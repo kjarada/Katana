@@ -253,7 +253,11 @@ TEST(IntersectProperties, ReportedPointsLieOnBothOperands)
 
 TEST(IntersectProperties, SegmentIntersectionIsSymmetric)
 {
+    // Four independent random points are never collinear, so this generator
+    // reaches Points and None only - the Overlap case it also ought to protect
+    // is unreachable here, and is covered by the test below.
     Random random;
+    std::size_t crossings = 0;
     for (int i = 0; i < kPropertyIterations; ++i) {
         const Segment2 a{Point2(random.real(-20, 20), random.real(-20, 20)),
                          Point2(random.real(-20, 20), random.real(-20, 20))};
@@ -262,8 +266,115 @@ TEST(IntersectProperties, SegmentIntersectionIsSymmetric)
         const auto ab = intersect(a, b);
         const auto ba = intersect(b, a);
         ASSERT_EQ(ab.kind, ba.kind);
+        ASSERT_EQ(ab.count, ba.count);
         if (ab.kind == IntersectionKind::Points) {
+            ++crossings;
             EXPECT_TRUE(nearlyEqual(ab.points[0], ba.points[0], 1e-9));
         }
     }
+    // A run that never crossed would assert symmetry only over empty results.
+    EXPECT_GT(crossings, 50u) << "the generator must actually produce crossings";
+}
+
+TEST(IntersectProperties, CollinearOverlapIsSymmetricAsASetOfEndpoints)
+{
+    // The Overlap case the generator above cannot reach. Segments are built ON
+    // a shared line so collinearity is exact rather than hoped for, and both
+    // orientations are produced, because that is where symmetry is genuinely
+    // at risk: intersect(a, b) reports the shared portion ordered along A, so
+    // reversing the arguments reverses the pair.
+    //
+    // The documented contract (intersection.hpp) is "increasing parameter along
+    // the FIRST operand", so the ordered pair is deliberately NOT expected to
+    // match; the SET of endpoints is.
+    Random random;
+    std::size_t overlaps = 0;
+    std::size_t touches = 0;
+    std::size_t disjoint = 0;
+
+    for (int i = 0; i < kPropertyIterations; ++i) {
+        const Point2 origin(random.real(-20, 20), random.real(-20, 20));
+        const double angle = random.real(0.0, 6.283185307179586);
+        const Vec2 direction(std::cos(angle), std::sin(angle));
+
+        const double t0 = random.real(-10.0, 10.0);
+        const double t1 = t0 + random.real(0.5, 8.0);
+        const double t2 = random.real(-12.0, 12.0);
+        const double t3 = t2 + random.real(0.5, 8.0);
+
+        const bool flip = (i % 3) == 0; // b sometimes runs the other way
+        const Segment2 a{origin + direction * t0, origin + direction * t1};
+        const Segment2 b = flip ? Segment2{origin + direction * t3, origin + direction * t2}
+                                : Segment2{origin + direction * t2, origin + direction * t3};
+
+        const auto ab = intersect(a, b);
+        const auto ba = intersect(b, a);
+
+        ASSERT_EQ(ab.kind, ba.kind) << "iteration " << i;
+        ASSERT_EQ(ab.count, ba.count) << "iteration " << i;
+
+        if (ab.kind == IntersectionKind::Overlap) {
+            ++overlaps;
+            ASSERT_EQ(ab.count, 2u);
+            // Unordered comparison: either the same order or reversed.
+            const bool sameOrder = nearlyEqual(ab.points[0], ba.points[0], 1e-9) &&
+                                   nearlyEqual(ab.points[1], ba.points[1], 1e-9);
+            const bool reversed = nearlyEqual(ab.points[0], ba.points[1], 1e-9) &&
+                                  nearlyEqual(ab.points[1], ba.points[0], 1e-9);
+            EXPECT_TRUE(sameOrder || reversed) << "iteration " << i;
+            // And the shared portion is the same LENGTH either way, which is
+            // the property a caller measuring an overlap actually relies on.
+            EXPECT_NEAR(ab.points[0].distanceTo(ab.points[1]),
+                        ba.points[0].distanceTo(ba.points[1]), 1e-9);
+        } else if (ab.kind == IntersectionKind::Points) {
+            ++touches;
+            EXPECT_TRUE(nearlyEqual(ab.points[0], ba.points[0], 1e-9)) << "iteration " << i;
+        } else {
+            ++disjoint;
+        }
+    }
+
+    // The counts are asserted so the test cannot silently stop covering the
+    // case it exists for - which is exactly how the original missed Overlap.
+    EXPECT_GT(overlaps, 100u) << "collinear overlaps must actually occur";
+    EXPECT_GT(disjoint, 0u) << "non-overlapping collinear pairs must also occur";
+    (void)touches;
+}
+
+TEST(IntersectProperties, CollinearOverlapReportsTheSharedPortionExactly)
+{
+    // A hand-checkable case, so the property test above is anchored to a known
+    // answer rather than only to self-consistency. Two segments on the x axis:
+    // [0, 10] and [4, 20] share exactly [4, 10].
+    const Segment2 a{Point2(0.0, 0.0), Point2(10.0, 0.0)};
+    const Segment2 b{Point2(4.0, 0.0), Point2(20.0, 0.0)};
+
+    const auto ab = intersect(a, b);
+    ASSERT_EQ(ab.kind, IntersectionKind::Overlap);
+    ASSERT_EQ(ab.count, 2u);
+    EXPECT_NEAR(ab.points[0].x, 4.0, 1e-12);
+    EXPECT_NEAR(ab.points[1].x, 10.0, 1e-12);
+
+    // Reversed operands: the same portion, ordered along b instead.
+    const auto ba = intersect(b, a);
+    ASSERT_EQ(ba.kind, IntersectionKind::Overlap);
+    EXPECT_NEAR(ba.points[0].x, 4.0, 1e-12);
+    EXPECT_NEAR(ba.points[1].x, 10.0, 1e-12);
+
+    // b reversed: the shared portion is the same, ordered the other way, which
+    // is the documented "increasing parameter along the first operand".
+    const Segment2 backwards{Point2(20.0, 0.0), Point2(4.0, 0.0)};
+    const auto reversed = intersect(backwards, a);
+    ASSERT_EQ(reversed.kind, IntersectionKind::Overlap);
+    EXPECT_NEAR(reversed.points[0].x, 10.0, 1e-12);
+    EXPECT_NEAR(reversed.points[1].x, 4.0, 1e-12);
+
+    // Touching at a single point is Points, not a zero-length Overlap.
+    const auto touching = intersect(a, Segment2{Point2(10.0, 0.0), Point2(30.0, 0.0)});
+    EXPECT_EQ(touching.kind, IntersectionKind::Points);
+    EXPECT_EQ(touching.count, 1u);
+
+    // Disjoint collinear segments meet nowhere.
+    EXPECT_EQ(intersect(a, Segment2{Point2(12.0, 0.0), Point2(30.0, 0.0)}).kind,
+              IntersectionKind::None);
 }

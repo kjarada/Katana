@@ -79,6 +79,11 @@ TEST(GeometrySegment2, ZeroLengthSegmentBehavesAsAPoint)
 TEST(GeometryCircle2, MeasuresAndContainment)
 {
     const Circle2 circle{Point2(1, 1), 2.0};
+    // Radius 2 is the one radius where area (pi r^2 = 4pi) and perimeter
+    // (2 pi r = 4pi) are numerically EQUAL, so asserting only here would pass
+    // just as happily if the two implementations were swapped. The containment
+    // and closest-point assertions below want r = 2, so the measures are
+    // checked separately at a radius that tells them apart.
     EXPECT_DOUBLE_EQ(circle.area(), 4.0 * kPi);
     EXPECT_DOUBLE_EQ(circle.perimeter(), 4.0 * kPi);
     EXPECT_EQ(circle.classify(Point2(1, 1)), Containment::Inside);
@@ -88,6 +93,27 @@ TEST(GeometryCircle2, MeasuresAndContainment)
     EXPECT_EQ(circle.closestPoint(Point2(1, 1)), Point2(3, 1)); // centre: angle 0 by convention
     EXPECT_DOUBLE_EQ(circle.distanceTo(Point2(1, 1)), 2.0);     // to the curve, not the disc
     EXPECT_EQ(circle.boundingBox(), Box2(Point2(-1, -1), Point2(3, 3)));
+}
+
+TEST(GeometryCircle2, AreaAndPerimeterAreDistinguishableFromEachOther)
+{
+    // At r = 3: area = 9pi, perimeter = 6pi. Swapping the two implementations,
+    // or writing pi*r for one of them, now fails.
+    const Circle2 circle{Point2(-4.0, 7.0), 3.0};
+    EXPECT_DOUBLE_EQ(circle.area(), 9.0 * kPi);
+    EXPECT_DOUBLE_EQ(circle.perimeter(), 6.0 * kPi);
+    EXPECT_NE(circle.area(), circle.perimeter());
+
+    // And the scaling laws, which pin the exponent rather than one value:
+    // doubling the radius quadruples the area and doubles the perimeter.
+    const Circle2 twice{circle.center, circle.radius * 2.0};
+    EXPECT_DOUBLE_EQ(twice.area(), circle.area() * 4.0);
+    EXPECT_DOUBLE_EQ(twice.perimeter(), circle.perimeter() * 2.0);
+
+    // A degenerate circle has both at zero, and neither is negative anywhere.
+    const Circle2 point{Point2(0.0, 0.0), 0.0};
+    EXPECT_DOUBLE_EQ(point.area(), 0.0);
+    EXPECT_DOUBLE_EQ(point.perimeter(), 0.0);
 }
 
 // ---- Arc2 ------------------------------------------------------------------

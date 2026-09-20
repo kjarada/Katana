@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cctype>
+#include <set>
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -224,9 +227,17 @@ TEST_F(ProjectStoreLifecycle, RejectsForeignAndGarbageDatabases)
 TEST_F(ProjectStoreRoundTrip, ModelSurvivesSaveCloseOpenLoadExactly)
 {
     const Model original = sampleModel();
+    // Every field set to something distinctive. Asserting one or two of them
+    // would pass just as happily if the others were dropped, swapped or
+    // written into each other's columns.
     ProjectMetadata metadata;
     metadata.name = "Round trip";
+    metadata.description = "A description with punctuation: commas, \"quotes\" and a / slash.";
+    metadata.linearUnit = "US survey foot";
     metadata.coordinateSystem = "EPSG:32630";
+    metadata.createdUtc = "2019-03-04T05:06:07Z";
+    metadata.modifiedUtc = "1970-01-01T00:00:00Z"; // save() must replace this
+    metadata.applicationVersion = "katana-test/9.9.9";
     const std::vector<Relationship> relationships = {{7, 1, "measures", "{\"side\":\"left\"}"}};
     {
         auto store = ProjectStore::create(projectDir(), metadata);
@@ -254,7 +265,43 @@ TEST_F(ProjectStoreRoundTrip, ModelSurvivesSaveCloseOpenLoadExactly)
     // The retired id stays retired after a reload.
     EXPECT_EQ(loaded.entities.nextId(), original.entities.nextId());
     EXPECT_EQ(contents->relationships, relationships);
-    EXPECT_EQ(contents->metadata.coordinateSystem, "EPSG:32630");
+
+    // Six of the seven metadata fields survive unchanged...
+    EXPECT_EQ(contents->metadata.name, metadata.name);
+    EXPECT_EQ(contents->metadata.description, metadata.description);
+    EXPECT_EQ(contents->metadata.linearUnit, metadata.linearUnit);
+    EXPECT_EQ(contents->metadata.coordinateSystem, metadata.coordinateSystem);
+    EXPECT_EQ(contents->metadata.createdUtc, metadata.createdUtc);
+    EXPECT_EQ(contents->metadata.applicationVersion, metadata.applicationVersion);
+
+    // ...and modifiedUtc is the one save() owns: it must have replaced the
+    // sentinel with a real timestamp rather than passing it through.
+    EXPECT_NE(contents->metadata.modifiedUtc, metadata.modifiedUtc)
+        << "save() must stamp the modification time, not preserve it";
+    EXPECT_FALSE(contents->metadata.modifiedUtc.empty());
+    // The writer's format string is "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", so
+    // the stamp is 24 characters: YYYY-MM-DDTHH:MM:SS.mmmZ. Checked by shape
+    // rather than by length alone, so a reordering would also be caught.
+    const std::string& stamp = contents->metadata.modifiedUtc;
+    ASSERT_EQ(stamp.size(), 24u) << stamp;
+    EXPECT_EQ(stamp[4], '-');
+    EXPECT_EQ(stamp[7], '-');
+    EXPECT_EQ(stamp[10], 'T');
+    EXPECT_EQ(stamp[13], ':');
+    EXPECT_EQ(stamp[16], ':');
+    EXPECT_EQ(stamp[19], '.');
+    EXPECT_EQ(stamp[23], 'Z');
+    for (const std::size_t digit : {0u, 1u, 2u, 3u, 5u, 6u, 8u, 9u, 11u, 12u, 14u, 15u, 17u,
+                                    18u, 20u, 21u, 22u}) {
+        EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(stamp[digit])))
+            << "position " << digit << " of " << stamp;
+    }
+
+    // The whole struct, once the one field save() owns is accounted for. This
+    // is what catches a field added later and never persisted.
+    ProjectMetadata expected = metadata;
+    expected.modifiedUtc = contents->metadata.modifiedUtc;
+    EXPECT_EQ(contents->metadata, expected);
 }
 
 TEST_F(ProjectStoreRoundTrip, SaveIsAtomicWhenTheDatabaseRejectsARow)
@@ -376,15 +423,71 @@ TEST_F(ProjectStoreRecovery, BackupsArePrunedToTheNewest)
 {
     auto store = ProjectStore::create(projectDir(), {});
     ASSERT_TRUE(store.ok());
-    fs::path newest;
+
+    // Every path in creation order, so the test knows which two SHOULD survive
+    // rather than only checking that two did. Four backups taken back to back
+    // land in the same millisecond, so this also exercises the collision
+    // suffix and the ordering that has to parse it.
+    std::vector<fs::path> made;
     for (int i = 0; i < 4; ++i) {
-        const auto made = store->backup(/*keep=*/2);
-        ASSERT_TRUE(made.ok()) << made.error().describe();
-        newest = *made;
+        const auto path = store->backup(/*keep=*/2);
+        ASSERT_TRUE(path.ok()) << path.error().describe();
+        EXPECT_TRUE(fs::exists(*path)) << "backup " << i << " was not written";
+        made.push_back(*path);
     }
+    ASSERT_EQ(std::set<fs::path>(made.begin(), made.end()).size(), made.size())
+        << "each backup must get its own file, even within one millisecond";
+
     const auto backups = store->listBackups();
     ASSERT_EQ(backups.size(), 2u);
-    EXPECT_EQ(backups.front(), newest); // newest first
+    // BOTH survivors are identified, newest first: asserting only front() would
+    // pass with any arbitrary second file.
+    EXPECT_EQ(backups[0], made[3]);
+    EXPECT_EQ(backups[1], made[2]);
+
+    // The pruned ones are gone from DISK, not merely absent from the listing -
+    // a prune that only stopped listing them would leak a file per save.
+    EXPECT_FALSE(fs::exists(made[0])) << "the oldest backup should have been deleted";
+    EXPECT_FALSE(fs::exists(made[1]));
+    EXPECT_TRUE(fs::exists(made[2]));
+    EXPECT_TRUE(fs::exists(made[3]));
+
+    // And what survived is usable. A prune that kept a truncated file would
+    // satisfy every assertion above and still lose the project.
+    for (const fs::path& kept : backups) {
+        auto database = SqliteDatabase::open(kept, SqliteDatabase::OpenMode::ReadOnly);
+        ASSERT_TRUE(database.ok()) << kept.string() << ": " << database.error().describe();
+        const auto version = database->userVersion();
+        ASSERT_TRUE(version.ok());
+        EXPECT_EQ(*version, ProjectStore::kCurrentSchemaVersion);
+    }
+}
+
+TEST_F(ProjectStoreRecovery, TheKeepCountIsHonouredAtItsEdges)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok());
+
+    // keep larger than the number taken: nothing is pruned.
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(store->backup(/*keep=*/10).ok());
+    }
+    EXPECT_EQ(store->listBackups().size(), 3u);
+
+    // keep = 1 collapses to the newest, which must be the one just made.
+    const auto newest = store->backup(/*keep=*/1);
+    ASSERT_TRUE(newest.ok()) << newest.error().describe();
+    const auto one = store->listBackups();
+    ASSERT_EQ(one.size(), 1u);
+    EXPECT_EQ(one.front(), *newest);
+    EXPECT_TRUE(fs::exists(*newest));
+
+    // keep = 0 removes even the backup just taken. That is a strange thing to
+    // ask for, but it must do what it says rather than quietly keep one.
+    const auto discarded = store->backup(/*keep=*/0);
+    ASSERT_TRUE(discarded.ok()) << discarded.error().describe();
+    EXPECT_TRUE(store->listBackups().empty());
+    EXPECT_FALSE(fs::exists(*discarded));
 }
 
 TEST_F(ProjectStoreRecovery, RestoresTheNewestSoundBackupAndKeepsTheDamagedFile)
