@@ -6,6 +6,7 @@ add_library(katana_cad STATIC
     command_interpreter.cpp
     section.cpp
     dashing.cpp
+    hatching.cpp
     dimension_draw.cpp
     scene.cpp
     viewport_layout.cpp

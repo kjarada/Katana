@@ -909,3 +909,94 @@ TEST(CadInterpreter, DimensionStyleRejectsNonsenseWithItsOwnReason)
     // A refused change must leave the stored style alone.
     EXPECT_DOUBLE_EQ(session.document.model().dimensionStyles.find("site")->textHeight, 2.5);
 }
+
+TEST(CadInterpreter, HatchPatternsCanBeDefinedAndAttachedToALayer)
+{
+    Session session;
+    // Only the built-in is there to begin with, so a drawing is unhatched
+    // until someone says otherwise.
+    EXPECT_NE(session.ok("HATCH LIST").find("none"), std::string::npos);
+
+    session.ok("HATCH NEW brick 0 0.25");
+    session.ok("HATCH SOLID concrete");
+    session.ok("LAYER NEW paving");
+    session.ok("LAYER HATCH paving brick");
+
+    const auto* pattern = session.document.model().hatchPatterns.find("brick");
+    ASSERT_NE(pattern, nullptr);
+    ASSERT_EQ(pattern->families.size(), 1u);
+    EXPECT_DOUBLE_EQ(pattern->families[0].spacing, 0.25);
+    EXPECT_DOUBLE_EQ(pattern->families[0].angle, 0.0);
+    EXPECT_FALSE(pattern->solid);
+
+    ASSERT_NE(session.document.model().hatchPatterns.find("concrete"), nullptr);
+    EXPECT_TRUE(session.document.model().hatchPatterns.find("concrete")->solid);
+    ASSERT_NE(session.document.model().layers.find("paving"), nullptr);
+    EXPECT_EQ(session.document.model().layers.find("paving")->hatchPattern, "brick");
+}
+
+TEST(CadInterpreter, HatchAnglesAreTypedInDegreesAndStoredInRadians)
+{
+    // Every other angle the interpreter takes is in degrees, because that is
+    // what a drafter types. The model keeps one unit. 45 degrees is pi/4
+    // exactly as a mathematical quantity, so this is a real conversion check
+    // and not a restatement of whatever the parser produced.
+    Session session;
+    session.ok("HATCH NEW cross 45 0.5 135 0.5");
+
+    const auto* pattern = session.document.model().hatchPatterns.find("cross");
+    ASSERT_NE(pattern, nullptr);
+    ASSERT_EQ(pattern->families.size(), 2u);
+    EXPECT_NEAR(pattern->families[0].angle, std::acos(-1.0) / 4.0, 1e-12);
+    EXPECT_NEAR(pattern->families[1].angle, 3.0 * std::acos(-1.0) / 4.0, 1e-12);
+
+    // And LIST puts them back in degrees, so what is typed is what is read.
+    const std::string listed = session.ok("HATCH LIST");
+    EXPECT_NE(listed.find("45 deg"), std::string::npos) << listed;
+    EXPECT_NE(listed.find("135 deg"), std::string::npos) << listed;
+}
+
+TEST(CadInterpreter, HatchRejectsNonsenseWithItsOwnReason)
+{
+    Session session;
+    // An odd number of arguments means an angle with no spacing, which would
+    // otherwise be read as a spacing of whatever came next.
+    EXPECT_EQ(session.fails("HATCH NEW lopsided 45"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("HATCH NEW zero 0 0"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("HATCH NEW negative 0 -1"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("HATCH DELETE none"), ErrorCode::CommandRejected);
+    EXPECT_TRUE(session.document.model().hatchPatterns.contains("none"));
+    EXPECT_FALSE(session.document.model().hatchPatterns.contains("lopsided"));
+}
+
+TEST(CadInterpreter, DeletingAHatchPatternALayerStillUsesIsRefusedAndNamesTheLayer)
+{
+    // Allowing it would leave the layer naming a pattern that is gone, and the
+    // drawing would quietly stop being hatched with nothing to say why.
+    Session session;
+    session.ok("HATCH NEW brick 0 0.25");
+    session.ok("LAYER NEW paving");
+    session.ok("LAYER HATCH paving brick");
+
+    const auto refused = session.interpreter.run("HATCH DELETE brick");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_NE(refused.error().describe().find("paving"), std::string::npos)
+        << refused.error().describe();
+    EXPECT_TRUE(session.document.model().hatchPatterns.contains("brick"));
+
+    // Detach it and the deletion goes through.
+    session.ok("LAYER HATCH paving none");
+    session.ok("HATCH DELETE brick");
+    EXPECT_FALSE(session.document.model().hatchPatterns.contains("brick"));
+}
+
+TEST(CadInterpreter, CreatingAHatchPatternIsUndoable)
+{
+    Session session;
+    session.ok("HATCH NEW brick 0 0.25");
+    ASSERT_TRUE(session.document.model().hatchPatterns.contains("brick"));
+    session.ok("UNDO");
+    EXPECT_FALSE(session.document.model().hatchPatterns.contains("brick"));
+    session.ok("REDO");
+    EXPECT_TRUE(session.document.model().hatchPatterns.contains("brick"));
+}

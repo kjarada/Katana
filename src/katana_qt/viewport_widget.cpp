@@ -3,6 +3,7 @@
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
+#include "katana/cad/hatching.hpp"
 #include "katana/entity/display.hpp"
 
 #include <algorithm>
@@ -799,6 +800,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             painter.setPen(pen);
         }
         dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
+        hatch_ = cad::resolveHatchPattern(model, entity);
         drawGeometry(painter, entity.geometry);
     });
 }
@@ -853,6 +855,9 @@ void ViewportWidget::drawGeometry(QPainter& painter,
                 polygon << widget.toScreen(vertex);
             }
             if (g.closed && !g.vertices.empty()) {
+                // The fill goes down before the boundary, so the outline stays
+                // crisp over its own hatching instead of being half covered.
+                widget.drawHatch(painter, g, polygon);
                 polygon << widget.toScreen(g.vertices.front());
             }
             painter.drawPolyline(polygon);
@@ -902,6 +907,48 @@ void ViewportWidget::drawGeometry(QPainter& painter,
         }
     };
     std::visit(Visitor{*this, painter, drawArcPath}, geometry);
+}
+
+void ViewportWidget::drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,
+                                 const QPolygonF& screen) const
+{
+    if (hatch_ == nullptr) {
+        return;
+    }
+    cad::HatchOptions options;
+    options.viewScale = view_.scale;
+    const QColor color = painter.pen().color();
+
+    switch (cad::hatchDrawing(*hatch_, options)) {
+    case cad::HatchDrawing::None:
+        return;
+    case cad::HatchDrawing::Solid: {
+        // Drawn at partial opacity rather than flat: a solid fill in the
+        // entity's own colour hides the drawing underneath it, and at this zoom
+        // the user is looking at the layout, not at the fill.
+        QColor fill = color;
+        fill.setAlpha(90);
+        painter.fillPath([&] {
+            QPainterPath path;
+            path.addPolygon(screen);
+            path.closeSubpath();
+            return path;
+        }(), fill);
+        return;
+    }
+    case cad::HatchDrawing::Lines:
+        break;
+    }
+
+    // Hatch lines are always solid and hairline, whatever the boundary is
+    // drawn with: a dashed hatch of a dashed boundary is unreadable, and no CAD
+    // package draws one.
+    const QPen previous = painter.pen();
+    painter.setPen(QPen(color, 0));
+    for (const Segment2& line : cad::hatchSegments(boundary, *hatch_)) {
+        painter.drawLine(toScreen(line.start), toScreen(line.end));
+    }
+    painter.setPen(previous);
 }
 
 void ViewportWidget::drawText(QPainter& painter, const Point2& position, const std::string& text,

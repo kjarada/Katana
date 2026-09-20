@@ -63,6 +63,7 @@ class CommandInterpreter {
     [[nodiscard]] Reply layer(const Tokens& args);
     [[nodiscard]] Reply linetype(const Tokens& args);
     [[nodiscard]] Reply dimensionStyle(const Tokens& args);
+    [[nodiscard]] Reply hatchPattern(const Tokens& args);
     [[nodiscard]] Reply attributes(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply undoRedo(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply file(const std::string& verb, const Tokens& args);

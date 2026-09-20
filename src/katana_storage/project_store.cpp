@@ -158,6 +158,30 @@ constexpr Migration kMigrations[] = {
 
         ALTER TABLE layers ADD COLUMN dimension_style TEXT NOT NULL DEFAULT '';
     )sql"},
+    // Hatch patterns, and the layer and style columns that name one. The layer
+    // column defaults to the built-in that draws no fill and the style column
+    // to empty, which means ByLayer - so every project written before this
+    // migration keeps drawing exactly as it did, and nothing acquires a hatch
+    // it never asked for.
+    {6, R"sql(
+        CREATE TABLE hatch_patterns (
+            name        TEXT PRIMARY KEY,
+            description TEXT NOT NULL,
+            solid       INTEGER NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE hatch_families (
+            pattern  TEXT NOT NULL REFERENCES hatch_patterns(name) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            angle    REAL NOT NULL,
+            spacing  REAL NOT NULL,
+            line_offset REAL NOT NULL,
+            PRIMARY KEY (pattern, position)
+        ) WITHOUT ROWID;
+
+        ALTER TABLE layers ADD COLUMN hatch_pattern TEXT NOT NULL DEFAULT 'none';
+        ALTER TABLE styles ADD COLUMN hatch_pattern TEXT NOT NULL DEFAULT '';
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -422,6 +446,7 @@ ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata
     contents.styles = model.styles.all();
     contents.linetypes = model.linetypes.all();
     contents.dimensionStyles = model.dimensionStyles.all();
+    contents.hatchPatterns = model.hatchPatterns.all();
     contents.propertyDefinitions = model.properties.all();
     contents.entities.reserve(model.entities.size());
     model.entities.forEach([&](const Entity& entity) { contents.entities.push_back(entity); });
@@ -472,6 +497,16 @@ Status applyToModel(const ProjectContents& contents, katana::entity::Model& mode
         auto status = style.name == katana::entity::kDefaultDimensionStyleName
                           ? staged.dimensionStyles.update(style)
                           : staged.dimensionStyles.add(style);
+        if (!status) {
+            return status;
+        }
+    }
+    for (const katana::entity::HatchPattern& pattern : contents.hatchPatterns) {
+        // "none" is built in, so a stored one updates rather than adds - the
+        // same rule layer "0" and the continuous linetype follow above.
+        auto status = pattern.name == katana::entity::kNoHatch
+                          ? staged.hatchPatterns.update(pattern)
+                          : staged.hatchPatterns.add(pattern);
         if (!status) {
             return status;
         }
@@ -810,6 +845,7 @@ Status ProjectStore::save(const ProjectContents& contents)
                                        "DELETE FROM property_definitions; DELETE FROM styles;"
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
                                        "DELETE FROM dimension_styles;"
+                                       "DELETE FROM hatch_families; DELETE FROM hatch_patterns;"
                                        "DELETE FROM layers; DELETE FROM metadata;");
         !status) {
         return status;
@@ -820,7 +856,7 @@ Status ProjectStore::save(const ProjectContents& contents)
 
     auto insertLayer = database.prepare(
         "INSERT INTO layers (name, color, visible, locked, linetype, line_weight,"
-        " dimension_style) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)");
+        " dimension_style, hatch_pattern) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
     if (!insertLayer) {
         return insertLayer.error();
     }
@@ -830,7 +866,8 @@ Status ProjectStore::save(const ProjectContents& contents)
         if (auto status = Binder(*insertLayer)(1, std::string_view(layer.name))(
                               2, std::string_view(layer.color.toHex()))(3, layer.visible)(
                               4, layer.locked)(5, std::string_view(layer.linetype))(
-                              6, layer.lineWeight)(7, std::string_view(layer.dimensionStyle))
+                              6, layer.lineWeight)(7, std::string_view(layer.dimensionStyle))(
+                              8, std::string_view(layer.hatchPattern))
                               .run();
             !status) {
             return status;
@@ -841,7 +878,9 @@ Status ProjectStore::save(const ProjectContents& contents)
         if (auto status = Binder(*insertLayer)(1, std::string_view(fallback.name))(
                               2, std::string_view(fallback.color.toHex()))(3, fallback.visible)(
                               4, fallback.locked)(5, std::string_view(fallback.linetype))(
-                              6, fallback.lineWeight)
+                              6, fallback.lineWeight)(
+                              7, std::string_view(fallback.dimensionStyle))(
+                              8, std::string_view(fallback.hatchPattern))
                               .run();
             !status) {
             return status;
@@ -849,14 +888,16 @@ Status ProjectStore::save(const ProjectContents& contents)
     }
 
     auto insertStyle = database.prepare(
-        "INSERT INTO styles (name, color, line_weight, linetype) VALUES (?1, ?2, ?3, ?4)");
+        "INSERT INTO styles (name, color, line_weight, linetype, hatch_pattern)"
+        " VALUES (?1, ?2, ?3, ?4, ?5)");
     if (!insertStyle) {
         return insertStyle.error();
     }
     for (const Style& style : contents.styles) {
         if (auto status = Binder(*insertStyle)(1, std::string_view(style.name))
                               .color(2, style.color)(3, style.lineWeight)(
-                                  4, std::string_view(style.linetype))
+                                  4, std::string_view(style.linetype))(
+                                  5, std::string_view(style.hatchPattern))
                               .run();
             !status) {
             return status;
@@ -941,6 +982,39 @@ Status ProjectStore::save(const ProjectContents& contents)
                 !status) {
                 return makeError(status.error().code, status.error().message,
                                  "linetype=" + linetype.name + " element=" + std::to_string(i));
+            }
+        }
+    }
+
+    auto insertPattern = database.prepare(
+        "INSERT INTO hatch_patterns (name, description, solid) VALUES (?1, ?2, ?3)");
+    if (!insertPattern) {
+        return insertPattern.error();
+    }
+    auto insertFamily = database.prepare(
+        "INSERT INTO hatch_families (pattern, position, angle, spacing, line_offset)"
+        " VALUES (?1, ?2, ?3, ?4, ?5)");
+    if (!insertFamily) {
+        return insertFamily.error();
+    }
+    for (const katana::entity::HatchPattern& pattern : contents.hatchPatterns) {
+        if (auto status = Binder(*insertPattern)(1, std::string_view(pattern.name))(
+                              2, std::string_view(pattern.description))(3, pattern.solid)
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "hatch pattern=" + pattern.name + " " + status.error().context);
+        }
+        for (std::size_t i = 0; i < pattern.families.size(); ++i) {
+            const katana::entity::HatchLineFamily& family = pattern.families[i];
+            if (auto status = Binder(*insertFamily)(1, std::string_view(pattern.name))(
+                                  2, static_cast<std::int64_t>(i))(3, family.angle)(
+                                  4, family.spacing)(5, family.offset)
+                                  .run();
+                !status) {
+                return makeError(status.error().code, status.error().message,
+                                 "hatch pattern=" + pattern.name +
+                                     " family=" + std::to_string(i));
             }
         }
     }
@@ -1077,8 +1151,8 @@ Result<ProjectContents> ProjectStore::load()
     }
 
     status = forEachRow(
-        "SELECT name, color, visible, locked, linetype, line_weight, dimension_style"
-        " FROM layers ORDER BY name",
+        "SELECT name, color, visible, locked, linetype, line_weight, dimension_style,"
+        " hatch_pattern FROM layers ORDER BY name",
         [&](SqliteStatement& row) -> Status {
             Layer layer;
             layer.name = row.columnText(0);
@@ -1092,6 +1166,7 @@ Result<ProjectContents> ProjectStore::load()
             layer.linetype = row.columnText(4);
             layer.lineWeight = row.columnDouble(5);
             layer.dimensionStyle = row.columnText(6);
+            layer.hatchPattern = row.columnText(7);
             contents.layers.push_back(std::move(layer));
             return {};
         });
@@ -1163,7 +1238,53 @@ Result<ProjectContents> ProjectStore::load()
         return status.error();
     }
 
-    status = forEachRow("SELECT name, color, line_weight, linetype FROM styles ORDER BY name",
+    status = forEachRow(
+        "SELECT name, description, solid FROM hatch_patterns ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::HatchPattern pattern;
+            pattern.name = row.columnText(0);
+            pattern.description = row.columnText(1);
+            pattern.solid = row.columnInt64(2) != 0;
+            contents.hatchPatterns.push_back(std::move(pattern));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    // Ordered by position so the families come back in the order they were
+    // written; a crosshatch is two families and their order is part of the
+    // definition, not an accident of the table.
+    status = forEachRow(
+        "SELECT pattern, angle, spacing, line_offset FROM hatch_families"
+        " ORDER BY pattern, position",
+        [&](SqliteStatement& row) -> Status {
+            const std::string name = row.columnText(0);
+            const auto found = std::lower_bound(
+                contents.hatchPatterns.begin(), contents.hatchPatterns.end(), name,
+                [](const katana::entity::HatchPattern& pattern, const std::string& wanted) {
+                    return pattern.name < wanted;
+                });
+            if (found == contents.hatchPatterns.end() || found->name != name) {
+                // The foreign key makes this unreachable; reporting rather than
+                // dropping the row is what stops a future schema change from
+                // silently losing families (PLAN.MD section 36).
+                return makeError(ErrorCode::DatabaseFailure,
+                                 "a hatch family names a pattern that was not read", name);
+            }
+            katana::entity::HatchLineFamily family;
+            family.angle = row.columnDouble(1);
+            family.spacing = row.columnDouble(2);
+            family.offset = row.columnDouble(3);
+            found->families.push_back(family);
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow("SELECT name, color, line_weight, linetype, hatch_pattern"
+                        " FROM styles ORDER BY name",
                         [&](SqliteStatement& row) -> Status {
                             Style style;
                             style.name = row.columnText(0);
@@ -1172,6 +1293,7 @@ Result<ProjectContents> ProjectStore::load()
                             }
                             style.lineWeight = row.columnDouble(2);
                             style.linetype = row.columnText(3);
+                            style.hatchPattern = row.columnText(4);
                             contents.styles.push_back(std::move(style));
                             return {};
                         });

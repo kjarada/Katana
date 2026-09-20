@@ -121,4 +121,10 @@ struct EntityAttributes {
 // Refuses while any layer still names it, and refuses "Standard".
 [[nodiscard]] CommandPtr deleteDimensionStyle(std::string name);
 
+// ---- hatch patterns --------------------------------------------------------------
+[[nodiscard]] CommandPtr createHatchPattern(katana::entity::HatchPattern pattern);
+[[nodiscard]] CommandPtr updateHatchPattern(katana::entity::HatchPattern pattern);
+// Refuses while any layer or style still names it, and refuses "none".
+[[nodiscard]] CommandPtr deleteHatchPattern(std::string name);
+
 } // namespace katana::commands

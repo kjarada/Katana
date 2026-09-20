@@ -57,4 +57,41 @@ using TriangleIndices = std::array<std::size_t, 3>;
 [[nodiscard]] katana::core::Result<std::vector<TriangleIndices>>
 triangulate(const Polyline2& polygon);
 
+// ---- hatching ---------------------------------------------------------------------
+
+// The most lines one hatch may produce. A pattern finer than this over a given
+// boundary is not a drawing, it is a solid fill that takes a minute to render,
+// and the user has almost certainly typed a spacing in the wrong unit - a
+// 0.5 mm pattern spacing entered as metres over a 200 m parcel is 400 lines,
+// the same mistake entered as millimetres is 400 000. Reporting that is a
+// service; silently drawing it is not (PLAN.MD section 36).
+inline constexpr std::size_t kMaxHatchLines = 100000;
+
+// Segments filling `boundary` with a family of parallel lines, for hatching.
+//
+// `angle` is measured counter-clockwise from the +x axis, in radians, and
+// `spacing` is the perpendicular distance between neighbouring lines, in model
+// units - so a hatch keeps its size on the ground at every zoom, exactly as a
+// linetype pattern does.
+//
+// `offset` shifts the family perpendicular to itself. It is measured from the
+// WORLD ORIGIN, not from the boundary, and that is the whole point: two
+// adjacent parcels hatched with the same pattern produce lines that continue
+// across the shared edge instead of each starting afresh at its own corner,
+// which is what makes a hatched drawing look drawn rather than assembled.
+//
+// The boundary may be concave. It is filled by the even-odd rule: crossings
+// along each line are sorted and taken in pairs, so a line entering and leaving
+// a concave notch contributes two segments rather than one spanning the gap. An
+// edge is counted as crossed under a half-open rule, so a vertex lying exactly
+// on a hatch line is counted once rather than twice or not at all.
+//
+// Fails with InvalidGeometry when `boundary` is not a closed polygon of at
+// least three vertices, InvalidArgument for a non-finite angle or offset or a
+// spacing that is not positive, or a spacing so fine for this boundary that
+// the family would exceed `kMaxHatchLines`. That last error names the count
+// and the limit, because the useful reply is which unit was meant.
+[[nodiscard]] katana::core::Result<std::vector<Segment2>>
+hatchLines(const Polyline2& boundary, double angle, double spacing, double offset = 0.0);
+
 } // namespace katana::geometry

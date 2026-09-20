@@ -11,6 +11,9 @@ ResolvedDisplay resolveDisplay(const Model& model, const Entity& entity)
         resolved.color = layer->color;
         resolved.lineWeight = layer->lineWeight;
         resolved.linetype = layer->linetype;
+        if (!layer->hatchPattern.empty()) {
+            resolved.hatchPattern = layer->hatchPattern;
+        }
     }
 
     // A named style overrides the layer. lineWeight and linetype are not
@@ -22,6 +25,9 @@ ResolvedDisplay resolveDisplay(const Model& model, const Entity& entity)
             resolved.linetype = style->linetype;
             if (style->color.has_value()) {
                 resolved.color = *style->color;
+            }
+            if (!style->hatchPattern.empty()) {
+                resolved.hatchPattern = style->hatchPattern;
             }
         }
     }

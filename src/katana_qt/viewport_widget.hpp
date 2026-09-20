@@ -106,6 +106,12 @@ class ViewportWidget final : public QWidget {
     void drawEntities(QPainter& painter) const;
     void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
     // `height` in model units; `rotation` in radians, counter-clockwise.
+    // Fills a closed polyline with the hatch pattern resolved for the entity
+    // being drawn, if any. `screen` is that boundary already transformed, so a
+    // solid fill costs nothing beyond the polygon the caller built anyway.
+    void drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,
+                   const QPolygonF& screen) const;
+
     void drawText(QPainter& painter, const Point2& position, const std::string& text,
                   double height, double rotation) const;
     void drawPreview(QPainter& painter) const;
@@ -131,6 +137,12 @@ class ViewportWidget final : public QWidget {
     // held here because drawGeometry's visitor is handed only the geometry.
     // Mutable because painting is logically const, like the caches below.
     mutable katana::entity::DimensionStyle dimensionStyle_{};
+
+    // The hatch pattern in force for the entity currently being drawn, or null
+    // when it is not hatched. Resolved once per entity for the same reason
+    // dimensionStyle_ is, and owned by the document, so this only ever points
+    // at a pattern the model is holding for the duration of the paint.
+    mutable const katana::entity::HatchPattern* hatch_ = nullptr;
 
     // Converting RGBA bytes to a QImage, and a classification to a colour, are
     // both far too expensive to redo for every frame of a pan. Both are cached

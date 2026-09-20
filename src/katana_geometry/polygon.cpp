@@ -308,4 +308,106 @@ Result<std::vector<TriangleIndices>> triangulate(const Polyline2& polygon)
     return triangles;
 }
 
+Result<std::vector<Segment2>> hatchLines(const Polyline2& boundary, double angle, double spacing,
+                                         double offset)
+{
+    if (!boundary.closed || boundary.vertices.size() < 3) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "a hatch boundary must be a closed polygon of at least three vertices");
+    }
+    if (!std::isfinite(angle) || !std::isfinite(offset)) {
+        return makeError(ErrorCode::InvalidArgument, "hatch angle and offset must be finite");
+    }
+    if (!(spacing > 0.0) || !std::isfinite(spacing)) {
+        return makeError(ErrorCode::InvalidArgument, "hatch spacing must be a positive length");
+    }
+    for (const Point2& vertex : boundary.vertices) {
+        if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y)) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "a hatch boundary must have finite coordinates");
+        }
+    }
+
+    // Along the lines, and across them. Every position is handled as a pair of
+    // projections onto these, which keeps the whole routine independent of the
+    // angle instead of special-casing vertical and horizontal families.
+    const double dx = std::cos(angle);
+    const double dy = std::sin(angle);
+    const double nx = -dy;
+    const double ny = dx;
+
+    double lowest = 0.0;
+    double highest = 0.0;
+    for (std::size_t i = 0; i < boundary.vertices.size(); ++i) {
+        const double across = boundary.vertices[i].x * nx + boundary.vertices[i].y * ny;
+        lowest = i == 0 ? across : std::min(lowest, across);
+        highest = i == 0 ? across : std::max(highest, across);
+    }
+
+    // Line k sits at offset + k * spacing, measured from the world origin, so
+    // the family is a property of the drawing rather than of this boundary.
+    const double firstExact = std::ceil((lowest - offset) / spacing);
+    const double lastExact = std::floor((highest - offset) / spacing);
+    if (!(lastExact >= firstExact)) {
+        return std::vector<Segment2>{}; // the boundary falls between two lines
+    }
+    const double countExact = lastExact - firstExact + 1.0;
+    if (!(countExact <= static_cast<double>(kMaxHatchLines))) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "hatch spacing is too fine for this boundary: " +
+                             std::to_string(static_cast<long long>(countExact)) +
+                             " lines, the limit is " + std::to_string(kMaxHatchLines));
+    }
+    const auto first = static_cast<long long>(firstExact);
+    const auto count = static_cast<long long>(countExact);
+
+    std::vector<Segment2> segments;
+    std::vector<double> crossings;
+    for (long long k = 0; k < count; ++k) {
+        const double across = offset + static_cast<double>(first + k) * spacing;
+        crossings.clear();
+        for (std::size_t e = 0; e < boundary.vertices.size(); ++e) {
+            const Point2& p = boundary.vertices[e];
+            const Point2& q = boundary.vertices[(e + 1) % boundary.vertices.size()];
+            const double sp = p.x * nx + p.y * ny - across;
+            const double sq = q.x * nx + q.y * ny - across;
+            // Half-open: an edge counts when it starts on or below the line and
+            // ends above it, or the reverse. A vertex lying exactly on the line
+            // therefore belongs to one of its two edges and not the other, so
+            // it contributes one crossing - not two (which would close the
+            // interval immediately) and not none (which would leak the fill out
+            // through the vertex). This is the convention point-in-polygon ray
+            // casting uses, for the same reason.
+            const bool upward = sp <= 0.0 && sq > 0.0;
+            const bool downward = sq <= 0.0 && sp > 0.0;
+            if (!upward && !downward) {
+                continue;
+            }
+            const double t = sp / (sp - sq);
+            const double x = p.x + t * (q.x - p.x);
+            const double y = p.y + t * (q.y - p.y);
+            crossings.push_back(x * dx + y * dy);
+        }
+        if (crossings.size() < 2) {
+            continue;
+        }
+        std::sort(crossings.begin(), crossings.end());
+        // Even-odd: inside between the first and second crossing, the third and
+        // fourth, and so on, so a concave notch is left unfilled rather than
+        // bridged. An odd count cannot occur for a closed boundary under the
+        // rule above, but the loop is written so that a stray one is dropped
+        // rather than paired with nothing.
+        for (std::size_t i = 0; i + 1 < crossings.size(); i += 2) {
+            const double a = crossings[i];
+            const double b = crossings[i + 1];
+            if (!(b > a)) {
+                continue; // a tangency, not a span
+            }
+            segments.push_back(Segment2{Point2(a * dx + across * nx, a * dy + across * ny),
+                                        Point2(b * dx + across * nx, b * dy + across * ny)});
+        }
+    }
+    return segments;
+}
+
 } // namespace katana::geometry

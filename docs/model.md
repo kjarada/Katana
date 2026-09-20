@@ -310,9 +310,35 @@ the policy.
 `tables.hpp` giving `kNoun` and `validate`, plus `isProtected` and `seed` if it
 has a built-in entry and `checkUpdate` if it has a rule that applies to updates
 but not to adds; then `using XDatabase = NamedTable<X, XPolicy>;`. The
-container needs nothing else. What still has to be done by hand is everything
-*around* the table - a field on `Model`, the commands, the schema migration and
-the store's save/load - which is the same list a new geometry kind faces above.
+container needs nothing else.
+
+Everything *around* the table is still by hand, and - exactly as for a geometry
+kind - the list divides into the parts the compiler catches and the parts it
+does not.
+
+*The compiler will stop you here:*
+
+* a field on `entity::Model`;
+* `ProjectContents` in `storage/project_store.hpp`;
+* the create / update / delete commands.
+
+*The compiler will NOT stop you here. Each of these fails silently:*
+
+* **`Model::adoptContents`** - a hand-written list of moves, and a table left
+  out of it is dropped on every load with no error anywhere. This is not
+  hypothetical: `hatchPatterns` was lost exactly this way, and only a
+  round-trip test that saved a pattern and looked for it again caught it.
+* **`Model::reset`** - a table left out keeps its contents across File > New.
+* **`captureModel` and `applyToModel`** - omit either and the table saves or
+  loads as empty.
+* **The `DELETE FROM` list in `ProjectStore::save`** - `save` clears and
+  rewrites every table it owns, so a missing `DELETE` fails on the *second*
+  save with a primary-key conflict, not the first. Both the linetype and the
+  dimension style tables shipped this bug and were caught by saving twice in a
+  test. Do that.
+* **The schema migration** - a new column needs a `DEFAULT` that reproduces the
+  behaviour of projects written before it existed, or old drawings change
+  appearance on open.
 
 `LayerDatabase` is deliberately not one of these. Layer names are `/`-separated
 paths and the table derives a tree from them (`children`, `subtree`,

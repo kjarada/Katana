@@ -579,6 +579,67 @@ void LinetypePolicy::seed(NamedMap<Linetype>& items)
 
 // ---- StyleDatabase ---------------------------------------------------------------
 
+// ---- hatch patterns --------------------------------------------------------------
+
+Status validate(const HatchPattern& pattern)
+{
+    if (auto status = validateName(pattern.name, "hatch pattern"); !status) {
+        return status;
+    }
+    if (pattern.solid && !pattern.families.empty()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a solid hatch pattern cannot also carry line families", pattern.name);
+    }
+    // A pattern that draws nothing is almost always a half-finished definition,
+    // and it would be invisible on the drawing with no error anywhere - the
+    // silent failure PLAN.MD section 36 forbids. "none" is the one pattern
+    // whose whole purpose is to draw nothing.
+    if (pattern.drawsNothing() && pattern.name != kNoHatch) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a hatch pattern must be solid or have at least one line family",
+                         pattern.name);
+    }
+    for (const HatchLineFamily& family : pattern.families) {
+        if (!std::isfinite(family.angle) || !std::isfinite(family.offset)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "hatch family angle and offset must be finite", pattern.name);
+        }
+        if (!(family.spacing > 0.0) || !std::isfinite(family.spacing)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "hatch family spacing must be a positive length", pattern.name);
+        }
+    }
+    return {};
+}
+
+Status HatchPatternPolicy::validate(const HatchPattern& pattern)
+{
+    return katana::entity::validate(pattern);
+}
+
+Status HatchPatternPolicy::checkUpdate(const HatchPattern& pattern)
+{
+    if (pattern.name == kNoHatch && !pattern.drawsNothing()) {
+        return makeError(ErrorCode::InvalidArgument, "the \"none\" hatch pattern cannot be given "
+                                                     "a fill");
+    }
+    return {};
+}
+
+void HatchPatternPolicy::seed(NamedMap<HatchPattern>& items)
+{
+    // Only "none" is built in, for the same reason only "continuous" is: the
+    // ISO and ANSI pattern sets are defined in paper millimetres and inches,
+    // and a survey drawing here is in metres, so anything shipped would be a
+    // conversion of numbers not to hand or an invention that a test would then
+    // pin as though it were a standard. Patterns come from the user or from an
+    // imported file.
+    HatchPattern none;
+    none.name = std::string(kNoHatch);
+    none.description = "Not hatched";
+    items.emplace(none.name, std::move(none));
+}
+
 Status StylePolicy::validate(const Style& style)
 {
     if (auto status = validateName(style.name, "style"); !status) {

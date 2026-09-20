@@ -24,11 +24,12 @@
 //               layer's colour.
 //   lineWeight  the style's if the entity names one, else the layer's.
 //   linetype    the style's if the entity names one, else the layer's.
+//   hatch       the style's if it names one, else the layer's.
 //
-// Colour is the only one of the three that is optional on a Style, which is why
-// it is the only one that can fall through a named style to the layer. That
-// asymmetry is in the Style type itself (`std::optional<Color> color` is
-// documented "empty: ByLayer"), not invented here.
+// Colour and the hatch pattern are the two that are optional on a Style, which
+// is why they are the ones that can fall through a named style to the layer.
+// That asymmetry is in the Style type itself (`std::optional<Color> color` is
+// documented "empty: ByLayer", and so is `hatchPattern`), not invented here.
 //
 // A missing layer or style resolves to the defaults rather than dereferencing
 // null. An entity can reference a layer that has been removed - the model
@@ -45,6 +46,9 @@ struct ResolvedDisplay {
     Color color{};
     double lineWeight = 0.25;                       // millimetres on paper
     std::string linetype{kContinuousLinetype};
+    // "none" when the entity is not hatched, never empty, so a renderer looks
+    // the name up rather than testing for emptiness first.
+    std::string hatchPattern{kNoHatch};
 
     friend bool operator==(const ResolvedDisplay&, const ResolvedDisplay&) = default;
 };

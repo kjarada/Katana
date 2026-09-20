@@ -25,6 +25,11 @@ namespace katana::entity {
 inline constexpr std::string_view kDefaultLayerName = "0";
 inline constexpr std::string_view kContinuousLinetype = "continuous";
 
+// The built-in hatch pattern that draws no fill. Named rather than represented
+// by an empty string so that "this layer is not hatched" and "this layer has
+// not said" stay distinguishable, exactly as "continuous" does for linetypes.
+inline constexpr std::string_view kNoHatch = "none";
+
 struct Layer {
     std::string name{kDefaultLayerName};
     Color color{};
@@ -35,6 +40,7 @@ struct Layer {
     // Empty means the document default ("Standard"). Appended last, as every
     // field here is, so the storage columns keep their order.
     std::string dimensionStyle{};
+    std::string hatchPattern{kNoHatch};
 
     friend bool operator==(const Layer&, const Layer&) = default;
 };
@@ -247,9 +253,61 @@ struct Style {
     std::optional<Color> color{}; // empty: ByLayer
     double lineWeight = 0.25;     // millimetres on paper
     std::string linetype{kContinuousLinetype};
+    // Empty means ByLayer. Unlike the layer field this is NOT defaulted to
+    // "none": a style that says nothing about hatching must not override a
+    // layer that does.
+    std::string hatchPattern{};
 
     friend bool operator==(const Style&, const Style&) = default;
 };
+
+// ---- hatch patterns -------------------------------------------------------------
+//
+// One family of parallel lines. A pattern is a list of these, which is how DXF
+// PAT files describe hatching and why a crosshatch is two families rather than
+// a special kind of one.
+//
+// Angles are radians counter-clockwise from +x; spacing and offset are MODEL
+// units, so a hatch keeps its size on the ground at every zoom exactly as a
+// linetype pattern does. The offset is measured from the world origin, which is
+// what makes two adjacent parcels hatched alike line up along their shared
+// edge - see geometry::hatchLines.
+struct HatchLineFamily {
+    double angle = 0.0;
+    double spacing = 1.0;
+    double offset = 0.0;
+
+    friend bool operator==(const HatchLineFamily&, const HatchLineFamily&) = default;
+};
+
+struct HatchPattern {
+    std::string name{};
+    std::string description{};
+    // A filled area rather than a family of lines. DXF SOLID hatches import as
+    // this; it is not expressible as a spacing, however small.
+    bool solid = false;
+    std::vector<HatchLineFamily> families{};
+
+    // The built-in "none" is the only pattern allowed to draw nothing.
+    [[nodiscard]] bool drawsNothing() const { return !solid && families.empty(); }
+
+    friend bool operator==(const HatchPattern&, const HatchPattern&) = default;
+};
+
+// Fails with InvalidArgument, naming the specific rule broken.
+[[nodiscard]] katana::core::Status validate(const HatchPattern& pattern);
+
+struct HatchPatternPolicy : NamedTablePolicy<HatchPattern> {
+    static constexpr std::string_view kNoun = "hatch pattern";
+    static katana::core::Status validate(const HatchPattern& pattern);
+    // "none" is what an unhatched layer resolves to, so giving it a fill would
+    // hatch every layer that has never asked to be hatched.
+    static katana::core::Status checkUpdate(const HatchPattern& pattern);
+    static bool isProtected(std::string_view name) { return name == kNoHatch; }
+    static void seed(NamedMap<HatchPattern>& items);
+};
+
+using HatchPatternDatabase = NamedTable<HatchPattern, HatchPatternPolicy>;
 
 struct StylePolicy : NamedTablePolicy<Style> {
     static constexpr std::string_view kNoun = "style";

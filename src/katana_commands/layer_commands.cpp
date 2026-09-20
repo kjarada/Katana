@@ -550,6 +550,124 @@ class DeleteDimensionStyleCommand final : public Command {
     DimensionStyle removed_;
 };
 
+using katana::entity::HatchPattern;
+
+class CreateHatchPatternCommand final : public Command {
+  public:
+    explicit CreateHatchPatternCommand(HatchPattern pattern) : pattern_(std::move(pattern)) {}
+    [[nodiscard]] std::string_view name() const override { return "CreateHatchPattern"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (context.model.hatchPatterns.contains(pattern_.name)) {
+            return makeError(ErrorCode::AlreadyExists, "hatch pattern already exists",
+                             pattern_.name);
+        }
+        return katana::entity::validate(pattern_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        return context.model.hatchPatterns.add(pattern_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        auto removed = context.model.hatchPatterns.remove(pattern_.name);
+        return removed ? Status{} : removed.error();
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    HatchPattern pattern_;
+};
+
+class UpdateHatchPatternCommand final : public Command {
+  public:
+    explicit UpdateHatchPatternCommand(HatchPattern pattern) : after_(std::move(pattern)) {}
+    [[nodiscard]] std::string_view name() const override { return "UpdateHatchPattern"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (!context.model.hatchPatterns.contains(after_.name)) {
+            return makeError(ErrorCode::NotFound, "hatch pattern does not exist", after_.name);
+        }
+        if (after_.name == katana::entity::kNoHatch && !after_.drawsNothing()) {
+            return makeError(ErrorCode::CommandRejected,
+                             "the \"none\" hatch pattern cannot be given a fill");
+        }
+        return katana::entity::validate(after_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        const HatchPattern* current = context.model.hatchPatterns.find(after_.name);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound, "hatch pattern does not exist", after_.name);
+        }
+        before_ = *current;
+        return context.model.hatchPatterns.update(after_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.hatchPatterns.update(before_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override
+    {
+        return context.model.hatchPatterns.update(after_);
+    }
+
+  private:
+    HatchPattern after_;
+    HatchPattern before_;
+};
+
+class DeleteHatchPatternCommand final : public Command {
+  public:
+    explicit DeleteHatchPatternCommand(std::string name) : name_(std::move(name)) {}
+    [[nodiscard]] std::string_view name() const override { return "DeleteHatchPattern"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (name_ == katana::entity::kNoHatch) {
+            return makeError(ErrorCode::CommandRejected,
+                             "the \"none\" hatch pattern cannot be deleted");
+        }
+        if (!context.model.hatchPatterns.contains(name_)) {
+            return makeError(ErrorCode::NotFound, "hatch pattern does not exist", name_);
+        }
+        // A layer or style left naming a deleted pattern would simply stop
+        // being hatched, with nothing to say why, so the reference is reported
+        // with the holder NAMED rather than the deletion quietly allowed.
+        for (const std::string& layer : context.model.layers.names()) {
+            const katana::entity::Layer* definition = context.model.layers.find(layer);
+            if (definition != nullptr && definition->hatchPattern == name_) {
+                return makeError(ErrorCode::CommandRejected,
+                                 "a layer still uses that hatch pattern", "layer=" + layer);
+            }
+        }
+        for (const katana::entity::Style& style : context.model.styles.all()) {
+            if (style.hatchPattern == name_) {
+                return makeError(ErrorCode::CommandRejected,
+                                 "a style still uses that hatch pattern", "style=" + style.name);
+            }
+        }
+        return {};
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        auto removed = context.model.hatchPatterns.remove(name_);
+        if (!removed) {
+            return removed.error();
+        }
+        removed_ = std::move(*removed);
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.hatchPatterns.add(removed_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    std::string name_;
+    HatchPattern removed_;
+};
+
 } // namespace
 
 CommandPtr createDimensionStyle(DimensionStyle style)
@@ -565,6 +683,21 @@ CommandPtr updateDimensionStyle(DimensionStyle style)
 CommandPtr deleteDimensionStyle(std::string name)
 {
     return std::make_unique<DeleteDimensionStyleCommand>(std::move(name));
+}
+
+CommandPtr createHatchPattern(HatchPattern pattern)
+{
+    return std::make_unique<CreateHatchPatternCommand>(std::move(pattern));
+}
+
+CommandPtr updateHatchPattern(HatchPattern pattern)
+{
+    return std::make_unique<UpdateHatchPatternCommand>(std::move(pattern));
+}
+
+CommandPtr deleteHatchPattern(std::string name)
+{
+    return std::make_unique<DeleteHatchPatternCommand>(std::move(name));
 }
 
 } // namespace katana::commands

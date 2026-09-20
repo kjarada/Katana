@@ -354,6 +354,47 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 
 // ---- migration -----------------------------------------------------------------------
 
+
+// Undoes every migration above `version`, so a project can be made to look as
+// though it were written by an older build.
+//
+// Migrations are append-only and each runs once, so a fixture that claims
+// version N must actually LOOK like version N: leaving a later migration's
+// table in place makes the replay fail with "table already exists", which is
+// the migration machinery working correctly on a fixture that lied.
+//
+// This exists as one function because it was previously written out inside
+// each test, and every new migration then broke every older fixture. Adding a
+// migration now means adding one case here.
+[[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
+{
+    // Newest first: a migration is undone before the one it was built on.
+    if (version < 6) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS hatch_families;"
+                                           "DROP TABLE IF EXISTS hatch_patterns;"
+                                           "ALTER TABLE layers DROP COLUMN hatch_pattern;"
+                                           "ALTER TABLE styles DROP COLUMN hatch_pattern;");
+            !status) {
+            return status;
+        }
+    }
+    if (version < 5) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS dimension_styles;"
+                                           "ALTER TABLE layers DROP COLUMN dimension_style;");
+            !status) {
+            return status;
+        }
+    }
+    if (version < 4) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS linetype_elements;"
+                                           "DROP TABLE IF EXISTS linetypes;");
+            !status) {
+            return status;
+        }
+    }
+    return database.setUserVersion(version);
+}
+
 TEST_F(ProjectStoreMigration, UpgradesAVersion1ProjectAndBacksItUpFirst)
 {
     // A project exactly as Katana schema version 1 wrote it (no relationships table).
@@ -876,18 +917,7 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeLinetypesOpensWithItsLayerPatter
         auto database = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(database.ok());
         ASSERT_TRUE(database->execute("UPDATE layers SET linetype = 'hidden'").ok());
-        // Wind the schema back to 3, dropping EVERYTHING migrations 4 and 5
-        // added - not just the linetype tables. Migrations are append-only and
-        // run once, so leaving a later migration's table in place makes the
-        // replay fail with "table already exists", which is the migration
-        // machinery working correctly on a fixture that lied about its version.
-        ASSERT_TRUE(database
-                        ->execute("DROP TABLE linetype_elements;"
-                                  "DROP TABLE linetypes;"
-                                  "DROP TABLE dimension_styles;"
-                                  "ALTER TABLE layers DROP COLUMN dimension_style;")
-                        .ok());
-        ASSERT_TRUE(database->setUserVersion(3).ok());
+        ASSERT_TRUE(rewindSchemaTo(*database, 3).ok());
     }
 
     auto reopened = ProjectStore::open(projectDir());
@@ -967,11 +997,7 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeDimensionStylesGetsTheDefaultAnd
     {
         auto database = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(database.ok());
-        ASSERT_TRUE(database
-                        ->execute("DROP TABLE dimension_styles;"
-                                  "ALTER TABLE layers DROP COLUMN dimension_style;")
-                        .ok());
-        ASSERT_TRUE(database->setUserVersion(4).ok());
+        ASSERT_TRUE(rewindSchemaTo(*database, 4).ok());
     }
 
     auto reopened = ProjectStore::open(projectDir());
@@ -990,4 +1016,102 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeDimensionStylesGetsTheDefaultAnd
     }
     EXPECT_TRUE(loaded.dimensionStyles.contains("Standard"));
     EXPECT_EQ(loaded.dimensionStyles.size(), 1u);
+}
+
+TEST_F(ProjectStoreMigration, AProjectFromBeforeHatchPatternsOpensUnhatched)
+{
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(rewindSchemaTo(*database, 5).ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    // The point of the migration's default: a drawing made before hatching
+    // existed must look exactly as it did, so every layer comes back naming
+    // the built-in that draws no fill, and no other pattern is invented.
+    for (const Layer& layer : loaded.layers.all()) {
+        EXPECT_EQ(layer.hatchPattern, katana::entity::kNoHatch) << layer.name;
+    }
+    for (const katana::entity::Style& style : loaded.styles.all()) {
+        EXPECT_TRUE(style.hatchPattern.empty()) << style.name; // ByLayer
+    }
+    EXPECT_TRUE(loaded.hatchPatterns.contains(katana::entity::kNoHatch));
+    EXPECT_EQ(loaded.hatchPatterns.size(), 1u);
+}
+
+TEST_F(ProjectStoreRoundTrip, AHatchPatternSurvivesSaveAndReopenWithEveryFamily)
+{
+    Model model = sampleModel();
+
+    katana::entity::HatchPattern brick;
+    brick.name = "brick";
+    brick.description = "Running bond";
+    // Two families with different angles, spacings and offsets, so that a
+    // writer which dropped a column, or a reader which mixed two of them up,
+    // could not pass by coincidence.
+    brick.families.push_back(katana::entity::HatchLineFamily{0.0, 0.25, 0.0});
+    brick.families.push_back(katana::entity::HatchLineFamily{1.25, 0.5, 0.125});
+    ASSERT_TRUE(model.hatchPatterns.add(brick));
+
+    katana::entity::HatchPattern solid;
+    solid.name = "concrete";
+    solid.solid = true;
+    ASSERT_TRUE(model.hatchPatterns.add(solid));
+
+    Layer hatched;
+    hatched.name = "paving";
+    hatched.hatchPattern = "brick";
+    ASSERT_TRUE(model.layers.add(hatched));
+
+    katana::entity::Style style;
+    style.name = "slab";
+    style.hatchPattern = "concrete";
+    ASSERT_TRUE(model.styles.add(style));
+
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        // Saved twice: save clears and rewrites every table it owns, so a
+        // second save is what catches a missing DELETE and its primary-key
+        // conflict. That is exactly how the linetype and dimension style
+        // tables each failed when they were added.
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    const katana::entity::HatchPattern* reloaded = loaded.hatchPatterns.find("brick");
+    ASSERT_NE(reloaded, nullptr);
+    EXPECT_EQ(*reloaded, brick) << "a field was lost or reordered on the way through SQLite";
+
+    const katana::entity::HatchPattern* reloadedSolid = loaded.hatchPatterns.find("concrete");
+    ASSERT_NE(reloadedSolid, nullptr);
+    EXPECT_TRUE(reloadedSolid->solid);
+    EXPECT_TRUE(reloadedSolid->families.empty());
+
+    ASSERT_NE(loaded.layers.find("paving"), nullptr);
+    EXPECT_EQ(loaded.layers.find("paving")->hatchPattern, "brick");
+    ASSERT_NE(loaded.styles.find("slab"), nullptr);
+    EXPECT_EQ(loaded.styles.find("slab")->hatchPattern, "concrete");
 }

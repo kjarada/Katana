@@ -50,5 +50,14 @@ DIM 0,0 160,0 -14
 DIM 40,35 110,35 -6
 DIM 0,0 0,100 -14
 
+# ---- hatching -----------------------------------------------------------
+# Angles in degrees, spacing in MODEL units - so the pattern keeps its size on
+# the ground as the view zooms, which is the point of a hatch on a survey
+# drawing. Zoom out far enough and it is drawn as a solid tone instead, because
+# lines closer together than about three pixels cannot be told apart anyway.
+HATCH NEW brick 0 0.6 90 0.6
+HATCH NEW hardstanding 45 1.5
+LAYER HATCH BUILDING brick
+
 LAYER SET BOUNDARY
 LIST

@@ -118,7 +118,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"AR", "ARRAY"},   {"E", "ERASE"},       {"DELETE", "ERASE"},   {"DEL", "ERASE"},
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
-        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"},
+        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"},
         {"?", "HELP"},
     };
     return table;
@@ -216,6 +216,8 @@ Layers    LAYER LIST | NEW name [#RRGGBB] | SET name | DELETE name
           LAYER SHOW|HIDE|LOCK|UNLOCK name | LAYER LTYPE layer linetype
 Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
+Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
+          angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
@@ -331,6 +333,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "DIMSTYLE") {
         return dimensionStyle(args);
+    }
+    if (verb == "HATCH") {
+        return hatchPattern(args);
     }
     if (verb == "UNDO" || verb == "REDO") {
         return undoRedo(verb, args);
@@ -891,6 +896,93 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
     return usage("DIMSTYLE LIST | NEW name | SET name field value | DELETE name");
 }
 
+CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
+{
+    const auto& model = document_.model();
+    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+
+    if (action == "LIST") {
+        std::ostringstream out;
+        out.precision(6);
+        for (const katana::entity::HatchPattern& pattern : model.hatchPatterns.all()) {
+            out << "  " << pattern.name;
+            if (pattern.solid) {
+                out << "  solid";
+            } else if (pattern.families.empty()) {
+                out << "  (draws nothing)";
+            } else {
+                for (const katana::entity::HatchLineFamily& family : pattern.families) {
+                    out << "  [" << family.angle * katana::math::kRadToDeg << " deg @ "
+                        << family.spacing;
+                    if (family.offset != 0.0) {
+                        out << " offset " << family.offset;
+                    }
+                    out << "]";
+                }
+            }
+            if (!pattern.description.empty()) {
+                out << "  " << pattern.description;
+            }
+            out << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text;
+    }
+
+    if (args.size() < 2) {
+        return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
+                     " | DELETE name");
+    }
+    const std::string& name = args[1];
+
+    if (action == "DELETE") {
+        return finish(document_.execute(cmd::deleteHatchPattern(name)),
+                      "hatch pattern " + name + " deleted");
+    }
+    if (action == "SOLID") {
+        katana::entity::HatchPattern pattern;
+        pattern.name = name;
+        pattern.solid = true;
+        pattern.description = "Solid fill";
+        return finish(document_.execute(cmd::createHatchPattern(std::move(pattern))),
+                      "hatch pattern " + name + " created (solid)");
+    }
+    if (action == "NEW") {
+        // Angles are DEGREES here and radians in the model. Every other angle
+        // the interpreter takes is in degrees, because that is what a drafter
+        // types; converting at the edge keeps the model in one unit.
+        if (args.size() < 4 || (args.size() - 2) % 2 != 0) {
+            return usage("HATCH NEW name angle spacing [angle spacing ...]\n"
+                         "  angle in DEGREES, spacing in MODEL units."
+                         " e.g. HATCH NEW brick 45 0.25   (crosshatch: 45 0.25 135 0.25)");
+        }
+        katana::entity::HatchPattern pattern;
+        pattern.name = name;
+        for (std::size_t i = 2; i + 1 < args.size(); i += 2) {
+            const auto angle = parseNumber(args[i]);
+            if (!angle) {
+                return angle.error();
+            }
+            const auto spacing = parseNumber(args[i + 1]);
+            if (!spacing) {
+                return spacing.error();
+            }
+            katana::entity::HatchLineFamily family;
+            family.angle = *angle * katana::math::kDegToRad;
+            family.spacing = *spacing;
+            pattern.families.push_back(family);
+        }
+        return finish(document_.execute(cmd::createHatchPattern(std::move(pattern))),
+                      "hatch pattern " + name + " created (" +
+                          std::to_string(pattern.families.size()) + " families)");
+    }
+    return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
+                 " | DELETE name");
+}
+
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
 {
     const auto& model = document_.model();
@@ -1018,6 +1110,22 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
         changed.linetype = args[2];
         return finish(document_.execute(cmd::updateLayer(std::move(changed))),
                       "layer " + name + " uses linetype " + args[2]);
+    }
+    if (action == "HATCH") {
+        if (args.size() < 3) {
+            return usage("LAYER HATCH layer pattern");
+        }
+        const katana::entity::Layer* existing = model.layers.find(name);
+        if (existing == nullptr) {
+            return makeError(ErrorCode::NotFound, "layer does not exist", name);
+        }
+        if (!model.hatchPatterns.contains(args[2])) {
+            return makeError(ErrorCode::NotFound, "hatch pattern does not exist", args[2]);
+        }
+        katana::entity::Layer changed = *existing;
+        changed.hatchPattern = args[2];
+        return finish(document_.execute(cmd::updateLayer(std::move(changed))),
+                      "layer " + name + " uses hatch pattern " + args[2]);
     }
     if (action == "DIMSTYLE") {
         if (args.size() < 3) {
