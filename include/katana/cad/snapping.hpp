@@ -13,6 +13,7 @@
 #include <optional>
 
 #include "katana/entity/model.hpp"
+#include "katana/geometry/spatial_index.hpp"
 
 namespace katana::cad {
 
@@ -66,7 +67,14 @@ struct SnapResult {
 
 // Considers drawn entities only (visible, on visible layers; locked layers are
 // valid snap targets). nullopt when nothing is within the aperture.
+//
+// `index`, when supplied, narrows the search to the entities near the cursor
+// instead of scanning the model (PLAN.MD Phase 18). It must be in step with
+// `model`; katana::cad::Document keeps one that is. The result is IDENTICAL
+// either way - the index is a broad phase and every exact test still runs -
+// which is asserted by a test that compares the two paths over random models.
 [[nodiscard]] std::optional<SnapResult> snap(const katana::entity::Model& model,
-                                             const SnapRequest& request);
+                                             const SnapRequest& request,
+                                             const katana::geometry::SpatialIndex* index = nullptr);
 
 } // namespace katana::cad

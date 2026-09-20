@@ -22,6 +22,7 @@
 #include "katana/core/error.hpp"
 #include "katana/core/log.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/geometry/spatial_index.hpp"
 #include "katana/storage/project_store.hpp"
 
 namespace katana::cad {
@@ -37,6 +38,16 @@ class Document {
     Document& operator=(const Document&) = delete;
 
     [[nodiscard]] const katana::entity::Model& model() const { return model_; }
+
+    // Broad-phase index over the entities, kept in step with the model
+    // (PLAN.MD Phase 18). Maintained incrementally from the per-entity changes
+    // every command reports, and rebuilt whole whenever the model is replaced -
+    // a rebuild is what chooses the cell size from the data.
+    //
+    // Pass it to snap(), pickEntity() and pickInBox(). They give the same
+    // answer without it, only slower, so a caller that has no Document loses
+    // nothing but speed.
+    [[nodiscard]] const katana::geometry::SpatialIndex& spatialIndex() const { return index_; }
     [[nodiscard]] const katana::commands::CommandStack& history() const { return *stack_; }
 
     // ---- editing -------------------------------------------------------------
@@ -78,11 +89,16 @@ class Document {
 
   private:
     void rebuildStack();
+    // Whole index from the current model; picks the cell size from the data.
+    void rebuildSpatialIndex();
+    // Incremental maintenance from the changes one command reported.
+    void applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent>& changes);
     void pruneSelection();
     void notify();
 
     katana::core::Logger* logger_ = nullptr;
     katana::entity::Model model_;
+    katana::geometry::SpatialIndex index_;
     std::unique_ptr<katana::commands::CommandStack> stack_;
     std::unique_ptr<katana::storage::ProjectStore> store_;
     katana::storage::ProjectMetadata metadata_;

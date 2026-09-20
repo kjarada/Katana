@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "katana/entity/model.hpp"
+#include "katana/geometry/spatial_index.hpp"
 
 namespace katana::cad {
 
@@ -51,19 +52,24 @@ class SelectionSet {
 
 // Nearest selectable entity whose geometry lies within `tolerance` (model units)
 // of `point`. Ties go to the higher id: the entity drawn last, i.e. on top.
-[[nodiscard]] std::optional<EntityId> pickEntity(const katana::entity::Model& model,
-                                                 const katana::geometry::Point2& point,
-                                                 double tolerance,
-                                                 const SelectionFilter& filter = {});
+// `index`, when supplied, narrows the search instead of scanning the model
+// (PLAN.MD Phase 18). It must be in step with `model`; Document keeps one that
+// is. The answer is identical either way - the index is a broad phase and the
+// exact distance test is unchanged - which is asserted by a test comparing the
+// two paths.
+[[nodiscard]] std::optional<EntityId>
+pickEntity(const katana::entity::Model& model, const katana::geometry::Point2& point,
+           double tolerance, const SelectionFilter& filter = {},
+           const katana::geometry::SpatialIndex* index = nullptr);
 
 enum class BoxSelectionMode {
     Window,   // only entities entirely inside the box
     Crossing, // entities inside or touching the box
 };
 
-[[nodiscard]] std::vector<EntityId> pickInBox(const katana::entity::Model& model,
-                                              const katana::geometry::Box2& box,
-                                              BoxSelectionMode mode,
-                                              const SelectionFilter& filter = {});
+[[nodiscard]] std::vector<EntityId>
+pickInBox(const katana::entity::Model& model, const katana::geometry::Box2& box,
+          BoxSelectionMode mode, const SelectionFilter& filter = {},
+          const katana::geometry::SpatialIndex* index = nullptr);
 
 } // namespace katana::cad

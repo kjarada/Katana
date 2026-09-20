@@ -224,3 +224,59 @@ the status bar; the model is untouched. Closing with unsaved changes prompts to
 save, discard or cancel. A failed save reports the error and leaves the modified
 flag set. A damaged project offers backup recovery and never deletes the
 damaged file.
+
+## Spatial indexing (Phase 18)
+
+Snapping, picking and box selection each walked every entity in the model.
+Measured in Release, 4-vertex strings scattered over a 1 km square:
+
+| Entities | Snap per mouse move | Share of the 16 ms budget |
+|---|---|---|
+| 100 000 | 4.3 ms | 27% |
+| 250 000 | 11.6 ms | 73% |
+| 500 000 | 23.9 ms | over budget, before anything is drawn |
+
+A quarter-million-entity as-built is ordinary, so the scan ran out before the
+drawings did. `katana::geometry::SpatialIndex` is a sparse spatial hash grid
+over bounding boxes, used as a broad phase: it returns a superset and every
+exact test still runs, so it can make queries faster and cannot make them
+different.
+
+| Operation | 100 000 entities, scan | indexed | factor |
+|---|---|---|---|
+| Snap | 4404 µs | 88 µs | 50× |
+| Pick | 3910 µs | 12.6 µs | 310× |
+| Box select | 4442 µs | 0.040 µs | constant in drawing size |
+
+At 500 000 entities snapping drops from 24.3 ms to 1.9 ms. It still grows with
+**density** rather than count, because intersection snapping is quadratic in the
+candidates inside the aperture; that is inherent to the mode.
+
+### Two decisions worth knowing
+
+**A hash grid, not an R-tree.** The R-tree is the textbook answer and handles
+pathological size distributions better, but its insertion, splitting and
+rebalancing are much more code and every one of those paths must stay correct
+under the constant incremental edits a CAD document makes. The grid is O(1) on
+insert, remove and update. `oversizedCount()` is exposed so the case where an
+R-tree would win can be seen rather than guessed; that is the upgrade trigger.
+
+**The indexed box is not always the bounding box.** Snapping an arc offers its
+centre, and the centre of a shallow arc is far outside the arc's own bounding
+box. Indexing plain bounding boxes would have made the broad phase reject the
+arc and centre snap would have silently stopped working the moment the index
+was switched on. `detail::queryExtents` therefore indexes the full circle for
+an arc and the bounding box for everything else — while picking still tests the
+true bounding box, so clicking an arc's centre does not select it. Both are
+asserted in `tests/cad/test_indexed_queries.cpp`.
+
+### Staying in step
+
+`Document` maintains the index from the per-entity changes every command
+reports, so a single click on a large drawing does not pay for a rebuild.
+The whole index is rebuilt only when the model is replaced — a rebuild is also
+what chooses the cell size from the data. It costs 7.8 ms at 100 000 entities
+and 44.6 ms at 500 000, about 5% of the load time.
+
+The equivalence tests run each query twice, scanned and indexed, and require
+the results to be equal — including after moves, deletions, undo and redo.

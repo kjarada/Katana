@@ -26,13 +26,13 @@ and the command line are two thin front ends over the same engine.
 | 15 | 3D rendering | partial — tiled multithreaded software renderer, orbit camera, tiled viewports, 3D and cross-section views; Vulkan backend outstanding |
 | 16 | 3D CAD (Open CASCADE) | not started |
 | 17 | Point clouds | partial — LAS/LAZ read/write, budgeted decimation, 2D display; no out-of-core LOD |
-| 18 | Spatial indexing | not started — picking and culling are still linear scans over all entities |
+| 18 | Spatial indexing | partial — sparse hash grid behind snapping, picking and box selection (50x–310x measured); view culling still linear |
 | 19 | Performance architecture | partial — deterministic `TaskPool` drives the renderer; no task graph, no SIMD |
 | 20 | File interoperability | partial — raster, vector and point cloud import/export in the GUI and the CLI; no DWG/LandXML/IFC |
 | 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
 | 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
 
-641 tests pass in Debug and Release, including the architectural layering check.
+667 tests pass in Debug and Release, including the architectural layering check.
 
 ## Building
 

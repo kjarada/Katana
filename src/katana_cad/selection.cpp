@@ -1,5 +1,7 @@
 #include "katana/cad/selection.hpp"
 
+#include "candidates.hpp"
+
 #include <algorithm>
 #include <array>
 
@@ -66,12 +68,18 @@ bool isSelectable(const Model& model, const Entity& entity)
 }
 
 std::optional<EntityId> pickEntity(const Model& model, const Point2& point, double tolerance,
-                                   const SelectionFilter& filter)
+                                   const SelectionFilter& filter,
+                                   const katana::geometry::SpatialIndex* index)
 {
     std::optional<EntityId> best;
     double bestDistance = tolerance;
     const Box2 reach = Box2(point, point).inflated(tolerance);
-    model.entities.forEach([&](const Entity& entity) {
+    std::vector<katana::geometry::SpatialId> scratch;
+    detail::forEachCandidate(model, index, reach, scratch, [&](const Entity& entity) {
+        // The broad phase uses queryExtents, which is wider than the bounding
+        // box for an arc so that snapping can reach its centre. Picking must
+        // NOT be that generous - clicking an arc's centre should not select it
+        // - so the true bounding box is still tested here.
         if (!isSelectable(model, entity) || !filter.accepts(entity) ||
             !katana::entity::boundingBox(entity.geometry).intersects(reach)) {
             return;
@@ -144,13 +152,15 @@ struct TouchesBox {
 } // namespace
 
 std::vector<EntityId> pickInBox(const Model& model, const Box2& box, BoxSelectionMode mode,
-                                const SelectionFilter& filter)
+                                const SelectionFilter& filter,
+                                const katana::geometry::SpatialIndex* index)
 {
     std::vector<EntityId> picked;
     if (box.empty()) {
         return picked;
     }
-    model.entities.forEach([&](const Entity& entity) {
+    std::vector<katana::geometry::SpatialId> scratch;
+    detail::forEachCandidate(model, index, box, scratch, [&](const Entity& entity) {
         if (!isSelectable(model, entity) || !filter.accepts(entity)) {
             return;
         }

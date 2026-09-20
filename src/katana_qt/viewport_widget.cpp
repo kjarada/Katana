@@ -262,7 +262,11 @@ void ViewportWidget::updateCursor(const QPointF& screen)
             request.from = points_.back();
         }
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(view_.scale) : 0.0;
-        activeSnap_ = cad::snap(document_.model(), request);
+        // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
+        // Release on 100 000 entities: 4404 us per mouse move scanning,
+        // 88 us indexed. The answer is identical either way - asserted by
+        // IndexedQueries - so this is purely the cost.
+        activeSnap_ = cad::snap(document_.model(), request, &document_.spatialIndex());
         if (activeSnap_) {
             cursorWorld_ = activeSnap_->point;
         }
@@ -356,7 +360,8 @@ void ViewportWidget::finishOperation(bool close)
 void ViewportWidget::selectAt(const QPointF& screen, Qt::KeyboardModifiers modifiers)
 {
     const auto picked = cad::pickEntity(document_.model(), toWorld(screen),
-                                        view_.pixelsToWorld(kPickAperturePixels));
+                                        view_.pixelsToWorld(kPickAperturePixels), {},
+                                        &document_.spatialIndex());
     cad::SelectionSet& selection = document_.selection();
     if (modifiers & Qt::ControlModifier) {
         if (picked) {
@@ -385,7 +390,8 @@ void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
     // takes whatever the box touches.
     const auto mode = to.x() >= from.x() ? cad::BoxSelectionMode::Window
                                          : cad::BoxSelectionMode::Crossing;
-    const auto picked = cad::pickInBox(document_.model(), box, mode);
+    const auto picked = cad::pickInBox(document_.model(), box, mode, {},
+                                       &document_.spatialIndex());
     cad::SelectionSet& selection = document_.selection();
     if (!(modifiers & (Qt::ShiftModifier | Qt::ControlModifier))) {
         selection.clear();

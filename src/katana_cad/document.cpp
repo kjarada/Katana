@@ -1,5 +1,7 @@
 #include "katana/cad/document.hpp"
 
+#include "candidates.hpp"
+
 #include <utility>
 
 namespace katana::cad {
@@ -21,7 +23,11 @@ void Document::rebuildStack()
     // observer, which must not happen after the new stack has installed its own.
     stack_.reset();
     stack_ = std::make_unique<katana::commands::CommandStack>(model_, logger_);
-    stack_->addListener([this](const katana::commands::CommandEvent&) {
+    stack_->addListener([this](const katana::commands::CommandEvent& event) {
+        // The index is maintained from the per-entity changes the command
+        // reported rather than rebuilt: a single click on a 250 000-entity
+        // drawing must not pay for a whole rebuild.
+        applyToSpatialIndex(event.changes);
         // Undo can delete selected entities and the current layer.
         pruneSelection();
         if (!model_.layers.contains(currentLayer_)) {
@@ -29,6 +35,50 @@ void Document::rebuildStack()
         }
         notify();
     });
+}
+
+void Document::rebuildSpatialIndex()
+{
+    std::vector<katana::geometry::SpatialEntry> entries;
+    entries.reserve(model_.entities.size());
+    model_.entities.forEach([&](const katana::entity::Entity& entity) {
+        entries.push_back(
+            katana::geometry::SpatialEntry{static_cast<katana::geometry::SpatialId>(entity.id),
+                                           detail::queryExtents(entity)});
+    });
+    index_.rebuild(entries);
+}
+
+void Document::applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent>& changes)
+{
+    for (const katana::entity::ChangeEvent& change : changes) {
+        switch (change.kind) {
+        case katana::entity::ChangeKind::Cleared:
+            // Everything went at once; a full rebuild also re-chooses the cell
+            // size, which is right because the data is about to be different.
+            rebuildSpatialIndex();
+            return;
+        case katana::entity::ChangeKind::EntityRemoved:
+            index_.remove(static_cast<katana::geometry::SpatialId>(change.id));
+            break;
+        case katana::entity::ChangeKind::EntityAdded:
+        case katana::entity::ChangeKind::EntityModified: {
+            const katana::entity::Entity* entity = model_.entities.find(change.id);
+            if (entity == nullptr) {
+                // Added then removed within one command. insert() would have
+                // nothing to index; remove() keeps the index from holding an
+                // id the model no longer has.
+                index_.remove(static_cast<katana::geometry::SpatialId>(change.id));
+                break;
+            }
+            // insert() replaces an existing entry, so Modified needs no
+            // separate remove.
+            index_.insert(static_cast<katana::geometry::SpatialId>(entity->id),
+                          detail::queryExtents(*entity));
+            break;
+        }
+        }
+    }
 }
 
 Status Document::execute(katana::commands::CommandPtr command)
@@ -83,6 +133,7 @@ void Document::newDocument()
     store_.reset();
     model_.reset();
     rebuildStack(); // fresh history; also re-installs the entity observer
+    rebuildSpatialIndex();
     metadata_ = {};
     metadataModified_ = false;
     selection_.clear();
@@ -109,6 +160,9 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     metadata_ = std::move(contents->metadata);
     metadataModified_ = false;
     rebuildStack();
+    // Whole rebuild rather than incremental: the model was replaced, and a
+    // rebuild is what picks a cell size suited to the data just loaded.
+    rebuildSpatialIndex();
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
     if (logger_ != nullptr) {

@@ -1,5 +1,7 @@
 #include "katana/cad/snapping.hpp"
 
+#include "candidates.hpp"
+
 #include <cmath>
 #include <vector>
 
@@ -260,24 +262,20 @@ void appendCurves(const Entity& entity, const Box2& reach,
 }
 
 // An arc's centre can lie outside the arc's own extents; use the full circle.
-Box2 snapExtents(const Entity& entity)
-{
-    if (const auto* arc = std::get_if<Arc2>(&entity.geometry)) {
-        return arc->circle().boundingBox();
-    }
-    return katana::entity::boundingBox(entity.geometry);
-}
-
 } // namespace
 
-std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapRequest& request)
+std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapRequest& request,
+                               const katana::geometry::SpatialIndex* index)
 {
     Collector collector(request);
     const Box2 reach = Box2(request.cursor, request.cursor).inflated(request.aperture);
 
     std::vector<const Entity*> nearby;
-    model.entities.forEach([&](const Entity& entity) {
-        if (isDrawn(model, entity) && snapExtents(entity).intersects(reach)) {
+    std::vector<katana::geometry::SpatialId> scratch;
+    // The extent test is detail::queryExtents, which is deliberately wider
+    // than the bounding box for an arc so that its centre stays snappable.
+    detail::forEachCandidate(model, index, reach, scratch, [&](const Entity& entity) {
+        if (isDrawn(model, entity)) {
             nearby.push_back(&entity);
         }
     });
