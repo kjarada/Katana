@@ -63,8 +63,16 @@ Status SqliteStatement::bind(int index, double value)
 
 Status SqliteStatement::bind(int index, std::string_view value)
 {
+    // A default-constructed string_view has a NULL data() pointer, and SQLite
+    // binds a null pointer as SQL NULL rather than as empty text. A caller that
+    // wrote `std::string_view{}` meaning "empty" would silently violate a NOT
+    // NULL constraint, or worse, store NULL where the schema allows it and have
+    // the difference surface much later. Empty text is bound as empty text.
+    static constexpr char kEmpty[] = "";
+    const char* data = value.data() != nullptr ? value.data() : kEmpty;
+
     // SQLITE_TRANSIENT: SQLite copies the text, so the caller's buffer may die.
-    return impl_->check(sqlite3_bind_text64(impl_->statement, index, value.data(), value.size(),
+    return impl_->check(sqlite3_bind_text64(impl_->statement, index, data, value.size(),
                                             SQLITE_TRANSIENT, SQLITE_UTF8),
                         "bind text");
 }
@@ -72,6 +80,23 @@ Status SqliteStatement::bind(int index, std::string_view value)
 Status SqliteStatement::bind(int index, bool value)
 {
     return bind(index, static_cast<std::int64_t>(value ? 1 : 0));
+}
+
+Status SqliteStatement::bind(int index, std::span<const std::byte> value)
+{
+    // SQLITE_TRANSIENT for the same reason as text: SQLite copies, so the
+    // caller's buffer may die immediately afterwards.
+    //
+    // A zero-length blob is bound through sqlite3_bind_zeroblob rather than
+    // bind_blob64 with a null pointer, which SQLite would store as NULL - and
+    // NULL is how this schema says "no blob here, read the JSON column".
+    if (value.empty()) {
+        return impl_->check(sqlite3_bind_zeroblob(impl_->statement, index, 0), "bind empty blob");
+    }
+    return impl_->check(sqlite3_bind_blob64(impl_->statement, index, value.data(),
+                                            static_cast<sqlite3_uint64>(value.size()),
+                                            SQLITE_TRANSIENT),
+                        "bind blob");
 }
 
 Status SqliteStatement::bindNull(int index)
@@ -129,6 +154,17 @@ std::string SqliteStatement::columnText(int column) const
     return text != nullptr ? std::string(reinterpret_cast<const char*>(text),
                                          static_cast<std::size_t>(size))
                            : std::string{};
+}
+
+std::vector<std::byte> SqliteStatement::columnBlob(int column) const
+{
+    const void* bytes = sqlite3_column_blob(impl_->statement, column);
+    const int size = sqlite3_column_bytes(impl_->statement, column);
+    if (bytes == nullptr || size <= 0) {
+        return {};
+    }
+    const auto* first = static_cast<const std::byte*>(bytes);
+    return std::vector<std::byte>(first, first + size);
 }
 
 // ---- SqliteDatabase ----------------------------------------------------------------

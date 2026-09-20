@@ -593,3 +593,108 @@ TEST_F(ProjectStoreRecovery, BackupOrderIgnoresStrayFilesAndHandlesTheCollisionS
     EXPECT_EQ(reordered.front().filename(), collision.filename())
         << "the later collision backup must rank above the one it collided with";
 }
+
+TEST_F(ProjectStoreMigration, SavingAMigratedProjectConvertsItsGeometryToBlobs)
+{
+    // A schema-1 project keeps its JSON until it is next saved; after that the
+    // blob is the record. Both readings must give the same geometry, or the
+    // act of saving would silently change a drawing.
+    fs::create_directories(projectDir());
+    {
+        auto v1 = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(v1.ok());
+        ASSERT_TRUE(v1->setApplicationId(0x4B544E41).ok());
+        ASSERT_TRUE(v1->execute(R"sql(
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE layers (name TEXT PRIMARY KEY, color TEXT NOT NULL, visible INTEGER NOT NULL,
+                locked INTEGER NOT NULL, linetype TEXT NOT NULL, line_weight REAL NOT NULL) WITHOUT ROWID;
+            CREATE TABLE styles (name TEXT PRIMARY KEY, color TEXT, line_weight REAL NOT NULL,
+                linetype TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE property_definitions (name TEXT PRIMARY KEY, type TEXT NOT NULL,
+                description TEXT NOT NULL, default_value TEXT) WITHOUT ROWID;
+            CREATE TABLE entities (id INTEGER PRIMARY KEY, type TEXT NOT NULL,
+                layer TEXT NOT NULL REFERENCES layers(name), style TEXT NOT NULL, color TEXT,
+                visible INTEGER NOT NULL, geometry TEXT NOT NULL, properties TEXT NOT NULL,
+                metadata TEXT NOT NULL);
+            INSERT INTO metadata VALUES ('name', 'Converted'), ('next_entity_id', '9');
+            INSERT INTO layers VALUES ('0', '#FFFFFF', 1, 0, 'continuous', 0.25);
+            INSERT INTO entities VALUES (5, 'Circle', '0', '', NULL, 1,
+                '{"type":"Circle","center":[1.5,2.5],"radius":4.0}', '{}', '{}');
+        )sql")
+                        .ok());
+        ASSERT_TRUE(v1->setUserVersion(1).ok());
+    }
+
+    const Circle2 expected{Point2(1.5, 2.5), 4.0};
+
+    // Open (migrates the schema, still reads JSON) and save (writes blobs).
+    {
+        auto store = ProjectStore::open(projectDir());
+        ASSERT_TRUE(store.ok()) << store.error().describe();
+        const auto contents = store->load();
+        ASSERT_TRUE(contents.ok()) << contents.error().describe();
+        ASSERT_EQ(contents->entities.size(), 1u);
+        EXPECT_EQ(std::get<Circle2>(contents->entities[0].geometry), expected);
+        ASSERT_TRUE(store->save(*contents).ok());
+    }
+
+    // The blob is now populated and the legacy column emptied.
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db",
+                                             SqliteDatabase::OpenMode::ReadOnly);
+        ASSERT_TRUE(database.ok());
+        auto row = database->prepare("SELECT geometry, geometry_blob FROM entities WHERE id = 5");
+        ASSERT_TRUE(row.ok());
+        const auto stepped = row->step();
+        ASSERT_TRUE(stepped.ok());
+        ASSERT_TRUE(*stepped);
+        EXPECT_TRUE(row->columnText(0).empty()) << "the JSON column is no longer written";
+        EXPECT_FALSE(row->columnIsNull(1)) << "the blob must have been written";
+        EXPECT_GE(row->columnBlob(1).size(), 2u);
+    }
+
+    // And it still reads back as the same circle.
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    ASSERT_EQ(contents->entities.size(), 1u);
+    EXPECT_EQ(std::get<Circle2>(contents->entities[0].geometry), expected);
+    EXPECT_EQ(contents->metadata.name, "Converted");
+}
+
+TEST_F(ProjectStoreMigration, WhereBothEncodingsArePresentTheBlobWins)
+{
+    // A half-migrated row - JSON from before, blob from a later save - must
+    // read the blob, which is the newer of the two. The JSON here is
+    // deliberately a DIFFERENT circle, so a reader taking the wrong column
+    // fails loudly instead of happening to agree.
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(database
+                        ->execute("UPDATE entities SET geometry = "
+                                  "'{\"type\":\"Circle\",\"center\":[999.0,999.0],\"radius\":1.0}'")
+                        .ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    model.entities.forEach([&](const Entity& entity) {
+        const Entity* back = loaded.entities.find(entity.id);
+        ASSERT_NE(back, nullptr);
+        EXPECT_EQ(back->geometry, entity.geometry)
+            << "entity " << entity.id << " was read from the stale JSON column";
+    });
+}

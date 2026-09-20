@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/geometry_blob.hpp"
 #include "katana/entity/serialization.hpp"
 #include "katana/storage/sqlite_database.hpp"
 
@@ -96,6 +97,20 @@ constexpr Migration kMigrations[] = {
         );
         CREATE INDEX relationships_by_from ON relationships(from_entity);
         CREATE INDEX relationships_by_to ON relationships(to_entity);
+    )sql"},
+    // Geometry as a binary blob instead of JSON text. Parsing the JSON was 602
+    // of the 891 ms it took to open a 50 000-entity project - 68%, against 289
+    // ms for SQLite itself - which is why the encoding changed and the database
+    // did not (docs/storage.md).
+    //
+    // The column is ADDED rather than replacing `geometry`, and is NULL for
+    // every row written before this migration. A load reads the blob when there
+    // is one and falls back to the JSON when there is not, so an existing
+    // project opens untouched and is converted the next time it is saved. The
+    // old column stays until a migration that rewrites every row can be
+    // justified; dropping it now would mean rewriting the whole table on open.
+    {3, R"sql(
+        ALTER TABLE entities ADD COLUMN geometry_blob BLOB;
     )sql"},
 };
 
@@ -801,15 +816,23 @@ Status ProjectStore::save(const ProjectContents& contents)
     }
 
     auto insertEntity = database.prepare(
-        "INSERT INTO entities (id, type, layer, style, color, visible, geometry, properties, metadata)"
-        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+        "INSERT INTO entities (id, type, layer, style, color, visible, geometry, properties, "
+        "metadata, geometry_blob)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)");
     if (!insertEntity) {
         return insertEntity.error();
     }
     for (const Entity& entity : contents.entities) {
         // A write that cannot be encoded fails the save cleanly instead of
         // aborting the process partway through the transaction.
-        auto geometry = katana::entity::geometryToJson(entity.geometry);
+        //
+        // Geometry goes in as a binary blob; the legacy `geometry` TEXT column
+        // is written empty. Storing the JSON as well would double the cost of
+        // a save for a column nothing reads any more - geometryToJson is still
+        // there for exports and for inspecting a database by hand. Rows
+        // written before schema 3 keep their JSON and are read from it until
+        // the project is next saved.
+        auto geometry = katana::entity::geometryToBlob(entity.geometry);
         if (!geometry) {
             return geometry.error();
         }
@@ -825,8 +848,9 @@ Status ProjectStore::save(const ProjectContents& contents)
                               2, katana::entity::toString(entity.type()))(
                               3, std::string_view(entity.layer))(4, std::string_view(entity.style))
                               .color(5, entity.color)(6, entity.visible)(
-                                  7, std::string_view(*geometry))(8, std::string_view(*properties))(
-                                  9, std::string_view(*metadata))
+                                  7, std::string_view{})(8, std::string_view(*properties))(
+                                  9, std::string_view(*metadata))(
+                                  10, std::span<const std::byte>(*geometry))
                               .run();
             !status) {
             return makeError(status.error().code, status.error().message,
@@ -988,7 +1012,7 @@ Result<ProjectContents> ProjectStore::load()
     }
 
     status = forEachRow(
-        "SELECT id, layer, style, color, visible, geometry, properties, metadata"
+        "SELECT id, layer, style, color, visible, geometry, properties, metadata, geometry_blob"
         " FROM entities ORDER BY id",
         [&](SqliteStatement& row) -> Status {
             Entity entity;
@@ -1000,12 +1024,27 @@ Result<ProjectContents> ProjectStore::load()
                 return colorStatus;
             }
             entity.visible = row.columnInt64(4) != 0;
-            auto geometry = katana::entity::geometryFromJson(row.columnText(5));
-            if (!geometry) {
-                return makeError(geometry.error().code, geometry.error().message,
-                                 context + " " + geometry.error().context);
+            // The blob is the record from schema 3 onwards; the JSON column is
+            // read only for rows written before it, which are converted the
+            // next time the project is saved. Preferring the blob when both
+            // are present means a half-migrated database still reads the
+            // newer of the two rather than the staler.
+            if (!row.columnIsNull(8)) {
+                const std::vector<std::byte> blob = row.columnBlob(8);
+                auto geometry = katana::entity::geometryFromBlob(blob);
+                if (!geometry) {
+                    return makeError(geometry.error().code, geometry.error().message,
+                                     context + " " + geometry.error().context);
+                }
+                entity.geometry = std::move(*geometry);
+            } else {
+                auto geometry = katana::entity::geometryFromJson(row.columnText(5));
+                if (!geometry) {
+                    return makeError(geometry.error().code, geometry.error().message,
+                                     context + " " + geometry.error().context);
+                }
+                entity.geometry = std::move(*geometry);
             }
-            entity.geometry = std::move(*geometry);
             auto properties = katana::entity::propertiesFromJson(row.columnText(6));
             auto metadata = katana::entity::propertiesFromJson(row.columnText(7));
             if (!properties) {

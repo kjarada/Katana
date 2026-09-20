@@ -91,7 +91,9 @@ struct RecoveryReport {
 
 class ProjectStore {
   public:
-    static constexpr int kCurrentSchemaVersion = 2;
+    // 3: geometry stored as a binary blob rather than JSON text. See the
+    // migration table in project_store.cpp and docs/storage.md for why.
+    static constexpr int kCurrentSchemaVersion = 3;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // Creates the directory layout and an empty database. Fails if a project

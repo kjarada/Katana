@@ -10,7 +10,10 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <cstddef>
+#include <span>
 #include <string>
+#include <vector>
 #include <string_view>
 
 #include "katana/core/error.hpp"
@@ -30,6 +33,8 @@ class SqliteStatement {
     [[nodiscard]] katana::core::Status bind(int index, double value);
     [[nodiscard]] katana::core::Status bind(int index, std::string_view value);
     [[nodiscard]] katana::core::Status bind(int index, bool value);
+    // Binary column. SQLite copies the bytes, so `value` need not outlive this.
+    [[nodiscard]] katana::core::Status bind(int index, std::span<const std::byte> value);
     [[nodiscard]] katana::core::Status bindNull(int index);
 
     // true: a row is available. false: the statement finished.
@@ -42,6 +47,10 @@ class SqliteStatement {
     [[nodiscard]] std::int64_t columnInt64(int column) const;
     [[nodiscard]] double columnDouble(int column) const;
     [[nodiscard]] std::string columnText(int column) const;
+    // Empty for a NULL column or a zero-length blob; columnIsNull separates
+    // the two, which matters because a missing geometry and an empty one are
+    // different failures.
+    [[nodiscard]] std::vector<std::byte> columnBlob(int column) const;
 
   private:
     friend class SqliteDatabase;

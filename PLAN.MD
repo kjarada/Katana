@@ -860,8 +860,11 @@ SIMD anywhere; terrain generation, triangulation, point-cloud processing,
 imports and exports are all still single-threaded. Latency, throughput, memory
 bandwidth and cache behaviour are not yet benchmarked as section 32 requires.
 
-The next measured win is the one `docs/storage.md` names: replacing the JSON
-geometry encoding with a versioned binary one.
+The win `docs/storage.md` named has since landed: geometry is stored as a
+versioned little-endian blob (schema 3), taking a 50 000-entity project open
+from 891 ms to 195 ms (4.6x) and a save from 445 ms to 206 ms (2.2x). Doubles
+are stored by bit pattern, so the round trip is exact. Projects written before
+schema 3 keep their JSON and convert on the next save.
 
 ---
 

@@ -82,14 +82,9 @@ would be trading a solved problem for an unbounded one, to save 289 ms on a
 
 ### What to do instead — in priority order
 
-1. **Replace the JSON geometry encoding with a binary one.** This is the 68 %.
-   A `Polyline2` of eight vertices is 128 bytes of doubles; as JSON it is
-   ~350 bytes of text that must be lexed, unescaped and converted decimal → binary.
-   A length-prefixed little-endian blob removes the parse entirely.
-   The format must stay **versioned and self-describing enough to migrate**, and
-   JSON must remain readable so existing projects open — the schema already
-   carries a version for exactly this.
-   *Expected: most of 602 ms on load, most of 172 ms on save.*
+1. ~~**Replace the JSON geometry encoding with a binary one.**~~ **DONE** — see
+   "The result" below. Predicted "most of 602 ms on load, most of 172 ms on
+   save"; actual was 696 ms and 239 ms.
 2. **Keep the row-per-entity shape.** It is what makes partial load, per-layer
    queries and incremental save possible later.
 3. **Revisit only with a new measurement.** If binary encoding lands and SQLite
@@ -113,6 +108,55 @@ with Arrow, adding DuckDB only if the queries outgrow that.
 Whatever is chosen there, it goes **behind a Katana interface in `src/`**, with
 no third-party type in a public header (Rule 4) — the same isolation GDAL and
 PDAL already have.
+
+## The result
+
+Schema version 3 stores geometry as a versioned little-endian blob
+(`include/katana/entity/geometry_blob.hpp`). Same machine, same benchmark:
+
+| 50 000 entities | Before | After | |
+|---|---|---|---|
+| `open` + `load` + `applyToModel` | 891 ms | **195 ms** | 4.6× |
+| `save` | 445 ms | **206 ms** | 2.2× |
+
+**The load saved more than the JSON parse alone accounted for** — 696 ms
+against the 602 ms measured for `geometryFromJson`. The extra is most likely
+the string handling that went with it: the JSON path pulled each geometry out
+as a `std::string` from `columnText` and then allocated again while parsing,
+where the blob is read into one buffer and decoded in place. That is an
+explanation, not a measurement; if it matters, measure it before relying on it.
+
+Doubles are stored by bit pattern, so a round trip is exact — negative zero,
+denormals and infinities included. A saved drawing reloads as the same drawing,
+not one that agrees to fifteen digits, which is what Rule 7 requires.
+
+### Migration
+
+The blob column was **added**, not swapped in. Rows written before schema 3
+keep their JSON and are read from it; they convert the next time the project is
+saved. Where both are present the blob wins, because it is the newer of the
+two — asserted by a test that plants a deliberately *different* circle in the
+JSON column and requires the blob's geometry to come back.
+
+An older build refuses a schema-3 project outright (`Unsupported`, "project was
+written by a newer version of Katana") rather than reading the now-empty JSON
+column and producing an empty drawing.
+
+### One trap found on the way
+
+`std::string_view{}` has a **null** `data()`, and SQLite binds a null pointer as
+SQL NULL rather than as empty text. Writing the legacy column as
+`std::string_view{}` therefore violated its `NOT NULL` constraint. The fix is in
+the wrapper rather than at the call site: `SqliteStatement::bind` now
+substitutes a pointer to an empty string, so no future caller can mean "empty"
+and silently get NULL.
+
+## What is still open
+
+SQLite now accounts for the majority of what remains (195 ms for 50 000
+entities). Before reopening the engine question, note that the remaining time
+includes `applyToModel` — validating and inserting every entity into the model —
+which no database change would touch. Measure that split first.
 
 ## Reproducing
 
