@@ -112,6 +112,29 @@ constexpr Migration kMigrations[] = {
     {3, R"sql(
         ALTER TABLE entities ADD COLUMN geometry_blob BLOB;
     )sql"},
+    // Linetype definitions. The elements go in their own table rather than an
+    // encoded string in one column, because the order matters and a delimited
+    // list of signed doubles is a parser waiting to be written twice.
+    //
+    // Layer::linetype and Style::linetype have always been free strings with no
+    // table behind them, so an existing project may name a pattern that does
+    // not exist. That is NOT repaired here: resolution treats an unknown
+    // linetype as continuous, which is how those projects already drew, and
+    // inventing an empty definition for every name found would shadow a real
+    // built-in of the same name for ever after.
+    {4, R"sql(
+        CREATE TABLE linetypes (
+            name        TEXT PRIMARY KEY,
+            description TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE linetype_elements (
+            linetype TEXT NOT NULL REFERENCES linetypes(name) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            length   REAL NOT NULL,
+            PRIMARY KEY (linetype, position)
+        ) WITHOUT ROWID;
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -374,6 +397,7 @@ ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata
     contents.metadata = std::move(metadata);
     contents.layers = model.layers.all();
     contents.styles = model.styles.all();
+    contents.linetypes = model.linetypes.all();
     contents.propertyDefinitions = model.properties.all();
     contents.entities.reserve(model.entities.size());
     model.entities.forEach([&](const Entity& entity) { contents.entities.push_back(entity); });
@@ -407,6 +431,16 @@ Status applyToModel(const ProjectContents& contents, katana::entity::Model& mode
     }
     for (const Style& style : contents.styles) {
         if (auto status = staged.styles.add(style); !status) {
+            return status;
+        }
+    }
+    for (const katana::entity::Linetype& linetype : contents.linetypes) {
+        // "continuous" is built in, so a stored one updates rather than adds -
+        // the same rule layer "0" follows above.
+        auto status = linetype.name == katana::entity::kContinuousLinetype
+                          ? staged.linetypes.update(linetype)
+                          : staged.linetypes.add(linetype);
+        if (!status) {
             return status;
         }
     }
@@ -732,8 +766,17 @@ Status ProjectStore::save(const ProjectContents& contents)
     if (!transaction) {
         return transaction.error();
     }
+    // Every table a save rewrites must be cleared here, or the SECOND save of a
+    // project fails on a primary key it already wrote. A round-trip test that
+    // saves once does not catch that; CadDocument.SaveReopenAndModifiedFlag
+    // does, which is why it saves twice.
+    //
+    // linetype_elements is deleted explicitly rather than left to the ON DELETE
+    // CASCADE: foreign keys are only enforced when the pragma is on, so relying
+    // on the cascade would make correctness depend on a connection setting.
     if (auto status = database.execute("DELETE FROM relationships; DELETE FROM entities;"
                                        "DELETE FROM property_definitions; DELETE FROM styles;"
+                                       "DELETE FROM linetype_elements; DELETE FROM linetypes;"
                                        "DELETE FROM layers; DELETE FROM metadata;");
         !status) {
         return status;
@@ -812,6 +855,36 @@ Status ProjectStore::save(const ProjectContents& contents)
         }
         if (!status) {
             return status;
+        }
+    }
+
+    auto insertLinetype =
+        database.prepare("INSERT INTO linetypes (name, description) VALUES (?1, ?2)");
+    if (!insertLinetype) {
+        return insertLinetype.error();
+    }
+    auto insertElement = database.prepare(
+        "INSERT INTO linetype_elements (linetype, position, length) VALUES (?1, ?2, ?3)");
+    if (!insertElement) {
+        return insertElement.error();
+    }
+    for (const katana::entity::Linetype& linetype : contents.linetypes) {
+        if (auto status = Binder(*insertLinetype)(1, std::string_view(linetype.name))(
+                              2, std::string_view(linetype.description))
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "linetype=" + linetype.name + " " + status.error().context);
+        }
+        for (std::size_t i = 0; i < linetype.pattern.size(); ++i) {
+            if (auto status = Binder(*insertElement)(1, std::string_view(linetype.name))(
+                                  2, static_cast<std::int64_t>(i))(
+                                  3, linetype.pattern[i].length)
+                                  .run();
+                !status) {
+                return makeError(status.error().code, status.error().message,
+                                 "linetype=" + linetype.name + " element=" + std::to_string(i));
+            }
         }
     }
 
@@ -961,6 +1034,39 @@ Result<ProjectContents> ProjectStore::load()
             layer.linetype = row.columnText(4);
             layer.lineWeight = row.columnDouble(5);
             contents.layers.push_back(std::move(layer));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, description FROM linetypes ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::Linetype linetype;
+            linetype.name = row.columnText(0);
+            linetype.description = row.columnText(1);
+            contents.linetypes.push_back(std::move(linetype));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+    // Elements in one pass, ordered by position, matched to the definition by
+    // name. A pattern whose definition row is missing is dropped rather than
+    // resurrected under an empty name.
+    status = forEachRow(
+        "SELECT linetype, length FROM linetype_elements ORDER BY linetype, position",
+        [&](SqliteStatement& row) -> Status {
+            const std::string name = row.columnText(0);
+            const auto found = std::find_if(
+                contents.linetypes.begin(), contents.linetypes.end(),
+                [&name](const katana::entity::Linetype& l) { return l.name == name; });
+            if (found == contents.linetypes.end()) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "a linetype element names a definition that is not there", name);
+            }
+            found->pattern.push_back(katana::entity::LinetypeElement{row.columnDouble(1)});
             return {};
         });
     if (!status) {

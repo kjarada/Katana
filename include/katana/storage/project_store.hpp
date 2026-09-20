@@ -67,6 +67,7 @@ struct ProjectContents {
     ProjectMetadata metadata{};
     std::vector<katana::entity::Layer> layers{};
     std::vector<katana::entity::Style> styles{};
+    std::vector<katana::entity::Linetype> linetypes{};
     std::vector<katana::entity::PropertyDefinition> propertyDefinitions{};
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
@@ -92,8 +93,9 @@ struct RecoveryReport {
 class ProjectStore {
   public:
     // 3: geometry stored as a binary blob rather than JSON text. See the
-    // migration table in project_store.cpp and docs/storage.md for why.
-    static constexpr int kCurrentSchemaVersion = 3;
+    //    migration table in project_store.cpp and docs/storage.md for why.
+    // 4: linetype definitions (Phase 09).
+    static constexpr int kCurrentSchemaVersion = 4;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // Creates the directory layout and an empty database. Fails if a project

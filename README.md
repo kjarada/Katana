@@ -20,7 +20,7 @@ and the command line are two thin front ends over the same engine.
 | 06 | Command system, transactions, undo/redo | done |
 | 07 | Project storage (SQLite) | done — schema 3 stores geometry as a binary blob; opening a 50k-entity project is 4.6× faster |
 | 08 | Basic 2D CAD application (Qt 6) | done |
-| 09 | Professional 2D CAD | partial — editing, snapping and NESTED layers done; splines, hatches, blocks and dimension styles outstanding |
+| 09 | Professional 2D CAD | partial — editing, snapping, nested layers, resolved appearance and linetypes done; splines, hatches, blocks and dimension styles outstanding |
 | 10–13 | Survey data model, coordinate systems, survey calculations, least squares | done |
 | 14 | Terrain engine | done |
 | 15 | 3D rendering | partial — tiled multithreaded software renderer, orbit camera, tiled viewports, 3D and cross-section views; Vulkan backend outstanding |
@@ -32,7 +32,7 @@ and the command line are two thin front ends over the same engine.
 | 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
 | 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
 
-700 tests pass in Debug and Release, including the architectural layering check.
+721 tests pass in Debug and Release, including the architectural layering check.
 
 ## Building
 

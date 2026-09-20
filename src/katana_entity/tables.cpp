@@ -1,6 +1,9 @@
 #include "katana/entity/tables.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace katana::entity {
@@ -27,6 +30,22 @@ Status validateLineWeight(double lineWeight)
                          std::to_string(lineWeight));
     }
     return {};
+}
+
+// ASCII case-insensitive compare, for the reserved names an exchange format
+// spells in capitals and a user may not.
+[[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 template <typename Table> auto collect(const Table& table)
@@ -333,6 +352,173 @@ LayerDatabase::renameSubtree(std::string_view from, std::string_view to)
     }
     return mapping;
 }
+
+// ---- Linetype --------------------------------------------------------------------
+
+double Linetype::patternLength() const
+{
+    // The sum of the ABSOLUTE lengths (DXF group 40). Absolute, because a gap
+    // is stored negative and still occupies its length along the path.
+    double total = 0.0;
+    for (const LinetypeElement& element : pattern) {
+        total += std::abs(element.length);
+    }
+    return total;
+}
+
+double Linetype::shortestElement() const
+{
+    // Dots are excluded: a dot has no length by definition, so including it
+    // would make every pattern containing one report zero and be judged
+    // unresolvable at any zoom.
+    double shortest = std::numeric_limits<double>::infinity();
+    for (const LinetypeElement& element : pattern) {
+        if (element.isDot()) {
+            continue;
+        }
+        shortest = std::min(shortest, std::abs(element.length));
+    }
+    return std::isfinite(shortest) ? shortest : 0.0;
+}
+
+Status validate(const Linetype& linetype)
+{
+    if (auto status = validateName(linetype.name, "linetype"); !status) {
+        return status;
+    }
+    // BYLAYER and BYBLOCK are the values DXF group code 6 takes on an entity,
+    // so they can never name a definition. Reserved now, before blocks exist
+    // and need BYBLOCK, because doing it later would be a migration.
+    for (const char* reserved : {"ByLayer", "ByBlock"}) {
+        if (equalsIgnoringCase(linetype.name, reserved)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "that linetype name is reserved by the exchange format",
+                             linetype.name);
+        }
+    }
+    if (linetype.pattern.empty()) {
+        return {}; // continuous
+    }
+
+    for (const LinetypeElement& element : linetype.pattern) {
+        if (!std::isfinite(element.length)) {
+            return makeError(ErrorCode::InvalidArgument, "linetype element is not finite",
+                             linetype.name);
+        }
+    }
+    // Alignment 'A' (DXF group 72, always 65) fits the pattern so a line begins
+    // with a dash, so the first element cannot be a gap.
+    if (linetype.pattern.front().isGap()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a linetype must begin with a dash or a dot, not a gap", linetype.name);
+    }
+    // Ending on a gap closes the period. Without it the pattern would place two
+    // pen-down runs adjacently when it repeats, which is indistinguishable from
+    // one longer dash, and Qt's dash array - which alternates on/off from on -
+    // would come out with an odd length and silently mean something else.
+    if (!linetype.pattern.back().isGap()) {
+        return makeError(ErrorCode::InvalidArgument, "a linetype must end with a gap",
+                         linetype.name);
+    }
+    for (std::size_t i = 1; i < linetype.pattern.size(); ++i) {
+        if (linetype.pattern[i].isPenDown() == linetype.pattern[i - 1].isPenDown()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "linetype elements must alternate between pen down and pen up",
+                             linetype.name + " at element " + std::to_string(i));
+        }
+    }
+    if (!(linetype.patternLength() > 0.0)) {
+        return makeError(ErrorCode::InvalidArgument, "linetype pattern has no length",
+                         linetype.name);
+    }
+    return {};
+}
+
+// ---- LinetypeDatabase ------------------------------------------------------------
+
+LinetypeDatabase::LinetypeDatabase() { reset(); }
+
+void LinetypeDatabase::reset()
+{
+    linetypes_.clear();
+    // Only "continuous" is built in.
+    //
+    // No "dashed", "center" or "hidden" is seeded, deliberately. AutoCAD's
+    // acad.lin set is in imperial drawing units and its ISO set is in
+    // millimetres, while a survey drawing here is in metres - so any table
+    // shipped would be either a conversion of numbers not to hand or an
+    // invention. A test would then pin the invention as though it were a
+    // standard. Patterns are defined by the user or read from an imported
+    // file; see docs/model.md.
+    Linetype continuous;
+    continuous.name = std::string(kContinuousLinetype);
+    continuous.description = "Solid line";
+    linetypes_.emplace(continuous.name, std::move(continuous));
+}
+
+Status LinetypeDatabase::add(Linetype linetype)
+{
+    if (auto status = validate(linetype); !status) {
+        return status;
+    }
+    if (contains(linetype.name)) {
+        return makeError(ErrorCode::AlreadyExists, "linetype already exists", linetype.name);
+    }
+    std::string name = linetype.name;
+    linetypes_.emplace(std::move(name), std::move(linetype));
+    return {};
+}
+
+Status LinetypeDatabase::update(const Linetype& linetype)
+{
+    const auto found = linetypes_.find(linetype.name);
+    if (found == linetypes_.end()) {
+        return makeError(ErrorCode::NotFound, "linetype does not exist", linetype.name);
+    }
+    if (linetype.name == kContinuousLinetype && !linetype.isContinuous()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the continuous linetype cannot be given a pattern");
+    }
+    if (auto status = validate(linetype); !status) {
+        return status;
+    }
+    found->second = linetype;
+    return {};
+}
+
+Result<Linetype> LinetypeDatabase::remove(std::string_view name)
+{
+    if (name == kContinuousLinetype) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the continuous linetype cannot be removed");
+    }
+    const auto found = linetypes_.find(name);
+    if (found == linetypes_.end()) {
+        return makeError(ErrorCode::NotFound, "linetype does not exist", std::string(name));
+    }
+    Linetype removed = std::move(found->second);
+    linetypes_.erase(found);
+    return removed;
+}
+
+const Linetype* LinetypeDatabase::find(std::string_view name) const
+{
+    const auto found = linetypes_.find(name);
+    return found == linetypes_.end() ? nullptr : &found->second;
+}
+
+std::vector<std::string> LinetypeDatabase::names() const
+{
+    std::vector<std::string> result;
+    result.reserve(linetypes_.size());
+    for (const auto& [name, linetype] : linetypes_) {
+        (void)linetype;
+        result.push_back(name);
+    }
+    return result;
+}
+
+std::vector<Linetype> LinetypeDatabase::all() const { return collect(linetypes_); }
 
 // ---- StyleDatabase ---------------------------------------------------------------
 

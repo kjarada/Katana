@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <functional>
 
 #include "katana/cad/scene.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -387,3 +388,149 @@ TEST(CadScene, ByLayerEntitiesAreDrawnInTheirLayersColour)
 // loading a project that already contains one. resolveDisplay's own tests cover
 // the chain. Recorded in PLAN.MD Phase 09 as an outstanding gap rather than
 // left as a test that cannot be written.
+
+namespace {
+
+katana::entity::Linetype dashedLinetype()
+{
+    katana::entity::Linetype linetype;
+    linetype.name = "dashed";
+    linetype.pattern = {katana::entity::LinetypeElement{1.0},
+                        katana::entity::LinetypeElement{-0.5}};
+    return linetype;
+}
+
+// Puts a dashed linetype on a layer and returns a document using it.
+void useDashedLayer(Document& document)
+{
+    ASSERT_TRUE(document.execute(katana::commands::createLinetype(dashedLinetype())).ok());
+    katana::entity::Layer layer;
+    layer.name = "fence";
+    layer.linetype = "dashed";
+    ASSERT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+    ASSERT_TRUE(document.setCurrentLayer("fence").ok());
+}
+
+} // namespace
+
+TEST(CadScene, EveryCurveKindIsDashedIncludingAPlainLine)
+{
+    // The half-feature this catches: a Segment2 that adds its DrawLine directly
+    // instead of going through the shared emitter stays SOLID in 3D while
+    // polylines, arcs and circles dash. No compiler complains, and it is the
+    // most confusing possible outcome - the same linetype works on some
+    // entities and not others.
+    SceneOptions options = plainOptions();
+    SceneBuilder builder;
+
+    struct Case {
+        const char* what;
+        katana::commands::CommandPtr (*make)(const katana::commands::EntityAttributes&);
+    };
+
+    const auto lineCount = [&](const std::function<void(Document&)>& draw) {
+        Document document;
+        useDashedLayer(document);
+        draw(document);
+        DrawList list;
+        builder.build(document, {}, options, list);
+        return list.lines.size();
+    };
+
+    // A 20 m run of a 1.5 m period is about 14 dashes; anything that stayed
+    // solid would be exactly 1 line (or 4 for the closed shapes).
+    const std::size_t line = lineCount([](Document& d) {
+        ASSERT_TRUE(d.execute(katana::commands::createLine(Point2(0, 0), Point2(20, 0),
+                                                           d.currentAttributes()))
+                        .ok());
+    });
+    EXPECT_GT(line, 5u) << "a plain Segment2 must dash too, not stay solid";
+
+    const std::size_t polyline = lineCount([](Document& d) {
+        katana::geometry::Polyline2 p;
+        p.vertices = {Point2(0, 0), Point2(20, 0), Point2(20, 20)};
+        ASSERT_TRUE(d.execute(katana::commands::createPolyline(p, d.currentAttributes())).ok());
+    });
+    EXPECT_GT(polyline, 10u);
+
+    const std::size_t circle = lineCount([](Document& d) {
+        ASSERT_TRUE(
+            d.execute(katana::commands::createCircle(Point2(0, 0), 10.0, d.currentAttributes()))
+                .ok());
+    });
+    EXPECT_GT(circle, 10u);
+
+    const std::size_t arc = lineCount([](Document& d) {
+        ASSERT_TRUE(d.execute(katana::commands::createArc(
+                                  katana::geometry::Arc2{Point2(0, 0), 10.0, 0.0, 1.5},
+                                  d.currentAttributes()))
+                        .ok());
+    });
+    EXPECT_GT(arc, 5u);
+}
+
+TEST(CadScene, TurningLinetypesOffDrawsEverythingSolid)
+{
+    Document document;
+    useDashedLayer(document);
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(0, 0), Point2(20, 0),
+                                                          document.currentAttributes()))
+                    .ok());
+
+    SceneBuilder builder;
+    DrawList dashed;
+    SceneOptions options = plainOptions();
+    builder.build(document, {}, options, dashed);
+
+    options.drawLinetypes = false;
+    DrawList solid;
+    builder.build(document, {}, options, solid);
+
+    EXPECT_GT(dashed.lines.size(), 5u);
+    EXPECT_EQ(solid.lines.size(), 1u) << "off must mean one line, not a shorter pattern";
+}
+
+TEST(CadScene, ADashedPathPastTheBudgetIsDrawnWholeAndSolid)
+{
+    // All or nothing. A truncating implementation would emit the budget's worth
+    // of dashes and stop, silently drawing a 10 km boundary as a 1 km one.
+    Document document;
+    useDashedLayer(document);
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(0, 0), Point2(100000.0, 0),
+                                                          document.currentAttributes()))
+                    .ok());
+
+    SceneOptions options = plainOptions();
+    options.maximumDashSpans = 100;
+    SceneBuilder builder;
+    DrawList list;
+    builder.build(document, {}, options, list);
+
+    ASSERT_EQ(list.lines.size(), 1u) << "the whole path, solid";
+    const auto box = list.bounds();
+    ASSERT_FALSE(box.empty());
+    EXPECT_NEAR(box.max.x, 100000.0, 1e-6) << "the line must still reach its far end";
+}
+
+TEST(CadScene, AnUnknownLinetypeNameDrawsSolidRatherThanFailing)
+{
+    // Layer::linetype has always been a free string with no table behind it, so
+    // every project in the field can name a pattern that does not exist.
+    Document document;
+    katana::entity::Layer layer;
+    layer.name = "legacy";
+    layer.linetype = "no-such-pattern";
+    ASSERT_TRUE(document.execute(katana::commands::createLayer(layer)).ok());
+    ASSERT_TRUE(document.setCurrentLayer("legacy").ok());
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(0, 0), Point2(20, 0),
+                                                          document.currentAttributes()))
+                    .ok());
+
+    SceneBuilder builder;
+    DrawList list;
+    builder.build(document, {}, plainOptions(), list);
+    EXPECT_EQ(list.lines.size(), 1u) << "drawn solid, exactly as it drew before linetypes existed";
+}

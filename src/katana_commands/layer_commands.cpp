@@ -306,4 +306,137 @@ CommandPtr renameLayer(std::string from, std::string to)
     return std::make_unique<RenameLayerCommand>(std::move(from), std::move(to));
 }
 
+
+namespace {
+
+using katana::entity::Linetype;
+
+class CreateLinetypeCommand final : public Command {
+  public:
+    explicit CreateLinetypeCommand(Linetype linetype) : linetype_(std::move(linetype)) {}
+    [[nodiscard]] std::string_view name() const override { return "CreateLinetype"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (context.model.linetypes.contains(linetype_.name)) {
+            return makeError(ErrorCode::AlreadyExists, "linetype already exists", linetype_.name);
+        }
+        return katana::entity::validate(linetype_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        return context.model.linetypes.add(linetype_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        auto removed = context.model.linetypes.remove(linetype_.name);
+        return removed ? Status{} : removed.error();
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    Linetype linetype_;
+};
+
+class UpdateLinetypeCommand final : public Command {
+  public:
+    explicit UpdateLinetypeCommand(Linetype linetype) : after_(std::move(linetype)) {}
+    [[nodiscard]] std::string_view name() const override { return "UpdateLinetype"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (!context.model.linetypes.contains(after_.name)) {
+            return makeError(ErrorCode::NotFound, "linetype does not exist", after_.name);
+        }
+        return katana::entity::validate(after_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        const Linetype* current = context.model.linetypes.find(after_.name);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound, "linetype does not exist", after_.name);
+        }
+        before_ = *current; // before-image, as every other edit command takes one
+        return context.model.linetypes.update(after_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.linetypes.update(before_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override
+    {
+        return context.model.linetypes.update(after_);
+    }
+
+  private:
+    Linetype after_;
+    Linetype before_;
+};
+
+class DeleteLinetypeCommand final : public Command {
+  public:
+    explicit DeleteLinetypeCommand(std::string name) : name_(std::move(name)) {}
+    [[nodiscard]] std::string_view name() const override { return "DeleteLinetype"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (name_ == katana::entity::kContinuousLinetype) {
+            return makeError(ErrorCode::CommandRejected,
+                             "the continuous linetype cannot be deleted");
+        }
+        if (!context.model.linetypes.contains(name_)) {
+            return makeError(ErrorCode::NotFound, "linetype does not exist", name_);
+        }
+        // A layer or style left naming a deleted pattern would resolve to
+        // continuous and draw solid with nothing to say why, so the reference
+        // is reported instead - naming the layer, so it can be found.
+        for (const std::string& layer : context.model.layers.names()) {
+            const katana::entity::Layer* definition = context.model.layers.find(layer);
+            if (definition != nullptr && definition->linetype == name_) {
+                return makeError(ErrorCode::CommandRejected, "a layer still uses that linetype",
+                                 "layer=" + layer);
+            }
+        }
+        for (const katana::entity::Style& style : context.model.styles.all()) {
+            if (style.linetype == name_) {
+                return makeError(ErrorCode::CommandRejected, "a style still uses that linetype",
+                                 "style=" + style.name);
+            }
+        }
+        return {};
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        auto removed = context.model.linetypes.remove(name_);
+        if (!removed) {
+            return removed.error();
+        }
+        removed_ = std::move(*removed);
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.linetypes.add(removed_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    std::string name_;
+    Linetype removed_;
+};
+
+} // namespace
+
+CommandPtr createLinetype(Linetype linetype)
+{
+    return std::make_unique<CreateLinetypeCommand>(std::move(linetype));
+}
+
+CommandPtr updateLinetype(Linetype linetype)
+{
+    return std::make_unique<UpdateLinetypeCommand>(std::move(linetype));
+}
+
+CommandPtr deleteLinetype(std::string name)
+{
+    return std::make_unique<DeleteLinetypeCommand>(std::move(name));
+}
+
 } // namespace katana::commands

@@ -318,7 +318,7 @@ The required progression is:
 | 06 | Command System | **done** |
 | 07 | Project Storage | **done** |
 | 08 | Basic CAD | **done** |
-| 09 | Professional 2D CAD | partial — nested layer tree delivered; splines, hatches, blocks, dimension styles, linetypes outstanding |
+| 09 | Professional 2D CAD | partial — nested layer tree, resolved appearance and linetypes delivered; splines, hatches, blocks, dimension styles outstanding |
 | 10 | Survey Data | **done** |
 | 11 | Coordinate Systems | **done** |
 | 12 | Survey Calculations | **done** |
@@ -517,6 +517,54 @@ It replaced three different answers, two of which were visibly wrong:
 loading a project that already contains one, so styles remain unreachable from
 the application even now that they take effect. A `STYLE` verb and a styles
 panel belong with the Phase 09 work below.
+
+## 5.3 Linetypes (delivered)
+
+`Linetype`, `LinetypeElement` and `LinetypeDatabase` in
+`include/katana/entity/tables.hpp`, with the DXF sign convention (AutoCAD DXF
+Reference, LTYPE group code 49): a positive length is a dash, a negative one a
+gap, and exactly zero a dot. `patternLength()` is the sum of the ABSOLUTE
+lengths (group 40), computed rather than stored so it cannot disagree with the
+elements. Patterns must begin with a dash or a dot, end with a gap and strictly
+alternate; each rule has its own error.
+
+**Dash lengths are MODEL lengths.** A 0.5 m dash is half a metre of ground at
+every zoom, so a 10 km boundary carries a thousand times the dashes of a 10 m
+fence. The opposite - a fixed pattern in pixels - is the easy implementation and
+renders a perfectly convincing dashed line while being exactly backwards; two
+property tests exist to catch it.
+
+`katana::cad::forEachDash` walks a path in model space and emits its pen-down
+spans, carrying the pattern across vertices so it runs continuously along a
+polyline rather than restarting at each corner (DXF `$PLINEGEN`). It is
+all-or-nothing: where the span budget would be exceeded it emits NOTHING and
+the caller draws the path solid, because a truncated dashed line is a shorter
+line with nothing to say so.
+
+Below about one device pixel per element the pattern is drawn solid instead -
+under that, every dash and gap falls inside one pixel and antialiasing turns the
+line a uniformly paler colour, so the user sees the wrong COLOUR rather than a
+pattern. That is a display decision and is deliberately NOT in `math::tolerance`.
+
+Both renderers use it. The 2D viewport converts to a `QPen` dash array, which is
+in units of PEN WIDTH rather than pixels - at the 1.5 px pen the viewport draws
+with, forgetting the division makes every pattern half again too long. Every 3D
+path goes through one emitter INCLUDING a plain `Segment2`, because a segment
+adding its line directly would have left lines solid while polylines, arcs and
+circles dashed.
+
+Schema 4 stores definitions, with elements in their own table so their order is
+the database's to keep. An older project naming a pattern that has no definition
+keeps the name and draws solid, exactly as it already did; no empty definition is
+invented for it, because that would shadow a real one later.
+
+**OUTSTANDING:** no built-in patterns are shipped. `acad.lin` is in imperial
+drawing units and the ISO set in millimetres, while a survey drawing here is in
+metres, so any table shipped would be a conversion of numbers not to hand or an
+invention - and a test would then pin the invention as though it were a standard.
+Patterns are defined by the user until an importer reads real ones. `$LTSCALE`
+and a per-entity scale are parameterised throughout but pinned at 1, and there
+is no GUI editor.
 
 ## 5.1 Nested layers (delivered)
 

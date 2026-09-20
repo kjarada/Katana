@@ -5,6 +5,7 @@ add_library(katana_cad STATIC
     snapping.cpp
     command_interpreter.cpp
     section.cpp
+    dashing.cpp
     scene.cpp
     viewport_layout.cpp
 )

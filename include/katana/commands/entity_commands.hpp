@@ -109,4 +109,10 @@ struct EntityAttributes {
 // to match. One command, so undo puts back both the tree and the entities.
 [[nodiscard]] CommandPtr renameLayer(std::string from, std::string to);
 
+// ---- linetypes -------------------------------------------------------------------
+[[nodiscard]] CommandPtr createLinetype(katana::entity::Linetype linetype);
+[[nodiscard]] CommandPtr updateLinetype(katana::entity::Linetype linetype);
+// Refuses while any layer or style still names it, and refuses "continuous".
+[[nodiscard]] CommandPtr deleteLinetype(std::string name);
+
 } // namespace katana::commands

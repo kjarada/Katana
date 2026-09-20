@@ -801,3 +801,99 @@ TEST_F(ProjectStoreMigration, WhereBothEncodingsArePresentTheBlobWins)
             << "entity " << entity.id << " was read from the stale JSON column";
     });
 }
+
+TEST_F(ProjectStoreRoundTrip, LinetypeDefinitionsSurviveSaveAndReload)
+{
+    katana::entity::Linetype dashed;
+    dashed.name = "dashed";
+    dashed.description = "Dashed  __  __  __";
+    dashed.pattern = {katana::entity::LinetypeElement{1.0},
+                      katana::entity::LinetypeElement{-0.5}};
+
+    katana::entity::Linetype dashDot;
+    dashDot.name = "dashdot";
+    dashDot.description = "Dash dot  __ . __ .";
+    // Includes a dot (exactly zero), which is the element a naive
+    // "store the sign" encoding loses.
+    dashDot.pattern = {katana::entity::LinetypeElement{2.0},
+                       katana::entity::LinetypeElement{-0.25},
+                       katana::entity::LinetypeElement{0.0},
+                       katana::entity::LinetypeElement{-0.25}};
+
+    Model model;
+    ASSERT_TRUE(model.linetypes.add(dashed).ok());
+    ASSERT_TRUE(model.linetypes.add(dashDot).ok());
+
+    Layer fence;
+    fence.name = "fence";
+    fence.linetype = "dashed";
+    ASSERT_TRUE(model.layers.add(fence).ok());
+
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    // Element ORDER is the thing a per-row table can get wrong, and reversing
+    // it turns a dash-dot into a dot-dash while every length still matches.
+    const auto* back = loaded.linetypes.find("dashdot");
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(back->description, dashDot.description);
+    ASSERT_EQ(back->pattern.size(), 4u);
+    for (std::size_t i = 0; i < back->pattern.size(); ++i) {
+        EXPECT_DOUBLE_EQ(back->pattern[i].length, dashDot.pattern[i].length) << "element " << i;
+    }
+    EXPECT_TRUE(back->pattern[2].isDot()) << "a zero-length dot must survive as a dot";
+
+    EXPECT_EQ(*loaded.linetypes.find("dashed"), dashed);
+    EXPECT_TRUE(loaded.linetypes.contains("continuous")) << "the built-in must still be there";
+    EXPECT_EQ(loaded.layers.find("fence")->linetype, "dashed");
+}
+
+TEST_F(ProjectStoreMigration, AProjectFromBeforeLinetypesOpensWithItsLayerPatternsIntact)
+{
+    // Layer::linetype has always been a free string with no table behind it, so
+    // an older project can name a pattern that has no definition. Opening it
+    // must keep the name - it is what the layer says - and resolve to solid,
+    // which is exactly how it already drew.
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(database->execute("UPDATE layers SET linetype = 'hidden'").ok());
+        // Wind the schema back to before linetypes and drop their tables, as a
+        // project written by the previous build would be.
+        ASSERT_TRUE(database->execute("DROP TABLE linetype_elements; DROP TABLE linetypes;").ok());
+        ASSERT_TRUE(database->setUserVersion(3).ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    EXPECT_EQ(loaded.layers.find("0")->linetype, "hidden")
+        << "the name the layer carries must be kept, not rewritten to continuous";
+    EXPECT_FALSE(loaded.linetypes.contains("hidden"))
+        << "no empty definition may be invented, or it would shadow a real one later";
+    EXPECT_TRUE(loaded.linetypes.contains("continuous"));
+}

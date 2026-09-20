@@ -4,6 +4,7 @@
 #include <cmath>
 #include <variant>
 
+#include "katana/cad/dashing.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -262,8 +263,13 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
     const double z = std::isfinite(options.entityElevation) ? options.entityElevation : 0.0;
     const SelectionSet& selection = document.selection();
 
+    // EVERY drawn path goes through this one emitter, including a plain
+    // Segment2. The tempting shortcut - a Segment2 adding its DrawLine
+    // directly - would have left lines solid in 3D while polylines, arcs and
+    // circles dashed: the most confusing possible half-feature, and one no
+    // compiler complains about.
     const auto emitPolyline = [&](const std::vector<Point2>& points, bool closed, Rgba color,
-                                  float width) {
+                                  float width, const katana::entity::Linetype* linetype) {
         if (points.size() < 2) {
             if (points.size() == 1) {
                 const VertexIndex v = out.addVertex(Vec3(points[0].x, points[0].y, z), color);
@@ -271,6 +277,38 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
             }
             return;
         }
+
+        if (options.drawLinetypes && linetype != nullptr && !linetype->isContinuous()) {
+            DashOptions dash;
+            dash.patternScale = options.linetypeScale;
+            // A 3D view has no single pixels-per-model-unit, so resolvability
+            // cannot be judged here; the span budget bounds the work instead.
+            dash.viewScale = 1.0;
+            dash.minimumElementPixels = 0.0;
+            dash.maximumSpans = options.maximumDashSpans;
+
+            // All or nothing: forEachDash emits nothing when the budget would
+            // be exceeded, so a long dashed line is drawn whole and solid
+            // rather than silently cut short.
+            const bool laid = forEachDash(points, closed, *linetype, dash,
+                                          [&](const Point2& a, const Point2& b) {
+                                              const VertexIndex from =
+                                                  out.addVertex(Vec3(a.x, a.y, z), color);
+                                              if (a.distanceTo(b) <= 0.0) {
+                                                  out.addPoint(from, options.pointSize * 0.6,
+                                                               options.entityDepthBias);
+                                                  return;
+                                              }
+                                              const VertexIndex to =
+                                                  out.addVertex(Vec3(b.x, b.y, z), color);
+                                              out.addLine(from, to, width,
+                                                          options.entityDepthBias);
+                                          });
+            if (laid) {
+                return;
+            }
+        }
+
         VertexIndex previous = out.addVertex(Vec3(points[0].x, points[0].y, z), color);
         const VertexIndex first = previous;
         for (std::size_t i = 1; i < points.size(); ++i) {
@@ -292,6 +330,10 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
         const Rgba color =
             selected ? options.selectionColor : colorOf(document.model(), entity, options);
         const float width = selected ? options.selectedLineWidth : options.entityLineWidth;
+        const auto display = katana::entity::resolveDisplay(document.model(), entity);
+        // A selected entity is drawn in the selection style, dashes and all.
+        const katana::entity::Linetype* linetype =
+            selected ? nullptr : document.model().linetypes.find(display.linetype);
 
         std::visit(
             [&](const auto& shape) {
@@ -301,18 +343,16 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
                         Vec3(shape.position.x, shape.position.y, z), color);
                     out.addPoint(v, options.pointSize, options.entityDepthBias);
                 } else if constexpr (std::is_same_v<Shape, Segment2>) {
-                    const VertexIndex a =
-                        out.addVertex(Vec3(shape.start.x, shape.start.y, z), color);
-                    const VertexIndex b = out.addVertex(Vec3(shape.end.x, shape.end.y, z), color);
-                    out.addLine(a, b, width, options.entityDepthBias);
+                    chord_ = {shape.start, shape.end};
+                    emitPolyline(chord_, false, color, width, linetype);
                 } else if constexpr (std::is_same_v<Shape, Arc2>) {
                     chord_ = chordArc(shape, options.chordTolerance);
-                    emitPolyline(chord_, false, color, width);
+                    emitPolyline(chord_, false, color, width, linetype);
                 } else if constexpr (std::is_same_v<Shape, Circle2>) {
                     chord_ = chordCircle(shape, options.chordTolerance);
-                    emitPolyline(chord_, true, color, width);
+                    emitPolyline(chord_, true, color, width, linetype);
                 } else if constexpr (std::is_same_v<Shape, Polyline2>) {
-                    emitPolyline(shape.vertices, shape.closed, color, width);
+                    emitPolyline(shape.vertices, shape.closed, color, width, linetype);
                 } else if constexpr (std::is_same_v<Shape, katana::entity::TextGeometry>) {
                     // Text is not rendered in 3D yet: a glyph outline needs a
                     // font, and drawing a marker where the text sits is more

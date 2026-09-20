@@ -113,6 +113,73 @@ class LayerDatabase {
     std::map<std::string, Layer, std::less<>> layers_;
 };
 
+// ---- linetypes ------------------------------------------------------------------
+//
+// A dash pattern, in MODEL units. The sign convention is DXF's (AutoCAD DXF
+// Reference, LTYPE table entry, group code 49): a positive length is a dash
+// (pen down), a negative length is a gap (pen up), and exactly zero is a dot.
+//
+// Lengths are model lengths, so a 0.5 m dash stays half a metre of ground at
+// every zoom - which is the entire point of a linetype on a survey drawing,
+// and the opposite of what a screen-space dash pattern does. A dot is the one
+// exception: it has no length, so it draws at a fixed pixel size at any zoom,
+// which matches CAD practice.
+struct LinetypeElement {
+    double length = 0.0;
+
+    [[nodiscard]] constexpr bool isDash() const { return length > 0.0; }
+    [[nodiscard]] constexpr bool isGap() const { return length < 0.0; }
+    [[nodiscard]] constexpr bool isDot() const { return length == 0.0; }
+    // Pen down covers both a dash and a dot.
+    [[nodiscard]] constexpr bool isPenDown() const { return length >= 0.0; }
+
+    friend constexpr bool operator==(const LinetypeElement&, const LinetypeElement&) = default;
+};
+
+struct Linetype {
+    std::string name{};
+    std::string description{}; // DXF group 3, e.g. "Dashed  __  __  __"
+    // Empty means continuous. Otherwise the elements must strictly alternate
+    // pen-down and pen-up, start with a dash or a dot, and end with a gap -
+    // see validate() for why each of those is required rather than tidy.
+    std::vector<LinetypeElement> pattern{};
+
+    // The period, in model units: the sum of the ABSOLUTE element lengths
+    // (DXF group 40). Computed rather than stored, so it cannot disagree with
+    // the elements it is derived from.
+    [[nodiscard]] double patternLength() const;
+    [[nodiscard]] bool isContinuous() const { return pattern.empty(); }
+    // Shortest non-dot element. Used to decide when a pattern is too fine to
+    // resolve on screen and should be drawn solid instead.
+    [[nodiscard]] double shortestElement() const;
+
+    friend bool operator==(const Linetype&, const Linetype&) = default;
+};
+
+// Fails with InvalidArgument, naming the specific rule broken.
+[[nodiscard]] katana::core::Status validate(const Linetype& linetype);
+
+// Always contains "continuous" (an empty pattern), which can be neither removed
+// nor renamed, exactly as layer "0" cannot.
+class LinetypeDatabase {
+  public:
+    LinetypeDatabase();
+
+    [[nodiscard]] katana::core::Status add(Linetype linetype);
+    [[nodiscard]] katana::core::Status update(const Linetype& linetype);
+    [[nodiscard]] katana::core::Result<Linetype> remove(std::string_view name);
+    void reset();
+
+    [[nodiscard]] const Linetype* find(std::string_view name) const;
+    [[nodiscard]] bool contains(std::string_view name) const { return find(name) != nullptr; }
+    [[nodiscard]] std::vector<std::string> names() const;
+    [[nodiscard]] std::vector<Linetype> all() const;
+    [[nodiscard]] std::size_t size() const { return linetypes_.size(); }
+
+  private:
+    std::map<std::string, Linetype, std::less<>> linetypes_;
+};
+
 struct Style {
     std::string name{};
     std::optional<Color> color{}; // empty: ByLayer

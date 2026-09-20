@@ -73,6 +73,14 @@ struct SceneOptions {
     katana::render::Rgba gridColor = katana::render::rgba(60, 60, 68);
     katana::render::Rgba axisColorX = katana::render::rgba(150, 70, 70);
     katana::render::Rgba axisColorY = katana::render::rgba(70, 130, 70);
+    // Linetypes. Off draws every line solid, which is a fast preview and a
+    // way to prove a pattern is not hiding something.
+    bool drawLinetypes = true;
+    double linetypeScale = 1.0; // DXF $LTSCALE's eventual home
+    // A dashed entity becomes one DrawLine per dash. Past this many spans the
+    // whole path is drawn solid instead - all or nothing, because a truncated
+    // dashed line is a shorter line with nothing to say so.
+    std::size_t maximumDashSpans = 20000;
     float entityLineWidth = 1.0f;
     float selectedLineWidth = 2.0f;
     float pointSize = 5.0f;

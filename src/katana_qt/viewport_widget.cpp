@@ -1,6 +1,7 @@
 #include "viewport_widget.hpp"
 
 #include "katana/cad/spatial_query.hpp"
+#include "katana/cad/dashing.hpp"
 #include "katana/entity/display.hpp"
 
 #include <algorithm>
@@ -777,7 +778,24 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             if (layer->locked) {
                 color.setAlpha(110); // locked layers read as background
             }
-            painter.setPen(QPen(color, 1.5));
+            constexpr double kPenWidthPixels = 1.5;
+            QPen pen(color, kPenWidthPixels);
+            // Dashes are MODEL lengths: a 0.5 m dash stays half a metre of
+            // ground at every zoom, so the pixel pattern is recomputed from
+            // the view scale each frame. Qt's array is in units of PEN WIDTH,
+            // not pixels, which is why the width is passed in rather than
+            // assumed - at 1.5 px a pattern that forgot it would be half again
+            // too long.
+            if (const auto* linetype = model.linetypes.find(display.linetype);
+                linetype != nullptr) {
+                cad::DashOptions dash;
+                dash.viewScale = view_.scale;
+                const auto pattern = cad::qtDashPattern(*linetype, dash, kPenWidthPixels);
+                if (!pattern.empty()) {
+                    pen.setDashPattern(QList<qreal>(pattern.begin(), pattern.end()));
+                }
+            }
+            painter.setPen(pen);
         }
         drawGeometry(painter, entity.geometry);
     });
