@@ -15,6 +15,7 @@
 // to match.
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -92,13 +93,12 @@ class ViewportLayout {
     [[nodiscard]] LayoutKind layout() const { return layout_; }
 
     [[nodiscard]] std::size_t size() const { return cells_.size(); }
-    [[nodiscard]] const ViewportCell& cell(std::size_t index) const { return cells_[index]; }
-    [[nodiscard]] ViewportCell& cell(std::size_t index) { return cells_[index]; }
-    [[nodiscard]] const std::vector<ViewportCell>& cells() const { return cells_; }
+    [[nodiscard]] const ViewportCell& cell(std::size_t index) const { return *cells_[index]; }
+    [[nodiscard]] ViewportCell& cell(std::size_t index) { return *cells_[index]; }
 
     [[nodiscard]] std::size_t activeIndex() const { return active_; }
-    [[nodiscard]] const ViewportCell& active() const { return cells_[active_]; }
-    [[nodiscard]] ViewportCell& active() { return cells_[active_]; }
+    [[nodiscard]] const ViewportCell& active() const { return *cells_[active_]; }
+    [[nodiscard]] ViewportCell& active() { return *cells_[active_]; }
     // Out-of-range indices are ignored rather than clamped: silently activating
     // a different viewport than the one asked for is worse than doing nothing.
     void setActiveIndex(std::size_t index);
@@ -128,7 +128,13 @@ class ViewportLayout {
     void applyLayout(LayoutKind kind);
 
     LayoutKind layout_ = LayoutKind::Single;
-    std::vector<ViewportCell> cells_;
+    // unique_ptr, NOT a vector of values. A viewport WIDGET holds a pointer to
+    // its cell so that its camera survives a layout change; a vector of values
+    // is replaced wholesale by applyLayout, which would dangle every one of
+    // those pointers from that moment until the widgets were rebuilt - and the
+    // widgets are still alive and still receiving Qt events in between.
+    // Indirection keeps a surviving cell at the same address.
+    std::vector<std::unique_ptr<ViewportCell>> cells_;
     std::size_t active_ = 0;
     int pixelWidth_ = 0;
     int pixelHeight_ = 0;

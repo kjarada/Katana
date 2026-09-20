@@ -1,5 +1,7 @@
 #include "katana/interop/import.hpp"
 
+#include <sstream>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -427,6 +429,60 @@ Result<std::vector<Point2>> groundPointsXY(const PointCloudLayer& cloud)
                          cloud.name);
     }
     return points;
+}
+
+
+PlacementAdvice advisePlacement(const katana::geometry::Box2& existing,
+                                const katana::geometry::Box2& incoming)
+{
+    PlacementAdvice advice;
+    if (existing.empty() || incoming.empty()) {
+        return advice; // nothing to be far from
+    }
+
+    const auto diagonal = [](const katana::geometry::Box2& box) {
+        return std::hypot(box.width(), box.height());
+    };
+    katana::geometry::Box2 combined = existing;
+    combined.expand(incoming);
+
+    const double together = diagonal(combined);
+    if (!(together > 0.0) || !std::isfinite(together)) {
+        return advice;
+    }
+
+    // Gap between the boxes, zero where they overlap.
+    const double gapX = std::max({existing.min.x - incoming.max.x,
+                                  incoming.min.x - existing.max.x, 0.0});
+    const double gapY = std::max({existing.min.y - incoming.max.y,
+                                  incoming.min.y - existing.max.y, 0.0});
+    advice.separation = std::hypot(gapX, gapY);
+
+    // The criterion is the symptom, not an arbitrary distance: either part is
+    // "far" when showing both at once would shrink it below roughly one percent
+    // of the view, which is the point at which it stops being visible at all.
+    // A distance threshold in metres would be wrong for a site plan and wrong
+    // again for a national grid.
+    constexpr double kInvisibleFraction = 0.01;
+    const double smaller = std::min(diagonal(existing), diagonal(incoming));
+    if (smaller > together * kInvisibleFraction) {
+        return advice;
+    }
+
+    advice.farApart = true;
+    // Bring the incoming data's lower-left corner to the drawing's, which keeps
+    // the imported geometry's own shape and internal coordinates exactly as they
+    // were and moves it as one piece.
+    advice.suggestedShift =
+        katana::geometry::Vec2(incoming.min.x - existing.min.x, incoming.min.y - existing.min.y);
+
+    std::ostringstream out;
+    out.precision(1);
+    out << std::fixed << "the imported data sits about " << advice.separation
+        << " units from the existing drawing, so at a zoom that shows both, one of them is "
+           "smaller than a pixel";
+    advice.message = out.str();
+    return advice;
 }
 
 } // namespace katana::interop

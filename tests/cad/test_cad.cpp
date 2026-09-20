@@ -830,3 +830,32 @@ TEST(CadInterpreter, ALinetypeWithAnOddNumberOfLengthsIsRefusedWithAUsefulReason
     session.fails("LINETYPE DELETE continuous");
     session.fails("LAYER LTYPE 0 no-such-pattern");
 }
+
+TEST(CadInterpreter, OpenReportsHowManyEntitiesItActuallyOpened)
+{
+    // The count used to be built as a sibling ARGUMENT to document_.open() in
+    // the same call, and C++ does not order function arguments - so it was read
+    // before the open ran and every OPEN reported "(0 entities)" however large
+    // the project was. Unspecified order, not undefined behaviour, and it reads
+    // as perfectly correct code.
+    const auto directory =
+        std::filesystem::temp_directory_path() / "katana_open_count_test";
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+
+    {
+        Session session;
+        session.ok("LINE 0,0 10,0");
+        session.ok("LINE 0,5 10,5");
+        session.ok("CIRCLE 5,5 2");
+        session.ok("SAVE " + directory.string());
+    }
+
+    Session reopened;
+    const std::string reply = reopened.ok("OPEN " + directory.string());
+    EXPECT_NE(reply.find("(3 entities)"), std::string::npos)
+        << "reported: " << reply;
+    EXPECT_EQ(reopened.document.model().entities.size(), 3u);
+
+    std::filesystem::remove_all(directory, ignored);
+}

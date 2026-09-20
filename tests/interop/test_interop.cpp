@@ -21,6 +21,7 @@ using namespace katana::interop;
 using katana::core::ErrorCode;
 using katana::entity::Entity;
 using katana::entity::Model;
+using katana::geometry::Box2;
 using katana::geometry::Point2;
 using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
@@ -526,4 +527,93 @@ TEST(InteropImport, ImportedEntitiesPassCommandValidation)
     // And the whole import is a single undo step.
     ASSERT_TRUE(stack.undo().ok());
     EXPECT_TRUE(model.entities.empty());
+}
+
+// ---- placement advice (PLAN.MD Phase 20) ---------------------------------------
+
+TEST(InteropPlacement, DataFarFromTheDrawingIsReportedRatherThanMergedSilently)
+{
+    // The real case that prompted this: a DXF in a projected CRS at
+    // (255440, 7410850) imported into a drawing that sits near the origin. The
+    // merge succeeds, and at a zoom showing both the original drawing is a dot
+    // smaller than a pixel - with nothing saying so.
+    const Box2 drawing(Point2(0.0, 0.0), Point2(160.0, 100.0));
+    const Box2 survey(Point2(255440.07, 7410850.76), Point2(257712.57, 7412122.21));
+
+    const auto advice = katana::interop::advisePlacement(drawing, survey);
+    EXPECT_TRUE(advice.farApart);
+    EXPECT_GT(advice.separation, 7.0e6);
+    EXPECT_FALSE(advice.message.empty());
+
+    // The suggested shift brings the incoming data's corner onto the drawing's.
+    EXPECT_NEAR(advice.suggestedShift.x, 255440.07, 1e-6);
+    EXPECT_NEAR(advice.suggestedShift.y, 7410850.76, 1e-6);
+}
+
+TEST(InteropPlacement, DataAlongsideTheDrawingIsNotReported)
+{
+    const Box2 drawing(Point2(0.0, 0.0), Point2(160.0, 100.0));
+
+    // Overlapping.
+    EXPECT_FALSE(
+        katana::interop::advisePlacement(drawing, Box2(Point2(50.0, 20.0), Point2(200.0, 150.0)))
+            .farApart);
+    // Adjacent, and of a comparable size: a neighbouring sheet, not a different
+    // coordinate system.
+    EXPECT_FALSE(
+        katana::interop::advisePlacement(drawing, Box2(Point2(200.0, 0.0), Point2(400.0, 100.0)))
+            .farApart);
+    // Ten times the size but in the same place - a site within a suburb. Still
+    // not "far": the criterion is whether one becomes invisible, and at 10x
+    // both are still legible.
+    EXPECT_FALSE(
+        katana::interop::advisePlacement(drawing, Box2(Point2(-500.0, -500.0),
+                                                       Point2(1000.0, 1000.0)))
+            .farApart);
+}
+
+TEST(InteropPlacement, ImportingIntoAnEmptyDrawingIsNeverFarApart)
+{
+    // Nothing to be far FROM. Warning here would fire on every first import,
+    // which is the normal way to start a job from survey data.
+    const Box2 survey(Point2(255440.07, 7410850.76), Point2(257712.57, 7412122.21));
+    EXPECT_FALSE(katana::interop::advisePlacement(Box2{}, survey).farApart);
+    EXPECT_FALSE(katana::interop::advisePlacement(survey, Box2{}).farApart);
+    EXPECT_TRUE(katana::interop::advisePlacement(Box2{}, Box2{}).message.empty());
+}
+
+TEST(InteropPlacement, TheCriterionIsVisibilityNotADistanceInMetres)
+{
+    // A fixed distance threshold would be wrong for a site plan and wrong again
+    // for a national grid. THE SAME 20 km gap is far apart for two 100 m
+    // drawings and not for two 50 km ones, and the arithmetic says why:
+    //
+    //   100 m boxes, 20 km apart: each diagonal 141 m, combined view 20 100 m,
+    //                             so each is 0.70% of the view - a dot.
+    //   50 km boxes, 20 km apart: each diagonal 70 711 m, combined 130 000 m,
+    //                             so each is 54% of the view - plainly visible.
+    //
+    // The threshold is 1% of the combined diagonal. (An earlier version of this
+    // test used a 5 km gap for the small pair, which is 2.8% of the view -
+    // small, but not invisible, so the implementation was right to say no.)
+    const double gap = 20000.0;
+
+    const Box2 smallA(Point2(0.0, 0.0), Point2(100.0, 100.0));
+    const Box2 smallB(Point2(gap, 0.0), Point2(gap + 100.0, 100.0));
+    EXPECT_TRUE(katana::interop::advisePlacement(smallA, smallB).farApart);
+
+    const Box2 largeA(Point2(0.0, 0.0), Point2(50000.0, 50000.0));
+    const Box2 largeB(Point2(gap + 50000.0, 0.0), Point2(gap + 100000.0, 50000.0));
+    EXPECT_FALSE(katana::interop::advisePlacement(largeA, largeB).farApart);
+}
+
+TEST(InteropPlacement, ADrawingSmallButStillVisibleIsNotReported)
+{
+    // The boundary from the other side: two 100 m drawings 5 km apart occupy
+    // 2.8% of a view showing both. Small, legible, and not worth interrupting
+    // the user over - a warning that fires on ordinary adjacent sheets would be
+    // ignored and would then be ignored when it mattered.
+    const Box2 a(Point2(0.0, 0.0), Point2(100.0, 100.0));
+    const Box2 b(Point2(5000.0, 0.0), Point2(5100.0, 100.0));
+    EXPECT_FALSE(katana::interop::advisePlacement(a, b).farApart);
 }

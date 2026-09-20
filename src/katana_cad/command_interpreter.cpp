@@ -976,9 +976,16 @@ CommandInterpreter::Reply CommandInterpreter::file(const std::string& verb, cons
             return usage("OPEN project-directory");
         }
         resetPointState();
-        return finish(document_.open(args[0]),
-                      "opened " + args[0] + " (" +
-                          std::to_string(document_.model().entities.size()) + " entities)");
+        // Sequenced deliberately. Building the message inside the finish() call
+        // made the entity count an ARGUMENT alongside document_.open(), and the
+        // order in which function arguments are evaluated is unspecified in
+        // C++ - so the count was read before the open and every OPEN reported
+        // "(0 entities)". It is not undefined behaviour, just unspecified, and
+        // it reads as correct code.
+        auto status = document_.open(args[0]);
+        const std::size_t count = document_.model().entities.size();
+        return finish(std::move(status),
+                      "opened " + args[0] + " (" + std::to_string(count) + " entities)");
     }
     // SAVE
     if (args.size() > 1) {

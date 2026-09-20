@@ -1005,6 +1005,31 @@ into the project - the pixels are re-read from the source path each session.
 
 ---
 
+## 20.1 Where imported data lands (delivered)
+
+`katana::interop::advisePlacement` compares the incoming bounds with the
+drawing's and says so when the two cannot usefully be seen together. This is the
+survey case, not a corner case: a DXF in a projected CRS carries coordinates
+like (255440, 7410850) and a drawing started from scratch sits near the origin,
+so the merge succeeds and the original content becomes a dot smaller than a
+pixel with nothing saying why.
+
+The criterion is the SYMPTOM, not a distance: either part is far when showing
+both would shrink it below 1% of the combined diagonal. A threshold in metres
+would be wrong for a site plan and wrong again for a national grid - the same
+20 km gap is far apart for two 100 m drawings (0.7% of the view) and not for two
+50 km ones (54%).
+
+`IMPORT <file> LOCAL` in the CLI shifts the data so its corner meets the
+drawing's, using the `VectorImportOptions::originShift` that already existed and
+that nothing had ever set. Verified on a 51 417-feature DXF at
+(255440, 7410850): without LOCAL the warning fires and names the separation;
+with it the data lands at 0,0 to 2272,1271 beside the existing plan.
+
+**OUTSTANDING:** the GUI import offers no equivalent - it neither warns nor
+offers the shift, so the warning is CLI-only. No CRS is read from the source and
+no reprojection is done, so "LOCAL" is a translation, not a transformation.
+
 # 26. Phase 21 — Civil and Survey Engineering
 
 **STATUS: PARTIALLY DELIVERED — profiles and cross sections only.**

@@ -9,6 +9,7 @@
 // '#' are comments. It drives exactly the same Document, commands and storage
 // as the desktop application.
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -93,9 +94,32 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
     namespace cmd = katana::commands;
     const std::filesystem::path path(text);
 
-    switch (interop::kindForPath(path)) {
+    // IMPORT <file> LOCAL shifts the data to sit alongside the drawing instead
+    // of at its own survey coordinates.
+    std::filesystem::path file = path;
+    bool shiftToLocal = false;
+    {
+        const std::string raw = path.string();
+        const std::size_t space = raw.find_last_of(" 	");
+        if (space != std::string::npos) {
+            std::string tail = raw.substr(space + 1);
+            std::transform(tail.begin(), tail.end(), tail.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            if (tail == "LOCAL") {
+                shiftToLocal = true;
+                file = std::filesystem::path(raw.substr(0, space));
+            }
+        }
+    }
+
+    switch (interop::kindForPath(file)) {
     case interop::SourceKind::Vector: {
-        auto imported = interop::importVector(path);
+        interop::VectorImportOptions options;
+        auto probe = interop::importVector(file, options);
+        if (probe && shiftToLocal && !probe->bounds.empty()) {
+            options.originShift = katana::geometry::Vec2(probe->bounds.min.x, probe->bounds.min.y);
+        }
+        auto imported = shiftToLocal ? interop::importVector(file, options) : std::move(probe);
         if (!imported) {
             std::cerr << "error: " << imported.error().describe() << '\n';
             return false;
@@ -109,16 +133,30 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
             }
         }
         const std::size_t count = imported->entities.size();
+        const auto bounds = imported->bounds;
+        const auto existingBounds = document.model().entities.bounds();
         transaction->add(cmd::createEntities(std::move(imported->entities)));
         const auto status = document.execute(std::move(transaction));
         if (!status) {
             std::cerr << "error: " << status.error().describe() << '\n';
             return false;
         }
-        std::cout << "imported " << count << " entities from " << path.filename().string()
+        std::cout << "imported " << count << " entities from " << file.filename().string()
                   << '\n';
         for (const std::string& warning : imported->warnings) {
             std::cout << "  " << warning << '\n';
+        }
+        if (!bounds.empty()) {
+            std::cout << "  extent " << bounds.min.x << "," << bounds.min.y << " to "
+                      << bounds.max.x << "," << bounds.max.y << '\n';
+        }
+        // Said out loud rather than left for the user to discover by zooming to
+        // extents and finding their drawing has become a dot.
+        const auto advice = interop::advisePlacement(existingBounds, bounds);
+        if (advice.farApart) {
+            std::cout << "  WARNING: " << advice.message << '\n'
+                      << "  undo, then re-import with  IMPORT <file> LOCAL  to shift it "
+                         "alongside the drawing\n";
         }
         return true;
     }

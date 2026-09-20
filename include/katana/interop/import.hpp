@@ -54,6 +54,33 @@ struct VectorImportOptions {
     std::optional<katana::geometry::Vec2> originShift;
 };
 
+// Whether imported data sits so far from the drawing it is joining that the two
+// cannot usefully be seen together (PLAN.MD Phase 20).
+//
+// This is the survey case, not a corner case. A DXF or GeoPackage in a
+// projected CRS carries coordinates like (255440, 7410850); a drawing started
+// from scratch sits near the origin. Merging them silently produces a drawing
+// whose extents span seven million metres, in which the original content is a
+// dot smaller than a pixel - and nothing says so, which is the kind of quiet
+// wrongness PLAN.MD section 36 forbids.
+struct PlacementAdvice {
+    // True when one of the two would be invisible at a zoom that shows both.
+    bool farApart = false;
+    // Subtract from every imported coordinate to bring it alongside the
+    // drawing. Zero when they already share a neighbourhood.
+    katana::geometry::Vec2 suggestedShift{};
+    // Distance between the two bounding boxes, 0 when they overlap.
+    double separation = 0.0;
+    // Ready to show. Empty when there is nothing worth saying.
+    std::string message;
+};
+
+// `existing` may be empty, which is the common case of importing into a new
+// drawing; the advice is then never "far apart", because there is nothing for
+// the data to be far FROM.
+[[nodiscard]] PlacementAdvice advisePlacement(const katana::geometry::Box2& existing,
+                                              const katana::geometry::Box2& incoming);
+
 struct VectorImportResult {
     std::vector<katana::entity::Entity> entities;
     // Katana layers the entities reference, in first-use order. The caller must

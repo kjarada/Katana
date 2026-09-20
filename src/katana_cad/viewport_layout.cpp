@@ -109,23 +109,24 @@ ViewportLayout::ViewportLayout() { applyLayout(LayoutKind::Single); }
 void ViewportLayout::applyLayout(LayoutKind kind)
 {
     const std::vector<CellRect> rects = layoutRects(kind);
-    std::vector<ViewportCell> next;
+    std::vector<std::unique_ptr<ViewportCell>> next;
     next.reserve(rects.size());
 
     for (std::size_t i = 0; i < rects.size(); ++i) {
-        ViewportCell cell;
         if (i < cells_.size()) {
-            // Carried over by position: growing the split must not throw away
-            // the view the user had, or every layout change costs them their
-            // zoom.
-            cell = cells_[i];
+            // MOVED, not copied: the cell keeps its address, so a widget still
+            // holding a pointer to it stays valid across the layout change.
+            // Carrying it over by position also means growing the split does
+            // not throw away the view the user had.
+            next.push_back(std::move(cells_[i]));
         } else {
-            cell.kind = kDefaultKinds[std::min<std::size_t>(
+            auto cell = std::make_unique<ViewportCell>();
+            cell->kind = kDefaultKinds[std::min<std::size_t>(
                 i, sizeof(kDefaultKinds) / sizeof(kDefaultKinds[0]) - 1)];
-            configureCamera(cell);
+            configureCamera(*cell);
+            next.push_back(std::move(cell));
         }
-        cell.rect = rects[i];
-        next.push_back(std::move(cell));
+        next[i]->rect = rects[i];
     }
 
     cells_ = std::move(next);
@@ -151,11 +152,11 @@ Status ViewportLayout::setCellKind(std::size_t index, ViewKind kind)
         return makeError(ErrorCode::InvalidArgument, "no such viewport",
                          std::to_string(index) + " of " + std::to_string(cells_.size()));
     }
-    if (cells_[index].kind == kind) {
+    if (cells_[index]->kind == kind) {
         return {};
     }
-    cells_[index].kind = kind;
-    configureCamera(cells_[index]);
+    cells_[index]->kind = kind;
+    configureCamera(*cells_[index]);
     return {};
 }
 
@@ -165,7 +166,7 @@ std::optional<std::size_t> ViewportLayout::cellAt(double u, double v) const
         return std::nullopt;
     }
     for (std::size_t i = 0; i < cells_.size(); ++i) {
-        if (cells_[i].rect.contains(u, v)) {
+        if (cells_[i]->rect.contains(u, v)) {
             return i;
         }
     }
@@ -181,9 +182,9 @@ void ViewportLayout::setPixelSize(int width, int height)
         if (!rect) {
             continue;
         }
-        cells_[i].pixelWidth = static_cast<int>(rect->width);
-        cells_[i].pixelHeight = static_cast<int>(rect->height);
-        cells_[i].camera.setViewportSize(cells_[i].pixelWidth, cells_[i].pixelHeight);
+        cells_[i]->pixelWidth = static_cast<int>(rect->width);
+        cells_[i]->pixelHeight = static_cast<int>(rect->height);
+        cells_[i]->camera.setViewportSize(cells_[i]->pixelWidth, cells_[i]->pixelHeight);
     }
 }
 
@@ -193,7 +194,7 @@ Result<CellRect> ViewportLayout::pixelRect(std::size_t index) const
         return makeError(ErrorCode::InvalidArgument, "no such viewport",
                          std::to_string(index) + " of " + std::to_string(cells_.size()));
     }
-    const CellRect& rect = cells_[index].rect;
+    const CellRect& rect = cells_[index]->rect;
     const double w = static_cast<double>(pixelWidth_);
     const double h = static_cast<double>(pixelHeight_);
 

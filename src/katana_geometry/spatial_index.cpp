@@ -27,6 +27,15 @@ SpatialIndex::CellKey SpatialIndex::keyOf(std::int32_t x, std::int32_t y)
 
 std::int32_t SpatialIndex::cellOf(double coordinate) const
 {
+    // A non-finite coordinate must be turned away HERE rather than relied on
+    // being filtered upstream. std::clamp passes a NaN straight through - its
+    // comparisons are both false - and static_cast<int32_t> of a NaN is
+    // undefined behaviour, which a release build is free to turn into anything
+    // at all. Cell 0 is an arbitrary but harmless answer: nothing non-finite is
+    // ever inserted, so no query can match through it.
+    if (!std::isfinite(coordinate)) {
+        return 0;
+    }
     const double scaled = std::floor(coordinate / cellSize_);
     // Clamped rather than wrapped: a coordinate far enough out to overflow an
     // int32 cell index is not real survey data, and folding it back would make
