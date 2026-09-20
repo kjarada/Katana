@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <iterator>
+#include <variant>
+
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -53,6 +56,15 @@ TEST(Entity, TypeFollowsGeometryAlternative)
     const EntityType expected[] = {EntityType::Point, EntityType::Line, EntityType::Arc,
                                    EntityType::Polyline, EntityType::Circle, EntityType::Text,
                                    EntityType::Dimension};
+    // The loop below walks `geometries` and indexes `expected`, so growing one
+    // without the other was an out-of-bounds read - which a normal build may
+    // well survive, failing only under the sanitizer job. Both are also pinned
+    // to the variant, so a kind added without extending this corpus fails here
+    // rather than leaving a test named "one of each" quietly covering six of
+    // seven.
+    ASSERT_EQ(geometries.size(), std::variant_size_v<Geometry>)
+        << "oneOfEachGeometry() is missing a geometry kind";
+    ASSERT_EQ(std::size(expected), geometries.size());
     for (std::size_t i = 0; i < geometries.size(); ++i) {
         EXPECT_EQ(typeOf(geometries[i]), expected[i]);
         const auto parsed = entityTypeFromString(toString(expected[i]));

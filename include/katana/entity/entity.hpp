@@ -72,6 +72,28 @@ using Geometry =
     return static_cast<EntityType>(geometry.index());
 }
 
+// ADDING A GEOMETRY KIND? READ THIS.
+//
+// 1. APPEND ONLY. Never insert an alternative in the middle and never reorder.
+//    The variant INDEX is the on-disk kind byte (geometry_blob.cpp writes
+//    `geometry.index()`), so reordering silently reinterprets every project
+//    ever saved. Most shifts are caught by the payload-length checks, but two
+//    kinds of equal payload size swap with no complaint at all and the drawing
+//    reloads as the wrong shapes. GeometryBlobWireFormat pins the mapping.
+// 2. Add the EntityType enumerator at the SAME ordinal - typeOf() casts the
+//    index straight to it, so the two orders are one thing, not two.
+// 3. docs/model.md lists every place that must then change. The exhaustive
+//    visitors (validate, boundingBox, distanceTo, transformed, and the closed
+//    visitor structs) will not compile until they are complete, which is
+//    deliberate; the places that opted out of that discipline are listed there
+//    because the compiler cannot help with them.
+//
+// This assert exists so that step 3 is not something you have to remember.
+static_assert(std::variant_size_v<Geometry> == 7,
+              "A geometry kind was added or removed. See docs/model.md for every place that "
+              "must change - several of them fail SILENTLY, not at compile time. Update this "
+              "count once you have been through the list.");
+
 struct Color {
     std::uint8_t r = 255;
     std::uint8_t g = 255;

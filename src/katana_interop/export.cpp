@@ -191,9 +191,18 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
                     // counted instead.
                     supported = false;
                     ++textSkipped;
-                } else {
+                } else if constexpr (std::is_same_v<Held, katana::entity::DimensionGeometry>) {
+                    // A dimension is annotation over a measurement, not a
+                    // feature; the formats here have nowhere to put it.
                     supported = false;
                     ++dimensionSkipped;
+                } else {
+                    // This was a catch-all that counted anything unhandled as a
+                    // skipped DIMENSION - so a geometry kind added later would
+                    // be dropped from the export AND reported to the user with a
+                    // fluent, confident, wrong sentence. Whoever adds a kind
+                    // must decide what the export does with it.
+                    static_assert(false, "vector export has no case for this geometry kind");
                 }
             },
             entity.geometry);

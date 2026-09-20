@@ -332,3 +332,84 @@ TEST(GeometryBlob, IsSubstantiallySmallerThanTheJsonItReplaces)
     // 8 vertices = 128 bytes of doubles, plus a 7-byte header.
     EXPECT_EQ(blob->size(), 2u + 4u + 1u + 8u * 16u);
 }
+
+TEST(GeometryBlobWireFormat, TheKindByteIsPinnedToTheVariantOrder)
+{
+    // THE test that makes the "append only" rule enforceable rather than a
+    // comment. geometryToBlob writes `geometry.index()` as the on-disk kind
+    // byte, so reordering or inserting an alternative reinterprets every
+    // project ever saved. Most shifts are caught by the payload-length checks,
+    // but two kinds of EQUAL payload size swap with no complaint at all - a
+    // Line and any other two-point kind, for instance - and the drawing simply
+    // reloads as the wrong shapes.
+    //
+    // The JSON path is unaffected because it keys on the type NAME, which is
+    // exactly why this would be missed: the bug would look encoding-specific.
+    struct Expected {
+        std::uint8_t kind;
+        const char* name;
+        Geometry geometry;
+    };
+    const std::vector<Expected> pinned = {
+        {0, "Point", PointGeometry{Point2(1.0, 2.0)}},
+        {1, "Line", Segment2{Point2(0.0, 0.0), Point2(1.0, 1.0)}},
+        {2, "Arc", Arc2{Point2(0.0, 0.0), 1.0, 0.0, 1.0}},
+        {3, "Polyline", polylineOf(3, false)},
+        {4, "Circle", Circle2{Point2(0.0, 0.0), 1.0}},
+        {5, "Text", TextGeometry{Point2(0.0, 0.0), "x", 2.5, 0.0}},
+        {6, "Dimension", DimensionGeometry{Point2(0.0, 0.0), Point2(1.0, 0.0), 0.0, ""}},
+    };
+
+    ASSERT_EQ(pinned.size(), std::variant_size_v<Geometry>)
+        << "a geometry kind was added; append it here and confirm it went on the END";
+
+    for (const Expected& item : pinned) {
+        EXPECT_EQ(item.geometry.index(), item.kind) << item.name << " moved in the variant";
+        EXPECT_EQ(static_cast<std::uint8_t>(katana::entity::typeOf(item.geometry)), item.kind)
+            << item.name << ": EntityType and the variant have drifted apart";
+        EXPECT_EQ(katana::entity::toString(katana::entity::typeOf(item.geometry)), item.name);
+
+        const auto blob = geometryToBlob(item.geometry);
+        ASSERT_TRUE(blob.ok()) << item.name;
+        ASSERT_GE(blob->size(), 2u);
+        EXPECT_EQ(static_cast<std::uint8_t>((*blob)[0]), katana::entity::kBlobVersion);
+        EXPECT_EQ(static_cast<std::uint8_t>((*blob)[1]), item.kind)
+            << item.name << ": the on-disk kind byte changed, which reinterprets every "
+                            "project already saved";
+    }
+}
+
+TEST(GeometryBlobWireFormat, StoredBytesFromAPreviousBuildStillDecode)
+{
+    // A blob captured by hand rather than produced by the current writer, so
+    // this fails if the LAYOUT changes even when the writer and reader change
+    // together and agree with each other.
+    //
+    // Circle at centre (1.5, 2.5) radius 4.0: version 1, kind 4, then three
+    // little-endian IEEE-754 doubles.
+    const std::vector<std::byte> stored = {
+        std::byte{0x01}, std::byte{0x04},
+        // 1.5
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00}, std::byte{0xF8}, std::byte{0x3F},
+        // 2.5
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x04}, std::byte{0x40},
+        // 4.0
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x10}, std::byte{0x40},
+    };
+
+    const auto decoded = geometryFromBlob(stored);
+    ASSERT_TRUE(decoded.ok()) << decoded.error().describe();
+    const auto* circle = std::get_if<Circle2>(&*decoded);
+    ASSERT_NE(circle, nullptr) << "the kind byte no longer means Circle";
+    EXPECT_DOUBLE_EQ(circle->center.x, 1.5);
+    EXPECT_DOUBLE_EQ(circle->center.y, 2.5);
+    EXPECT_DOUBLE_EQ(circle->radius, 4.0);
+
+    // And the current writer still produces exactly those bytes.
+    const auto written = geometryToBlob(Geometry{Circle2{Point2(1.5, 2.5), 4.0}});
+    ASSERT_TRUE(written.ok());
+    EXPECT_EQ(*written, stored) << "the on-disk layout changed";
+}

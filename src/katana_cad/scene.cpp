@@ -310,9 +310,17 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
                     const VertexIndex v =
                         out.addVertex(Vec3(shape.position.x, shape.position.y, z), color);
                     out.addPoint(v, options.pointSize, options.entityDepthBias);
+                } else if constexpr (std::is_same_v<Shape, katana::entity::DimensionGeometry>) {
+                    // Annotation: it belongs on a plan sheet, not in a 3D model
+                    // view, so it is deliberately not drawn. Written as an
+                    // explicit branch rather than left to fall off the end of
+                    // the chain, so that a geometry kind added later cannot
+                    // inherit the same silence - it would simply be absent from
+                    // the 3D view, with no error anywhere and no clue that it
+                    // was a missing case rather than a renderer glitch.
+                } else {
+                    static_assert(false, "appendEntities has no case for this geometry kind");
                 }
-                // DimensionGeometry is annotation: it belongs on a plan sheet,
-                // not in a 3D model view, so it is deliberately skipped.
             },
             entity.geometry);
     });

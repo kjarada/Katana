@@ -38,7 +38,7 @@ struct Entity {
 `EntityType` so `typeOf()` is a cast of the variant index. Using a variant rather
 than an inheritance hierarchy keeps entities copyable values, makes exhaustive
 handling a compile-time property, and means the database owns its entities
-outright.
+outright. **The order is load-bearing** - see "Adding a geometry kind" below.
 
 `PropertyMap` is an ordered `std::map` of `variant<bool, int64_t, double,
 string>`. Ordered, because serialisation, diffs and iteration must be
@@ -223,3 +223,75 @@ have not yet been measured on a 10⁶-entity drawing.
 | SQLite error | `DatabaseFailure` with SQLite's message |
 | Corrupt project | detected on open; `recover()` restores a backup |
 | Project schema too new | `Unsupported` |
+
+## Adding a geometry kind
+
+`static_assert(std::variant_size_v<Geometry> == 7)` in `entity.hpp` points here.
+The count is deliberately awkward to change, because the fan-out is wide and
+some of it does not fail at compile time.
+
+### Two rules that are not negotiable
+
+**Append only. Never insert in the middle, never reorder.** The variant *index*
+is the on-disk kind byte — `geometry_blob.cpp` writes `geometry.index()` — so a
+reorder reinterprets every project ever saved. Most shifts are caught by the
+payload-length checks and surface as "truncated" or "trailing bytes", but **two
+kinds of equal payload size swap with no complaint at all** and the drawing
+reloads as the wrong shapes. The JSON path is unaffected because it keys on the
+type *name*, which is exactly why this would be missed: it looks
+encoding-specific. `GeometryBlobWireFormat` pins the mapping, including against
+a hand-written byte sequence.
+
+**Add the `EntityType` enumerator at the same ordinal.** `typeOf()` casts the
+variant index straight to it, so the two orders are one thing, not two.
+
+### The compiler will stop you here
+
+These are exhaustive visitors: `std::visit` refuses to compile until they are
+complete. Getting them green fixes picking, box selection, the spatial index,
+the viewport cull and validation for free.
+
+| Where | What |
+|---|---|
+| `entity_geometry.cpp` | `toString`, `Validator`, `boundingBox`, `distanceTo`, `transformed` |
+| `serialization.cpp` | `toJsonValue` visitor, `geometryFromJsonValue` switch |
+| `geometry_blob.cpp` | writer chain (`static_assert` on the trailing `else`), reader switch |
+| `snapping.cpp` | `EntitySnaps` |
+| `selection.cpp` | `TouchesBox` |
+| `scene.cpp` | `appendEntities` (`static_assert` on the trailing `else`) |
+| `export.cpp` | the export visitor (`static_assert` on the trailing `else`) |
+| `command_interpreter.cpp` | `describe`'s `Detail` visitor |
+| `viewport_widget.cpp` | `drawGeometry`'s visitor |
+| `main_window.cpp` | `describeGeometry`'s visitor |
+
+### The compiler will NOT stop you here
+
+These opted out of exhaustive dispatch, mostly for good reasons. Each is a
+place where a new kind is silently absent rather than reported.
+
+| Where | What is silently lost |
+|---|---|
+| `snapping.cpp` `appendCurves` | a `get_if` chain. A curve-like kind contributes no curves, so Intersection and Nearest snap stop working for it — no error, the cursor just will not snap. |
+| `spatial_query.hpp` `queryExtents` | special-cases `Arc2` because an arc's centre lies outside its bounding box. A kind with any snap point outside its bbox is rejected by the broad phase — and because that is index-dependent, it can work on a small drawing and fail as the drawing grows, looking like a performance flake. |
+| `section.cpp` `appendCrossings` | a curve-like kind produces no section crossings. **The section comes out missing features and looks complete** — a wrong answer in a signed deliverable. |
+| `main_window.cpp` `buildSurfaceFromDrawing` | a kind carrying surveyed vertices contributes nothing, and the TIN comes out missing a breakline while looking plausible. |
+| `editing.hpp` `Curve2` | a second variant. A curve-like kind almost certainly belongs here too; it has its own `static_assert`. |
+| `entity_commands.cpp` | `asCurve`, `edgeCurves`, `asSegment` decide what is trimmable, offsettable and filletable. |
+| `import.cpp` | maps `gis::GeometryKind` inwards; only Point/LineString/Polygon exist there. |
+| `project_store.cpp` | `kCurrentSchemaVersion` does not change for a new kind, so an older build does not refuse the project up front — it opens it and fails per row with "unknown geometry kind in blob". Loud, but late, and phrased as corruption rather than version skew. Consider bumping it. |
+
+### Tests with a hand-written "one of each" corpus
+
+Each of these will otherwise keep passing while never touching the new kind,
+under a name that claims full coverage:
+
+- `test_entity.cpp` `oneOfEachGeometry()` — asserts its own size against
+  `variant_size_v` so it fails loudly instead.
+- `test_geometry_blob.cpp` — the `samples` lists, and `GeometryBlobWireFormat`,
+  which asserts its pinned table covers every alternative.
+- `test_commands.cpp`, `test_cad.cpp`, `test_storage.cpp` — per-type creation,
+  interpreter round-trip and save/load corpora.
+
+### Then
+
+Update the `static_assert` count, this document, `PLAN.MD` and `README.md`.

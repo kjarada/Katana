@@ -131,7 +131,16 @@ Result<Curve2> offsetTowards(const Curve2& curve, double distance, const Point2&
         }
         return Curve2{*moved};
     }
-    const Arc2& arc = std::get<Arc2>(curve);
+    // Explicitly, not by elimination. std::get<Arc2> here assumed Arc2 was the
+    // only alternative left; a fourth Curve2 alternative would have made it
+    // throw std::bad_variant_access out of a function that returns Result and
+    // promises not to throw - a compiling change that becomes a crash across an
+    // interface boundary.
+    const auto* arcPtr = std::get_if<Arc2>(&curve);
+    if (arcPtr == nullptr) {
+        return makeError(ErrorCode::Unsupported, "this curve kind cannot be offset");
+    }
+    const Arc2& arc = *arcPtr;
     const bool outward = arc.center.distanceTo(side) >= arc.radius;
     const auto moved = offset(arc, outward ? magnitude : -magnitude);
     if (!moved) {
@@ -236,7 +245,12 @@ Result<TrimResult> trim(const Curve2& target, std::span<const Curve2> cutters, c
                         });
     }
 
-    const Circle2& circle = std::get<Circle2>(target);
+    // Explicitly, for the same reason as offset() above.
+    const auto* circlePtr = std::get_if<Circle2>(&target);
+    if (circlePtr == nullptr) {
+        return makeError(ErrorCode::Unsupported, "this curve kind cannot be trimmed");
+    }
+    const Circle2& circle = *circlePtr;
     if (!(circle.radius > tol::kGeometric)) {
         return makeError(ErrorCode::InvalidGeometry, "cannot trim a zero-radius circle");
     }

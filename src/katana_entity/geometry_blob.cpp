@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <cstring>
+#include <type_traits>
 #include <variant>
 
 #include "katana/entity/entity_geometry.hpp"
@@ -202,6 +203,13 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
                 putPoint(out, shape.end);
                 putDouble(out, shape.offset);
                 status = putString(out, shape.textOverride);
+            } else {
+                // Without this, a geometry kind added later fell off the end of
+                // the chain, wrote a two-byte header and no payload, and the
+                // SAVE reported success - destroying the data at write time and
+                // surfacing it only at the next open. The compiler is a better
+                // place to find that out.
+                static_assert(false, "geometryToBlob has no case for this geometry kind");
             }
         },
         geometry);

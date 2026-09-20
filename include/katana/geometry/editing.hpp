@@ -17,7 +17,17 @@
 
 namespace katana::geometry {
 
+// The curve kinds that can be trimmed, extended, offset, filleted and chamfered.
+// A SECOND variant beside katana::entity::Geometry: a curve-like geometry kind
+// added there almost certainly belongs here too, and editing.cpp used to
+// identify the last alternative by elimination with std::get<>, which a fourth
+// alternative would have turned into a thrown std::bad_variant_access from a
+// Result-returning function. Those are now explicit checks, but the count is
+// pinned so the question is at least asked.
 using Curve2 = std::variant<Segment2, Arc2, Circle2>;
+static_assert(std::variant_size_v<Curve2> == 3,
+              "A Curve2 alternative changed. Check every std::get_if chain in editing.cpp "
+              "handles it, and whether katana::entity::Geometry needs the same kind.");
 
 [[nodiscard]] IntersectionResult intersect(const Curve2& a, const Curve2& b);
 [[nodiscard]] Point2 closestPoint(const Curve2& curve, const Point2& p);

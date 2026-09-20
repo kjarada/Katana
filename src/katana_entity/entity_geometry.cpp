@@ -101,7 +101,13 @@ bool isValidUtf8(std::string_view text)
 
 Result<EntityType> entityTypeFromString(std::string_view name)
 {
-    for (int raw = 0; raw <= static_cast<int>(EntityType::Dimension); ++raw) {
+    // Derived from the variant rather than naming the last enumerator: a kind
+    // appended after Dimension was previously unreachable here, which made it
+    // unparseable by name - legacy-JSON rows of it would fail to load and
+    // `SELECT TYPE <name>` would reject it, both with an error blaming the
+    // input rather than this loop.
+    constexpr int kKindCount = static_cast<int>(std::variant_size_v<Geometry>);
+    for (int raw = 0; raw < kKindCount; ++raw) {
         const auto type = static_cast<EntityType>(raw);
         if (toString(type) == name) {
             return type;
