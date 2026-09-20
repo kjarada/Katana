@@ -328,7 +328,7 @@ The required progression is:
 | 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons; civil solids on the TIN instead |
 | 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; LOD reshaped to use COPC rather than a bespoke octree |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
-| 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `buildTin` at 657.7 ms is the real target |
+| 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` at 12.1 s is the real target, measured |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
 | 21 | Civil Engineering | partial — profiles and cross sections along an alignment, with exact surface-break sampling; alignments, corridors, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
@@ -1078,25 +1078,38 @@ Also delivered here, because both were measured rather than assumed:
 task graph, work stealing, TBB and SIMD. Rule 6 says profile before optimising,
 and none of those four is where the time goes. What is measured:
 
-* **`buildTin` is 657.7 ms for 400 000 points** in Release. It is the one
-  terrain operation a user can reach from the application, it is
-  single-threaded, and it is the largest single cost in the product. It is also
-  the one that is *hardest* to parallelise correctly, because incremental
-  Delaunay insertion is inherently sequential and Rule 7 requires the same
-  triangulation whatever the thread count.
+`benchmarks/bench_terrain.cpp` has since been written and run - terrain was
+the largest area of the codebase with no benchmark, which is why this list had
+been written from the shape of the API instead. Full table in `docs/terrain.md`.
+Release, 16 x 2496 MHz:
+
+* **`compareSurfaces` is 12 150 ms** comparing a 200 000-vertex surface with a
+  50 000-vertex one. It is 7.2x the worst `buildTin` measured, and it is the
+  single number an earthworks job exists to produce. **This is the bottleneck,
+  and nothing in the original list above would have touched it.** The exact
+  overlay must stay exact - `volume.hpp` promises it samples nothing, and that
+  promise is why the answer can be signed off - so the work is to make the same
+  answer cheaper, with an equivalence test, not to substitute a sampled grid.
+* **`buildTin` is 1681 ms at 400 000 points**, 360 ms at 100 000. Second
+  largest, and the one every user reaches: it runs on import and on every
+  surface rebuild. Cost per point rises from 3.49 to 4.20 microseconds across
+  that range, which is the n log n of incremental Delaunay insertion, not
+  anything quadratic.
 * A task graph solves a problem Katana does not have. There is no fan-in of
   dependent stages anywhere; the renderer's three stages are a straight line.
 * Work stealing would change visit order, which is exactly what `TaskPool`'s
-  contract forbids. It is not a missing feature; it is a rejected one, and this
+  contract forbids, and incremental Delaunay insertion is sequential by
+  construction. It is not a missing feature; it is a rejected one, and this
   plan should have said so.
-* SIMD before the 657.7 ms is addressed would be optimising the 3% instead of
-  the 60%.
+* SIMD is not where the 12 seconds is.
+* `elevationAt` (499 ns) and `contours` (~45 ms fixed, 1.97x for 25x the bands)
+  are already the right shape and need no work.
 
-**The first slice of this phase is therefore `benchmarks/bench_terrain.cpp`** -
-not an optimisation at all, but the measurement that says which of the terrain
-operations deserves one. Section 4 of CLAUDE.md requires a measurement to live
-in `benchmarks/` so it can be repeated; terrain is the largest area of the
-codebase with no such file.
+An earlier draft of this section claimed 657.7 ms for the 400 000-point build.
+That number was never measured on this machine and is wrong by 2.6x; it is
+recorded here as struck rather than silently replaced, because CLAUDE.md
+section 3 forbids trusting a figure without a source and this plan was briefly
+guilty of exactly that.
 
 Latency, throughput, memory bandwidth and cache behaviour are still not
 benchmarked as section 32 requires.
