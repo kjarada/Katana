@@ -384,6 +384,23 @@ the message.
 Do not batch unrelated work into one commit, and do not commit a half-finished
 feature to save progress.
 
+## 5.2b Standing process — do not stop until the plan is finished
+
+Work continuously through this plan until every phase is delivered. Finish a
+milestone, commit it, and begin the next in the same session; do not stop at a
+natural pause point and do not stop to ask whether to continue.
+
+Stop only for a decision that is genuinely the user's (destructive,
+outward-facing, or a fork where the options lead to materially different
+software), for a hard block naming exactly what is missing, or because the plan
+is complete. Running out of obvious next steps is not a stopping condition: the
+table in this section lists what remains, and `CLAUDE.md` section 6 lists the
+standing improvement work.
+
+This does not license committing a half-finished feature to keep moving. Every
+commit still lands green, with the plan and documentation updated in the same
+change.
+
 ## 5.2a Standing process — hand over something runnable
 
 Before stopping work, leave a Release build that runs and say how to run it,

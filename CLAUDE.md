@@ -176,6 +176,40 @@ Never leave the application mid-refactor at the end of a session. If the work
 is genuinely incomplete, finish to the nearest point where it builds, passes
 and runs, and say what remains.
 
+## 5.2 Do not stop until the plan is finished — MANDATORY
+
+**Work continuously through `PLAN.MD` until every phase is delivered.** Do not
+stop at a natural pause point, do not stop because a feature is complete, and
+do not stop to ask whether to carry on. Finish a milestone, commit it, and
+start the next one in the same session.
+
+Take the next work item in this order:
+
+1. The phase you are part-way through, to a point where it is DELIVERED rather
+   than partially delivered.
+2. A real defect found on the way — fix it if it is small and adjacent, record
+   it in `PLAN.MD` otherwise.
+3. The earliest phase in `PLAN.MD` §5's table that is not yet delivered, unless
+   a measurement says a later one is worth more (record the measurement).
+
+Stop only for these, and say which:
+
+- **A decision that is genuinely the user's** — a destructive or irreversible
+  action, an outward-facing one, or a fork in the plan where the options lead
+  to materially different software. State the options and recommend one.
+- **A hard block** — a missing dependency, a credential, a file only the user
+  has. Say exactly what is needed.
+- **The plan is complete.**
+
+Running out of obvious next steps is not a stopping condition: §5 of `PLAN.MD`
+lists the remaining phases and §6 of this file lists the standing improvement
+work. Neither is ever empty.
+
+Two things this does NOT license. It does not license committing a broken or
+half-finished feature to keep moving — §5 still applies, and every commit lands
+green. And it does not license silence: hand back a runnable build and an
+honest account at each milestone (§5.1), then carry on.
+
 ## 6. Self-improvement — leave the codebase easier to work on
 
 You are expected to improve the *conditions* for the next contributor, not only
