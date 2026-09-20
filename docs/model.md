@@ -295,3 +295,27 @@ under a name that claims full coverage:
 ### Then
 
 Update the `static_assert` count, this document, `PLAN.MD` and `README.md`.
+
+## Named tables
+
+`Linetype`, `DimensionStyle` and `Style` are stored in `NamedTable<T, Policy>`
+(`include/katana/entity/named_table.hpp`), one implementation of "an ordered map
+from name to record" with the add / update / remove / find / all surface, the
+`AlreadyExists` and `NotFound` shape, and the built-in entry that `remove`
+refuses. They were three hand-written copies of that; the copies differed only
+in their noun, their validation and which name was protected, and those are now
+the policy.
+
+**To add another kind of named table**: write a `Policy` beside the others in
+`tables.hpp` giving `kNoun` and `validate`, plus `isProtected` and `seed` if it
+has a built-in entry and `checkUpdate` if it has a rule that applies to updates
+but not to adds; then `using XDatabase = NamedTable<X, XPolicy>;`. The
+container needs nothing else. What still has to be done by hand is everything
+*around* the table - a field on `Model`, the commands, the schema migration and
+the store's save/load - which is the same list a new geometry kind faces above.
+
+`LayerDatabase` is deliberately not one of these. Layer names are `/`-separated
+paths and the table derives a tree from them (`children`, `subtree`,
+`removeSubtree`, `rename`), so it is a different structure that happens to be
+keyed by name. `PropertyDatabase` is not one either: it validates *values*
+against definitions, which no other table does.

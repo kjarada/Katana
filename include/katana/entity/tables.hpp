@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/entity/named_table.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/entity/entity.hpp"
 
@@ -170,24 +171,14 @@ struct DimensionStyle {
 
 // Always contains "Standard", which can be neither removed nor renamed, exactly
 // as layer "0" and the continuous linetype cannot.
-class DimensionStyleDatabase {
-  public:
-    DimensionStyleDatabase();
-
-    [[nodiscard]] katana::core::Status add(DimensionStyle style);
-    [[nodiscard]] katana::core::Status update(const DimensionStyle& style);
-    [[nodiscard]] katana::core::Result<DimensionStyle> remove(std::string_view name);
-    void reset();
-
-    [[nodiscard]] const DimensionStyle* find(std::string_view name) const;
-    [[nodiscard]] bool contains(std::string_view name) const { return find(name) != nullptr; }
-    [[nodiscard]] std::vector<std::string> names() const;
-    [[nodiscard]] std::vector<DimensionStyle> all() const;
-    [[nodiscard]] std::size_t size() const { return styles_.size(); }
-
-  private:
-    std::map<std::string, DimensionStyle, std::less<>> styles_;
+struct DimensionStylePolicy : NamedTablePolicy<DimensionStyle> {
+    static constexpr std::string_view kNoun = "dimension style";
+    static katana::core::Status validate(const DimensionStyle& style);
+    static bool isProtected(std::string_view name) { return name == kDefaultDimensionStyleName; }
+    static void seed(NamedMap<DimensionStyle>& items);
 };
+
+using DimensionStyleDatabase = NamedTable<DimensionStyle, DimensionStylePolicy>;
 
 // ---- linetypes ------------------------------------------------------------------
 //
@@ -237,24 +228,19 @@ struct Linetype {
 
 // Always contains "continuous" (an empty pattern), which can be neither removed
 // nor renamed, exactly as layer "0" cannot.
-class LinetypeDatabase {
-  public:
-    LinetypeDatabase();
-
-    [[nodiscard]] katana::core::Status add(Linetype linetype);
-    [[nodiscard]] katana::core::Status update(const Linetype& linetype);
-    [[nodiscard]] katana::core::Result<Linetype> remove(std::string_view name);
-    void reset();
-
-    [[nodiscard]] const Linetype* find(std::string_view name) const;
-    [[nodiscard]] bool contains(std::string_view name) const { return find(name) != nullptr; }
-    [[nodiscard]] std::vector<std::string> names() const;
-    [[nodiscard]] std::vector<Linetype> all() const;
-    [[nodiscard]] std::size_t size() const { return linetypes_.size(); }
-
-  private:
-    std::map<std::string, Linetype, std::less<>> linetypes_;
+struct LinetypePolicy : NamedTablePolicy<Linetype> {
+    static constexpr std::string_view kNoun = "linetype";
+    static katana::core::Status validate(const Linetype& linetype);
+    // The continuous linetype exists so that every entity has something to
+    // resolve to. Giving it a pattern would change what an unset ByLayer chain
+    // draws as across the whole document, so it is refused on update as well
+    // as on remove.
+    static katana::core::Status checkUpdate(const Linetype& linetype);
+    static bool isProtected(std::string_view name) { return name == kContinuousLinetype; }
+    static void seed(NamedMap<Linetype>& items);
 };
+
+using LinetypeDatabase = NamedTable<Linetype, LinetypePolicy>;
 
 struct Style {
     std::string name{};
@@ -265,20 +251,12 @@ struct Style {
     friend bool operator==(const Style&, const Style&) = default;
 };
 
-class StyleDatabase {
-  public:
-    [[nodiscard]] katana::core::Status add(Style style);
-    [[nodiscard]] katana::core::Status update(const Style& style);
-    [[nodiscard]] katana::core::Result<Style> remove(std::string_view name);
-    void reset() { styles_.clear(); }
-
-    [[nodiscard]] const Style* find(std::string_view name) const;
-    [[nodiscard]] std::vector<Style> all() const; // ascending by name
-    [[nodiscard]] std::size_t size() const { return styles_.size(); }
-
-  private:
-    std::map<std::string, Style, std::less<>> styles_;
+struct StylePolicy : NamedTablePolicy<Style> {
+    static constexpr std::string_view kNoun = "style";
+    static katana::core::Status validate(const Style& style);
 };
+
+using StyleDatabase = NamedTable<Style, StylePolicy>;
 
 enum class PropertyType { Boolean, Integer, Real, Text };
 

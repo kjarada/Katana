@@ -451,75 +451,17 @@ Status validate(const DimensionStyle& style)
 
 // ---- DimensionStyleDatabase -------------------------------------------------------
 
-DimensionStyleDatabase::DimensionStyleDatabase() { reset(); }
-
-void DimensionStyleDatabase::reset()
+Status DimensionStylePolicy::validate(const DimensionStyle& style)
 {
-    styles_.clear();
+    return katana::entity::validate(style);
+}
+
+void DimensionStylePolicy::seed(NamedMap<DimensionStyle>& items)
+{
     DimensionStyle standard;
     standard.name = std::string(kDefaultDimensionStyleName);
-    styles_.emplace(standard.name, std::move(standard));
+    items.emplace(standard.name, std::move(standard));
 }
-
-Status DimensionStyleDatabase::add(DimensionStyle style)
-{
-    if (auto status = validate(style); !status) {
-        return status;
-    }
-    if (contains(style.name)) {
-        return makeError(ErrorCode::AlreadyExists, "dimension style already exists", style.name);
-    }
-    std::string name = style.name;
-    styles_.emplace(std::move(name), std::move(style));
-    return {};
-}
-
-Status DimensionStyleDatabase::update(const DimensionStyle& style)
-{
-    const auto found = styles_.find(style.name);
-    if (found == styles_.end()) {
-        return makeError(ErrorCode::NotFound, "dimension style does not exist", style.name);
-    }
-    if (auto status = validate(style); !status) {
-        return status;
-    }
-    found->second = style;
-    return {};
-}
-
-Result<DimensionStyle> DimensionStyleDatabase::remove(std::string_view name)
-{
-    if (name == kDefaultDimensionStyleName) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "the default dimension style cannot be removed");
-    }
-    const auto found = styles_.find(name);
-    if (found == styles_.end()) {
-        return makeError(ErrorCode::NotFound, "dimension style does not exist", std::string(name));
-    }
-    DimensionStyle removed = std::move(found->second);
-    styles_.erase(found);
-    return removed;
-}
-
-const DimensionStyle* DimensionStyleDatabase::find(std::string_view name) const
-{
-    const auto found = styles_.find(name);
-    return found == styles_.end() ? nullptr : &found->second;
-}
-
-std::vector<std::string> DimensionStyleDatabase::names() const
-{
-    std::vector<std::string> result;
-    result.reserve(styles_.size());
-    for (const auto& [name, style] : styles_) {
-        (void)style;
-        result.push_back(name);
-    }
-    return result;
-}
-
-std::vector<DimensionStyle> DimensionStyleDatabase::all() const { return collect(styles_); }
 
 // ---- Linetype --------------------------------------------------------------------
 
@@ -604,11 +546,22 @@ Status validate(const Linetype& linetype)
 
 // ---- LinetypeDatabase ------------------------------------------------------------
 
-LinetypeDatabase::LinetypeDatabase() { reset(); }
-
-void LinetypeDatabase::reset()
+Status LinetypePolicy::validate(const Linetype& linetype)
 {
-    linetypes_.clear();
+    return katana::entity::validate(linetype);
+}
+
+Status LinetypePolicy::checkUpdate(const Linetype& linetype)
+{
+    if (linetype.name == kContinuousLinetype && !linetype.isContinuous()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the continuous linetype cannot be given a pattern");
+    }
+    return {};
+}
+
+void LinetypePolicy::seed(NamedMap<Linetype>& items)
+{
     // Only "continuous" is built in.
     //
     // No "dashed", "center" or "hidden" is seeded, deliberately. AutoCAD's
@@ -621,124 +574,17 @@ void LinetypeDatabase::reset()
     Linetype continuous;
     continuous.name = std::string(kContinuousLinetype);
     continuous.description = "Solid line";
-    linetypes_.emplace(continuous.name, std::move(continuous));
+    items.emplace(continuous.name, std::move(continuous));
 }
-
-Status LinetypeDatabase::add(Linetype linetype)
-{
-    if (auto status = validate(linetype); !status) {
-        return status;
-    }
-    if (contains(linetype.name)) {
-        return makeError(ErrorCode::AlreadyExists, "linetype already exists", linetype.name);
-    }
-    std::string name = linetype.name;
-    linetypes_.emplace(std::move(name), std::move(linetype));
-    return {};
-}
-
-Status LinetypeDatabase::update(const Linetype& linetype)
-{
-    const auto found = linetypes_.find(linetype.name);
-    if (found == linetypes_.end()) {
-        return makeError(ErrorCode::NotFound, "linetype does not exist", linetype.name);
-    }
-    if (linetype.name == kContinuousLinetype && !linetype.isContinuous()) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "the continuous linetype cannot be given a pattern");
-    }
-    if (auto status = validate(linetype); !status) {
-        return status;
-    }
-    found->second = linetype;
-    return {};
-}
-
-Result<Linetype> LinetypeDatabase::remove(std::string_view name)
-{
-    if (name == kContinuousLinetype) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "the continuous linetype cannot be removed");
-    }
-    const auto found = linetypes_.find(name);
-    if (found == linetypes_.end()) {
-        return makeError(ErrorCode::NotFound, "linetype does not exist", std::string(name));
-    }
-    Linetype removed = std::move(found->second);
-    linetypes_.erase(found);
-    return removed;
-}
-
-const Linetype* LinetypeDatabase::find(std::string_view name) const
-{
-    const auto found = linetypes_.find(name);
-    return found == linetypes_.end() ? nullptr : &found->second;
-}
-
-std::vector<std::string> LinetypeDatabase::names() const
-{
-    std::vector<std::string> result;
-    result.reserve(linetypes_.size());
-    for (const auto& [name, linetype] : linetypes_) {
-        (void)linetype;
-        result.push_back(name);
-    }
-    return result;
-}
-
-std::vector<Linetype> LinetypeDatabase::all() const { return collect(linetypes_); }
 
 // ---- StyleDatabase ---------------------------------------------------------------
 
-Status StyleDatabase::add(Style style)
+Status StylePolicy::validate(const Style& style)
 {
     if (auto status = validateName(style.name, "style"); !status) {
         return status;
     }
-    if (auto status = validateLineWeight(style.lineWeight); !status) {
-        return status;
-    }
-    if (find(style.name) != nullptr) {
-        return makeError(ErrorCode::AlreadyExists, "style already exists", style.name);
-    }
-    std::string name = style.name;
-    styles_.emplace(std::move(name), std::move(style));
-    return {};
-}
-
-Status StyleDatabase::update(const Style& style)
-{
-    const auto found = styles_.find(style.name);
-    if (found == styles_.end()) {
-        return makeError(ErrorCode::NotFound, "style does not exist", style.name);
-    }
-    if (auto status = validateLineWeight(style.lineWeight); !status) {
-        return status;
-    }
-    found->second = style;
-    return {};
-}
-
-Result<Style> StyleDatabase::remove(std::string_view name)
-{
-    const auto found = styles_.find(name);
-    if (found == styles_.end()) {
-        return makeError(ErrorCode::NotFound, "style does not exist", std::string(name));
-    }
-    Style removed = std::move(found->second);
-    styles_.erase(found);
-    return removed;
-}
-
-const Style* StyleDatabase::find(std::string_view name) const
-{
-    const auto found = styles_.find(name);
-    return found == styles_.end() ? nullptr : &found->second;
-}
-
-std::vector<Style> StyleDatabase::all() const
-{
-    return collect(styles_);
+    return validateLineWeight(style.lineWeight);
 }
 
 // ---- PropertyDatabase ------------------------------------------------------------
