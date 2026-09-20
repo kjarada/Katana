@@ -135,6 +135,29 @@ constexpr Migration kMigrations[] = {
             PRIMARY KEY (linetype, position)
         ) WITHOUT ROWID;
     )sql"},
+    // Dimension styles, and the layer column that names one. A layer with an
+    // empty dimension_style uses the document default, which is how every
+    // project written before this migration behaves - so nothing is invented
+    // for existing rows.
+    {5, R"sql(
+        CREATE TABLE dimension_styles (
+            name              TEXT PRIMARY KEY,
+            text_height       REAL NOT NULL,
+            text_gap          REAL NOT NULL,
+            extension_offset  REAL NOT NULL,
+            extension_beyond  REAL NOT NULL,
+            arrow_size        REAL NOT NULL,
+            arrow_head        TEXT NOT NULL,
+            unit_scale        REAL NOT NULL,
+            prefix            TEXT NOT NULL,
+            suffix            TEXT NOT NULL,
+            decimals          INTEGER NOT NULL,
+            round_to          REAL NOT NULL,
+            suppress_zeros    INTEGER NOT NULL
+        ) WITHOUT ROWID;
+
+        ALTER TABLE layers ADD COLUMN dimension_style TEXT NOT NULL DEFAULT '';
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -398,6 +421,7 @@ ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata
     contents.layers = model.layers.all();
     contents.styles = model.styles.all();
     contents.linetypes = model.linetypes.all();
+    contents.dimensionStyles = model.dimensionStyles.all();
     contents.propertyDefinitions = model.properties.all();
     contents.entities.reserve(model.entities.size());
     model.entities.forEach([&](const Entity& entity) { contents.entities.push_back(entity); });
@@ -440,6 +464,14 @@ Status applyToModel(const ProjectContents& contents, katana::entity::Model& mode
         auto status = linetype.name == katana::entity::kContinuousLinetype
                           ? staged.linetypes.update(linetype)
                           : staged.linetypes.add(linetype);
+        if (!status) {
+            return status;
+        }
+    }
+    for (const katana::entity::DimensionStyle& style : contents.dimensionStyles) {
+        auto status = style.name == katana::entity::kDefaultDimensionStyleName
+                          ? staged.dimensionStyles.update(style)
+                          : staged.dimensionStyles.add(style);
         if (!status) {
             return status;
         }
@@ -777,6 +809,7 @@ Status ProjectStore::save(const ProjectContents& contents)
     if (auto status = database.execute("DELETE FROM relationships; DELETE FROM entities;"
                                        "DELETE FROM property_definitions; DELETE FROM styles;"
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
+                                       "DELETE FROM dimension_styles;"
                                        "DELETE FROM layers; DELETE FROM metadata;");
         !status) {
         return status;
@@ -786,8 +819,8 @@ Status ProjectStore::save(const ProjectContents& contents)
     }
 
     auto insertLayer = database.prepare(
-        "INSERT INTO layers (name, color, visible, locked, linetype, line_weight)"
-        " VALUES (?1, ?2, ?3, ?4, ?5, ?6)");
+        "INSERT INTO layers (name, color, visible, locked, linetype, line_weight,"
+        " dimension_style) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)");
     if (!insertLayer) {
         return insertLayer.error();
     }
@@ -797,7 +830,7 @@ Status ProjectStore::save(const ProjectContents& contents)
         if (auto status = Binder(*insertLayer)(1, std::string_view(layer.name))(
                               2, std::string_view(layer.color.toHex()))(3, layer.visible)(
                               4, layer.locked)(5, std::string_view(layer.linetype))(
-                              6, layer.lineWeight)
+                              6, layer.lineWeight)(7, std::string_view(layer.dimensionStyle))
                               .run();
             !status) {
             return status;
@@ -855,6 +888,30 @@ Status ProjectStore::save(const ProjectContents& contents)
         }
         if (!status) {
             return status;
+        }
+    }
+
+    auto insertDimensionStyle = database.prepare(
+        "INSERT INTO dimension_styles (name, text_height, text_gap, extension_offset,"
+        " extension_beyond, arrow_size, arrow_head, unit_scale, prefix, suffix, decimals,"
+        " round_to, suppress_zeros)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)");
+    if (!insertDimensionStyle) {
+        return insertDimensionStyle.error();
+    }
+    for (const katana::entity::DimensionStyle& style : contents.dimensionStyles) {
+        if (auto status =
+                Binder(*insertDimensionStyle)(1, std::string_view(style.name))(
+                    2, style.textHeight)(3, style.textGap)(4, style.extensionOffset)(
+                    5, style.extensionBeyond)(6, style.arrowSize)(
+                    7, katana::entity::toString(style.arrowHead))(8, style.unitScale)(
+                    9, std::string_view(style.prefix))(10, std::string_view(style.suffix))(
+                    11, static_cast<std::int64_t>(style.decimals))(12, style.roundTo)(
+                    13, style.suppressTrailingZeros)
+                    .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "dimension style=" + style.name + " " + status.error().context);
         }
     }
 
@@ -1020,7 +1077,8 @@ Result<ProjectContents> ProjectStore::load()
     }
 
     status = forEachRow(
-        "SELECT name, color, visible, locked, linetype, line_weight FROM layers ORDER BY name",
+        "SELECT name, color, visible, locked, linetype, line_weight, dimension_style"
+        " FROM layers ORDER BY name",
         [&](SqliteStatement& row) -> Status {
             Layer layer;
             layer.name = row.columnText(0);
@@ -1033,7 +1091,39 @@ Result<ProjectContents> ProjectStore::load()
             layer.locked = row.columnInt64(3) != 0;
             layer.linetype = row.columnText(4);
             layer.lineWeight = row.columnDouble(5);
+            layer.dimensionStyle = row.columnText(6);
             contents.layers.push_back(std::move(layer));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, text_height, text_gap, extension_offset, extension_beyond, arrow_size,"
+        " arrow_head, unit_scale, prefix, suffix, decimals, round_to, suppress_zeros"
+        " FROM dimension_styles ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::DimensionStyle style;
+            style.name = row.columnText(0);
+            style.textHeight = row.columnDouble(1);
+            style.textGap = row.columnDouble(2);
+            style.extensionOffset = row.columnDouble(3);
+            style.extensionBeyond = row.columnDouble(4);
+            style.arrowSize = row.columnDouble(5);
+            auto head = katana::entity::arrowHeadFromString(row.columnText(6));
+            if (!head) {
+                return makeError(head.error().code, head.error().message,
+                                 "dimension style=" + style.name);
+            }
+            style.arrowHead = *head;
+            style.unitScale = row.columnDouble(7);
+            style.prefix = row.columnText(8);
+            style.suffix = row.columnText(9);
+            style.decimals = static_cast<int>(row.columnInt64(10));
+            style.roundTo = row.columnDouble(11);
+            style.suppressTrailingZeros = row.columnInt64(12) != 0;
+            contents.dimensionStyles.push_back(std::move(style));
             return {};
         });
     if (!status) {

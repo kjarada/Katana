@@ -68,6 +68,7 @@ struct ProjectContents {
     std::vector<katana::entity::Layer> layers{};
     std::vector<katana::entity::Style> styles{};
     std::vector<katana::entity::Linetype> linetypes{};
+    std::vector<katana::entity::DimensionStyle> dimensionStyles{};
     std::vector<katana::entity::PropertyDefinition> propertyDefinitions{};
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
@@ -95,7 +96,8 @@ class ProjectStore {
     // 3: geometry stored as a binary blob rather than JSON text. See the
     //    migration table in project_store.cpp and docs/storage.md for why.
     // 4: linetype definitions (Phase 09).
-    static constexpr int kCurrentSchemaVersion = 4;
+    // 5: dimension styles, and Layer::dimensionStyle (Phase 09).
+    static constexpr int kCurrentSchemaVersion = 5;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // Creates the directory layout and an empty database. Fails if a project

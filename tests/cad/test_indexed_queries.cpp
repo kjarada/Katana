@@ -15,6 +15,8 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/snapping.hpp"
+#include "katana/cad/spatial_query.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/commands/entity_commands.hpp"
 
 using katana::cad::BoxSelectionMode;
@@ -400,4 +402,42 @@ TEST(IndexedQueries, AQueryEntirelyOffTheDrawingIsEmptyOnBothPaths)
         pickInBox(document.model(), far, BoxSelectionMode::Crossing, {},
                   &document.spatialIndex())
             .empty());
+}
+
+TEST(IndexedQueries, ADimensionIsFoundByItsLabelNotOnlyByItsMeasuredLine)
+{
+    // The broad phase culls against what a dimension DRAWS. Its label, arrows
+    // and extension overshoot sit outside the measured points, so culling
+    // against the plain bounding box drops a dimension whose text is still on
+    // screen - a glitch at the edge of the view that looks like a redraw fault.
+    Document document;
+
+    katana::entity::DimensionGeometry dimension;
+    dimension.start = Point2(0.0, 0.0);
+    dimension.end = Point2(10.0, 0.0);
+    dimension.offset = 2.0;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createDimension(dimension,
+                                                           document.currentAttributes()))
+            .ok());
+
+    const auto id = document.model().entities.ids().back();
+    const auto plain =
+        katana::entity::boundingBox(*&document.model().entities.find(id)->geometry);
+    const auto indexed = katana::cad::detail::queryExtents(document.model(),
+                                                           *document.model().entities.find(id));
+
+    ASSERT_GT(indexed.max.y, plain.max.y)
+        << "the drawn extent must exceed the measured one, or this test proves nothing";
+
+    // A window that touches only the drawn part - above the dimension line,
+    // where the label sits - must still find it, on both paths.
+    const Box2 labelOnly(Point2(4.0, plain.max.y + 0.05),
+                         Point2(6.0, indexed.max.y - 0.01));
+    ASSERT_FALSE(labelOnly.empty());
+
+    const auto scanned = pickInBox(document.model(), labelOnly, BoxSelectionMode::Crossing);
+    const auto viaIndex = pickInBox(document.model(), labelOnly, BoxSelectionMode::Crossing, {},
+                                    &document.spatialIndex());
+    EXPECT_EQ(scanned, viaIndex) << "both paths must agree about a dimension's extent";
 }

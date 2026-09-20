@@ -859,3 +859,53 @@ TEST(CadInterpreter, OpenReportsHowManyEntitiesItActuallyOpened)
 
     std::filesystem::remove_all(directory, ignored);
 }
+
+TEST(CadInterpreter, DimensionStylesCanBeDefinedTunedAndAttachedToALayer)
+{
+    Session session;
+    EXPECT_NE(session.ok("DIMSTYLE LIST").find("Standard"), std::string::npos);
+
+    session.ok("DIMSTYLE NEW site");
+    session.ok("DIMSTYLE SET site DECIMALS 1");
+    session.ok("DIMSTYLE SET site SCALE 1000");
+    session.ok("DIMSTYLE SET site SUFFIX mm");
+    session.ok("DIMSTYLE SET site HEAD Dot");
+
+    const auto* style = session.document.model().dimensionStyles.find("site");
+    ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->decimals, 1);
+    EXPECT_DOUBLE_EQ(style->unitScale, 1000.0);
+    EXPECT_EQ(style->arrowHead, katana::entity::ArrowHead::Dot);
+
+    // LIST shows what a ten-unit dimension would READ as, which is the question
+    // anyone setting a style is actually asking.
+    const std::string listed = session.ok("DIMSTYLE LIST");
+    EXPECT_NE(listed.find("10000.0mm"), std::string::npos) << listed;
+
+    session.ok("LAYER NEW dims");
+    session.ok("LAYER DIMSTYLE dims site");
+    EXPECT_EQ(session.document.model().layers.find("dims")->dimensionStyle, "site");
+
+    // A layer still using it blocks deletion, naming the layer.
+    const auto refused = session.interpreter.run("DIMSTYLE DELETE site");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_NE(refused.error().describe().find("dims"), std::string::npos)
+        << refused.error().describe();
+}
+
+TEST(CadInterpreter, DimensionStyleRejectsNonsenseWithItsOwnReason)
+{
+    Session session;
+    session.ok("DIMSTYLE NEW site");
+
+    EXPECT_EQ(session.fails("DIMSTYLE SET site TEXT 0"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("DIMSTYLE SET site DECIMALS 99"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("DIMSTYLE SET site HEAD Diamond"), ErrorCode::ParseFailure);
+    EXPECT_EQ(session.fails("DIMSTYLE SET site NOSUCHFIELD 1"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("DIMSTYLE SET missing TEXT 1"), ErrorCode::NotFound);
+    session.fails("DIMSTYLE DELETE Standard");
+    session.fails("LAYER DIMSTYLE 0 no-such-style");
+
+    // A refused change must leave the stored style alone.
+    EXPECT_DOUBLE_EQ(session.document.model().dimensionStyles.find("site")->textHeight, 2.5);
+}

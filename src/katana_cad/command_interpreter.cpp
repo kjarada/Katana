@@ -1,5 +1,7 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/entity/dimension_text.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -116,7 +118,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"AR", "ARRAY"},   {"E", "ERASE"},       {"DELETE", "ERASE"},   {"DEL", "ERASE"},
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
-        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"},
+        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"},
         {"?", "HELP"},
     };
     return table;
@@ -214,6 +216,9 @@ Layers    LAYER LIST | NEW name [#RRGGBB] | SET name | DELETE name
           LAYER SHOW|HIDE|LOCK|UNLOCK name | LAYER LTYPE layer linetype
 Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
+DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
+          fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
+          LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER | PROP key value   (selection)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
@@ -323,6 +328,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "LINETYPE") {
         return linetype(args);
+    }
+    if (verb == "DIMSTYLE") {
+        return dimensionStyle(args);
     }
     if (verb == "UNDO" || verb == "REDO") {
         return undoRedo(verb, args);
@@ -748,6 +756,141 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
 
 // ---- layers -------------------------------------------------------------------------------
 
+CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
+{
+    const auto& model = document_.model();
+    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+
+    if (action == "LIST") {
+        std::ostringstream out;
+        out.precision(6);
+        for (const katana::entity::DimensionStyle& style : model.dimensionStyles.all()) {
+            out << "  " << style.name << "  text=" << style.textHeight
+                << "  arrow=" << style.arrowSize << " " << katana::entity::toString(style.arrowHead)
+                << "  decimals=" << style.decimals;
+            if (style.unitScale != 1.0) {
+                out << "  scale=" << style.unitScale;
+            }
+            if (style.roundTo > 0.0) {
+                out << "  round=" << style.roundTo;
+            }
+            if (!style.suffix.empty()) {
+                out << "  suffix='" << style.suffix << "'";
+            }
+            // What a dimension of exactly ten units would read as. This is the
+            // question anyone setting a style is actually asking, and working
+            // it out from the fields is guesswork.
+            out << "  (10 reads as " << katana::entity::formatMeasurement(10.0, style) << ")";
+            out << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text;
+    }
+
+    if (args.size() < 2) {
+        return usage("DIMSTYLE LIST | NEW name | SET name field value | DELETE name");
+    }
+    const std::string& name = args[1];
+
+    if (action == "NEW") {
+        katana::entity::DimensionStyle created;
+        created.name = name;
+        return finish(document_.execute(cmd::createDimensionStyle(std::move(created))),
+                      "dimension style " + name + " created");
+    }
+    if (action == "DELETE") {
+        return finish(document_.execute(cmd::deleteDimensionStyle(name)),
+                      "dimension style " + name + " deleted");
+    }
+    if (action == "SET") {
+        if (args.size() < 4) {
+            return usage("DIMSTYLE SET name field value\n"
+                         "  fields: TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND"
+                         " PREFIX SUFFIX TRIM");
+        }
+        const katana::entity::DimensionStyle* current = model.dimensionStyles.find(name);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound, "dimension style does not exist", name);
+        }
+        katana::entity::DimensionStyle changed = *current;
+        const std::string field = upper(args[2]);
+        const std::string& value = args[3];
+
+        const auto number = [&value]() { return parseNumber(value); };
+        if (field == "TEXT") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.textHeight = *v;
+        } else if (field == "GAP") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.textGap = *v;
+        } else if (field == "EXTOFF") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.extensionOffset = *v;
+        } else if (field == "EXTBEYOND") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.extensionBeyond = *v;
+        } else if (field == "ARROW") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.arrowSize = *v;
+        } else if (field == "HEAD") {
+            const auto head = katana::entity::arrowHeadFromString(value);
+            if (!head) {
+                return head.error();
+            }
+            changed.arrowHead = *head;
+        } else if (field == "SCALE") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.unitScale = *v;
+        } else if (field == "DECIMALS") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.decimals = static_cast<int>(*v);
+        } else if (field == "ROUND") {
+            const auto v = number();
+            if (!v) {
+                return v.error();
+            }
+            changed.roundTo = *v;
+        } else if (field == "PREFIX") {
+            changed.prefix = value;
+        } else if (field == "SUFFIX") {
+            changed.suffix = value;
+        } else if (field == "TRIM") {
+            const std::string on = upper(value);
+            changed.suppressTrailingZeros = on == "ON" || on == "1" || on == "YES";
+        } else {
+            return makeError(ErrorCode::InvalidArgument, "unknown dimension style field", field);
+        }
+
+        return finish(document_.execute(cmd::updateDimensionStyle(std::move(changed))),
+                      "dimension style " + name + " updated");
+    }
+    return usage("DIMSTYLE LIST | NEW name | SET name field value | DELETE name");
+}
+
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
 {
     const auto& model = document_.model();
@@ -875,6 +1018,22 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
         changed.linetype = args[2];
         return finish(document_.execute(cmd::updateLayer(std::move(changed))),
                       "layer " + name + " uses linetype " + args[2]);
+    }
+    if (action == "DIMSTYLE") {
+        if (args.size() < 3) {
+            return usage("LAYER DIMSTYLE layer style");
+        }
+        const katana::entity::Layer* existing = model.layers.find(name);
+        if (existing == nullptr) {
+            return makeError(ErrorCode::NotFound, "layer does not exist", name);
+        }
+        if (!model.dimensionStyles.contains(args[2])) {
+            return makeError(ErrorCode::NotFound, "dimension style does not exist", args[2]);
+        }
+        katana::entity::Layer changed = *existing;
+        changed.dimensionStyle = args[2];
+        return finish(document_.execute(cmd::updateLayer(std::move(changed))),
+                      "layer " + name + " uses dimension style " + args[2]);
     }
     if (action == "DELETE") {
         return finish(document_.execute(cmd::deleteLayer(name)), "layer " + name + " deleted");

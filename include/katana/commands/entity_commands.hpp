@@ -115,4 +115,10 @@ struct EntityAttributes {
 // Refuses while any layer or style still names it, and refuses "continuous".
 [[nodiscard]] CommandPtr deleteLinetype(std::string name);
 
+// ---- dimension styles ------------------------------------------------------------
+[[nodiscard]] CommandPtr createDimensionStyle(katana::entity::DimensionStyle style);
+[[nodiscard]] CommandPtr updateDimensionStyle(katana::entity::DimensionStyle style);
+// Refuses while any layer still names it, and refuses "Standard".
+[[nodiscard]] CommandPtr deleteDimensionStyle(std::string name);
+
 } // namespace katana::commands

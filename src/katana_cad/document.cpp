@@ -44,7 +44,7 @@ void Document::rebuildSpatialIndex()
     model_.entities.forEach([&](const katana::entity::Entity& entity) {
         entries.push_back(
             katana::geometry::SpatialEntry{static_cast<katana::geometry::SpatialId>(entity.id),
-                                           detail::queryExtents(entity)});
+                                           detail::queryExtents(model_, entity)});
     });
     index_.rebuild(entries);
 }
@@ -74,7 +74,7 @@ void Document::applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent
             // insert() replaces an existing entry, so Modified needs no
             // separate remove.
             index_.insert(static_cast<katana::geometry::SpatialId>(entity->id),
-                          detail::queryExtents(*entity));
+                          detail::queryExtents(model_, *entity));
             break;
         }
         }

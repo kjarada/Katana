@@ -2,6 +2,7 @@
 
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/dashing.hpp"
+#include "katana/cad/dimension_draw.hpp"
 #include "katana/entity/display.hpp"
 
 #include <algorithm>
@@ -797,6 +798,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             }
             painter.setPen(pen);
         }
+        dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
         drawGeometry(painter, entity.geometry);
     });
 }
@@ -861,27 +863,42 @@ void ViewportWidget::drawGeometry(QPainter& painter,
         }
         void operator()(const katana::entity::DimensionGeometry& g) const
         {
-            const Vec2 along = (g.end - g.start).normalized();
-            const Vec2 shift = along.perpendicular() * g.offset;
-            const auto a = g.start + shift;
-            const auto b = g.end + shift;
-            painter.drawLine(widget.toScreen(g.start), widget.toScreen(a)); // extension lines
-            painter.drawLine(widget.toScreen(g.end), widget.toScreen(b));
-            painter.drawLine(widget.toScreen(a), widget.toScreen(b));       // dimension line
-            // 45 degree ticks of fixed screen size at both ends.
-            const QPointF dir(along.x, -along.y);
-            const QPointF tick = (dir + QPointF(dir.y(), -dir.x())) * 5.0;
-            for (const auto& end : {a, b}) {
-                painter.drawLine(widget.toScreen(end) - tick, widget.toScreen(end) + tick);
+            // Through the shared builder, so this draws exactly what the 3D
+            // view draws and exactly what the cull box covers.
+            //
+            // Everything is in MODEL units now. The previous version drew a
+            // fixed 5-pixel tick and a 12-pixel label, which looks right on
+            // screen and plots at whatever size the paper happens to give it -
+            // a dimension is part of the drawing, not an overlay on it. It also
+            // formatted the number with QString::number, which is LOCALE
+            // DEPENDENT and would put a comma in "1,5" on a European machine.
+            const auto drawing = cad::buildDimension(g, widget.dimensionStyle_);
+            if (drawing.empty()) {
+                return;
             }
-            const std::string label =
-                g.textOverride.empty()
-                    ? QString::number(g.measurement(), 'f', 3).toStdString()
-                    : g.textOverride;
-            const double height = 12.0 / widget.view_.scale; // constant 12 px label
-            const auto anchor = (a + b) * 0.5 + along.perpendicular() * (0.4 * height) -
-                                along * (0.3 * height * static_cast<double>(label.size()));
-            widget.drawText(painter, anchor, label, height, along.angle());
+            const auto line = [this](const Segment2& segment) {
+                painter.drawLine(widget.toScreen(segment.start), widget.toScreen(segment.end));
+            };
+            for (const Segment2& segment : drawing.extensionLines) {
+                line(segment);
+            }
+            line(drawing.dimensionLine);
+            for (const Segment2& stroke : drawing.arrowStrokes) {
+                line(stroke);
+            }
+            for (const std::vector<Point2>& fill : drawing.arrowFills) {
+                QPolygonF polygon;
+                polygon.reserve(static_cast<int>(fill.size()));
+                for (const Point2& point : fill) {
+                    polygon << widget.toScreen(point);
+                }
+                const QBrush previous = painter.brush();
+                painter.setBrush(painter.pen().color());
+                painter.drawPolygon(polygon);
+                painter.setBrush(previous);
+            }
+            widget.drawText(painter, drawing.textAnchor, drawing.text, drawing.textHeight,
+                            drawing.textRotation);
         }
     };
     std::visit(Visitor{*this, painter, drawArcPath}, geometry);

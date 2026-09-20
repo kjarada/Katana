@@ -5,6 +5,7 @@
 #include <variant>
 
 #include "katana/cad/dashing.hpp"
+#include "katana/cad/dimension_draw.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -361,13 +362,39 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
                         out.addVertex(Vec3(shape.position.x, shape.position.y, z), color);
                     out.addPoint(v, options.pointSize, options.entityDepthBias);
                 } else if constexpr (std::is_same_v<Shape, katana::entity::DimensionGeometry>) {
-                    // Annotation: it belongs on a plan sheet, not in a 3D model
-                    // view, so it is deliberately not drawn. Written as an
-                    // explicit branch rather than left to fall off the end of
-                    // the chain, so that a geometry kind added later cannot
-                    // inherit the same silence - it would simply be absent from
-                    // the 3D view, with no error anywhere and no clue that it
-                    // was a missing case rather than a renderer glitch.
+                    // Drawn through the same builder the 2D viewport uses, so
+                    // the two views cannot disagree about what a dimension
+                    // looks like. The text itself is not rendered here - a
+                    // glyph outline needs a font, which the 3D path does not
+                    // have - so the lines and arrows appear and the label does
+                    // not. That is stated rather than left to look like a bug.
+                    const auto drawn = buildDimension(shape, resolveDimensionStyle(
+                                                                 document.model(), entity));
+                    if (!drawn.empty()) {
+                        const auto stroke = [&](const katana::geometry::Segment2& segment) {
+                            out.addSegment(Vec3(segment.start.x, segment.start.y, z),
+                                           Vec3(segment.end.x, segment.end.y, z), color, width,
+                                           options.entityDepthBias);
+                        };
+                        for (const auto& segment : drawn.extensionLines) {
+                            stroke(segment);
+                        }
+                        stroke(drawn.dimensionLine);
+                        for (const auto& segment : drawn.arrowStrokes) {
+                            stroke(segment);
+                        }
+                        for (const auto& fill : drawn.arrowFills) {
+                            // Outlined rather than filled: DrawList fills only
+                            // triangles, and an arrowhead is small enough that
+                            // an outline reads correctly.
+                            for (std::size_t i = 0; i < fill.size(); ++i) {
+                                const auto& from = fill[i];
+                                const auto& to = fill[(i + 1) % fill.size()];
+                                out.addSegment(Vec3(from.x, from.y, z), Vec3(to.x, to.y, z),
+                                               color, width, options.entityDepthBias);
+                            }
+                        }
+                    }
                 } else {
                     static_assert(false, "appendEntities has no case for this geometry kind");
                 }

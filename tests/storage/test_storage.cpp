@@ -876,9 +876,17 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeLinetypesOpensWithItsLayerPatter
         auto database = SqliteDatabase::open(projectDir() / "project.db");
         ASSERT_TRUE(database.ok());
         ASSERT_TRUE(database->execute("UPDATE layers SET linetype = 'hidden'").ok());
-        // Wind the schema back to before linetypes and drop their tables, as a
-        // project written by the previous build would be.
-        ASSERT_TRUE(database->execute("DROP TABLE linetype_elements; DROP TABLE linetypes;").ok());
+        // Wind the schema back to 3, dropping EVERYTHING migrations 4 and 5
+        // added - not just the linetype tables. Migrations are append-only and
+        // run once, so leaving a later migration's table in place makes the
+        // replay fail with "table already exists", which is the migration
+        // machinery working correctly on a fixture that lied about its version.
+        ASSERT_TRUE(database
+                        ->execute("DROP TABLE linetype_elements;"
+                                  "DROP TABLE linetypes;"
+                                  "DROP TABLE dimension_styles;"
+                                  "ALTER TABLE layers DROP COLUMN dimension_style;")
+                        .ok());
         ASSERT_TRUE(database->setUserVersion(3).ok());
     }
 
@@ -896,4 +904,90 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeLinetypesOpensWithItsLayerPatter
     EXPECT_FALSE(loaded.linetypes.contains("hidden"))
         << "no empty definition may be invented, or it would shadow a real one later";
     EXPECT_TRUE(loaded.linetypes.contains("continuous"));
+}
+
+TEST_F(ProjectStoreRoundTrip, DimensionStylesAndTheLayersThatNameThemSurvive)
+{
+    katana::entity::DimensionStyle site;
+    site.name = "site";
+    site.textHeight = 1.8;
+    site.textGap = 0.4;
+    site.extensionOffset = 0.2;
+    site.extensionBeyond = 0.9;
+    site.arrowSize = 1.5;
+    site.arrowHead = katana::entity::ArrowHead::Dot;
+    site.unitScale = 1000.0;
+    site.prefix = "~";
+    site.suffix = " mm";
+    site.decimals = 1;
+    site.roundTo = 0.5;
+    site.suppressTrailingZeros = true;
+
+    Model model;
+    ASSERT_TRUE(model.dimensionStyles.add(site).ok());
+
+    Layer dims;
+    dims.name = "dims";
+    dims.dimensionStyle = "site";
+    ASSERT_TRUE(model.layers.add(dims).ok());
+
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    // The whole struct, so a field added later and never persisted fails here
+    // rather than silently reverting to its default on every save.
+    const auto* back = loaded.dimensionStyles.find("site");
+    ASSERT_NE(back, nullptr);
+    EXPECT_EQ(*back, site);
+
+    EXPECT_EQ(loaded.layers.find("dims")->dimensionStyle, "site");
+    EXPECT_TRUE(loaded.dimensionStyles.contains("Standard")) << "the built-in must still be there";
+}
+
+TEST_F(ProjectStoreMigration, AProjectFromBeforeDimensionStylesGetsTheDefaultAndKeepsWorking)
+{
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(database
+                        ->execute("DROP TABLE dimension_styles;"
+                                  "ALTER TABLE layers DROP COLUMN dimension_style;")
+                        .ok());
+        ASSERT_TRUE(database->setUserVersion(4).ok());
+    }
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    // Every layer names no style, which means the document default - the same
+    // behaviour the project already had, rather than an invented style.
+    for (const Layer& layer : loaded.layers.all()) {
+        EXPECT_TRUE(layer.dimensionStyle.empty()) << layer.name;
+    }
+    EXPECT_TRUE(loaded.dimensionStyles.contains("Standard"));
+    EXPECT_EQ(loaded.dimensionStyles.size(), 1u);
 }

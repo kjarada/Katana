@@ -31,6 +31,9 @@ struct Layer {
     bool locked = false; // locked layers are drawn but their entities cannot be edited
     std::string linetype{kContinuousLinetype};
     double lineWeight = 0.25; // millimetres on paper
+    // Empty means the document default ("Standard"). Appended last, as every
+    // field here is, so the storage columns keep their order.
+    std::string dimensionStyle{};
 
     friend bool operator==(const Layer&, const Layer&) = default;
 };

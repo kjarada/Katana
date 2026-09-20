@@ -318,7 +318,7 @@ The required progression is:
 | 06 | Command System | **done** |
 | 07 | Project Storage | **done** |
 | 08 | Basic CAD | **done** |
-| 09 | Professional 2D CAD | partial — nested layer tree, resolved appearance and linetypes delivered; splines, hatches, blocks, dimension styles outstanding |
+| 09 | Professional 2D CAD | partial — nested layers, resolved appearance, linetypes and dimension styles delivered; splines, hatches and blocks outstanding |
 | 10 | Survey Data | **done** |
 | 11 | Coordinate Systems | **done** |
 | 12 | Survey Calculations | **done** |
@@ -546,7 +546,7 @@ loading a project that already contains one, so styles remain unreachable from
 the application even now that they take effect. A `STYLE` verb and a styles
 panel belong with the Phase 09 work below.
 
-## 5.4 Dimension styles (partially delivered)
+## 5.4 Dimension styles (delivered)
 
 `DimensionStyle`, `ArrowHead` and `DimensionStyleDatabase` in
 `include/katana/entity/tables.hpp`, with `formatMeasurement` in
@@ -583,14 +583,40 @@ entity layer may only see core, math and geometry (`tools/check_layering.cmake`)
 so `katana/geodesy/units.hpp` is unreachable - and duplicating it would be a
 second definition of a foot.
 
-**OUTSTANDING:** the style table exists and nothing uses it yet. Dimensions are
-still drawn with a fixed 5-pixel tick and a constant 12-pixel label
-(`viewport_widget.cpp`), which is screen-sized rather than model-sized and so
-plots at the wrong size. Still to come: `Layer::dimensionStyle`, resolution
-through the ByLayer chain, the renderer, commands, and schema 5. Note also that
-`entity::boundingBox` for a Dimension covers only the endpoints and the
-dimension line - not the text, the arrows or the extension overshoot - so a
-styled dimension will be culled slightly too early.
+`katana::cad::buildDimension` turns a dimension and its style into plain
+geometry - extension lines, the dimension line, arrow strokes or fills, and the
+placed text - and BOTH renderers draw from it, so the two views cannot disagree
+about what a dimension looks like. It also returns the drawn EXTENT, which the
+broad phase now culls against: `entity::boundingBox` for a Dimension covers only
+the measured points and the dimension line, so culling against it dropped
+dimensions whose label was still on screen.
+
+Everything is in model units. The viewport previously drew a fixed 5-pixel tick
+and a 12-pixel label, which looks right on screen and plots at whatever size the
+paper happens to give it, and formatted the number with `QString::number`, which
+is locale dependent.
+
+`Layer::dimensionStyle` names a style, resolved through the same ByLayer shape
+as colour: the layer's named style, else the document default. A layer naming a
+style that has gone still draws, in the default - leaving a dimension off a plan
+because its styling is missing would remove information from it.
+
+Schema 5 stores the styles and the layer column. A project from before it gets
+the default, which is exactly how it already behaved.
+
+Reachable from the application: `DIMSTYLE LIST | NEW name | SET name field value
+| DELETE name` with fields TEXT, GAP, EXTOFF, EXTBEYOND, ARROW, HEAD, SCALE,
+DECIMALS, ROUND, PREFIX, SUFFIX and TRIM, plus `LAYER DIMSTYLE layer style`.
+LIST shows what a ten-unit dimension would READ as, because that is the question
+anyone setting a style is actually asking.
+
+**OUTSTANDING:** no GUI panel - styles are set from the command line only. The
+3D view draws a dimension's lines and arrows but not its TEXT, because a glyph
+outline needs a font the 3D path does not have. Arrow fills are outlined rather
+than filled there, for the same reason `DrawList` fills only triangles. The text
+width used for centring and for the extent assumes 0.6 of the height per
+character, which matches the stroke font the 2D viewport draws with and would
+need revisiting for a real font.
 
 ## 5.3 Linetypes (delivered)
 

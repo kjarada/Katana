@@ -439,4 +439,132 @@ CommandPtr deleteLinetype(std::string name)
     return std::make_unique<DeleteLinetypeCommand>(std::move(name));
 }
 
+
+namespace {
+
+using katana::entity::DimensionStyle;
+
+class CreateDimensionStyleCommand final : public Command {
+  public:
+    explicit CreateDimensionStyleCommand(DimensionStyle style) : style_(std::move(style)) {}
+    [[nodiscard]] std::string_view name() const override { return "CreateDimensionStyle"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (context.model.dimensionStyles.contains(style_.name)) {
+            return makeError(ErrorCode::AlreadyExists, "dimension style already exists",
+                             style_.name);
+        }
+        return katana::entity::validate(style_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        return context.model.dimensionStyles.add(style_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        auto removed = context.model.dimensionStyles.remove(style_.name);
+        return removed ? Status{} : removed.error();
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    DimensionStyle style_;
+};
+
+class UpdateDimensionStyleCommand final : public Command {
+  public:
+    explicit UpdateDimensionStyleCommand(DimensionStyle style) : after_(std::move(style)) {}
+    [[nodiscard]] std::string_view name() const override { return "UpdateDimensionStyle"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (!context.model.dimensionStyles.contains(after_.name)) {
+            return makeError(ErrorCode::NotFound, "dimension style does not exist", after_.name);
+        }
+        return katana::entity::validate(after_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        const DimensionStyle* current = context.model.dimensionStyles.find(after_.name);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound, "dimension style does not exist", after_.name);
+        }
+        before_ = *current;
+        return context.model.dimensionStyles.update(after_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.dimensionStyles.update(before_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override
+    {
+        return context.model.dimensionStyles.update(after_);
+    }
+
+  private:
+    DimensionStyle after_;
+    DimensionStyle before_;
+};
+
+class DeleteDimensionStyleCommand final : public Command {
+  public:
+    explicit DeleteDimensionStyleCommand(std::string name) : name_(std::move(name)) {}
+    [[nodiscard]] std::string_view name() const override { return "DeleteDimensionStyle"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (name_ == katana::entity::kDefaultDimensionStyleName) {
+            return makeError(ErrorCode::CommandRejected,
+                             "the default dimension style cannot be deleted");
+        }
+        if (!context.model.dimensionStyles.contains(name_)) {
+            return makeError(ErrorCode::NotFound, "dimension style does not exist", name_);
+        }
+        // A layer left naming a deleted style falls back to the default and its
+        // dimensions silently change size, so the reference is reported with
+        // the layer NAMED rather than the deletion quietly allowed.
+        for (const std::string& layer : context.model.layers.names()) {
+            const katana::entity::Layer* definition = context.model.layers.find(layer);
+            if (definition != nullptr && definition->dimensionStyle == name_) {
+                return makeError(ErrorCode::CommandRejected,
+                                 "a layer still uses that dimension style", "layer=" + layer);
+            }
+        }
+        return {};
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        auto removed = context.model.dimensionStyles.remove(name_);
+        if (!removed) {
+            return removed.error();
+        }
+        removed_ = std::move(*removed);
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.dimensionStyles.add(removed_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    std::string name_;
+    DimensionStyle removed_;
+};
+
+} // namespace
+
+CommandPtr createDimensionStyle(DimensionStyle style)
+{
+    return std::make_unique<CreateDimensionStyleCommand>(std::move(style));
+}
+
+CommandPtr updateDimensionStyle(DimensionStyle style)
+{
+    return std::make_unique<UpdateDimensionStyleCommand>(std::move(style));
+}
+
+CommandPtr deleteDimensionStyle(std::string name)
+{
+    return std::make_unique<DeleteDimensionStyleCommand>(std::move(name));
+}
+
 } // namespace katana::commands

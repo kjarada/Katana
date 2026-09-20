@@ -18,6 +18,7 @@
 
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/cad/dimension_draw.hpp"
 #include "katana/geometry/spatial_index.hpp"
 
 namespace katana::cad {
@@ -41,10 +42,28 @@ namespace detail {
 // an arc, the bounding box for everything else. It stays a BROAD phase for
 // every caller, because each still applies its own exact test - picking tests
 // the true bounding box and so does not become clickable at an arc's centre.
-[[nodiscard]] inline katana::geometry::Box2 queryExtents(const katana::entity::Entity& entity)
+[[nodiscard]] inline katana::geometry::Box2 queryExtents(const katana::entity::Model& model,
+                                                         const katana::entity::Entity& entity)
 {
     if (const auto* arc = std::get_if<katana::geometry::Arc2>(&entity.geometry)) {
         return arc->circle().boundingBox();
+    }
+    if (const auto* dimension =
+            std::get_if<katana::entity::DimensionGeometry>(&entity.geometry)) {
+        // A dimension DRAWS far outside what it measures: the label, the
+        // arrows and the extension overshoot all sit beyond the measured
+        // points, and how far depends on its style. Culling against the plain
+        // bounding box drops a dimension whose label is still on screen.
+        //
+        // buildDimension is called here rather than a margin being guessed at,
+        // because a style with a large text height makes any fixed guess wrong.
+        // It costs a handful of vector appends per dimension, and only on the
+        // scan path - the indexed path stores this box once when the entity
+        // changes.
+        const auto drawing = buildDimension(*dimension, resolveDimensionStyle(model, entity));
+        if (!drawing.extent.empty()) {
+            return drawing.extent;
+        }
     }
     return katana::entity::boundingBox(entity.geometry);
 }
@@ -108,7 +127,7 @@ void forEachCandidate(const katana::entity::Model& model,
 {
     if (index == nullptr || !worthIndexing(*index, reach)) {
         model.entities.forEach([&](const katana::entity::Entity& entity) {
-            if (queryExtents(entity).intersects(reach)) {
+            if (queryExtents(model, entity).intersects(reach)) {
                 visit(entity);
             }
         });
@@ -128,7 +147,7 @@ void forEachCandidate(const katana::entity::Model& model,
             // skipping it degrades to a narrower answer rather than crashing.
             continue;
         }
-        if (queryExtents(*entity).intersects(reach)) {
+        if (queryExtents(model, *entity).intersects(reach)) {
             visit(*entity);
         }
     }

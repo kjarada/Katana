@@ -126,6 +126,12 @@ class ViewportWidget final : public QWidget {
 
     katana::interop::ReferenceData* reference_ = nullptr;
 
+    // The dimension style in force for the entity currently being drawn.
+    // Resolved once per entity in drawEntities rather than per draw call, and
+    // held here because drawGeometry's visitor is handed only the geometry.
+    // Mutable because painting is logically const, like the caches below.
+    mutable katana::entity::DimensionStyle dimensionStyle_{};
+
     // Converting RGBA bytes to a QImage, and a classification to a colour, are
     // both far too expensive to redo for every frame of a pan. Both are cached
     // against the layer id (and, for clouds, the colour mode) and rebuilt only
