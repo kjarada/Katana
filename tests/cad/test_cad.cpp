@@ -787,3 +787,46 @@ TEST(CadSnapping, CullingLongPolylinesDoesNotChangeWhatIsFound)
     request.modes = katana::cad::kDefaultSnapModes;
     EXPECT_FALSE(katana::cad::snap(model, request).has_value());
 }
+
+TEST(CadInterpreter, LinetypesCanBeDefinedListedAndAttachedToALayer)
+{
+    // The whole point of the verb: without it a pattern can be defined in the
+    // library and never reached from the application, which is finished work in
+    // the tests and unfinished work to the user.
+    Session session;
+    EXPECT_NE(session.ok("LINETYPE LIST").find("continuous"), std::string::npos);
+
+    session.ok("LINETYPE NEW fence 1 -0.5");
+    const std::string listed = session.ok("LINETYPE LIST");
+    EXPECT_NE(listed.find("fence"), std::string::npos) << listed;
+    EXPECT_NE(listed.find("period=1.5"), std::string::npos) << listed;
+
+    session.ok("LAYER NEW boundary");
+    session.ok("LAYER LTYPE boundary fence");
+    ASSERT_NE(session.document.model().layers.find("boundary"), nullptr);
+    EXPECT_EQ(session.document.model().layers.find("boundary")->linetype, "fence");
+
+    // A layer still using it blocks deletion, naming the layer so it can be
+    // found rather than just refusing.
+    const auto refused = session.interpreter.run("LINETYPE DELETE fence");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_NE(refused.error().describe().find("boundary"), std::string::npos)
+        << refused.error().describe();
+}
+
+TEST(CadInterpreter, ALinetypeWithAnOddNumberOfLengthsIsRefusedWithAUsefulReason)
+{
+    // "must end with a gap" is true and unhelpful; the actual mistake is
+    // forgetting the gap after the last dash.
+    Session session;
+    const auto refused = session.interpreter.run("LINETYPE NEW bad 1 -0.5 1");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_NE(refused.error().describe().find("pairs"), std::string::npos)
+        << refused.error().describe();
+
+    // And the DXF rules still apply underneath.
+    EXPECT_EQ(session.fails("LINETYPE NEW bad -1 0.5"), ErrorCode::InvalidArgument)
+        << "must not start with a gap";
+    session.fails("LINETYPE DELETE continuous");
+    session.fails("LAYER LTYPE 0 no-such-pattern");
+}

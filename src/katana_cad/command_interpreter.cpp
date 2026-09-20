@@ -116,6 +116,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"AR", "ARRAY"},   {"E", "ERASE"},       {"DELETE", "ERASE"},   {"DEL", "ERASE"},
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
+        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"},
         {"?", "HELP"},
     };
     return table;
@@ -210,7 +211,9 @@ Edit      OFFSET id distance side-point | TRIM id pick-point cutter-id...
           CHAMFER id id distance [distance2]
 Select    SELECT ALL | NONE | id... | LAYER name | TYPE name
 Layers    LAYER LIST | NEW name [#RRGGBB] | SET name | DELETE name
-          LAYER SHOW|HIDE|LOCK|UNLOCK name
+          LAYER SHOW|HIDE|LOCK|UNLOCK name | LAYER LTYPE layer linetype
+Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name
+          lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER | PROP key value   (selection)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
@@ -317,6 +320,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "LAYER") {
         return layer(args);
+    }
+    if (verb == "LINETYPE") {
+        return linetype(args);
     }
     if (verb == "UNDO" || verb == "REDO") {
         return undoRedo(verb, args);
@@ -742,6 +748,74 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
 
 // ---- layers -------------------------------------------------------------------------------
 
+CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
+{
+    const auto& model = document_.model();
+    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+
+    if (action == "LIST") {
+        std::ostringstream out;
+        out.precision(6);
+        for (const katana::entity::Linetype& linetype : model.linetypes.all()) {
+            out << "  " << linetype.name;
+            if (linetype.isContinuous()) {
+                out << "  (solid)";
+            } else {
+                out << "  [";
+                for (std::size_t i = 0; i < linetype.pattern.size(); ++i) {
+                    out << (i == 0 ? "" : " ") << linetype.pattern[i].length;
+                }
+                out << "]  period=" << linetype.patternLength();
+            }
+            if (!linetype.description.empty()) {
+                out << "  " << linetype.description;
+            }
+            out << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text;
+    }
+
+    if (args.size() < 2) {
+        return usage("LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name");
+    }
+    const std::string& name = args[1];
+
+    if (action == "NEW") {
+        if (args.size() < 3) {
+            return usage("LINETYPE NEW name dash gap [dash gap ...]"
+                         "   (positive = dash, negative = gap, 0 = dot; model units)");
+        }
+        katana::entity::Linetype created;
+        created.name = name;
+        created.description = "User defined";
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            const auto length = parseNumber(args[i]);
+            if (!length) {
+                return length.error();
+            }
+            created.pattern.push_back(katana::entity::LinetypeElement{*length});
+        }
+        // validate() has the real rules; this just gives the common mistake a
+        // better sentence than "must end with a gap".
+        if (created.pattern.size() % 2 != 0) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "give a gap after every dash: lengths come in pairs",
+                             std::to_string(created.pattern.size()) + " given");
+        }
+        return finish(document_.execute(cmd::createLinetype(std::move(created))),
+                      "linetype " + name + " created");
+    }
+    if (action == "DELETE") {
+        return finish(document_.execute(cmd::deleteLinetype(name)),
+                      "linetype " + name + " deleted");
+    }
+    return usage("LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name");
+}
+
 CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
 {
     const auto& model = document_.model();
@@ -762,7 +836,8 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
         return text;
     }
     if (args.size() < 2) {
-        return usage("LAYER LIST | NEW name [#RRGGBB] | SET|DELETE|SHOW|HIDE|LOCK|UNLOCK name");
+        return usage("LAYER LIST | NEW name [#RRGGBB] | SET|DELETE|SHOW|HIDE|LOCK|UNLOCK name"
+                     " | LTYPE layer linetype");
     }
     const std::string& name = args[1];
 
@@ -781,6 +856,25 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
     }
     if (action == "SET") {
         return finish(document_.setCurrentLayer(name), "current layer is " + name);
+    }
+    if (action == "LTYPE") {
+        // LAYER LTYPE <layer> <linetype>. Without a way to say this, a defined
+        // pattern can never be attached to anything and the whole feature is
+        // unreachable from the application.
+        if (args.size() < 3) {
+            return usage("LAYER LTYPE layer linetype");
+        }
+        const katana::entity::Layer* existing = model.layers.find(name);
+        if (existing == nullptr) {
+            return makeError(ErrorCode::NotFound, "layer does not exist", name);
+        }
+        if (!model.linetypes.contains(args[2])) {
+            return makeError(ErrorCode::NotFound, "linetype does not exist", args[2]);
+        }
+        katana::entity::Layer changed = *existing;
+        changed.linetype = args[2];
+        return finish(document_.execute(cmd::updateLayer(std::move(changed))),
+                      "layer " + name + " uses linetype " + args[2]);
     }
     if (action == "DELETE") {
         return finish(document_.execute(cmd::deleteLayer(name)), "layer " + name + " deleted");

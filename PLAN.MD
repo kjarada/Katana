@@ -569,6 +569,11 @@ the database's to keep. An older project naming a pattern that has no definition
 keeps the name and draws solid, exactly as it already did; no empty definition is
 invented for it, because that would shadow a real one later.
 
+Reachable from the application: `LINETYPE LIST`, `LINETYPE NEW name dash gap
+[...]` (lengths in model units, + dash, - gap, 0 dot), `LINETYPE DELETE name`,
+and `LAYER LTYPE layer linetype` to attach one. Deleting a pattern a layer or
+style still names is refused, and the error names the layer.
+
 **OUTSTANDING:** no built-in patterns are shipped. `acad.lin` is in imperial
 drawing units and the ISO set in millimetres, while a survey drawing here is in
 metres, so any table shipped would be a conversion of numbers not to hand or an
