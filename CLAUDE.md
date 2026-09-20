@@ -134,6 +134,41 @@ Evidence: <test counts, before/after measurements, external source consulted>
 Outstanding: <what this deliberately does not do>
 ```
 
+## 5.1 Hand over something runnable — MANDATORY
+
+**Before you stop working, leave a Release build the user can run, and say how
+to run it.** A session that ends with passing tests and no runnable application
+has not delivered anything the user can check.
+
+At the end of a work session, or whenever you are about to hand back:
+
+1. Build Release and run the whole suite there, not only in Debug:
+   ```sh
+   cmake --build build/release
+   ctest --test-dir build/release -j 8
+   ```
+   A Debug-only result is not evidence that the shipped configuration works.
+2. Build the desktop application and confirm the binary is newer than the
+   sources you changed. A stale executable that still launches is the easiest
+   way to report success on work that did not build.
+3. **Tell the user the exact command to launch it**, including the runtime PATH
+   the MSYS2 toolchain needs, and sample data where that makes the feature
+   visible:
+   ```sh
+   PATH="/c/msys64/ucrt64/bin:$PATH"      ./build/release/src/katana_qt/katana_qt_app.exe samples/site_plan
+   ```
+4. **Say what to look at.** Name the menu item, the command or the sample file
+   that exercises what you just built, and what correct looks like. "It builds"
+   is not a test the user can perform.
+5. Say plainly what is NOT yet visible in the GUI. A feature that exists only
+   in the library and has no way to reach it from the application is finished
+   work in the tests and unfinished work to the user; say which it is rather
+   than letting the demo imply otherwise.
+
+Never leave the application mid-refactor at the end of a session. If the work
+is genuinely incomplete, finish to the nearest point where it builds, passes
+and runs, and say what remains.
+
 ## 6. Self-improvement — leave the codebase easier to work on
 
 You are expected to improve the *conditions* for the next contributor, not only

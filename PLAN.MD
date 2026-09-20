@@ -384,6 +384,17 @@ the message.
 Do not batch unrelated work into one commit, and do not commit a half-finished
 feature to save progress.
 
+## 5.2a Standing process — hand over something runnable
+
+Before stopping work, leave a Release build that runs and say how to run it,
+what to look at, and what correct looks like. A session that ends with a green
+test suite and no runnable application has delivered nothing the user can
+check. `CLAUDE.md` section 5.1 is normative on this.
+
+Say plainly which of the work is reachable from the GUI and which exists only
+in the library with no way to invoke it yet - a feature with no route to it from
+the application is finished work in the tests and unfinished work to the user.
+
 ## 5.3 Standing process — self-improvement
 
 Every contributor is expected to leave the codebase easier to work on, not only
