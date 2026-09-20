@@ -1026,9 +1026,15 @@ that nothing had ever set. Verified on a 51 417-feature DXF at
 (255440, 7410850): without LOCAL the warning fires and names the separation;
 with it the data lands at 0,0 to 2272,1271 beside the existing plan.
 
-**OUTSTANDING:** the GUI import offers no equivalent - it neither warns nor
-offers the shift, so the warning is CLI-only. No CRS is read from the source and
-no reprojection is done, so "LOCAL" is a translation, not a transformation.
+The GUI asks BEFORE anything is added: Shift Alongside / Keep Survey
+Coordinates / Cancel, with the file's extent shown. Shifting is the default,
+because the drawing the user is already looking at is the one they want to keep
+seeing.
+
+**OUTSTANDING:** no CRS is read from the source and no reprojection is done, so
+a shift is a translation, not a transformation - two files in different
+projections still will not line up. Raster and point-cloud imports get no
+equivalent check.
 
 # 26. Phase 21 — Civil and Survey Engineering
 

@@ -1055,6 +1055,56 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
         return;
     }
 
+    // Survey data in a projected CRS carries coordinates like (255440, 7410850)
+    // while a drawing started from scratch sits near the origin. Merging them
+    // succeeds and leaves the existing drawing a dot smaller than a pixel, so
+    // the choice is put to the user BEFORE anything is added rather than left
+    // to be discovered by zooming to extents.
+    const auto advice =
+        interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
+    if (advice.farApart) {
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Question);
+        box.setWindowTitle("Far from the current drawing");
+        box.setText(QString::fromStdString(advice.message) + ".");
+        box.setInformativeText(
+            QString("The file covers %1,%2 to %3,%4.\n\n"
+                    "Shifting moves the imported data as one piece so it sits beside the "
+                    "drawing; its shape and internal dimensions are unchanged.")
+                .arg(imported->bounds.min.x, 0, 'f', 2)
+                .arg(imported->bounds.min.y, 0, 'f', 2)
+                .arg(imported->bounds.max.x, 0, 'f', 2)
+                .arg(imported->bounds.max.y, 0, 'f', 2));
+        QPushButton* shift = box.addButton("Shift Alongside", QMessageBox::AcceptRole);
+        QPushButton* keep = box.addButton("Keep Survey Coordinates", QMessageBox::DestructiveRole);
+        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(shift);
+        box.exec();
+
+        if (box.clickedButton() == cancel) {
+            logMessage("Import cancelled.");
+            return;
+        }
+        if (box.clickedButton() == shift) {
+            interop::VectorImportOptions options;
+            options.originShift = advice.suggestedShift;
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            auto shifted = interop::importVector(path, options);
+            QApplication::restoreOverrideCursor();
+            if (!shifted.ok()) {
+                logMessage(QString::fromStdString(shifted.error().describe()), true);
+                return;
+            }
+            imported = std::move(shifted);
+            logMessage(QString("Shifted the imported data by %1,%2 to sit beside the drawing.")
+                           .arg(advice.suggestedShift.x, 0, 'f', 3)
+                           .arg(advice.suggestedShift.y, 0, 'f', 3));
+        } else {
+            (void)keep;
+            logMessage(QString::fromStdString(advice.message) + ".", true);
+        }
+    }
+
     // Layers must exist before the entities that reference them, and the whole
     // import has to be ONE undo step - a user who imports a shapefile by
     // mistake expects a single Ctrl+Z to remove it, not one per layer.
@@ -1067,6 +1117,7 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
         }
     }
     const std::size_t created = imported->entities.size();
+    const auto importedBounds = imported->bounds;
     transaction->add(cmd::createEntities(std::move(imported->entities)));
 
     const auto status = document_.execute(std::move(transaction));
@@ -1078,6 +1129,13 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
     }
 
     logMessage("Imported " + grouped(created) + " entities from " + fromPath(path.filename()));
+    if (!importedBounds.empty()) {
+        logMessage(QString("  extent %1,%2 to %3,%4")
+                       .arg(importedBounds.min.x, 0, 'f', 2)
+                       .arg(importedBounds.min.y, 0, 'f', 2)
+                       .arg(importedBounds.max.x, 0, 'f', 2)
+                       .arg(importedBounds.max.y, 0, 'f', 2));
+    }
     for (const std::string& warning : imported->warnings) {
         logMessage("  " + QString::fromStdString(warning));
     }
