@@ -316,3 +316,102 @@ TEST(CompareSurfaces, RejectsEmptySurfaces)
     EXPECT_EQ(compareSurfaces(surface, TinSurface{}).error().code, ErrorCode::InvalidArgument);
     EXPECT_EQ(compareSurfaces(TinSurface{}, TinSurface{}).error().code, ErrorCode::InvalidArgument);
 }
+
+// ---- the spatial cull must lose nothing (CLAUDE.md section 4) --------------------------
+
+TEST(CompareSurfaces, EveryPieceOfTheCommonGroundIsFoundByTheIndexedSearch)
+{
+    // compareSurfaces pairs triangles through a spatial index rather than
+    // testing all pairs. The pieces it keeps must tile the common ground
+    // exactly: any pair the index failed to return is missing area, and area is
+    // the one quantity whose true value is known here in closed form.
+    //
+    // Both surfaces carry the four corners of the same 100 m square, so their
+    // convex hulls - and therefore the common ground - are exactly that square,
+    // 10 000 m^2. The interiors are triangulated from different random points,
+    // so no triangle of one matches a triangle of the other and the overlay is
+    // a genuine subdivision rather than a one-to-one correspondence.
+    Random existingRandom(101);
+    Random designRandom(202);
+    const TinSurface existing =
+        buildFromPoints(planePoints(Plane{0.02, -0.013, 5.0}, 100.0, 300, existingRandom));
+    const TinSurface design =
+        buildFromPoints(planePoints(Plane{-0.011, 0.017, 6.0}, 100.0, 200, designRandom));
+    ASSERT_FALSE(existing.empty());
+    ASSERT_FALSE(design.empty());
+
+    const auto result = compareSurfaces(existing, design);
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+
+    // 1e-6 m^2 on 10 000 m^2 is 1e-10 relative - far tighter than a single
+    // dropped triangle, the smallest of which spans several square metres here.
+    EXPECT_NEAR(result.value().planArea, 10000.0, 1e-6);
+    EXPECT_NEAR(result.value().cutArea + result.value().fillArea, 10000.0, 1e-6);
+
+    // The subdivision is real: more pieces than either surface has triangles,
+    // so the test exercises many-to-many clipping and not a trivial match. A
+    // generator that could not reach that case would read as coverage while
+    // proving nothing.
+    EXPECT_GT(result.value().overlayTriangleCount,
+              existing.triangleCount() + design.triangleCount());
+
+    // Shown to fail, not assumed to: dropping one candidate pair in every seven
+    // from the index result moves planArea by 779 m^2 of 10 000 and fails this
+    // test (and five of the ones above it). Its sensitivity does have a floor -
+    // shrinking the query box by 5 cm loses only sub-millimetre slivers along
+    // triangle boundaries and is NOT caught here. What this test protects is
+    // the loss of a pair that overlaps in real area, which is the way a broad
+    // phase actually goes wrong.
+}
+
+TEST(CompareSurfaces, TheAnswerDoesNotDependOnHowTheGridBucketsTriangles)
+{
+    // The same two surfaces, moved far from the origin. The hash grid assigns
+    // every triangle to a different cell, and triangles that shared a cell
+    // before no longer do, so a cull that depended on bucketing would move the
+    // answer.
+    //
+    // `planePoints` lifts points onto a plane defined in ABSOLUTE coordinates,
+    // so shifting the site would also change every elevation and the two
+    // surfaces would no longer cross. The intercept is corrected for that: a
+    // plane with c' = c - a*x0 - b*y0 gives, at (x0 + u, y0 + v), exactly the
+    // elevation the original gives at (u, v). The result is a rigid
+    // translation - the same shape, in the same relative position - which is
+    // what makes this a test of the index rather than of arithmetic.
+    const double shift = 12345.0;
+    const auto shifted = [](const Plane& plane, double x0, double y0) {
+        return Plane{plane.a, plane.b, plane.c - plane.a * x0 - plane.b * y0};
+    };
+    const auto build = [&](std::uint32_t seed, const Plane& plane, double x0, double y0) {
+        Random random(seed);
+        return buildFromPoints(planePoints(shifted(plane, x0, y0), 100.0, 250, random, x0, y0));
+    };
+    const Plane existingPlane{0.02, -0.013, 5.0};
+    const Plane designPlane{-0.011, 0.017, 6.0};
+
+    const auto here =
+        compareSurfaces(build(31, existingPlane, 0.0, 0.0), build(37, designPlane, 0.0, 0.0));
+    const auto there = compareSurfaces(build(31, existingPlane, shift, shift),
+                                       build(37, designPlane, shift, shift));
+    ASSERT_TRUE(here.ok()) << here.error().describe();
+    ASSERT_TRUE(there.ok()) << there.error().describe();
+
+    // Exactly the same pieces have to be found, however they were bucketed.
+    EXPECT_EQ(here.value().overlayTriangleCount, there.value().overlayTriangleCount);
+
+    // The values agree only to floating point. Coordinates near 12 345 have an
+    // ulp of 1.8e-12 against 1.4e-14 near 100, about 128 times coarser, and a
+    // plan area is built from differences of them, so each triangle's area
+    // carries roughly 1e-12 relative error. Accumulated over the ~2000 pieces
+    // with independent signs that is ~5e-7 absolute on a volume of 1.1e4 m^3.
+    // 1e-4 leaves two decades over that estimate, in case the accumulation is
+    // less favourable than a random walk.
+    EXPECT_NEAR(here.value().planArea, there.value().planArea, 1e-4);
+    EXPECT_NEAR(here.value().cut, there.value().cut, 1e-4);
+    EXPECT_NEAR(here.value().fill, there.value().fill, 1e-4);
+
+    // Not the trivial all-cut or all-fill case: the planes genuinely cross, so
+    // the mixed-sign path of SignedIntegral is exercised on both runs.
+    EXPECT_GT(here.value().cut, 1.0);
+    EXPECT_GT(here.value().fill, 1.0);
+}

@@ -1,5 +1,7 @@
 #include "katana/terrain/volume.hpp"
 
+#include "katana/geometry/spatial_index.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -7,8 +9,6 @@
 #include <optional>
 #include <vector>
 
-#include "cdt_backend.hpp"
-#include "point_merge.hpp"
 #include "summation.hpp"
 
 namespace katana::terrain {
@@ -88,24 +88,81 @@ class SignedIntegral {
     detail::CompensatedSum negativeArea_;
 };
 
-// The part of one surface that takes part in an overlay.
-struct OverlayPart {
-    const TinSurface* surface = nullptr;
-    std::vector<std::uint8_t> selected; // per triangle
-    std::uint8_t tag = 1;
-};
-
-// Triangles whose bounding box reaches into `region`; all others cannot lie in
-// the common area.
-std::vector<std::uint8_t> selectTriangles(const TinSurface& surface, const Box2& region)
+// A triangle's corners counter-clockwise. The clipper below needs a known
+// winding to decide which side of a clip edge is inside, and a TIN triangle's
+// stored order is whatever the triangulation produced.
+std::array<Point2, 3> orientedCorners(const Triangle2& triangle)
 {
-    std::vector<std::uint8_t> selected(surface.triangleCount(), std::uint8_t{0});
-    for (std::size_t t = 0; t < surface.triangleCount(); ++t) {
-        if (surface.planTriangle(t).boundingBox().intersects(region)) {
-            selected[t] = 1;
+    std::array<Point2, 3> corners{triangle.a, triangle.b, triangle.c};
+    if (triangle.signedArea() < 0.0) {
+        std::swap(corners[1], corners[2]);
+    }
+    return corners;
+}
+
+// Sutherland-Hodgman clip of one triangle by another. Both are convex, so the
+// intersection is convex with at most six corners; `out` holds them counter-
+// clockwise and the count is returned. Fewer than three means the triangles
+// meet in at most a segment and contribute no area.
+//
+// WHY THIS IS EXACT WHERE IT MATTERS. The inside test is `cross >= 0`, not
+// `> 0`. For a subject corner lying exactly on a clip edge - which is the
+// normal case where two triangles share an edge or a vertex - the cross
+// product is exactly zero in IEEE arithmetic, because it evaluates to a
+// quantity of the form `a - a` when the point is one of the two that define
+// the edge. Counting it as inside means no crossing point is constructed for
+// it, so the corner is reproduced bit for bit rather than recomputed. Two
+// triangles that share an edge therefore clip to exactly that segment, whose
+// fan has signed area exactly 0.0 and is rejected by the caller's `area > 0`
+// guard. With `> 0` the same case would construct a near-degenerate polygon of
+// some tiny arbitrary area, and comparing a surface with itself would no
+// longer be exactly zero.
+std::size_t clipTriangleToTriangle(const std::array<Point2, 3>& subject,
+                                   const std::array<Point2, 3>& window,
+                                   std::array<Point2, 8>& out)
+{
+    // Two buffers of eight: each clip edge can add at most one corner, and
+    // three edges applied to a triangle cannot exceed six.
+    std::array<Point2, 8> buffer{};
+    std::size_t count = 3;
+    for (std::size_t i = 0; i < 3; ++i) {
+        out[i] = subject[i];
+    }
+
+    for (std::size_t edge = 0; edge < 3 && count >= 3; ++edge) {
+        const Point2& p = window[edge];
+        const Point2& q = window[(edge + 1) % 3];
+        const double ex = q.x - p.x;
+        const double ey = q.y - p.y;
+        const auto side = [&](const Point2& v) { return ex * (v.y - p.y) - ey * (v.x - p.x); };
+
+        std::size_t produced = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Point2& current = out[i];
+            const Point2& next = out[(i + 1) % count];
+            const double sideCurrent = side(current);
+            const double sideNext = side(next);
+            if (sideCurrent >= 0.0) {
+                buffer[produced++] = current;
+            }
+            // A crossing only when the two strictly straddle the line. When
+            // either is exactly on it that endpoint has already been kept (or
+            // will be), so constructing a point here would duplicate it.
+            if ((sideCurrent > 0.0 && sideNext < 0.0) || (sideCurrent < 0.0 && sideNext > 0.0)) {
+                const double t = sideCurrent / (sideCurrent - sideNext);
+                buffer[produced++] = Point2(current.x + t * (next.x - current.x),
+                                            current.y + t * (next.y - current.y));
+            }
+            if (produced >= buffer.size()) {
+                break;
+            }
+        }
+        count = produced;
+        for (std::size_t i = 0; i < count; ++i) {
+            out[i] = buffer[i];
         }
     }
-    return selected;
+    return count < 3 ? 0 : count;
 }
 
 // Elevation of the plane of `triangle` at the three given positions. The
@@ -126,36 +183,6 @@ std::optional<std::array<double, 3>> planeElevations(const TinSurface& surface,
         elevations[i] = (*weights)[0] * surface.vertices()[tri[0]].z +
                         (*weights)[1] * surface.vertices()[tri[1]].z +
                         (*weights)[2] * surface.vertices()[tri[2]].z;
-    }
-    return elevations;
-}
-
-// Elevations of `surface` at the corners of an overlay triangle that lies in one
-// of its triangles. The triangle is found through the centroid, which is
-// strictly inside the overlay triangle and so never ambiguous between
-// neighbours; nullopt when the overlay triangle is off the surface.
-std::optional<std::array<double, 3>> cornerElevations(const TinSurface& surface,
-                                                      const std::array<Point2, 3>& corners)
-{
-    const Point2 centroid = Triangle2{corners[0], corners[1], corners[2]}.centroid();
-    const auto location = surface.locate(centroid);
-    if (!location) {
-        return std::nullopt;
-    }
-    if (location->interior) {
-        if (const auto elevations = planeElevations(surface, location->triangle, corners)) {
-            return elevations;
-        }
-    }
-    // The centroid sits on a sliver or on the rim: no reliable plane. Such an
-    // overlay triangle has next to no area; sample its corners individually.
-    std::array<double, 3> elevations{};
-    for (std::size_t i = 0; i < 3; ++i) {
-        const auto z = surface.elevationAt(corners[i]);
-        if (!z) {
-            return std::nullopt;
-        }
-        elevations[i] = *z;
     }
     return elevations;
 }
@@ -203,80 +230,74 @@ Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinS
                              std::min(existing.bounds().max.y, design.bounds().max.y)));
     const Box2 region = common.inflated(tol::kGeometric);
 
-    std::array<OverlayPart, 2> parts{OverlayPart{&existing, selectTriangles(existing, region), 1},
-                                     OverlayPart{&design, selectTriangles(design, region), 2}};
-
-    // Overlay input: every vertex of the selected triangles (exactly equal plan
-    // positions of the two surfaces become one point; nothing is snapped) and
-    // every edge once, as a constraint.
-    std::size_t capacity = 0;
-    for (const OverlayPart& part : parts) {
-        capacity += 3 * static_cast<std::size_t>(
-                            std::count(part.selected.begin(), part.selected.end(), 1));
-    }
-    detail::PointMerger merger(capacity, 0.0);
-    std::vector<detail::CdtConstraint> constraints;
-    for (const OverlayPart& part : parts) {
-        const TinSurface& surface = *part.surface;
-        std::vector<std::uint32_t> pointOfVertex(surface.vertexCount(), detail::kNoIndex);
-        for (std::size_t t = 0; t < surface.triangleCount(); ++t) {
-            if (part.selected[t] == 0) {
-                continue;
-            }
-            const TinTriangle& tri = surface.triangles()[t];
-            for (const std::uint32_t v : tri) {
-                if (pointOfVertex[v] == detail::kNoIndex) {
-                    const Point3& p = surface.vertices()[v];
-                    pointOfVertex[v] = merger.add(Point2(p.x, p.y)).index;
-                }
-            }
-            for (std::size_t k = 0; k < 3; ++k) {
-                const std::uint32_t neighbor = surface.neighbors()[t][k];
-                const bool mine = neighbor == kNoTriangle || part.selected[neighbor] == 0 ||
-                                  t < neighbor;
-                if (mine) {
-                    constraints.push_back(
-                        {pointOfVertex[tri[k]], pointOfVertex[tri[(k + 1) % 3]], part.tag});
-                }
-            }
+    // Broad phase over the design triangles that reach the common area. Only
+    // these can contribute, and only they are worth indexing.
+    std::vector<katana::geometry::SpatialEntry> entries;
+    entries.reserve(design.triangleCount());
+    for (std::size_t t = 0; t < design.triangleCount(); ++t) {
+        const Box2 box = design.planTriangle(t).boundingBox();
+        if (box.intersects(region)) {
+            entries.push_back({static_cast<katana::geometry::SpatialId>(t), box});
         }
     }
-    if (merger.positions().size() < 3) {
+    if (entries.empty()) {
         return result;
     }
+    katana::geometry::SpatialIndex index;
+    index.rebuild(entries);
 
-    auto overlay = detail::triangulate({merger.positions(), constraints, false});
-    if (!overlay) {
-        return overlay.error();
-    }
-    const std::size_t inputCount = merger.positions().size();
-    const auto position = [&](std::uint32_t vertex) {
-        return vertex < inputCount ? merger.positions()[vertex]
-                                   : overlay->generatedPoints[vertex - inputCount];
-    };
-
-    // Each overlay triangle lies in one triangle of each surface (or off a
-    // surface), so zDesign - zExisting is linear over it.
     SignedIntegral integral;
     detail::CompensatedSum planArea;
-    for (const auto& tri : overlay->triangles) {
-        const std::array<Point2, 3> corners{position(tri[0]), position(tri[1]), position(tri[2])};
-        const double area = Triangle2{corners[0], corners[1], corners[2]}.signedArea();
-        if (!(area > 0.0)) {
+    std::vector<katana::geometry::SpatialId> candidates;
+    std::array<Point2, 8> piece{};
+
+    // Existing triangles in index order, and for each one its design candidates
+    // in ascending id order (SpatialIndex guarantees that sort), so the terms
+    // reach the compensated sums in a fixed order and the result does not
+    // depend on how the grid happened to bucket anything - Rule 7.
+    for (std::size_t te = 0; te < existing.triangleCount(); ++te) {
+        const Triangle2 planExisting = existing.planTriangle(te);
+        const Box2 boxExisting = planExisting.boundingBox();
+        if (!boxExisting.intersects(region)) {
             continue;
         }
-        const auto zExisting = cornerElevations(existing, corners);
-        if (!zExisting) {
-            continue;
+        const std::array<Point2, 3> subject = orientedCorners(planExisting);
+        index.query(boxExisting, candidates);
+        for (const katana::geometry::SpatialId id : candidates) {
+            const auto td = static_cast<std::uint32_t>(id);
+            const std::array<Point2, 3> window = orientedCorners(design.planTriangle(td));
+            const std::size_t corners = clipTriangleToTriangle(subject, window, piece);
+            if (corners < 3) {
+                continue;
+            }
+            // The clipped region is convex, so a fan from its first vertex
+            // covers it exactly once with no coordinates that are not already
+            // on its boundary.
+            for (std::size_t i = 1; i + 1 < corners; ++i) {
+                const std::array<Point2, 3> part{piece[0], piece[i], piece[i + 1]};
+                const double area = Triangle2{part[0], part[1], part[2]}.signedArea();
+                if (!(area > 0.0)) {
+                    continue;
+                }
+                // `part` lies inside both triangles by construction, so both
+                // planes are evaluated with barycentric weights in [0, 1] and
+                // neither surface has to be searched for the triangle to use.
+                const auto zExisting = planeElevations(existing, static_cast<std::uint32_t>(te),
+                                                       part);
+                if (!zExisting) {
+                    continue;
+                }
+                const auto zDesign = planeElevations(design, td, part);
+                if (!zDesign) {
+                    continue;
+                }
+                integral.add(area, {(*zDesign)[0] - (*zExisting)[0],
+                                    (*zDesign)[1] - (*zExisting)[1],
+                                    (*zDesign)[2] - (*zExisting)[2]});
+                planArea.add(area);
+                ++result.overlayTriangleCount;
+            }
         }
-        const auto zDesign = cornerElevations(design, corners);
-        if (!zDesign) {
-            continue;
-        }
-        integral.add(area, {(*zDesign)[0] - (*zExisting)[0], (*zDesign)[1] - (*zExisting)[1],
-                            (*zDesign)[2] - (*zExisting)[2]});
-        planArea.add(area);
-        ++result.overlayTriangleCount;
     }
     result.fill = integral.positive();
     result.cut = integral.negative();

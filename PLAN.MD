@@ -328,7 +328,7 @@ The required progression is:
 | 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons; civil solids on the TIN instead |
 | 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; LOD reshaped to use COPC rather than a bespoke octree |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
-| 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` at 12.1 s is the real target, measured |
+| 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
 | 21 | Civil Engineering | partial — profiles and cross sections along an alignment, with exact surface-break sampling; alignments, corridors, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
@@ -1083,13 +1083,20 @@ the largest area of the codebase with no benchmark, which is why this list had
 been written from the shape of the API instead. Full table in `docs/terrain.md`.
 Release, 16 x 2496 MHz:
 
-* **`compareSurfaces` is 12 150 ms** comparing a 200 000-vertex surface with a
-  50 000-vertex one. It is 7.2x the worst `buildTin` measured, and it is the
-  single number an earthworks job exists to produce. **This is the bottleneck,
-  and nothing in the original list above would have touched it.** The exact
-  overlay must stay exact - `volume.hpp` promises it samples nothing, and that
-  promise is why the answer can be signed off - so the work is to make the same
-  answer cheaper, with an equivalence test, not to substitute a sampled grid.
+* **`compareSurfaces` was 12 150 ms, now 2 141 ms (5.7x). DELIVERED.**
+  Comparing a 200 000-vertex surface with a 50 000-vertex one took 7.2x the
+  worst `buildTin` measured, for the single number an earthworks job exists to
+  produce. **This was the bottleneck, and nothing in the original list above
+  would have touched it.** Instrumentation put 82% of it in one constrained
+  triangulation of the merged overlay: 250 000 points, 749 928 constraints.
+  That triangulation was unnecessary. Two triangles are convex, so their
+  intersection is a convex polygon needing no new vertices, and the set of
+  those intersections is the same partition the global overlay was building.
+  Pairs come from `geometry::SpatialIndex`, the broad phase the codebase
+  already had. The answer is unchanged - no expected value was touched, and the
+  exactness `volume.hpp` promises is preserved rather than traded for a grid.
+  Full record, including why the clipper's inside test must be `>= 0`, in
+  `docs/terrain.md`.
 * **`buildTin` is 1681 ms at 400 000 points**, 360 ms at 100 000. Second
   largest, and the one every user reaches: it runs on import and on every
   surface rebuild. Cost per point rises from 3.49 to 4.20 microseconds across

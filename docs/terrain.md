@@ -28,15 +28,16 @@ would have measured faster than any real job.
 | `contours`, 5.0 m interval | 48.3 ms | ~5 bands |
 | `contours`, 1.0 m interval | 57.7 ms | ~25 bands |
 | `contours`, 0.2 m interval | 95.4 ms | ~125 bands |
-| **`compareSurfaces` 200k vs 50k** | **12 150 ms** | exact overlay |
+| **`compareSurfaces` 200k vs 50k** | 12 150 ms -> **2 141 ms** | see below |
 
 ### What that changes
 
-**`compareSurfaces` is the bottleneck, not `buildTin`.** Twelve seconds, on a
+**`compareSurfaces` was the bottleneck, not `buildTin`.** Twelve seconds, on a
 site that is not large, for the single number an earthworks job exists to
-produce. It is 7.2× the worst `buildTin` in the table and 32× the cost of
-building the design surface it compares against. Nothing in Phase 19's original
-outstanding list would have touched it.
+produce — 7.2× the worst `buildTin` in the table and 32× the cost of building
+the design surface it compares against. Nothing in Phase 19's original
+outstanding list would have touched it. It has since been fixed; the diagnosis
+is kept because it is the reason the fix took the shape it did.
 
 The reason is in `volume.hpp`: the overlay merges both triangulations into one
 constrained triangulation with *every* edge of *both* surfaces as a constraint,
@@ -46,12 +47,77 @@ constraint edges — and the breakline rows above show constraint is what is
 expensive: 100 breaklines of 200 vertices (20 000 constrained edges, 8% of the
 point count) add 55% to a build.
 
-That exactness is not negotiable and must not be traded for a sampled grid — it
+That exactness is not negotiable and must not be traded for a sampled grid - it
 is the property `volume.hpp` promises and the reason the answer can be signed
-off. The work is to make the *same* answer cheaper: the surfaces overlap only
-where their bounds do, and the overlay currently gains nothing from the fact
-that both inputs are already triangulated. Any change here needs an equivalence
-test against the current result, per CLAUDE.md section 4.
+off. So the fix had to produce the *same* answer, faster.
+
+### The fix: clip triangle pairs, do not triangulate the union
+
+Instrumenting `compareSurfaces` split its 12 150 ms as:
+
+| Stage | Time | Share |
+| --- | --- | --- |
+| collect points and constraints | 101 ms | 1% |
+| **constrained triangulation of the overlay** | **9 937 ms** | **82%** |
+| integrate over the overlay triangles | 2 072 ms | 17% |
+
+250 000 merged points and 749 928 constraints, producing 1 981 985 overlay
+triangles. The global triangulation was the whole cost.
+
+It was also unnecessary. The overlay exists for exactly one reason: every piece
+must lie inside one triangle of each surface, so that the elevation difference
+is linear over it. The intersection of two triangles is already such a piece -
+both are convex, so the intersection is a convex polygon of at most six corners,
+and a fan from one of its corners gives triangles that need no new vertices. The
+set of those intersections, over every overlapping pair, is the same partition
+the global triangulation was building, obtained pairwise.
+
+Pairs are found through `geometry::SpatialIndex` over the design triangles,
+which is the broad phase the codebase already has rather than a second one.
+
+**12 150 ms to 2 141 ms, 5.7x**, with 765 tests passing and no expected value
+changed. `buildTin`, `elevationAt` and `contours` were re-measured after the
+change and did not move.
+
+Two things improved besides the time:
+
+* **No point location.** The old integration called `locate(centroid)` on each
+  surface for every overlay triangle, and fell back to sampling the corners
+  individually when the centroid landed on a rim or a sliver - a fallback that
+  is not exact. Clipping knows which pair produced each piece, so both planes
+  are evaluated by barycentric weights that are in [0, 1] by construction.
+* **One less dependency.** `volume.cpp` no longer includes the CDT backend or
+  the point merger at all.
+
+The clipper's inside test is `cross >= 0` rather than `> 0`, and that is
+load-bearing, not a detail. When a subject corner lies exactly on a clip edge -
+the normal case for triangles that share an edge - the cross product is exactly
+zero in IEEE arithmetic, because it reduces to `a - a` for the two points that
+define the edge. Treating it as inside means no crossing point is constructed
+and the corner is reproduced bit for bit, so two triangles sharing an edge clip
+to exactly that segment, whose fan has signed area exactly `0.0` and is
+rejected. With `> 0` the same case would build a sliver of some arbitrary tiny
+area, and `CompareSurfaces.ASurfaceAgainstItselfIsExactlyZero` would no longer
+hold.
+
+**What the cull is tested against.** CLAUDE.md section 4 requires proving a
+culled run finds what an exhaustive one did.
+`EveryPieceOfTheCommonGroundIsFoundByTheIndexedSearch` uses the one quantity
+known in closed form: both surfaces carry the corners of the same 100 m square,
+so the pieces must tile exactly 10 000 m^2, and any pair the index failed to
+return is missing area. It was shown to fail rather than assumed to - dropping
+one candidate in every seven moves `planArea` by 779 m^2 and fails it and five
+older tests. Its sensitivity has a floor, recorded in the test: shrinking the
+query box by 5 cm loses only sub-millimetre boundary slivers and is not caught.
+`TheAnswerDoesNotDependOnHowTheGridBucketsTriangles` translates the whole site
+12 345 m so every triangle lands in a different cell.
+
+**Still open.** 2 141 ms is not fast; it is 5.7x less slow. The remaining cost
+is now spread across roughly two million pair clips rather than concentrated in
+one call, so the next step - if the measurement justifies one - is the
+`TaskPool`, which this loop suits: existing triangles are independent and the
+only shared state is the compensated sums, which would need per-range
+accumulators combined in index order to keep Rule 7.
 
 **`buildTin` is second, and it is the one every user reaches** — it runs on
 import and on every surface rebuild. 1681 ms at 400 000 points is over
