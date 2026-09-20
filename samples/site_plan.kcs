@@ -1,0 +1,54 @@
+# Katana sample drawing - a small site plan.
+# Run:  katana_cli samples/site_plan.kcs
+# or open the saved project from the GUI: File > Open -> samples/site_plan
+
+# ---- layers -------------------------------------------------------------
+LAYER NEW BOUNDARY #FFD54F
+LAYER NEW BUILDING #4FC3F7
+LAYER NEW ROAD     #9E9E9E
+LAYER NEW UTILITY  #E040FB
+LAYER NEW ANNOT    #FFFFFF
+LAYER NEW DIMS     #81C784
+
+# ---- parcel boundary ----------------------------------------------------
+LAYER SET BOUNDARY
+PLINE 0,0 160,0 175,90 80,130 0,100 CLOSE
+
+# ---- building footprint -------------------------------------------------
+LAYER SET BUILDING
+RECT 40,35 110,85
+# a bay window off the south wall
+PLINE 60,35 60,25 85,25 85,35
+
+# ---- road ---------------------------------------------------------------
+LAYER SET ROAD
+# centreline: straight run into a curve at the east end
+LINE 5,15 120,15
+ARC 120,15 145,18 160,32
+# kerb lines, offset both sides of the straight
+LINE 5,20 120,20
+LINE 5,10 120,10
+
+# ---- utilities ----------------------------------------------------------
+LAYER SET UTILITY
+LINE 20,60 20,15
+LINE 20,60 75,60
+CIRCLE 20,60 2.5
+CIRCLE 20,15 2.5
+CIRCLE 75,60 2.5
+
+# ---- annotation ---------------------------------------------------------
+LAYER SET ANNOT
+TEXT 52,58 7 "BUILDING A"
+TEXT 6,112 6 "PARCEL 42"
+TEXT 30,7 4 "ACCESS ROAD"
+TEXT 24,64 3 "MH-01"
+
+# ---- dimensions ---------------------------------------------------------
+LAYER SET DIMS
+DIM 0,0 160,0 -14
+DIM 40,35 110,35 -6
+DIM 0,0 0,100 -14
+
+LAYER SET BOUNDARY
+LIST

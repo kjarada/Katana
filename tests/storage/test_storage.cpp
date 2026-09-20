@@ -1,0 +1,595 @@
+#include <gtest/gtest.h>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+#include "katana/storage/project_store.hpp"
+#include "katana/storage/sqlite_database.hpp"
+
+using namespace katana::storage;
+namespace fs = std::filesystem;
+using katana::core::ErrorCode;
+using katana::entity::Color;
+using katana::entity::Entity;
+using katana::entity::Layer;
+using katana::entity::Model;
+using katana::entity::PropertyDefinition;
+using katana::entity::PropertyType;
+using katana::entity::PropertyValue;
+using katana::entity::Style;
+using katana::geometry::Arc2;
+using katana::geometry::Circle2;
+using katana::geometry::Point2;
+using katana::geometry::Polyline2;
+using katana::geometry::Segment2;
+
+namespace {
+
+// Each test gets its own empty directory, removed afterwards.
+class StorageTest : public ::testing::Test {
+  protected:
+    void SetUp() override
+    {
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        root_ = fs::temp_directory_path() / "katana-storage-tests" /
+                (std::string(info->test_suite_name()) + "." + info->name());
+        fs::remove_all(root_);
+        fs::create_directories(root_);
+    }
+    void TearDown() override
+    {
+        std::error_code ignored;
+        fs::remove_all(root_, ignored);
+    }
+
+    [[nodiscard]] fs::path projectDir() const { return root_ / "site.katana"; }
+
+    fs::path root_;
+};
+
+using SqliteWrapper = StorageTest;
+using ProjectStoreLifecycle = StorageTest;
+using ProjectStoreRoundTrip = StorageTest;
+using ProjectStoreMigration = StorageTest;
+using ProjectStoreRecovery = StorageTest;
+
+Model sampleModel()
+{
+    Model model;
+    EXPECT_TRUE(model.layers.add(Layer{"Survey", Color{255, 0, 0, 255}, true, false, "dashed", 0.5}).ok());
+    EXPECT_TRUE(model.layers.add(Layer{"Locked", Color{0, 0, 255, 128}, false, true}).ok());
+    EXPECT_TRUE(model.styles.add(Style{"Boundary", Color{0, 255, 0, 255}, 0.7, "continuous"}).ok());
+    EXPECT_TRUE(model.styles.add(Style{"ByLayer", std::nullopt, 0.25, "continuous"}).ok());
+    EXPECT_TRUE(model.properties
+                    .define(PropertyDefinition{"elevation", PropertyType::Real, "Ground level (m)",
+                                               PropertyValue{0.0}})
+                    .ok());
+    EXPECT_TRUE(model.properties.define(PropertyDefinition{"code", PropertyType::Text, "", {}}).ok());
+
+    Entity line;
+    line.geometry = Segment2{Point2(500000.123456789, 5000000.987654321), Point2(1.0 / 3.0, -2e-9)};
+    line.layer = "Survey";
+    line.style = "Boundary";
+    line.color = Color{1, 2, 3, 255};
+    line.properties = {{"elevation", 101.25}, {"code", std::string("IP \"A\"")}, {"n", std::int64_t{7}}};
+    line.metadata = {{"source", std::string("fieldbook.csv")}};
+    EXPECT_TRUE(model.entities.add(line).ok());
+
+    Entity hidden;
+    hidden.geometry = Circle2{Point2(3, 4), 5.5};
+    hidden.visible = false;
+    EXPECT_TRUE(model.entities.add(hidden).ok());
+
+    for (const katana::entity::Geometry& geometry : std::initializer_list<katana::entity::Geometry>{
+             katana::entity::PointGeometry{Point2(9, 9)}, Arc2{Point2(0, 0), 2.0, 0.5, -1.5},
+             Polyline2{{Point2(0, 0), Point2(4, 0), Point2(4, 3)}, true},
+             katana::entity::TextGeometry{Point2(1, 1), "Ünïcödé — BM1", 2.5, 0.25},
+             katana::entity::DimensionGeometry{Point2(0, 0), Point2(10, 0), 2.0, "10.00"}}) {
+        Entity entity;
+        entity.geometry = geometry;
+        EXPECT_TRUE(model.entities.add(entity).ok());
+    }
+    // Retire an id so that nextEntityId is not simply "count + 1".
+    const auto doomed = model.entities.add(hidden);
+    EXPECT_TRUE(model.entities.remove(*doomed).ok());
+    return model;
+}
+
+void overwriteWithGarbage(const fs::path& file)
+{
+    const auto size = fs::file_size(file);
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    const std::string garbage(static_cast<std::size_t>(size), '\x5A');
+    out.write(garbage.data(), static_cast<std::streamsize>(garbage.size()));
+}
+
+} // namespace
+
+// ---- SQLite wrapper ------------------------------------------------------------
+
+TEST_F(SqliteWrapper, StatementsBindStepAndReportErrors)
+{
+    auto database = SqliteDatabase::openInMemory();
+    ASSERT_TRUE(database.ok());
+    ASSERT_TRUE(database->execute("CREATE TABLE t (id INTEGER PRIMARY KEY, x REAL, s TEXT)").ok());
+    EXPECT_TRUE(*database->tableExists("t"));
+    EXPECT_FALSE(*database->tableExists("missing"));
+
+    auto insert = database->prepare("INSERT INTO t (id, x, s) VALUES (?1, ?2, ?3)");
+    ASSERT_TRUE(insert.ok());
+    ASSERT_TRUE(insert->bind(1, std::int64_t{7}).ok());
+    ASSERT_TRUE(insert->bind(2, 0.1 + 0.2).ok());
+    ASSERT_TRUE(insert->bind(3, std::string_view("text with 'quotes'")).ok());
+    ASSERT_TRUE(insert->run().ok());
+
+    auto select = database->prepare("SELECT id, x, s FROM t");
+    ASSERT_TRUE(select.ok());
+    ASSERT_TRUE(*select->step());
+    EXPECT_EQ(select->columnInt64(0), 7);
+    EXPECT_EQ(select->columnDouble(1), 0.1 + 0.2); // REAL columns hold doubles exactly
+    EXPECT_EQ(select->columnText(2), "text with 'quotes'");
+    EXPECT_FALSE(*select->step());
+
+    const auto bad = database->execute("THIS IS NOT SQL");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_EQ(bad.error().code, ErrorCode::DatabaseFailure);
+    EXPECT_FALSE(bad.error().context.empty()); // carries SQLite's own message
+    EXPECT_FALSE(database->prepare("SELECT * FROM nowhere").ok());
+
+    // Primary key violation surfaces as an error, not a silent no-op.
+    ASSERT_TRUE(insert->bind(1, std::int64_t{7}).ok());
+    ASSERT_TRUE(insert->bind(2, 1.0).ok());
+    ASSERT_TRUE(insert->bind(3, std::string_view("dup")).ok());
+    EXPECT_FALSE(insert->run().ok());
+}
+
+TEST_F(SqliteWrapper, TransactionRollsBackUnlessCommitted)
+{
+    auto database = SqliteDatabase::openInMemory();
+    ASSERT_TRUE(database.ok());
+    ASSERT_TRUE(database->execute("CREATE TABLE t (id INTEGER)").ok());
+    const auto count = [&] {
+        auto statement = database->prepare("SELECT COUNT(*) FROM t");
+        EXPECT_TRUE(*statement->step());
+        return statement->columnInt64(0);
+    };
+    {
+        auto transaction = SqliteTransaction::begin(*database);
+        ASSERT_TRUE(transaction.ok());
+        ASSERT_TRUE(database->execute("INSERT INTO t VALUES (1)").ok());
+    } // destroyed without commit
+    EXPECT_EQ(count(), 0);
+    {
+        auto transaction = SqliteTransaction::begin(*database);
+        ASSERT_TRUE(transaction.ok());
+        ASSERT_TRUE(database->execute("INSERT INTO t VALUES (1)").ok());
+        ASSERT_TRUE(transaction->commit().ok());
+        EXPECT_FALSE(transaction->commit().ok()); // already finished
+    }
+    EXPECT_EQ(count(), 1);
+}
+
+// ---- lifecycle -------------------------------------------------------------------
+
+TEST_F(ProjectStoreLifecycle, CreateBuildsTheProjectLayout)
+{
+    ProjectMetadata metadata;
+    metadata.name = "Hilltop Subdivision";
+    auto store = ProjectStore::create(projectDir(), metadata);
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+
+    for (const char* name : {"project.db", "backups", "terrain", "pointcloud", "assets", "cache"}) {
+        EXPECT_TRUE(fs::exists(projectDir() / name)) << name;
+    }
+    EXPECT_TRUE(ProjectStore::isProjectDirectory(projectDir()));
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok());
+    EXPECT_EQ(contents->metadata.name, "Hilltop Subdivision");
+    EXPECT_FALSE(contents->metadata.createdUtc.empty());
+    EXPECT_FALSE(contents->metadata.modifiedUtc.empty());
+    EXPECT_TRUE(contents->entities.empty());
+    ASSERT_EQ(contents->layers.size(), 1u);
+    EXPECT_EQ(contents->layers[0].name, "0");
+}
+
+TEST_F(ProjectStoreLifecycle, CreateRefusesToOverwriteAndOpenRequiresAProject)
+{
+    ASSERT_TRUE(ProjectStore::create(projectDir(), {}).ok());
+    EXPECT_EQ(ProjectStore::create(projectDir(), {}).error().code, ErrorCode::AlreadyExists);
+    EXPECT_EQ(ProjectStore::open(root_ / "nothing-here").error().code, ErrorCode::NotFound);
+    EXPECT_FALSE(ProjectStore::isProjectDirectory(root_));
+}
+
+TEST_F(ProjectStoreLifecycle, RejectsForeignAndGarbageDatabases)
+{
+    fs::create_directories(projectDir());
+    {
+        auto foreign = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(foreign.ok());
+        ASSERT_TRUE(foreign->execute("CREATE TABLE unrelated (x)").ok());
+    }
+    const auto notKatana = ProjectStore::open(projectDir());
+    ASSERT_FALSE(notKatana.ok());
+    EXPECT_EQ(notKatana.error().code, ErrorCode::DatabaseFailure);
+
+    overwriteWithGarbage(projectDir() / "project.db");
+    EXPECT_EQ(ProjectStore::open(projectDir()).error().code, ErrorCode::DatabaseFailure);
+}
+
+// ---- round trip --------------------------------------------------------------------
+
+TEST_F(ProjectStoreRoundTrip, ModelSurvivesSaveCloseOpenLoadExactly)
+{
+    const Model original = sampleModel();
+    ProjectMetadata metadata;
+    metadata.name = "Round trip";
+    metadata.coordinateSystem = "EPSG:32630";
+    const std::vector<Relationship> relationships = {{7, 1, "measures", "{\"side\":\"left\"}"}};
+    {
+        auto store = ProjectStore::create(projectDir(), metadata);
+        ASSERT_TRUE(store.ok());
+        const auto status = store->save(captureModel(original, metadata, relationships));
+        ASSERT_TRUE(status.ok()) << status.error().describe();
+    } // connection closed
+
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    EXPECT_EQ(loaded.layers.all(), original.layers.all());
+    EXPECT_EQ(loaded.styles.all(), original.styles.all());
+    EXPECT_EQ(loaded.properties.all(), original.properties.all());
+    EXPECT_EQ(loaded.entities.ids(), original.entities.ids());
+    original.entities.forEach([&](const Entity& entity) {
+        ASSERT_NE(loaded.entities.find(entity.id), nullptr);
+        EXPECT_EQ(*loaded.entities.find(entity.id), entity) << "entity " << entity.id; // bit exact
+    });
+    // The retired id stays retired after a reload.
+    EXPECT_EQ(loaded.entities.nextId(), original.entities.nextId());
+    EXPECT_EQ(contents->relationships, relationships);
+    EXPECT_EQ(contents->metadata.coordinateSystem, "EPSG:32630");
+}
+
+TEST_F(ProjectStoreRoundTrip, SaveIsAtomicWhenTheDatabaseRejectsARow)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok());
+    const Model model = sampleModel();
+    ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+
+    // Two layers with the same name violate the primary key half way through the
+    // save, after the old rows were deleted inside the transaction.
+    ProjectContents broken = captureModel(model, {});
+    broken.entities.clear();
+    broken.layers.push_back(Layer{"Survey"});
+    const auto status = store->save(broken);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::DatabaseFailure);
+
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok());
+    EXPECT_EQ(contents->entities.size(), model.entities.size()); // previous save intact
+}
+
+TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok());
+    const Model model = sampleModel();
+
+    ProjectContents unknownLayer = captureModel(model, {});
+    unknownLayer.entities[0].layer = "Nowhere";
+    EXPECT_EQ(store->save(unknownLayer).error().code, ErrorCode::InvalidArgument);
+
+    ProjectContents duplicateId = captureModel(model, {});
+    duplicateId.entities[1].id = duplicateId.entities[0].id;
+    EXPECT_FALSE(store->save(duplicateId).ok());
+
+    ProjectContents staleCounter = captureModel(model, {});
+    staleCounter.nextEntityId = 1;
+    EXPECT_FALSE(store->save(staleCounter).ok());
+
+    ProjectContents danglingRelationship = captureModel(model, {}, {{1, 9999, "x", ""}});
+    EXPECT_FALSE(store->save(danglingRelationship).ok());
+
+    Model target = sampleModel();
+    const auto before = target.entities.ids();
+    EXPECT_FALSE(applyToModel(unknownLayer, target).ok());
+    EXPECT_EQ(target.entities.ids(), before); // rejected before anything was touched
+}
+
+// ---- migration -----------------------------------------------------------------------
+
+TEST_F(ProjectStoreMigration, UpgradesAVersion1ProjectAndBacksItUpFirst)
+{
+    // A project exactly as Katana schema version 1 wrote it (no relationships table).
+    fs::create_directories(projectDir());
+    {
+        auto v1 = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(v1.ok());
+        ASSERT_TRUE(v1->setApplicationId(0x4B544E41).ok());
+        ASSERT_TRUE(v1->execute(R"sql(
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE layers (name TEXT PRIMARY KEY, color TEXT NOT NULL, visible INTEGER NOT NULL,
+                locked INTEGER NOT NULL, linetype TEXT NOT NULL, line_weight REAL NOT NULL) WITHOUT ROWID;
+            CREATE TABLE styles (name TEXT PRIMARY KEY, color TEXT, line_weight REAL NOT NULL,
+                linetype TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE property_definitions (name TEXT PRIMARY KEY, type TEXT NOT NULL,
+                description TEXT NOT NULL, default_value TEXT) WITHOUT ROWID;
+            CREATE TABLE entities (id INTEGER PRIMARY KEY, type TEXT NOT NULL,
+                layer TEXT NOT NULL REFERENCES layers(name), style TEXT NOT NULL, color TEXT,
+                visible INTEGER NOT NULL, geometry TEXT NOT NULL, properties TEXT NOT NULL,
+                metadata TEXT NOT NULL);
+            INSERT INTO metadata VALUES ('name', 'Legacy site'), ('next_entity_id', '6');
+            INSERT INTO layers VALUES ('0', '#FFFFFF', 1, 0, 'continuous', 0.25);
+            INSERT INTO entities VALUES (5, 'Circle', '0', '', NULL, 1,
+                '{"type":"Circle","center":[1.5,2.5],"radius":4.0}', '{}', '{}');
+        )sql")
+                        .ok());
+        ASSERT_TRUE(v1->setUserVersion(1).ok());
+    }
+
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    EXPECT_EQ(store->listBackups().size(), 1u); // taken before the schema was touched
+
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    EXPECT_EQ(contents->metadata.name, "Legacy site");
+    ASSERT_EQ(contents->entities.size(), 1u);
+    EXPECT_EQ(contents->entities[0].id, 5u);
+    EXPECT_EQ(std::get<Circle2>(contents->entities[0].geometry), (Circle2{Point2(1.5, 2.5), 4.0}));
+    EXPECT_EQ(contents->nextEntityId, 6u);
+
+    // The pre-migration backup is still a version 1 database.
+    auto backup = SqliteDatabase::open(store->listBackups().front(),
+                                       SqliteDatabase::OpenMode::ReadOnly);
+    ASSERT_TRUE(backup.ok());
+    EXPECT_EQ(*backup->userVersion(), 1);
+    EXPECT_FALSE(*backup->tableExists("relationships"));
+}
+
+TEST_F(ProjectStoreMigration, RefusesProjectsFromANewerKatana)
+{
+    { ASSERT_TRUE(ProjectStore::create(projectDir(), {}).ok()); }
+    {
+        auto raw = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(raw.ok());
+        ASSERT_TRUE(raw->setUserVersion(ProjectStore::kCurrentSchemaVersion + 1).ok());
+    }
+    const auto opened = ProjectStore::open(projectDir());
+    ASSERT_FALSE(opened.ok());
+    EXPECT_EQ(opened.error().code, ErrorCode::Unsupported);
+}
+
+// ---- backup & recovery --------------------------------------------------------------------
+
+TEST_F(ProjectStoreRecovery, BackupsArePrunedToTheNewest)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok());
+    fs::path newest;
+    for (int i = 0; i < 4; ++i) {
+        const auto made = store->backup(/*keep=*/2);
+        ASSERT_TRUE(made.ok()) << made.error().describe();
+        newest = *made;
+    }
+    const auto backups = store->listBackups();
+    ASSERT_EQ(backups.size(), 2u);
+    EXPECT_EQ(backups.front(), newest); // newest first
+}
+
+TEST_F(ProjectStoreRecovery, RestoresTheNewestSoundBackupAndKeepsTheDamagedFile)
+{
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        ASSERT_TRUE(store->backup().ok()); // older, sound
+        const auto newer = store->backup();
+        ASSERT_TRUE(newer.ok());
+        overwriteWithGarbage(*newer); // the newest backup is damaged as well
+    }
+    overwriteWithGarbage(projectDir() / "project.db");
+    ASSERT_FALSE(ProjectStore::open(projectDir()).ok());
+
+    const auto report = ProjectStore::recover(projectDir());
+    ASSERT_TRUE(report.ok()) << report.error().describe();
+    EXPECT_TRUE(report->restored);
+    EXPECT_FALSE(report->problems.empty());
+    EXPECT_TRUE(fs::exists(report->damagedFileKeptAs)); // evidence is never deleted
+
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok());
+    EXPECT_EQ(contents->entities.size(), model.entities.size());
+}
+
+TEST_F(ProjectStoreRecovery, SoundProjectsAreLeftAloneAndMissingBackupsAreReported)
+{
+    { ASSERT_TRUE(ProjectStore::create(projectDir(), {}).ok()); }
+    const auto sound = ProjectStore::recover(projectDir());
+    ASSERT_TRUE(sound.ok());
+    EXPECT_FALSE(sound->restored);
+
+    overwriteWithGarbage(projectDir() / "project.db");
+    const auto hopeless = ProjectStore::recover(projectDir());
+    ASSERT_FALSE(hopeless.ok());
+    EXPECT_EQ(hopeless.error().code, ErrorCode::DatabaseFailure);
+    EXPECT_TRUE(fs::exists(projectDir() / "project.db")); // untouched when nothing can replace it
+}
+
+// ---- regressions: four ways the store used to lose data --------------------------------------
+
+// applyToModel() used to reset the caller's model before populating it, and
+// reset it again if any insertion failed - so a project that passed
+// validateContents but tripped a table rule destroyed the drawing that was
+// already open. docs/cad.md documents the opposite, and Document::open relies
+// on it: "a failed open leaves the current drawing exactly as it was".
+TEST_F(ProjectStoreRoundTrip, AFailedLoadLeavesTheCallersModelUntouched)
+{
+    Model existing = sampleModel();
+    const auto idsBefore = existing.entities.ids();
+    const auto layersBefore = existing.layers.all().size();
+    ASSERT_FALSE(idsBefore.empty());
+
+    // Contents that pass validateContents but that the tables reject: a style
+    // named twice cannot be added twice.
+    ProjectContents contents;
+    contents.layers.push_back(Layer{std::string(katana::entity::kDefaultLayerName)});
+    contents.styles.push_back(Style{"Duplicate"});
+    contents.styles.push_back(Style{"Duplicate"});
+    contents.nextEntityId = 1;
+
+    const auto status = applyToModel(contents, existing);
+    ASSERT_FALSE(status.ok()) << "a duplicate style should be refused";
+
+    // The drawing that was open must still be there, in full.
+    EXPECT_EQ(existing.entities.ids(), idsBefore);
+    EXPECT_EQ(existing.layers.all().size(), layersBefore);
+}
+
+// The observer belongs to the model's OWNER, not to the contents being loaded.
+// Committing the staged contents with a plain move-assignment would carry the
+// staged model's empty observer across and silently stop every change
+// notification the Document depends on.
+TEST_F(ProjectStoreRoundTrip, LoadingKeepsTheCallersEntityObserver)
+{
+    Model model;
+    int events = 0;
+    model.entities.setObserver([&events](const katana::entity::ChangeEvent&) { ++events; });
+
+    const auto status = applyToModel(captureModel(sampleModel(), {}), model);
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    EXPECT_FALSE(model.entities.empty());
+
+    const int afterLoad = events;
+    EXPECT_GT(afterLoad, 0) << "the wholesale replacement should report a Cleared event";
+
+    // And the observer must still be live afterwards.
+    Entity point;
+    point.geometry = katana::entity::PointGeometry{Point2(1.0, 2.0)};
+    ASSERT_TRUE(model.entities.add(std::move(point)).ok());
+    EXPECT_GT(events, afterLoad) << "the caller's observer was replaced by the loaded model's";
+}
+
+// A database whose process was killed mid-commit has a hot rollback journal
+// beside it. SQLite replays that journal on the next WRITABLE open, after which
+// the file is sound. Inspecting read-only cannot replay it and reports
+// SQLITE_READONLY_ROLLBACK, which used to be taken for corruption - so recover()
+// threw away a perfectly recoverable database for an older backup.
+TEST_F(ProjectStoreRecovery, ACrashInterruptedDatabaseIsNotMistakenForDamage)
+{
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+
+    // Simulate the crash: a leftover journal beside an otherwise intact file.
+    // Its header is deliberately not a valid journal, which is exactly what a
+    // torn write leaves behind; SQLite discards such a journal on open.
+    const fs::path journal = projectDir() / "project.db-journal";
+    {
+        std::ofstream out(journal, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        const std::string rubbish(512, '\0');
+        out.write(rubbish.data(), static_cast<std::streamsize>(rubbish.size()));
+    }
+    ASSERT_TRUE(fs::exists(journal));
+
+    // The store must open, and the drawing must still be all there.
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << "a hot journal was taken for corruption: "
+                               << reopened.error().describe();
+    const auto loaded = reopened->load();
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    EXPECT_EQ(loaded->entities.size(), model.entities.size());
+}
+
+// recover() must move the damaged file's rollback journal aside, or SQLite
+// replays it over the restored data on the next open. When project.db was
+// missing entirely, damagedFileKeptAs is empty and concat() produced the
+// RELATIVE name "-journal": the journal was moved into the working directory
+// and left sitting beside the restored database.
+TEST_F(ProjectStoreRecovery, TheDamagedJournalIsMovedAsideAndNeverIntoTheWorkingDirectory)
+{
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        ASSERT_TRUE(store->backup().ok());
+    }
+
+    // project.db is gone, but its journal is not: the case that produced a
+    // relative rename target.
+    fs::remove(projectDir() / "project.db");
+    const fs::path journal = projectDir() / "project.db-journal";
+    { std::ofstream out(journal, std::ios::binary); out << "stale journal"; }
+
+    const fs::path strayInCwd = fs::current_path() / "-journal";
+    std::error_code ignored;
+    fs::remove(strayInCwd, ignored);
+
+    const auto report = ProjectStore::recover(projectDir());
+    ASSERT_TRUE(report.ok()) << report.error().describe();
+    EXPECT_TRUE(report->restored);
+
+    EXPECT_FALSE(fs::exists(journal)) << "the stale journal was left beside the restored database";
+    EXPECT_FALSE(fs::exists(strayInCwd))
+        << "the journal was renamed to a relative path and landed in the working directory";
+    fs::remove(strayInCwd, ignored);
+
+    // And the restored database opens.
+    EXPECT_TRUE(ProjectStore::open(projectDir()).ok());
+}
+
+// "Newest backup" used to be decided by filename, so anything else dropped into
+// backups/ could outrank the real snapshots - and the collision suffix sorted
+// BACKWARDS, because '.' (0x2E) is above '-' (0x2D), making "...T120000.db"
+// beat the later "...T120000-1.db".
+TEST_F(ProjectStoreRecovery, BackupOrderIgnoresStrayFilesAndHandlesTheCollisionSuffix)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok());
+    ASSERT_TRUE(store->save(captureModel(sampleModel(), {})).ok());
+
+    const auto first = store->backup(/*keep=*/50);
+    ASSERT_TRUE(first.ok()) << first.error().describe();
+
+    const fs::path backupDir = projectDir() / "backups";
+    // A name that beats every real snapshot on a plain descending filename sort.
+    const fs::path stray = backupDir / "zzz-not-ours.db";
+    fs::copy_file(*first, stray);
+    // A hand-made copy that is not even a database.
+    { std::ofstream out(backupDir / "scratch.db"); out << "not a database"; }
+
+    const auto listed = store->listBackups();
+    for (const fs::path& path : listed) {
+        EXPECT_NE(path.filename(), stray.filename())
+            << "a file this store never wrote was offered as a backup";
+        EXPECT_NE(path.filename().string(), "scratch.db");
+    }
+    ASSERT_FALSE(listed.empty());
+
+    // The collision suffix: same second, higher sequence, therefore newer.
+    const std::string stem = first->stem().string();
+    const fs::path collision = backupDir / (stem + "-1.db");
+    fs::copy_file(*first, collision);
+    const auto reordered = store->listBackups();
+    ASSERT_GE(reordered.size(), 2u);
+    EXPECT_EQ(reordered.front().filename(), collision.filename())
+        << "the later collision backup must rank above the one it collided with";
+}

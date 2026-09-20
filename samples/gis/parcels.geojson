@@ -1,0 +1,235 @@
+{
+ "type": "FeatureCollection",
+ "name": "parcels",
+ "crs": {
+  "type": "name",
+  "properties": {
+   "name": "urn:ogc:def:crs:EPSG::32630"
+  }
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "parcel": "42A",
+    "owner": "Crown Estate",
+    "area_m2": "8450"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       185,
+       0
+      ],
+      [
+       300,
+       0
+      ],
+      [
+       310,
+       70
+      ],
+      [
+       200,
+       95
+      ],
+      [
+       185,
+       0
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "parcel": "42B",
+    "owner": "R. Okonkwo",
+    "area_m2": "6120"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       200,
+       95
+      ],
+      [
+       310,
+       70
+      ],
+      [
+       320,
+       150
+      ],
+      [
+       215,
+       165
+      ],
+      [
+       200,
+       95
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Mill Lane",
+    "surface": "asphalt"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      180,
+      20
+     ],
+     [
+      240,
+      30
+     ],
+     [
+      290,
+      55
+     ],
+     [
+      330,
+      100
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Footpath 7",
+    "surface": "gravel"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      190,
+      140
+     ],
+     [
+      250,
+      120
+     ],
+     [
+      300,
+      125
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "station": "CP-01",
+    "order": "2"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     195,
+     15
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "station": "CP-02",
+    "order": "2"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     305,
+     90
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "station": "CP-03",
+    "order": "3"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     220,
+     160
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Spoil heaps"
+   },
+   "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [
+     [
+      [
+       [
+        330,
+        10
+       ],
+       [
+        360,
+        10
+       ],
+       [
+        360,
+        40
+       ],
+       [
+        330,
+        40
+       ],
+       [
+        330,
+        10
+       ]
+      ]
+     ],
+     [
+      [
+       [
+        335,
+        55
+       ],
+       [
+        365,
+        55
+       ],
+       [
+        365,
+        80
+       ],
+       [
+        335,
+        80
+       ],
+       [
+        335,
+        55
+       ]
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

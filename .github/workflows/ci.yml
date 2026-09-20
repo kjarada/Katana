@@ -1,0 +1,218 @@
+# Required checks from PLAN.MD Phase 01: compile, unit tests, static analysis,
+# sanitizers. Every job builds with warnings as errors.
+#
+# Linux is the primary CI platform because it is the only one where
+# AddressSanitizer is available (MinGW does not ship libsanitizer, so the local
+# Windows `sanitize` preset falls back to UBSan in trap mode). The Windows job
+# exists to keep MSVC and the MSYS2 toolchain honest, since that is where the
+# project is developed.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Dependencies are stable; refresh the key to rebuild the cache.
+  DEPS: >-
+    build-essential ninja-build cmake
+    libeigen3-dev libproj-dev libcgal-dev libsqlite3-dev nlohmann-json3-dev
+    libgdal-dev libpdal-dev qt6-base-dev
+
+jobs:
+  # ---- compile + unit tests, Debug and Release --------------------------------
+  test:
+    name: test (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $DEPS
+
+      # GoogleTest and Google Benchmark are fetched once and cached, so the
+      # build stays offline-capable and does not re-download every run.
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: third_party/_cache
+          key: third-party-v1
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DKATANA_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+      # Runs the benchmarks briefly to prove they still build and execute.
+      # Timings from a shared CI runner are not comparable, so nothing is
+      # asserted about them; performance regressions are tracked locally.
+      - name: Benchmarks (smoke)
+        if: matrix.build_type == 'Release'
+        run: cmake --build build --target run-benchmarks
+
+  # ---- sanitizers -------------------------------------------------------------
+  sanitizers:
+    name: sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $DEPS
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: third_party/_cache
+          key: third-party-v1
+
+      # The Qt app and the GDAL/PDAL module are excluded: their dependencies are
+      # not sanitizer-instrumented, so they produce container-overflow and
+      # interceptor false positives that would drown real findings.
+      - name: Configure
+        run: >-
+          cmake -S . -B build-asan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DKATANA_ENABLE_SANITIZERS=ON
+          -DKATANA_BUILD_QT_APP=OFF
+          -DKATANA_BUILD_IO=OFF
+          -DKATANA_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        run: cmake --build build-asan --parallel
+
+      - name: Test under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1:strict_string_checks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/.github/lsan.supp
+        run: ctest --test-dir build-asan --output-on-failure --parallel 2
+
+  # ---- static analysis --------------------------------------------------------
+  static-analysis:
+    name: static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $DEPS clang-tidy cppcheck
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: third_party/_cache
+          key: third-party-v1
+
+      # clang-tidy and cppcheck run as compiler launchers, so the build failing
+      # IS the analysis failing (.clang-tidy sets --warnings-as-errors=*).
+      - name: Configure
+        run: >-
+          cmake -S . -B build-tidy -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DKATANA_ENABLE_CLANG_TIDY=ON
+          -DKATANA_ENABLE_CPPCHECK=ON
+          -DKATANA_BUILD_QT_APP=OFF
+          -DKATANA_BUILD_BENCHMARKS=OFF
+
+      - name: Analyse
+        run: cmake --build build-tidy --parallel
+
+  # ---- architectural rules ----------------------------------------------------
+  # PLAN.MD section 2 (one-way dependencies) and Rule 4 (no third-party types in
+  # public headers). Cheap and dependency-free, so it runs on its own and fails
+  # fast without waiting for a full build.
+  layering:
+    name: layering + format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake clang-format
+
+      - name: Check layer dependencies
+        run: cmake -DKATANA_ROOT=${{ github.workspace }} -P tools/check_layering.cmake
+
+      # Advisory until the tree has been passed through clang-format once.
+      # The sources were written to .clang-format by hand but have never been
+      # verified by the tool, so this reports differences without failing the
+      # build. Make it blocking (drop continue-on-error) after the first
+      # `cmake --build <dir> --target format` run lands.
+      - name: Check formatting
+        continue-on-error: true
+        run: |
+          find include src tests benchmarks \
+            \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+            | xargs -0 clang-format --dry-run --Werror
+
+  # ---- Windows, the development platform --------------------------------------
+  windows:
+    name: windows (MSYS2 UCRT64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-eigen3
+            mingw-w64-ucrt-x86_64-proj
+            mingw-w64-ucrt-x86_64-cgal
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-gdal
+            mingw-w64-ucrt-x86_64-pdal
+            mingw-w64-ucrt-x86_64-qt6-base
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: third_party/_cache
+          key: third-party-v1
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DKATANA_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4

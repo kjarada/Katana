@@ -1,0 +1,154 @@
+# Interoperability — GIS, rasters and point clouds
+
+`katana_io` (the GDAL and PDAL adapters, exposed as `katana::gis` and
+`katana::pointcloud`) and `katana_interop` (conversion to and from the domain
+model). PLAN.MD Phases 17 and 20.
+
+## Purpose
+
+Import external survey and GIS data into the drawing, and export the drawing
+back out. Phase 20 states the rule this layer exists to enforce: *"Do not make
+the internal data model dependent on any external format. All importers should
+convert external data into the internal domain model."*
+
+## Layering
+
+```
+katana_io      GDAL + PDAL behind Katana interfaces. No domain knowledge:
+  ↓            it does not know what an entity is.
+katana_interop Converts what katana_io reads into entities and reference data.
+  ↓            The ONLY layer allowed to see both.
+katana_app     Own the reference data and offer Import/Export.
+katana_qt
+```
+
+`katana_cad` deliberately may **not** see `katana_interop`. Keeping GDAL and
+PDAL out of the core application layer is what lets it build with
+`-DKATANA_BUILD_IO=OFF`, which the sanitizer CI job depends on — neither library
+is sanitizer-instrumented, so their allocations produce false positives that
+would drown real findings. `tools/check_layering.cmake` enforces this.
+
+No GDAL or PDAL type appears in any public header: geometry crosses the boundary
+as plain coordinate arrays (`GeoPoint`), rasters as 8-bit RGBA, and failures as
+`Result<T>`. Both libraries signal errors by throwing; that is caught at the
+adapter boundary and converted, so nothing throws across the interface.
+
+## What is supported
+
+| Direction | Formats |
+|---|---|
+| Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite |
+| Vector out | the same, driver inferred from the extension |
+| Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2, ECW — GDAL's readers |
+| Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD, E57 in; LAS/LAZ out |
+
+Not supported: **DWG, LandXML, IFC**, and DXF *import* (export only, via GDAL).
+
+## Two kinds of imported data
+
+This is the distinction the whole design turns on.
+
+**Vector data becomes entities.** An importer returns plain `Entity` values; the
+caller wraps them in `commands::createEntities` and a `Transaction` alongside any
+layers they need. So an import is one validated, atomic, undoable command like
+every other edit, and a single Ctrl+Z removes the whole thing.
+
+**Rasters and point clouds become reference data.** They are backdrop: material a
+drawing is worked *on top of*, not made *of*. An entity is something you draw,
+select, snap to, edit and undo; a 400-megapixel orthophoto is none of those. Making
+it an entity would push a hundred megabytes of pixels through before-image undo
+for a visibility toggle, and would give the user a "select all" that returns a
+photograph. So reference data lives beside the model, is not undoable, and is
+owned by the application layer.
+
+Rule 3 still holds throughout: the viewport paints reference data, it does not
+own it.
+
+## Conversion, and what it costs
+
+Every lossy step is stated rather than hidden.
+
+* A **two-point LineString** becomes a `Line`, not a two-vertex polyline — a
+  drafter expects to be able to fillet it. Longer ones become polylines.
+* A **polygon** becomes closed polylines, one per ring, with the ring's role
+  (`exterior` / `hole`) recorded in entity metadata. The entity model has no
+  polygon-with-holes type, so the information is preserved where it can be
+  rather than discarded.
+* **Multi-geometries** are flattened to one entity per part, each carrying a
+  copy of the feature's attributes.
+* The **closing vertex** of a ring is dropped; `Polyline2::closed` expresses it,
+  and keeping it would create a zero-length final segment the model rejects.
+* **Arcs and circles** have no exact representation in these formats, so they
+  are exported as polylines. `curveTolerance` is the sagitta — the greatest
+  distance the polyline may deviate from the true curve — in model units,
+  default 1 mm. The chord count follows `φ = 2·acos(1 − tolerance/r)`, so the
+  result is the coarsest polyline meeting the tolerance and no finer.
+* **Text and dimensions** have no counterpart at all. They are skipped, counted,
+  and reported in `warnings` — never silently dropped (PLAN.MD §36).
+* **Attributes** become string entity properties; entity properties become
+  attributes, doubles formatted at `%.17g` so they round trip exactly.
+
+### Precision at survey coordinates
+
+`originShift` subtracts a local origin on import and adds it back on export.
+Survey data often sits where a `double` has about 0.1 mm of resolution left; a
+drawing worked at a local origin keeps full precision and exports back to the
+true position unchanged.
+
+## Format limitations that are refused rather than papered over
+
+* A **Shapefile holds one geometry type per file.** GDAL discovers the mismatch
+  only on the first feature of a different kind, by which point a partial
+  `.shp`/`.shx`/`.dbf` set exists — and a half-written shapefile is worse than
+  none, because it opens. So a mixed selection is refused *before* anything is
+  created, with a message counting what is present and naming formats that can
+  hold it.
+* Every failure after the dataset is created unwinds through the driver's own
+  `Delete`, which removes the sidecar files too.
+* **GeoJSON always declares WGS 84** (RFC 7946). Projected coordinates written
+  to it will be read back as degrees, so exporting without a CRS warns.
+* **No reprojection.** A file's declared CRS is read and reported, never applied.
+  Mixing coordinate systems is the user's responsibility and the UI says so.
+
+## Scale
+
+`readHeader()` reads only the LAS header, so the importer picks a decimation
+step from the real point count before committing to a read — opening a
+400-million-point file costs what opening a small one costs. Filtering, cropping
+and decimation all happen *inside* the PDAL pipeline, so discarded points are
+never materialised.
+
+Rasters are decimated by GDAL during `RasterIO`, so a 2 GB GeoTIFF never becomes
+resident; the geotransform is rescaled by the actual size ratio (not the
+decimation step, which differs whenever the size is not an exact multiple).
+
+Point clouds are drawn by splatting into an image buffer rather than one
+`QPainter::drawPoint` per point — microseconds each would be seconds per frame
+at two million points. Per-point colours are cached against the layer and its
+colour mode, so only the projection is redone per frame.
+
+**What is not implemented**: the out-of-core half of Phase 17. There is no
+spatial hierarchy, no level of detail and no streaming. A billion-point dataset
+is opened as a decimated sample held in memory, not worked on in full.
+
+## Failure modes
+
+| Condition | Result |
+|---|---|
+| File does not exist | `NotFound` |
+| Extension has no importer/driver | `Unsupported`, naming the extension |
+| Mixed geometry into a Shapefile | `Unsupported`, nothing written |
+| Nothing matched the export filter | `InvalidArgument`, no file created |
+| Raster with no georeferencing | imported, placed at the origin, **warned** |
+| Band index out of range | `InvalidArgument` |
+| No points survive the import filters | `InvalidArgument` |
+| GDAL/PDAL internal failure | `FileImportFailure` / `FileExportFailure`, carrying the library's own message as context |
+
+## Threading
+
+`ensureRegistered()` registers GDAL's drivers once, under a `call_once`, and the
+driver manager is deliberately never destroyed — it is process-global state
+shared by every open dataset, and tearing it down when one dataset closes
+invalidates all the others. Process exit frees it, which costs nothing.
+
+A `GdalDataset` is not thread-safe; use one per thread.

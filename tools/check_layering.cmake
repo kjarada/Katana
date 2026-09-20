@@ -1,0 +1,124 @@
+# Verifies the one-way dependency rule of PLAN.MD section 2 and the library
+# isolation rule (Rule 4).
+#
+#   cmake -DKATANA_ROOT=<source dir> -P tools/check_layering.cmake
+#
+# 1. A header or source belonging to layer X may only include "katana/<Y>/..."
+#    when Y is X itself or is listed in KATANA_ALLOWED_<X>.
+# 2. Public headers (include/) must not include third-party library headers;
+#    those stay behind internal interfaces inside src/.
+
+if(NOT KATANA_ROOT)
+    message(FATAL_ERROR "Pass -DKATANA_ROOT=<source dir>")
+endif()
+
+# Layer -> layers it may depend on (transitively closed by hand, lowest first).
+set(KATANA_ALLOWED_core "")
+set(KATANA_ALLOWED_math "core")
+set(KATANA_ALLOWED_geometry "core;math")
+set(KATANA_ALLOWED_geodesy "core;math")
+set(KATANA_ALLOWED_survey "core;math")
+set(KATANA_ALLOWED_terrain "core;math;geometry")
+set(KATANA_ALLOWED_entity "core;math;geometry")
+set(KATANA_ALLOWED_commands "core;math;geometry;entity")
+set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
+# gis and pointcloud are both implemented by src/katana_io.
+set(KATANA_ALLOWED_gis "core;pointcloud")
+set(KATANA_ALLOWED_pointcloud "core")
+# interop converts what gis and pointcloud read into the domain model, so it is
+# the only layer allowed to see both the external readers and the entity model.
+set(KATANA_ALLOWED_interop
+    "core;math;geometry;entity;commands;gis;pointcloud")
+# render sits beside terrain: it consumes a DrawList of plain geometry and has
+# no idea an Entity or a Document exists, which is Rule 3 made structural.
+set(KATANA_ALLOWED_render "core;math;geometry")
+# cad deliberately may NOT see interop: keeping GDAL and PDAL out of the core
+# application layer is what lets it build with -DKATANA_BUILD_IO=OFF, which the
+# sanitizer job depends on. Reference data is owned by app/qt instead.
+set(KATANA_ALLOWED_cad
+    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage")
+set(KATANA_ALLOWED_app
+    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;gis;pointcloud;interop")
+set(KATANA_ALLOWED_qt
+    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;gis;pointcloud;interop;app")
+
+# src/<directory> -> layer
+set(KATANA_SRC_LAYER_katana_core core)
+set(KATANA_SRC_LAYER_katana_math math)
+set(KATANA_SRC_LAYER_katana_geometry geometry)
+set(KATANA_SRC_LAYER_katana_geodesy geodesy)
+set(KATANA_SRC_LAYER_katana_survey survey)
+set(KATANA_SRC_LAYER_katana_terrain terrain)
+set(KATANA_SRC_LAYER_katana_render render)
+set(KATANA_SRC_LAYER_katana_entity entity)
+set(KATANA_SRC_LAYER_katana_commands commands)
+set(KATANA_SRC_LAYER_katana_storage storage)
+set(KATANA_SRC_LAYER_katana_cad cad)
+set(KATANA_SRC_LAYER_katana_io gis)
+set(KATANA_SRC_LAYER_katana_interop interop)
+set(KATANA_SRC_LAYER_katana_app app)
+set(KATANA_SRC_LAYER_katana_qt qt)
+
+set(KATANA_THIRD_PARTY_PATTERN
+    "#[ \t]*include[ \t]*[<\"](Eigen/|CGAL/|proj\\.h|sqlite3\\.h|gdal|ogr|cpl_|pdal/|nlohmann/|Q[A-Z]|vulkan/)")
+
+set(_violations "")
+
+function(_check_file file layer is_public)
+    file(STRINGS "${file}" _lines REGEX "#[ \t]*include")
+    file(RELATIVE_PATH _rel "${KATANA_ROOT}" "${file}")
+    foreach(_line IN LISTS _lines)
+        if(_line MATCHES "#[ \t]*include[ \t]*\"katana/([a-z_]+)/")
+            set(_dep "${CMAKE_MATCH_1}")
+            if(NOT _dep STREQUAL layer)
+                list(FIND KATANA_ALLOWED_${layer} "${_dep}" _index)
+                if(_index EQUAL -1)
+                    list(APPEND _violations
+                        "${_rel}: layer '${layer}' must not depend on '${_dep}'")
+                endif()
+            endif()
+        endif()
+        if(is_public AND _line MATCHES "${KATANA_THIRD_PARTY_PATTERN}")
+            list(APPEND _violations
+                "${_rel}: public header exposes a third-party header (${_line})")
+        endif()
+    endforeach()
+    set(_violations "${_violations}" PARENT_SCOPE)
+endfunction()
+
+file(GLOB _layer_dirs LIST_DIRECTORIES true "${KATANA_ROOT}/include/katana/*")
+foreach(_dir IN LISTS _layer_dirs)
+    if(IS_DIRECTORY "${_dir}")
+        get_filename_component(_layer "${_dir}" NAME)
+        if(NOT DEFINED KATANA_ALLOWED_${_layer})
+            list(APPEND _violations "include/katana/${_layer}: layer is not declared in check_layering.cmake")
+            continue()
+        endif()
+        file(GLOB_RECURSE _headers "${_dir}/*.hpp")
+        foreach(_header IN LISTS _headers)
+            _check_file("${_header}" "${_layer}" TRUE)
+        endforeach()
+    endif()
+endforeach()
+
+file(GLOB _src_dirs LIST_DIRECTORIES true "${KATANA_ROOT}/src/*")
+foreach(_dir IN LISTS _src_dirs)
+    if(IS_DIRECTORY "${_dir}")
+        get_filename_component(_name "${_dir}" NAME)
+        if(NOT DEFINED KATANA_SRC_LAYER_${_name})
+            list(APPEND _violations "src/${_name}: module is not declared in check_layering.cmake")
+            continue()
+        endif()
+        set(_layer "${KATANA_SRC_LAYER_${_name}}")
+        file(GLOB_RECURSE _sources "${_dir}/*.cpp" "${_dir}/*.hpp")
+        foreach(_source IN LISTS _sources)
+            _check_file("${_source}" "${_layer}" FALSE)
+        endforeach()
+    endif()
+endforeach()
+
+if(_violations)
+    list(JOIN _violations "\n  " _text)
+    message(FATAL_ERROR "Layering violations:\n  ${_text}")
+endif()
+message(STATUS "Layering check passed.")

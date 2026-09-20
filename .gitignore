@@ -1,0 +1,13 @@
+build/
+cmake-build-debug/
+cmake-build-release/
+third_party/_cache/
+.vscode/
+.idea/
+*.user
+*.swp
+*.swo
+*.DS_Store
+CMakeUserPresets.json
+aqtinstall.log
+legacy-scaffold-*.zip

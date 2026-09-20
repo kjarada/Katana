@@ -1,0 +1,16 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  clang-analyzer-*,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-virtual-class-destructor,
+  misc-const-correctness,
+  misc-unused-parameters,
+  modernize-use-nullptr,
+  modernize-use-override,
+  performance-*,
+  readability-container-size-empty,
+  readability-misleading-indentation
+HeaderFilterRegex: '(include/katana|src)/.*'
+FormatStyle: file

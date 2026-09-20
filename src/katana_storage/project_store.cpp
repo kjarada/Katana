@@ -1,0 +1,1040 @@
+#include "katana/storage/project_store.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <ctime>
+#include <set>
+#include <system_error>
+#include <utility>
+
+#include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/serialization.hpp"
+#include "katana/storage/sqlite_database.hpp"
+
+namespace katana::storage {
+
+namespace fs = std::filesystem;
+using katana::core::ErrorCode;
+using katana::core::makeError;
+using katana::core::Result;
+using katana::core::Status;
+using katana::entity::Entity;
+using katana::entity::EntityId;
+using katana::entity::Layer;
+using katana::entity::PropertyDefinition;
+using katana::entity::PropertyType;
+using katana::entity::Style;
+
+namespace {
+
+// "KTNA" — marks a SQLite file as a Katana project (PRAGMA application_id).
+constexpr std::int32_t kApplicationId = 0x4B544E41;
+constexpr const char* kDatabaseFile = "project.db";
+constexpr const char* kBackupDirectory = "backups";
+constexpr const char* kDataDirectories[] = {"terrain", "pointcloud", "assets", "cache"};
+
+struct Migration {
+    int toVersion;
+    const char* sql;
+};
+
+// Append only. Never edit a released migration: projects in the field have
+// already run it. Schema changes are new entries.
+constexpr Migration kMigrations[] = {
+    {1, R"sql(
+        CREATE TABLE metadata (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE layers (
+            name        TEXT PRIMARY KEY,
+            color       TEXT NOT NULL,
+            visible     INTEGER NOT NULL,
+            locked      INTEGER NOT NULL,
+            linetype    TEXT NOT NULL,
+            line_weight REAL NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE styles (
+            name        TEXT PRIMARY KEY,
+            color       TEXT,
+            line_weight REAL NOT NULL,
+            linetype    TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE property_definitions (
+            name          TEXT PRIMARY KEY,
+            type          TEXT NOT NULL,
+            description   TEXT NOT NULL,
+            default_value TEXT
+        ) WITHOUT ROWID;
+
+        CREATE TABLE entities (
+            id         INTEGER PRIMARY KEY,
+            type       TEXT NOT NULL,
+            layer      TEXT NOT NULL REFERENCES layers(name),
+            style      TEXT NOT NULL,
+            color      TEXT,
+            visible    INTEGER NOT NULL,
+            geometry   TEXT NOT NULL,
+            properties TEXT NOT NULL,
+            metadata   TEXT NOT NULL
+        );
+        CREATE INDEX entities_by_layer ON entities(layer);
+        CREATE INDEX entities_by_type ON entities(type);
+    )sql"},
+    {2, R"sql(
+        CREATE TABLE relationships (
+            id          INTEGER PRIMARY KEY,
+            from_entity INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            to_entity   INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+            kind        TEXT NOT NULL,
+            data        TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX relationships_by_from ON relationships(from_entity);
+        CREATE INDEX relationships_by_to ON relationships(to_entity);
+    )sql"},
+};
+
+std::string toUtf8(const fs::path& path)
+{
+    const auto utf8 = path.u8string();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+// `compact` gives a file-name-safe form: 20260919T101530-123.
+std::string utcTimestamp(bool compact)
+{
+    using namespace std::chrono;
+    const auto now = system_clock::now();
+    const auto wholeSeconds = time_point_cast<seconds>(now);
+    const auto millis = duration_cast<milliseconds>(now - wholeSeconds).count();
+    const std::time_t time = system_clock::to_time_t(wholeSeconds);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &time);
+#else
+    gmtime_r(&time, &utc);
+#endif
+    char buffer[48];
+    std::snprintf(buffer, sizeof(buffer),
+                  compact ? "%04d%02d%02dT%02d%02d%02d-%03d" : "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                  utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
+                  utc.tm_sec, static_cast<int>(millis));
+    return buffer;
+}
+
+std::string_view toString(PropertyType type)
+{
+    switch (type) {
+    case PropertyType::Boolean:
+        return "Boolean";
+    case PropertyType::Integer:
+        return "Integer";
+    case PropertyType::Real:
+        return "Real";
+    case PropertyType::Text:
+        return "Text";
+    }
+    return "Text";
+}
+
+Result<PropertyType> propertyTypeFromString(const std::string& text)
+{
+    for (const PropertyType type : {PropertyType::Boolean, PropertyType::Integer,
+                                    PropertyType::Real, PropertyType::Text}) {
+        if (toString(type) == text) {
+            return type;
+        }
+    }
+    return makeError(ErrorCode::DatabaseFailure, "unknown property type in project", text);
+}
+
+// Shared by save() and applyToModel(): a project that fails this is never
+// written and never loaded into a model.
+Status validateContents(const ProjectContents& contents)
+{
+    std::set<std::string> layerNames{std::string(katana::entity::kDefaultLayerName)};
+    for (const Layer& layer : contents.layers) {
+        if (layer.name.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "project contains a layer without a name");
+        }
+        layerNames.insert(layer.name);
+    }
+    std::set<std::string> styleNames;
+    for (const Style& style : contents.styles) {
+        styleNames.insert(style.name);
+    }
+    std::set<EntityId> ids;
+    EntityId highest = 0;
+    for (const Entity& entity : contents.entities) {
+        const std::string context = "id=" + std::to_string(entity.id);
+        if (entity.id == katana::entity::kInvalidEntityId || !ids.insert(entity.id).second) {
+            return makeError(ErrorCode::InvalidArgument, "entity id is missing or duplicated",
+                             context);
+        }
+        if (layerNames.count(entity.layer) == 0) {
+            return makeError(ErrorCode::InvalidArgument, "entity refers to an unknown layer",
+                             context + " layer=" + entity.layer);
+        }
+        if (!entity.style.empty() && styleNames.count(entity.style) == 0) {
+            return makeError(ErrorCode::InvalidArgument, "entity refers to an unknown style",
+                             context + " style=" + entity.style);
+        }
+        if (auto status = katana::entity::validate(entity.geometry); !status) {
+            return makeError(status.error().code, status.error().message, context);
+        }
+        highest = std::max(highest, entity.id);
+    }
+    if (contents.nextEntityId <= highest) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "next entity id would collide with an existing entity",
+                         "next=" + std::to_string(contents.nextEntityId));
+    }
+    for (const Relationship& relationship : contents.relationships) {
+        if (ids.count(relationship.from) == 0 || ids.count(relationship.to) == 0) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "relationship refers to an entity that is not in the project",
+                             "kind=" + relationship.kind);
+        }
+    }
+    return {};
+}
+
+Status migrate(SqliteDatabase& database, int fromVersion)
+{
+    for (const Migration& migration : kMigrations) {
+        if (migration.toVersion <= fromVersion) {
+            continue;
+        }
+        auto transaction = SqliteTransaction::begin(database);
+        if (!transaction) {
+            return transaction.error();
+        }
+        if (auto status = database.execute(migration.sql); !status) {
+            return makeError(ErrorCode::DatabaseFailure, "schema migration failed",
+                             "to=" + std::to_string(migration.toVersion) + " " +
+                                 status.error().context);
+        }
+        if (auto status = database.setUserVersion(migration.toVersion); !status) {
+            return status;
+        }
+        if (auto status = transaction->commit(); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+// A database that opens, carries the Katana application id and passes the
+// integrity check. Returns the problem description otherwise.
+Result<std::optional<std::string>> inspectDatabase(const fs::path& file)
+{
+    // Read-WRITE, not read-only. A database whose process was killed mid-commit
+    // has a hot rollback journal beside it, and SQLite replays that journal when
+    // the file is next opened for writing - after which it is perfectly sound.
+    // A read-only connection cannot replay it and fails with
+    // SQLITE_READONLY_ROLLBACK, which is indistinguishable from real corruption
+    // here: recover() would then throw away a recoverable database and restore
+    // an older backup, losing every change since.
+    //
+    // Read-only is still tried as a fallback, for genuinely unwritable media.
+    auto database = SqliteDatabase::open(file, SqliteDatabase::OpenMode::ReadWrite);
+    if (!database) {
+        auto readOnly = SqliteDatabase::open(file, SqliteDatabase::OpenMode::ReadOnly);
+        if (!readOnly) {
+            return std::optional<std::string>{readOnly.error().describe()};
+        }
+        database = std::move(readOnly);
+    }
+    const auto applicationId = database->applicationId();
+    if (!applicationId) {
+        return std::optional<std::string>{applicationId.error().describe()};
+    }
+    if (*applicationId != kApplicationId) {
+        return std::optional<std::string>{"not a Katana project database"};
+    }
+    auto problems = database->integrityProblems();
+    if (!problems) {
+        return std::optional<std::string>{problems.error().describe()};
+    }
+    return *problems;
+}
+
+// Backups are written as "project-<compact UTC>.db", and "project-<compact
+// UTC>-<n>.db" when several land in the same second. Parsing that back into
+// (timestamp, sequence) is what lets them be ordered correctly; ordering by
+// filename alone gets the collision case BACKWARDS, because '.' (0x2E) sorts
+// above '-' (0x2D) and so "...T120000.db" outranks the later "...T120000-1.db".
+struct BackupName {
+    std::string timestamp;
+    long sequence = 0;
+};
+
+std::optional<BackupName> parseBackupName(const fs::path& file)
+{
+    static constexpr std::string_view kPrefix = "project-";
+    // utcTimestamp(true) produces "YYYYMMDDTHHMMSS-mmm" - fixed width, and it
+    // ALREADY contains a dash, before the milliseconds. So the collision suffix
+    // cannot be found by looking for the first '-' (that finds the milliseconds)
+    // nor safely by the last one. The timestamp is a known shape, so it is
+    // matched as one and whatever follows must be the suffix.
+    static constexpr std::size_t kTimestampLength = 19; // YYYYMMDDTHHMMSS-mmm
+    const std::string stem = file.stem().string();
+    if (file.extension() != ".db" || stem.size() < kPrefix.size() + kTimestampLength ||
+        stem.compare(0, kPrefix.size(), kPrefix) != 0) {
+        return std::nullopt;
+    }
+    const std::string rest = stem.substr(kPrefix.size());
+
+    BackupName parsed;
+    parsed.timestamp = rest.substr(0, kTimestampLength);
+    for (std::size_t i = 0; i < kTimestampLength; ++i) {
+        const char ch = parsed.timestamp[i];
+        const bool valid = i == 8    ? ch == 'T'
+                           : i == 15 ? ch == '-'
+                                     : std::isdigit(static_cast<unsigned char>(ch)) != 0;
+        if (!valid) {
+            return std::nullopt;
+        }
+    }
+
+    if (rest.size() > kTimestampLength) {
+        // Only "-<digits>", the suffix added when two backups land in the same
+        // millisecond, may follow.
+        if (rest[kTimestampLength] != '-') {
+            return std::nullopt;
+        }
+        const std::string sequence = rest.substr(kTimestampLength + 1);
+        if (sequence.empty() || sequence.find_first_not_of("0123456789") != std::string::npos) {
+            return std::nullopt;
+        }
+        parsed.sequence = std::stol(sequence);
+    }
+    return parsed;
+}
+
+std::vector<fs::path> backupsNewestFirst(const fs::path& projectDirectory)
+{
+    // Only files this class actually wrote are considered. Any other .db
+    // dropped into backups/ - a copy someone made by hand, an editor's stray
+    // save - would otherwise be offered as a restore candidate and could
+    // outrank every real snapshot on name alone.
+    std::vector<std::pair<BackupName, fs::path>> backups;
+    std::error_code ignored;
+    for (const auto& entry : fs::directory_iterator(projectDirectory / kBackupDirectory, ignored)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        if (auto parsed = parseBackupName(entry.path())) {
+            backups.emplace_back(*parsed, entry.path());
+        }
+    }
+    std::sort(backups.begin(), backups.end(), [](const auto& a, const auto& b) {
+        if (a.first.timestamp != b.first.timestamp) {
+            return a.first.timestamp > b.first.timestamp;
+        }
+        return a.first.sequence > b.first.sequence;
+    });
+
+    std::vector<fs::path> ordered;
+    ordered.reserve(backups.size());
+    for (auto& [name, path] : backups) {
+        ordered.push_back(std::move(path));
+    }
+    return ordered;
+}
+
+} // namespace
+
+// ---- model <-> contents ---------------------------------------------------------------
+
+ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata metadata,
+                             std::vector<Relationship> relationships)
+{
+    ProjectContents contents;
+    contents.metadata = std::move(metadata);
+    contents.layers = model.layers.all();
+    contents.styles = model.styles.all();
+    contents.propertyDefinitions = model.properties.all();
+    contents.entities.reserve(model.entities.size());
+    model.entities.forEach([&](const Entity& entity) { contents.entities.push_back(entity); });
+    contents.relationships = std::move(relationships);
+    contents.nextEntityId = model.entities.nextId();
+    return contents;
+}
+
+Status applyToModel(const ProjectContents& contents, katana::entity::Model& model)
+{
+    if (auto status = validateContents(contents); !status) {
+        return status;
+    }
+    // Built ASIDE and committed only once every insertion has succeeded.
+    //
+    // validateContents() does not cover everything the tables themselves
+    // enforce - line weights, empty or duplicate names, property defaults - so
+    // an insertion here really can fail on a file that passed validation. The
+    // previous version reset the caller's model first and reset it again on
+    // failure, which destroyed the open drawing; Document::open documents the
+    // opposite ("a failed open leaves the current drawing exactly as it was")
+    // and relies on it.
+    katana::entity::Model staged;
+    for (const Layer& layer : contents.layers) {
+        auto status = layer.name == katana::entity::kDefaultLayerName
+                          ? staged.layers.update(layer)
+                          : staged.layers.add(layer);
+        if (!status) {
+            return status;
+        }
+    }
+    for (const Style& style : contents.styles) {
+        if (auto status = staged.styles.add(style); !status) {
+            return status;
+        }
+    }
+    for (const PropertyDefinition& definition : contents.propertyDefinitions) {
+        if (auto status = staged.properties.define(definition); !status) {
+            return status;
+        }
+    }
+    for (const Entity& entity : contents.entities) {
+        if (auto status = staged.entities.insert(entity); !status) {
+            return status;
+        }
+    }
+    staged.entities.reserveIdsBelow(contents.nextEntityId);
+
+    // Nothing below can fail, so this is the commit point.
+    model.adoptContents(std::move(staged));
+    return {};
+}
+
+// ---- ProjectStore -----------------------------------------------------------------------
+
+struct ProjectStore::Impl {
+    fs::path directory;
+    SqliteDatabase database;
+};
+
+ProjectStore::ProjectStore(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+ProjectStore::ProjectStore(ProjectStore&&) noexcept = default;
+ProjectStore& ProjectStore::operator=(ProjectStore&&) noexcept = default;
+ProjectStore::~ProjectStore() = default;
+
+bool ProjectStore::isProjectDirectory(const fs::path& directory)
+{
+    std::error_code ignored;
+    return fs::is_regular_file(directory / kDatabaseFile, ignored);
+}
+
+Result<ProjectStore> ProjectStore::create(const fs::path& projectDirectory,
+                                          const ProjectMetadata& metadata)
+{
+    if (isProjectDirectory(projectDirectory)) {
+        return makeError(ErrorCode::AlreadyExists, "a project already exists in this directory",
+                         toUtf8(projectDirectory));
+    }
+    std::error_code failure;
+    fs::create_directories(projectDirectory / kBackupDirectory, failure);
+    for (const char* name : kDataDirectories) {
+        if (!failure) {
+            fs::create_directories(projectDirectory / name, failure);
+        }
+    }
+    if (failure) {
+        return makeError(ErrorCode::DatabaseFailure, "could not create the project directories",
+                         toUtf8(projectDirectory) + ": " + failure.message());
+    }
+
+    auto database = SqliteDatabase::open(projectDirectory / kDatabaseFile);
+    if (!database) {
+        return database.error();
+    }
+    if (auto status = database->setApplicationId(kApplicationId); !status) {
+        return status.error();
+    }
+    if (auto status = migrate(*database, 0); !status) {
+        return status.error();
+    }
+
+    ProjectStore store(std::make_unique<Impl>(Impl{projectDirectory, std::move(*database)}));
+    ProjectContents empty;
+    empty.metadata = metadata;
+    empty.metadata.createdUtc = utcTimestamp(false);
+    empty.layers.push_back(Layer{});
+    if (auto status = store.save(empty); !status) {
+        return status.error();
+    }
+    return store;
+}
+
+Result<ProjectStore> ProjectStore::open(const fs::path& projectDirectory)
+{
+    if (!isProjectDirectory(projectDirectory)) {
+        return makeError(ErrorCode::NotFound, "no Katana project in this directory",
+                         toUtf8(projectDirectory));
+    }
+    const fs::path file = projectDirectory / kDatabaseFile;
+    const auto problems = inspectDatabase(file);
+    if (!problems) {
+        return problems.error();
+    }
+    if (problems->has_value()) {
+        return makeError(ErrorCode::DatabaseFailure,
+                         "project database is damaged; ProjectStore::recover() can restore a backup",
+                         **problems);
+    }
+
+    auto database = SqliteDatabase::open(file, SqliteDatabase::OpenMode::ReadWrite);
+    if (!database) {
+        return database.error();
+    }
+    const auto version = database->userVersion();
+    if (!version) {
+        return version.error();
+    }
+    if (*version > kCurrentSchemaVersion) {
+        return makeError(ErrorCode::Unsupported,
+                         "project was written by a newer version of Katana",
+                         "schema=" + std::to_string(*version) +
+                             " supported=" + std::to_string(kCurrentSchemaVersion));
+    }
+
+    ProjectStore store(std::make_unique<Impl>(Impl{projectDirectory, std::move(*database)}));
+    if (*version < kCurrentSchemaVersion) {
+        if (auto saved = store.backup(); !saved) { // never migrate without a way back
+            return saved.error();
+        }
+        if (auto status = migrate(store.impl_->database, *version); !status) {
+            return status.error();
+        }
+    }
+    return store;
+}
+
+Result<RecoveryReport> ProjectStore::recover(const fs::path& projectDirectory)
+{
+    const fs::path file = projectDirectory / kDatabaseFile;
+    RecoveryReport report;
+
+    std::error_code ignored;
+    if (fs::exists(file, ignored)) {
+        const auto problems = inspectDatabase(file);
+        if (!problems) {
+            return problems.error();
+        }
+        if (!problems->has_value()) {
+            return report; // sound: nothing to do
+        }
+        report.problems = **problems;
+    } else {
+        report.problems = "project.db is missing";
+    }
+
+    for (const fs::path& candidate : backupsNewestFirst(projectDirectory)) {
+        const auto candidateProblems = inspectDatabase(candidate);
+        if (!candidateProblems || candidateProblems->has_value()) {
+            continue; // this backup is damaged too; try an older one
+        }
+        std::error_code failure;
+        if (fs::exists(file, ignored)) {
+            report.damagedFileKeptAs =
+                projectDirectory / (std::string(kDatabaseFile) + ".damaged-" + utcTimestamp(true));
+            fs::rename(file, report.damagedFileKeptAs, failure);
+            if (failure) {
+                return makeError(ErrorCode::DatabaseFailure,
+                                 "could not move the damaged database aside", failure.message());
+            }
+        }
+        // A rollback journal of the damaged file must never be left beside the
+        // restored one: SQLite would replay it over the good data on the next
+        // open, corrupting the file that was just recovered.
+        const fs::path journal = projectDirectory / (std::string(kDatabaseFile) + "-journal");
+        if (fs::exists(journal, ignored)) {
+            // damagedFileKeptAs is empty when project.db was missing entirely,
+            // and concat() on an empty path yields the RELATIVE name "-journal",
+            // which moves the journal into the working directory and leaves it
+            // beside the restored database. The target is always built inside
+            // projectDirectory instead.
+            const fs::path journalKeptAs =
+                report.damagedFileKeptAs.empty()
+                    ? projectDirectory / (std::string(kDatabaseFile) + ".damaged-" +
+                                          utcTimestamp(true) + "-journal")
+                    : fs::path(report.damagedFileKeptAs).concat("-journal");
+            fs::rename(journal, journalKeptAs, failure);
+            if (failure) {
+                // Restoring on top of a journal that is still there would be
+                // worse than not restoring at all.
+                return makeError(ErrorCode::DatabaseFailure,
+                                 "could not move the damaged database's rollback journal aside",
+                                 failure.message());
+            }
+        }
+        fs::copy_file(candidate, file, fs::copy_options::overwrite_existing, failure);
+        if (failure) {
+            return makeError(ErrorCode::DatabaseFailure, "could not restore the backup",
+                             failure.message());
+        }
+        report.restored = true;
+        report.restoredFrom = candidate;
+        return report;
+    }
+    return makeError(ErrorCode::DatabaseFailure, "no usable backup was found",
+                     toUtf8(projectDirectory) + ": " + report.problems);
+}
+
+const fs::path& ProjectStore::directory() const
+{
+    return impl_->directory;
+}
+
+fs::path ProjectStore::databasePath() const
+{
+    return impl_->directory / kDatabaseFile;
+}
+
+Result<int> ProjectStore::schemaVersion()
+{
+    return impl_->database.userVersion();
+}
+
+std::vector<fs::path> ProjectStore::listBackups() const
+{
+    return backupsNewestFirst(impl_->directory);
+}
+
+Result<fs::path> ProjectStore::backup(std::size_t keep)
+{
+    const fs::path directory = impl_->directory / kBackupDirectory;
+    std::error_code failure;
+    fs::create_directories(directory, failure);
+    if (failure) {
+        return makeError(ErrorCode::DatabaseFailure, "could not create the backup directory",
+                         failure.message());
+    }
+    fs::path target = directory / ("project-" + utcTimestamp(true) + ".db");
+    for (int suffix = 1; fs::exists(target, failure); ++suffix) { // same millisecond
+        target = directory / ("project-" + utcTimestamp(true) + "-" + std::to_string(suffix) + ".db");
+    }
+    if (auto status = impl_->database.backupTo(target); !status) {
+        fs::remove(target, failure);
+        return status.error();
+    }
+    const auto backups = backupsNewestFirst(impl_->directory);
+    for (std::size_t i = keep; i < backups.size(); ++i) {
+        fs::remove(backups[i], failure);
+    }
+    return target;
+}
+
+namespace {
+
+Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
+{
+    auto insert = database.prepare("INSERT INTO metadata (key, value) VALUES (?1, ?2)");
+    if (!insert) {
+        return insert.error();
+    }
+    const ProjectMetadata& m = contents.metadata;
+    const std::pair<const char*, std::string> rows[] = {
+        {"name", m.name},
+        {"description", m.description},
+        {"linear_unit", m.linearUnit},
+        {"coordinate_system", m.coordinateSystem},
+        {"created_utc", m.createdUtc},
+        {"modified_utc", utcTimestamp(false)},
+        {"application_version", m.applicationVersion},
+        {"next_entity_id", std::to_string(contents.nextEntityId)},
+    };
+    for (const auto& [key, value] : rows) {
+        Status status = insert->bind(1, std::string_view(key));
+        if (status) {
+            status = insert->bind(2, std::string_view(value));
+        }
+        if (status) {
+            status = insert->run();
+        }
+        if (!status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+// Binds a nullable colour column.
+Status bindColor(SqliteStatement& statement, int index,
+                 const std::optional<katana::entity::Color>& color)
+{
+    return color ? statement.bind(index, std::string_view(color->toHex()))
+                 : statement.bindNull(index);
+}
+
+// Chains bind calls, stopping at the first failure.
+class Binder {
+  public:
+    explicit Binder(SqliteStatement& statement) : statement_(statement) {}
+
+    template <typename T> Binder& operator()(int index, const T& value)
+    {
+        if (status_) {
+            status_ = statement_.bind(index, value);
+        }
+        return *this;
+    }
+    Binder& color(int index, const std::optional<katana::entity::Color>& value)
+    {
+        if (status_) {
+            status_ = bindColor(statement_, index, value);
+        }
+        return *this;
+    }
+    [[nodiscard]] Status run()
+    {
+        if (!status_) {
+            statement_.reset();
+            return std::move(status_);
+        }
+        return statement_.run();
+    }
+
+  private:
+    SqliteStatement& statement_;
+    Status status_;
+};
+
+} // namespace
+
+Status ProjectStore::save(const ProjectContents& contents)
+{
+    if (auto status = validateContents(contents); !status) {
+        return status;
+    }
+    SqliteDatabase& database = impl_->database;
+    auto transaction = SqliteTransaction::begin(database);
+    if (!transaction) {
+        return transaction.error();
+    }
+    if (auto status = database.execute("DELETE FROM relationships; DELETE FROM entities;"
+                                       "DELETE FROM property_definitions; DELETE FROM styles;"
+                                       "DELETE FROM layers; DELETE FROM metadata;");
+        !status) {
+        return status;
+    }
+    if (auto status = writeMetadata(database, contents); !status) {
+        return status;
+    }
+
+    auto insertLayer = database.prepare(
+        "INSERT INTO layers (name, color, visible, locked, linetype, line_weight)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6)");
+    if (!insertLayer) {
+        return insertLayer.error();
+    }
+    bool hasDefaultLayer = false;
+    for (const Layer& layer : contents.layers) {
+        hasDefaultLayer = hasDefaultLayer || layer.name == katana::entity::kDefaultLayerName;
+        if (auto status = Binder(*insertLayer)(1, std::string_view(layer.name))(
+                              2, std::string_view(layer.color.toHex()))(3, layer.visible)(
+                              4, layer.locked)(5, std::string_view(layer.linetype))(
+                              6, layer.lineWeight)
+                              .run();
+            !status) {
+            return status;
+        }
+    }
+    if (!hasDefaultLayer) { // entities may legitimately refer to it
+        const Layer fallback;
+        if (auto status = Binder(*insertLayer)(1, std::string_view(fallback.name))(
+                              2, std::string_view(fallback.color.toHex()))(3, fallback.visible)(
+                              4, fallback.locked)(5, std::string_view(fallback.linetype))(
+                              6, fallback.lineWeight)
+                              .run();
+            !status) {
+            return status;
+        }
+    }
+
+    auto insertStyle = database.prepare(
+        "INSERT INTO styles (name, color, line_weight, linetype) VALUES (?1, ?2, ?3, ?4)");
+    if (!insertStyle) {
+        return insertStyle.error();
+    }
+    for (const Style& style : contents.styles) {
+        if (auto status = Binder(*insertStyle)(1, std::string_view(style.name))
+                              .color(2, style.color)(3, style.lineWeight)(
+                                  4, std::string_view(style.linetype))
+                              .run();
+            !status) {
+            return status;
+        }
+    }
+
+    auto insertDefinition = database.prepare(
+        "INSERT INTO property_definitions (name, type, description, default_value)"
+        " VALUES (?1, ?2, ?3, ?4)");
+    if (!insertDefinition) {
+        return insertDefinition.error();
+    }
+    for (const PropertyDefinition& definition : contents.propertyDefinitions) {
+        Binder binder(*insertDefinition);
+        binder(1, std::string_view(definition.name))(2, toString(definition.type))(
+            3, std::string_view(definition.description));
+        Status status;
+        if (definition.defaultValue) {
+            auto json = katana::entity::propertiesToJson({{"value", *definition.defaultValue}});
+            if (!json) {
+                return json.error();
+            }
+            status = binder(4, std::string_view(*json)).run();
+        } else {
+            status = insertDefinition->bindNull(4);
+            if (status) {
+                status = binder.run();
+            }
+        }
+        if (!status) {
+            return status;
+        }
+    }
+
+    auto insertEntity = database.prepare(
+        "INSERT INTO entities (id, type, layer, style, color, visible, geometry, properties, metadata)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+    if (!insertEntity) {
+        return insertEntity.error();
+    }
+    for (const Entity& entity : contents.entities) {
+        // A write that cannot be encoded fails the save cleanly instead of
+        // aborting the process partway through the transaction.
+        auto geometry = katana::entity::geometryToJson(entity.geometry);
+        if (!geometry) {
+            return geometry.error();
+        }
+        auto properties = katana::entity::propertiesToJson(entity.properties);
+        if (!properties) {
+            return properties.error();
+        }
+        auto metadata = katana::entity::propertiesToJson(entity.metadata);
+        if (!metadata) {
+            return metadata.error();
+        }
+        if (auto status = Binder(*insertEntity)(1, static_cast<std::int64_t>(entity.id))(
+                              2, katana::entity::toString(entity.type()))(
+                              3, std::string_view(entity.layer))(4, std::string_view(entity.style))
+                              .color(5, entity.color)(6, entity.visible)(
+                                  7, std::string_view(*geometry))(8, std::string_view(*properties))(
+                                  9, std::string_view(*metadata))
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "entity id=" + std::to_string(entity.id) + " " +
+                                 status.error().context);
+        }
+    }
+
+    auto insertRelationship = database.prepare(
+        "INSERT INTO relationships (from_entity, to_entity, kind, data) VALUES (?1, ?2, ?3, ?4)");
+    if (!insertRelationship) {
+        return insertRelationship.error();
+    }
+    for (const Relationship& relationship : contents.relationships) {
+        if (auto status = Binder(*insertRelationship)(1, static_cast<std::int64_t>(relationship.from))(
+                              2, static_cast<std::int64_t>(relationship.to))(
+                              3, std::string_view(relationship.kind))(
+                              4, std::string_view(relationship.data))
+                              .run();
+            !status) {
+            return status;
+        }
+    }
+    return transaction->commit();
+}
+
+Result<ProjectContents> ProjectStore::load()
+{
+    SqliteDatabase& database = impl_->database;
+    ProjectContents contents;
+
+    // Runs `sql` and calls `onRow` for every row; stops at the first failure.
+    const auto forEachRow = [&](const char* sql, auto onRow) -> Status {
+        auto statement = database.prepare(sql);
+        if (!statement) {
+            return statement.error();
+        }
+        while (true) {
+            const auto row = statement->step();
+            if (!row) {
+                return row.error();
+            }
+            if (!*row) {
+                return {};
+            }
+            if (auto status = onRow(*statement); !status) {
+                return status;
+            }
+        }
+    };
+    const auto readColor = [](SqliteStatement& row, int column,
+                              std::optional<katana::entity::Color>& out) -> Status {
+        if (row.columnIsNull(column)) {
+            out.reset();
+            return {};
+        }
+        const auto color = katana::entity::Color::fromHex(row.columnText(column));
+        if (!color) {
+            return color.error();
+        }
+        out = *color;
+        return {};
+    };
+
+    Status status = forEachRow("SELECT key, value FROM metadata", [&](SqliteStatement& row) -> Status {
+        const std::string key = row.columnText(0);
+        std::string value = row.columnText(1);
+        ProjectMetadata& m = contents.metadata;
+        if (key == "name") {
+            m.name = std::move(value);
+        } else if (key == "description") {
+            m.description = std::move(value);
+        } else if (key == "linear_unit") {
+            m.linearUnit = std::move(value);
+        } else if (key == "coordinate_system") {
+            m.coordinateSystem = std::move(value);
+        } else if (key == "created_utc") {
+            m.createdUtc = std::move(value);
+        } else if (key == "modified_utc") {
+            m.modifiedUtc = std::move(value);
+        } else if (key == "application_version") {
+            m.applicationVersion = std::move(value);
+        } else if (key == "next_entity_id") {
+            try {
+                contents.nextEntityId = std::stoull(value);
+            } catch (const std::exception&) {
+                return makeError(ErrorCode::DatabaseFailure, "next_entity_id is not a number", value);
+            }
+        }
+        return {}; // unknown keys come from newer minor versions; ignore them
+    });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, color, visible, locked, linetype, line_weight FROM layers ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            Layer layer;
+            layer.name = row.columnText(0);
+            const auto color = katana::entity::Color::fromHex(row.columnText(1));
+            if (!color) {
+                return color.error();
+            }
+            layer.color = *color;
+            layer.visible = row.columnInt64(2) != 0;
+            layer.locked = row.columnInt64(3) != 0;
+            layer.linetype = row.columnText(4);
+            layer.lineWeight = row.columnDouble(5);
+            contents.layers.push_back(std::move(layer));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow("SELECT name, color, line_weight, linetype FROM styles ORDER BY name",
+                        [&](SqliteStatement& row) -> Status {
+                            Style style;
+                            style.name = row.columnText(0);
+                            if (auto colorStatus = readColor(row, 1, style.color); !colorStatus) {
+                                return colorStatus;
+                            }
+                            style.lineWeight = row.columnDouble(2);
+                            style.linetype = row.columnText(3);
+                            contents.styles.push_back(std::move(style));
+                            return {};
+                        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, type, description, default_value FROM property_definitions ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            PropertyDefinition definition;
+            definition.name = row.columnText(0);
+            const auto type = propertyTypeFromString(row.columnText(1));
+            if (!type) {
+                return type.error();
+            }
+            definition.type = *type;
+            definition.description = row.columnText(2);
+            if (!row.columnIsNull(3)) {
+                auto parsed = katana::entity::propertiesFromJson(row.columnText(3));
+                if (!parsed) {
+                    return parsed.error();
+                }
+                const auto found = parsed->find("value");
+                if (found != parsed->end()) {
+                    definition.defaultValue = found->second;
+                }
+            }
+            contents.propertyDefinitions.push_back(std::move(definition));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT id, layer, style, color, visible, geometry, properties, metadata"
+        " FROM entities ORDER BY id",
+        [&](SqliteStatement& row) -> Status {
+            Entity entity;
+            entity.id = static_cast<EntityId>(row.columnInt64(0));
+            const std::string context = "entity id=" + std::to_string(entity.id);
+            entity.layer = row.columnText(1);
+            entity.style = row.columnText(2);
+            if (auto colorStatus = readColor(row, 3, entity.color); !colorStatus) {
+                return colorStatus;
+            }
+            entity.visible = row.columnInt64(4) != 0;
+            auto geometry = katana::entity::geometryFromJson(row.columnText(5));
+            if (!geometry) {
+                return makeError(geometry.error().code, geometry.error().message,
+                                 context + " " + geometry.error().context);
+            }
+            entity.geometry = std::move(*geometry);
+            auto properties = katana::entity::propertiesFromJson(row.columnText(6));
+            auto metadata = katana::entity::propertiesFromJson(row.columnText(7));
+            if (!properties) {
+                return makeError(properties.error().code, properties.error().message, context);
+            }
+            if (!metadata) {
+                return makeError(metadata.error().code, metadata.error().message, context);
+            }
+            entity.properties = std::move(*properties);
+            entity.metadata = std::move(*metadata);
+            contents.entities.push_back(std::move(entity));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow("SELECT from_entity, to_entity, kind, data FROM relationships ORDER BY id",
+                        [&](SqliteStatement& row) -> Status {
+                            contents.relationships.push_back(
+                                Relationship{static_cast<EntityId>(row.columnInt64(0)),
+                                             static_cast<EntityId>(row.columnInt64(1)),
+                                             row.columnText(2), row.columnText(3)});
+                            return {};
+                        });
+    if (!status) {
+        return status.error();
+    }
+    return contents;
+}
+
+} // namespace katana::storage

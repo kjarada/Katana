@@ -1,0 +1,19 @@
+# LeakSanitizer suppressions.
+#
+# Only for allocations inside third-party libraries that are intentionally
+# retained for the process lifetime and cannot be freed by Katana. Katana's own
+# code must never appear here: a leak in this codebase is a defect to fix, not
+# to suppress.
+
+# PROJ caches its database connection and search-path state per context and
+# frees it only at process exit.
+leak:proj_context_create
+leak:pj_open_lib
+
+# SQLite's global mutex and page-cache initialisation, torn down only by
+# sqlite3_shutdown(), which a test binary has no reason to call.
+leak:sqlite3_initialize
+
+# GDAL/OGR driver registration builds a static driver manager.
+leak:GDALAllRegister
+leak:OGRRegisterAll

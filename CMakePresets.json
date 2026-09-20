@@ -1,0 +1,121 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "msys2-ucrt64",
+            "hidden": true,
+            "inherits": "base",
+            "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "C:/msys64/ucrt64",
+                "CMAKE_CXX_COMPILER": "C:/msys64/ucrt64/bin/g++.exe"
+            },
+            "environment": {
+                "PATH": "C:/msys64/ucrt64/bin;$penv{PATH}"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "Debug (MSYS2 UCRT64)",
+            "inherits": "msys2-ucrt64",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "release",
+            "displayName": "Release (MSYS2 UCRT64)",
+            "inherits": "msys2-ucrt64",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "relwithdebinfo",
+            "displayName": "RelWithDebInfo (MSYS2 UCRT64)",
+            "inherits": "msys2-ucrt64",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+        },
+        {
+            "name": "sanitize",
+            "displayName": "Debug + sanitizers (UBSan trap mode on MinGW, ASan+UBSan elsewhere)",
+            "inherits": "msys2-ucrt64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "KATANA_ENABLE_SANITIZERS": "ON",
+                "KATANA_BUILD_QT_APP": "OFF",
+                "KATANA_BUILD_BENCHMARKS": "OFF"
+            }
+        },
+        {
+            "name": "tidy",
+            "displayName": "Debug + clang-tidy + cppcheck",
+            "inherits": "msys2-ucrt64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "KATANA_ENABLE_CLANG_TIDY": "ON",
+                "KATANA_ENABLE_CPPCHECK": "ON"
+            }
+        },
+        {
+            "name": "linux-debug",
+            "displayName": "Debug (Linux/macOS, system packages)",
+            "inherits": "base",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+        },
+        {
+            "name": "linux-sanitize",
+            "displayName": "Debug + ASan + UBSan (Linux/macOS)",
+            "inherits": "linux-debug",
+            "cacheVariables": { "KATANA_ENABLE_SANITIZERS": "ON" }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug", "configurePreset": "debug" },
+        { "name": "release", "configurePreset": "release" },
+        { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo" },
+        { "name": "sanitize", "configurePreset": "sanitize" },
+        { "name": "tidy", "configurePreset": "tidy" },
+        { "name": "linux-debug", "configurePreset": "linux-debug" },
+        { "name": "linux-sanitize", "configurePreset": "linux-sanitize" }
+    ],
+    "testPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "relwithdebinfo",
+            "configurePreset": "relwithdebinfo",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "linux-debug",
+            "configurePreset": "linux-debug",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "linux-sanitize",
+            "configurePreset": "linux-sanitize",
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}
