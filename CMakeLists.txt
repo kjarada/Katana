@@ -77,6 +77,49 @@ foreach(module IN LISTS KATANA_MODULES)
     endif()
 endforeach()
 
+# A filtered configuration must still be a COMPLETE one.
+#
+# CMake turns a link against a target that does not exist into a bare -lname and
+# says nothing, so excluding a module that another included module depends on
+# configures cleanly, builds every object file, and then fails at LINK time with
+# "ld returned 1" and no indication of why. That happened: a build directory
+# carried a KATANA_MODULE_FILTER from before katana_cad depended on
+# katana_terrain and katana_render, and the failure looked like a code
+# regression rather than a stale cache.
+#
+# PLAN.MD section 36 forbids silent failures, so the graph is checked here and
+# named precisely.
+set(_katana_missing "")
+foreach(module IN LISTS KATANA_MODULES)
+    if(NOT TARGET ${module})
+        continue()
+    endif()
+    set(_deps "")
+    foreach(_property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(_value ${module} ${_property})
+        if(_value)
+            list(APPEND _deps ${_value})
+        endif()
+    endforeach()
+    foreach(_dep IN LISTS _deps)
+        # Only first-party modules; third-party names are found by find_package.
+        if(_dep MATCHES "^katana_" AND NOT TARGET ${_dep})
+            list(APPEND _katana_missing "${module} needs ${_dep}")
+        endif()
+    endforeach()
+endforeach()
+if(_katana_missing)
+    list(REMOVE_DUPLICATES _katana_missing)
+    list(JOIN _katana_missing "
+  " _text)
+    message(FATAL_ERROR
+        "KATANA_MODULE_FILTER excludes a module that another one depends on:
+  ${_text}
+"
+        "Add the missing modules to KATANA_MODULE_FILTER, or clear it to configure them all. "
+        "Without this check the configure succeeds and the LINK fails with no explanation.")
+endif()
+
 if(KATANA_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

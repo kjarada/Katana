@@ -119,12 +119,24 @@ Schema version 3 stores geometry as a versioned little-endian blob
 | `open` + `load` + `applyToModel` | 891 ms | **195 ms** | 4.6× |
 | `save` | 445 ms | **206 ms** | 2.2× |
 
-**The load saved more than the JSON parse alone accounted for** — 696 ms
-against the 602 ms measured for `geometryFromJson`. The extra is most likely
-the string handling that went with it: the JSON path pulled each geometry out
-as a `std::string` from `columnText` and then allocated again while parsing,
-where the blob is read into one buffer and decoded in place. That is an
-explanation, not a measurement; if it matters, measure it before relying on it.
+Measuring the two encodings head to head, on the same 50 000 geometries with
+no database involved:
+
+| | JSON | Blob | |
+|---|---|---|---|
+| Encode | 205 ms | **19.8 ms** | 10.4× |
+| Decode | 587 ms | **3.61 ms** | **163×** |
+
+Decoding is the one that mattered, and it is now effectively free: 3.6 ms
+against 587 ms. Reading a length and memcpy-ing doubles is not comparable work
+to lexing text and converting decimal to binary.
+
+**The load saved 696 ms, of which decoding accounts for 583 ms.** The remaining
+~113 ms is most likely the string handling that went with the JSON: that path
+pulled each geometry out of `columnText` as a `std::string` and then allocated
+again while parsing, where the blob is read into one buffer and decoded in
+place. The arithmetic is consistent with that, but the 113 ms has not been
+measured directly — treat it as an explanation, not a result.
 
 Doubles are stored by bit pattern, so a round trip is exact — negative zero,
 denormals and infinities included. A saved drawing reloads as the same drawing,

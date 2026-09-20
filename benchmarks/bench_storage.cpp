@@ -17,6 +17,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/entity/geometry_blob.hpp"
 #include "katana/entity/serialization.hpp"
 #include "katana/storage/project_store.hpp"
 
@@ -183,6 +184,58 @@ void BM_GeometryJsonDecode(benchmark::State& state)
     state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(count));
 }
 BENCHMARK(BM_GeometryJsonDecode)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(50000)
+    ->Unit(benchmark::kMillisecond);
+
+
+// The binary path that replaced the JSON one, measured the same way so
+// docs/storage.md can be re-verified rather than trusted. The JSON benchmarks
+// above are kept deliberately: they are the baseline the decision rests on,
+// and a format change that regressed against them should be visible.
+void BM_GeometryBlobEncode(benchmark::State& state)
+{
+    const auto count = static_cast<std::size_t>(state.range(0));
+    const Model model = drawingOf(count);
+    std::vector<katana::entity::Entity> entities;
+    model.entities.forEach([&](const Entity& entity) { entities.push_back(entity); });
+
+    for (auto _ : state) {
+        for (const Entity& entity : entities) {
+            auto blob = katana::entity::geometryToBlob(entity.geometry);
+            benchmark::DoNotOptimize(blob.ok());
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(count));
+}
+BENCHMARK(BM_GeometryBlobEncode)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(50000)
+    ->Unit(benchmark::kMillisecond);
+
+void BM_GeometryBlobDecode(benchmark::State& state)
+{
+    const auto count = static_cast<std::size_t>(state.range(0));
+    const Model model = drawingOf(count);
+    std::vector<std::vector<std::byte>> encoded;
+    model.entities.forEach([&](const Entity& entity) {
+        auto blob = katana::entity::geometryToBlob(entity.geometry);
+        if (blob.ok()) {
+            encoded.push_back(std::move(*blob));
+        }
+    });
+
+    for (auto _ : state) {
+        for (const auto& blob : encoded) {
+            auto back = katana::entity::geometryFromBlob(blob);
+            benchmark::DoNotOptimize(back.ok());
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(count));
+}
+BENCHMARK(BM_GeometryBlobDecode)
     ->Arg(1000)
     ->Arg(10000)
     ->Arg(50000)
