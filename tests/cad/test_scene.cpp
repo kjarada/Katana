@@ -349,3 +349,41 @@ TEST(CadScene, SceneBoundsCoverBothSurfacesAndDrawingGeometry)
     EXPECT_NEAR(box.max.x, 100.0, 1e-9) << "the surface extends further east than the drawing";
     EXPECT_NEAR(box.max.z, 10.0, 1e-9);
 }
+
+TEST(CadScene, ByLayerEntitiesAreDrawnInTheirLayersColour)
+{
+    // The 3D view used to read the entity's own colour or a fixed default and
+    // ignore the layer entirely. ByLayer is the DEFAULT for a new entity, so
+    // everything drawn on a coloured layer came out the default grey while the
+    // 2D view showed it correctly - the two views disagreed about the common
+    // case, not a corner one.
+    Document document;
+
+    katana::entity::Layer kerb;
+    kerb.name = "kerb";
+    kerb.color = katana::entity::Color{255, 0, 0, 255};
+    ASSERT_TRUE(document.execute(katana::commands::createLayer(kerb)).ok());
+    ASSERT_TRUE(document.setCurrentLayer("kerb").ok());
+
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(10.0, 5.0),
+                                                          document.currentAttributes()))
+                    .ok());
+
+    SceneOptions options = plainOptions();
+    options.defaultColor = katana::render::rgba(1, 2, 3); // deliberately not red
+    SceneBuilder builder;
+    DrawList list;
+    builder.build(document, {}, options, list);
+
+    ASSERT_FALSE(list.colors.empty());
+    EXPECT_EQ(list.colors.front(), katana::render::rgba(255, 0, 0, 255))
+        << "a ByLayer entity must take its layer's colour, not the scene default";
+    EXPECT_NE(list.colors.front(), options.defaultColor);
+}
+
+// There is deliberately no scene test for a named style overriding the layer,
+// because no command creates a Style: the table can only be populated by
+// loading a project that already contains one. resolveDisplay's own tests cover
+// the chain. Recorded in PLAN.MD Phase 09 as an outstanding gap rather than
+// left as a test that cannot be written.

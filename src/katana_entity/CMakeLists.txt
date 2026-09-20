@@ -6,6 +6,7 @@ add_library(katana_entity STATIC
     tables.cpp
     layer_path.cpp
     geometry_blob.cpp
+    display.cpp
     serialization.cpp
 )
 katana_target_defaults(katana_entity)

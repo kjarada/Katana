@@ -494,6 +494,30 @@ Measured figures are recorded in `docs/geometry.md`.
 ---
 
 
+## 5.2 Resolved appearance (delivered)
+
+`katana::entity::resolveDisplay` (`include/katana/entity/display.hpp`) is the
+ONE answer to "what colour is this entity, how thick is it, and what linetype
+does it use". The chain is the DXF ByLayer model: entity colour overrides a
+named style's, which overrides the layer's; line weight and linetype come from
+the style when one is named, otherwise from the layer.
+
+It replaced three different answers, two of which were visibly wrong:
+
+* the 3D scene builder read the entity's own colour or a fixed default and
+  ignored the layer entirely - and ByLayer is the DEFAULT for a new entity, so
+  everything on a coloured layer drew grey in 3D while the 2D view showed it
+  correctly;
+* the 2D viewport read the entity's or the layer's and ignored the style;
+* nothing at all read `Style::color`, `Style::lineWeight` or `Style::linetype`.
+  The Style table was validated on write and persisted faithfully, and was
+  inert - a style could not change how anything looked.
+
+**OUTSTANDING: no command creates a Style.** The table can only be populated by
+loading a project that already contains one, so styles remain unreachable from
+the application even now that they take effect. A `STYLE` verb and a styles
+panel belong with the Phase 09 work below.
+
 ## 5.1 Nested layers (delivered)
 
 Layer names are `/`-separated paths: `design/surface/tin1`, `asbuilt/road/kerb`.

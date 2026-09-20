@@ -1,6 +1,7 @@
 #include "viewport_widget.hpp"
 
 #include "katana/cad/spatial_query.hpp"
+#include "katana/entity/display.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -768,7 +769,11 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         if (selection.contains(entity.id)) {
             painter.setPen(QPen(kSelection, 2, Qt::DashLine));
         } else {
-            QColor color = toQColor(entity.color ? *entity.color : layer->color);
+            // Through the one resolution chain, so this agrees with the 3D
+            // view and so that a named style can finally change how an entity
+            // looks - Style::color was stored and validated and read by nothing.
+            const auto display = katana::entity::resolveDisplay(model, entity);
+            QColor color = toQColor(display.color);
             if (layer->locked) {
                 color.setAlpha(110); // locked layers read as background
             }

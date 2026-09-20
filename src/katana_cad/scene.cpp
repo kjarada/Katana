@@ -4,6 +4,7 @@
 #include <cmath>
 #include <variant>
 
+#include "katana/entity/display.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad {
@@ -58,13 +59,21 @@ constexpr double kTwoPi = 6.283185307179586476925;
     return katana::render::rgba(channel(t * 2.0), channel(2.0 - t * 2.0), channel(0.15));
 }
 
-[[nodiscard]] Rgba colorOf(const Entity& entity, const SceneOptions& options)
+// Through the one resolution chain (entity -> style -> layer), so the 3D view
+// agrees with the 2D one. It previously read the entity's own colour or a fixed
+// default, which meant an entity on a red layer drew grey - ByLayer is the
+// DEFAULT, so that was the common case, not the corner one.
+//
+// options.defaultColor now only applies where the entity has no layer at all.
+[[nodiscard]] Rgba colorOf(const katana::entity::Model& model, const Entity& entity,
+                           const SceneOptions& options)
 {
-    if (entity.color.has_value()) {
-        return katana::render::rgba(entity.color->r, entity.color->g, entity.color->b,
-                                    entity.color->a);
+    if (model.layers.find(entity.layer) == nullptr && !entity.color.has_value()) {
+        return options.defaultColor;
     }
-    return options.defaultColor;
+    const auto display = katana::entity::resolveDisplay(model, entity);
+    return katana::render::rgba(display.color.r, display.color.g, display.color.b,
+                                display.color.a);
 }
 
 } // namespace
@@ -280,7 +289,8 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
             return;
         }
         const bool selected = selection.contains(entity.id);
-        const Rgba color = selected ? options.selectionColor : colorOf(entity, options);
+        const Rgba color =
+            selected ? options.selectionColor : colorOf(document.model(), entity, options);
         const float width = selected ? options.selectedLineWidth : options.entityLineWidth;
 
         std::visit(
