@@ -11,6 +11,7 @@
 
 #include "katana/cad/selection.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/cad/spatial_query.hpp"
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/entity/model.hpp"
@@ -282,5 +283,89 @@ BENCHMARK(BM_SpatialIndexRebuild)
     ->Arg(100000)
     ->Arg(500000)
     ->Unit(benchmark::kMillisecond);
+
+
+// Collecting the entities a repaint has to draw. This is the per-FRAME scan:
+// it runs on every pan, every zoom and every redraw, not just on a click.
+// `zoomed` decides how much of the drawing is on screen - the interesting case
+// is a user working at detail scale, where almost nothing is visible and the
+// scan is pure waste.
+void collectVisible(benchmark::State& state, bool indexed, double fraction)
+{
+    const auto count = static_cast<std::size_t>(state.range(0));
+    const katana::entity::Model model = modelWithEntities(count);
+    const katana::geometry::SpatialIndex index = indexFor(model);
+    const double half = 500.0 * fraction;
+    const katana::geometry::Box2 view(Point2(500.0 - half, 500.0 - half),
+                                      Point2(500.0 + half, 500.0 + half));
+
+    std::vector<katana::geometry::SpatialId> scratch;
+    std::size_t drawn = 0;
+    for (auto _ : state) {
+        drawn = 0;
+        katana::cad::detail::forEachCandidate(
+            model, indexed ? &index : nullptr, view, scratch,
+            [&](const katana::entity::Entity& entity) {
+                // Stand-in for the per-entity draw work, so the loop cannot be
+                // optimised away and the measurement is of the traversal.
+                auto id = entity.id;
+                benchmark::DoNotOptimize(id);
+                ++drawn;
+            });
+        benchmark::DoNotOptimize(drawn);
+    }
+    state.counters["visible"] = static_cast<double>(drawn);
+}
+
+// Zoomed in to 1% of the extent: a handful of entities on screen.
+void BM_CollectVisibleScan(benchmark::State& state) { collectVisible(state, false, 0.01); }
+BENCHMARK(BM_CollectVisibleScan)
+    ->Arg(10000)
+    ->Arg(100000)
+    ->Arg(500000)
+    ->Unit(benchmark::kMicrosecond);
+
+void BM_CollectVisibleIndexed(benchmark::State& state) { collectVisible(state, true, 0.01); }
+BENCHMARK(BM_CollectVisibleIndexed)
+    ->Arg(10000)
+    ->Arg(100000)
+    ->Arg(500000)
+    ->Unit(benchmark::kMicrosecond);
+
+// Zoomed out to the whole drawing: everything is visible, so the index cannot
+// help and must not HURT. This is the case that says the change is safe.
+void BM_CollectEverythingScan(benchmark::State& state) { collectVisible(state, false, 1.0); }
+BENCHMARK(BM_CollectEverythingScan)->Arg(100000)->Unit(benchmark::kMicrosecond);
+
+void BM_CollectEverythingIndexed(benchmark::State& state) { collectVisible(state, true, 1.0); }
+BENCHMARK(BM_CollectEverythingIndexed)->Arg(100000)->Unit(benchmark::kMicrosecond);
+
+
+// Finding the crossover, so the heuristic that picks between the two paths is
+// chosen from a measurement rather than from intuition. `fraction` is the
+// LINEAR share of the extent on screen, so the area share is its square.
+void BM_CollectFractionScan(benchmark::State& state)
+{
+    collectVisible(state, false, static_cast<double>(state.range(1)) / 100.0);
+}
+BENCHMARK(BM_CollectFractionScan)
+    ->Args({100000, 10})
+    ->Args({100000, 20})
+    ->Args({100000, 30})
+    ->Args({100000, 50})
+    ->Args({100000, 70})
+    ->Unit(benchmark::kMicrosecond);
+
+void BM_CollectFractionIndexed(benchmark::State& state)
+{
+    collectVisible(state, true, static_cast<double>(state.range(1)) / 100.0);
+}
+BENCHMARK(BM_CollectFractionIndexed)
+    ->Args({100000, 10})
+    ->Args({100000, 20})
+    ->Args({100000, 30})
+    ->Args({100000, 50})
+    ->Args({100000, 70})
+    ->Unit(benchmark::kMicrosecond);
 
 } // namespace

@@ -1,6 +1,6 @@
 #include "katana/cad/selection.hpp"
 
-#include "candidates.hpp"
+#include "katana/cad/spatial_query.hpp"
 
 #include <algorithm>
 #include <array>

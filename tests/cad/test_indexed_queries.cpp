@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <random>
 #include <vector>
 
@@ -347,4 +348,56 @@ TEST(IndexedQueries, HiddenAndLockedEntitiesAreFilteredTheSameWayOnBothPaths)
                 << "a hidden entity was picked";
         }
     }
+}
+
+TEST(IndexedQueries, BothSidesOfTheScanCrossoverGiveTheSameAnswer)
+{
+    // forEachCandidate uses the index for a narrow query and falls back to the
+    // ordered scan for a wide one, because asking an index for everything
+    // costs more than walking the model once (see spatial_query.hpp). The
+    // threshold changes WHICH path runs, so the answers on either side of it
+    // have to be identical or the drawing would change as the user zoomed.
+    Document document;
+    populate(document, 400);
+
+    const Box2 extent = document.spatialIndex().bounds();
+    ASSERT_FALSE(extent.empty());
+    const Point2 middle = extent.center();
+
+    // Window half-widths sweeping from far below the threshold to far above,
+    // so both paths are exercised and the boundary is crossed.
+    for (const double share : {0.001, 0.01, 0.1, 0.3, 0.34, 0.35, 0.36, 0.5, 0.9, 1.0, 4.0}) {
+        const double half = 0.5 * extent.width() * std::sqrt(share);
+        const Box2 window(Point2(middle.x - half, middle.y - half),
+                          Point2(middle.x + half, middle.y + half));
+
+        for (const auto mode : {BoxSelectionMode::Window, BoxSelectionMode::Crossing}) {
+            ASSERT_EQ(pickInBox(document.model(), window, mode),
+                      pickInBox(document.model(), window, mode, {}, &document.spatialIndex()))
+                << "area share " << share;
+        }
+        const double tolerance = half;
+        ASSERT_EQ(pickEntity(document.model(), middle, tolerance),
+                  pickEntity(document.model(), middle, tolerance, {},
+                             &document.spatialIndex()))
+            << "area share " << share;
+    }
+}
+
+TEST(IndexedQueries, AQueryEntirelyOffTheDrawingIsEmptyOnBothPaths)
+{
+    Document document;
+    populate(document, 100);
+
+    const Point2 elsewhere(1.0e6, 1.0e6);
+    EXPECT_FALSE(pickEntity(document.model(), elsewhere, 1.0).has_value());
+    EXPECT_FALSE(
+        pickEntity(document.model(), elsewhere, 1.0, {}, &document.spatialIndex()).has_value());
+
+    const Box2 far(Point2(1.0e6, 1.0e6), Point2(1.0e6 + 50.0, 1.0e6 + 50.0));
+    EXPECT_TRUE(pickInBox(document.model(), far, BoxSelectionMode::Crossing).empty());
+    EXPECT_TRUE(
+        pickInBox(document.model(), far, BoxSelectionMode::Crossing, {},
+                  &document.spatialIndex())
+            .empty());
 }

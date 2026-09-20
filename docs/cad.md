@@ -280,3 +280,39 @@ and 44.6 ms at 500 000, about 5% of the load time.
 
 The equivalence tests run each query twice, scanned and indexed, and require
 the results to be equal — including after moves, deletions, undo and redo.
+
+### The per-frame path, and knowing when NOT to use the index
+
+Picking and snapping happen on a click or a mouse move. Collecting the entities
+a repaint has to draw happens on **every frame** — every pan, every zoom — so
+it was the scan that mattered most. At 500 000 entities zoomed to 1% of the
+extent it cost 22.3 ms per repaint to find the 500 entities on screen.
+
+Measured, 100 000 entities, by the share of the drawing's **area** on screen:
+
+| Area on screen | Visible | Scan | Indexed |
+|---|---|---|---|
+| 1% | 900 | 4060 µs | **170 µs** |
+| 9% | 8 995 | 4029 µs | **2586 µs** |
+| 25% | 25 195 | 4881 µs | **4147 µs** |
+| 49% | 49 000 | **4426 µs** | 6173 µs |
+| 100% | 100 000 | **4018 µs** | 8068 µs |
+
+The last two rows are the point. **Asking an index for everything is slower
+than walking the model once**: it gathers every id, sorts them, then looks each
+one up again, against a single ordered traversal. A zoom-extents repaint is
+exactly that case, and it is common.
+
+So `forEachCandidate` chooses. Below ~35% of the indexed area it queries the
+index; above it, it scans. The threshold is the measured crossover, not a
+guess, and the table above is in the header next to it. After the change a
+zoomed-out repaint costs 4360 µs against the scan's 4337 µs — the same, within
+noise — while the zoomed-in case keeps its full win:
+
+| 500 000 entities, 1% on screen | Before | After |
+|---|---|---|
+| Collect visible | 22.3 ms | **0.090 ms** (248×) |
+
+Both paths are required to return identical results, including across the
+threshold: `BothSidesOfTheScanCrossoverGiveTheSameAnswer` sweeps window sizes
+from far below it to far above and compares.

@@ -1,5 +1,7 @@
 #include "viewport_widget.hpp"
 
+#include "katana/cad/spatial_query.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -749,7 +751,15 @@ void ViewportWidget::drawEntities(QPainter& painter) const
     const Box2 visible = view_.visibleWorldBounds();
     const cad::SelectionSet& selection = document_.selection();
 
-    model.entities.forEach([&](const Entity& entity) {
+    // Through the spatial index (PLAN.MD Phase 18). This runs on EVERY repaint
+    // - every pan, every zoom - not just on a click, so it is the scan that
+    // mattered most. Measured in Release at 500 000 entities zoomed to 1% of
+    // the extent: 22.3 ms scanning, 0.090 ms indexed. forEachCandidate falls
+    // back to the ordered scan for a zoomed-out repaint, where asking the
+    // index for everything would be slower than walking the model once.
+    std::vector<katana::geometry::SpatialId> scratch;
+    cad::detail::forEachCandidate(
+        model, &document_.spatialIndex(), visible, scratch, [&](const Entity& entity) {
         if (!cad::isDrawn(model, entity) ||
             !katana::entity::boundingBox(entity.geometry).intersects(visible)) {
             return;

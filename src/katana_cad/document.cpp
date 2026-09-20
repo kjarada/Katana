@@ -1,6 +1,6 @@
 #include "katana/cad/document.hpp"
 
-#include "candidates.hpp"
+#include "katana/cad/spatial_query.hpp"
 
 #include <utility>
 

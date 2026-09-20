@@ -1,7 +1,7 @@
 #pragma once
 
 // Narrowing a query to the entities that could possibly answer it
-// (PLAN.MD Phase 18). Internal to katana_cad.
+// (PLAN.MD Phase 18).
 //
 // Snapping, picking and box selection all begin the same way: take a reach box
 // around the cursor or the selection window and consider only the entities
@@ -12,6 +12,7 @@
 // of "which entities are candidates", and one definition of the box that
 // decides it - see queryExtents below, which is the subtle part.
 
+#include <algorithm>
 #include <variant>
 #include <vector>
 
@@ -19,7 +20,12 @@
 #include "katana/entity/model.hpp"
 #include "katana/geometry/spatial_index.hpp"
 
-namespace katana::cad::detail {
+namespace katana::cad {
+
+// `detail` because queryExtents is an implementation decision of the broad
+// phase, not a property of an entity that other code should reason about. It
+// is public only because the viewport draws through the same narrowing.
+namespace detail {
 
 // The box the spatial index stores for an entity, and the box the broad phase
 // tests against.
@@ -43,6 +49,50 @@ namespace katana::cad::detail {
     return katana::entity::boundingBox(entity.geometry);
 }
 
+// Whether the index is worth using for a query this wide, or whether the plain
+// ordered scan is cheaper.
+//
+// It is NOT free to ask an index for everything. A query covering the whole
+// drawing gathers every id, sorts them, and then looks each one up again,
+// against a single ordered walk of the entities. Measured in Release at
+// 100 000 entities, by the share of the drawing's AREA on screen:
+//
+//     area on screen    visible   scan      indexed
+//        1 %              900     4060 us     170 us     index 24x better
+//        9 %            8 995     4029 us    2586 us     index 1.6x better
+//       25 %           25 195     4881 us    4147 us     index 1.2x better
+//       49 %           49 000     4426 us    6173 us     SCAN 1.4x better
+//      100 %          100 000     4018 us    8068 us     SCAN 2.0x better
+//
+// The crossover is around 35% of the area, which is the threshold below. A
+// zoomed-out repaint is exactly the case that would otherwise get slower, and
+// getting slower is not an acceptable price for getting faster elsewhere.
+//
+// SpatialIndex::bounds() is never shrunk when an entity is removed (that would
+// make every delete O(n)), so it can be larger than the data really is. That
+// biases this towards the index, by a margin a rebuild removes.
+[[nodiscard]] inline bool worthIndexing(const katana::geometry::SpatialIndex& index,
+                                        const katana::geometry::Box2& reach)
+{
+    const katana::geometry::Box2 extent = index.bounds();
+    if (extent.empty() || reach.empty()) {
+        return !extent.empty(); // nothing indexed: the scan is trivially cheap
+    }
+    const double total = extent.width() * extent.height();
+    if (!(total > 0.0)) {
+        return true; // a degenerate extent says nothing; the index cannot be worse
+    }
+    const double overlapWidth =
+        std::min(extent.max.x, reach.max.x) - std::max(extent.min.x, reach.min.x);
+    const double overlapHeight =
+        std::min(extent.max.y, reach.max.y) - std::max(extent.min.y, reach.min.y);
+    if (overlapWidth <= 0.0 || overlapHeight <= 0.0) {
+        return true; // the query is off the data entirely; the index says so at once
+    }
+    constexpr double kScanAboveAreaShare = 0.35;
+    return (overlapWidth * overlapHeight) / total < kScanAboveAreaShare;
+}
+
 // Calls visit(entity) for every entity whose queryExtents meets `reach`, in
 // ascending id order.
 //
@@ -56,7 +106,7 @@ void forEachCandidate(const katana::entity::Model& model,
                       const katana::geometry::Box2& reach,
                       std::vector<katana::geometry::SpatialId>& scratch, Visit&& visit)
 {
-    if (index == nullptr) {
+    if (index == nullptr || !worthIndexing(*index, reach)) {
         model.entities.forEach([&](const katana::entity::Entity& entity) {
             if (queryExtents(entity).intersects(reach)) {
                 visit(entity);
@@ -84,4 +134,6 @@ void forEachCandidate(const katana::entity::Model& model,
     }
 }
 
-} // namespace katana::cad::detail
+} // namespace detail
+
+} // namespace katana::cad

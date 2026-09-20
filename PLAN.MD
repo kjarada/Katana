@@ -803,12 +803,27 @@ a half-million-entity drawing went from 24 ms per mouse move - over the whole
 Rebuilding costs 7.8 ms at 100 000 entities and 44.6 ms at 500 000, paid once
 on open (about 5% of the 891 ms load).
 
+The 2D viewport's repaint goes through the same narrowing, which matters more
+than the click paths because it runs on every pan and zoom rather than on an
+event: at 500 000 entities zoomed to 1% of the extent, collecting what to draw
+fell from 22.3 ms to 0.090 ms (248x).
+
+**A measured non-obvious result**, recorded because it is the kind of thing an
+index is assumed not to do: asking the index for EVERYTHING is slower than
+scanning. A query covering the whole drawing gathers every id, sorts them and
+looks each one up again, against one ordered walk - 8.1 ms against 4.0 ms at
+100 000 entities. A zoom-extents repaint is exactly that case. `forEachCandidate`
+therefore picks: index below ~35% of the indexed area, scan above it, the
+threshold taken from the measured crossover. Tests compare the two paths on
+both sides of it.
+
 **OUTSTANDING:** the rest of the structures the phase names, each for the
 workload it suits - KD-tree for nearest-point queries over survey marks, BVH
 for mesh intersection, octree for point clouds, quadtree for terrain tiles. The
 terrain module already has its own uniform bucket grid inside `TinSurface`;
-unifying the two is worth considering but has not been measured. View culling
-in the 2D viewport and the scene builder still walks every entity.
+unifying the two is worth considering but has not been measured. The 3D scene
+builder still walks every entity, which matters less because it rebuilds only
+when the document changes rather than per frame.
 
 ---
 

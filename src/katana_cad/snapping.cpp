@@ -1,6 +1,6 @@
 #include "katana/cad/snapping.hpp"
 
-#include "candidates.hpp"
+#include "katana/cad/spatial_query.hpp"
 
 #include <cmath>
 #include <vector>
