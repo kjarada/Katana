@@ -325,14 +325,14 @@ The required progression is:
 | 13 | Least Squares | **done** |
 | 14 | Terrain | **done** |
 | 15 | 3D Rendering | partial — tiled multithreaded SOFTWARE renderer, camera, tiled viewports, 3D and section views; Vulkan backend outstanding |
-| 16 | 3D CAD | not started |
-| 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; no out-of-core LOD |
+| 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons; civil solids on the TIN instead |
+| 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; LOD reshaped to use COPC rather than a bespoke octree |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
-| 19 | Performance Architecture | partial — `katana::core::TaskPool` (jthread, deterministic parallel-for) drives the renderer; no task graph, no SIMD |
+| 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `buildTin` at 657.7 ms is the real target |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
 | 21 | Civil Engineering | partial — profiles and cross sections along an alignment, with exact surface-break sampling; alignments, corridors, parcels and grading outstanding |
-| 22 | Drawing/Plotting | not started |
-| 23 | C++ Application API | not started |
+| 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
+| 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
 | 25 | AI Agent | not started |
 | 26 | Production Hardening | not started |
@@ -876,25 +876,53 @@ and `Camera`, so the Vulkan backend does not change application code.
 
 # 21. Phase 16 — 3D CAD
 
-Integrate Open CASCADE.
+**STATUS: THE PLAN IS WRONG HERE. RESHAPED, NOT STARTED.**
 
-Use it for:
+This phase said "integrate Open CASCADE". Section 5 of this plan licenses
+saying so when the plan asks for something that turns out to be a bad idea.
+This is one. The verdict below was checked against the machine, not argued
+from taste.
 
-```text
-B-rep
-solids
-boolean operations
-extrusion
-revolve
-sweep
-NURBS
-fillet
-chamfer
-```
+**Why not Open CASCADE:**
 
-Create an internal application-level CAD API around it.
+* **It is not a dependency, it is a second application.** Not installed here
+  (`pacman -Q mingw-w64-ucrt-x86_64-opencascade` -> not found). `pacman -Si`:
+  36.84 MiB to download, **261.70 MiB installed**, and it depends on **VTK,
+  Tcl, Tk, FFmpeg, OpenVR, FreeImage and TBB**. Katana's entire `build/release`
+  is a fraction of that. Rule 4 keeps third-party types out of public headers,
+  and this would satisfy Rule 4 while still making the shipped product an
+  Open CASCADE distribution with a CAD program attached.
+* **It brings a second tolerance system.** OCCT carries per-shape tolerances
+  that propagate through boolean operations. Section 35 and `math::tolerance`
+  are the single tolerance policy. Two is a defect (CLAUDE.md section 1).
+* **It brings a second parallelism system.** OCCT parallel booleans are TBB.
+  `katana::core::TaskPool` exists to make parallelism *deterministic* - Rule 7.
+  TBB's work stealing gives no such guarantee, so an OCCT boolean could return
+  a different shape on a different machine.
+* **`TopoDS_Shape` cannot live in the entity model.** It is a handle into a
+  shared `TShape` graph, not a copyable value. `entity::Geometry` is a
+  `std::variant` of plain values that the before-image undo copies wholesale
+  and `geometryToBlob` serialises field by field. A B-rep would need its own
+  ownership, its own undo and its own serialisation - see `docs/model.md`.
+* **The civil work does not need it.** `katana::geometry::volume` already
+  computes cut and fill between surfaces *exactly*: "Nothing is sampled: the
+  results are exact up to floating-point rounding (sums are compensated)"
+  (`volume.hpp:9`). A B-rep boolean would replace an exact answer with a
+  tolerance-dependent one. That is a regression dressed as a feature.
 
-Do not expose Open CASCADE types to unrelated application modules.
+**What this phase should be instead: 3D solids for civil, built on the TIN.**
+The precedent is already set - `TinSurface` appears nowhere in
+`entity/entity.hpp` (`grep -c` -> 0); a surface is a referenced dataset the
+model names, not an eighth geometry kind. A solid follows the same shape: a
+`TriangleMesh` dataset, produced by extruding a closed plan polygon between two
+surfaces or two elevations, with volume from the existing exact code.
+
+NURBS, fillet, chamfer, revolve and sweep are **removed from this plan**. They
+are mechanical-CAD features. Nothing in sections 1-20 asks for them, and no
+survey or civil workflow described anywhere in this document uses one. If a
+real requirement for machined solids ever arrives, it arrives with a user, and
+Open CASCADE can be reconsidered then - behind an optional `KATANA_BUILD_BREP`
+module, the way GDAL and PDAL are already optional.
 
 ---
 
@@ -918,10 +946,25 @@ rather than drawn one QPainter call at a time, which is what keeps two million
 points interactive; the per-point colours are cached and only the projection is
 redone per frame.
 
-**OUTSTANDING: the out-of-core half of this phase.** There is no spatial
-hierarchy, no level of detail, and no streaming: the decimated sample is held in
-memory. A billion-point dataset is opened as a sample of it, not worked on in
-full. Sections 32 and 33 govern what that will need.
+**OUTSTANDING: the out-of-core half of this phase - but NOT as written.**
+There is no level of detail and no streaming: the decimated sample is held in
+memory, so a billion-point dataset is opened as a sample of it rather than
+worked on in full. Sections 32 and 33 govern what that will need.
+
+**The plan is wrong about how.** It asks Katana to build a spatial hierarchy.
+It should not build one. **COPC** (Cloud Optimised Point Cloud) is a LAZ file
+whose chunks are already arranged as an octree, and the PDAL already linked
+into `katana_io` reads and writes it natively - verified on this machine:
+`pdal --drivers` lists **`readers.copc`** and **`writers.copc`**. `readers.copc`
+takes a `resolution` argument and returns only the octree levels coarse enough
+to matter, so level of detail becomes a *query parameter* rather than a data
+structure Katana owns, maintains and has to keep correct under edits.
+
+So the remaining work is: a COPC writer pass for non-COPC input (build once, on
+import), and a viewport that re-queries at a resolution derived from the current
+`worldPerPixel` - the same quantity the renderer already computes. Building a
+bespoke octree would duplicate, in Katana, a structure that is already in the
+file format, already in the linked library, and already an OGC standard.
 
 ---
 
@@ -1031,11 +1074,32 @@ Also delivered here, because both were measured rather than assumed:
   including why DuckDB is the wrong engine for this table and where it would
   earn its place, is `docs/storage.md`.
 
-**OUTSTANDING:** no task graph or dependency scheduling; no work stealing (a
-single shared job at a time, nested calls run inline); TBB not evaluated; no
-SIMD anywhere; terrain generation, triangulation, point-cloud processing,
-imports and exports are all still single-threaded. Latency, throughput, memory
-bandwidth and cache behaviour are not yet benchmarked as section 32 requires.
+**OUTSTANDING - and the list as written is in the wrong order.** It names a
+task graph, work stealing, TBB and SIMD. Rule 6 says profile before optimising,
+and none of those four is where the time goes. What is measured:
+
+* **`buildTin` is 657.7 ms for 400 000 points** in Release. It is the one
+  terrain operation a user can reach from the application, it is
+  single-threaded, and it is the largest single cost in the product. It is also
+  the one that is *hardest* to parallelise correctly, because incremental
+  Delaunay insertion is inherently sequential and Rule 7 requires the same
+  triangulation whatever the thread count.
+* A task graph solves a problem Katana does not have. There is no fan-in of
+  dependent stages anywhere; the renderer's three stages are a straight line.
+* Work stealing would change visit order, which is exactly what `TaskPool`'s
+  contract forbids. It is not a missing feature; it is a rejected one, and this
+  plan should have said so.
+* SIMD before the 657.7 ms is addressed would be optimising the 3% instead of
+  the 60%.
+
+**The first slice of this phase is therefore `benchmarks/bench_terrain.cpp`** -
+not an optimisation at all, but the measurement that says which of the terrain
+operations deserves one. Section 4 of CLAUDE.md requires a measurement to live
+in `benchmarks/` so it can be repeated; terrain is the largest area of the
+codebase with no such file.
+
+Latency, throughput, memory bandwidth and cache behaviour are still not
+benchmarked as section 32 requires.
 
 The win `docs/storage.md` named has since landed: geometry is stored as a
 versioned little-endian blob (schema 3), taking a 50 000-entity project open
@@ -1151,9 +1215,35 @@ station and elevation readout under the cursor, gaps drawn as gaps where the
 alignment leaves the surface, slope breaks marked, crossings ticked, vertical
 exaggeration.
 
-**OUTSTANDING:** everything below — alignments as first-class entities with
-horizontal and vertical geometry, profiles as design objects, corridors,
-parcels and grading.
+**OUTSTANDING:** everything below - alignments with horizontal and vertical
+geometry, profiles as design objects, corridors, parcels and grading.
+
+**Where an alignment lives, decided before it is built.** An alignment is a
+**named table in `entity::Model`**, beside `layers`, `linetypes` and
+`dimensionStyles` - it is **NOT** an eighth `entity::Geometry` alternative.
+Three reasons, in order of how expensive getting it wrong would be:
+
+1. `docs/model.md` lists the places a new geometry kind must be threaded
+   through, and separates the ones the compiler catches from the ones that
+   **fail silently**. `cad::section.cpp appendCrossings` is on the silent list.
+   The alignment is the thing sections are cut *along*. Adding it as a geometry
+   kind would therefore silently degrade the one part of this phase that is
+   already delivered and tested.
+2. An alignment is not a shape with a position; it is a *definition* that a
+   shape is derived from. It is referenced by name by profiles, corridors and
+   cross-section sets, exactly as a TIN surface is - and `TinSurface` is
+   already a named dataset rather than a geometry kind (`grep -c TinSurface
+   include/katana/entity/entity.hpp` -> 0). Following that precedent costs
+   nothing; inventing a second pattern costs the next contributor.
+3. Undo is a before-image copy of a whole entity. An alignment edited one PI at
+   a time would copy the entire horizontal geometry per keystroke.
+
+**The first slice is `katana::geometry::Spiral2`** - the clothoid, in the
+geometry layer beside `Arc2`, with `pointAt`, `tangentAt` and the
+`L = A^2 / R` relation. It is the only primitive here that does not already
+exist, it needs no model change at all, and every later item depends on it.
+Its tests assert against published transition-curve tables, not against its
+own output (CLAUDE.md section 3).
 
 ## Alignments
 
@@ -1209,6 +1299,29 @@ grading surfaces
 
 # 27. Phase 22 — Drawing and Plotting
 
+**STATUS: NOT STARTED. Reshaped - this is the phase that makes three
+already-built things honest.**
+
+Three capabilities exist, are validated, are persisted, and are read by nothing
+that draws. Each is a silent lie to the user, who sets a value and sees no
+effect:
+
+* **`Layer::lineWeight`** is documented as *millimetres on paper*. There is no
+  paper. `grep lineWeight src/katana_qt/` finds nothing: the viewport draws
+  every line at a hardcoded width. "Millimetres on paper" is meaningless until
+  this phase defines paper.
+* **`DimensionStyle::textHeight`** is in model units, which is correct, but
+  annotation scaling - the thing that makes one dimension readable at 1:200 and
+  at 1:2000 - has nowhere to live without a sheet scale.
+* **Dimension styles themselves** (delivered above) are named "plot styles"
+  in this phase's own list, which double-counts work already done.
+
+So this phase is not "add plotting". It is: **define paper, and connect the
+three settings that already claim to describe it.** A `lineWeight` that changes
+nothing is worse than an absent one, because it reads as a working feature.
+
+`dimension styles` is struck from the list below - delivered in Phase 09.
+
 Separate the engineering model from the drawing model.
 
 Architecture:
@@ -1244,6 +1357,24 @@ printing
 ---
 
 # 28. Phase 23 — C++ Application API
+
+**STATUS: NOT STARTED. Reshaped, and roughly half the list is already built.**
+
+The JSON command shape below duplicates `katana::cad::CommandInterpreter`,
+which already parses verbs, validates arguments, returns `Result<T>` and routes
+every mutation through the `Command` undo stack. A second command parser beside
+it is precisely the "second way of doing something that already has a first
+way" that CLAUDE.md section 6 says to collapse.
+
+What is genuinely missing is not a command language but a **stable, typed,
+header-only-facing surface** that a caller outside `src/` can link against -
+which is a new `katana_api` module at the top of the layering graph, not a new
+interpreter. `query entities`, `query terrain`, `run spatial queries`,
+`create surfaces` and `export data` in the list below are all already reachable
+in-process; they need exposing, not implementing.
+
+The JSON example is retained below as the *wire format for a future
+out-of-process caller*, not as the in-process API.
 
 Before implementing AI, expose a stable C++ application API.
 
