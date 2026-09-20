@@ -529,6 +529,52 @@ loading a project that already contains one, so styles remain unreachable from
 the application even now that they take effect. A `STYLE` verb and a styles
 panel belong with the Phase 09 work below.
 
+## 5.4 Dimension styles (partially delivered)
+
+`DimensionStyle`, `ArrowHead` and `DimensionStyleDatabase` in
+`include/katana/entity/tables.hpp`, with `formatMeasurement` in
+`src/katana_entity/dimension_text.cpp`. Lengths are MODEL units, unlike
+`Layer::lineWeight` which is paper millimetres: a dimension is part of the
+drawing, so its text must keep its size relative to the geometry it annotates.
+
+The formatter is the part that has to be exactly right, because the number ends
+up on a drawing somebody signs:
+
+* **Order is scale, then round, then fix the decimals** (DIMLFAC, DIMRND,
+  DIMDEC). Rounding before scaling rounds in the wrong units: 1.24 m rounded to
+  0.05 is 1.25 m = 1250 mm, but scaled to millimetres FIRST it is 1240 and the
+  same rounding does nothing, giving 1240 mm. A centimetre of difference from
+  the order alone.
+* **Ties go away from zero**, through `std::llround`, which C17 7.12.9.6-7
+  specifies to round halfway cases away from zero regardless of the current
+  rounding mode. This is not pedantry: measured on this toolchain,
+  `printf("%.0f", 2.5)` gives 2 and `llround(2.5)` gives 3, and
+  `printf("%.2f", 0.125)` gives 0.12 where the correct surveying answer is 0.13.
+  `printf`, `std::to_chars` with a fixed precision and `QString::number` all
+  round ties to EVEN, so none of them may be used here. A test also changes the
+  rounding mode and requires the answer not to move.
+* **Locale independent**: `std::to_chars` on the integer parts and hand-emitted
+  digits for the fraction, so no global locale can turn 1.5 into "1,5" and make
+  the drawing read as a different number.
+* A text override wins VERBATIM - no prefix, no suffix, no rounding, no unit
+  scale - because DXF does not apply DIMPOST to overridden text and a surveyor
+  who typed a value means that value.
+* Trailing-zero suppression never produces a bare ".", an empty label or "-0".
+
+Units are a scale factor plus a suffix rather than a unit enum, because the
+entity layer may only see core, math and geometry (`tools/check_layering.cmake`)
+so `katana/geodesy/units.hpp` is unreachable - and duplicating it would be a
+second definition of a foot.
+
+**OUTSTANDING:** the style table exists and nothing uses it yet. Dimensions are
+still drawn with a fixed 5-pixel tick and a constant 12-pixel label
+(`viewport_widget.cpp`), which is screen-sized rather than model-sized and so
+plots at the wrong size. Still to come: `Layer::dimensionStyle`, resolution
+through the ByLayer chain, the renderer, commands, and schema 5. Note also that
+`entity::boundingBox` for a Dimension covers only the endpoints and the
+dimension line - not the text, the arrows or the extension overshoot - so a
+styled dimension will be culled slightly too early.
+
 ## 5.3 Linetypes (delivered)
 
 `Linetype`, `LinetypeElement` and `LinetypeDatabase` in

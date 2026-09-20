@@ -113,6 +113,79 @@ class LayerDatabase {
     std::map<std::string, Layer, std::less<>> layers_;
 };
 
+// ---- dimension styles -----------------------------------------------------------
+
+inline constexpr std::string_view kDefaultDimensionStyleName = "Standard";
+
+// How the arrow at each end of a dimension line is drawn.
+enum class ArrowHead { None, Tick, ClosedFilled, Open, Dot };
+
+[[nodiscard]] std::string_view toString(ArrowHead head);
+[[nodiscard]] katana::core::Result<ArrowHead> arrowHeadFromString(std::string_view name);
+
+// Everything that decides how a dimension is drawn and what its text says.
+//
+// Lengths here are MODEL units, unlike Layer::lineWeight which is millimetres
+// on paper. A dimension is part of the drawing: its text has to stay the same
+// size relative to the geometry it annotates when the view is zoomed, or the
+// plotted sheet shows something different from the screen.
+struct DimensionStyle {
+    std::string name{kDefaultDimensionStyleName};
+
+    // Geometry, in model units.
+    double textHeight = 2.5;        // DIMTXT
+    double textGap = 0.625;         // DIMGAP: dimension line to the text
+    double extensionOffset = 0.625; // DIMEXO: gap between the measured point and
+                                    // the start of its extension line
+    double extensionBeyond = 1.25;  // DIMEXE: how far the extension line runs past
+                                    // the dimension line
+    double arrowSize = 2.5;         // DIMASZ
+    ArrowHead arrowHead = ArrowHead::ClosedFilled;
+
+    // Text.
+    //
+    // `unitScale` multiplies the measurement before it is shown (DIMLFAC), so a
+    // drawing in metres can be dimensioned in millimetres with 1000 and a
+    // "mm" suffix. It is a factor and a suffix rather than a unit enum because
+    // the entity layer cannot see katana/geodesy, and duplicating a unit table
+    // here would be a second definition of a foot.
+    double unitScale = 1.0;
+    std::string prefix{};
+    std::string suffix{};
+    int decimals = 3;               // DIMDEC
+    // Rounds the scaled measurement to a multiple of this before formatting
+    // (DIMRND). 0 disables it. Must be 0 or at least tolerance::kGeometric:
+    // rounding finer than the geometric tolerance is rounding to noise.
+    double roundTo = 0.0;
+    bool suppressTrailingZeros = false; // DIMZIN
+
+    friend bool operator==(const DimensionStyle&, const DimensionStyle&) = default;
+};
+
+// Fails with InvalidArgument, naming the specific rule broken.
+[[nodiscard]] katana::core::Status validate(const DimensionStyle& style);
+
+// Always contains "Standard", which can be neither removed nor renamed, exactly
+// as layer "0" and the continuous linetype cannot.
+class DimensionStyleDatabase {
+  public:
+    DimensionStyleDatabase();
+
+    [[nodiscard]] katana::core::Status add(DimensionStyle style);
+    [[nodiscard]] katana::core::Status update(const DimensionStyle& style);
+    [[nodiscard]] katana::core::Result<DimensionStyle> remove(std::string_view name);
+    void reset();
+
+    [[nodiscard]] const DimensionStyle* find(std::string_view name) const;
+    [[nodiscard]] bool contains(std::string_view name) const { return find(name) != nullptr; }
+    [[nodiscard]] std::vector<std::string> names() const;
+    [[nodiscard]] std::vector<DimensionStyle> all() const;
+    [[nodiscard]] std::size_t size() const { return styles_.size(); }
+
+  private:
+    std::map<std::string, DimensionStyle, std::less<>> styles_;
+};
+
 // ---- linetypes ------------------------------------------------------------------
 //
 // A dash pattern, in MODEL units. The sign convention is DXF's (AutoCAD DXF

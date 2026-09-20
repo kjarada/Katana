@@ -160,7 +160,14 @@ At the end of a work session, or whenever you are about to hand back:
 4. **Say what to look at.** Name the menu item, the command or the sample file
    that exercises what you just built, and what correct looks like. "It builds"
    is not a test the user can perform.
-5. Say plainly what is NOT yet visible in the GUI. A feature that exists only
+5. **Do not launch the GUI through the background task runner.** A detached
+   `katana_qt_app.exe` reports exit 139 when its parent shell is reaped, which
+   looks exactly like a segmentation fault and is not one. Measured: the same
+   binary survives 150 s in the foreground and 30 minutes under gdb, and
+   reports 139 every time it is launched detached. Hand the user the command
+   instead; run it yourself only in the foreground under `timeout` when you
+   need to check that it starts.
+6. Say plainly what is NOT yet visible in the GUI. A feature that exists only
    in the library and has no way to reach it from the application is finished
    work in the tests and unfinished work to the user; say which it is rather
    than letting the demo imply otherwise.

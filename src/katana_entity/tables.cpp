@@ -1,5 +1,7 @@
 #include "katana/entity/tables.hpp"
 
+#include "katana/math/numerics.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -352,6 +354,172 @@ LayerDatabase::renameSubtree(std::string_view from, std::string_view to)
     }
     return mapping;
 }
+
+// ---- ArrowHead --------------------------------------------------------------------
+
+std::string_view toString(ArrowHead head)
+{
+    switch (head) {
+    case ArrowHead::None:
+        return "None";
+    case ArrowHead::Tick:
+        return "Tick";
+    case ArrowHead::ClosedFilled:
+        return "ClosedFilled";
+    case ArrowHead::Open:
+        return "Open";
+    case ArrowHead::Dot:
+        return "Dot";
+    }
+    return "Unknown";
+}
+
+Result<ArrowHead> arrowHeadFromString(std::string_view name)
+{
+    for (const ArrowHead head : {ArrowHead::None, ArrowHead::Tick, ArrowHead::ClosedFilled,
+                                 ArrowHead::Open, ArrowHead::Dot}) {
+        if (equalsIgnoringCase(toString(head), name)) {
+            return head;
+        }
+    }
+    return makeError(ErrorCode::ParseFailure, "unknown arrow head", std::string(name));
+}
+
+// ---- DimensionStyle ---------------------------------------------------------------
+
+Status validate(const DimensionStyle& style)
+{
+    if (auto status = validateName(style.name, "dimension style"); !status) {
+        return status;
+    }
+
+    // Each of these gets its own sentence rather than one "invalid style": the
+    // user set one number and needs to know which.
+    struct Positive {
+        const char* what;
+        double value;
+    };
+    for (const Positive& field : {Positive{"text height", style.textHeight},
+                                  Positive{"arrow size", style.arrowSize},
+                                  Positive{"unit scale", style.unitScale}}) {
+        if (!std::isfinite(field.value) || field.value <= 0.0) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::string(field.what) + " must be finite and greater than zero",
+                             style.name);
+        }
+    }
+    struct NonNegative {
+        const char* what;
+        double value;
+    };
+    for (const NonNegative& field :
+         {NonNegative{"text gap", style.textGap},
+          NonNegative{"extension offset", style.extensionOffset},
+          NonNegative{"extension overshoot", style.extensionBeyond}}) {
+        if (!std::isfinite(field.value) || field.value < 0.0) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::string(field.what) + " must be finite and not negative",
+                             style.name);
+        }
+    }
+
+    // Twelve is where a double stops having digits to give: a measurement of a
+    // few thousand metres has about sixteen significant digits in total.
+    if (style.decimals < 0 || style.decimals > 12) {
+        return makeError(ErrorCode::InvalidArgument, "decimals must be between 0 and 12",
+                         style.name + " has " + std::to_string(style.decimals));
+    }
+
+    if (!std::isfinite(style.roundTo) || style.roundTo < 0.0) {
+        return makeError(ErrorCode::InvalidArgument, "the rounding step must not be negative",
+                         style.name);
+    }
+    // No new epsilon: rounding to less than the geometric tolerance is rounding
+    // to noise, and a tiny step makes value/step overflow before it rounds.
+    if (style.roundTo > 0.0 && style.roundTo < katana::math::tolerance::kGeometric) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the rounding step is finer than the geometric tolerance",
+                         style.name);
+    }
+
+    if (!isValidUtf8(style.prefix) || !isValidUtf8(style.suffix)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the prefix and suffix must be valid UTF-8", style.name);
+    }
+    return {};
+}
+
+// ---- DimensionStyleDatabase -------------------------------------------------------
+
+DimensionStyleDatabase::DimensionStyleDatabase() { reset(); }
+
+void DimensionStyleDatabase::reset()
+{
+    styles_.clear();
+    DimensionStyle standard;
+    standard.name = std::string(kDefaultDimensionStyleName);
+    styles_.emplace(standard.name, std::move(standard));
+}
+
+Status DimensionStyleDatabase::add(DimensionStyle style)
+{
+    if (auto status = validate(style); !status) {
+        return status;
+    }
+    if (contains(style.name)) {
+        return makeError(ErrorCode::AlreadyExists, "dimension style already exists", style.name);
+    }
+    std::string name = style.name;
+    styles_.emplace(std::move(name), std::move(style));
+    return {};
+}
+
+Status DimensionStyleDatabase::update(const DimensionStyle& style)
+{
+    const auto found = styles_.find(style.name);
+    if (found == styles_.end()) {
+        return makeError(ErrorCode::NotFound, "dimension style does not exist", style.name);
+    }
+    if (auto status = validate(style); !status) {
+        return status;
+    }
+    found->second = style;
+    return {};
+}
+
+Result<DimensionStyle> DimensionStyleDatabase::remove(std::string_view name)
+{
+    if (name == kDefaultDimensionStyleName) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the default dimension style cannot be removed");
+    }
+    const auto found = styles_.find(name);
+    if (found == styles_.end()) {
+        return makeError(ErrorCode::NotFound, "dimension style does not exist", std::string(name));
+    }
+    DimensionStyle removed = std::move(found->second);
+    styles_.erase(found);
+    return removed;
+}
+
+const DimensionStyle* DimensionStyleDatabase::find(std::string_view name) const
+{
+    const auto found = styles_.find(name);
+    return found == styles_.end() ? nullptr : &found->second;
+}
+
+std::vector<std::string> DimensionStyleDatabase::names() const
+{
+    std::vector<std::string> result;
+    result.reserve(styles_.size());
+    for (const auto& [name, style] : styles_) {
+        (void)style;
+        result.push_back(name);
+    }
+    return result;
+}
+
+std::vector<DimensionStyle> DimensionStyleDatabase::all() const { return collect(styles_); }
 
 // ---- Linetype --------------------------------------------------------------------
 

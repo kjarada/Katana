@@ -7,6 +7,7 @@ add_library(katana_entity STATIC
     layer_path.cpp
     geometry_blob.cpp
     display.cpp
+    dimension_text.cpp
     serialization.cpp
 )
 katana_target_defaults(katana_entity)

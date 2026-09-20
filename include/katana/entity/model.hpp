@@ -14,6 +14,7 @@ struct Model {
     LayerDatabase layers;
     StyleDatabase styles;
     LinetypeDatabase linetypes;
+    DimensionStyleDatabase dimensionStyles;
     PropertyDatabase properties;
 
     // Back to the state of a new, empty document. Entity ids are not reused.
@@ -23,6 +24,7 @@ struct Model {
         layers.reset();
         styles.reset();
         linetypes.reset();
+        dimensionStyles.reset();
         properties.reset();
     }
 
@@ -34,6 +36,7 @@ struct Model {
         layers = std::move(other.layers);
         styles = std::move(other.styles);
         linetypes = std::move(other.linetypes);
+        dimensionStyles = std::move(other.dimensionStyles);
         properties = std::move(other.properties);
         entities.adoptContents(std::move(other.entities));
     }
