@@ -379,3 +379,68 @@ Profiles, corridors, parcels and grading - everything in Phase 21 that is
 built ON an alignment rather than being one. Nothing references an alignment
 by name yet, so `deleteAlignment` has no in-use guard; the comment in the
 command says where it belongs when profiles arrive.
+
+## The vertical alignment (`profile.hpp`)
+
+Elevation against station along a horizontal alignment: the design grade line.
+Built the same way as the horizontal alignment and for the same reasons.
+
+### Decisions
+
+**Defined by PVIs; the tangents and curves are derived.** A PVI is a station,
+an elevation and the length of the curve that rounds the grade change there.
+A PVI cannot be edited into a discontinuity, and a definition that cannot be
+built is refused naming the PVI - the same argument as for the horizontal
+alignment, and the same shape of code, so that anyone who has read one has
+read the other.
+
+**Symmetric parabolas, and only those.** Every road and rail standard
+specifies the parabola for a vertical curve because its rate of change of
+grade is constant: the vertical acceleration a vehicle feels is constant
+through the curve, and sight distance has a closed form. Asymmetric
+(unequal-tangent) curves exist in the texts and are not provided; they are
+rare and nothing in the plan asks for one. Recorded so that the omission
+reads as a decision rather than an oversight.
+
+**Continuity by identity, not by adjustment.** A parabola from the PVC with
+entry grade g1 ends at the PVT at `z_PVI + g2 L / 2`, which is exactly where
+the outgoing tangent starts. The solver relies on that identity and does not
+snap; the joint-continuity test checks elevation and grade from both sides at
+every joint of a three-curve profile, and would show a step if the identity
+had not survived the arithmetic.
+
+**One formula for both element kinds.** `z = z0 + g1 x + (g2 - g1) x^2 / 2L`
+is the parabola; on a tangent `g2 == g1` and the quadratic term vanishes. One
+evaluator rather than two that could disagree at a joint.
+
+**High and low points are closed-form.** The grade is linear across a curve,
+so it passes through zero inside the curve exactly when the entry and exit
+grades differ in sign, at `x = g1 L / (g1 - g2)`. A low point on a sag is
+where water collects and a high point on a crest is where sight distance is
+tightest, so both are reported with the PVI they belong to.
+
+**Zero-length tangents between back-to-back curves are not stored**, as in
+the horizontal alignment, and a curve on the first or last PVI is refused
+because there is no grade beyond it to blend into.
+
+### How it was tested
+
+The two standard textbook curves, worked by hand and then confirmed by
+evaluating the parabola directly and finding the extremum by a 200 000-step
+scan rather than by the closed form the code uses:
+
+* sag, -3% into +2% over 200 m at PVI 1000 / 100.0: PVC 900 @ 103.0, PVT
+  1100 @ 102.0, low point 1020 @ 101.2, grade there exactly 0;
+* crest, +4% into -2% over 300 m at PVI 500 / 150.0: PVC 350 @ 144.0, PVT
+  650 @ 147.0, high point 550 @ 148.0.
+
+Every number is exact in decimal, so the tolerances are rounding only.
+
+### Not done
+
+Nothing holds or draws a profile yet: `geometry::VerticalAlignment` is a
+value with a solver. Attaching one to a named alignment, storing it,
+defining it from the command line, and drawing it as a design series over
+the ground line in the section view are the next slice - and at that point
+the section view finally shows what a profile exists to show, the cut and
+fill between design and ground.

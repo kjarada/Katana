@@ -3,6 +3,7 @@ add_library(katana_geometry STATIC
     spiral2.cpp
     chording.cpp
     alignment.cpp
+    profile.cpp
     intersection.cpp
     spatial_index.cpp
     polygon.cpp

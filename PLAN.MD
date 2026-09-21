@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections; clothoid; PI-defined alignments as a named table with `ALIGN`, an overlay with key stations, and section-along-alignment; profiles, corridors, parcels and grading outstanding |
+| 21 | Civil Engineering | partial — sections; clothoid; PI-defined alignments with `ALIGN`, overlay and section-along-alignment; parabolic vertical profile solver in `geometry`; profile integration, corridors, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1332,10 +1332,24 @@ Alignment... cuts a section down one by name through the same routine the
 selection path uses. `samples/site_plan` carries one. Records in
 `docs/geometry.md` and `docs/cad.md`.
 
-**OUTSTANDING in this phase:** profiles, corridors, parcels and grading -
-everything built ON an alignment rather than being one. `deleteAlignment` has
-no in-use guard because nothing references an alignment by name yet; the
-command says where the guard belongs when profiles arrive.
+**Fourth slice DELIVERED: `katana::geometry::VerticalAlignment` and
+`solveProfile`** (`include/katana/geometry/profile.hpp`), the design grade
+line. Defined by PVIs - station, elevation, curve length - with symmetric
+parabolic vertical curves, the tangents and curves derived, continuity at
+every joint holding by the identity `z_PVT = z_PVI + g2 L / 2` rather than by
+adjustment, and high and low points in closed form. Tested against the two
+standard textbook curves, worked by hand and confirmed by direct evaluation
+and a fine scan: sag low point 1020 @ 101.2, crest high point 550 @ 148.0.
+Asymmetric curves are deliberately not provided. Record in
+`docs/geometry.md`.
+
+**OUTSTANDING in this phase:** the profile is not yet in the model, the
+command line or the section view - attaching one to a named alignment,
+storing it, and drawing it as a design series over the ground line is the
+next slice, and the one that finally shows cut and fill between design and
+ground. After that: corridors, parcels and grading. `deleteAlignment` has no
+in-use guard because nothing references an alignment by name yet; the
+command says where the guard belongs when profiles are attached.
 
 ## Alignments
 
