@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — profiles and cross sections along an alignment, with exact surface-break sampling; alignments, corridors, parcels and grading outstanding |
+| 21 | Civil Engineering | partial — sections with exact surface-break sampling; clothoid and PI-defined horizontal alignment solver delivered in `geometry`; alignment table, profiles, corridors, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1305,8 +1305,24 @@ independent adaptive-Simpson integration for the cases that have no series;
 a right-hand spiral is the EXACT reflection of the left-hand one, asserted as
 equality. Decision record in `docs/geometry.md`.
 
-Nothing draws or stations along a spiral yet: it is a primitive with no
-entity, command or renderer behind it. The alignment table is the next slice.
+**Second slice DELIVERED: `katana::geometry::HorizontalAlignment` and
+`solveAlignment`** (`include/katana/geometry/alignment.hpp`). An alignment is
+defined by its PIs - each with a radius and spiral lengths - and the tangents,
+spirals and arcs are DERIVED, so continuity holds by construction and a
+definition that cannot be built is refused naming the PI. The tangent length
+for unequal spirals, which the design texts do not give, was derived by
+placing the shifted circle and checked by closing the chain independently in
+Python (2e-14 m off the forward tangent); it reduces to the published
+`T = k + (R + p) tan(D / 2)` for equal spirals and to `R tan(D / 2)` for
+none. `SolvedAlignment` answers point, direction, curvature and left-offset
+at a station, lists its key stations (TS, SC, CS, ST), and chords itself to
+a `Polyline2` through the one sagitta rule - which is what lets a section be
+cut along it with `extractSection` untouched, exactly as intended above.
+Decision record in `docs/geometry.md`.
+
+Still nothing in the model, the CLI or a viewport: the `entity::Alignment`
+named table, a `SECTION` along an alignment by name, and drawing one with its
+key stations are the next slices.
 
 ## Alignments
 

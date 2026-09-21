@@ -294,3 +294,74 @@ A fourth test pins the two callers to each other: `chordArc` on a 300 m arc
 sweeping 0.3 rad at 1 mm yields exactly `sagittaChordCount(300, 0.3, 0.001) + 1`
 points, and that count is 59 - the same 59 the spiral test derives for 90 m
 on the same radius, because 90 m on r = 300 *is* a 0.3 rad sweep.
+
+## The horizontal alignment (`alignment.hpp`)
+
+The plan centreline of a road, railway, pipe or channel: the second slice of
+Phase 21, built on the clothoid and the shared chording rule.
+
+### Decisions
+
+**Defined by PIs, with the elements derived.** An alignment is a sequence of
+points of intersection - the corners of the tangent polygon - each carrying
+the radius that rounds it and the lengths of the spirals into and out of the
+curve. `solveAlignment` derives the tangents, spirals and arcs. The
+alternative, storing the element list directly, was rejected because a list
+can be edited into one with a gap or a kink between two elements, after which
+every stationing and section query has to decide what that means. A PI cannot
+be edited into a discontinuity: move it and the three elements at that corner
+are recomputed to meet again. It is also what a designer actually edits. The
+price is that a definition can be infeasible, and the solver's job is then to
+say exactly which PI, not to draw something plausible.
+
+**Tangent lengths, derived rather than recalled.** The design texts give the
+spiral-curve-spiral tangent length only for equal spirals,
+`T = k + (R + p) tan(D / 2)`. The general case was derived by placing the
+shifted circle: its centre sits `R + p_in` off the back tangent and
+`R + p_out` off the forward tangent, and each tangent point is `k` short of
+the foot of that perpendicular, which gives
+`T_in = k_in + ((R + p_out) - (R + p_in) cos D) / sin D` and the mirror for
+`T_out`. Before any test was written around it the derivation was checked
+independently: the chain was laid out in Python with adaptive-Simpson spirals
+and its end measured against the forward tangent line - 3e-15 m, 2e-14 m and
+2e-14 m off for a simple curve, equal spirals and unequal spirals on a right
+turn. With equal spirals it reduces to the published formula to twelve
+decimals, and with none to `R tan(D / 2)` exactly.
+
+**The chain end is not snapped to the computed ST.** After the spiral-out is
+laid, the cursor is wherever the chain actually ended, and the next tangent
+starts there. If the tangent-length derivation were wrong the chain would end
+off the forward tangent and the next tangent would visibly kink. Snapping
+would hide precisely that, so the test that checks every joint for continuity
+in position and direction would be testing the snap, not the solver.
+
+**Zero-length tangents are not stored.** Two curves back to back - a reverse
+curve whose PIs are exactly a tangent length apart - leave nothing between
+them. An element of zero length has no direction to report and would make
+every station query at its joint ambiguous, so it is skipped, and a test
+asserts that a reverse curve solves with no such element.
+
+**The central arc is built as a constant-curvature `Spiral2` and converted
+with `asArc()`.** The arc's centre and start angle then follow exactly the
+conventions the spirals on either side use, instead of a second piece of
+centre arithmetic that could disagree with them by a sign.
+
+**A radius of zero is a kink, not an error.** An alignment traced from a
+surveyed polyline has no curves at all; it must solve and station.
+
+### What is refused, and why each names its PI
+
+Fewer than two PIs; consecutive PIs closer than `kCoordinate` (no tangent
+direction); a reversal through 180 degrees at a PI with a radius (nothing can
+round it); spirals whose angles exceed the deflection (no central arc left);
+neighbouring curves whose tangent lengths overlap (the tangent between them
+would be negative - reported with the shortfall in metres). Every one names
+the PI or pair of PIs, because the useful reply to "the curve does not fit"
+is which corner to move.
+
+### Not done
+
+There is no entity, command, store row, verb or renderer for an alignment
+yet; `geometry::HorizontalAlignment` is a value with a solver. The named
+table in `entity::Model`, a `SECTION` cut along an alignment by name, and a
+viewport that draws one with its key stations are the next slices.

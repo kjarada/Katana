@@ -7,5 +7,6 @@ katana_add_test_suite(geometry
         test_polygon.cpp
         test_spiral2.cpp
         test_chording.cpp
+        test_alignment.cpp
         test_editing.cpp
 )
