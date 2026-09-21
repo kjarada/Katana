@@ -16,6 +16,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/entity/named_table.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/entity/entity.hpp"
 
@@ -308,6 +309,37 @@ struct HatchPatternPolicy : NamedTablePolicy<HatchPattern> {
 };
 
 using HatchPatternDatabase = NamedTable<HatchPattern, HatchPatternPolicy>;
+
+// ---- alignments -----------------------------------------------------------------
+//
+// A named horizontal alignment: the plan centreline a section is cut along, a
+// profile is drawn against and a corridor is built around. It is a NAMED
+// TABLE in the model and not an eighth Geometry alternative, for the reasons
+// PLAN.MD Phase 21 sets out: it is a definition other things reference by
+// name, exactly as a surface is, and the section code that already exists is
+// on the silent-failure list for a new geometry kind. What is stored is the
+// PI definition; the elements are derived on demand by
+// geometry::solveAlignment, so a stored alignment cannot be discontinuous.
+struct Alignment {
+    std::string name{};
+    std::string description{};
+    katana::geometry::HorizontalAlignment horizontal{};
+
+    friend bool operator==(const Alignment&, const Alignment&) = default;
+};
+
+// Fails with InvalidArgument for a bad name, and with whatever
+// geometry::solveAlignment reports for a definition that cannot be built - so
+// an alignment that would fail to draw is refused on the way in, naming the
+// PI, rather than stored and found out about later.
+[[nodiscard]] katana::core::Status validate(const Alignment& alignment);
+
+struct AlignmentPolicy : NamedTablePolicy<Alignment> {
+    static constexpr std::string_view kNoun = "alignment";
+    static katana::core::Status validate(const Alignment& alignment);
+};
+
+using AlignmentDatabase = NamedTable<Alignment, AlignmentPolicy>;
 
 struct StylePolicy : NamedTablePolicy<Style> {
     static constexpr std::string_view kNoun = "style";

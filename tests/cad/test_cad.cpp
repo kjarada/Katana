@@ -1000,3 +1000,104 @@ TEST(CadInterpreter, CreatingAHatchPatternIsUndoable)
     session.ok("REDO");
     EXPECT_TRUE(session.document.model().hatchPatterns.contains("brick"));
 }
+
+// ---- alignments -----------------------------------------------------------------------
+
+TEST(CadInterpreter, AnAlignmentIsDefinedByItsPIsAndSolvedOnDemand)
+{
+    Session session;
+    EXPECT_TRUE(session.ok("ALIGN LIST").empty()) << "nothing is defined in a new document";
+
+    // Three PIs with no curves: a 200 m kinked centreline.
+    session.ok("ALIGN NEW road 0,0 100,0 100,100");
+    const auto* road = session.document.model().alignments.find("road");
+    ASSERT_NE(road, nullptr);
+    ASSERT_EQ(road->horizontal.pis.size(), 3u);
+    EXPECT_NE(session.ok("ALIGN LIST").find("length 200.000"), std::string::npos)
+        << session.ok("ALIGN LIST");
+
+    // Round the corner: T = R tan(45 deg) = 50, so the length becomes
+    // 100 + 50 pi / 2 = 178.540.
+    session.ok("ALIGN SET road 1 50");
+    EXPECT_NE(session.ok("ALIGN LIST").find("length 178.540"), std::string::npos)
+        << session.ok("ALIGN LIST");
+
+    session.ok("ALIGN START road 1000");
+    EXPECT_NE(session.ok("ALIGN LIST").find("1000.000 to 1178.540"), std::string::npos)
+        << session.ok("ALIGN LIST");
+}
+
+TEST(CadInterpreter, AlignmentPIsCanBeAppendedWithTheirCurveData)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 400,0");
+    // Extend past the corner with a 30 degree turn, R = 300, 90 m spirals.
+    session.ok("ALIGN SET road 1 300 90 90");
+    session.ok("ALIGN PI road 659.808,150");
+    const auto* road = session.document.model().alignments.find("road");
+    ASSERT_NE(road, nullptr);
+    ASSERT_EQ(road->horizontal.pis.size(), 3u);
+    EXPECT_DOUBLE_EQ(road->horizontal.pis[1].radius, 300.0);
+    EXPECT_DOUBLE_EQ(road->horizontal.pis[1].spiralIn, 90.0);
+    EXPECT_DOUBLE_EQ(road->horizontal.pis[1].spiralOut, 90.0);
+}
+
+TEST(CadInterpreter, AStationTableIncludesEveryKeyStationNotOnlyTheInterval)
+{
+    // A setting-out table that skipped the TS, SC, CS and ST would be useless
+    // in the field: those are the points that get pegged.
+    Session session;
+    session.ok("ALIGN NEW road 0,0 100,0 100,100");
+    session.ok("ALIGN SET road 1 50");
+    const std::string table = session.ok("ALIGN STATIONS road 25");
+    // TS at 50 (on the interval anyway), ST at 128.540 (not on it).
+    EXPECT_NE(table.find("128.540"), std::string::npos) << table;
+    EXPECT_NE(table.find("178.540"), std::string::npos) << table;
+    // Tangent rows say so; arc rows give the radius.
+    EXPECT_NE(table.find("straight"), std::string::npos) << table;
+    EXPECT_NE(table.find("50.000"), std::string::npos) << table;
+    EXPECT_EQ(session.fails("ALIGN STATIONS road 0"), ErrorCode::InvalidArgument);
+}
+
+TEST(CadInterpreter, AnAlignmentThatCannotBeBuiltIsRefusedNamingThePI)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 400,0 659.808,150");
+    // 500 m spirals on R = 300 use more deflection than a 30 degree corner has.
+    const auto refused = session.interpreter.run("ALIGN SET road 1 300 500 500");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(refused.error().describe().find("PI 1"), std::string::npos)
+        << refused.error().describe();
+    // The model kept the last good definition.
+    EXPECT_DOUBLE_EQ(session.document.model().alignments.find("road")->horizontal.pis[1].spiralIn,
+                     0.0);
+
+    // One PI is a malformed command, and the verb says so before the solver
+    // is asked - InvalidArgument from the usage guard, not InvalidGeometry.
+    // The solver's own "at least two PIs" refusal is reached through the API
+    // and is tested in the geometry suite.
+    EXPECT_EQ(session.fails("ALIGN NEW lonely 0,0"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("ALIGN SET road 7 50"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("ALIGN PI nosuch 1,1"), ErrorCode::NotFound);
+}
+
+TEST(CadInterpreter, AlignmentEditsAreUndoable)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 100,0 100,100");
+    session.ok("ALIGN SET road 1 50");
+    ASSERT_DOUBLE_EQ(session.document.model().alignments.find("road")->horizontal.pis[1].radius,
+                     50.0);
+    session.ok("UNDO");
+    EXPECT_DOUBLE_EQ(session.document.model().alignments.find("road")->horizontal.pis[1].radius,
+                     0.0);
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.model().alignments.find("road"), nullptr);
+    session.ok("REDO");
+    ASSERT_NE(session.document.model().alignments.find("road"), nullptr);
+    session.ok("ALIGN DELETE road");
+    EXPECT_EQ(session.document.model().alignments.find("road"), nullptr);
+    session.ok("UNDO");
+    EXPECT_NE(session.document.model().alignments.find("road"), nullptr);
+}

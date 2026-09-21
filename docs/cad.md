@@ -316,3 +316,34 @@ noise — while the zoomed-in case keeps its full win:
 Both paths are required to return identical results, including across the
 threshold: `BothSidesOfTheScanCrossoverGiveTheSameAnswer` sweeps window sizes
 from far below it to far above and compares.
+
+## Alignments in the command line and the window
+
+`ALIGN NEW name x,y x,y [x,y ...]` defines an alignment by its PIs, with no
+curves; `ALIGN SET name index radius [spiralIn [spiralOut]]` rounds a corner;
+`ALIGN PI name x,y [...]` appends one; `ALIGN START name station` sets the
+chainage origin; `ALIGN STATIONS name interval` prints a setting-out table.
+PI indices count from 0, to match the PI the solver names in its refusals.
+
+**The station table always includes the key stations.** An interval table
+that skipped the TS, SC, CS and ST would be useless in the field, because
+those are the points that get pegged. The key stations are merged with the
+interval stations, sorted, and de-duplicated to a nanometre, so a key station
+that happens to land on the interval appears once.
+
+**Chainage labels use `to_chars`, not `snprintf`.** The overlay prints
+1234.5 as `1+234.50`. `snprintf` obeys the C locale and would print
+`1+234,50` on a machine set to a decimal-comma locale - the same reason the
+dimension formatter avoids it.
+
+**The overlay solves each alignment per repaint.** A document has a handful
+of alignments and a solve is a few spiral end-points; caching would need
+invalidation on every edit for no gain anyone has measured. The comment in
+`drawAlignments` says to measure before changing that.
+
+**One section routine for both callers.** "Cut Section Along Selection" and
+"Cut Section Along Alignment..." share `cutSectionAlong`, which gathers the
+visible surfaces, cuts and shows. The alignment path chords the centreline at
+10 mm: the section samples at most every 100 mm along it, so a finer polyline
+would cost time and change nothing the section reports.
+

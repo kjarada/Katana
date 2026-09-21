@@ -640,6 +640,30 @@ void HatchPatternPolicy::seed(NamedMap<HatchPattern>& items)
     items.emplace(none.name, std::move(none));
 }
 
+// ---- alignments ------------------------------------------------------------------
+
+Status validate(const Alignment& alignment)
+{
+    if (auto status = validateName(alignment.name, "alignment"); !status) {
+        return status;
+    }
+    // An alignment with no PIs is a name with nothing behind it. Two is the
+    // least that has a direction; solveAlignment says so itself, and its
+    // message is the one the user should read.
+    auto solved = katana::geometry::solveAlignment(alignment.horizontal);
+    if (!solved) {
+        return makeError(solved.error().code, solved.error().message,
+                         "alignment " + alignment.name +
+                             (solved.error().context.empty() ? "" : ": " + solved.error().context));
+    }
+    return {};
+}
+
+Status AlignmentPolicy::validate(const Alignment& alignment)
+{
+    return katana::entity::validate(alignment);
+}
+
 Status StylePolicy::validate(const Style& style)
 {
     if (auto status = validateName(style.name, "style"); !status) {

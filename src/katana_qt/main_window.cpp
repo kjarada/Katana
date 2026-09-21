@@ -29,6 +29,7 @@
 #include <map>
 #include <set>
 
+#include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
@@ -261,6 +262,9 @@ void MainWindow::buildActions()
     terrainMenu->addAction("Surface From &Drawing", this,
                            [this] { buildSurfaceFromDrawing(); });
     terrainMenu->addSeparator();
+    terrainMenu->addAction("Cut Section Along &Alignment...",
+                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K), this,
+                           &MainWindow::cutSectionAlongAlignment);
     terrainMenu->addAction("&Cut Section Along Selection", QKeySequence(Qt::CTRL | Qt::Key_K),
                            this, [this] { cutSectionAlongSelection(); });
 
@@ -1782,10 +1786,6 @@ void MainWindow::buildSurfaceFromDrawing()
 
 void MainWindow::cutSectionAlongSelection()
 {
-    if (sceneSurfaces_.empty()) {
-        logMessage("Build a surface first (Terrain > Surface From ...).", true);
-        return;
-    }
     const auto selected = document_.selection().ids();
     if (selected.size() != 1) {
         logMessage("Select exactly one line or polyline to cut along.", true);
@@ -1808,6 +1808,15 @@ void MainWindow::cutSectionAlongSelection()
         return;
     }
 
+    cutSectionAlong(std::move(alignment), "the selection");
+}
+
+void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along)
+{
+    if (sceneSurfaces_.empty()) {
+        logMessage("Build a surface first (Terrain > Surface From ...).", true);
+        return;
+    }
     std::vector<cad::SectionSurfaceInput> inputs;
     inputs.reserve(sceneSurfaces_.size());
     for (const auto& item : sceneSurfaces_) {
@@ -1836,10 +1845,45 @@ void MainWindow::cutSectionAlongSelection()
         return;
     }
     refreshViewMenu();
-    logMessage(QString("Section cut: length %1, interval %2, %3 crossings.")
+    logMessage(QString("Section cut along %1: length %2, interval %3, %4 crossings.")
+                   .arg(along)
                    .arg(length, 0, 'f', 3)
                    .arg(options.interval, 0, 'f', 3)
                    .arg(crossings));
+}
+
+void MainWindow::cutSectionAlongAlignment()
+{
+    const std::vector<std::string> names = document_.model().alignments.names();
+    if (names.empty()) {
+        logMessage("Define an alignment first: ALIGN NEW name x,y x,y ... in the command line.",
+                   true);
+        return;
+    }
+    QStringList items;
+    for (const std::string& name : names) {
+        items << QString::fromStdString(name);
+    }
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(this, "Cut Section Along Alignment",
+                                                 "Alignment:", items, 0, false, &ok);
+    if (!ok || chosen.isEmpty()) {
+        return;
+    }
+    const katana::entity::Alignment* alignment =
+        document_.model().alignments.find(chosen.toStdString());
+    if (alignment == nullptr) {
+        logMessage("The alignment no longer exists.", true);
+        return;
+    }
+    auto solved = katana::geometry::solveAlignment(alignment->horizontal);
+    if (!solved) {
+        logMessage(QString::fromStdString(solved.error().describe()), true);
+        return;
+    }
+    // 10 mm chords. The section samples at most every 100 mm along the line,
+    // so a finer centreline would cost time and change nothing it reports.
+    cutSectionAlong(solved->toPolyline(0.01), QString("alignment %1").arg(chosen));
 }
 
 } // namespace katana::qt

@@ -70,6 +70,7 @@ struct ProjectContents {
     std::vector<katana::entity::Linetype> linetypes{};
     std::vector<katana::entity::DimensionStyle> dimensionStyles{};
     std::vector<katana::entity::HatchPattern> hatchPatterns{};
+    std::vector<katana::entity::Alignment> alignments{};
     std::vector<katana::entity::PropertyDefinition> propertyDefinitions{};
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
@@ -99,7 +100,8 @@ class ProjectStore {
     // 4: linetype definitions (Phase 09).
     // 5: dimension styles, and Layer::dimensionStyle (Phase 09).
     // 6: hatch patterns, and Layer/Style::hatchPattern (Phase 09).
-    static constexpr int kCurrentSchemaVersion = 6;
+    // 7: alignments, stored as their PI definitions (Phase 21).
+    static constexpr int kCurrentSchemaVersion = 7;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // Creates the directory layout and an empty database. Fails if a project

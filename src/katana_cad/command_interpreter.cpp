@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cmath>
 #include <map>
+#include <iomanip>
 #include <sstream>
 
 #include "katana/entity/entity_geometry.hpp"
@@ -118,7 +119,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"AR", "ARRAY"},   {"E", "ERASE"},       {"DELETE", "ERASE"},   {"DEL", "ERASE"},
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
-        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"},
+        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"},
         {"?", "HELP"},
     };
     return table;
@@ -218,6 +219,9 @@ Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
           angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
+Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
+          SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
+          DELETE name.  PI indices count from 0; radius 0 is a kink; spirals in MODEL units
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
@@ -336,6 +340,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "HATCH") {
         return hatchPattern(args);
+    }
+    if (verb == "ALIGN") {
+        return alignment(args);
     }
     if (verb == "UNDO" || verb == "REDO") {
         return undoRedo(verb, args);
@@ -981,6 +988,187 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
     }
     return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
                  " | DELETE name");
+}
+
+CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
+{
+    const auto& model = document_.model();
+    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+    const char* const kUsage =
+        "ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spiralIn [spiralOut]]]"
+        "\n      | SET name index radius [spiralIn [spiralOut]] | START name station"
+        "\n      | STATIONS name interval | DELETE name     (PI indices count from 0)";
+
+    if (action == "LIST") {
+        std::ostringstream out;
+        out.precision(3);
+        out << std::fixed;
+        for (const katana::entity::Alignment& alignment : model.alignments.all()) {
+            out << "  " << alignment.name << "  " << alignment.horizontal.pis.size() << " PIs";
+            // Stored alignments always solve - add() refused any that could
+            // not - so a failure here is a defect worth showing, not hiding.
+            if (auto solved = katana::geometry::solveAlignment(alignment.horizontal)) {
+                out << "  " << solved->startStation() << " to " << solved->endStation()
+                    << "  length " << solved->length();
+            } else {
+                out << "  (does not solve: " << solved.error().describe() << ")";
+            }
+            if (!alignment.description.empty()) {
+                out << "  " << alignment.description;
+            }
+            out << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text;
+    }
+    if (args.size() < 2) {
+        return usage(kUsage);
+    }
+    const std::string& name = args[1];
+
+    if (action == "NEW") {
+        if (args.size() < 4) {
+            return usage("ALIGN NEW name x,y x,y [x,y ...]   at least two PIs");
+        }
+        katana::entity::Alignment created;
+        created.name = name;
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            const auto point = parsePoint(args[i]);
+            if (!point) {
+                return point.error();
+            }
+            created.horizontal.pis.push_back(katana::geometry::AlignmentPI{*point});
+        }
+        return finish(document_.execute(cmd::createAlignment(std::move(created))),
+                      "alignment " + name + " created with " +
+                          std::to_string(args.size() - 2) + " PIs");
+    }
+    if (action == "DELETE") {
+        return finish(document_.execute(cmd::deleteAlignment(name)),
+                      "alignment " + name + " deleted");
+    }
+
+    const katana::entity::Alignment* existing = model.alignments.find(name);
+    if (existing == nullptr) {
+        return makeError(ErrorCode::NotFound, "alignment does not exist", name);
+    }
+    katana::entity::Alignment changed = *existing;
+
+    if (action == "PI") {
+        if (args.size() < 3) {
+            return usage("ALIGN PI name x,y [radius [spiralIn [spiralOut]]]   appends a PI");
+        }
+        const auto point = parsePoint(args[2]);
+        if (!point) {
+            return point.error();
+        }
+        katana::geometry::AlignmentPI pi{*point};
+        double* fields[] = {&pi.radius, &pi.spiralIn, &pi.spiralOut};
+        for (std::size_t i = 3; i < args.size() && i < 6; ++i) {
+            const auto value = parseNumber(args[i]);
+            if (!value) {
+                return value.error();
+            }
+            *fields[i - 3] = *value;
+        }
+        changed.horizontal.pis.push_back(pi);
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " now has " +
+                          std::to_string(existing->horizontal.pis.size() + 1) + " PIs");
+    }
+    if (action == "SET") {
+        if (args.size() < 4) {
+            return usage("ALIGN SET name index radius [spiralIn [spiralOut]]   index from 0");
+        }
+        const auto index = parseNumber(args[2]);
+        if (!index) {
+            return index.error();
+        }
+        if (*index < 0.0 || *index >= static_cast<double>(changed.horizontal.pis.size())) {
+            return makeError(ErrorCode::InvalidArgument, "no such PI", "index=" + args[2]);
+        }
+        katana::geometry::AlignmentPI& pi = changed.horizontal.pis[static_cast<std::size_t>(*index)];
+        double* fields[] = {&pi.radius, &pi.spiralIn, &pi.spiralOut};
+        for (std::size_t i = 3; i < args.size() && i < 6; ++i) {
+            const auto value = parseNumber(args[i]);
+            if (!value) {
+                return value.error();
+            }
+            *fields[i - 3] = *value;
+        }
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " PI " + args[2] + " updated");
+    }
+    if (action == "START") {
+        if (args.size() < 3) {
+            return usage("ALIGN START name station");
+        }
+        const auto station = parseNumber(args[2]);
+        if (!station) {
+            return station.error();
+        }
+        changed.horizontal.startStation = *station;
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " starts at " + args[2]);
+    }
+    if (action == "STATIONS") {
+        if (args.size() < 3) {
+            return usage("ALIGN STATIONS name interval");
+        }
+        const auto interval = parseNumber(args[2]);
+        if (!interval) {
+            return interval.error();
+        }
+        if (!(*interval > 0.0)) {
+            return makeError(ErrorCode::InvalidArgument, "the interval must be positive");
+        }
+        auto solved = katana::geometry::solveAlignment(existing->horizontal);
+        if (!solved) {
+            return solved.error();
+        }
+        // Every interval station plus every key station, in order, once. A
+        // setting-out table with the TS, SC, CS and ST missing is not one.
+        std::vector<double> stations = solved->keyStations();
+        for (double s = solved->startStation(); s < solved->endStation(); s += *interval) {
+            stations.push_back(s);
+        }
+        std::sort(stations.begin(), stations.end());
+        stations.erase(std::unique(stations.begin(), stations.end(),
+                                   [](double a, double b) { return std::abs(a - b) < 1e-9; }),
+                       stations.end());
+        if (stations.size() > 100000) {
+            return makeError(ErrorCode::InvalidArgument, "that interval gives too many stations",
+                             std::to_string(stations.size()) + " stations, the limit is 100000");
+        }
+        std::ostringstream out;
+        out << std::fixed;
+        out.precision(3);
+        out << "  station        x             y        direction  radius\n";
+        for (double s : stations) {
+            const auto point = solved->pointAtStation(s);
+            const auto direction = solved->directionAtStation(s);
+            const auto curvature = solved->curvatureAtStation(s);
+            if (!point || !direction || !curvature) {
+                continue;
+            }
+            out << "  " << std::setw(10) << s << "  " << std::setw(12) << point->x << "  "
+                << std::setw(12) << point->y << "  " << std::setw(8)
+                << *direction * katana::math::kRadToDeg << "  ";
+            if (*curvature == 0.0) {
+                out << "straight";
+            } else {
+                out << std::setw(8) << 1.0 / *curvature;
+            }
+            out << "\n";
+        }
+        std::string text = out.str();
+        text.pop_back();
+        return text;
+    }
+    return usage(kUsage);
 }
 
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)

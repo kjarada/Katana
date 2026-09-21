@@ -668,6 +668,103 @@ class DeleteHatchPatternCommand final : public Command {
     HatchPattern removed_;
 };
 
+using katana::entity::Alignment;
+
+class CreateAlignmentCommand final : public Command {
+  public:
+    explicit CreateAlignmentCommand(Alignment alignment) : alignment_(std::move(alignment)) {}
+    [[nodiscard]] std::string_view name() const override { return "CreateAlignment"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (context.model.alignments.contains(alignment_.name)) {
+            return makeError(ErrorCode::AlreadyExists, "alignment already exists",
+                             alignment_.name);
+        }
+        return katana::entity::validate(alignment_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        return context.model.alignments.add(alignment_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        auto removed = context.model.alignments.remove(alignment_.name);
+        return removed ? Status{} : removed.error();
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    Alignment alignment_;
+};
+
+class UpdateAlignmentCommand final : public Command {
+  public:
+    explicit UpdateAlignmentCommand(Alignment alignment) : after_(std::move(alignment)) {}
+    [[nodiscard]] std::string_view name() const override { return "UpdateAlignment"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (!context.model.alignments.contains(after_.name)) {
+            return makeError(ErrorCode::NotFound, "alignment does not exist", after_.name);
+        }
+        return katana::entity::validate(after_);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        const Alignment* current = context.model.alignments.find(after_.name);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound, "alignment does not exist", after_.name);
+        }
+        before_ = *current;
+        return context.model.alignments.update(after_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.alignments.update(before_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override
+    {
+        return context.model.alignments.update(after_);
+    }
+
+  private:
+    Alignment after_;
+    Alignment before_;
+};
+
+class DeleteAlignmentCommand final : public Command {
+  public:
+    explicit DeleteAlignmentCommand(std::string name) : name_(std::move(name)) {}
+    [[nodiscard]] std::string_view name() const override { return "DeleteAlignment"; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        if (!context.model.alignments.contains(name_)) {
+            return makeError(ErrorCode::NotFound, "alignment does not exist", name_);
+        }
+        // Nothing in the model references an alignment by name yet - sections
+        // are cut and shown, not stored. When profiles or corridors arrive
+        // they will, and this is where the in-use guard belongs.
+        return {};
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        auto removed = context.model.alignments.remove(name_);
+        if (!removed) {
+            return removed.error();
+        }
+        removed_ = std::move(*removed);
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return context.model.alignments.add(removed_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    std::string name_;
+    Alignment removed_;
+};
+
 } // namespace
 
 CommandPtr createDimensionStyle(DimensionStyle style)
@@ -698,6 +795,21 @@ CommandPtr updateHatchPattern(HatchPattern pattern)
 CommandPtr deleteHatchPattern(std::string name)
 {
     return std::make_unique<DeleteHatchPatternCommand>(std::move(name));
+}
+
+CommandPtr createAlignment(Alignment alignment)
+{
+    return std::make_unique<CreateAlignmentCommand>(std::move(alignment));
+}
+
+CommandPtr updateAlignment(Alignment alignment)
+{
+    return std::make_unique<UpdateAlignmentCommand>(std::move(alignment));
+}
+
+CommandPtr deleteAlignment(std::string name)
+{
+    return std::make_unique<DeleteAlignmentCommand>(std::move(name));
 }
 
 } // namespace katana::commands

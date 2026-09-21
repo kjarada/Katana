@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 
+#include "katana/geometry/primitives2d.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/log.hpp"
@@ -58,6 +59,11 @@ class MainWindow final : public QMainWindow {
     void buildSurfaceFromDrawing();
     void addSurface(std::string name, katana::terrain::TinSurface surface);
     void cutSectionAlongSelection();
+    void cutSectionAlongAlignment();
+    // The part both section commands share: gather the visible surfaces, cut
+    // along `alignment`, show the result. `along` names the source for the
+    // log line.
+    void cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along);
     void setVerticalExaggeration();
     void buildDocks();
     void buildReferenceDock();

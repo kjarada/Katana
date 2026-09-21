@@ -359,9 +359,23 @@ would be negative - reported with the shortfall in metres). Every one names
 the PI or pair of PIs, because the useful reply to "the curve does not fit"
 is which corner to move.
 
+### In the application
+
+`entity::Alignment` is the third `NamedTable` (`docs/model.md`), holding the
+PI definition and nothing else; the elements are derived on demand, so a
+stored alignment cannot be discontinuous, and `add()` solves the definition
+so one that cannot be built is refused naming its PI - including one arriving
+from a file, which a test proves by hand-editing a saved row. Schema 7 stores
+`alignments` and `alignment_pis`. The `ALIGN` verb defines and edits them and
+prints a setting-out table that always includes the key stations; the
+viewport draws every alignment as an amber overlay with a tick and chainage
+label at each key station; and Terrain > Cut Section Along Alignment cuts a
+section down one by name, sharing the section code with the selection path
+rather than duplicating it. Details in `docs/cad.md`.
+
 ### Not done
 
-There is no entity, command, store row, verb or renderer for an alignment
-yet; `geometry::HorizontalAlignment` is a value with a solver. The named
-table in `entity::Model`, a `SECTION` cut along an alignment by name, and a
-viewport that draws one with its key stations are the next slices.
+Profiles, corridors, parcels and grading - everything in Phase 21 that is
+built ON an alignment rather than being one. Nothing references an alignment
+by name yet, so `deleteAlignment` has no in-use guard; the comment in the
+command says where it belongs when profiles arrive.

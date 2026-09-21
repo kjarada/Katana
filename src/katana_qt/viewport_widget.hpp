@@ -112,6 +112,14 @@ class ViewportWidget final : public QWidget {
     void drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,
                    const QPolygonF& screen) const;
 
+    // Every alignment in the document, as an amber overlay above the drawing:
+    // the centreline, a tick and a chainage label at each key station (the
+    // ends and every TS, SC, CS, ST), and the name at the start. An overlay
+    // rather than an entity because an alignment is a definition other things
+    // are cut along, not a line in the drawing - the same reason a surface is
+    // not an entity.
+    void drawAlignments(QPainter& painter) const;
+
     void drawText(QPainter& painter, const Point2& position, const std::string& text,
                   double height, double rotation) const;
     void drawPreview(QPainter& painter) const;

@@ -127,4 +127,11 @@ struct EntityAttributes {
 // Refuses while any layer or style still names it, and refuses "none".
 [[nodiscard]] CommandPtr deleteHatchPattern(std::string name);
 
+// ---- alignments ------------------------------------------------------------------
+// Create and update validate the definition by solving it, so an alignment
+// that cannot be built is refused naming its PI rather than stored.
+[[nodiscard]] CommandPtr createAlignment(katana::entity::Alignment alignment);
+[[nodiscard]] CommandPtr updateAlignment(katana::entity::Alignment alignment);
+[[nodiscard]] CommandPtr deleteAlignment(std::string name);
+
 } // namespace katana::commands

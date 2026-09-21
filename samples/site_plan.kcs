@@ -59,5 +59,13 @@ HATCH NEW brick 0 0.6 90 0.6
 HATCH NEW hardstanding 45 1.5
 LAYER HATCH BUILDING brick
 
+# ---- alignment ----------------------------------------------------------
+# The access road centreline, defined by its PIs. PI 1 is rounded with R = 40
+# and 10 m spirals either side; the tangents, spirals and arc are derived, so
+# moving a PI recomputes the corner. Drawn as the amber overlay with its key
+# stations; Terrain > Cut Section Along Alignment... cuts a section down it.
+ALIGN NEW access 0,-30 60,-30 160,20
+ALIGN SET access 1 40 10 10
+
 LAYER SET BOUNDARY
 LIST

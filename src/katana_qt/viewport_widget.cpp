@@ -4,9 +4,11 @@
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/hatching.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "katana/entity/display.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <limits>
 
@@ -557,6 +559,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     drawPointClouds(painter);
     painter.setRenderHint(QPainter::Antialiasing, true);
     drawEntities(painter);
+    drawAlignments(painter);
     drawPreview(painter);
 
     if (boxStart_) {
@@ -907,6 +910,89 @@ void ViewportWidget::drawGeometry(QPainter& painter,
         }
     };
     std::visit(Visitor{*this, painter, drawArcPath}, geometry);
+}
+
+namespace {
+
+// Chainage in the civil convention, kilometres + metres: 1234.5 reads as
+// "1+234.50". Formatted with to_chars rather than snprintf, because snprintf
+// obeys the C locale and would print "1+234,50" on a machine set to one that
+// uses a decimal comma - the same reason the dimension formatter avoids it.
+std::string formatStation(double station)
+{
+    const double magnitude = std::abs(station);
+    const auto kilometres = static_cast<long long>(magnitude / 1000.0);
+    const double metres = magnitude - static_cast<double>(kilometres) * 1000.0;
+    char buffer[32];
+    const auto result =
+        std::to_chars(buffer, buffer + sizeof buffer, metres, std::chars_format::fixed, 2);
+    std::string metresText(buffer, result.ptr);
+    while (metresText.size() < 6) { // "000.00"
+        metresText.insert(metresText.begin(), '0');
+    }
+    return (station < 0.0 ? "-" : "") + std::to_string(kilometres) + "+" + metresText;
+}
+
+} // namespace
+
+void ViewportWidget::drawAlignments(QPainter& painter) const
+{
+    const auto& model = document_.model();
+    if (model.alignments.empty() || !(view_.scale > 0.0)) {
+        return;
+    }
+    // Half a pixel: finer cannot be seen, coarser shows facets on tight curves.
+    const double tolerance = 0.5 / view_.scale;
+    const Box2 visible = view_.visibleWorldBounds();
+    const QColor kAlignment(0xff, 0xb7, 0x4d); // amber: an overlay, not drawing content
+    const double tick = 6.0 / view_.scale;     // screen-constant, like the snap marker
+    const double height = 11.0 / view_.scale;
+
+    for (const katana::entity::Alignment& alignment : model.alignments.all()) {
+        // Solved per repaint. A document has a handful of alignments and the
+        // solve is a few spiral end-points; caching it would need invalidation
+        // on every edit for no measurable gain. Measure before changing this.
+        const auto solved = katana::geometry::solveAlignment(alignment.horizontal);
+        if (!solved) {
+            continue; // the model refused it on the way in; nothing to draw
+        }
+        const Polyline2 line = solved->toPolyline(tolerance);
+        if (line.vertices.size() < 2) {
+            continue;
+        }
+        Box2 box;
+        for (const Point2& vertex : line.vertices) {
+            box.expand(vertex);
+        }
+        if (!box.inflated(tick * 4.0).intersects(visible)) {
+            continue;
+        }
+
+        QPolygonF polygon;
+        polygon.reserve(static_cast<int>(line.vertices.size()));
+        for (const Point2& vertex : line.vertices) {
+            polygon << toScreen(vertex);
+        }
+        painter.setPen(QPen(kAlignment, 2.0));
+        painter.drawPolyline(polygon);
+
+        painter.setPen(QPen(kAlignment, 1.0));
+        for (const double station : solved->keyStations()) {
+            const auto left = solved->pointAtStationOffset(station, tick);
+            const auto right = solved->pointAtStationOffset(station, -tick);
+            const auto direction = solved->directionAtStation(station);
+            const auto label = solved->pointAtStationOffset(station, tick * 1.6);
+            if (!left || !right || !direction || !label) {
+                continue;
+            }
+            painter.drawLine(toScreen(*left), toScreen(*right));
+            drawText(painter, *label, formatStation(station), height, *direction);
+        }
+        if (const auto start = solved->pointAtStationOffset(solved->startStation(), -tick * 3.0)) {
+            const auto direction = solved->directionAtStation(solved->startStation());
+            drawText(painter, *start, alignment.name, height * 1.3, direction.value_or(0.0));
+        }
+    }
 }
 
 void ViewportWidget::drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,

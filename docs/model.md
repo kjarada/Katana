@@ -298,7 +298,7 @@ Update the `static_assert` count, this document, `PLAN.MD` and `README.md`.
 
 ## Named tables
 
-`Linetype`, `DimensionStyle` and `Style` are stored in `NamedTable<T, Policy>`
+`Linetype`, `DimensionStyle`, `Style`, `HatchPattern` and `Alignment` are stored in `NamedTable<T, Policy>`
 (`include/katana/entity/named_table.hpp`), one implementation of "an ordered map
 from name to record" with the add / update / remove / find / all surface, the
 `AlreadyExists` and `NotFound` shape, and the built-in entry that `remove`

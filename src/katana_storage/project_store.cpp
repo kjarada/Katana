@@ -182,6 +182,28 @@ constexpr Migration kMigrations[] = {
         ALTER TABLE layers ADD COLUMN hatch_pattern TEXT NOT NULL DEFAULT 'none';
         ALTER TABLE styles ADD COLUMN hatch_pattern TEXT NOT NULL DEFAULT '';
     )sql"},
+    // Alignments, stored as the PI definition and nothing else. The elements
+    // are derived on load by geometry::solveAlignment, so a file can never
+    // hold an alignment with a gap in it, and a better solver later applies
+    // to every existing file for free.
+    {7, R"sql(
+        CREATE TABLE alignments (
+            name          TEXT PRIMARY KEY,
+            description   TEXT NOT NULL,
+            start_station REAL NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE alignment_pis (
+            alignment  TEXT NOT NULL REFERENCES alignments(name) ON DELETE CASCADE,
+            position   INTEGER NOT NULL,
+            x          REAL NOT NULL,
+            y          REAL NOT NULL,
+            radius     REAL NOT NULL,
+            spiral_in  REAL NOT NULL,
+            spiral_out REAL NOT NULL,
+            PRIMARY KEY (alignment, position)
+        ) WITHOUT ROWID;
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -447,6 +469,7 @@ ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata
     contents.linetypes = model.linetypes.all();
     contents.dimensionStyles = model.dimensionStyles.all();
     contents.hatchPatterns = model.hatchPatterns.all();
+    contents.alignments = model.alignments.all();
     contents.propertyDefinitions = model.properties.all();
     contents.entities.reserve(model.entities.size());
     model.entities.forEach([&](const Entity& entity) { contents.entities.push_back(entity); });
@@ -508,6 +531,14 @@ Status applyToModel(const ProjectContents& contents, katana::entity::Model& mode
                           ? staged.hatchPatterns.update(pattern)
                           : staged.hatchPatterns.add(pattern);
         if (!status) {
+            return status;
+        }
+    }
+    for (const katana::entity::Alignment& alignment : contents.alignments) {
+        // add() solves the definition, so a file holding an alignment that
+        // cannot be built is refused here with the PI named, not opened and
+        // drawn wrong.
+        if (auto status = staged.alignments.add(alignment); !status) {
             return status;
         }
     }
@@ -846,6 +877,7 @@ Status ProjectStore::save(const ProjectContents& contents)
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
                                        "DELETE FROM dimension_styles;"
                                        "DELETE FROM hatch_families; DELETE FROM hatch_patterns;"
+                                       "DELETE FROM alignment_pis; DELETE FROM alignments;"
                                        "DELETE FROM layers; DELETE FROM metadata;");
         !status) {
         return status;
@@ -1015,6 +1047,39 @@ Status ProjectStore::save(const ProjectContents& contents)
                 return makeError(status.error().code, status.error().message,
                                  "hatch pattern=" + pattern.name +
                                      " family=" + std::to_string(i));
+            }
+        }
+    }
+
+    auto insertAlignment = database.prepare(
+        "INSERT INTO alignments (name, description, start_station) VALUES (?1, ?2, ?3)");
+    if (!insertAlignment) {
+        return insertAlignment.error();
+    }
+    auto insertPI = database.prepare(
+        "INSERT INTO alignment_pis (alignment, position, x, y, radius, spiral_in, spiral_out)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)");
+    if (!insertPI) {
+        return insertPI.error();
+    }
+    for (const katana::entity::Alignment& alignment : contents.alignments) {
+        if (auto status = Binder(*insertAlignment)(1, std::string_view(alignment.name))(
+                              2, std::string_view(alignment.description))(
+                              3, alignment.horizontal.startStation)
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "alignment=" + alignment.name + " " + status.error().context);
+        }
+        for (std::size_t i = 0; i < alignment.horizontal.pis.size(); ++i) {
+            const katana::geometry::AlignmentPI& pi = alignment.horizontal.pis[i];
+            if (auto status = Binder(*insertPI)(1, std::string_view(alignment.name))(
+                                  2, static_cast<std::int64_t>(i))(3, pi.point.x)(4, pi.point.y)(
+                                  5, pi.radius)(6, pi.spiralIn)(7, pi.spiralOut)
+                                  .run();
+                !status) {
+                return makeError(status.error().code, status.error().message,
+                                 "alignment=" + alignment.name + " pi=" + std::to_string(i));
             }
         }
     }
@@ -1277,6 +1342,47 @@ Result<ProjectContents> ProjectStore::load()
             family.spacing = row.columnDouble(2);
             family.offset = row.columnDouble(3);
             found->families.push_back(family);
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, description, start_station FROM alignments ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::Alignment alignment;
+            alignment.name = row.columnText(0);
+            alignment.description = row.columnText(1);
+            alignment.horizontal.startStation = row.columnDouble(2);
+            contents.alignments.push_back(std::move(alignment));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    // Ordered by position: the PI order IS the alignment.
+    status = forEachRow(
+        "SELECT alignment, x, y, radius, spiral_in, spiral_out FROM alignment_pis"
+        " ORDER BY alignment, position",
+        [&](SqliteStatement& row) -> Status {
+            const std::string name = row.columnText(0);
+            const auto found = std::lower_bound(
+                contents.alignments.begin(), contents.alignments.end(), name,
+                [](const katana::entity::Alignment& alignment, const std::string& wanted) {
+                    return alignment.name < wanted;
+                });
+            if (found == contents.alignments.end() || found->name != name) {
+                return makeError(ErrorCode::DatabaseFailure,
+                                 "an alignment PI names an alignment that was not read", name);
+            }
+            katana::geometry::AlignmentPI pi;
+            pi.point = katana::geometry::Point2(row.columnDouble(1), row.columnDouble(2));
+            pi.radius = row.columnDouble(3);
+            pi.spiralIn = row.columnDouble(4);
+            pi.spiralOut = row.columnDouble(5);
+            found->horizontal.pis.push_back(pi);
             return {};
         });
     if (!status) {

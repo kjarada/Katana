@@ -16,6 +16,7 @@ struct Model {
     LinetypeDatabase linetypes;
     DimensionStyleDatabase dimensionStyles;
     HatchPatternDatabase hatchPatterns;
+    AlignmentDatabase alignments;
     PropertyDatabase properties;
 
     // Back to the state of a new, empty document. Entity ids are not reused.
@@ -27,6 +28,7 @@ struct Model {
         linetypes.reset();
         dimensionStyles.reset();
         hatchPatterns.reset();
+        alignments.reset();
         properties.reset();
     }
 
@@ -46,6 +48,7 @@ struct Model {
         linetypes = std::move(other.linetypes);
         dimensionStyles = std::move(other.dimensionStyles);
         hatchPatterns = std::move(other.hatchPatterns);
+        alignments = std::move(other.alignments);
         properties = std::move(other.properties);
         entities.adoptContents(std::move(other.entities));
     }

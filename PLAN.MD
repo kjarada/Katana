@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections with exact surface-break sampling; clothoid and PI-defined horizontal alignment solver delivered in `geometry`; alignment table, profiles, corridors, parcels and grading outstanding |
+| 21 | Civil Engineering | partial — sections; clothoid; PI-defined alignments as a named table with `ALIGN`, an overlay with key stations, and section-along-alignment; profiles, corridors, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1320,9 +1320,22 @@ a `Polyline2` through the one sagitta rule - which is what lets a section be
 cut along it with `extractSection` untouched, exactly as intended above.
 Decision record in `docs/geometry.md`.
 
-Still nothing in the model, the CLI or a viewport: the `entity::Alignment`
-named table, a `SECTION` along an alignment by name, and drawing one with its
-key stations are the next slices.
+**Third slice DELIVERED: alignments in the application.** `entity::Alignment`
+is a named table (the third on `NamedTable`) holding the PI definition only;
+`add()` solves it, so an alignment that cannot be built is refused naming its
+PI - including one arriving from a file, proved by a test that hand-edits a
+saved row. Schema 7 stores `alignments` and `alignment_pis`. The `ALIGN` verb
+defines, edits and prints a setting-out table that always carries the key
+stations; the viewport draws every alignment as an amber overlay with a tick
+and chainage label at each TS, SC, CS and ST; and Terrain > Cut Section Along
+Alignment... cuts a section down one by name through the same routine the
+selection path uses. `samples/site_plan` carries one. Records in
+`docs/geometry.md` and `docs/cad.md`.
+
+**OUTSTANDING in this phase:** profiles, corridors, parcels and grading -
+everything built ON an alignment rather than being one. `deleteAlignment` has
+no in-use guard because nothing references an alignment by name yet; the
+command says where the guard belongs when profiles arrive.
 
 ## Alignments
 

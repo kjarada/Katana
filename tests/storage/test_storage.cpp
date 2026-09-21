@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include <cctype>
 #include <set>
 
@@ -369,6 +371,13 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 [[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
 {
     // Newest first: a migration is undone before the one it was built on.
+    if (version < 7) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS alignment_pis;"
+                                           "DROP TABLE IF EXISTS alignments;");
+            !status) {
+            return status;
+        }
+    }
     if (version < 6) {
         if (auto status = database.execute("DROP TABLE IF EXISTS hatch_families;"
                                            "DROP TABLE IF EXISTS hatch_patterns;"
@@ -1114,4 +1123,111 @@ TEST_F(ProjectStoreRoundTrip, AHatchPatternSurvivesSaveAndReopenWithEveryFamily)
     EXPECT_EQ(loaded.layers.find("paving")->hatchPattern, "brick");
     ASSERT_NE(loaded.styles.find("slab"), nullptr);
     EXPECT_EQ(loaded.styles.find("slab")->hatchPattern, "concrete");
+}
+
+// ---- alignments (schema 7) ---------------------------------------------------------
+
+namespace {
+
+katana::entity::Alignment mainRoad()
+{
+    katana::entity::Alignment road;
+    road.name = "road";
+    road.description = "Main road";
+    road.horizontal.startStation = 1000.0;
+    const double d = std::acos(-1.0) / 6.0; // 30 degrees
+    road.horizontal.pis = {
+        katana::geometry::AlignmentPI{katana::geometry::Point2(0, 0)},
+        katana::geometry::AlignmentPI{katana::geometry::Point2(400, 0), 300.0, 90.0, 90.0},
+        katana::geometry::AlignmentPI{
+            katana::geometry::Point2(400 + 300 * std::cos(d), 300 * std::sin(d))},
+    };
+    return road;
+}
+
+} // namespace
+
+TEST_F(ProjectStoreMigration, AProjectFromBeforeAlignmentsOpensWithNone)
+{
+    const Model model = sampleModel();
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(rewindSchemaTo(*database, 6).ok());
+    }
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    EXPECT_EQ(loaded.alignments.size(), 0u) << "nothing should be invented for an old file";
+}
+
+TEST_F(ProjectStoreRoundTrip, AnAlignmentSurvivesSaveAndReopenWithEveryPI)
+{
+    Model model = sampleModel();
+    const katana::entity::Alignment road = mainRoad();
+    ASSERT_TRUE(model.alignments.add(road));
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        // Twice: save clears and rewrites every table it owns, and a missing
+        // DELETE only shows as a primary-key conflict on the second save.
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+
+    const katana::entity::Alignment* reloaded = loaded.alignments.find("road");
+    ASSERT_NE(reloaded, nullptr) << "dropped somewhere between capture and adoptContents";
+    // Exact equality: SQLite REAL is a double, so every coordinate, radius,
+    // spiral length and the start station must come back bit for bit.
+    EXPECT_EQ(*reloaded, road);
+}
+
+TEST_F(ProjectStoreRoundTrip, AFileHoldingAnAlignmentThatCannotBeBuiltIsRefusedNamingThePI)
+{
+    // Nothing in the writer can produce this - add() refuses it - so it can
+    // only arrive by a hand edit, another tool, or a future bug. Whichever it
+    // is, opening the file must say so rather than draw the alignment wrong
+    // (PLAN.MD section 36).
+    Model model = sampleModel();
+    ASSERT_TRUE(model.alignments.add(mainRoad()));
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        // 500 m spirals on R = 300 each use 0.833 rad; the corner has 0.524.
+        ASSERT_TRUE(database
+                        ->execute("UPDATE alignment_pis SET spiral_in = 500, spiral_out = 500"
+                                  " WHERE alignment = 'road' AND position = 1")
+                        .ok());
+    }
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << "reading rows is fine; building them is what must fail";
+    Model loaded;
+    const auto applied = applyToModel(*contents, loaded);
+    ASSERT_FALSE(applied.ok());
+    EXPECT_EQ(applied.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(applied.error().describe().find("PI 1"), std::string::npos)
+        << applied.error().describe();
+    EXPECT_EQ(loaded.alignments.size(), 0u) << "a refused load must leave the model untouched";
 }

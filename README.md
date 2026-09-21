@@ -32,7 +32,7 @@ and the command line are two thin front ends over the same engine.
 | 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
 | 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
 
-822 tests pass in Debug and Release, including the architectural layering check.
+830 tests pass in Debug and Release, including the architectural layering check.
 
 ## Building
 
