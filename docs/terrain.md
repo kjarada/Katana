@@ -147,3 +147,23 @@ give different points on a different standard library and the timings could not
 be compared with the ones in this table. The LCG constants (Press et al.,
 *Numerical Recipes* 3rd ed., section 7.1) are plain arithmetic on `uint32_t` and
 produce an identical sequence everywhere.
+
+## Where the compensated sum lives now
+
+Every area and volume here goes through a Neumaier compensated sum. It was
+`katana::terrain::detail::CompensatedSum`, private to this module, until the
+corridor quantities in `cad` needed the same thing; a second copy would have
+been the defect CLAUDE.md section 1 names, so it moved to the public
+`katana::math::CompensatedSum` (`include/katana/math/summation.hpp`) and the
+terrain header now aliases it - the call sites in `volume.cpp` and
+`tin_surface.cpp` read as they always did, and the 17 volume and area tests
+passed unchanged through the move.
+
+It is tested directly for the first time. The property that took two tries to
+pin: Neumaier's variant differs from Kahan's exactly when a term is larger
+than the running sum, so the test adds 1e15 FIRST and then a million 0.1s -
+each of which plain addition rounds up to 0.125, the ulp at 1e15, landing at
+125 000 instead of 100 000. The first draft added the small terms first and
+asserted plain addition would drift; it barely did, and the +1e15 / -1e15
+round trip then rounded the drift away to exactly 100 000 by luck. That order
+is the case Kahan already handles and proves nothing about Neumaier.

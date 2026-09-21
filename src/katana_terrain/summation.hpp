@@ -1,32 +1,16 @@
 #pragma once
 
-// Compensated (Neumaier) summation. Areas and volumes are sums over millions of
-// triangles; plain accumulation loses up to log2(n) bits, the compensated sum
-// stays within a few ulp of the exact sum of its terms. Relies on the project's
-// -fno-fast-math / -ffp-contract=off so the compiler may not reassociate it away.
+// The compensated sum used for every area and volume in this module. It is
+// katana::math::CompensatedSum, aliased here so that the call sites in
+// volume.cpp and tin_surface.cpp read as they always have; the implementation
+// moved to the public header when the corridor quantities in cad needed the
+// same one, and a second copy would have been the defect CLAUDE.md section 1
+// names.
 
-#include <cmath>
+#include "katana/math/summation.hpp"
 
 namespace katana::terrain::detail {
 
-class CompensatedSum {
-  public:
-    void add(double term)
-    {
-        const double next = sum_ + term;
-        if (std::abs(sum_) >= std::abs(term)) {
-            compensation_ += (sum_ - next) + term;
-        } else {
-            compensation_ += (term - next) + sum_;
-        }
-        sum_ = next;
-    }
-
-    [[nodiscard]] double value() const { return sum_ + compensation_; }
-
-  private:
-    double sum_ = 0.0;
-    double compensation_ = 0.0;
-};
+using CompensatedSum = katana::math::CompensatedSum;
 
 } // namespace katana::terrain::detail
