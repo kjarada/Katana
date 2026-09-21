@@ -17,19 +17,25 @@ function(katana_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_23)
 
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
+        target_compile_options(${target} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:/W4 /permissive- /utf-8>)
         if(KATANA_WARNINGS_AS_ERRORS)
-            target_compile_options(${target} PRIVATE /WX)
+            target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/WX>)
         endif()
     else()
+        # Guarded to C++: a target may also carry a Windows resource file, and
+        # these flags are handed to EVERY language on the target - windres
+        # rejects -Wall outright.
         target_compile_options(${target} PRIVATE
-            -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Woverloaded-virtual -Wformat=2)
+            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor
+                                     -Woverloaded-virtual -Wformat=2>)
         if(KATANA_WARNINGS_AS_ERRORS)
-            target_compile_options(${target} PRIVATE -Werror)
+            target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
         endif()
         # Deterministic floating point: forbid value-changing optimisations and
         # fused multiply-add contraction so results match across optimisation levels.
-        target_compile_options(${target} PRIVATE -ffp-contract=off -fno-fast-math)
+        target_compile_options(${target} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off -fno-fast-math>)
     endif()
 
     # libstdc++ container/iterator precondition checks in debug builds.

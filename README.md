@@ -32,7 +32,7 @@ and the command line are two thin front ends over the same engine.
 | 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
 | 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
 
-879 tests pass in Debug and Release, including the architectural layering check and a headless plot to PDF.
+880 tests pass in Debug and Release, including the architectural layering check, a headless plot to PDF and a headless build of the main window.
 
 ## Building
 
@@ -60,9 +60,16 @@ use system packages instead. Useful options:
 | `KATANA_ENABLE_CPPCHECK` | OFF | cppcheck during compilation |
 | `KATANA_MODULE_FILTER` | *(empty)* | configure only the listed modules |
 
+The desktop application is themed dark to match its viewport, with icon
+toolbars whose icons are drawn in code (crisp at any DPI, recoloured by the
+theme). `katana <project> --screenshot out.png` renders the main window
+headlessly, and `--plot out.pdf` plots the drawing, so both can be reviewed
+without a display.
+
 Other targets: `format` and `format-check` (clang-format), `run-benchmarks`,
-`bundle` (a self-contained `<build>/dist/Katana` that runs with no MSYS2, Qt or
-GDAL installed) and `package` (that tree as `Katana-<version>-win64.zip`, plus
+`katana_make_icons` (regenerates `resources/katana.ico` and an icon contact
+sheet), `bundle` (a self-contained `<build>/dist/Katana` that runs with no
+MSYS2, Qt or GDAL installed) and `package` (that tree as `Katana-<version>-win64.zip`, plus
 an installer when NSIS is present).
 
 ## Running

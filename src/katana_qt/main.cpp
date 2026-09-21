@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <optional>
 
+#include "icons.hpp"
 #include "katana/cad/plot.hpp"
+#include "theme.hpp"
 #include "main_window.hpp"
 
 // Usage:
@@ -12,6 +14,7 @@
 //   katana [project-directory] [data-file...] --plot out.pdf
 //                 [--fit | --scale N] [--paper A4|A3|A2|A1|A0]
 //                 [--landscape | --portrait] [--dpi N]
+//   katana [project-directory] [data-file...] --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -22,13 +25,25 @@
 // widget and otherwise needs a person: the qt_plot_headless test runs this
 // under QT_QPA_PLATFORM=offscreen and opens the result. --fit is the default;
 // --scale N plots at 1 : N about the view centre.
+//
+// --screenshot lays the main window out exactly as it would appear, grabs it
+// to a PNG and exits. It exists so that the LOOK of the application can be
+// reviewed - by a person in a pull request, or by a model that cannot watch a
+// screen - the same way --plot lets its output be reviewed. Under
+// QT_QPA_PLATFORM=offscreen nothing is shown anywhere.
 int main(int argc, char* argv[])
 {
     QApplication application(argc, argv);
     application.setApplicationName("Katana");
     application.setOrganizationName("Katana");
+    application.setApplicationVersion(KATANA_VERSION);
+    // Before any window exists: a widget created under the default style keeps
+    // some of its metrics when the style changes beneath it.
+    katana::qt::theme::apply(application);
+    application.setWindowIcon(katana::qt::applicationIcon());
 
     std::optional<QString> plotPath;
+    std::optional<QString> screenshotPath;
     bool fit = true;
     katana::cad::PlotSettings settings;
     QStringList inputs;
@@ -40,6 +55,8 @@ int main(int argc, char* argv[])
         };
         if (argument == "--plot") {
             plotPath = value();
+        } else if (argument == "--screenshot") {
+            screenshotPath = value();
         } else if (argument == "--fit") {
             fit = true;
         } else if (argument == "--scale") {
@@ -77,7 +94,7 @@ int main(int argc, char* argv[])
     }
 
     katana::qt::MainWindow window;
-    if (!plotPath) {
+    if (!plotPath && !screenshotPath) {
         window.show();
     }
     for (const QString& input : inputs) {
@@ -86,6 +103,24 @@ int main(int argc, char* argv[])
         } else {
             window.importPath(input);
         }
+    }
+
+    if (screenshotPath) {
+        if (screenshotPath->isEmpty()) {
+            std::fprintf(stderr, "--screenshot needs an output path\n");
+            return 2;
+        }
+        // Shown so that the layout is real - docks sized, toolbars wrapped -
+        // and events pumped twice, because the first pass lays out and the
+        // second paints what the layout produced.
+        window.show();
+        QApplication::processEvents();
+        QApplication::processEvents();
+        if (!window.grab().save(*screenshotPath, "PNG")) {
+            std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
+            return 1;
+        }
+        return 0;
     }
 
     if (plotPath) {

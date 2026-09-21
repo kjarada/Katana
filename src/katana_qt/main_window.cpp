@@ -1,5 +1,9 @@
 #include "main_window.hpp"
 
+#include "theme.hpp"
+
+#include "icons.hpp"
+
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -20,6 +24,7 @@
 #include <QFormLayout>
 #include <QCheckBox>
 #include <QInputDialog>
+#include <QPixmap>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -199,57 +204,146 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
 // ---- construction -----------------------------------------------------------------------
 
+// A QAction is made ONCE and shared by its menu and its toolbar, so the two
+// cannot drift: one text, one shortcut, one icon, one enabled state. `tip` is
+// the sentence shown in the status bar and, with the shortcut appended, in the
+// toolbar tooltip - an icon-only button owes the user its name.
+QAction* MainWindow::makeAction(Icon icon, const QString& text, const QString& tip,
+                                const QKeySequence& shortcut)
+{
+    auto* action = new QAction(katana::qt::icon(icon), text, this);
+    if (!shortcut.isEmpty()) {
+        action->setShortcut(shortcut);
+    }
+    QString plain = text;
+    plain.remove('&').remove("...");
+    action->setStatusTip(tip);
+    action->setToolTip(shortcut.isEmpty()
+                           ? QString("<b>%1</b><br>%2").arg(plain, tip)
+                           : QString("<b>%1</b> &nbsp;<span style='color:%4'>%3</span><br>%2")
+                                 .arg(plain, tip, shortcut.toString(QKeySequence::NativeText),
+                                      theme::textMuted().name()));
+    return action;
+}
+
+QToolBar* MainWindow::makeToolBar(const QString& title, Qt::ToolBarArea area)
+{
+    auto* toolbar = new QToolBar(title, this);
+    // The object name is what QMainWindow::saveState keys a toolbar's position
+    // on; without one, a saved layout cannot be restored.
+    toolbar->setObjectName(title + "ToolBar");
+    toolbar->setIconSize(QSize(20, 20));
+    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    toolbar->setMovable(true);
+    toolbar->setFloatable(false);
+    addToolBar(area, toolbar);
+    return toolbar;
+}
+
 void MainWindow::buildActions()
 {
+    // ---- File ------------------------------------------------------------------------
+    QAction* newAction = makeAction(Icon::New, "&New", "Start a new, empty drawing", QKeySequence::New);
+    QAction* openAction = makeAction(Icon::Open, "&Open Project...", "Open a Katana project directory",
+                                     QKeySequence::Open);
+    QAction* saveAction =
+        makeAction(Icon::Save, "&Save", "Save the project", QKeySequence::Save);
+    QAction* saveAsAction = makeAction(Icon::SaveAs, "Save &As...",
+                                       "Save the project under another name", QKeySequence::SaveAs);
+    QAction* importAction =
+        makeAction(Icon::Import, "&Import...",
+                   "Import a drawing, an image or a point cloud (DXF, SHP, GeoTIFF, LAS ...)",
+                   QKeySequence(Qt::CTRL | Qt::Key_I));
+    QAction* exportAction = makeAction(Icon::Export, "Export &Vector...",
+                                       "Export the drawing (DXF, GeoPackage, GeoJSON, SHP ...)",
+                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+    QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
+                                     "Plot the drawing to a sheet at a standard scale",
+                                     QKeySequence::Print);
+    connect(newAction, &QAction::triggered, this, [this] { newDocument(); });
+    connect(openAction, &QAction::triggered, this, [this] { openDocument(); });
+    connect(saveAction, &QAction::triggered, this, [this] { saveDocument(); });
+    connect(saveAsAction, &QAction::triggered, this, [this] { saveDocumentAs(); });
+    connect(importAction, &QAction::triggered, this, [this] { importFile(); });
+    connect(exportAction, &QAction::triggered, this, [this] { exportVectorFile(); });
+    connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
+
     QMenu* fileMenu = menuBar()->addMenu("&File");
-    fileMenu->addAction("&New", QKeySequence::New, this, [this] { newDocument(); });
-    fileMenu->addAction("&Open Project...", QKeySequence::Open, this, [this] { openDocument(); });
+    fileMenu->addActions({newAction, openAction});
     fileMenu->addSeparator();
-    fileMenu->addAction("&Save", QKeySequence::Save, this, [this] { saveDocument(); });
-    fileMenu->addAction("Save &As...", QKeySequence::SaveAs, this, [this] { saveDocumentAs(); });
+    fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
-    fileMenu->addAction("&Import...", QKeySequence(Qt::CTRL | Qt::Key_I), this,
-                        [this] { importFile(); });
-    fileMenu->addAction("Export &Vector...", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), this,
-                        [this] { exportVectorFile(); });
+    fileMenu->addActions({importAction, exportAction});
     fileMenu->addSeparator();
-    fileMenu->addAction("&Plot to PDF...", QKeySequence::Print, this, [this] { plotToPdf(); });
+    fileMenu->addAction(plotAction);
+    fileMenu->addSeparator();
     fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
 
-    QMenu* editMenu = menuBar()->addMenu("&Edit");
-    undoAction_ = editMenu->addAction("&Undo", QKeySequence::Undo, this, [this] {
+    QToolBar* fileBar = makeToolBar("File", Qt::TopToolBarArea);
+    fileBar->addActions({newAction, openAction, saveAction});
+    fileBar->addSeparator();
+    fileBar->addActions({importAction, exportAction, plotAction});
+
+    // ---- Edit ------------------------------------------------------------------------
+    undoAction_ = makeAction(Icon::Undo, "&Undo", "Undo the last command", QKeySequence::Undo);
+    redoAction_ = makeAction(Icon::Redo, "&Redo", "Redo the command that was undone",
+                             QKeySequence::Redo);
+    QAction* selectAllAction = makeAction(Icon::SelectAll, "Select &All",
+                                          "Select every entity on an unlocked layer",
+                                          QKeySequence::SelectAll);
+    QAction* eraseAction = makeAction(Icon::Erase, "&Erase Selection", "Erase the selected entities",
+                                      QKeySequence(Qt::Key_Delete));
+    connect(undoAction_, &QAction::triggered, this, [this] {
         if (const auto status = document_.undo(); !status) {
             logMessage(QString::fromStdString(status.error().describe()), true);
         }
     });
-    redoAction_ = editMenu->addAction("&Redo", QKeySequence::Redo, this, [this] {
+    connect(redoAction_, &QAction::triggered, this, [this] {
         if (const auto status = document_.redo(); !status) {
             logMessage(QString::fromStdString(status.error().describe()), true);
         }
     });
-    editMenu->addSeparator();
-    editMenu->addAction("Select &All", QKeySequence::SelectAll, this, [this] {
+    connect(selectAllAction, &QAction::triggered, this, [this] {
         logMessage(QString::fromStdString(interpreter_.run("SELECT ALL").valueOr("")));
     });
-    editMenu->addAction("&Deselect", this, [this] { views_->cancel(); });
-    editMenu->addAction("&Erase Selection", this, [this] {
+    connect(eraseAction, &QAction::triggered, this, [this] {
         commandInput_->setText("ERASE");
         runCommandLine();
     });
 
-    QMenu* viewMenu = menuBar()->addMenu("&View");
-    viewMenu->addAction("Zoom &Extents", QKeySequence(Qt::CTRL | Qt::Key_E), this,
-                        [this] { views_->zoomExtents(); });
-    gridAction_ = viewMenu->addAction("&Grid", QKeySequence(Qt::Key_F7), this,
-                                      [this](bool on) { views_->setGridVisible(on); });
+    QMenu* editMenu = menuBar()->addMenu("&Edit");
+    editMenu->addActions({undoAction_, redoAction_});
+    editMenu->addSeparator();
+    editMenu->addAction(selectAllAction);
+    editMenu->addAction("&Deselect", QKeySequence(Qt::Key_Escape), this, [this] { views_->cancel(); });
+    editMenu->addAction(eraseAction);
+
+    QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
+    editBar->addActions({undoAction_, redoAction_});
+    editBar->addSeparator();
+    editBar->addActions({selectAllAction, eraseAction});
+
+    // ---- View ------------------------------------------------------------------------
+    QAction* extentsAction = makeAction(Icon::ZoomExtents, "Zoom &Extents",
+                                        "Fit the whole drawing in the view",
+                                        QKeySequence(Qt::CTRL | Qt::Key_E));
+    connect(extentsAction, &QAction::triggered, this, [this] { views_->zoomExtents(); });
+    gridAction_ = makeAction(Icon::Grid, "&Grid", "Show or hide the grid", QKeySequence(Qt::Key_F7));
     gridAction_->setCheckable(true);
     gridAction_->setChecked(views_->gridVisible());
-    snapAction_ = viewMenu->addAction("Object &Snap", QKeySequence(Qt::Key_F3), this,
-                                      [this](bool on) { views_->setSnapEnabled(on); });
+    connect(gridAction_, &QAction::toggled, this, [this](bool on) { views_->setGridVisible(on); });
+    snapAction_ = makeAction(Icon::Snap, "Object &Snap",
+                             "Snap the cursor to endpoints, midpoints, centres and intersections",
+                             QKeySequence(Qt::Key_F3));
     snapAction_->setCheckable(true);
     snapAction_->setChecked(views_->snapEnabled());
+    connect(snapAction_, &QAction::toggled, this, [this](bool on) { views_->setSnapEnabled(on); });
 
-    QMenu* snapMenu = viewMenu->addMenu("Snap &Modes");
+    viewMenu_ = menuBar()->addMenu("&View");
+    viewMenu_->addAction(extentsAction);
+    viewMenu_->addActions({gridAction_, snapAction_});
+
+    QMenu* snapMenu = viewMenu_->addMenu("Snap &Modes");
     for (const cad::SnapMode mode :
          {cad::SnapMode::Endpoint, cad::SnapMode::Midpoint, cad::SnapMode::Center,
           cad::SnapMode::Intersection, cad::SnapMode::Perpendicular, cad::SnapMode::Tangent,
@@ -264,66 +358,124 @@ void MainWindow::buildActions()
         });
     }
 
-    buildViewMenu(viewMenu);
+    buildViewMenu(viewMenu_);
+
+    QToolBar* viewBar = makeToolBar("View", Qt::TopToolBarArea);
+    viewBar->addAction(extentsAction);
+    viewBar->addSeparator();
+    viewBar->addActions({gridAction_, snapAction_});
+
+    // ---- Terrain and civil -----------------------------------------------------------
+    QAction* cloudSurface = makeAction(Icon::SurfaceFromCloud, "Surface From &Point Cloud...",
+                                       "Triangulate a surface from an imported point cloud");
+    QAction* rasterSurface = makeAction(Icon::SurfaceFromRaster, "Surface From &Raster...",
+                                        "Triangulate a surface from an elevation raster");
+    QAction* drawingSurface = makeAction(Icon::SurfaceFromDrawing, "Surface From &Drawing",
+                                         "Triangulate a surface from the drawing's points and lines");
+    QAction* quantities = makeAction(Icon::CorridorQuantities, "Corridor &Quantities...",
+                                     "Cut and fill along an alignment, by average end area",
+                                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q));
+    QAction* corridor = makeAction(Icon::CorridorSurface, "Corridor &Surface...",
+                                   "Build the finished design along an alignment as a surface");
+    QAction* alignmentSection = makeAction(Icon::SectionAlignment, "Cut Section Along &Alignment...",
+                                           "Long section down a named alignment, with its design profile",
+                                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
+    QAction* selectionSection = makeAction(Icon::Section, "&Cut Section Along Selection",
+                                           "Long section along the selected line or polyline",
+                                           QKeySequence(Qt::CTRL | Qt::Key_K));
+    connect(cloudSurface, &QAction::triggered, this, [this] { buildSurfaceFromPointCloud(); });
+    connect(rasterSurface, &QAction::triggered, this, [this] { buildSurfaceFromRaster(); });
+    connect(drawingSurface, &QAction::triggered, this, [this] { buildSurfaceFromDrawing(); });
+    connect(quantities, &QAction::triggered, this, &MainWindow::corridorQuantities);
+    connect(corridor, &QAction::triggered, this, &MainWindow::corridorSurface);
+    connect(alignmentSection, &QAction::triggered, this, &MainWindow::cutSectionAlongAlignment);
+    connect(selectionSection, &QAction::triggered, this, [this] { cutSectionAlongSelection(); });
 
     QMenu* terrainMenu = menuBar()->addMenu("&Terrain");
-    terrainMenu->addAction("Surface From &Point Cloud...", this,
-                           [this] { buildSurfaceFromPointCloud(); });
-    terrainMenu->addAction("Surface From &Raster...", this,
-                           [this] { buildSurfaceFromRaster(); });
-    terrainMenu->addAction("Surface From &Drawing", this,
-                           [this] { buildSurfaceFromDrawing(); });
+    terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
     terrainMenu->addSeparator();
-    terrainMenu->addAction("Corridor &Quantities...", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q),
-                           this, &MainWindow::corridorQuantities);
-    terrainMenu->addAction("Corridor &Surface...", this, &MainWindow::corridorSurface);
-    terrainMenu->addAction("Cut Section Along &Alignment...",
-                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K), this,
-                           &MainWindow::cutSectionAlongAlignment);
-    terrainMenu->addAction("&Cut Section Along Selection", QKeySequence(Qt::CTRL | Qt::Key_K),
-                           this, [this] { cutSectionAlongSelection(); });
+    terrainMenu->addActions({selectionSection, alignmentSection});
+    terrainMenu->addSeparator();
+    terrainMenu->addActions({quantities, corridor});
 
+    QToolBar* terrainBar = makeToolBar("Terrain", Qt::TopToolBarArea);
+    terrainBar->addActions({cloudSurface, rasterSurface, drawingSurface});
+    terrainBar->addSeparator();
+    terrainBar->addActions({selectionSection, alignmentSection});
+    terrainBar->addSeparator();
+    terrainBar->addActions({quantities, corridor});
+
+    // ---- Draw and Modify -------------------------------------------------------------
+    // Down the LEFT edge, where every CAD program keeps its drawing tools:
+    // they are the ones reached for without looking, and a vertical strip
+    // beside the drawing is a shorter mouse journey than a row above it.
     QMenu* drawMenu = menuBar()->addMenu("&Draw");
     QMenu* modifyMenu = menuBar()->addMenu("&Modify");
-    QToolBar* toolbar = addToolBar("Tools");
-    toolbar->setMovable(false);
+    QToolBar* drawBar = makeToolBar("Draw", Qt::LeftToolBarArea);
     toolGroup_ = new QActionGroup(this);
     toolGroup_->setExclusive(true);
-    for (const Tool tool : {Tool::Select, Tool::Point, Tool::Line, Tool::Polyline, Tool::Rectangle,
-                            Tool::Circle, Tool::Arc, Tool::Move, Tool::Copy}) {
-        auto* action = new QAction(toString(tool), this);
+
+    struct ToolEntry {
+        Tool tool;
+        Icon icon;
+        const char* tip;
+        QKeySequence shortcut;
+    };
+    const ToolEntry tools[] = {
+        {Tool::Select, Icon::Select, "Pick entities, or drag a window or crossing box", {}},
+        {Tool::Point, Icon::Point, "Place a point", {}},
+        {Tool::Line, Icon::Line, "Draw a line between two points", {}},
+        {Tool::Polyline, Icon::Polyline, "Draw a polyline; right-click or Enter to finish", {}},
+        {Tool::Rectangle, Icon::Rectangle, "Draw a rectangle by two corners", {}},
+        {Tool::Circle, Icon::Circle, "Draw a circle by centre and radius", {}},
+        {Tool::Arc, Icon::Arc, "Draw an arc through three points", {}},
+        {Tool::Move, Icon::Move, "Move the selection by two points", {}},
+        {Tool::Copy, Icon::Copy, "Copy the selection by two points", {}},
+    };
+    for (const ToolEntry& entry : tools) {
+        QAction* action = makeAction(entry.icon, toString(entry.tool), entry.tip, entry.shortcut);
         action->setCheckable(true);
-        action->setData(static_cast<int>(tool));
+        action->setData(static_cast<int>(entry.tool));
+        const Tool tool = entry.tool;
         connect(action, &QAction::triggered, this, [this, tool] { views_->setTool(tool); });
         toolGroup_->addAction(action);
-        toolbar->addAction(action);
+        drawBar->addAction(action);
         if (tool == Tool::Move || tool == Tool::Copy) {
             modifyMenu->addAction(action);
         } else if (tool != Tool::Select) {
             drawMenu->addAction(action);
         }
         if (tool == Tool::Select || tool == Tool::Arc) {
-            toolbar->addSeparator();
+            drawBar->addSeparator();
         }
     }
+    modifyMenu->addAction(eraseAction);
     modifyMenu->addSeparator();
     QAction* hint = modifyMenu->addAction(
         "Rotate, Scale, Mirror, Array, Trim, Extend, Offset, Fillet, Chamfer: command line");
     hint->setEnabled(false);
 
-    toolbar->addSeparator();
-    toolbar->addAction(gridAction_);
-    toolbar->addAction(snapAction_);
-
-    QMenu* helpMenu = menuBar()->addMenu("&Help");
-    helpMenu->addAction("&Command Reference", this, [this] {
+    // ---- Help ------------------------------------------------------------------------
+    QAction* reference = makeAction(Icon::Help, "&Command Reference",
+                                    "List every command the command line accepts",
+                                    QKeySequence::HelpContents);
+    QAction* about = makeAction(Icon::About, "&About Katana", "Version and build information");
+    connect(reference, &QAction::triggered, this, [this] {
         logMessage(QString::fromStdString(cad::CommandInterpreter::helpText()));
     });
-    helpMenu->addAction("&About Katana", this, [this] {
-        QMessageBox::about(this, "About Katana",
-                           "Katana CAD & Survey Platform\n\nDeterministic C++ engineering core "
-                           "with a Qt 6 desktop shell.");
+    connect(about, &QAction::triggered, this, [this] {
+        QMessageBox box(this);
+        box.setWindowTitle("About Katana");
+        box.setIconPixmap(QPixmap::fromImage(applicationIconImage(96)));
+        box.setText(QString("<h3>Katana %1</h3>"
+                            "<p>High-performance survey and CAD platform.</p>"
+                            "<p style='color:%2'>Deterministic C++23 engineering core, "
+                            "Qt %3 desktop shell.</p>")
+                        .arg(KATANA_VERSION, theme::textMuted().name(), qVersion()));
+        box.exec();
     });
+    QMenu* helpMenu = menuBar()->addMenu("&Help");
+    helpMenu->addActions({reference, about});
 }
 
 void MainWindow::buildDocks()
@@ -399,11 +551,35 @@ void MainWindow::buildDocks()
     connect(commandInput_, &QLineEdit::returnPressed, this, [this] { runCommandLine(); });
 
     buildReferenceDock();
+
+    // Every panel can be closed, so every panel needs a way back. Qt makes the
+    // toggle action; it only has to be put somewhere the user will look.
+    for (QDockWidget* dock : {layerDock, propertyDock, commandDock}) {
+        dock->setObjectName(dock->windowTitle() + "Dock"); // for saveState, as the toolbars
+    }
+    layerDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::Layers));
+    propertyDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::Properties));
+    viewMenu_->addSeparator();
+    QMenu* panels = viewMenu_->addMenu("&Panels");
+    panels->addActions({layerDock->toggleViewAction(), propertyDock->toggleViewAction(),
+                        commandDock->toggleViewAction()});
+    if (referenceDock_ != nullptr) {
+        panels->addAction(referenceDock_->toggleViewAction());
+    }
+
+    // Opening sizes. Left to itself Qt gives each dock its size hint, which
+    // for a text log is a third of the window - so the drawing, which is the
+    // point of the program, opened in the space left over. The drawing gets
+    // the room; the panels get what they need to be read.
+    resizeDocks({layerDock, propertyDock}, {300, 270}, Qt::Horizontal);
+    resizeDocks({commandDock}, {150}, Qt::Vertical);
 }
 
 void MainWindow::buildReferenceDock()
 {
     auto* dock = new QDockWidget("Reference Data", this);
+    dock->setObjectName("ReferenceDataDock");
+    referenceDock_ = dock;
     auto* panel = new QWidget(dock);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(4, 4, 4, 4);

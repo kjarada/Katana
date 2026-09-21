@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+#include "icons.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/cad/corridor.hpp"
@@ -36,6 +37,9 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QMenu;
 
+class QToolBar;
+class QDockWidget;
+class QKeySequence;
 namespace katana::qt {
 
 class MainWindow final : public QMainWindow {
@@ -66,6 +70,9 @@ class MainWindow final : public QMainWindow {
   private:
     void buildActions();
     void buildViewMenu(QMenu* viewMenu);
+    [[nodiscard]] QAction* makeAction(Icon icon, const QString& text, const QString& tip,
+                                      const QKeySequence& shortcut = {});
+    [[nodiscard]] QToolBar* makeToolBar(const QString& title, Qt::ToolBarArea area);
     void refreshViewMenu();
 
     // ---- terrain, 3D and sections (PLAN.MD Phases 14, 15, 21) -------------
@@ -171,6 +178,8 @@ class MainWindow final : public QMainWindow {
     QAction* gridAction_ = nullptr;
     QAction* snapAction_ = nullptr;
     QActionGroup* toolGroup_ = nullptr;
+    QMenu* viewMenu_ = nullptr;
+    QDockWidget* referenceDock_ = nullptr;
     std::vector<QAction*> layoutActions_;
     std::vector<QAction*> kindActions_;
 

@@ -556,3 +556,83 @@ good PDF, while the `HEX` read is byte-exact. The dialog and the switch
 share one `plotDrawingToPdf`, so the test exercises the same code the menu
 does.
 
+## The look of the application: theme, icons, toolbars
+
+The viewport has been dark (`#1e2329`) from the start, and the window around
+it was whatever grey Qt defaults to. A dark drawing in a light frame is most
+of why the application looked unfinished. Three files fix that, and each was
+shaped by what this toolchain does and does not have.
+
+**`theme.hpp` - every chrome colour is a named token.** `window`, `panel`,
+`raised`, `hover`, `border`, `text`, `textMuted`, `accent` and so on, as
+functions. The stylesheet is ASSEMBLED from them rather than written with
+colour literals, so the tokens are the only place a colour is decided and a
+change of theme is a change to one file. Nothing else under `src/katana_qt`
+should contain a widget colour literal; the viewports keep their own constants
+for DRAWING colours (grid, snap marker, selection), which are content, not
+chrome. The style is Fusion, because it is the one built-in style that honours
+a palette completely - the native Windows style draws light controls into a
+dark palette. The accent is blue, not the red of the logo: in an engineering
+program red already means "error", and a checked tool must not read as one.
+
+**`icons.hpp` - the icons are drawn in code.** Each is a vector drawing on a
+24-unit grid painted by a `QIconEngine` at whatever size and device-pixel ratio
+Qt asks for. There are no image files behind them, for four reasons: they are
+crisp at every size because nothing is resampled; they take their colours from
+the theme, so a theme change recolours all of them; a function that is wrong
+does not compile, where a resource path that is wrong is a blank button; and
+this toolchain has no Qt SVG module and no image tools, so an SVG or PNG set
+would have been a dependency added for decoration. The language is one rule
+applied everywhere: a 1.7-unit round stroke, neutral for the object and ACCENT
+for the part the command acts on - the arrow of Import, the new geometry of a
+draw tool, the cut line of a section. 1.7 rather than the usual 2.0 because at
+16 px the heavier stroke closes up small counters (the label of Save, the
+inside of the magnet).
+
+**The application icon comes from the same painter.** `katana_make_icons`
+writes `resources/katana.ico` (nine sizes, PNG-compressed entries), a 256 px
+PNG, and `icon_sheet.png` - every icon at 96 px and at the 20 px it ships at.
+The `.ico` is COMMITTED, not generated in the build: generating it would make
+an ordinary build run a Qt program before it could compile a resource file,
+which fails wherever that program cannot start, and buys nothing for an icon
+that changes once a year. Below 64 px the sword is drawn larger and heavier
+within its tile; at true proportions it is a few pixels wide on a taskbar and
+disappears. `katana.rc.in` embeds the icon and a `VERSIONINFO` block whose
+numbers come from `project(Katana VERSION ...)`, so a version is written in
+exactly one place.
+
+**The contact sheet earned its keep at once.** The first application icon had
+the handle running UP the blade with the guard at the pommel - a sign error in
+the tangent - and the Circle tool read as a minus sign in a ring. Both were
+obvious on the sheet and invisible in the code.
+
+**Toolbars share their actions with the menus.** `MainWindow::makeAction`
+makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
+that names the command and shows its shortcut, since an icon-only button owes
+the user its name - and the same object goes into the menu and the toolbar, so
+the two cannot drift. File, Edit, View and Terrain run along the top; Draw runs
+down the LEFT edge, where every CAD program keeps its drawing tools, because
+they are the ones reached for without looking and a strip beside the drawing is
+a shorter journey than a row above it. Every toolbar and dock has an object
+name, which is what `QMainWindow::saveState` keys a layout on. View > Panels
+brings back any dock that has been closed.
+
+**`katana --screenshot out.png`** lays the real main window out and grabs it to
+a PNG, headlessly. It exists so that the LOOK can be reviewed - in a pull
+request, or by a model that cannot watch a screen - the way `--plot` lets its
+output be reviewed. The first screenshot found three things no test would
+have: alignment station labels printing over one another where key stations
+bunch up (a label is now skipped when it would land within 70 px of the last,
+while the tick is always drawn - the tick is the information, the label only
+names it); Zoom Extents ignoring alignments, which are drawn but are not
+entities; and the command log opening at a third of the window's height. The
+`qt_screenshot_headless` test builds the whole window - theme, toolbars, every
+icon, the sample with its hatch and alignment - and checks a PNG of plausible
+size comes out. It protects construction, not appearance.
+
+**Not done.** Settings are not persisted: toolbar positions, dock layout and
+window geometry are not saved between sessions although every object now has
+the name that would allow it. There is no light theme. The dialogs (corridor,
+plot) are themed but plain. There are no toolbar buttons for the command-line
+only operations (rotate, scale, mirror, array, trim, extend, offset, fillet).
+

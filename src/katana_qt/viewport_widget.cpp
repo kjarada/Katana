@@ -8,12 +8,14 @@
 #include "katana/entity/display.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <charconv>
 #include <cmath>
 #include <limits>
 
 #include <QPdfWriter>
 #include <QPageSize>
+#include <QLineF>
 #include <QMarginsF>
 #include <QFont>
 #include <QKeyEvent>
@@ -134,6 +136,18 @@ void ViewportWidget::zoomExtents()
     Box2 bounds = document_.model().entities.bounds();
     if (reference_ != nullptr) {
         bounds.expand(reference_->visibleBounds());
+    }
+    // Alignments are drawn but are not entities, so they are in no entity
+    // bound. Found by looking at a screenshot: the sample's access road ran off
+    // the bottom of a view that claimed to show everything.
+    for (const katana::entity::Alignment& alignment : document_.model().alignments.all()) {
+        if (const auto solved = katana::geometry::solveAlignment(alignment.horizontal)) {
+            // A metre is fine enough for a bounding box; the curve cannot
+            // stray further than that from its chords.
+            for (const Point2& vertex : solved->toPolyline(1.0).vertices) {
+                bounds.expand(vertex);
+            }
+        }
     }
     view_.fit(bounds, 0.08);
     update();
@@ -986,6 +1000,13 @@ void ViewportWidget::drawAlignments(QPainter& painter) const
         painter.drawPolyline(polygon);
 
         painter.setPen(QPen(kAlignment, 1.0));
+        // Key stations bunch up - a 10 m spiral puts TS and SC ten metres
+        // apart - and their labels then print over one another into a smear
+        // nobody can read. A label is skipped when it would land within its
+        // own length of the last one drawn; the TICK is always drawn, because
+        // the tick is the information and the label only names it.
+        std::optional<QPointF> lastLabel;
+        const double minimumLabelGapPixels = 70.0; // about one "0+000.00" at this text size
         for (const double station : solved->keyStations()) {
             const auto left = solved->pointAtStationOffset(station, tick);
             const auto right = solved->pointAtStationOffset(station, -tick);
@@ -995,6 +1016,12 @@ void ViewportWidget::drawAlignments(QPainter& painter) const
                 continue;
             }
             painter.drawLine(toScreen(*left), toScreen(*right));
+            const QPointF at = toScreen(*label);
+            if (lastLabel.has_value() &&
+                QLineF(*lastLabel, at).length() < minimumLabelGapPixels) {
+                continue;
+            }
+            lastLabel = at;
             drawText(painter, *label, formatStation(station), height, *direction);
         }
         if (const auto start = solved->pointAtStationOffset(solved->startStation(), -tick * 3.0)) {

@@ -462,12 +462,20 @@ CMake 3.24+ / Ninja / C++20, one target per module. `-Wall -Wextra -Wpedantic
   feature and without that plugin Qt does not fail - it opens a modal box and
   waits for ever. Record in `docs/architecture.md`.
 
+* **The executable is branded.** `katana.rc.in` embeds the application icon
+  and a `VERSIONINFO` block (version from `project(... VERSION ...)`, written
+  once). The icon is painted by the application's own icon code and written to
+  `resources/katana.ico` by the `katana_make_icons` developer tool; it is
+  committed rather than generated during the build, for the reason recorded in
+  `src/katana_qt/make_icons.cpp`. Warning flags in `KatanaTargetDefaults` are
+  now guarded to C++, because a target's options reach every language on it
+  and `windres` rejects `-Wall`.
+
 **OUTSTANDING:** the bundle is 388 MB, nearly all of it the dependency chain of
 GDAL and PDAL as MSYS2 builds them (HDF5, netCDF, Poppler, ...); trimming it
 means building GDAL with fewer drivers, which is a packaging project of its
-own. There is no application icon or version resource in the executable yet,
-no installer unless NSIS is installed, no code signing, and no Linux or macOS
-bundle.
+own. There is no installer unless NSIS is installed, no code signing, and no
+Linux or macOS bundle.
 * `tools/check_layering.cmake` - machine-enforces section 2 and Rule 4: a layer
   may only include from its allow-list, and no public header may include a
   third-party header. Runs as the `layering` CTest case.
