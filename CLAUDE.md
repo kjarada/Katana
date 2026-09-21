@@ -264,7 +264,9 @@ ctest --test-dir build/debug -j 8
 ```
 
 `build/debug`, `build/rel` and `build/release` are the primary build
-directories. C++23, GCC 15.2 (MSYS2 UCRT64) on Windows.
+directories. C++23, GCC 16.2 (MSYS2 UCRT64) on Windows - the toolchain is a
+rolling MSYS2 install, so check `g++ --version` before quoting it in a
+measurement; it moved from 15.2 to 16.2 on 2026-09-21.
 
 ## 8. Style
 

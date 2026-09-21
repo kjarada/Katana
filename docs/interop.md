@@ -152,3 +152,47 @@ shared by every open dataset, and tearing it down when one dataset closes
 invalidates all the others. Process exit frees it, which costs nothing.
 
 A `GdalDataset` is not thread-safe; use one per thread.
+
+## Point-cloud level of detail: COPC, not a bespoke octree
+
+PLAN.MD Phase 17 asked Katana to build a spatial hierarchy for point clouds.
+It should not build one. A Cloud Optimised Point Cloud is a LAZ file whose
+chunks are already arranged as an octree, and the PDAL linked into
+`katana_io` reads and writes it natively (`pdal --drivers` lists
+`readers.copc` and `writers.copc`). `readers.copc` takes a `resolution` and
+returns only the octree levels at or above that point spacing, so level of
+detail is a *query parameter* rather than a data structure Katana owns,
+maintains and keeps correct.
+
+What the engine now offers (`include/katana/pointcloud/point_cloud_engine.hpp`):
+
+* `PointCloudReadOptions::resolution` - the coarsest spacing acceptable.
+* `convertToCopc(source, destination)` - any PDAL-readable cloud to COPC,
+  done once so every later view can ask for just the resolution it needs.
+* `isCopc(path)` - whether PDAL will read the file as COPC.
+
+**A resolution asked of a non-COPC file is refused, not ignored.**
+`readers.las` has no such option; passing one through would hand the whole
+file to a caller who asked for a coarse sample of a billion points. That is
+the silent failure PLAN.MD section 36 forbids, so it is `InvalidArgument`
+naming `convertToCopc`.
+
+**The destination must be named `.copc.laz`.** The extension is what makes
+every later read infer `readers.copc`; a COPC file called `.laz` would be
+read as plain LAZ and could never answer a resolution query.
+
+**The test fixture's spacing is load-bearing.** A COPC node keeps at most
+one point per cell of a 128-cell grid across its span, so on a 100 m root a
+point every 0.78 m or coarser lands entirely in the root node and EVERY
+resolution returns the whole file - a fixture that could never show a coarse
+read being coarser. The tests use 0.25 m spacing (160 000 points) and assert
+the properties of level of detail rather than the counts one PDAL version
+happens to produce: coarser is never more, a 5 m query is under a quarter of
+the file, and it still spans the whole extent - which is the difference
+between a level of detail and the `maxPoints` truncation it replaces.
+
+**Not done yet.** The engine can answer the query; nothing asks it. The
+importer still decimates by a fixed step, and the viewport still holds that
+one sample. Converting on import and re-querying at a resolution derived
+from the view's `worldPerPixel` is the next slice.
+

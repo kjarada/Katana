@@ -76,6 +76,13 @@ struct PointCloudReadOptions {
     // decimation, as a last resort - prefer a decimation step, which samples
     // the whole extent instead of truncating it to whatever PDAL emits first.
     std::uint64_t maxPoints = 0;
+    // COPC only: the coarsest point spacing acceptable, in the cloud's units.
+    // A Cloud Optimised Point Cloud is a LAZ whose chunks are already an
+    // octree, and readers.copc returns only the levels whose spacing is at or
+    // above this, so level of detail is a query parameter rather than a
+    // structure Katana owns (PLAN.MD Phase 17). Refused with InvalidArgument
+    // on a file that is not COPC, rather than silently returning everything.
+    std::optional<double> resolution;
 };
 
 class PointCloudEngine {
@@ -88,6 +95,23 @@ class PointCloudEngine {
 
     [[nodiscard]] katana::core::Status write(const std::filesystem::path& path,
                                              const PointCloud& cloud) const;
+
+    // True when PDAL reads `path` as a Cloud Optimised Point Cloud - a
+    // .copc.laz whose header carries the COPC record - and so can answer a
+    // resolution query. False for any other readable file. NotFound when the
+    // file does not exist.
+    [[nodiscard]] katana::core::Result<bool> isCopc(const std::filesystem::path& path) const;
+
+    // Writes `source` - any format PDAL reads - as COPC at `destination`,
+    // which must end in .copc.laz so that every later read infers
+    // readers.copc. Done once, on import, so that every later view of the
+    // cloud can ask for just the resolution it needs. Fails with
+    // InvalidArgument for the wrong extension, NotFound for a missing
+    // source, Unsupported for an unreadable format, and FileExportFailure
+    // from PDAL.
+    [[nodiscard]] katana::core::Status
+    convertToCopc(const std::filesystem::path& source,
+                  const std::filesystem::path& destination) const;
 
     // A decimation step that brings `sourceCount` points under `budget`, never
     // less than 1. Exposed because the GUI needs it to size a read before it

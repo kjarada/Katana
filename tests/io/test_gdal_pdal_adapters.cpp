@@ -214,6 +214,134 @@ TEST(PointCloudEngine, RefusesToWriteAnEmptyCloud)
     EXPECT_FALSE(std::filesystem::exists(file.path()));
 }
 
+// ---- COPC: level of detail as a query (PLAN.MD Phase 17) -------------------------------------
+
+namespace {
+
+// A 100 m square of ground at 0.25 m spacing: 160 000 points.
+//
+// The spacing is what makes this a test of level of detail at all. A COPC
+// octree node keeps at most one point per cell of a 128-cell grid across its
+// span, so on a 100 m root a point every 0.78 m or coarser lands ENTIRELY in
+// the root node, and every resolution query then returns the whole file - a
+// fixture that could never show a coarse read being coarser. A quarter of a
+// metre forces the octree to at least two further levels.
+PointCloud denseGround()
+{
+    PointCloud cloud;
+    cloud.points.reserve(400u * 400u);
+    for (int j = 0; j < 400; ++j) {
+        for (int i = 0; i < 400; ++i) {
+            const double x = 0.25 * i;
+            const double y = 0.25 * j;
+            cloud.points.push_back({x, y, 10.0 + 0.01 * x, 1.0, 2, 0, 0, 0, false});
+        }
+    }
+    return cloud;
+}
+
+} // namespace
+
+TEST(PointCloudEngine, ACoarseCopcQueryReturnsFewerPointsOverTheSameExtent)
+{
+    const TempFile las("lod-source.las");
+    const TempFile copc("lod.copc.laz");
+    const PointCloudEngine engine;
+    ASSERT_TRUE(engine.write(las.path(), denseGround()).ok());
+    const auto converted = engine.convertToCopc(las.path(), copc.path());
+    ASSERT_TRUE(converted.ok()) << converted.error().describe();
+
+    // Converting loses nothing: with no resolution asked, every point is there.
+    const auto full = engine.read(copc.path());
+    ASSERT_TRUE(full.ok()) << full.error().describe();
+    EXPECT_EQ(full->points.size(), 160000u);
+
+    PointCloudReadOptions coarse;
+    coarse.resolution = 5.0;
+    PointCloudReadOptions medium;
+    medium.resolution = 0.5;
+    const auto coarseRead = engine.read(copc.path(), coarse);
+    const auto mediumRead = engine.read(copc.path(), medium);
+    ASSERT_TRUE(coarseRead.ok()) << coarseRead.error().describe();
+    ASSERT_TRUE(mediumRead.ok()) << mediumRead.error().describe();
+
+    // The properties of level of detail, not the counts one PDAL version
+    // happens to produce: coarser is never more, the coarse read is a real
+    // reduction, and it is still a sample of the WHOLE extent rather than the
+    // first corner of it - which is the difference between a level of detail
+    // and the `maxPoints` truncation this replaces.
+    EXPECT_GT(coarseRead->points.size(), 0u);
+    EXPECT_LE(coarseRead->points.size(), mediumRead->points.size());
+    EXPECT_LE(mediumRead->points.size(), full->points.size());
+    EXPECT_LT(coarseRead->points.size() * 4u, full->points.size())
+        << "a 5 m query on 0.25 m data should be a small fraction of it";
+    EXPECT_LT(coarseRead->bounds.minX, 10.0);
+    EXPECT_GT(coarseRead->bounds.maxX, 90.0);
+    EXPECT_LT(coarseRead->bounds.minY, 10.0);
+    EXPECT_GT(coarseRead->bounds.maxY, 90.0);
+    // The honest count is unchanged by the query: it is what the FILE holds.
+    EXPECT_EQ(coarseRead->sourcePointCount, 160000u);
+}
+
+TEST(PointCloudEngine, OnlyACopcFileIsReportedAsOne)
+{
+    const TempFile las("plain.las");
+    const TempFile copc("real.copc.laz");
+    const PointCloudEngine engine;
+    ASSERT_TRUE(engine.write(las.path(), denseGround()).ok());
+    ASSERT_TRUE(engine.convertToCopc(las.path(), copc.path()).ok());
+
+    const auto plain = engine.isCopc(las.path());
+    ASSERT_TRUE(plain.ok());
+    EXPECT_FALSE(*plain);
+    const auto real = engine.isCopc(copc.path());
+    ASSERT_TRUE(real.ok()) << real.error().describe();
+    EXPECT_TRUE(*real);
+    EXPECT_EQ(engine.isCopc("definitely-not-here.copc.laz").error().code, ErrorCode::NotFound);
+}
+
+TEST(PointCloudEngine, AResolutionAskedOfAPlainLasIsRefusedRatherThanIgnored)
+{
+    // readers.las has no resolution option. Passing one through would return
+    // the whole file to a caller who asked for a coarse sample of a
+    // billion-point cloud - the silent failure PLAN.MD section 36 forbids.
+    const TempFile las("no-lod.las");
+    const PointCloudEngine engine;
+    ASSERT_TRUE(engine.write(las.path(), denseGround()).ok());
+    PointCloudReadOptions options;
+    options.resolution = 5.0;
+    const auto refused = engine.read(las.path(), options);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(refused.error().describe().find("COPC"), std::string::npos)
+        << refused.error().describe();
+}
+
+TEST(PointCloudEngine, CopcConversionRefusesWhatItCannotDo)
+{
+    const TempFile las("convert-source.las");
+    const TempFile copc("convert.copc.laz");
+    const TempFile wrongName("convert-wrong.laz");
+    const PointCloudEngine engine;
+    ASSERT_TRUE(engine.write(las.path(), denseGround()).ok());
+
+    // The extension is what makes every later read infer readers.copc; a COPC
+    // file called .laz would be read as plain LAZ and never answer a query.
+    EXPECT_EQ(engine.convertToCopc(las.path(), wrongName.path()).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_FALSE(std::filesystem::exists(wrongName.path()));
+    EXPECT_EQ(engine.convertToCopc("definitely-not-here.las", copc.path()).error().code,
+              ErrorCode::NotFound);
+
+    ASSERT_TRUE(engine.convertToCopc(las.path(), copc.path()).ok());
+    PointCloudReadOptions zero;
+    zero.resolution = 0.0;
+    EXPECT_EQ(engine.read(copc.path(), zero).error().code, ErrorCode::InvalidArgument);
+    PointCloudReadOptions negative;
+    negative.resolution = -1.0;
+    EXPECT_EQ(engine.read(copc.path(), negative).error().code, ErrorCode::InvalidArgument);
+}
+
 // ---- GDAL raster ------------------------------------------------------------------------------
 
 namespace gis = katana::gis;

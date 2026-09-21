@@ -10,7 +10,10 @@ outstanding list had been written from the shape of the API rather than from
 evidence: it named a task graph, work stealing, TBB and SIMD. `benchmarks/bench_terrain.cpp`
 was added to settle it. Rule 6 — profile before optimising.
 
-Release, GCC 15.2 UCRT64, 16 × 2496 MHz, L3 18 MiB, `--benchmark_min_time=0.3s`.
+Release, GCC 16.2 UCRT64, 16 × 2496 MHz, L3 18 MiB, `--benchmark_min_time=0.3s`.
+(First recorded here as GCC 15.2, from CLAUDE.md. The MSYS2 toolchain had been
+upgraded to 16.2 an hour before these were taken - `pacman.log`, 2026-09-21
+00:15 - so 16.2 is the compiler that produced every number in this file.)
 Points are a fixed-seed LCG scatter over a 1 km square with a rolling ground
 surface, which is what a lidar ground classification delivers; a flat plane
 would have measured faster than any real job.

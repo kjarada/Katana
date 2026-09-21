@@ -326,7 +326,7 @@ The required progression is:
 | 14 | Terrain | **done** |
 | 15 | 3D Rendering | partial — tiled multithreaded SOFTWARE renderer, camera, tiled viewports, 3D and section views; Vulkan backend outstanding |
 | 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons; civil solids on the TIN instead |
-| 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; LOD reshaped to use COPC rather than a bespoke octree |
+| 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; COPC conversion and resolution queries in the engine; import-time conversion and view-driven re-query outstanding |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
@@ -993,9 +993,19 @@ takes a `resolution` argument and returns only the octree levels coarse enough
 to matter, so level of detail becomes a *query parameter* rather than a data
 structure Katana owns, maintains and has to keep correct under edits.
 
-So the remaining work is: a COPC writer pass for non-COPC input (build once, on
-import), and a viewport that re-queries at a resolution derived from the current
-`worldPerPixel` - the same quantity the renderer already computes. Building a
+**Engine half DELIVERED.** `PointCloudReadOptions::resolution`,
+`PointCloudEngine::convertToCopc` and `isCopc`. A resolution asked of a file
+that is not COPC is refused rather than ignored, because `readers.las` would
+silently return the whole file; the destination must be named `.copc.laz`
+because the extension is what makes later reads infer `readers.copc`. Tested
+on a 160 000-point cloud converted inside the test, asserting the properties
+of level of detail rather than one PDAL version's counts. Record in
+`docs/interop.md`.
+
+**OUTSTANDING:** nothing ASKS the query yet. Converting on import (build
+once), and a viewport that re-queries at a resolution derived from the
+current `worldPerPixel` - the same quantity the renderer already computes -
+are the remaining work; until then the display is still one decimated sample. Building a
 bespoke octree would duplicate, in Katana, a structure that is already in the
 file format, already in the linked library, and already an OGC standard.
 

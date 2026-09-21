@@ -1,6 +1,7 @@
 #include "katana/pointcloud/point_cloud_engine.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <string>
 
@@ -149,7 +150,25 @@ Result<PointCloud> PointCloudEngine::read(const std::filesystem::path& path,
             }
 
             pdal::PipelineManager pipeline;
-            pdal::Stage* stage = &pipeline.makeReader(path.string(), driver);
+            pdal::Options readerOptions;
+            if (options.resolution.has_value()) {
+                // Only readers.copc understands a resolution. Any other reader
+                // would ignore the option and return the whole file, which is
+                // exactly the silent failure a caller asking for a coarse
+                // level of detail cannot afford (PLAN.MD section 36).
+                if (driver != "readers.copc") {
+                    return makeError(ErrorCode::InvalidArgument,
+                                     "a resolution can only be asked of a COPC file; convert it "
+                                     "with convertToCopc first",
+                                     path.string());
+                }
+                if (!(*options.resolution > 0.0)) {
+                    return makeError(ErrorCode::InvalidArgument,
+                                     "the resolution must be positive");
+                }
+                readerOptions.add("resolution", *options.resolution);
+            }
+            pdal::Stage* stage = &pipeline.makeReader(path.string(), driver, readerOptions);
 
             if (options.clip.has_value()) {
                 const PointCloudBounds& box = *options.clip;
@@ -250,6 +269,70 @@ Result<PointCloud> PointCloudEngine::read(const std::filesystem::path& path,
             return cloud;
         },
         ErrorCode::FileImportFailure, "PDAL could not read the point cloud");
+}
+
+Result<bool> PointCloudEngine::isCopc(const std::filesystem::path& path) const
+{
+    std::error_code existsError;
+    if (!std::filesystem::exists(path, existsError)) {
+        return Result<bool>(makeError(ErrorCode::NotFound, "file does not exist", path.string()));
+    }
+    if (inferDriver(path, false) != "readers.copc") {
+        return false;
+    }
+    // A .copc.laz that is not actually COPC makes readers.copc throw on its
+    // header. "Will PDAL read it as COPC" is the question, so that is false,
+    // not an error.
+    const auto probe = guarded(
+        [&]() -> Status {
+            pdal::StageFactory factory;
+            pdal::Stage* reader = factory.createStage("readers.copc");
+            if (reader == nullptr) {
+                return makeError(ErrorCode::Unsupported, "PDAL could not create readers.copc");
+            }
+            pdal::Options options;
+            options.add("filename", path.string());
+            reader->setOptions(options);
+            (void)reader->preview();
+            return {};
+        },
+        ErrorCode::FileImportFailure, "not COPC");
+    return probe.ok();
+}
+
+Status PointCloudEngine::convertToCopc(const std::filesystem::path& source,
+                                       const std::filesystem::path& destination) const
+{
+    std::error_code existsError;
+    if (!std::filesystem::exists(source, existsError)) {
+        return makeError(ErrorCode::NotFound, "file does not exist", source.string());
+    }
+    std::string name = destination.filename().string();
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (!name.ends_with(".copc.laz")) {
+        // The extension is what makes every later read infer readers.copc;
+        // a COPC file called .laz would be read as plain LAZ and could never
+        // answer a resolution query.
+        return makeError(ErrorCode::InvalidArgument,
+                         "a COPC file must be named .copc.laz", destination.string());
+    }
+    const std::string driver = inferDriver(source, false);
+    if (driver.empty()) {
+        return makeError(ErrorCode::Unsupported,
+                         "no PDAL reader is registered for this extension", source.string());
+    }
+    return guarded(
+        [&]() -> Status {
+            pdal::PipelineManager pipeline;
+            pdal::Stage& reader = pipeline.makeReader(source.string(), driver);
+            pdal::Options writerOptions;
+            writerOptions.add("filename", destination.string());
+            pipeline.makeWriter(destination.string(), "writers.copc", reader, writerOptions);
+            pipeline.execute();
+            return {};
+        },
+        ErrorCode::FileExportFailure, "PDAL could not write the COPC file");
 }
 
 Status PointCloudEngine::write(const std::filesystem::path& path, const PointCloud& cloud) const
