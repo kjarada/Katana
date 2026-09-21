@@ -2175,19 +2175,7 @@ void MainWindow::plotToPdf()
     settings.landscape = orientationBox->currentIndex() == 0;
     settings.dpi = dpi->value();
     settings.marginMm = margin->value();
-    settings.center = view->viewTransform().center;
     settings.scaleDenominator = scale->value();
-    if (fit->isChecked()) {
-        const katana::geometry::Box2 extent = document_.spatialIndex().bounds();
-        auto fitted = cad::fitScale(extent, settings);
-        if (!fitted) {
-            logMessage(QString::fromStdString(fitted.error().describe()), true);
-            return;
-        }
-        settings.scaleDenominator = *fitted;
-        settings.center = katana::geometry::Point2(0.5 * (extent.min.x + extent.max.x),
-                                                   0.5 * (extent.min.y + extent.max.y));
-    }
 
     QString path = QFileDialog::getSaveFileName(this, "Plot to PDF", QString(), "PDF (*.pdf)");
     if (path.isEmpty()) {
@@ -2196,18 +2184,64 @@ void MainWindow::plotToPdf()
     if (!path.endsWith(".pdf", Qt::CaseInsensitive)) {
         path += ".pdf";
     }
+    if (const auto status = plotDrawingToPdf(path, settings, fit->isChecked()); !status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+    }
+}
+
+namespace {
+
+const char* paperName(cad::PaperSize size)
+{
+    switch (size) {
+    case cad::PaperSize::A0:
+        return "A0";
+    case cad::PaperSize::A1:
+        return "A1";
+    case cad::PaperSize::A2:
+        return "A2";
+    case cad::PaperSize::A3:
+        return "A3";
+    case cad::PaperSize::A4:
+        return "A4";
+    }
+    return "?";
+}
+
+} // namespace
+
+katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::PlotSettings settings,
+                                                  bool fitToDrawing)
+{
+    ViewportWidget* view = views_->activePlanView();
+    if (view == nullptr) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidState,
+                                       "no plan viewport to plot from");
+    }
+    if (fitToDrawing) {
+        const katana::geometry::Box2 extent = document_.spatialIndex().bounds();
+        auto fitted = cad::fitScale(extent, settings);
+        if (!fitted) {
+            return fitted.error();
+        }
+        settings.scaleDenominator = *fitted;
+        settings.center = katana::geometry::Point2(0.5 * (extent.min.x + extent.max.x),
+                                                   0.5 * (extent.min.y + extent.max.y));
+    } else {
+        settings.center = view->viewTransform().center;
+    }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     const auto status = view->plotToPdf(path, settings);
     QApplication::restoreOverrideCursor();
     if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        return;
+        return status;
     }
     logMessage(QString("Plotted to %1: %2 %3 at 1 : %4, %5 dpi. Line widths are the layers' "
                        "line weights in millimetres.")
-                   .arg(path, paperBox->currentText(), orientationBox->currentText().toLower())
+                   .arg(path, paperName(settings.paper), settings.landscape ? "landscape" : "portrait")
                    .arg(settings.scaleDenominator, 0, 'f', 0)
                    .arg(settings.dpi, 0, 'f', 0));
+    return {};
 }
 
 } // namespace katana::qt

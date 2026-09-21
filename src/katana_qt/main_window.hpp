@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+#include "katana/cad/plot.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/profile.hpp"
@@ -46,6 +47,16 @@ class MainWindow final : public QMainWindow {
     // Imports a data file given on the command line, routed by its extension
     // exactly as File > Import does.
     void importPath(const QString& path);
+    // Plots the drawing to `path` on the active plan viewport. With
+    // `fitToDrawing` the scale is the first standard one the drawing fits at
+    // and the sheet is centred on it; otherwise `settings.scaleDenominator`
+    // is used about the current view centre. Public so that the application
+    // can plot headlessly from the command line, which is what lets a test
+    // open the result. Fails with InvalidState when there is no plan
+    // viewport, and with whatever the fit or the plot refuses.
+    [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
+                                                        katana::cad::PlotSettings settings,
+                                                        bool fitToDrawing);
 
   protected:
     void closeEvent(QCloseEvent* event) override;

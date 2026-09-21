@@ -540,10 +540,19 @@ point by point would take minutes. Both are a later slice with their own
 decisions about resolution. The grid, the snap marker and the selection are
 screen furniture and are not drawn either.
 
-**What ctest does not cover, and why.** The sheet arithmetic is fully tested.
-The PDF writing itself runs inside the Qt widget and needs a `QGuiApplication`,
-which the test suites do not create; it has been checked by hand and the
-handover says how. Recorded in PLAN.MD as an outstanding item: a `--plot`
-switch on the application, so a plot can be produced headlessly and a test
-can open the result.
+**The PDF itself is tested, not only the arithmetic.** The PDF writing runs
+inside the Qt widget and needs an application, which the unit-test suites do
+not create - so the application grew a `--plot` switch: `katana_qt_app
+<project> --plot out.pdf [--fit | --scale N] [--paper A3] [--portrait]
+[--dpi N]` plots and exits without showing a window. The `qt_plot_headless`
+test runs it under `QT_QPA_PLATFORM=offscreen` on the sample project and
+checks the exit code, that a file of plausible size came out, and that it
+begins with `%PDF`. Two rules it follows are worth keeping. It copies the
+sample project before opening it, because opening can touch the project
+directory and a test must never change repository data. And it compares the
+header as hex: CMake's plain `file(READ ... LIMIT 4)` on this platform
+returned `%PDF` plus a newline - five characters - and failed a perfectly
+good PDF, while the `HEX` read is byte-exact. The dialog and the switch
+share one `plotDrawingToPdf`, so the test exercises the same code the menu
+does.
 

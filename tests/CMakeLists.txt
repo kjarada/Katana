@@ -26,3 +26,19 @@ foreach(_suite IN LISTS _suites)
         add_subdirectory("${_suite}")
     endif()
 endforeach()
+
+# A plot produced headlessly, so the PDF writing inside the Qt widget is
+# exercised by ctest and not only by hand (PLAN.MD Phase 22). The script
+# copies the sample project first: a test must never touch repository data.
+if(TARGET katana_qt_app)
+    add_test(NAME qt_plot_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana_qt_app>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_headless.pdf"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_plot.cmake")
+    set_tests_properties(qt_plot_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

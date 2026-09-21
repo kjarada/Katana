@@ -1460,17 +1460,18 @@ fits at), with every line as wide as its layer's `lineWeight` says in
 millimetres of paper - which that field has claimed to mean since Phase 09
 and has never meant until now. Entities, hatches (with their model-unit
 patterns) and alignments are plotted; rasters and point clouds are not, by
-decision. The arithmetic is tested against ISO 216 and 25.4 mm to the inch;
-the PDF writing needs a Qt application and is checked by hand. Record in
-`docs/cad.md`.
+decision. The arithmetic is tested against ISO 216 and 25.4 mm to the inch,
+and the PDF itself by the `qt_plot_headless` test, which runs the
+application's `--plot` switch offscreen on a copy of the sample project and
+checks the file that comes out - the dialog and the switch share one code
+path, so the test exercises what the menu does. Record in `docs/cad.md`.
 
 **OUTSTANDING:** layouts and paper space (a plot is the current view on one
 sheet); viewports on a sheet; title blocks; annotation scaling (text and
 dimension sizes are still model units, so a 2.5 m label is 2.5 mm at 1:1000
 and 0.25 mm at 1:10 000); plot styles beyond the line weight (colour-to-pen
 mapping, screening); printing to a device (needs Qt PrintSupport, not yet
-linked); rasters and point clouds on the sheet; and a `--plot` switch on the
-application so a plot can be produced headlessly and tested.
+linked); rasters and point clouds on the sheet.
 
 Three capabilities exist, are validated, are persisted, and are read by nothing
 that draws. Each is a silent lie to the user, who sets a value and sees no
