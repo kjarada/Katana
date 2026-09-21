@@ -443,6 +443,31 @@ CMake 3.24+ / Ninja / C++20, one target per module. `-Wall -Wextra -Wpedantic
   launchers, so a finding fails the build.
 * `cmake/KatanaThirdParty.cmake` - GoogleTest and Google Benchmark cached under
   `third_party/_cache`, so extra build directories configure offline.
+* **Where things are built.** Everything a person runs lands in `<build>/bin`:
+  `katana.exe` (the application - the target is `katana`, not the old
+  `katana_qt_app`) and `katana_cli.exe`, with tests in `bin/tests` and
+  benchmarks in `bin/benchmarks` so that `bin` itself holds only what ships.
+  CMake's default had put the application at
+  `build/release/src/katana_qt/katana_qt_app.exe`, a path that read as though
+  the executable were in the sources.
+* `cmake/KatanaPackaging.cmake` - `cmake --install`, a `bundle` target
+  (`<build>/dist/Katana`) and CPack (`package`: a ZIP, plus an NSIS installer
+  when `makensis` is installed). The installed tree is SELF-CONTAINED:
+  `windeployqt` brings Qt and its plugins, a dependency scan over the
+  executables AND the deployed plugins brings the other 184 DLLs, and
+  `share/proj` and `share/gdal` carry the data files. Verified by running both
+  bundled programs with `PATH` reduced to the Windows directories: the GUI
+  executable plots a PDF headlessly and the CLI exports a DXF. It carries
+  `qoffscreen.dll`, which windeployqt omits, because `--plot` is a headless
+  feature and without that plugin Qt does not fail - it opens a modal box and
+  waits for ever. Record in `docs/architecture.md`.
+
+**OUTSTANDING:** the bundle is 388 MB, nearly all of it the dependency chain of
+GDAL and PDAL as MSYS2 builds them (HDF5, netCDF, Poppler, ...); trimming it
+means building GDAL with fewer drivers, which is a packaging project of its
+own. There is no application icon or version resource in the executable yet,
+no installer unless NSIS is installed, no code signing, and no Linux or macOS
+bundle.
 * `tools/check_layering.cmake` - machine-enforces section 2 and Rule 4: a layer
   may only include from its allow-list, and no public header may include a
   third-party header. Runs as the `layering` CTest case.
@@ -1213,8 +1238,21 @@ refused BEFORE anything is written rather than failing halfway and leaving a
 partial file. GeoJSON always declares WGS 84, so exporting projected coordinates
 to it warns that a reader will take them for degrees.
 
-**OUTSTANDING: DWG, LandXML, IFC, and DXF import** (DXF is export only, through
-GDAL's driver). **No coordinate transformation on import**: a file's declared
+**CORRECTED: this paragraph had DXF backwards.** It said "DXF is export only".
+DXF IMPORT has worked all along, through the GDAL driver - a 51 000-feature
+drawing was imported in testing. DXF EXPORT is what had never worked, for two
+independent reasons found by running the bundled CLI rather than by any test:
+GDAL could not find `header.dxf` (it has no usable compiled-in data path on
+MSYS2, and only an MSYS2 login shell sets `GDAL_DATA`), and the exporter
+treated "DXF does not support arbitrary fields" as fatal. Both are fixed -
+GDAL's data is now located relative to the GDAL DLL, which is right in the
+build tree and in a bundle alike - and DXF import now puts each entity on its
+own CAD layer instead of all 51 000 on one layer called `entities`. Record in
+`docs/interop.md`.
+
+**OUTSTANDING: DWG, LandXML and IFC**, and **text and dimensions are skipped on
+DXF export** although DXF has both (the vector path models only points, lines
+and polygons). **No coordinate transformation on import**: a file's declared
 CRS is reported but coordinates are never reprojected, so mixing coordinate
 systems is the user's responsibility. Reference layers are not yet persisted
 into the project - the pixels are re-read from the source path each session.

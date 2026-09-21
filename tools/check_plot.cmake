@@ -1,6 +1,6 @@
 # Runs the application headlessly with --plot and checks that a PDF came out
 # (PLAN.MD Phase 22). Invoked by the qt_plot_headless test with:
-#   -DAPP=<katana_qt_app>  -DPROJECT=<sample project dir>  -DOUTPUT=<pdf path>
+#   -DAPP=<katana executable>  -DPROJECT=<sample project dir>  -DOUTPUT=<pdf path>
 # under QT_QPA_PLATFORM=offscreen, so no window is ever shown.
 #
 # The sample project is COPIED before it is opened. Opening a project can
@@ -26,7 +26,7 @@ execute_process(
     ERROR_VARIABLE err
     TIMEOUT 120)
 if(NOT rc EQUAL 0)
-    message(FATAL_ERROR "katana_qt_app --plot exited with ${rc}\n${out}\n${err}")
+    message(FATAL_ERROR "katana --plot exited with ${rc}\n${out}\n${err}")
 endif()
 if(NOT EXISTS "${OUTPUT}")
     message(FATAL_ERROR "no PDF was written to ${OUTPUT}\n${out}\n${err}")

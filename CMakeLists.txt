@@ -22,6 +22,34 @@ option(KATANA_ENABLE_SANITIZERS "Instrument with ASan/UBSan where the toolchain 
 option(KATANA_ENABLE_CLANG_TIDY "Run clang-tidy during compilation (requires clang-tidy)" OFF)
 option(KATANA_ENABLE_CPPCHECK "Run cppcheck during compilation (requires cppcheck)" OFF)
 
+# ---------------------------------------------------------------------------
+# Where things are built.
+#
+# CMake's default mirrors the source tree inside the build tree, which is how
+# the application came to be at build/release/src/katana_qt/katana_qt_app.exe -
+# a path that reads as though the executable were in the sources, and that
+# nobody could be expected to find. Everything a person runs now lands in
+# <build>/bin, with the tests and benchmarks one level down so that bin itself
+# holds only what ships:
+#
+#   <build>/bin/katana.exe          the application
+#   <build>/bin/katana_cli.exe      the command-line front end
+#   <build>/bin/tests/              one test executable per module
+#   <build>/bin/benchmarks/
+#   <build>/lib/                    static libraries
+#
+# Set before any add_subdirectory, because the variables initialise each
+# target's property at the moment the target is created. `cmake --install`
+# (or the `bundle` target) turns bin/ into a self-contained folder; see
+# cmake/KatanaPackaging.cmake.
+# ---------------------------------------------------------------------------
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(KATANA_TEST_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
+set(KATANA_BENCHMARK_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/benchmarks")
+
+include(GNUInstallDirs)
 include(KatanaTargetDefaults)
 include(KatanaSanitizers)
 include(KatanaStaticAnalysis)
@@ -129,3 +157,4 @@ if(KATANA_BUILD_BENCHMARKS)
 endif()
 
 include(KatanaFormat)
+include(KatanaPackaging)

@@ -289,6 +289,12 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
     }
 
     result.featuresWritten = features.size();
+    if (katana::gis::driverHasFixedFields(driver)) {
+        result.warnings.push_back(
+            driver + " has a fixed set of fields: every entity keeps its geometry and its "
+                     "layer, but entity ids and properties were not written. Use GeoPackage "
+                     "to keep them.");
+    }
     if (options.projectionWkt.empty() && katana::gis::driverAssumesWgs84(driver)) {
         // RFC 7946 defines GeoJSON coordinates as WGS 84 longitude/latitude, so
         // readers will label these as lat/lon whatever they really are. Saying

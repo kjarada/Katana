@@ -182,6 +182,11 @@ class GdalDataset {
 // True for formats whose specification fixes the coordinate reference system, so
 // any coordinates written are reinterpreted as that CRS regardless of what the
 // data actually is. RFC 7946 pins GeoJSON to WGS 84 longitude/latitude.
+// True for a format whose layers have a fixed set of fields and accept no
+// others (DXF). writeVector still writes such a file - geometry, and any
+// attribute the format already has a field for - but everything else is
+// dropped, and a caller should say so rather than let it pass unremarked.
+[[nodiscard]] bool driverHasFixedFields(const std::string& driver);
 [[nodiscard]] bool driverAssumesWgs84(const std::string& driver);
 
 // The GDAL version string, for the about box and for bug reports.

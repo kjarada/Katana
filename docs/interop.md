@@ -196,3 +196,60 @@ importer still decimates by a fixed step, and the viewport still holds that
 one sample. Converting on import and re-querying at a resolution derived
 from the view's `worldPerPixel` is the next slice.
 
+## DXF export had never worked, and why nothing noticed
+
+Found by running the *bundled* CLI in isolation, not by a test: `EXPORT x.dxf`
+failed. Every export test used a format that accepts arbitrary fields and
+needs no data files, so the one format a CAD program cannot do without was
+never exercised. Two independent causes:
+
+**GDAL could not find its own data.** GDAL builds every DXF from two template
+files, `header.dxf` and `trailer.dxf`, found through `GDAL_DATA` or a path
+compiled in when GDAL was built. The MSYS2 GDAL is relocatable, so the compiled
+path is useless, and only an MSYS2 *login shell* sets `GDAL_DATA`. Started any
+other way - Git Bash, an IDE, Explorer, ctest, a bundle on another machine -
+GDAL found nothing. `locateGdalData` now sets `GDAL_DATA` to
+`<directory of the GDAL DLL>/../share/gdal` when nothing else has, which is
+correct for the toolchain and for a bundle alike, and is the mechanism PROJ
+already uses for `proj.db`.
+
+Two approaches were tried and rejected, and both are worth knowing:
+
+* *Setting the variables from each program's `main()`*, relative to the
+  executable. Built, tested, and removed within the hour: it rested on the
+  belief that the compiled-in path works on the build machine, which is false,
+  so the build tree stayed broken; and it was a second mechanism beside the
+  one PROJ has.
+* *Asking Windows which module holds `&GDALAllRegister`.* Under MinGW that
+  address is the import THUNK inside the importing executable, so Windows
+  truthfully names the caller and the data is looked for beside the wrong
+  file. The module is found by name among the loaded modules instead
+  (`libgdal*.dll`, or `gdal*.dll` from an MSVC build).
+
+**A fixed-field format was treated as a failure.** A DXF layer has `Layer`,
+`Linetype`, `Text` and a few more fields and refuses any other, and the writer
+aborted on "could not create field `katana_id`". It now asks
+`OLCCreateField`, writes the geometry, and keeps any attribute the format
+already has a field for - OGR matches names case-insensitively, so the Katana
+attribute `layer` lands in the DXF field `Layer` and every entity keeps its
+CAD layer. What is dropped is reported as a warning (`driverHasFixedFields`),
+not silently.
+
+`InteropExport.ADrawingCanBeWrittenToDxfAndKeepsItsLayers` was watched to fail
+for each cause separately before it passed.
+
+## Imported entities keep their layers
+
+A DXF is ONE layer to GDAL (`entities`), and each entity's CAD layer arrives as
+its `Layer` attribute. The importer used to place everything on a layer named
+after the source layer, so a 51 000-entity drawing arrived on a single layer
+called `entities` and the layer tree was useless.
+`VectorImportOptions::layerAttribute` (default `layer`, matched
+case-insensitively) now names the attribute that carries each entity's layer;
+Katana's own exports write the same information, so a round trip through
+GeoJSON or GeoPackage keeps its layers too. An explicit `targetLayer` still
+wins, and no empty `entities` layer is created when nothing ends up on it.
+
+**Still open:** text and dimensions are skipped on DXF export, though DXF has
+both, because the vector path models only points, lines and polygons.
+

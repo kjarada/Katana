@@ -10,6 +10,9 @@ function(katana_add_test_suite module)
     target_link_libraries(${_target} PRIVATE ${ARG_LIBS} GTest::gtest_main)
     target_include_directories(${_target} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
     katana_target_defaults(${_target})
+    # Beside the application, not among it: bin/ holds what ships.
+    set_target_properties(${_target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
     katana_register_tests(${_target})
 endfunction()
 
@@ -30,10 +33,10 @@ endforeach()
 # A plot produced headlessly, so the PDF writing inside the Qt widget is
 # exercised by ctest and not only by hand (PLAN.MD Phase 22). The script
 # copies the sample project first: a test must never touch repository data.
-if(TARGET katana_qt_app)
+if(TARGET katana)
     add_test(NAME qt_plot_headless
         COMMAND ${CMAKE_COMMAND}
-            "-DAPP=$<TARGET_FILE:katana_qt_app>"
+            "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_headless.pdf"
             -P "${PROJECT_SOURCE_DIR}/tools/check_plot.cmake")

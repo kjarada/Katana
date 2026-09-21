@@ -264,6 +264,81 @@ TEST(InteropExport, RoundTripsThroughGeoJson)
     EXPECT_TRUE(sawPoint);
 }
 
+TEST(InteropExport, ADrawingCanBeWrittenToDxfAndKeepsItsLayers)
+{
+    // DXF has a fixed set of fields and refuses any other, and the exporter
+    // used to treat "could not create field katana_id" as fatal - so the one
+    // format a CAD program cannot do without could not be written at all.
+    // Found by running the bundled CLI, not by a test, because every export
+    // test used a format that accepts arbitrary fields.
+    const TempDir dir("dxf");
+    const auto path = dir.file("drawing.dxf");
+
+    Entity kerb = closedSquare(20.0);
+    kerb.layer = "KERB";
+    Entity line;
+    line.geometry = Segment2{Point2(0, 0), Point2(30, 40)};
+    line.layer = "BOUNDARY";
+    Model model = modelWith({});
+    for (const char* name : {"KERB", "BOUNDARY"}) {
+        katana::entity::Layer layer;
+        layer.name = name;
+        ASSERT_TRUE(model.layers.add(layer));
+    }
+    // add(), not insert(): add assigns the id, insert expects one already.
+    ASSERT_TRUE(model.entities.add(kerb).ok());
+    ASSERT_TRUE(model.entities.add(line).ok());
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_EQ(written->featuresWritten, 2u);
+
+    // What DXF cannot hold is SAID, not silently dropped (PLAN.MD section 36).
+    bool warned = false;
+    for (const std::string& warning : written->warnings) {
+        warned = warned || warning.find("fixed set of fields") != std::string::npos;
+    }
+    EXPECT_TRUE(warned) << "the loss of ids and properties went unreported";
+
+    // And what it CAN hold survives: geometry, and the layer each entity is
+    // on - our `layer` attribute lands in DXF's own Layer field.
+    // No option needed: the importer's default layer attribute matches DXF's
+    // `Layer` field, so the CAD layers come back rather than one "entities".
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 2u);
+    bool sawKerb = false;
+    bool sawBoundary = false;
+    for (const Entity& entity : read->entities) {
+        if (const auto* polyline = std::get_if<Polyline2>(&entity.geometry)) {
+            EXPECT_NEAR(std::abs(polyline->area()), 400.0, 1e-9);
+            sawKerb = sawKerb || entity.layer == "KERB";
+        } else if (const auto* segment = std::get_if<Segment2>(&entity.geometry)) {
+            EXPECT_NEAR(segment->length(), 50.0, 1e-9);
+            sawBoundary = sawBoundary || entity.layer == "BOUNDARY";
+        }
+    }
+    EXPECT_TRUE(sawKerb) << "the square lost its layer";
+    EXPECT_TRUE(sawBoundary) << "the line lost its layer";
+    // Both layers are reported as needed, and nothing asks for an "entities"
+    // layer that no entity is on.
+    EXPECT_NE(std::find(read->layersNeeded.begin(), read->layersNeeded.end(), "KERB"),
+              read->layersNeeded.end());
+    EXPECT_NE(std::find(read->layersNeeded.begin(), read->layersNeeded.end(), "BOUNDARY"),
+              read->layersNeeded.end());
+    EXPECT_EQ(std::find(read->layersNeeded.begin(), read->layersNeeded.end(), "entities"),
+              read->layersNeeded.end());
+
+    // An explicit target layer still wins: "put everything here" means that.
+    VectorImportOptions everythingHere;
+    everythingHere.targetLayer = "IMPORTED";
+    const auto flattened = importVector(path, everythingHere);
+    ASSERT_TRUE(flattened.ok());
+    for (const Entity& entity : flattened->entities) {
+        EXPECT_EQ(entity.layer, "IMPORTED");
+    }
+}
+
 TEST(InteropExport, TextAndDimensionsAreSkippedAndCounted)
 {
     const TempDir dir("skipped");

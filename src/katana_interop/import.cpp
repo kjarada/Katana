@@ -57,6 +57,15 @@ std::string sanitizeLayerName(std::string name)
     return name.substr(first, last - first + 1);
 }
 
+bool equalsIgnoringCase(const std::string& a, const std::string& b)
+{
+    return a.size() == b.size() &&
+           std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower(static_cast<unsigned char>(x)) ==
+                      std::tolower(static_cast<unsigned char>(y));
+           });
+}
+
 Point2 shifted(const katana::gis::GeoPoint& point, const std::optional<Vec2>& origin)
 {
     if (origin.has_value()) {
@@ -191,10 +200,6 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             options.targetLayer.empty()
                 ? sanitizeLayerName(info.name.empty() ? path.stem().string() : info.name)
                 : options.targetLayer;
-        if (!contains(result.layersNeeded, targetLayer)) {
-            result.layersNeeded.push_back(targetLayer);
-        }
-
         if (!info.projectionWkt.empty() && !result.projectionWkt.empty() &&
             info.projectionWkt != result.projectionWkt) {
             result.warnings.push_back("layer '" + info.name +
@@ -210,10 +215,30 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
         for (const katana::gis::VectorFeature& feature : *features) {
             ++result.featuresRead;
 
+            // The layer THIS feature belongs on: its own layer attribute when
+            // it has one and the caller has not said "put everything here".
+            std::string entityLayer = targetLayer;
+            if (options.targetLayer.empty() && !options.layerAttribute.empty()) {
+                for (const auto& [name, value] : feature.attributes) {
+                    if (equalsIgnoringCase(name, options.layerAttribute)) {
+                        const std::string named = sanitizeLayerName(value);
+                        // sanitizeLayerName turns a blank into "IMPORT"; a
+                        // blank attribute means "no layer given", not that.
+                        if (value.find_first_not_of(" \t\r\n") != std::string::npos) {
+                            entityLayer = named;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (!contains(result.layersNeeded, entityLayer)) {
+                result.layersNeeded.push_back(entityLayer);
+            }
+
             auto makeEntity = [&](katana::entity::Geometry geometry) {
                 Entity entity;
                 entity.geometry = std::move(geometry);
-                entity.layer = targetLayer;
+                entity.layer = entityLayer;
                 if (options.attributesAsProperties) {
                     copyAttributes(feature, entity);
                 }
@@ -286,7 +311,7 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
 
                     Entity entity;
                     entity.geometry = std::move(polyline);
-                    entity.layer = targetLayer;
+                    entity.layer = entityLayer;
                     if (options.attributesAsProperties) {
                         copyAttributes(feature, entity);
                     }

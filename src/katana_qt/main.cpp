@@ -8,8 +8,8 @@
 #include "main_window.hpp"
 
 // Usage:
-//   katana_qt_app [project-directory] [data-file...]
-//   katana_qt_app [project-directory] [data-file...] --plot out.pdf
+//   katana [project-directory] [data-file...]
+//   katana [project-directory] [data-file...] --plot out.pdf
 //                 [--fit | --scale N] [--paper A4|A3|A2|A1|A0]
 //                 [--landscape | --portrait] [--dpi N]
 //

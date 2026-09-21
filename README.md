@@ -32,7 +32,7 @@ and the command line are two thin front ends over the same engine.
 | 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
 | 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
 
-878 tests pass in Debug and Release, including the architectural layering check and a headless plot to PDF.
+879 tests pass in Debug and Release, including the architectural layering check and a headless plot to PDF.
 
 ## Building
 
@@ -60,12 +60,15 @@ use system packages instead. Useful options:
 | `KATANA_ENABLE_CPPCHECK` | OFF | cppcheck during compilation |
 | `KATANA_MODULE_FILTER` | *(empty)* | configure only the listed modules |
 
-Other targets: `format` and `format-check` (clang-format), `run-benchmarks`.
+Other targets: `format` and `format-check` (clang-format), `run-benchmarks`,
+`bundle` (a self-contained `<build>/dist/Katana` that runs with no MSYS2, Qt or
+GDAL installed) and `package` (that tree as `Katana-<version>-win64.zip`, plus
+an installer when NSIS is present).
 
 ## Running
 
-`katana_qt_app` is the desktop application; it takes an optional project
-directory. `katana_cli` is the same engine without a GUI:
+`katana` is the desktop application (`<build>/bin/katana.exe`); it takes an
+optional project directory. `katana_cli` is the same engine without a GUI:
 
 ```bash
 katana_cli                               # interactive
@@ -141,7 +144,7 @@ tool has the same verbs:
 ```bash
 katana_cli -c "IMPORT parcels.shp" -c "LIST"
 katana_cli site.kcs -c "EXPORT site.gpkg"
-katana_qt_app my-project.katana ortho.tif scan.las   # opens with data loaded
+katana my-project.katana ortho.tif scan.las   # opens with data loaded
 ```
 
 Vector data becomes ordinary entities, in one undoable command. Rasters and

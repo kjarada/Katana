@@ -22,7 +22,10 @@ change.
    (`tools/check_layering.cmake`). A second one is a defect, not a shortcut.
 2. **Write the test first where the behaviour is checkable.** See §3.
 3. **Implement.**
-4. **Build clean.** `-Werror` is on. A warning is a failure.
+4. **Build clean.** `-Werror` is on. A warning is a failure. Judge a build by
+   ITS EXIT CODE, never by grepping its output for "error": a link failure
+   prints no line that a source-path filter matches, and a filtered build once
+   reported "built" over a missing binary.
 5. **Run the whole suite**, not just your module: `ctest --test-dir build/debug -j 8`.
    The layering check is one of those tests.
 6. **Update `PLAN.MD` and the affected document in `docs/`.** See §2. This is
@@ -155,18 +158,29 @@ At the end of a work session, or whenever you are about to hand back:
    the MSYS2 toolchain needs, and sample data where that makes the feature
    visible:
    ```sh
-   PATH="/c/msys64/ucrt64/bin:$PATH"      ./build/release/src/katana_qt/katana_qt_app.exe samples/site_plan
+   PATH="/c/msys64/ucrt64/bin:$PATH"      ./build/release/bin/katana.exe samples/site_plan
+   ```
+   Everything runnable is in `<build>/bin`: `katana.exe`, `katana_cli.exe`,
+   and the test executables under `bin/tests`. For something that runs with
+   NO toolchain on PATH - what a user would actually receive - make the bundle
+   and run that instead:
+   ```sh
+   cmake --build build/release --target bundle
+   ./build/release/dist/Katana/bin/katana.exe
    ```
 4. **Say what to look at.** Name the menu item, the command or the sample file
    that exercises what you just built, and what correct looks like. "It builds"
    is not a test the user can perform.
 5. **Do not launch the GUI through the background task runner.** A detached
-   `katana_qt_app.exe` reports exit 139 when its parent shell is reaped, which
+   `katana.exe` reports exit 139 when its parent shell is reaped, which
    looks exactly like a segmentation fault and is not one. Measured: the same
    binary survives 150 s in the foreground and 30 minutes under gdb, and
    reports 139 every time it is launched detached. Hand the user the command
    instead; run it yourself only in the foreground under `timeout` when you
-   need to check that it starts.
+   need to check that it starts. ALWAYS under `timeout`: a GUI-subsystem
+   program that cannot find a DLL or a Qt platform plugin does not exit, it
+   opens a modal box and waits - which cost ten minutes the first time the
+   bundle was tested with `QT_QPA_PLATFORM=offscreen` and no `qoffscreen.dll`.
 6. Say plainly what is NOT yet visible in the GUI. A feature that exists only
    in the library and has no way to reach it from the application is finished
    work in the tests and unfinished work to the user; say which it is rather

@@ -12,6 +12,8 @@ foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_su
     endif()
 endforeach()
 katana_target_defaults(katana_benchmarks)
+set_target_properties(katana_benchmarks PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KATANA_BENCHMARK_OUTPUT_DIRECTORY}")
 
 # `cmake --build <dir> --target run-benchmarks`
 add_custom_target(run-benchmarks

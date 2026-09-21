@@ -5,12 +5,21 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # with a clear message beats a wall of undefined references.
 if(NOT TARGET katana_interop)
     message(FATAL_ERROR
-        "katana_qt_app requires katana_interop; configure with -DKATANA_BUILD_IO=ON "
+        "The Katana desktop application requires katana_interop; configure with -DKATANA_BUILD_IO=ON "
         "or turn the Qt app off with -DKATANA_BUILD_QT_APP=OFF")
 endif()
 
+# The target is `katana` and the file is katana.exe: this IS the product, and
+# "katana_qt_app" was a name for the people building it. The directory keeps
+# the name of its LAYER (`qt`, see tools/check_layering.cmake), which is a
+# statement about dependencies and not about what the user double-clicks.
+#
+# WIN32 means no console window opens behind the application. The cost is
+# that stderr goes nowhere when it is started from cmd.exe, so the --plot
+# switch reports failure through its exit code as well as its message.
+#
 # No Q_OBJECT classes: signals are connected to lambdas, so moc is not needed.
-add_executable(katana_qt_app WIN32 MACOSX_BUNDLE
+add_executable(katana WIN32 MACOSX_BUNDLE
     main.cpp
     main_window.cpp
     main_window.hpp
@@ -23,5 +32,5 @@ add_executable(katana_qt_app WIN32 MACOSX_BUNDLE
     section_view_widget.cpp
     section_view_widget.hpp
 )
-katana_target_defaults(katana_qt_app)
-target_link_libraries(katana_qt_app PRIVATE katana_cad katana_interop katana_render Qt6::Widgets)
+katana_target_defaults(katana)
+target_link_libraries(katana PRIVATE katana_cad katana_interop katana_render Qt6::Widgets)

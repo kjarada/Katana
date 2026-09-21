@@ -42,6 +42,18 @@ struct VectorImportOptions {
     // per source layer, named after it", which is what a multi-layer GeoPackage
     // should do.
     std::string targetLayer;
+    // A feature attribute that names the layer each entity belongs on,
+    // matched case-insensitively; used only when `targetLayer` is empty.
+    //
+    // A DXF is ONE source layer to GDAL ("entities"), and the CAD layer of
+    // each entity arrives as its `Layer` attribute - so without this a
+    // 50 000-entity drawing lands on a single layer called "entities" and the
+    // layer tree is useless. Katana's own exports write the same information
+    // as `layer`, which the case-insensitive match also picks up, so a round
+    // trip through GeoJSON or GeoPackage keeps its layers too. A feature
+    // without the attribute, or with a blank one, falls back to the source
+    // layer's name. Empty disables the lookup.
+    std::string layerAttribute = "layer";
     // -1 imports every layer in the dataset.
     int sourceLayerIndex = -1;
     std::uint64_t maxFeatures = 0;

@@ -3,7 +3,23 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cwctype>
+#include <filesystem>
 #include <mutex>
+#include <system_error>
+#include <vector>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+// PSAPI_VERSION 2 maps EnumProcessModules onto the copy in kernel32, so no
+// extra library is linked for it.
+#define PSAPI_VERSION 2
+#include <psapi.h>
+#endif
 
 #include <cpl_conv.h>
 #include <cpl_error.h>
@@ -26,10 +42,90 @@ using katana::core::Status;
 // dataset in the process, so calling it when one dataset closes - as this file
 // used to - invalidates every other dataset and every later open. The driver
 // manager is freed by process exit, which is correct and costs nothing.
+// Tells GDAL where its support files are, when nothing else has.
+//
+// GDAL reads data files at run time - header.dxf and trailer.dxf, the
+// templates every DXF it writes is built from, among others - and finds them
+// through GDAL_DATA or a directory compiled in when GDAL was built. On MSYS2
+// that compiled-in path is useless (the package is relocatable), and only an
+// MSYS2 LOGIN SHELL sets GDAL_DATA. Started any other way - from Git Bash, an
+// IDE, Explorer, a test runner, or a bundle on someone else's machine - GDAL
+// found nothing, and DXF export failed with "failed to find template header
+// file header.dxf". It had never once worked outside an MSYS2 shell.
+//
+// The fix is the one PROJ uses for proj.db: look RELATIVE TO THE LIBRARY.
+// The GDAL DLL sits in <prefix>/bin and its data in <prefix>/share/gdal, and
+// that holds both for the toolchain (C:/msys64/ucrt64) and for a bundle made
+// by `cmake --install`, which is laid out bin/ beside share/ for this reason.
+// One mechanism for both, instead of asking each program to know where it was
+// installed. A GDAL_DATA the user has set is respected: an explicit choice
+// outranks a default.
+void locateGdalData()
+{
+    if (CPLGetConfigOption("GDAL_DATA", nullptr) != nullptr) {
+        return;
+    }
+#if defined(_WIN32)
+    // Found by NAME among the loaded modules. The obvious route - ask Windows
+    // which module holds the address of GDALAllRegister - gives the wrong
+    // answer under MinGW: in an importing program that address is the import
+    // THUNK inside our own executable, so Windows truthfully names us, the
+    // data directory is looked for beside our own program, and nothing is
+    // found. That was tried first, and failed exactly so.
+    std::vector<HMODULE> modules(1024);
+    DWORD bytes = 0;
+    if (EnumProcessModules(GetCurrentProcess(), modules.data(),
+                           static_cast<DWORD>(modules.size() * sizeof(HMODULE)), &bytes) == 0) {
+        return;
+    }
+    modules.resize(std::min<std::size_t>(modules.size(), bytes / sizeof(HMODULE)));
+    std::wstring buffer;
+    for (const HMODULE module : modules) {
+        std::wstring candidate(512, L' ');
+        for (;;) {
+            const DWORD length = GetModuleFileNameW(module, candidate.data(),
+                                                    static_cast<DWORD>(candidate.size()));
+            if (length == 0) {
+                candidate.clear();
+                break;
+            }
+            if (length < candidate.size()) {
+                candidate.resize(length);
+                break;
+            }
+            candidate.resize(candidate.size() * 2); // truncated: longer than the buffer
+        }
+        std::wstring name = std::filesystem::path(candidate).filename().wstring();
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+        // libgdal-38.dll from MinGW, gdal.dll or gdal308.dll from MSVC.
+        const bool isGdal = name.ends_with(L".dll") &&
+                            (name.starts_with(L"libgdal") || name.starts_with(L"gdal"));
+        if (isGdal) {
+            buffer = candidate;
+            break;
+        }
+    }
+    if (buffer.empty()) {
+        return;
+    }
+    std::error_code ignored;
+    const std::filesystem::path data =
+        std::filesystem::path(buffer).parent_path().parent_path() / "share" / "gdal";
+    if (std::filesystem::is_directory(data, ignored)) {
+        // GDAL takes UTF-8 (GDAL_FILENAME_IS_UTF8 defaults to YES), and
+        // forward slashes on every platform.
+        const std::u8string utf8 = data.generic_u8string();
+        CPLSetConfigOption("GDAL_DATA", std::string(utf8.begin(), utf8.end()).c_str());
+    }
+#endif
+}
+
 void ensureRegistered()
 {
     static std::once_flag once;
     std::call_once(once, [] {
+        locateGdalData();
         GDALAllRegister();
         // Keep GDAL's chatter off stderr; failures are reported through Result
         // with CPLGetLastErrorMsg() as context instead.
@@ -771,7 +867,19 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
             }
         }
     }
+    // Some formats have a FIXED set of fields and refuse any other: a DXF
+    // layer has Layer, Linetype, Text and a few more, and CreateField fails
+    // on everything else. That used to abort the whole export - so DXF, the
+    // one format a CAD program cannot do without, could not be written at
+    // all. Such a layer is written with the fields it has; an attribute is
+    // kept when the format already has a field of that name (OGR matches
+    // names case-insensitively, so ours `layer` lands in DXF's `Layer`) and
+    // dropped otherwise, which driverHasFixedFields lets the caller report.
+    const bool canCreateFields = layer->TestCapability(OLCCreateField) != 0;
     for (const std::string& name : fieldNames) {
+        if (!canCreateFields) {
+            break;
+        }
         OGRFieldDefn field(name.c_str(), OFTString);
         if (layer->CreateField(&field) != OGRERR_NONE) {
             return abandon(dataset,
@@ -789,7 +897,12 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         OGRFeature* feature = OGRFeature::CreateFeature(layer->GetLayerDefn());
         feature->SetGeometryDirectly(geometry);
         for (const auto& [name, value] : source.attributes) {
-            feature->SetField(name.c_str(), value.c_str());
+            // By index, and only when the field exists: SetField by a name the
+            // layer does not have is an error GDAL logs once per feature.
+            const int index = feature->GetFieldIndex(name.c_str());
+            if (index >= 0) {
+                feature->SetField(index, value.c_str());
+            }
         }
         const OGRErr status = layer->CreateFeature(feature);
         OGRFeature::DestroyFeature(feature);
@@ -806,6 +919,11 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
 bool driverHoldsOneGeometryType(const std::string& driver)
 {
     return driver == "ESRI Shapefile" || driver == "MapInfo File";
+}
+
+bool driverHasFixedFields(const std::string& driver)
+{
+    return driver == "DXF";
 }
 
 bool driverAssumesWgs84(const std::string& driver)

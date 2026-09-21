@@ -131,7 +131,7 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 
 ## Desktop application
 
-`katana_qt_app` is a `QMainWindow` with a viewport, dockable layer, property and
+`katana` (the target in `src/katana_qt`) is a `QMainWindow` with a viewport, dockable layer, property and
 command panels, and a status bar showing cursor coordinates, the active snap and
 the current layer.
 
@@ -542,7 +542,7 @@ screen furniture and are not drawn either.
 
 **The PDF itself is tested, not only the arithmetic.** The PDF writing runs
 inside the Qt widget and needs an application, which the unit-test suites do
-not create - so the application grew a `--plot` switch: `katana_qt_app
+not create - so the application grew a `--plot` switch: `katana
 <project> --plot out.pdf [--fit | --scale N] [--paper A3] [--portrait]
 [--dpi N]` plots and exits without showing a window. The `qt_plot_headless`
 test runs it under `QT_QPA_PLATFORM=offscreen` on the sample project and

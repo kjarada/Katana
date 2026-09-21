@@ -1,0 +1,118 @@
+# Run by `cmake --install` on Windows (see KatanaPackaging.cmake). Makes the
+# installed tree self-contained. Configured with @ONLY, so every ${...} here is
+# evaluated at INSTALL time and every @...@ at configure time.
+
+# CMake 4.1 made file(GET_RUNTIME_DEPENDENCIES) normalise paths before matching
+# them (CMP0207). NEW is what the exclusion regexes below are written for -
+# forward slashes - and an install script starts with no policies set, so
+# without this every system DLL raises a policy warning of its own.
+if(POLICY CMP0207)
+    cmake_policy(SET CMP0207 NEW)
+endif()
+
+set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+set(_bin "${_prefix}/bin")
+set(_toolchain_bin "@KATANA_RUNTIME_BIN@")
+
+# --- 1. Qt ------------------------------------------------------------------------
+# windeployqt knows what no dependency scan can: the PLUGINS. katana.exe does
+# not link qwindows.dll - Qt loads it at start-up by name - so an objdump of
+# the executable never mentions it, and without it the application dies with
+# "no Qt platform plugin could be initialized".
+if(EXISTS "${_bin}/katana.exe" AND NOT "@KATANA_WINDEPLOYQT@" STREQUAL ""
+   AND NOT "@KATANA_WINDEPLOYQT@" MATCHES "NOTFOUND")
+    execute_process(
+        COMMAND "@KATANA_WINDEPLOYQT@"
+                --no-translations --no-system-d3d-compiler --no-opengl-sw
+                --no-compiler-runtime --dir "${_bin}" "${_bin}/katana.exe"
+        RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "windeployqt failed (${_rc}):\n${_out}\n${_err}")
+    endif()
+endif()
+
+# windeployqt ships the platform plugin a desktop needs, qwindows.dll, and only
+# that. `katana --plot` is a HEADLESS feature - it is what a build server or a
+# scheduled job runs - and with QT_QPA_PLATFORM=offscreen and no qoffscreen.dll
+# Qt does not fail: it opens a modal "no Qt platform plugin could be
+# initialized" box and waits for a click that never comes. Found by this
+# bundle's own smoke test hanging for ten minutes. Copied BEFORE the scan below
+# so that its dependencies are gathered with everyone else's.
+if(EXISTS "${_bin}/katana.exe" AND EXISTS "@KATANA_QT_PLUGIN_DIR@/platforms/qoffscreen.dll")
+    file(COPY "@KATANA_QT_PLUGIN_DIR@/platforms/qoffscreen.dll" DESTINATION "${_bin}/platforms")
+endif()
+
+# --- 2. Everything else that is loaded --------------------------------------------
+# Scanned AFTER windeployqt, and over the plugins too, because a plugin has
+# dependencies of its own that nothing else pulls in - qjpeg.dll needs
+# libjpeg, and only qjpeg.dll does.
+file(GLOB_RECURSE _executables "${_bin}/*.exe")
+file(GLOB_RECURSE _libraries "${_bin}/*.dll")
+
+# Explicit, because an install script does not inherit the project's toolchain
+# detection and the Windows default is dumpbin, which a MinGW machine lacks.
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "windows+pe")
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@CMAKE_OBJDUMP@")
+
+# CONFLICTING_DEPENDENCIES_PREFIX, because a conflict here is normal and not an
+# error. katana.exe finds Qt6Core.dll BESIDE ITSELF, where windeployqt has just
+# put it; bin/platforms/qwindows.dll has no Qt6Core.dll beside it and finds the
+# toolchain's copy instead. Same DLL, two paths - which CMake reports as a
+# fatal "multiple conflicting paths" unless asked to collect them. They are
+# handled below: whatever the bundle already has is left alone.
+file(GET_RUNTIME_DEPENDENCIES
+    EXECUTABLES ${_executables}
+    LIBRARIES ${_libraries}
+    RESOLVED_DEPENDENCIES_VAR _resolved
+    UNRESOLVED_DEPENDENCIES_VAR _unresolved
+    CONFLICTING_DEPENDENCIES_PREFIX _conflict
+    DIRECTORIES "${_toolchain_bin}"
+    # The operating system's own DLLs are not ours to ship: the API sets by
+    # name, and anything that resolves into the Windows directory.
+    PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-" "^hvsifiletrust" "^pdmutilities" "^wpaxholder"
+    POST_EXCLUDE_REGEXES ".*[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\].*")
+
+set(_copied 0)
+foreach(_dependency IN LISTS _resolved)
+    get_filename_component(_name "${_dependency}" NAME)
+    if(NOT EXISTS "${_bin}/${_name}")
+        file(COPY "${_dependency}" DESTINATION "${_bin}")
+        math(EXPR _copied "${_copied} + 1")
+    endif()
+endforeach()
+# A conflicting name is one the bundle may or may not already hold. Where it
+# does not, take the toolchain's copy - the only other place it can have come
+# from, given the single DIRECTORIES entry above.
+foreach(_name IN LISTS _conflict_FILENAMES)
+    if(NOT EXISTS "${_bin}/${_name}")
+        foreach(_candidate IN LISTS _conflict_${_name})
+            if(NOT EXISTS "${_bin}/${_name}" AND EXISTS "${_candidate}")
+                file(COPY "${_candidate}" DESTINATION "${_bin}")
+                math(EXPR _copied "${_copied} + 1")
+            endif()
+        endforeach()
+    endif()
+endforeach()
+message(STATUS "Katana deploy: ${_copied} runtime libraries copied into ${_bin}")
+
+# An unresolved dependency is a bundle that starts here and fails elsewhere.
+# Say so now, by name, rather than let it be found on a customer's machine
+# (PLAN.MD section 36).
+if(_unresolved)
+    list(JOIN _unresolved "\n  " _text)
+    message(WARNING "Katana deploy: these dependencies were NOT found and are not bundled:\n  ${_text}")
+endif()
+
+# --- 3. Data that GDAL and PROJ read at run time ------------------------------------
+# proj.db is a DATA file, so no dependency scan finds it, and without it every
+# reprojection fails with "cannot find proj.db". PROJ looks beside its own DLL
+# at ../share/proj, which is exactly where this puts it.
+foreach(_data proj gdal)
+    if(IS_DIRECTORY "${_toolchain_bin}/../share/${_data}")
+        file(COPY "${_toolchain_bin}/../share/${_data}" DESTINATION "${_prefix}/share")
+    else()
+        message(WARNING "Katana deploy: ${_toolchain_bin}/../share/${_data} was not found; "
+                        "the bundle will lack it")
+    endif()
+endforeach()

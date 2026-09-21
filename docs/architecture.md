@@ -156,6 +156,56 @@ aborts the offending test. GoogleTest and Google Benchmark are fetched once and
 cached under `third_party/_cache`, so additional build directories configure
 offline.
 
+### Where things are built
+
+```
+<build>/bin/katana.exe          the application (target `katana`)
+<build>/bin/katana_cli.exe      the command-line front end
+<build>/bin/tests/              one test executable per module
+<build>/bin/benchmarks/
+<build>/lib/                    static libraries
+```
+
+CMake's default mirrors the source tree inside the build tree, which had put
+the application at `build/release/src/katana_qt/katana_qt_app.exe` - a path
+that reads as though the executable were in the sources. The root
+`CMakeLists.txt` sets the output directories before any `add_subdirectory`,
+because those variables initialise each target's property when the target is
+created. Tests and benchmarks go one level down so that `bin` holds only what
+ships. The directory `src/katana_qt` keeps its name: it names a LAYER, which
+is a statement about dependencies, not about what the user double-clicks.
+
+### Bundling
+
+`cmake --build <build> --target bundle` installs into `<build>/dist/Katana`;
+`--target package` makes `Katana-<version>-win64.zip` (and an NSIS installer
+when `makensis` is on the machine). The result runs with no MSYS2, Qt or GDAL
+installed. Three things make it so, and each was learned by the bundle
+failing:
+
+* **`windeployqt` for Qt, then a dependency scan over everything it deployed.**
+  A scan of `katana.exe` alone never sees `qwindows.dll`, which Qt loads by
+  name at start-up; and a scan that stops at the executables misses what only
+  a PLUGIN needs (`qjpeg.dll` wants libjpeg). So the scan runs after
+  `windeployqt`, over the executables and the plugins.
+* **Conflicts are collected, not fatal.** `katana.exe` finds `Qt6Core.dll`
+  beside itself while `bin/platforms/qwindows.dll` finds the toolchain's copy -
+  one DLL, two paths, which `file(GET_RUNTIME_DEPENDENCIES)` reports as an
+  error unless given `CONFLICTING_DEPENDENCIES_PREFIX`.
+* **`qoffscreen.dll` is copied by hand.** `windeployqt` ships only the desktop
+  platform plugin, but `katana --plot` is a headless feature. Without the
+  offscreen plugin Qt does not exit with an error: it opens a modal "no Qt
+  platform plugin" box and waits for a click, which is how the bundle's own
+  smoke test came to hang for ten minutes.
+
+`bin/` sits beside `share/` because that is where both data-hungry libraries
+look: PROJ finds `proj.db` at `<its DLL>/../share/proj` by itself, and
+`locateGdalData` (in `gdal_adapter.cpp`) does the same for GDAL. See
+`docs/interop.md` for why GDAL needed telling.
+
+The bundle is 388 MB. Almost all of it is the dependency chain of GDAL and PDAL
+as MSYS2 builds them; Katana's own code is a few megabytes.
+
 ## Failure modes
 
 | Condition | Behaviour |
