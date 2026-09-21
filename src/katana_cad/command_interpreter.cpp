@@ -1,5 +1,7 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/cad/parcel.hpp"
+
 #include "katana/entity/dimension_text.hpp"
 
 #include <algorithm>
@@ -151,7 +153,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"AR", "ARRAY"},   {"E", "ERASE"},       {"DELETE", "ERASE"},   {"DEL", "ERASE"},
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
-        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"},
+        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"},
         {"?", "HELP"},
     };
     return table;
@@ -257,6 +259,8 @@ Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [s
           DESIGN name s,z[,L] s,z[,L] ... defines the design profile (parabolic vertical
           curves, symmetric); PVI name s z [L] appends; PROFILE name prints it with its
           high and low points; CLEARPROFILE name removes it
+Parcel    PARCEL id            bearings, distances, area and centroid of a closed polyline
+          PARCEL id LEGAL [name]   the deed wording;  PARCEL id LABEL [height]   text labels
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
@@ -378,6 +382,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "ALIGN") {
         return alignment(args);
+    }
+    if (verb == "PARCEL") {
+        return parcel(args);
     }
     if (verb == "UNDO" || verb == "REDO") {
         return undoRedo(verb, args);
@@ -1307,6 +1314,79 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
                       "alignment " + name + " profile removed");
     }
     return usage(kUsage);
+}
+
+CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
+{
+    const char* const kUsage = "PARCEL id | PARCEL id LEGAL [name] | PARCEL id LABEL [height]";
+    if (args.empty()) {
+        return usage(kUsage);
+    }
+    const auto id = parseId(args[0]);
+    if (!id) {
+        return id.error();
+    }
+    const auto& model = document_.model();
+    const Entity* entity = model.entities.find(*id);
+    if (entity == nullptr) {
+        return makeError(ErrorCode::NotFound, "no entity with that id", args[0]);
+    }
+    const auto* boundary = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
+    if (boundary == nullptr) {
+        return makeError(ErrorCode::InvalidGeometry, "a parcel must be a closed polyline", args[0]);
+    }
+    auto report = parcelReport(*boundary);
+    if (!report) {
+        return report.error();
+    }
+    const std::string action = args.size() > 1 ? upper(args[1]) : "REPORT";
+
+    if (action == "LEGAL") {
+        const std::string name = args.size() > 2 ? args[2] : "Parcel " + args[0];
+        return legalDescription(*report, name);
+    }
+    if (action == "LABEL") {
+        double height = 2.5;
+        if (args.size() > 2) {
+            const auto value = parseNumber(args[2]);
+            if (!value) {
+                return value.error();
+            }
+            height = *value;
+        }
+        auto labels = parcelLabels(*report, height);
+        if (!labels) {
+            return labels.error();
+        }
+        // One undo step for the lot: nobody wants to undo a parcel's labels
+        // one bearing at a time.
+        const cmd::EntityAttributes attributes = document_.currentAttributes();
+        auto chain = std::make_unique<cmd::Transaction>("PARCEL_LABELS");
+        for (katana::entity::TextGeometry& label : *labels) {
+            chain->add(cmd::createText(std::move(label), attributes));
+        }
+        const std::size_t count = labels->size();
+        return finish(document_.execute(std::move(chain)),
+                      std::to_string(count) + " labels created on the current layer");
+    }
+    if (action != "REPORT") {
+        return usage(kUsage);
+    }
+
+    std::ostringstream out;
+    out << std::fixed;
+    out.precision(3);
+    out << "  course  from                      bearing           distance\n";
+    std::size_t index = 1;
+    for (const ParcelCourse& course : report->courses) {
+        out << "  " << std::setw(4) << index++ << "    " << std::setw(10) << course.from.x << ","
+            << std::setw(10) << course.from.y << "   " << course.bearing << "   " << std::setw(10)
+            << course.distance << "\n";
+    }
+    out << "  area " << report->area << " m2 (" << report->area / 10000.0 << " ha), perimeter "
+        << report->perimeter << " m, centroid " << report->centroid.x << "," << report->centroid.y
+        << ", drawn " << (report->clockwise ? "clockwise" : "counter-clockwise");
+    return out.str();
 }
 
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)

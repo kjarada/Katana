@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections; clothoid; alignments and design profiles stored, editable and drawn; corridor quantities by end area and the corridor as a surface, cross-checked against each other; richer assemblies, parcels and grading outstanding |
+| 21 | Civil Engineering | partial — sections; clothoid; alignments and profiles; corridor quantities and surface, cross-checked; parcels with bearings, area, deed wording and labels; richer assemblies and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1378,10 +1378,22 @@ the ground (an exact overlay) and the end-area total (a different method
 entirely) agree on 2000 m^3 to 1e-6 on a straight. Both commands share one
 dialog. Record in `docs/cad.md`.
 
+**Eighth slice DELIVERED: parcels.** `cad::parcelReport` gives the courses of
+any closed polyline as quadrant bearings to the second and distances to the
+millimetre, with area, perimeter and centroid; `legalDescription` writes the
+deed wording; `parcelLabels` places text along each course, flipped so none
+reads upside down, on the inside of the boundary, created in one undo step
+by `PARCEL id LABEL`. Nothing is stored - a parcel is its boundary, computed
+on demand. Built entirely on `katana::survey` (azimuths, bearings, DMS,
+inverse, area, centroid); the one conversion from (x, y) to (northing,
+easting) is in one function and the tests check bearings, not only areas,
+because that is what an axis swap would break. Record in `docs/cad.md`.
+
 **OUTSTANDING in this phase:** richer assemblies (kerbs, verges, benches,
 subgrades) as a table of their own; the prismoidal correction, deliberately
-not applied; parcels; grading. `deleteAlignment` still has no in-use guard
-because nothing references an alignment by name.
+not applied; grading (feature lines, pads, slopes, daylight to a surface,
+grading surfaces). `deleteAlignment` still has no in-use guard because
+nothing references an alignment by name.
 
 ## Alignments
 

@@ -1167,3 +1167,62 @@ TEST(CadInterpreter, ClearingAProfileIsUndoable)
     EXPECT_EQ(session.document.model().alignments.find("road")->vertical->pvis.size(), 2u);
 }
 
+// ---- parcels ----------------------------------------------------------------------
+
+namespace {
+
+// The id of the only entity in the document, for verbs that take one.
+katana::entity::EntityId onlyEntityId(const Document& document)
+{
+    katana::entity::EntityId found = katana::entity::kInvalidEntityId;
+    std::size_t count = 0;
+    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+        found = entity.id;
+        ++count;
+    });
+    EXPECT_EQ(count, 1u);
+    return found;
+}
+
+} // namespace
+
+TEST(CadInterpreter, AParcelIsReportedLabelledAndDescribedFromAClosedPolyline)
+{
+    Session session;
+    session.ok("PLINE 0,0 100,0 100,50 0,50 CLOSE");
+    const std::string id = std::to_string(static_cast<unsigned long long>(onlyEntityId(session.document)));
+
+    const std::string report = session.ok("PARCEL " + id);
+    EXPECT_NE(report.find("5000.000"), std::string::npos) << report;
+    EXPECT_NE(report.find("N 90"), std::string::npos) << report;
+    EXPECT_NE(report.find("counter-clockwise"), std::string::npos) << report;
+
+    const std::string legal = session.ok("PARCEL " + id + " LEGAL Lot7");
+    EXPECT_NE(legal.find("Lot7"), std::string::npos) << legal;
+    EXPECT_NE(legal.find("thence"), std::string::npos) << legal;
+    EXPECT_NE(legal.find("0.5000 ha"), std::string::npos) << legal;
+
+    // Four course labels and the area, as ordinary text entities, in ONE undo
+    // step.
+    std::size_t before = 0;
+    session.document.model().entities.forEach([&](const katana::entity::Entity&) { ++before; });
+    session.ok("PARCEL " + id + " LABEL 2");
+    std::size_t after = 0;
+    session.document.model().entities.forEach([&](const katana::entity::Entity&) { ++after; });
+    EXPECT_EQ(after, before + 5);
+    session.ok("UNDO");
+    std::size_t undone = 0;
+    session.document.model().entities.forEach([&](const katana::entity::Entity&) { ++undone; });
+    EXPECT_EQ(undone, before) << "the five labels are one undo step";
+}
+
+TEST(CadInterpreter, ParcelRefusesAnOpenLineAndAMissingId)
+{
+    Session session;
+    session.ok("LINE 0,0 10,0");
+    const std::string id = std::to_string(static_cast<unsigned long long>(onlyEntityId(session.document)));
+    EXPECT_EQ(session.fails("PARCEL " + id), ErrorCode::InvalidGeometry);
+    EXPECT_EQ(session.fails("PARCEL 999999"), ErrorCode::NotFound);
+    EXPECT_EQ(session.fails("PARCEL"), ErrorCode::InvalidArgument);
+}
+

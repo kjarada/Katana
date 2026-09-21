@@ -455,3 +455,44 @@ Both commands share `askCorridor`, one dialog returning the solved alignment
 and profile, the ground and the assembly, rather than two copies of eighty
 lines of dialog.
 
+## Parcels
+
+`cad::parcelReport` (`include/katana/cad/parcel.hpp`) turns any closed
+polyline into its courses as bearings and distances, its area, perimeter and
+centroid; `legalDescription` writes the deed wording; `parcelLabels` makes
+the text entities. `PARCEL id`, `PARCEL id LEGAL [name]` and
+`PARCEL id LABEL [height]` drive them.
+
+**Nothing is stored.** A parcel is computed from its boundary on demand, so
+the report can never disagree with the drawing and there is no second table
+to keep in step when a corner is moved. Labels, when asked for, are ordinary
+text entities the user owns afterwards - a snapshot, and honest about it by
+being editable like any other text - created in one undo step, because
+nobody wants to undo a parcel's labels one bearing at a time.
+
+**Built on the survey layer, not beside it.** Azimuths, quadrant bearings,
+DMS formatting, the inverse between two points, the signed area and the
+centroid all already existed in `katana::survey`. The one thing this code
+does that could be wrong is the conversion from the drawing's (x, y) to the
+survey layer's (northing, easting), and it happens in exactly one function.
+That is why the rectangle test checks the bearing of every course and not
+only the area: swap the axes and the area stays 5000 while every bearing is
+wrong. Bearings are formatted to whole seconds, the precision a deed quotes.
+
+**Labels never read upside down.** Each course label lies along its course
+but is flipped by a half turn when the course runs west or south, so all of
+them read left to right or upward; and it is placed on the inside of the
+boundary - left of the course for a counter-clockwise boundary, right for a
+clockwise one - with the baseline moved a further text height inward when
+the flip would otherwise hang the glyphs outside. Text width is estimated at
+0.6 of the height per character for centring, because this layer has no
+font metrics and only the centring depends on it.
+
+**Two things this slice taught about the build.** `katana_cad` had never
+linked `katana_survey`, because nothing in `cad` had needed it: the layering
+rules allowed the include, and the link line did not follow. And the build
+filter used in this session - showing only lines that begin with a source
+path - hid that link failure and printed "built" over a missing binary,
+which is the green-over-red CLAUDE.md warns of. Builds are now judged by
+ninja's exit code.
+
