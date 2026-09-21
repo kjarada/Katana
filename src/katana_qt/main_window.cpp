@@ -272,6 +272,7 @@ void MainWindow::buildActions()
     terrainMenu->addSeparator();
     terrainMenu->addAction("Corridor &Quantities...", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q),
                            this, &MainWindow::corridorQuantities);
+    terrainMenu->addAction("Corridor &Surface...", this, &MainWindow::corridorSurface);
     terrainMenu->addAction("Cut Section Along &Alignment...",
                            QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K), this,
                            &MainWindow::cutSectionAlongAlignment);
@@ -1916,11 +1917,11 @@ void MainWindow::cutSectionAlongAlignment()
                     profile ? &*profile : nullptr, "design " + chosen.toStdString());
 }
 
-void MainWindow::corridorQuantities()
+std::optional<MainWindow::CorridorRequest> MainWindow::askCorridor(const QString& title)
 {
     // Only an alignment with a design profile has a finished level to measure
-    // against; the others are listed as unavailable rather than hidden, so
-    // the user learns what is missing.
+    // against or build; the message says what is missing rather than hiding
+    // the command.
     QStringList names;
     for (const katana::entity::Alignment& alignment : document_.model().alignments.all()) {
         if (alignment.vertical.has_value()) {
@@ -1930,7 +1931,7 @@ void MainWindow::corridorQuantities()
     if (names.isEmpty()) {
         logMessage("No alignment has a design profile. Define one with ALIGN DESIGN name s,z ...",
                    true);
-        return;
+        return std::nullopt;
     }
     QStringList surfaceNames;
     std::vector<const katana::terrain::TinSurface*> surfaces;
@@ -1942,11 +1943,11 @@ void MainWindow::corridorQuantities()
     }
     if (surfaces.empty()) {
         logMessage("Build a surface first (Terrain > Surface From ...).", true);
-        return;
+        return std::nullopt;
     }
 
     QDialog dialog(this);
-    dialog.setWindowTitle("Corridor Quantities");
+    dialog.setWindowTitle(title);
     auto* form = new QFormLayout(&dialog);
     auto* alignmentBox = new QComboBox(&dialog);
     alignmentBox->addItems(names);
@@ -1979,32 +1980,48 @@ void MainWindow::corridorQuantities()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     form->addRow(buttons);
     if (dialog.exec() != QDialog::Accepted) {
-        return;
+        return std::nullopt;
     }
 
     const katana::entity::Alignment* alignment =
         document_.model().alignments.find(alignmentBox->currentText().toStdString());
     if (alignment == nullptr || !alignment->vertical.has_value()) {
         logMessage("The alignment no longer exists or lost its profile.", true);
-        return;
+        return std::nullopt;
     }
     auto solved = katana::geometry::solveAlignment(alignment->horizontal);
     auto profile = katana::geometry::solveProfile(*alignment->vertical);
     if (!solved || !profile) {
         logMessage(QString::fromStdString((solved ? profile.error() : solved.error()).describe()),
                    true);
+        return std::nullopt;
+    }
+
+    CorridorRequest request;
+    request.alignment = std::move(*solved);
+    request.profile = std::move(*profile);
+    request.ground = surfaces[static_cast<std::size_t>(surfaceBox->currentIndex())];
+    request.alignmentName = alignmentBox->currentText();
+    request.surfaceName = surfaceBox->currentText();
+    request.assembly.halfWidth = halfWidth->value();
+    request.assembly.crossfall = crossfall->value() / 100.0;
+    request.assembly.cutBatter = cutBatter->value();
+    request.assembly.fillBatter = fillBatter->value();
+    request.crossfallPercent = crossfall->value();
+    request.interval = interval->value();
+    return request;
+}
+
+void MainWindow::corridorQuantities()
+{
+    const auto request = askCorridor("Corridor Quantities");
+    if (!request) {
         return;
     }
-    cad::Assembly assembly;
-    assembly.halfWidth = halfWidth->value();
-    assembly.crossfall = crossfall->value() / 100.0;
-    assembly.cutBatter = cutBatter->value();
-    assembly.fillBatter = fillBatter->value();
-
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto quantities = cad::corridorQuantities(
-        *solved, *profile, assembly, *surfaces[static_cast<std::size_t>(surfaceBox->currentIndex())],
-        interval->value());
+    auto quantities = cad::corridorQuantities(request->alignment, request->profile,
+                                              request->assembly, *request->ground,
+                                              request->interval);
     QApplication::restoreOverrideCursor();
     if (!quantities) {
         logMessage(QString::fromStdString(quantities.error().describe()), true);
@@ -2015,14 +2032,14 @@ void MainWindow::corridorQuantities()
     // earthworks schedule takes, so it can be read against one. QString::number
     // is not locale-aware, which here is what is wanted: a decimal point.
     QString report;
-    report += QString("Corridor quantities: %1 on %2\n").arg(alignmentBox->currentText(),
-                                                            surfaceBox->currentText());
+    report += QString("Corridor quantities: %1 on %2\n").arg(request->alignmentName,
+                                                            request->surfaceName);
     report += QString("Half width %1 m, crossfall %2 %, batters %3:1 cut / %4:1 fill, interval %5 m\n")
-                  .arg(assembly.halfWidth, 0, 'f', 2)
-                  .arg(crossfall->value(), 0, 'f', 2)
-                  .arg(assembly.cutBatter, 0, 'f', 2)
-                  .arg(assembly.fillBatter, 0, 'f', 2)
-                  .arg(interval->value(), 0, 'f', 2);
+                  .arg(request->assembly.halfWidth, 0, 'f', 2)
+                  .arg(request->crossfallPercent, 0, 'f', 2)
+                  .arg(request->assembly.cutBatter, 0, 'f', 2)
+                  .arg(request->assembly.fillBatter, 0, 'f', 2)
+                  .arg(request->interval, 0, 'f', 2);
     report += "\n    station     design z     cut area    fill area\n";
     for (const cad::CorridorSection& section : quantities->sections) {
         report += QString("%1  %2  %3  %4%5\n")
@@ -2060,7 +2077,7 @@ void MainWindow::corridorQuantities()
     table.exec();
 
     logMessage(QString("Corridor %1: cut %2 m3, fill %3 m3, net %4 m3 over %5 sections%6")
-                   .arg(alignmentBox->currentText())
+                   .arg(request->alignmentName)
                    .arg(quantities->cut, 0, 'f', 1)
                    .arg(quantities->fill, 0, 'f', 1)
                    .arg(quantities->net, 0, 'f', 1)
@@ -2068,6 +2085,34 @@ void MainWindow::corridorQuantities()
                    .arg(quantities->incompleteSections > 0
                             ? QString(" (%1 incomplete)").arg(quantities->incompleteSections)
                             : QString()));
+}
+
+void MainWindow::corridorSurface()
+{
+    const auto request = askCorridor("Corridor Surface");
+    if (!request) {
+        return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto corridor = cad::corridorSurface(request->alignment, request->profile, request->assembly,
+                                         *request->ground, request->interval);
+    QApplication::restoreOverrideCursor();
+    if (!corridor) {
+        logMessage(QString::fromStdString(corridor.error().describe()), true);
+        return;
+    }
+    const std::size_t triangles = corridor->surface.triangleCount();
+    const std::size_t sections = corridor->sections;
+    const std::size_t incomplete = corridor->incompleteSections;
+    addSurface("corridor " + request->alignmentName.toStdString(), std::move(corridor->surface));
+    logMessage(QString("Corridor surface for %1 added: %2 triangles from %3 sections%4. It is a "
+                       "surface like any other - visible in 3D and in sections.")
+                   .arg(request->alignmentName)
+                   .arg(triangles)
+                   .arg(sections)
+                   .arg(incomplete > 0 ? QString(", %1 left out for missing daylight (hull-bounded)")
+                                             .arg(incomplete)
+                                       : QString()));
 }
 
 } // namespace katana::qt

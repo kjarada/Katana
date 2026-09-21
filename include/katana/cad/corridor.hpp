@@ -112,6 +112,34 @@ corridorQuantities(const geometry::SolvedAlignment& alignment,
                    const geometry::SolvedProfile& profile, const Assembly& assembly,
                    const terrain::TinSurface& ground, double interval);
 
+// The finished design as a surface: the template strings of every complete
+// section, triangulated with the five longitudinal strings - both daylights,
+// both edges, the centreline - as breaklines, and the daylight lines as the
+// boundary so nothing is hulled across the inside of a curve. What the 3D
+// view shows, and what compareSurfaces can measure against the ground: an
+// independent check on the end-area quantities, which the tests make.
+//
+// Sections that cannot reach the ground are left out and the strings broken
+// there. When any are, the boundary is not used - a ring with gaps in it is
+// not a ring - and the surface is bounded by its convex hull instead, which
+// can then reach across a gap; the count says when that has happened.
+//
+// Where two strings cross in plan, on the inside of a curve tighter than the
+// corridor is wide, the crossing takes the mean of their elevations. That is
+// a compromise: the true design there is undefined, and refusing the whole
+// surface for it would lose the 99% that is fine.
+struct CorridorSurface {
+    terrain::TinSurface surface;
+    std::size_t sections = 0;           // that went into the surface
+    std::size_t incompleteSections = 0; // that were left out
+};
+
+// Fails as corridorQuantities does; with InvalidGeometry when fewer than two
+// sections are complete; and with whatever terrain::buildTin reports.
+[[nodiscard]] core::Result<CorridorSurface>
+corridorSurface(const geometry::SolvedAlignment& alignment, const geometry::SolvedProfile& profile,
+                const Assembly& assembly, const terrain::TinSurface& ground, double interval);
+
 // The area between two piecewise-linear lines over a common offset range,
 // split into the part where `upper` is above `lower` and the part where it is
 // below. Exposed because it is where the arithmetic is, and worth testing on

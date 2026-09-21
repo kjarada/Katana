@@ -1,9 +1,12 @@
 #include "katana/cad/corridor.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 
+#include "katana/geometry/primitives3d.hpp"
+#include "katana/terrain/tin_builder.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/math/summation.hpp"
 
@@ -330,6 +333,79 @@ Result<CorridorQuantities> corridorQuantities(const geometry::SolvedAlignment& a
     result.cut = cut.value();
     result.fill = fill.value();
     result.net = result.fill - result.cut;
+    return result;
+}
+
+Result<CorridorSurface> corridorSurface(const geometry::SolvedAlignment& alignment,
+                                        const geometry::SolvedProfile& profile,
+                                        const Assembly& assembly,
+                                        const terrain::TinSurface& ground, double interval)
+{
+    auto quantities = corridorQuantities(alignment, profile, assembly, ground, interval);
+    if (!quantities) {
+        return quantities.error();
+    }
+
+    terrain::TinInput input;
+    std::array<terrain::Breakline, 5> strings{};
+    std::vector<Point2> leftDaylight;
+    std::vector<Point2> rightDaylight;
+    const auto flush = [&] {
+        for (terrain::Breakline& string : strings) {
+            if (string.vertices.size() >= 2) {
+                input.breaklines.push_back(string);
+            }
+            string.vertices.clear();
+        }
+    };
+
+    CorridorSurface result;
+    for (const CorridorSection& section : quantities->sections) {
+        if (!section.complete) {
+            flush();
+            ++result.incompleteSections;
+            continue;
+        }
+        for (std::size_t k = 0; k < section.design.size(); ++k) {
+            const SectionVertex& vertex = section.design[k];
+            const auto plan = alignment.pointAtStationOffset(section.station, vertex.offset);
+            if (!plan) {
+                continue; // the station came from the alignment; cannot happen
+            }
+            const geometry::Point3 point(plan->x, plan->y, vertex.elevation);
+            input.points.push_back(point);
+            strings[k].vertices.push_back(point);
+            if (k == 0) {
+                leftDaylight.push_back(*plan);
+            } else if (k + 1 == section.design.size()) {
+                rightDaylight.push_back(*plan);
+            }
+        }
+        ++result.sections;
+    }
+    flush();
+    if (result.sections < 2) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "fewer than two sections reach the ground: there is no surface to build",
+                         std::to_string(result.incompleteSections) + " incomplete");
+    }
+    if (result.incompleteSections == 0) {
+        input.boundary.vertices = leftDaylight;
+        input.boundary.vertices.insert(input.boundary.vertices.end(), rightDaylight.rbegin(),
+                                       rightDaylight.rend());
+        input.boundary.closed = true;
+    }
+
+    terrain::TinBuildOptions options;
+    // Points and breakline vertices coincide exactly by construction, with
+    // equal elevations, so the default duplicate policy holds them to that;
+    // crossing strings take the mean - see the header.
+    options.crossingBreaklines = terrain::CrossingBreaklinePolicy::Average;
+    auto built = terrain::buildTin(input, options);
+    if (!built) {
+        return built.error();
+    }
+    result.surface = std::move(built->surface);
     return result;
 }
 

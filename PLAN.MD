@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections; clothoid; alignments and design profiles stored, editable and drawn; corridor cut/fill quantities by end area from a dialog; corridor surface, richer assemblies, parcels and grading outstanding |
+| 21 | Civil Engineering | partial — sections; clothoid; alignments and design profiles stored, editable and drawn; corridor quantities by end area and the corridor as a surface, cross-checked against each other; richer assemblies, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1369,12 +1369,19 @@ against hand-worked sections checked independently in Python: 10, 11.68 and
 10.75 m^2, and area-times-length exactly along a straight. Record in
 `docs/cad.md`.
 
-**OUTSTANDING in this phase:** the corridor as a SURFACE (the finished
-design as a TIN, so it can be shown in 3D and compared with
-`compareSurfaces`); richer assemblies (kerbs, verges, benches, subgrades) as
-a table of their own; the prismoidal correction, deliberately not applied;
-parcels; grading. `deleteAlignment` still has no in-use guard because nothing
-references an alignment by name.
+**Seventh slice DELIVERED: the corridor as a surface.** `cad::corridorSurface`
+triangulates the template strings as breaklines with the daylight lines as
+the boundary; Terrain > Corridor Surface... adds it to the scene, visible in
+3D and in sections. It makes an independent check of the quantities
+possible, and the tests make it: `compareSurfaces` of the corridor against
+the ground (an exact overlay) and the end-area total (a different method
+entirely) agree on 2000 m^3 to 1e-6 on a straight. Both commands share one
+dialog. Record in `docs/cad.md`.
+
+**OUTSTANDING in this phase:** richer assemblies (kerbs, verges, benches,
+subgrades) as a table of their own; the prismoidal correction, deliberately
+not applied; parcels; grading. `deleteAlignment` still has no in-use guard
+because nothing references an alignment by name.
 
 ## Alignments
 

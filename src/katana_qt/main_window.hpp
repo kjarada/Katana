@@ -6,12 +6,15 @@
 // view that is rebuilt from the document when it reports a change, and every
 // user action becomes a Command or a line for the CommandInterpreter.
 
+#include <optional>
 #include <QMainWindow>
 
 #include <filesystem>
 #include <memory>
 #include <vector>
 
+#include "katana/geometry/alignment.hpp"
+#include "katana/cad/corridor.hpp"
 #include "katana/geometry/profile.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/cad/command_interpreter.hpp"
@@ -62,6 +65,23 @@ class MainWindow final : public QMainWindow {
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
     void corridorQuantities();
+    void corridorSurface();
+
+    // What both corridor commands ask for: an alignment with a design
+    // profile, a ground surface, the assembly and the interval, from one
+    // dialog. nullopt when the user cancels or nothing qualifies, which has
+    // already been logged.
+    struct CorridorRequest {
+        katana::geometry::SolvedAlignment alignment;
+        katana::geometry::SolvedProfile profile;
+        const katana::terrain::TinSurface* ground = nullptr;
+        QString alignmentName;
+        QString surfaceName;
+        katana::cad::Assembly assembly;
+        double crossfallPercent = 0.0;
+        double interval = 10.0;
+    };
+    std::optional<CorridorRequest> askCorridor(const QString& title);
     // The part both section commands share: gather the visible surfaces, cut
     // along `alignment`, show the result. `along` names the source for the
     // log line.

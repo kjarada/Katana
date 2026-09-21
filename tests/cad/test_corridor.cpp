@@ -9,12 +9,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/profile.hpp"
 #include "katana/terrain/tin_builder.hpp"
+#include "katana/terrain/volume.hpp"
 
 using namespace katana::cad;
 using katana::core::ErrorCode;
@@ -260,3 +262,60 @@ TEST(Corridor, AreaBetweenSplitsAtACrossingAndIgnoresUncoveredIntervals)
     EXPECT_NEAR(areaBetween(shortLine, low).above, 5.0, 1e-12);
     EXPECT_EQ(areaBetween(std::vector<SectionVertex>{{0.0, 1.0}}, low).above, 0.0);
 }
+
+// ---- the corridor as a surface ---------------------------------------------------
+
+TEST(Corridor, TheCorridorSurfaceAgreesWithTheEndAreaQuantities)
+{
+    // Two independent methods for the same volume, both exact on a straight
+    // with a level design: end area over the sections, and the exact overlay
+    // of the built corridor surface against the ground in compareSurfaces.
+    // 2000 m^3 of cut over a 12 m by 200 m footprint, from both.
+    const TinSurface ground = planeGround(0.0, 0.0, 0.0);
+    const auto corridor = corridorSurface(straight200(), level(-1.0), assembly(4.0, 0.0, 2.0, 2.0),
+                                          ground, 10.0);
+    ASSERT_TRUE(corridor.ok()) << corridor.error().describe();
+    EXPECT_EQ(corridor->incompleteSections, 0u);
+    EXPECT_EQ(corridor->sections, 21u); // 0, 10, ..., 200
+    EXPECT_GT(corridor->surface.triangleCount(), 0u);
+
+    const auto comparison = katana::terrain::compareSurfaces(ground, corridor->surface);
+    ASSERT_TRUE(comparison.ok()) << comparison.error().describe();
+    EXPECT_NEAR(comparison->cut, 2000.0, 1e-6);  // ground above design
+    EXPECT_NEAR(comparison->fill, 0.0, 1e-9);
+    EXPECT_NEAR(comparison->planArea, 12.0 * 200.0, 1e-6);
+
+    const auto quantities = corridorQuantities(straight200(), level(-1.0),
+                                               assembly(4.0, 0.0, 2.0, 2.0), ground, 10.0);
+    ASSERT_TRUE(quantities.ok());
+    EXPECT_NEAR(quantities->cut, comparison->cut, 1e-6)
+        << "end area and the exact overlay must agree where both are exact";
+}
+
+TEST(Corridor, TheCorridorSurfaceStaysWithinItsDaylightLines)
+{
+    // The daylight lines are the boundary, so the surface reaches exactly
+    // +-6 m off the centreline and no further - nothing is hulled outside.
+    const TinSurface ground = planeGround(0.0, 0.0, 0.0);
+    const auto corridor = corridorSurface(straight200(), level(-1.0), assembly(4.0, 0.0, 2.0, 2.0),
+                                          ground, 10.0);
+    ASSERT_TRUE(corridor.ok());
+    const auto& bounds = corridor->surface.bounds();
+    EXPECT_NEAR(bounds.min.x, 0.0, 1e-9);
+    EXPECT_NEAR(bounds.max.x, 200.0, 1e-9);
+    EXPECT_NEAR(bounds.min.y, -6.0, 1e-9);
+    EXPECT_NEAR(bounds.max.y, 6.0, 1e-9);
+    EXPECT_NEAR(corridor->surface.minElevation(), -1.0, 1e-12);
+    EXPECT_NEAR(corridor->surface.maxElevation(), 0.0, 1e-9);
+}
+
+TEST(Corridor, NoSurfaceIsBuiltWhenNoSectionReachesTheGround)
+{
+    const TinSurface ground = planeGround(0.0, 0.0, 0.0, 3.0);
+    const auto corridor = corridorSurface(straight200(), level(-1.0), assembly(4.0, 0.0, 2.0, 2.0),
+                                          ground, 50.0);
+    ASSERT_FALSE(corridor.ok());
+    EXPECT_EQ(corridor.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(corridor.error().describe().find("incomplete"), std::string::npos);
+}
+

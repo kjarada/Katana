@@ -431,3 +431,27 @@ with the trapezoid split in the code. A constant section along a straight
 gives area times length exactly whatever the interval, which the end-area
 method must.
 
+**The corridor as a surface, and the check it makes possible.**
+`cad::corridorSurface` triangulates the template strings of every complete
+section - both daylights, both edges, the centreline - as breaklines, with
+the daylight lines as the boundary so nothing is hulled across the inside of
+a curve. Terrain > Corridor Surface... adds it to the scene like any other
+surface, so the finished design is visible in 3D and in sections. Two
+decisions: sections that cannot reach the ground are left out and the
+strings broken there, and when any are, the boundary is not used (a ring
+with gaps in it is not a ring) and the surface is hull-bounded instead, with
+the count reported; and where two strings cross in plan on the inside of a
+curve tighter than the corridor is wide, the crossing takes the mean of
+their elevations rather than refusing the whole surface for it.
+
+The surface makes an independent check of the quantities possible, and the
+tests make it: `compareSurfaces` of the built corridor against the ground is
+an exact overlay, the end-area total is a different method entirely, and on
+a straight with a level design both are exact and agree on 2000 m^3 to 1e-6.
+Two implementations that share nothing agreeing on the same number is the
+strongest evidence either can have.
+
+Both commands share `askCorridor`, one dialog returning the solved alignment
+and profile, the ground and the assembly, rather than two copies of eighty
+lines of dialog.
+
