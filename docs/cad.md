@@ -347,3 +347,30 @@ visible surfaces, cuts and shows. The alignment path chords the centreline at
 10 mm: the section samples at most every 100 mm along it, so a finer polyline
 would cost time and change nothing the section reports.
 
+## Design profiles
+
+`ALIGN DESIGN name station,elevation[,curveLength] ...` defines the design
+grade line on an alignment, at least two PVIs; `ALIGN PVI name s z [L]`
+appends one; `ALIGN PROFILE name` prints the PVIs, the solved tangents and
+curves with their grades, and the high and low points; `ALIGN CLEARPROFILE`
+removes it.
+
+**Why `DESIGN` exists as well as `PVI`.** The first draft had only `PVI`,
+adding one at a time, and the first one could never be added: a profile with
+one PVI cannot be built, and the model rightly refuses to hold an alignment
+whose profile does not solve. A profile therefore has to be born with at
+least two PVIs, in one command, and `PVI` appends to one that exists. The
+alternative - letting the model hold a partial profile - would have broken
+the invariant that everything stored can be drawn.
+
+**The design rides into the section as a series.** `cad::appendDesignProfile`
+adds the profile to a `Section` as one more `SectionSurface`, sampled at
+every station any ground series already has - so design and ground can be
+read against each other at the same stations - plus the profile's key
+stations and extrema, marked `SampleReason::ProfileVertex`. The section view
+needed no change: it already draws every series in its palette, breaks a
+line at every gap, and lists each series in its legend. A design shorter
+than the section shows as a gap beyond its end rather than an invented
+grade. Cut Section Along Alignment... passes the profile through
+`cutSectionAlong` when the alignment has one.
+

@@ -32,6 +32,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/geometry/profile.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
@@ -52,7 +53,9 @@ struct SectionSample {
 
 // Why a sample was placed. Useful to the view, which draws breaks differently
 // from interval ticks, and to a caller exporting the profile.
-enum class SampleReason { Interval, AlignmentVertex, SurfaceBreak, Start, End };
+// ProfileVertex marks a PVC, PVT, PVI, high or low point of a design profile
+// - the stations a design is labelled and set out at.
+enum class SampleReason { Interval, AlignmentVertex, SurfaceBreak, Start, End, ProfileVertex };
 
 struct SectionSurface {
     std::string name;
@@ -128,5 +131,20 @@ crossSectionLine(const Polyline2& alignment, double station, double halfWidth);
 // full length. The set of cross sections a corridor is cut at.
 [[nodiscard]] katana::core::Result<std::vector<double>>
 sectionStations(const Polyline2& alignment, double interval);
+
+// Adds the design grade line as one more series of `section`, named `name`,
+// so that whatever draws the ground draws the design beside it and the cut
+// and fill between them is visible.
+//
+// Sampled at every station any existing series already has - so design and
+// ground can be read against each other at the same stations - plus the
+// profile's key stations and high and low points, marked ProfileVertex.
+// Stations the profile does not cover get no elevation, which the view draws
+// as a gap: a design shorter than the section shows as exactly that.
+//
+// Fails with InvalidArgument for an empty name or a section of no length.
+[[nodiscard]] katana::core::Status appendDesignProfile(Section& section,
+                                                       const katana::geometry::SolvedProfile& profile,
+                                                       std::string name);
 
 } // namespace katana::cad

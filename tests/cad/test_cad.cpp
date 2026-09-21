@@ -1101,3 +1101,69 @@ TEST(CadInterpreter, AlignmentEditsAreUndoable)
     session.ok("UNDO");
     EXPECT_NE(session.document.model().alignments.find("road"), nullptr);
 }
+
+// ---- design profiles --------------------------------------------------------------
+
+TEST(CadInterpreter, ADesignProfileIsAttachedByPVIsAndReportedWithItsLowPoint)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 400,0 400,400");
+    session.ok("ALIGN SET road 1 50");
+    EXPECT_NE(session.ok("ALIGN PROFILE road").find("no design profile"), std::string::npos);
+
+    // A profile with one PVI cannot be built, so it cannot be grown from
+    // nothing: PVI on an undesigned alignment is refused and says what to do.
+    EXPECT_EQ(session.fails("ALIGN PVI road 0 16"), ErrorCode::InvalidState);
+
+    // The textbook sag: -3% into +2% over 100 m, low point at 110 @ 13.6.
+    session.ok("ALIGN DESIGN road 0,16 100,13,100 300,17");
+    const auto* road = session.document.model().alignments.find("road");
+    ASSERT_NE(road, nullptr);
+    ASSERT_TRUE(road->vertical.has_value());
+    EXPECT_EQ(road->vertical->pvis.size(), 3u);
+
+    const std::string report = session.ok("ALIGN PROFILE road");
+    EXPECT_NE(report.find("low point"), std::string::npos) << report;
+    EXPECT_NE(report.find("110.000"), std::string::npos) << report;
+    EXPECT_NE(report.find("13.600"), std::string::npos) << report;
+    EXPECT_NE(report.find("curve"), std::string::npos) << report;
+}
+
+TEST(CadInterpreter, AProfileThatCannotBeBuiltIsRefusedNamingThePVIAndKeepsTheLastGoodOne)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 400,0 400,400");
+    session.ok("ALIGN DESIGN road 0,16 100,13,100 300,17");
+    // A PVI behind the last one: stations must increase.
+    const auto refused = session.interpreter.run("ALIGN PVI road 50 20");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(refused.error().describe().find("PVI 3"), std::string::npos)
+        << refused.error().describe();
+    EXPECT_EQ(session.document.model().alignments.find("road")->vertical->pvis.size(), 3u);
+    EXPECT_EQ(session.fails("ALIGN PVI road 400"), ErrorCode::InvalidArgument); // no elevation
+    // DESIGN with a single PVI is a malformed command, and a curve on the last
+    // PVI is a definition that cannot be built - refused by the model, naming it.
+    EXPECT_EQ(session.fails("ALIGN DESIGN road 0,16"), ErrorCode::InvalidArgument);
+    const auto atEnd = session.interpreter.run("ALIGN DESIGN road 0,16 300,17,50");
+    ASSERT_FALSE(atEnd.ok());
+    EXPECT_EQ(atEnd.error().code, ErrorCode::InvalidGeometry);
+    EXPECT_NE(atEnd.error().describe().find("PVI 1"), std::string::npos) << atEnd.error().describe();
+    // Appending works once a profile exists.
+    session.ok("ALIGN PVI road 400 18");
+    EXPECT_EQ(session.document.model().alignments.find("road")->vertical->pvis.size(), 4u);
+}
+
+TEST(CadInterpreter, ClearingAProfileIsUndoable)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 400,0 400,400");
+    session.ok("ALIGN DESIGN road 0,16 300,17");
+    ASSERT_TRUE(session.document.model().alignments.find("road")->vertical.has_value());
+    session.ok("ALIGN CLEARPROFILE road");
+    EXPECT_FALSE(session.document.model().alignments.find("road")->vertical.has_value());
+    session.ok("UNDO");
+    ASSERT_TRUE(session.document.model().alignments.find("road")->vertical.has_value());
+    EXPECT_EQ(session.document.model().alignments.find("road")->vertical->pvis.size(), 2u);
+}
+

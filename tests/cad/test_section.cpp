@@ -7,6 +7,10 @@
 
 #include <gtest/gtest.h>
 
+#include "katana/geometry/profile.hpp"
+
+#include <algorithm>
+
 #include <cmath>
 
 #include "katana/cad/section.hpp"
@@ -408,3 +412,129 @@ TEST(CadSection, ACrossSectionOfARampIsFlatAcrossTheFallLine)
         EXPECT_NEAR(*sample.elevation, 5.0, 1e-6) << "station " << sample.station;
     }
 }
+
+// ---- the design profile as a series of the section --------------------------------
+
+namespace {
+
+// A straight 300 m section along +x with one ground series sampled every
+// 50 m at a constant 10.0, built by hand so the test depends on nothing but
+// the Section struct.
+katana::cad::Section straightSection()
+{
+    katana::cad::Section section;
+    section.alignment.vertices = {katana::geometry::Point2(0, 0), katana::geometry::Point2(300, 0)};
+    section.length = 300.0;
+    katana::cad::SectionSurface ground;
+    ground.name = "ground";
+    for (double s = 0.0; s <= 300.0; s += 50.0) {
+        katana::cad::SectionSample sample;
+        sample.station = s;
+        sample.plan = katana::geometry::Point2(s, 0);
+        sample.elevation = 10.0;
+        ground.samples.push_back(sample);
+        ground.reasons.push_back(katana::cad::SampleReason::Interval);
+    }
+    ground.minElevation = 10.0;
+    ground.maxElevation = 10.0;
+    section.surfaces.push_back(ground);
+    return section;
+}
+
+// The textbook sag from the profile tests, shifted to start at 0: PVC 100,
+// PVT 300... no - kept inside the 300 m section: PVIs (0, 16), (100, 13,
+// L = 100), (300, 17): -3% into +2%, PVC 50 @ 14.5, PVT 150 @ 14.0, low point
+// at x = 0.03 * 100 / 0.05 = 60 -> station 110 @ 14.5 - 1.8 + 0.9 = 13.6.
+katana::geometry::SolvedProfile sagProfile()
+{
+    katana::geometry::VerticalAlignment definition;
+    definition.pvis = {katana::geometry::ProfilePVI{0.0, 16.0},
+                       katana::geometry::ProfilePVI{100.0, 13.0, 100.0},
+                       katana::geometry::ProfilePVI{300.0, 17.0}};
+    auto solved = katana::geometry::solveProfile(definition);
+    EXPECT_TRUE(solved.ok()) << solved.error().describe();
+    return *solved;
+}
+
+} // namespace
+
+TEST(CadSection, ADesignProfileIsSampledWhereTheGroundIsAndAtItsOwnKeyStations)
+{
+    katana::cad::Section section = straightSection();
+    const auto profile = sagProfile();
+    ASSERT_TRUE(katana::cad::appendDesignProfile(section, profile, "design").ok());
+    ASSERT_EQ(section.surfaces.size(), 2u);
+    const katana::cad::SectionSurface& design = section.surfaces[1];
+    EXPECT_EQ(design.name, "design");
+
+    // Every ground station is present, so the two can be read against each
+    // other; the PVC (50), PVT (150) and low point (110) are present too and
+    // marked as the design's own.
+    std::vector<double> stations;
+    std::size_t vertices = 0;
+    for (std::size_t i = 0; i < design.samples.size(); ++i) {
+        stations.push_back(design.samples[i].station);
+        if (design.reasons[i] == katana::cad::SampleReason::ProfileVertex) {
+            ++vertices;
+        }
+    }
+    for (double ground : {0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 300.0}) {
+        EXPECT_NE(std::find(stations.begin(), stations.end(), ground), stations.end()) << ground;
+    }
+    EXPECT_NE(std::find(stations.begin(), stations.end(), 110.0), stations.end()) << "low point";
+    EXPECT_GE(vertices, 4u) << "start, PVC, low point, PVT, end at least";
+    EXPECT_TRUE(std::is_sorted(stations.begin(), stations.end()));
+    EXPECT_EQ(std::adjacent_find(stations.begin(), stations.end()), stations.end())
+        << "a station appeared twice";
+
+    // Elevations are the profile's, exactly, and the plan positions are on
+    // the alignment: station s of a straight along +x is (s, 0).
+    for (const katana::cad::SectionSample& sample : design.samples) {
+        ASSERT_TRUE(sample.elevation.has_value()) << sample.station;
+        EXPECT_NEAR(*sample.elevation, *profile.elevationAt(sample.station), 1e-12);
+        EXPECT_NEAR(sample.plan.x, sample.station, 1e-9);
+        EXPECT_NEAR(sample.plan.y, 0.0, 1e-9);
+    }
+    EXPECT_NEAR(*design.minElevation, 13.6, 1e-12) << "the low point";
+    EXPECT_NEAR(*design.maxElevation, 17.0, 1e-12);
+
+    // The section's extent now spans ground and design together.
+    const auto extent = section.extent();
+    EXPECT_NEAR(extent.min.y, 10.0, 1e-12);
+    EXPECT_NEAR(extent.max.y, 17.0, 1e-12);
+}
+
+TEST(CadSection, ADesignShorterThanTheSectionLeavesAGapRatherThanInventingGrades)
+{
+    katana::cad::Section section = straightSection();
+    katana::geometry::VerticalAlignment definition;
+    definition.pvis = {katana::geometry::ProfilePVI{0.0, 12.0},
+                       katana::geometry::ProfilePVI{200.0, 14.0}};
+    const auto profile = katana::geometry::solveProfile(definition);
+    ASSERT_TRUE(profile.ok());
+    ASSERT_TRUE(katana::cad::appendDesignProfile(section, *profile, "design").ok());
+    const katana::cad::SectionSurface& design = section.surfaces.back();
+    std::size_t gaps = 0;
+    for (const katana::cad::SectionSample& sample : design.samples) {
+        if (sample.station > 200.0) {
+            EXPECT_FALSE(sample.elevation.has_value()) << sample.station;
+            ++gaps;
+        } else {
+            EXPECT_TRUE(sample.elevation.has_value()) << sample.station;
+        }
+    }
+    EXPECT_GE(gaps, 2u) << "250 and 300 lie beyond the design";
+}
+
+TEST(CadSection, ADesignProfileRejectsAnEmptyNameAndAnEmptySection)
+{
+    katana::cad::Section section = straightSection();
+    const auto profile = sagProfile();
+    EXPECT_EQ(katana::cad::appendDesignProfile(section, profile, "").error().code,
+              katana::core::ErrorCode::InvalidArgument);
+    katana::cad::Section empty;
+    EXPECT_EQ(katana::cad::appendDesignProfile(empty, profile, "design").error().code,
+              katana::core::ErrorCode::InvalidArgument);
+    EXPECT_EQ(section.surfaces.size(), 1u) << "a refused append changes nothing";
+}
+

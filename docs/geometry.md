@@ -436,11 +436,23 @@ scan rather than by the closed form the code uses:
 
 Every number is exact in decimal, so the tolerances are rounding only.
 
+### In the application
+
+`entity::Alignment::vertical` holds the profile as an `optional`, because an
+alignment traced only to cut a section has no design and should not pretend
+to an empty one; `validate` solves it, so an unbuildable profile is refused
+naming its PVI, including one arriving from a file. Schema 8 stores
+`alignment_pvis`, and the reader creates the profile on its first row so an
+alignment with none comes back without one - a test proves that, because an
+empty profile would fail to solve and refuse the whole load. `ALIGN DESIGN`
+defines a profile, `PVI` appends, `PROFILE` prints it with its high and low
+points, and `cad::appendDesignProfile` adds it to a section as a series
+sampled at every ground station plus the profile's own key stations, so the
+section view draws design against ground and the low point of a sag lands
+where the water will. Details in `docs/cad.md`.
+
 ### Not done
 
-Nothing holds or draws a profile yet: `geometry::VerticalAlignment` is a
-value with a solver. Attaching one to a named alignment, storing it,
-defining it from the command line, and drawing it as a design series over
-the ground line in the section view are the next slice - and at that point
-the section view finally shows what a profile exists to show, the cut and
-fill between design and ground.
+Corridors, parcels and grading. Cut and fill *quantities* between design and
+ground along an alignment - the profile is drawn against the ground but
+nothing yet integrates the area between them; that is the corridor's job.

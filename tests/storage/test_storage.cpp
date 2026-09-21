@@ -371,6 +371,11 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 [[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
 {
     // Newest first: a migration is undone before the one it was built on.
+    if (version < 8) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS alignment_pvis;"); !status) {
+            return status;
+        }
+    }
     if (version < 7) {
         if (auto status = database.execute("DROP TABLE IF EXISTS alignment_pis;"
                                            "DROP TABLE IF EXISTS alignments;");
@@ -1231,3 +1236,93 @@ TEST_F(ProjectStoreRoundTrip, AFileHoldingAnAlignmentThatCannotBeBuiltIsRefusedN
         << applied.error().describe();
     EXPECT_EQ(loaded.alignments.size(), 0u) << "a refused load must leave the model untouched";
 }
+
+// ---- design profiles (schema 8) ----------------------------------------------------
+
+namespace {
+
+katana::entity::Alignment mainRoadWithProfile()
+{
+    katana::entity::Alignment road = mainRoad();
+    // Stations lie within the road's 1000 to ~1247 chainage: a crest of
+    // 60 m at 1120.
+    road.vertical.emplace();
+    road.vertical->pvis = {katana::geometry::ProfilePVI{1000.0, 50.0},
+                           katana::geometry::ProfilePVI{1120.0, 53.0, 60.0},
+                           katana::geometry::ProfilePVI{1240.0, 51.0}};
+    return road;
+}
+
+} // namespace
+
+TEST_F(ProjectStoreRoundTrip, AProfileOnAnAlignmentSurvivesSaveAndReopen)
+{
+    Model model = sampleModel();
+    const katana::entity::Alignment road = mainRoadWithProfile();
+    ASSERT_TRUE(model.alignments.add(road));
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok()); // the second-save check
+    }
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    const katana::entity::Alignment* reloaded = loaded.alignments.find("road");
+    ASSERT_NE(reloaded, nullptr);
+    ASSERT_TRUE(reloaded->vertical.has_value());
+    EXPECT_EQ(*reloaded, road);
+}
+
+TEST_F(ProjectStoreRoundTrip, AnAlignmentWithoutAProfileComesBackWithoutOne)
+{
+    // The reader creates the profile on its first row. An alignment with no
+    // rows must NOT come back with an empty profile, which would then fail
+    // to solve and refuse the whole load.
+    Model model = sampleModel();
+    ASSERT_TRUE(model.alignments.add(mainRoad()));
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok());
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    ASSERT_NE(loaded.alignments.find("road"), nullptr);
+    EXPECT_FALSE(loaded.alignments.find("road")->vertical.has_value());
+}
+
+TEST_F(ProjectStoreMigration, AProjectFromBeforeProfilesKeepsItsAlignmentsUnprofiled)
+{
+    Model model = sampleModel();
+    ASSERT_TRUE(model.alignments.add(mainRoadWithProfile()));
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(rewindSchemaTo(*database, 7).ok()); // drops the profile table
+    }
+    auto reopened = ProjectStore::open(projectDir());
+    ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+    EXPECT_EQ(*reopened->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    const auto contents = reopened->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    const katana::entity::Alignment* road = loaded.alignments.find("road");
+    ASSERT_NE(road, nullptr) << "the alignment itself predates the migration and must survive";
+    EXPECT_FALSE(road->vertical.has_value());
+}
+

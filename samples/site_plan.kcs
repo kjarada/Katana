@@ -66,6 +66,9 @@ LAYER HATCH BUILDING brick
 # stations; Terrain > Cut Section Along Alignment... cuts a section down it.
 ALIGN NEW access 0,-30 60,-30 160,20
 ALIGN SET access 1 40 10 10
+# Its design grade line: a sag of 40 m at chainage 80. Cut Section Along
+# Alignment... then shows the design against the ground, with its low point.
+ALIGN DESIGN access 0,52 80,50.5,40 171,53
 
 LAYER SET BOUNDARY
 LIST

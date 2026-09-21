@@ -204,6 +204,19 @@ constexpr Migration kMigrations[] = {
             PRIMARY KEY (alignment, position)
         ) WITHOUT ROWID;
     )sql"},
+    // The design profile on an alignment, as its PVIs. An alignment with no
+    // rows here has no profile - which is what every alignment written before
+    // this migration has, so nothing is invented.
+    {8, R"sql(
+        CREATE TABLE alignment_pvis (
+            alignment    TEXT NOT NULL REFERENCES alignments(name) ON DELETE CASCADE,
+            position     INTEGER NOT NULL,
+            station      REAL NOT NULL,
+            elevation    REAL NOT NULL,
+            curve_length REAL NOT NULL,
+            PRIMARY KEY (alignment, position)
+        ) WITHOUT ROWID;
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -877,7 +890,7 @@ Status ProjectStore::save(const ProjectContents& contents)
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
                                        "DELETE FROM dimension_styles;"
                                        "DELETE FROM hatch_families; DELETE FROM hatch_patterns;"
-                                       "DELETE FROM alignment_pis; DELETE FROM alignments;"
+                                       "DELETE FROM alignment_pvis; DELETE FROM alignment_pis; DELETE FROM alignments;"
                                        "DELETE FROM layers; DELETE FROM metadata;");
         !status) {
         return status;
@@ -1062,6 +1075,12 @@ Status ProjectStore::save(const ProjectContents& contents)
     if (!insertPI) {
         return insertPI.error();
     }
+    auto insertPVI = database.prepare(
+        "INSERT INTO alignment_pvis (alignment, position, station, elevation, curve_length)"
+        " VALUES (?1, ?2, ?3, ?4, ?5)");
+    if (!insertPVI) {
+        return insertPVI.error();
+    }
     for (const katana::entity::Alignment& alignment : contents.alignments) {
         if (auto status = Binder(*insertAlignment)(1, std::string_view(alignment.name))(
                               2, std::string_view(alignment.description))(
@@ -1080,6 +1099,20 @@ Status ProjectStore::save(const ProjectContents& contents)
                 !status) {
                 return makeError(status.error().code, status.error().message,
                                  "alignment=" + alignment.name + " pi=" + std::to_string(i));
+            }
+        }
+        if (alignment.vertical.has_value()) {
+            for (std::size_t i = 0; i < alignment.vertical->pvis.size(); ++i) {
+                const katana::geometry::ProfilePVI& pvi = alignment.vertical->pvis[i];
+                if (auto status = Binder(*insertPVI)(1, std::string_view(alignment.name))(
+                                      2, static_cast<std::int64_t>(i))(3, pvi.station)(
+                                      4, pvi.elevation)(5, pvi.curveLength)
+                                      .run();
+                    !status) {
+                    return makeError(status.error().code, status.error().message,
+                                     "alignment=" + alignment.name +
+                                         " pvi=" + std::to_string(i));
+                }
             }
         }
     }
@@ -1383,6 +1416,34 @@ Result<ProjectContents> ProjectStore::load()
             pi.spiralIn = row.columnDouble(4);
             pi.spiralOut = row.columnDouble(5);
             found->horizontal.pis.push_back(pi);
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    // The profile exists only when it has rows: the first row creates it, so
+    // an alignment with none keeps `vertical` empty rather than acquiring a
+    // profile of no PVIs that would then fail to solve.
+    status = forEachRow(
+        "SELECT alignment, station, elevation, curve_length FROM alignment_pvis"
+        " ORDER BY alignment, position",
+        [&](SqliteStatement& row) -> Status {
+            const std::string name = row.columnText(0);
+            const auto found = std::lower_bound(
+                contents.alignments.begin(), contents.alignments.end(), name,
+                [](const katana::entity::Alignment& alignment, const std::string& wanted) {
+                    return alignment.name < wanted;
+                });
+            if (found == contents.alignments.end() || found->name != name) {
+                return makeError(ErrorCode::DatabaseFailure,
+                                 "a profile PVI names an alignment that was not read", name);
+            }
+            if (!found->vertical.has_value()) {
+                found->vertical.emplace();
+            }
+            found->vertical->pvis.push_back(katana::geometry::ProfilePVI{
+                row.columnDouble(1), row.columnDouble(2), row.columnDouble(3)});
             return {};
         });
     if (!status) {

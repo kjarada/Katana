@@ -17,6 +17,7 @@
 #include "katana/core/error.hpp"
 #include "katana/entity/named_table.hpp"
 #include "katana/geometry/alignment.hpp"
+#include "katana/geometry/profile.hpp"
 #include "katana/entity/layer_path.hpp"
 #include "katana/entity/entity.hpp"
 
@@ -324,14 +325,21 @@ struct Alignment {
     std::string name{};
     std::string description{};
     katana::geometry::HorizontalAlignment horizontal{};
+    // The design grade line along it, when one has been designed. Optional
+    // rather than empty, because an alignment traced only to cut a section
+    // has no design and should not pretend to an empty one. One profile per
+    // alignment: a second (a kerb line, say) is a later need, and a separate
+    // table when it comes.
+    std::optional<katana::geometry::VerticalAlignment> vertical{};
 
     friend bool operator==(const Alignment&, const Alignment&) = default;
 };
 
 // Fails with InvalidArgument for a bad name, and with whatever
-// geometry::solveAlignment reports for a definition that cannot be built - so
-// an alignment that would fail to draw is refused on the way in, naming the
-// PI, rather than stored and found out about later.
+// geometry::solveAlignment or geometry::solveProfile reports for a definition
+// that cannot be built - so an alignment that would fail to draw is refused on
+// the way in, naming the PI or PVI, rather than stored and found out about
+// later.
 [[nodiscard]] katana::core::Status validate(const Alignment& alignment);
 
 struct AlignmentPolicy : NamedTablePolicy<Alignment> {

@@ -66,6 +66,38 @@ Result<std::vector<std::string>> tokenize(std::string_view line)
 }
 
 // std::from_chars is locale independent: "1.5" never becomes "1,5".
+Result<double> parseNumber(std::string_view text);
+
+// "station,elevation" or "station,elevation,curveLength", as ALIGN DESIGN
+// takes its PVIs - one token per PVI, so a profile of any length is one line.
+Result<katana::geometry::ProfilePVI> parsePVI(const std::string& text)
+{
+    std::vector<double> numbers;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t comma = text.find(',', start);
+        const std::string_view part =
+            std::string_view(text).substr(start, comma == std::string::npos ? std::string::npos
+                                                                            : comma - start);
+        const auto value = parseNumber(part);
+        if (!value) {
+            return makeError(ErrorCode::InvalidArgument, "a PVI is station,elevation[,curveLength]",
+                             text);
+        }
+        numbers.push_back(*value);
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    if (numbers.size() < 2 || numbers.size() > 3) {
+        return makeError(ErrorCode::InvalidArgument, "a PVI is station,elevation[,curveLength]",
+                         text);
+    }
+    return katana::geometry::ProfilePVI{numbers[0], numbers[1],
+                                        numbers.size() == 3 ? numbers[2] : 0.0};
+}
+
 Result<double> parseNumber(std::string_view text)
 {
     double value = 0.0;
@@ -222,6 +254,9 @@ Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] |
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
           SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
           DELETE name.  PI indices count from 0; radius 0 is a kink; spirals in MODEL units
+          DESIGN name s,z[,L] s,z[,L] ... defines the design profile (parabolic vertical
+          curves, symmetric); PVI name s z [L] appends; PROFILE name prints it with its
+          high and low points; CLEARPROFILE name removes it
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
@@ -997,7 +1032,9 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
     const char* const kUsage =
         "ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spiralIn [spiralOut]]]"
         "\n      | SET name index radius [spiralIn [spiralOut]] | START name station"
-        "\n      | STATIONS name interval | DELETE name     (PI indices count from 0)";
+        "\n      | STATIONS name interval | DELETE name     (PI indices count from 0)"
+        "\n      | DESIGN name station,elevation[,curveLength] ... (at least two PVIs)"
+        "\n      | PVI name station elevation [curveLength] | PROFILE name | CLEARPROFILE name";
 
     if (action == "LIST") {
         std::ostringstream out;
@@ -1167,6 +1204,107 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         std::string text = out.str();
         text.pop_back();
         return text;
+    }
+    if (action == "DESIGN") {
+        // The whole profile at once, because a profile with one PVI cannot be
+        // built and the model refuses to hold one - so it cannot be grown from
+        // nothing one PVI at a time. PVI appends to a profile that exists.
+        if (args.size() < 4) {
+            return usage("ALIGN DESIGN name station,elevation[,curveLength] ...   at least two;"
+                         " the first and last carry no curve");
+        }
+        katana::geometry::VerticalAlignment profile;
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            const auto pvi = parsePVI(args[i]);
+            if (!pvi) {
+                return pvi.error();
+            }
+            profile.pvis.push_back(*pvi);
+        }
+        changed.vertical = std::move(profile);
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " designed with " + std::to_string(args.size() - 2) +
+                          " PVIs");
+    }
+    if (action == "PVI") {
+        if (args.size() < 4) {
+            return usage("ALIGN PVI name station elevation [curveLength]   appends a PVI to an"
+                         " existing design profile; use DESIGN to start one");
+        }
+        if (!existing->vertical.has_value()) {
+            return makeError(ErrorCode::InvalidState,
+                             "the alignment has no design profile to append to; define one with"
+                             " ALIGN DESIGN",
+                             name);
+        }
+        const auto station = parseNumber(args[2]);
+        if (!station) {
+            return station.error();
+        }
+        const auto elevation = parseNumber(args[3]);
+        if (!elevation) {
+            return elevation.error();
+        }
+        double curveLength = 0.0;
+        if (args.size() > 4) {
+            const auto length = parseNumber(args[4]);
+            if (!length) {
+                return length.error();
+            }
+            curveLength = *length;
+        }
+        if (!changed.vertical.has_value()) {
+            changed.vertical.emplace();
+        }
+        changed.vertical->pvis.push_back(
+            katana::geometry::ProfilePVI{*station, *elevation, curveLength});
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " profile now has " +
+                          std::to_string(changed.vertical->pvis.size()) + " PVIs");
+    }
+    if (action == "PROFILE") {
+        if (!existing->vertical.has_value()) {
+            return "alignment " + name + " has no design profile";
+        }
+        auto solved = katana::geometry::solveProfile(*existing->vertical);
+        if (!solved) {
+            return solved.error();
+        }
+        std::ostringstream out;
+        out << std::fixed;
+        out.precision(3);
+        out << "  PVIs:";
+        for (const katana::geometry::ProfilePVI& pvi : existing->vertical->pvis) {
+            out << "  " << pvi.station << " @ " << pvi.elevation;
+            if (pvi.curveLength > 0.0) {
+                out << " L=" << pvi.curveLength;
+            }
+        }
+        out << "\n";
+        for (const katana::geometry::ProfileElement& element : solved->elements()) {
+            out << "  " << (element.kind == katana::geometry::ProfileElementKind::Curve
+                                ? "curve  "
+                                : "tangent")
+                << "  " << std::setw(10) << element.startStation << " to " << std::setw(10)
+                << element.startStation + element.length << "  grade " << std::setw(7)
+                << element.startGrade * 100.0 << "%";
+            if (element.kind == katana::geometry::ProfileElementKind::Curve) {
+                out << " to " << std::setw(7) << element.endGrade * 100.0 << "%";
+            }
+            out << "\n";
+        }
+        for (const katana::geometry::ProfileExtremum& point : solved->highLowPoints()) {
+            out << "  " << (point.high ? "high point" : "low point ") << " at " << point.station
+                << " @ " << point.elevation << "\n";
+        }
+        std::string text = out.str();
+        text.pop_back();
+        return text;
+    }
+    if (action == "CLEARPROFILE") {
+        changed.vertical.reset();
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " profile removed");
     }
     return usage(kUsage);
 }

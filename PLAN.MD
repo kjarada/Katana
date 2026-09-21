@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections; clothoid; PI-defined alignments with `ALIGN`, overlay and section-along-alignment; parabolic vertical profile solver in `geometry`; profile integration, corridors, parcels and grading outstanding |
+| 21 | Civil Engineering | partial — sections; clothoid; PI-defined alignments and PVI-defined design profiles, stored, editable from `ALIGN`, drawn as an overlay and as design-against-ground in the section view; corridors, parcels, grading and cut/fill quantities outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1343,13 +1343,25 @@ and a fine scan: sag low point 1020 @ 101.2, crest high point 550 @ 148.0.
 Asymmetric curves are deliberately not provided. Record in
 `docs/geometry.md`.
 
-**OUTSTANDING in this phase:** the profile is not yet in the model, the
-command line or the section view - attaching one to a named alignment,
-storing it, and drawing it as a design series over the ground line is the
-next slice, and the one that finally shows cut and fill between design and
-ground. After that: corridors, parcels and grading. `deleteAlignment` has no
-in-use guard because nothing references an alignment by name yet; the
-command says where the guard belongs when profiles are attached.
+**Fifth slice DELIVERED: profiles in the application.** `Alignment::vertical`
+holds the design profile as an `optional`, validated by solving so an
+unbuildable one is refused naming its PVI - from the command line or from a
+file. Schema 8 stores `alignment_pvis`; an alignment with no rows comes back
+without a profile, proved by a test, because an empty one would fail to
+solve and refuse the whole load. `ALIGN DESIGN` defines a profile in one
+command (a profile cannot be grown from a single PVI, which the model
+refuses - recorded in `docs/cad.md`), `PVI` appends, `PROFILE` prints it with
+high and low points. `cad::appendDesignProfile` adds the design to a section
+as a series sampled at every ground station plus the profile's key stations,
+and Cut Section Along Alignment... passes it through, so the section view
+shows design against ground with no change to the view. `samples/site_plan`
+carries one: a sag whose low point the command reports at 76.226 @ 50.723.
+
+**OUTSTANDING in this phase:** corridors, parcels and grading, and the cut and
+fill QUANTITIES between design and ground along an alignment - the profile is
+drawn against the ground but nothing integrates the area between them; that
+is the corridor's job. `deleteAlignment` still has no in-use guard because
+nothing references an alignment by name.
 
 ## Alignments
 

@@ -1,5 +1,7 @@
 #include "katana/cad/section.hpp"
 
+#include <utility>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -405,6 +407,106 @@ Result<std::vector<double>> sectionStations(const Polyline2& alignment, double i
     }
     stations.push_back(length);
     return stations;
+}
+
+namespace {
+
+// The world position `distance` along `line`, walking its segments. The
+// section keeps the chorded alignment it was cut along, so this is what puts
+// a design station back on the plan for the cursor readout.
+Point2 pointAlong(const Polyline2& line, double distance)
+{
+    if (line.vertices.empty()) {
+        return Point2{};
+    }
+    double remaining = std::max(distance, 0.0);
+    for (std::size_t i = 0; i + 1 < line.vertices.size(); ++i) {
+        const Point2& a = line.vertices[i];
+        const Point2& b = line.vertices[i + 1];
+        const double length = a.distanceTo(b);
+        if (remaining <= length || i + 2 == line.vertices.size()) {
+            const double t = length > 0.0 ? std::min(remaining / length, 1.0) : 0.0;
+            return a + (b - a) * t;
+        }
+        remaining -= length;
+    }
+    return line.vertices.back();
+}
+
+} // namespace
+
+katana::core::Status appendDesignProfile(Section& section,
+                                         const katana::geometry::SolvedProfile& profile,
+                                         std::string name)
+{
+    if (name.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "a design profile needs a name");
+    }
+    if (!(section.length > 0.0)) {
+        return makeError(ErrorCode::InvalidArgument, "the section has no length to profile");
+    }
+
+    // Stations: everything already sampled, plus the profile's own key
+    // stations and extrema, within the section.
+    std::vector<std::pair<double, SampleReason>> stations;
+    for (const SectionSurface& surface : section.surfaces) {
+        for (std::size_t i = 0; i < surface.samples.size(); ++i) {
+            stations.emplace_back(surface.samples[i].station, SampleReason::Interval);
+        }
+    }
+    for (const double station : profile.keyStations()) {
+        stations.emplace_back(station, SampleReason::ProfileVertex);
+    }
+    for (const auto& point : profile.highLowPoints()) {
+        stations.emplace_back(point.station, SampleReason::ProfileVertex);
+    }
+    if (section.surfaces.empty()) {
+        // Nothing to align with: sample the design on its own at the interval
+        // the window uses for ground, so the curve is drawn as a curve.
+        const double interval = std::max(section.length / 2000.0, 0.1);
+        for (double station = 0.0; station < section.length; station += interval) {
+            stations.emplace_back(station, SampleReason::Interval);
+        }
+        stations.emplace_back(section.length, SampleReason::End);
+    }
+    std::erase_if(stations, [&](const auto& entry) {
+        return entry.first < 0.0 || entry.first > section.length;
+    });
+    std::sort(stations.begin(), stations.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    // Duplicates collapse to one sample; a ProfileVertex wins over an
+    // Interval at the same station because it carries more meaning.
+    std::vector<std::pair<double, SampleReason>> unique;
+    for (const auto& entry : stations) {
+        if (!unique.empty() && std::abs(unique.back().first - entry.first) < 1e-9) {
+            if (entry.second == SampleReason::ProfileVertex) {
+                unique.back().second = entry.second;
+            }
+            continue;
+        }
+        unique.push_back(entry);
+    }
+
+    SectionSurface design;
+    design.name = std::move(name);
+    design.samples.reserve(unique.size());
+    design.reasons.reserve(unique.size());
+    for (const auto& [station, reason] : unique) {
+        SectionSample sample;
+        sample.station = station;
+        sample.plan = pointAlong(section.alignment, station);
+        sample.elevation = profile.elevationAt(station);
+        if (sample.elevation.has_value()) {
+            design.minElevation = design.minElevation ? std::min(*design.minElevation, *sample.elevation)
+                                                      : *sample.elevation;
+            design.maxElevation = design.maxElevation ? std::max(*design.maxElevation, *sample.elevation)
+                                                      : *sample.elevation;
+        }
+        design.samples.push_back(sample);
+        design.reasons.push_back(reason);
+    }
+    section.surfaces.push_back(std::move(design));
+    return {};
 }
 
 } // namespace katana::cad

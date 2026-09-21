@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 
+#include "katana/geometry/profile.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
@@ -63,7 +64,11 @@ class MainWindow final : public QMainWindow {
     // The part both section commands share: gather the visible surfaces, cut
     // along `alignment`, show the result. `along` names the source for the
     // log line.
-    void cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along);
+    // `profile`, when given, is added to the section as a design series named
+    // `profileName`, so the view shows design against ground.
+    void cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along,
+                         const katana::geometry::SolvedProfile* profile = nullptr,
+                         const std::string& profileName = {});
     void setVerticalExaggeration();
     void buildDocks();
     void buildReferenceDock();

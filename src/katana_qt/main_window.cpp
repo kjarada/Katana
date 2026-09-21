@@ -10,6 +10,8 @@
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <optional>
+
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -1811,7 +1813,9 @@ void MainWindow::cutSectionAlongSelection()
     cutSectionAlong(std::move(alignment), "the selection");
 }
 
-void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along)
+void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along,
+                                 const katana::geometry::SolvedProfile* profile,
+                                 const std::string& profileName)
 {
     if (sceneSurfaces_.empty()) {
         logMessage("Build a surface first (Terrain > Surface From ...).", true);
@@ -1836,6 +1840,12 @@ void MainWindow::cutSectionAlong(katana::geometry::Polyline2 alignment, const QS
     if (!section) {
         logMessage(QString::fromStdString(section.error().describe()), true);
         return;
+    }
+    if (profile != nullptr) {
+        if (auto status = cad::appendDesignProfile(*section, *profile, profileName); !status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+            return;
+        }
     }
 
     const double length = section->length;
@@ -1881,9 +1891,21 @@ void MainWindow::cutSectionAlongAlignment()
         logMessage(QString::fromStdString(solved.error().describe()), true);
         return;
     }
+    // The design profile rides along when the alignment has one, so the
+    // section shows design against ground - the reason to have a profile.
+    std::optional<katana::geometry::SolvedProfile> profile;
+    if (alignment->vertical.has_value()) {
+        auto solvedProfile = katana::geometry::solveProfile(*alignment->vertical);
+        if (!solvedProfile) {
+            logMessage(QString::fromStdString(solvedProfile.error().describe()), true);
+            return;
+        }
+        profile = std::move(*solvedProfile);
+    }
     // 10 mm chords. The section samples at most every 100 mm along the line,
     // so a finer centreline would cost time and change nothing it reports.
-    cutSectionAlong(solved->toPolyline(0.01), QString("alignment %1").arg(chosen));
+    cutSectionAlong(solved->toPolyline(0.01), QString("alignment %1").arg(chosen),
+                    profile ? &*profile : nullptr, "design " + chosen.toStdString());
 }
 
 } // namespace katana::qt

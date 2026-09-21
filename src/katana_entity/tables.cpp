@@ -656,6 +656,16 @@ Status validate(const Alignment& alignment)
                          "alignment " + alignment.name +
                              (solved.error().context.empty() ? "" : ": " + solved.error().context));
     }
+    if (alignment.vertical.has_value()) {
+        auto profile = katana::geometry::solveProfile(*alignment.vertical);
+        if (!profile) {
+            return makeError(profile.error().code, profile.error().message,
+                             "alignment " + alignment.name + " profile" +
+                                 (profile.error().context.empty()
+                                      ? ""
+                                      : ": " + profile.error().context));
+        }
+    }
     return {};
 }
 
