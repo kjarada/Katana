@@ -5,11 +5,10 @@
 #include <cmath>
 #include <limits>
 
+#include "katana/geometry/chording.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::geometry {
-
-namespace tol = katana::math::tolerance;
 
 namespace {
 
@@ -150,16 +149,10 @@ std::size_t Spiral2::chordCountFor(double tolerance) const
     if (!(worstCurvature > 0.0) || !(length > 0.0)) {
         return 2; // a straight line needs its two ends
     }
-    // The sagitta rule cad::chordArc uses, applied at the tightest radius so
-    // that every chord along the spiral is within tolerance, not only the
-    // average one.
-    const double radius = 1.0 / worstCurvature;
-    const double ratio = std::clamp(tolerance / radius, 1.0e-12, 0.5);
-    const double step = 2.0 * std::acos(1.0 - ratio);
-    const double chordLength = radius * step;
-    const double segments =
-        std::clamp(std::ceil(length / std::max(chordLength, 1.0e-9)), 1.0, 8192.0);
-    return static_cast<std::size_t>(segments) + 1;
+    // The one sagitta rule (geometry::chording), applied at the tightest
+    // radius so that every chord along the spiral is within tolerance and not
+    // only the average one. The spiral's sweep at that radius is L / R.
+    return sagittaChordCount(1.0 / worstCurvature, length * worstCurvature, tolerance) + 1;
 }
 
 } // namespace katana::geometry

@@ -265,3 +265,32 @@ those derivations, not because the program did (CLAUDE.md section 3).
 Nothing draws a spiral yet, and nothing stations along one. `Spiral2` is a
 geometry-layer primitive with no entity, no command and no renderer behind
 it; the alignment table that will hold it is the next slice of Phase 21.
+
+## Chording curves (`chording.hpp`)
+
+The sagitta rule - chords sized so none departs from the curve by more than a
+stated tolerance - lived in `cad::scene` as `chordArc` and `chordCircle`.
+When `Spiral2::chordCountFor` was written it grew its own copy of the same
+arithmetic, which is the second way of doing something that CLAUDE.md section
+1 calls a defect. The rule now lives in `geometry::chording`, the lowest layer
+that can see `Arc2`, and both the scene builder and the spiral call it; the
+horizontal alignment will be the third caller when it chords itself for a
+section cut.
+
+**Why the `cad` names were deleted rather than kept as forwarders.** The first
+attempt kept `cad::chordArc` forwarding to `geometry::chordArc`. That does not
+compile: the argument is an `Arc2` in `katana::geometry`, so argument-dependent
+lookup finds the geometry function from any call site in `katana::cad`, and an
+unqualified call becomes ambiguous between the two identical signatures. Two
+functions with the same name and signature in two namespaces of the same
+program are a trap for every future caller, not a convenience for the current
+ones, so the `cad` pair went and their three tests moved to `tests/geometry`
+with the code. `sagittaChordCount` is exposed alongside, so that a caller which
+only needs the number - the spiral - uses the same clamps (a 1e-12 floor on
+tolerance / radius, a 0.5 cap, at most 8192 chords) as one that needs the
+points.
+
+A fourth test pins the two callers to each other: `chordArc` on a 300 m arc
+sweeping 0.3 rad at 1 mm yields exactly `sagittaChordCount(300, 0.3, 0.001) + 1`
+points, and that count is 59 - the same 59 the spiral test derives for 90 m
+on the same radius, because 90 m on r = 300 *is* a 0.3 rad sweep.

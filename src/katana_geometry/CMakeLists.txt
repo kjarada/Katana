@@ -1,6 +1,7 @@
 add_library(katana_geometry STATIC
     primitives2d.cpp
     spiral2.cpp
+    chording.cpp
     intersection.cpp
     spatial_index.cpp
     polygon.cpp

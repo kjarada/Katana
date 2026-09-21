@@ -7,6 +7,7 @@
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/entity/display.hpp"
+#include "katana/geometry/chording.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad {
@@ -16,6 +17,8 @@ namespace tol = katana::math::tolerance;
 using katana::entity::Entity;
 using katana::geometry::Arc2;
 using katana::geometry::Circle2;
+using katana::geometry::chordArc;
+using katana::geometry::chordCircle;
 using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
 using katana::math::AABB;
@@ -25,8 +28,6 @@ using katana::render::Vec3;
 using katana::render::VertexIndex;
 
 namespace {
-
-constexpr double kTwoPi = 6.283185307179586476925;
 
 // Linear ramp through a small fixed palette. Chosen over a single hue so that
 // adjacent contour bands are actually distinguishable, which is the whole
@@ -80,45 +81,6 @@ constexpr double kTwoPi = 6.283185307179586476925;
 
 } // namespace
 
-std::vector<Point2> chordArc(const Arc2& arc, double tolerance)
-{
-    std::vector<Point2> out;
-    if (!(arc.radius > 0.0) || !std::isfinite(arc.sweep) || std::abs(arc.sweep) <= tol::kAngular) {
-        if (arc.radius > 0.0) {
-            out.push_back(arc.startPoint());
-            out.push_back(arc.endPoint());
-        }
-        return out;
-    }
-
-    // Sagitta: for a chord subtending angle phi on radius r the greatest
-    // deviation is r * (1 - cos(phi / 2)), so holding that at `tolerance`
-    // gives phi = 2 * acos(1 - tolerance / r). A tolerance at or beyond the
-    // radius would ask for acos of something <= 0, so it is capped.
-    const double ratio = std::clamp(tolerance / arc.radius, 1.0e-12, 0.5);
-    const double step = 2.0 * std::acos(1.0 - ratio);
-    const double sweep = std::abs(arc.sweep);
-    // At least one segment, and capped so that a hairline tolerance on a large
-    // radius cannot ask for a million chords.
-    const auto count = static_cast<std::size_t>(
-        std::clamp(std::ceil(sweep / std::max(step, 1.0e-9)), 1.0, 8192.0));
-
-    out.reserve(count + 1);
-    for (std::size_t i = 0; i <= count; ++i) {
-        out.push_back(arc.pointAt(static_cast<double>(i) / static_cast<double>(count)));
-    }
-    return out;
-}
-
-std::vector<Point2> chordCircle(const Circle2& circle, double tolerance)
-{
-    const Arc2 full{circle.center, circle.radius, 0.0, kTwoPi};
-    std::vector<Point2> out = chordArc(full, tolerance);
-    if (!out.empty()) {
-        out.pop_back(); // the closing point duplicates the first
-    }
-    return out;
-}
 
 // ---- surfaces -------------------------------------------------------------------
 

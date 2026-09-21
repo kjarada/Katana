@@ -123,11 +123,4 @@ class SceneBuilder {
                                              const std::vector<SceneSurface>& surfaces,
                                              const SceneOptions& options);
 
-// Chords an arc so that the greatest distance between the chord and the true
-// curve is at most `tolerance`. Exposed because the 2D viewport wants the same
-// answer, and because it is worth testing on its own.
-[[nodiscard]] std::vector<Point2> chordArc(const katana::geometry::Arc2& arc, double tolerance);
-[[nodiscard]] std::vector<Point2> chordCircle(const katana::geometry::Circle2& circle,
-                                              double tolerance);
-
 } // namespace katana::cad
