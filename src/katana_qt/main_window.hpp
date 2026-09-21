@@ -61,6 +61,7 @@ class MainWindow final : public QMainWindow {
     void addSurface(std::string name, katana::terrain::TinSurface surface);
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
+    void corridorQuantities();
     // The part both section commands share: gather the visible surfaces, cut
     // along `alignment`, show the result. `along` names the source for the
     // log line.

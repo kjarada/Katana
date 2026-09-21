@@ -12,6 +12,11 @@
 #include <QHeaderView>
 #include <optional>
 
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QFontDatabase>
+#include <QFormLayout>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -31,6 +36,7 @@
 #include <map>
 #include <set>
 
+#include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/interop/export.hpp"
@@ -264,6 +270,8 @@ void MainWindow::buildActions()
     terrainMenu->addAction("Surface From &Drawing", this,
                            [this] { buildSurfaceFromDrawing(); });
     terrainMenu->addSeparator();
+    terrainMenu->addAction("Corridor &Quantities...", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q),
+                           this, &MainWindow::corridorQuantities);
     terrainMenu->addAction("Cut Section Along &Alignment...",
                            QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K), this,
                            &MainWindow::cutSectionAlongAlignment);
@@ -1906,6 +1914,160 @@ void MainWindow::cutSectionAlongAlignment()
     // so a finer centreline would cost time and change nothing it reports.
     cutSectionAlong(solved->toPolyline(0.01), QString("alignment %1").arg(chosen),
                     profile ? &*profile : nullptr, "design " + chosen.toStdString());
+}
+
+void MainWindow::corridorQuantities()
+{
+    // Only an alignment with a design profile has a finished level to measure
+    // against; the others are listed as unavailable rather than hidden, so
+    // the user learns what is missing.
+    QStringList names;
+    for (const katana::entity::Alignment& alignment : document_.model().alignments.all()) {
+        if (alignment.vertical.has_value()) {
+            names << QString::fromStdString(alignment.name);
+        }
+    }
+    if (names.isEmpty()) {
+        logMessage("No alignment has a design profile. Define one with ALIGN DESIGN name s,z ...",
+                   true);
+        return;
+    }
+    QStringList surfaceNames;
+    std::vector<const katana::terrain::TinSurface*> surfaces;
+    for (const auto& item : sceneSurfaces_) {
+        if (item.visible && item.surface != nullptr) {
+            surfaceNames << QString::fromStdString(item.name);
+            surfaces.push_back(item.surface);
+        }
+    }
+    if (surfaces.empty()) {
+        logMessage("Build a surface first (Terrain > Surface From ...).", true);
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle("Corridor Quantities");
+    auto* form = new QFormLayout(&dialog);
+    auto* alignmentBox = new QComboBox(&dialog);
+    alignmentBox->addItems(names);
+    auto* surfaceBox = new QComboBox(&dialog);
+    surfaceBox->addItems(surfaceNames);
+    const auto spin = [&](double minimum, double maximum, double value, const QString& suffix) {
+        auto* box = new QDoubleSpinBox(&dialog);
+        box->setRange(minimum, maximum);
+        box->setDecimals(3);
+        box->setValue(value);
+        box->setSuffix(suffix);
+        return box;
+    };
+    // Defaults are a two-lane rural road: 3.5 m lanes at 2.5% crossfall,
+    // 1.5:1 in cut and 2:1 in fill, sectioned every 10 m.
+    auto* halfWidth = spin(0.5, 50.0, 3.5, " m");
+    auto* crossfall = spin(-20.0, 20.0, 2.5, " %");
+    auto* cutBatter = spin(0.1, 10.0, 1.5, " : 1");
+    auto* fillBatter = spin(0.1, 10.0, 2.0, " : 1");
+    auto* interval = spin(0.1, 1000.0, 10.0, " m");
+    form->addRow("Alignment", alignmentBox);
+    form->addRow("Ground surface", surfaceBox);
+    form->addRow("Half width", halfWidth);
+    form->addRow("Crossfall", crossfall);
+    form->addRow("Cut batter (run per rise)", cutBatter);
+    form->addRow("Fill batter (run per rise)", fillBatter);
+    form->addRow("Section interval", interval);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const katana::entity::Alignment* alignment =
+        document_.model().alignments.find(alignmentBox->currentText().toStdString());
+    if (alignment == nullptr || !alignment->vertical.has_value()) {
+        logMessage("The alignment no longer exists or lost its profile.", true);
+        return;
+    }
+    auto solved = katana::geometry::solveAlignment(alignment->horizontal);
+    auto profile = katana::geometry::solveProfile(*alignment->vertical);
+    if (!solved || !profile) {
+        logMessage(QString::fromStdString((solved ? profile.error() : solved.error()).describe()),
+                   true);
+        return;
+    }
+    cad::Assembly assembly;
+    assembly.halfWidth = halfWidth->value();
+    assembly.crossfall = crossfall->value() / 100.0;
+    assembly.cutBatter = cutBatter->value();
+    assembly.fillBatter = fillBatter->value();
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto quantities = cad::corridorQuantities(
+        *solved, *profile, assembly, *surfaces[static_cast<std::size_t>(surfaceBox->currentIndex())],
+        interval->value());
+    QApplication::restoreOverrideCursor();
+    if (!quantities) {
+        logMessage(QString::fromStdString(quantities.error().describe()), true);
+        return;
+    }
+
+    // The report: one line per section, then the totals - the shape an
+    // earthworks schedule takes, so it can be read against one. QString::number
+    // is not locale-aware, which here is what is wanted: a decimal point.
+    QString report;
+    report += QString("Corridor quantities: %1 on %2\n").arg(alignmentBox->currentText(),
+                                                            surfaceBox->currentText());
+    report += QString("Half width %1 m, crossfall %2 %, batters %3:1 cut / %4:1 fill, interval %5 m\n")
+                  .arg(assembly.halfWidth, 0, 'f', 2)
+                  .arg(crossfall->value(), 0, 'f', 2)
+                  .arg(assembly.cutBatter, 0, 'f', 2)
+                  .arg(assembly.fillBatter, 0, 'f', 2)
+                  .arg(interval->value(), 0, 'f', 2);
+    report += "\n    station     design z     cut area    fill area\n";
+    for (const cad::CorridorSection& section : quantities->sections) {
+        report += QString("%1  %2  %3  %4%5\n")
+                      .arg(section.station, 11, 'f', 3)
+                      .arg(section.designElevation, 11, 'f', 3)
+                      .arg(section.cutArea, 11, 'f', 3)
+                      .arg(section.fillArea, 11, 'f', 3)
+                      .arg(section.complete ? "" : "   (no daylight - excluded)");
+    }
+    report += QString("\nCut %1 m3   Fill %2 m3   Net %3 m3 (%4)\n")
+                  .arg(quantities->cut, 0, 'f', 1)
+                  .arg(quantities->fill, 0, 'f', 1)
+                  .arg(quantities->net, 0, 'f', 1)
+                  .arg(quantities->net >= 0.0 ? "import" : "surplus");
+    if (quantities->incompleteSections > 0) {
+        report += QString("%1 of %2 sections could not reach the ground and contribute NOTHING:"
+                          " these totals are not the whole job.\n")
+                      .arg(quantities->incompleteSections)
+                      .arg(quantities->sections.size());
+    }
+
+    QDialog table(this);
+    table.setWindowTitle("Corridor Quantities");
+    auto* layout = new QVBoxLayout(&table);
+    auto* text = new QPlainTextEdit(&table);
+    text->setReadOnly(true);
+    text->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    text->setPlainText(report);
+    layout->addWidget(text);
+    auto* close = new QDialogButtonBox(QDialogButtonBox::Close, &table);
+    connect(close, &QDialogButtonBox::rejected, &table, &QDialog::reject);
+    connect(close, &QDialogButtonBox::accepted, &table, &QDialog::accept);
+    layout->addWidget(close);
+    table.resize(720, 520);
+    table.exec();
+
+    logMessage(QString("Corridor %1: cut %2 m3, fill %3 m3, net %4 m3 over %5 sections%6")
+                   .arg(alignmentBox->currentText())
+                   .arg(quantities->cut, 0, 'f', 1)
+                   .arg(quantities->fill, 0, 'f', 1)
+                   .arg(quantities->net, 0, 'f', 1)
+                   .arg(quantities->sections.size())
+                   .arg(quantities->incompleteSections > 0
+                            ? QString(" (%1 incomplete)").arg(quantities->incompleteSections)
+                            : QString()));
 }
 
 } // namespace katana::qt

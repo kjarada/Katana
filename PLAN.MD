@@ -330,7 +330,7 @@ The required progression is:
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections; clothoid; PI-defined alignments and PVI-defined design profiles, stored, editable from `ALIGN`, drawn as an overlay and as design-against-ground in the section view; corridors, parcels, grading and cut/fill quantities outstanding |
+| 21 | Civil Engineering | partial — sections; clothoid; alignments and design profiles stored, editable and drawn; corridor cut/fill quantities by end area from a dialog; corridor surface, richer assemblies, parcels and grading outstanding |
 | 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
@@ -1357,11 +1357,24 @@ and Cut Section Along Alignment... passes it through, so the section view
 shows design against ground with no change to the view. `samples/site_plan`
 carries one: a sag whose low point the command reports at 76.226 @ 50.723.
 
-**OUTSTANDING in this phase:** corridors, parcels and grading, and the cut and
-fill QUANTITIES between design and ground along an alignment - the profile is
-drawn against the ground but nothing integrates the area between them; that
-is the corridor's job. `deleteAlignment` still has no in-use guard because
-nothing references an alignment by name.
+**Sixth slice DELIVERED: corridor quantities.** `cad::corridorQuantities`
+sets a template - half width, crossfall, cut and fill batters - across the
+alignment at the design elevation, carries its edges to daylight by a march
+and bisection against the TIN, and sums cut and fill by average end area with
+the compensated sum, always sectioning the profile's key stations. A section
+that cannot reach the ground contributes nothing and is counted, and the
+report says the totals are not the whole job. Terrain > Corridor
+Quantities... takes the assembly from a dialog and shows the schedule. Tested
+against hand-worked sections checked independently in Python: 10, 11.68 and
+10.75 m^2, and area-times-length exactly along a straight. Record in
+`docs/cad.md`.
+
+**OUTSTANDING in this phase:** the corridor as a SURFACE (the finished
+design as a TIN, so it can be shown in 3D and compared with
+`compareSurfaces`); richer assemblies (kerbs, verges, benches, subgrades) as
+a table of their own; the prismoidal correction, deliberately not applied;
+parcels; grading. `deleteAlignment` still has no in-use guard because nothing
+references an alignment by name.
 
 ## Alignments
 

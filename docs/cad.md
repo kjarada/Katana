@@ -374,3 +374,60 @@ than the section shows as a gap beyond its end rather than an invented
 grade. Cut Section Along Alignment... passes the profile through
 `cutSectionAlong` when the alignment has one.
 
+## Corridor quantities
+
+`cad::corridorQuantities` (`include/katana/cad/corridor.hpp`) sets a template
+across an alignment at the design elevation at every station, carries its
+edges to the ground by batter slopes, and sums the cut and fill between the
+finished shape and the ground along the alignment. Terrain > Corridor
+Quantities... drives it from a dialog and shows the schedule.
+
+**The template is deliberately simple.** One carriageway of a half width
+each side, at a crossfall, with a cut batter and a fill batter to daylight.
+Real assemblies carry kerbs, verges, benches and subgrades; they are a later
+need and belong in a table of their own, not in four more fields here. What
+the simple one already answers is the quantity to within the accuracy of the
+ground model, which is the accuracy anyone has.
+
+**Average end area, and why.** The volume between two stations is the mean
+of their cross-section areas times the distance between them. That is the
+method every earthworks specification and measurement standard names and the
+basis of payment in most road contracts, so it is the one a quantity from
+this software can be compared with. The prismoidal correction is more
+accurate where areas change quickly and is not applied; a caller wanting it
+shortens the interval, which is what practice does. The profile's key
+stations are always sectioned in addition to the interval, because the
+quantities change character at a PVC and a PVT and a schedule that stepped
+over them could not be checked against the design.
+
+**Ground is queried, not sectioned.** Each cross section asks the TIN for
+its elevation at a set of offsets directly rather than cutting a section with
+`extractSection`. A section carries breaks and crossings this does not need,
+and the daylight search wants the ground at arbitrary offsets rather than at
+a fixed set of samples. Ground is sampled at every design vertex and every
+half metre between, so an undulation between two template vertices is not
+straightened out.
+
+**Daylight by march and bisection.** The batter is marched out from the edge
+in half-metre steps until it and the ground have changed order, then
+bisected forty times - half a metre resolves any batter a machine can build,
+and the bisection puts the crossing at 5e-13 m. A march rather than a closed
+form because the ground is a TIN, piecewise planar with no formula for where
+an arbitrary line meets it.
+
+**A section that cannot reach the ground contributes nothing and is
+counted.** When a batter runs off the surface within the assembly's maximum
+width, the section is marked incomplete, the intervals touching it add no
+volume, and the count is reported - the dialog says in so many words that
+the totals are not the whole job. Inventing an elevation for it would be the
+silent failure PLAN.MD section 36 forbids.
+
+**Tested against hand-worked sections, checked independently.** A level
+design 1 m under flat ground with 2:1 batters is the trapezoid (12 + 8) / 2 =
+10 m^2; crossfall of 5% drops the edges and widens it to 11.68; ground rising
+10% to the left daylights 3.5 m out on that side and 1 m out on the other for
+10.75. Each was integrated numerically in Python by a method sharing nothing
+with the trapezoid split in the code. A constant section along a straight
+gives area times length exactly whatever the interval, which the end-area
+method must.
+
