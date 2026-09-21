@@ -66,6 +66,7 @@ class MainWindow final : public QMainWindow {
     void cutSectionAlongAlignment();
     void corridorQuantities();
     void corridorSurface();
+    void plotToPdf();
 
     // What both corridor commands ask for: an alignment with a design
     // profile, a ground surface, the assembly and the interval, from one

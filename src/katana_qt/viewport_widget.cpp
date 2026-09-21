@@ -12,6 +12,9 @@
 #include <cmath>
 #include <limits>
 
+#include <QPdfWriter>
+#include <QPageSize>
+#include <QMarginsF>
 #include <QFont>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -783,8 +786,14 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             if (layer->locked) {
                 color.setAlpha(110); // locked layers read as background
             }
-            constexpr double kPenWidthPixels = 1.5;
-            QPen pen(color, kPenWidthPixels);
+            // On screen every line is a 1.5 px hairline: a screen has no
+            // paper for a line weight to be millimetres of. On a plot the
+            // width is Layer::lineWeight - "millimetres on paper" - which
+            // means what it says for the first time (PLAN.MD Phase 22).
+            const double penWidthPixels = paperPixelsPerMillimetre_ > 0.0
+                                              ? display.lineWeight * paperPixelsPerMillimetre_
+                                              : 1.5;
+            QPen pen(color, penWidthPixels);
             // Dashes are MODEL lengths: a 0.5 m dash stays half a metre of
             // ground at every zoom, so the pixel pattern is recomputed from
             // the view scale each frame. Qt's array is in units of PEN WIDTH,
@@ -795,7 +804,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
                 linetype != nullptr) {
                 cad::DashOptions dash;
                 dash.viewScale = view_.scale;
-                const auto pattern = cad::qtDashPattern(*linetype, dash, kPenWidthPixels);
+                const auto pattern = cad::qtDashPattern(*linetype, dash, penWidthPixels);
                 if (!pattern.empty()) {
                     pen.setDashPattern(QList<qreal>(pattern.begin(), pattern.end()));
                 }
@@ -993,6 +1002,40 @@ void ViewportWidget::drawAlignments(QPainter& painter) const
             drawText(painter, *start, alignment.name, height * 1.3, direction.value_or(0.0));
         }
     }
+}
+
+katana::core::Status ViewportWidget::plotToPdf(const QString& path,
+                                               const cad::PlotSettings& settings)
+{
+    auto sheet = cad::sheetFor(settings);
+    if (!sheet) {
+        return sheet.error();
+    }
+    QPdfWriter writer(path);
+    writer.setResolution(static_cast<int>(settings.dpi));
+    const cad::PaperDimensions paper = cad::paperDimensions(settings.paper, settings.landscape);
+    writer.setPageSize(QPageSize(QSizeF(paper.widthMm, paper.heightMm), QPageSize::Millimeter));
+    // The sheet transform owns the margins; the writer's would shift the page.
+    writer.setPageMargins(QMarginsF(0.0, 0.0, 0.0, 0.0));
+    QPainter painter(&writer);
+    if (!painter.isActive()) {
+        return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
+                                       "could not open the PDF for writing", path.toStdString());
+    }
+
+    // The same drawing members as paintEvent, through the sheet instead of
+    // the screen, with line weights in paper millimetres - then the screen
+    // view is put back exactly as it was.
+    const cad::ViewTransform screen = view_;
+    view_ = sheet->view;
+    paperPixelsPerMillimetre_ = sheet->pixelsPerMillimetre;
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    drawEntities(painter);
+    drawAlignments(painter);
+    painter.end();
+    view_ = screen;
+    paperPixelsPerMillimetre_ = 0.0;
+    return {};
 }
 
 void ViewportWidget::drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,

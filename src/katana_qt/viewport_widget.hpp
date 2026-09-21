@@ -19,6 +19,7 @@
 #include <QString>
 #include <QWidget>
 
+#include "katana/cad/plot.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/cad/view_transform.hpp"
@@ -35,6 +36,18 @@ enum class Tool { Select, Point, Line, Polyline, Rectangle, Circle, Arc, Move, C
 
 class ViewportWidget final : public QWidget {
   public:
+    // The current view, for a caller that wants the same centre on paper.
+    [[nodiscard]] const katana::cad::ViewTransform& viewTransform() const { return view_; }
+
+    // Plots the drawing to a PDF: the same drawing code as the screen, painted
+    // through a sheet transform, with every line as wide as its layer's line
+    // weight says in millimetres (PLAN.MD Phase 22). Entities, hatches and
+    // alignments; not rasters or point clouds, which at plot resolution would
+    // be enormous and are a later slice. Fails with FileExportFailure when the
+    // file cannot be written, and with whatever cad::sheetFor refuses.
+    [[nodiscard]] katana::core::Status plotToPdf(const QString& path,
+                                                 const katana::cad::PlotSettings& settings);
+
     explicit ViewportWidget(katana::cad::Document& document, QWidget* parent = nullptr);
 
     void setTool(Tool tool);
@@ -151,6 +164,11 @@ class ViewportWidget final : public QWidget {
     // dimensionStyle_ is, and owned by the document, so this only ever points
     // at a pattern the model is holding for the duration of the paint.
     mutable const katana::entity::HatchPattern* hatch_ = nullptr;
+
+    // Device pixels per millimetre of paper while plotting; 0 on screen,
+    // where a line weight has no paper to be millimetres of and every line
+    // is a hairline. Set by plotToPdf for the duration of the plot only.
+    double paperPixelsPerMillimetre_ = 0.0;
 
     // Converting RGBA bytes to a QImage, and a classification to a colour, are
     // both far too expensive to redo for every frame of a pan. Both are cached

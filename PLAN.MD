@@ -331,7 +331,7 @@ The required progression is:
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
 | 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
 | 21 | Civil Engineering | partial — sections; clothoid; alignments and profiles; corridor quantities and surface, cross-checked; parcels with bearings, area, deed wording and labels; richer assemblies and grading outstanding |
-| 22 | Drawing/Plotting | not started — the phase that gives `Layer::lineWeight` a meaning |
+| 22 | Drawing/Plotting | partial — Plot to PDF through the screen's own drawing code at ISO sizes and standard scales, `Layer::lineWeight` finally honoured; layouts, title blocks, annotation scaling, printing outstanding |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
 | 25 | AI Agent | not started |
@@ -1449,8 +1449,28 @@ grading surfaces
 
 # 27. Phase 22 — Drawing and Plotting
 
-**STATUS: NOT STARTED. Reshaped - this is the phase that makes three
-already-built things honest.**
+**STATUS: PARTIALLY DELIVERED. Reshaped - this is the phase that makes three
+already-built things honest, and the first of them now is.**
+
+Delivered: File > Plot to PDF... The plot paints the drawing with the SAME
+drawing code the screen uses, through a sheet transform in place of the
+screen's (`cad/plot.hpp`: ISO 216 paper sizes, a scale ladder, the sheet as
+a `ViewTransform`, a fit rule that picks the first standard scale the drawing
+fits at), with every line as wide as its layer's `lineWeight` says in
+millimetres of paper - which that field has claimed to mean since Phase 09
+and has never meant until now. Entities, hatches (with their model-unit
+patterns) and alignments are plotted; rasters and point clouds are not, by
+decision. The arithmetic is tested against ISO 216 and 25.4 mm to the inch;
+the PDF writing needs a Qt application and is checked by hand. Record in
+`docs/cad.md`.
+
+**OUTSTANDING:** layouts and paper space (a plot is the current view on one
+sheet); viewports on a sheet; title blocks; annotation scaling (text and
+dimension sizes are still model units, so a 2.5 m label is 2.5 mm at 1:1000
+and 0.25 mm at 1:10 000); plot styles beyond the line weight (colour-to-pen
+mapping, screening); printing to a device (needs Qt PrintSupport, not yet
+linked); rasters and point clouds on the sheet; and a `--plot` switch on the
+application so a plot can be produced headlessly and tested.
 
 Three capabilities exist, are validated, are persisted, and are read by nothing
 that draws. Each is a silent lie to the user, who sets a value and sees no

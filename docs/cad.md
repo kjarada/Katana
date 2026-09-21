@@ -496,3 +496,54 @@ path - hid that link failure and printed "built" over a missing binary,
 which is the green-over-red CLAUDE.md warns of. Builds are now judged by
 ninja's exit code.
 
+## Plotting to PDF
+
+File > Plot to PDF... paints the drawing onto a sheet. `cad/plot.hpp` holds
+the arithmetic - paper sizes, the scale ladder, the sheet transform and the
+fit rule - and is tested as arithmetic; `ViewportWidget::plotToPdf` holds the
+`QPdfWriter` and the painter.
+
+**One drawing code, two surfaces.** The plot calls the same `drawEntities`
+and `drawAlignments` the screen uses, with the widget's `ViewTransform`
+temporarily replaced by the sheet's - device pixels of the PDF at its
+resolution - and put back afterwards. There is no second renderer for paper,
+so the plot and the screen cannot disagree about anything but the paper.
+That is Rule 3 applied to output: the renderer is never a second source of
+truth, and neither is the plotter.
+
+**Line weights finally mean what they say.** `Layer::lineWeight` has been
+documented as "millimetres on paper" since Phase 09, validated, persisted,
+and read by nothing that draws, because there was no paper. On screen every
+line is still a 1.5 px hairline - a screen has no paper for a weight to be
+millimetres of. On the plot the pen is `lineWeight * pixelsPerMillimetre`,
+where a millimetre is `dpi / 25.4` device pixels by definition. The dash
+pattern generator already took the pen width as a parameter, so linetypes
+keep their model-unit lengths on paper too.
+
+**ISO 216 sizes and a scale ladder.** Paper sizes are ISO 216:2007 Table 1.
+Fitting picks the first of 1:100, 200, 250, 500, 1000, 2000, 2500, 5000,
+10 000, 20 000, 25 000, 50 000 at which the drawing fits inside the margins,
+because a scale bar is only useful when the scale is one a scale rule
+carries; beyond the ladder the exact denominator is used so the plot still
+fits. The first draft of the fit test checked only the sheet's width and got
+the 10 km case wrong - on a landscape sheet the height binds first - and was
+corrected from that derivation, not from the output.
+
+**The sheet transform owns the margins.** The PDF writer's own page margins
+are set to zero; a non-zero writer margin would shift the page under a
+transform that already accounts for the margin, and the drawing would land
+off-centre by exactly that amount.
+
+**Not plotted.** Rasters and point clouds: at 300 dpi on A1 a backdrop image
+would be resampled to tens of megapixels per plot, and a point cloud drawn
+point by point would take minutes. Both are a later slice with their own
+decisions about resolution. The grid, the snap marker and the selection are
+screen furniture and are not drawn either.
+
+**What ctest does not cover, and why.** The sheet arithmetic is fully tested.
+The PDF writing itself runs inside the Qt widget and needs a `QGuiApplication`,
+which the test suites do not create; it has been checked by hand and the
+handover says how. Recorded in PLAN.MD as an outstanding item: a `--plot`
+switch on the application, so a plot can be produced headlessly and a test
+can open the result.
+

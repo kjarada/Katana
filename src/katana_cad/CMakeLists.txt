@@ -9,6 +9,7 @@ add_library(katana_cad STATIC
     hatching.cpp
     corridor.cpp
     parcel.cpp
+    plot.cpp
     dimension_draw.cpp
     scene.cpp
     viewport_layout.cpp

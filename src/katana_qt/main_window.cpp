@@ -10,6 +10,7 @@
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <array>
 #include <optional>
 
 #include <QDialog>
@@ -17,6 +18,7 @@
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QFormLayout>
+#include <QCheckBox>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -36,6 +38,7 @@
 #include <map>
 #include <set>
 
+#include "katana/cad/plot.hpp"
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -210,6 +213,7 @@ void MainWindow::buildActions()
     fileMenu->addAction("Export &Vector...", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), this,
                         [this] { exportVectorFile(); });
     fileMenu->addSeparator();
+    fileMenu->addAction("&Plot to PDF...", QKeySequence::Print, this, [this] { plotToPdf(); });
     fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
 
     QMenu* editMenu = menuBar()->addMenu("&Edit");
@@ -2113,6 +2117,97 @@ void MainWindow::corridorSurface()
                    .arg(incomplete > 0 ? QString(", %1 left out for missing daylight (hull-bounded)")
                                              .arg(incomplete)
                                        : QString()));
+}
+
+void MainWindow::plotToPdf()
+{
+    ViewportWidget* view = views_->activePlanView();
+    if (view == nullptr) {
+        logMessage("Open a plan viewport to plot from.", true);
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle("Plot to PDF");
+    auto* form = new QFormLayout(&dialog);
+    auto* paperBox = new QComboBox(&dialog);
+    paperBox->addItems({"A4", "A3", "A2", "A1", "A0"});
+    paperBox->setCurrentIndex(1);
+    auto* orientationBox = new QComboBox(&dialog);
+    orientationBox->addItems({"Landscape", "Portrait"});
+    // Fitting is the default because it is what a first plot of any drawing
+    // wants, and it picks a scale a scale rule carries.
+    auto* fit = new QCheckBox("Fit the drawing to the sheet at a standard scale", &dialog);
+    fit->setChecked(true);
+    auto* scale = new QDoubleSpinBox(&dialog);
+    scale->setRange(1.0, 1000000.0);
+    scale->setDecimals(0);
+    scale->setValue(1000.0);
+    scale->setPrefix("1 : ");
+    auto* dpi = new QDoubleSpinBox(&dialog);
+    dpi->setRange(72.0, 1200.0);
+    dpi->setDecimals(0);
+    dpi->setValue(300.0);
+    auto* margin = new QDoubleSpinBox(&dialog);
+    margin->setRange(0.0, 50.0);
+    margin->setDecimals(1);
+    margin->setValue(10.0);
+    margin->setSuffix(" mm");
+    form->addRow("Paper", paperBox);
+    form->addRow("Orientation", orientationBox);
+    form->addRow(fit);
+    form->addRow("Scale, when not fitting", scale);
+    form->addRow("Resolution (dpi)", dpi);
+    form->addRow("Margin", margin);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    cad::PlotSettings settings;
+    const std::array<cad::PaperSize, 5> sizes{cad::PaperSize::A4, cad::PaperSize::A3,
+                                              cad::PaperSize::A2, cad::PaperSize::A1,
+                                              cad::PaperSize::A0};
+    settings.paper = sizes[static_cast<std::size_t>(paperBox->currentIndex())];
+    settings.landscape = orientationBox->currentIndex() == 0;
+    settings.dpi = dpi->value();
+    settings.marginMm = margin->value();
+    settings.center = view->viewTransform().center;
+    settings.scaleDenominator = scale->value();
+    if (fit->isChecked()) {
+        const katana::geometry::Box2 extent = document_.spatialIndex().bounds();
+        auto fitted = cad::fitScale(extent, settings);
+        if (!fitted) {
+            logMessage(QString::fromStdString(fitted.error().describe()), true);
+            return;
+        }
+        settings.scaleDenominator = *fitted;
+        settings.center = katana::geometry::Point2(0.5 * (extent.min.x + extent.max.x),
+                                                   0.5 * (extent.min.y + extent.max.y));
+    }
+
+    QString path = QFileDialog::getSaveFileName(this, "Plot to PDF", QString(), "PDF (*.pdf)");
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!path.endsWith(".pdf", Qt::CaseInsensitive)) {
+        path += ".pdf";
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto status = view->plotToPdf(path, settings);
+    QApplication::restoreOverrideCursor();
+    if (!status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
+    }
+    logMessage(QString("Plotted to %1: %2 %3 at 1 : %4, %5 dpi. Line widths are the layers' "
+                       "line weights in millimetres.")
+                   .arg(path, paperBox->currentText(), orientationBox->currentText().toLower())
+                   .arg(settings.scaleDenominator, 0, 'f', 0)
+                   .arg(settings.dpi, 0, 'f', 0));
 }
 
 } // namespace katana::qt
