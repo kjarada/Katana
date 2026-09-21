@@ -1291,12 +1291,22 @@ Three reasons, in order of how expensive getting it wrong would be:
 3. Undo is a before-image copy of a whole entity. An alignment edited one PI at
    a time would copy the entire horizontal geometry per keystroke.
 
-**The first slice is `katana::geometry::Spiral2`** - the clothoid, in the
-geometry layer beside `Arc2`, with `pointAt`, `tangentAt` and the
-`L = A^2 / R` relation. It is the only primitive here that does not already
-exist, it needs no model change at all, and every later item depends on it.
-Its tests assert against published transition-curve tables, not against its
-own output (CLAUDE.md section 3).
+**First slice DELIVERED: `katana::geometry::Spiral2`**
+(`include/katana/geometry/spiral2.hpp`), the clothoid, in the geometry layer
+beside `Arc2`. Kept in its general form - curvature from k0 to k1 over L -
+because a real alignment also needs the transition between two curves and
+the reverse spiral, and all three are one object. Evaluated by composite
+Gauss-Legendre rather than the textbook power series, because the series is
+exact only for the from-a-straight case and the general one has no closed
+form; on half-radian panels the quadrature is exact to below 1e-20 relative.
+Tested against the published Fresnel integrals (Abramowitz & Stegun 7.7) to
+1e-14, the hand-derived series on an R = 300 m / L = 90 m transition, and an
+independent adaptive-Simpson integration for the cases that have no series;
+a right-hand spiral is the EXACT reflection of the left-hand one, asserted as
+equality. Decision record in `docs/geometry.md`.
+
+Nothing draws or stations along a spiral yet: it is a primitive with no
+entity, command or renderer behind it. The alignment table is the next slice.
 
 ## Alignments
 
