@@ -135,3 +135,44 @@ TEST(Customisation, TheWholeReferenceCustomisationLoadsFromItsFiles)
     EXPECT_NE(std::find(missing.begin(), missing.end(), "0"), missing.end());
     EXPECT_NE(std::find(missing.begin(), missing.end(), "Circle Single"), missing.end());
 }
+
+TEST(Customisation, ACustomisationIsFoundBesideTheApplicationWithoutBeingNamed)
+{
+    // An installed Katana keeps it in share/katana/customisation; a build
+    // tree has it in the source. Both are searched, in that order, so that a
+    // survey drawing is drawn with its linestyles and symbols without anyone
+    // being asked where they are.
+    const std::filesystem::path exe = "/opt/katana/bin/katana.exe";
+    const auto places = a12::customisationSearchPath(exe);
+    ASSERT_GE(places.size(), 2u);
+    EXPECT_EQ(places[0], std::filesystem::path("/opt/katana/share/katana/customisation"));
+
+    // Nothing there is not an error: Katana then draws plain lines, as 12d
+    // does without a customisation.
+    EXPECT_TRUE(a12::findCustomisation("/no/such/place/katana.exe").empty());
+}
+
+TEST(Customisation, WhatIsFoundIsDecidedByLookingInsideEachFileNotByItsName)
+{
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "katana_found_customisation" / "bin";
+    const std::filesystem::path share =
+        directory.parent_path() / "share" / "katana" / "customisation";
+    std::filesystem::create_directories(share);
+    // Two customisation files and one that is neither, all with extensions
+    // that say nothing useful.
+    std::ofstream(share / "a.4d") << "worldstyle \"S\" { move 0 0 draw 1 0 }";
+    std::ofstream(share / "b.4d")
+        << "<xml12d><map_file><map_data><item><key>W*</key><model>M</model></item>"
+           "</map_data></map_file></xml12d>";
+    std::ofstream(share / "notes.4d") << "just some notes, not a customisation at all";
+
+    const auto found = a12::findCustomisation(directory / "katana.exe");
+    ASSERT_EQ(found.size(), 2u) << "the notes are not a customisation file";
+    const auto loaded = a12::readCustomisation(found);
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    EXPECT_EQ(loaded->library.size(), 1u);
+    EXPECT_EQ(loaded->map.size(), 1u);
+
+    std::filesystem::remove_all(directory.parent_path());
+}

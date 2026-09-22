@@ -1727,8 +1727,9 @@ class Importer {
         }
         if (symbolsLeft_ != 0) {
             warnings.push_back(std::to_string(symbolsLeft_) +
-                               " strings carry vertex symbols that are kept and written back but "
-                               "not drawn: Katana draws a symbol on a point, from its style");
+                               " strings carry a DIFFERENT symbol per vertex, which are kept and "
+                               "written back but not drawn: a string is drawn with one symbol, "
+                               "from its style, and there is no one symbol here");
         }
         if (annotationsLeft_ != 0) {
             warnings.push_back(std::to_string(annotationsLeft_) +

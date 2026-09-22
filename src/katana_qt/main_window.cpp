@@ -14,6 +14,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDockWidget>
+#include <QCoreApplication>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -1375,6 +1376,33 @@ void MainWindow::importPath(const QString& path)
 // the mapfile. Several files at once, because they are useless apart - and
 // WHICH is which is decided by looking inside each one, since `.4d` is the
 // extension of both a style library and a mapfile (PLAN.MD 20.3).
+// The customisation that is PART OF THIS BUILD. Nothing is found, loaded or
+// configured: its linestyles, symbols and survey codes are compiled in, so a
+// survey drawing is drawn with them from the moment it is opened.
+//
+// A build made without one falls back to looking beside the executable, so a
+// checkout that does not carry the customisation - it is third-party material
+// under its own licence - can still be given one. An explicit
+// File > Load 12d Customisation... overrides either.
+void MainWindow::loadDefaultCustomisation()
+{
+    const katana::archive12d::Customisation& built = katana::archive12d::builtinCustomisation();
+    if (!built.empty()) {
+        document_.setStyleLibrary(built.library);
+        document_.setSurveyMap(built.map);
+        logMessage("Customisation: " + grouped(built.library.size()) + " linestyles and symbols (" +
+                   grouped(katana::entity::vertexStyleNames(built.library).size()) +
+                   " symbols) and " + grouped(built.map.size()) +
+                   " survey code rules, built in.");
+        return;
+    }
+    const auto paths = katana::archive12d::findCustomisation(
+        std::filesystem::path(QCoreApplication::applicationFilePath().toStdString()));
+    if (!paths.empty()) {
+        applyCustomisation(paths);
+    }
+}
+
 void MainWindow::loadCustomisation()
 {
     const QStringList chosen = QFileDialog::getOpenFileNames(

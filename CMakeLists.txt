@@ -4,6 +4,16 @@ project(Katana VERSION 0.2.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Python is used at build time to embed the 12d customisation into the binary
+# (tools/embed_customisation.py). Optional: without it the generated table is
+# empty and Katana draws plain lines.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    set(KATANA_PYTHON "${Python3_EXECUTABLE}")
+else()
+    set(KATANA_PYTHON "python")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

@@ -143,6 +143,9 @@ int main(int argc, char* argv[])
 
     katana::qt::MainWindow window;
     window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
+    // Before anything is opened, so the first drawing is drawn with it. A
+    // --customise on the command line is applied after and wins.
+    window.loadDefaultCustomisation();
     if (!plotPath && !screenshotPath) {
         window.show();
     }

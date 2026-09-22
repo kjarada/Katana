@@ -54,6 +54,61 @@ bool isQuit(const std::string& line)
 // IMPORT is: the interpreter belongs to katana_cad, which may not see the 12d
 // readers. Unlike IMPORT it needs no third-party library, so it is outside
 // the interoperability guard and is offered even in a build with no GDAL.
+// What the loaded customisation means for THIS drawing. "The linestyles are
+// not showing" looks identical whether nothing is loaded, the library does
+// not define what the drawing names, or the drawing's styles are 12d's plain
+// lines - so say which.
+void reportCoverage(const katana::cad::Document& document)
+{
+    const auto coverage = katana::cad::customisationCoverage(document);
+    if (coverage.styles == 0) {
+        std::cout << "This drawing has no styles yet; IMPORT a 12d archive to see the "
+                     "customisation take effect.\n";
+        return;
+    }
+    std::cout << coverage.resolved << " of this drawing's " << coverage.styles
+              << " styles are drawn with a loaded definition (" << coverage.named
+              << " name one; the rest are 12d's plain lines)\n";
+    if (!coverage.unresolved.empty()) {
+        std::cout << "  " << coverage.unresolved.size() << " names are in no loaded library:";
+        for (std::size_t i = 0; i < coverage.unresolved.size() && i < 8; ++i) {
+            std::cout << (i == 0 ? " " : ", ") << "\"" << coverage.unresolved[i] << "\"";
+        }
+        std::cout << (coverage.unresolved.size() > 8 ? ", ...\n" : "\n");
+    }
+}
+
+// Whatever customisation ships with the application or sits beside it, so a
+// session starts able to draw a survey rather than waiting to be told where
+// its linestyles are.
+void loadDefaultCustomisation(katana::cad::Document& document, const char* executable)
+{
+    // Compiled in: nothing to find and nothing to load.
+    const katana::archive12d::Customisation& built = katana::archive12d::builtinCustomisation();
+    if (!built.empty()) {
+        std::cout << "Customisation: " << built.library.size() << " linestyles and symbols and "
+                  << built.map.size() << " survey code rules, built in\n";
+        document.setStyleLibrary(built.library);
+        document.setSurveyMap(built.map);
+        return;
+    }
+    const auto paths = katana::archive12d::findCustomisation(std::filesystem::path(executable));
+    if (paths.empty()) {
+        return;
+    }
+    auto loaded = katana::archive12d::readCustomisation(paths);
+    if (!loaded) {
+        std::cerr << "warning: the customisation beside this program could not be read: "
+                  << loaded.error().describe() << "\n";
+        return;
+    }
+    std::cout << "Customisation: " << loaded->library.size() << " definitions and "
+              << loaded->map.size() << " survey code rules, from "
+              << paths.front().parent_path().string() << "\n";
+    document.setStyleLibrary(std::move(loaded->library));
+    document.setSurveyMap(std::move(loaded->map));
+}
+
 bool runCustomise(katana::cad::Document& document, const std::vector<std::string>& paths)
 {
     if (paths.empty()) {
@@ -70,6 +125,7 @@ bool runCustomise(katana::cad::Document& document, const std::vector<std::string
                   << katana::entity::vertexStyleNames(library).size() << " of them symbols\n"
                   << map.size() << " survey code rules over " << map.keys().size()
                   << " distinct codes\n";
+        reportCoverage(document);
         return true;
     }
 
@@ -110,6 +166,7 @@ bool runCustomise(katana::cad::Document& document, const std::vector<std::string
     }
     document.setStyleLibrary(std::move(loaded->library));
     document.setSurveyMap(std::move(loaded->map));
+    reportCoverage(document);
     return true;
 }
 
@@ -593,6 +650,10 @@ int main(int argc, char* argv[])
 #else
     Session session{document, interpreter};
 #endif
+
+    if (argc > 0) {
+        loadDefaultCustomisation(document, argv[0]);
+    }
 
     std::vector<std::string> batch;
     for (int i = 1; i < argc; ++i) {
