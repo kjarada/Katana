@@ -89,6 +89,11 @@ namespace katana::archive12d {
 inline constexpr std::string_view kElevationProperty = "elevation";
 inline constexpr std::string_view kElevationsProperty = "elevations";
 inline constexpr std::string_view kMetaName = "12d.name";
+// Which vertex of its string a point came from, one-based. Set only where a
+// `breakline point` string of several vertices was split into one point per
+// vertex - see the import - so that they can be told apart and put back in
+// the order the string had them.
+inline constexpr std::string_view kMetaVertex = "12d.vertex";
 inline constexpr std::string_view kMetaColour = "12d.colour";
 inline constexpr std::string_view kMetaChainage = "12d.chainage";
 inline constexpr std::string_view kMetaBreakline = "12d.breakline";

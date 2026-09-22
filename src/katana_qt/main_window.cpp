@@ -1471,6 +1471,29 @@ void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& pa
                " symbols) and " + grouped(loaded->map.size()) + " survey code rules.");
     document_.setStyleLibrary(std::move(loaded->library));
     document_.setSurveyMap(std::move(loaded->map));
+    reportCustomisationCoverage();
+}
+
+// What the loaded customisation means for THIS drawing. Without it, "the
+// linestyles are not showing" is indistinguishable from "this drawing's
+// styles are 12d's plain lines" and from "nothing is loaded at all".
+void MainWindow::reportCustomisationCoverage()
+{
+    const katana::cad::CustomisationCoverage coverage =
+        katana::cad::customisationCoverage(document_);
+    if (coverage.styles == 0) {
+        logMessage("This drawing has no styles yet; import a 12d archive to see the "
+                   "customisation take effect.");
+        return;
+    }
+    logMessage(grouped(coverage.resolved) + " of this drawing's " + grouped(coverage.styles) +
+               " styles are drawn with a loaded definition (" + grouped(coverage.named) +
+               " name one; the rest are 12d's plain lines).");
+    if (!coverage.unresolved.empty()) {
+        logMessage(grouped(coverage.unresolved.size()) +
+                   " names are in no loaded library, starting with \"" +
+                   QString::fromStdString(coverage.unresolved.front()) + "\"");
+    }
 }
 
 void MainWindow::importFile()

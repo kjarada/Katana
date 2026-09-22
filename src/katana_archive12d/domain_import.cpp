@@ -648,17 +648,94 @@ class Importer {
             (string.segmentAnnotation && string.segmentText.empty() && !string.segmentTextValue)) {
             ++annotationsLeft_;
         }
-        std::size_t added =
-            add(std::move(entity), describe(string.header, keyword)) ? std::size_t{1} : 0;
+        std::size_t added = addOrSplit(std::move(entity), string.header,
+                                       describe(string.header, keyword));
         added += addVertexText(string);
         added += addSegmentText(string);
         return added;
     }
 
-    // See kMetaSymbolPrefix for the two forms a symbol takes. Only a point
-    // with ONE block can take the symbol as its style; anything else - a line,
-    // or a point with a per-vertex list of more than one block, which the
-    // format allows and 12d does not write - is kept whole and counted.
+    // `breakline point` means the string's vertices are POINTS - separate
+    // survey shots that 12d keeps in one string for convenience - and not a
+    // line through them. Katana has no multi-point geometry, so each vertex
+    // becomes its own point entity carrying the string's layer, style,
+    // colour, metadata and properties.
+    //
+    // Without this they were drawn as a polyline: the vertices were joined
+    // up, and a model of standing infrastructure came out as a scribble
+    // through it. The flag was read and kept as `12d.breakline` but never
+    // acted on. Measured on a 15 MB production archive: 13,326 point strings
+    // have a single vertex and were always right; nine have several, and
+    // those nine held 649 points.
+    [[nodiscard]] std::size_t addOrSplit(Entity entity, const StringHeader& header,
+                                         const std::string& what)
+    {
+        const auto* polyline = std::get_if<Polyline2>(&entity.geometry);
+        const auto* segment = std::get_if<katana::geometry::Segment2>(&entity.geometry);
+        if (header.breakline != Breakline::Point || (polyline == nullptr && segment == nullptr)) {
+            return add(std::move(entity), what) ? std::size_t{1} : 0;
+        }
+        std::vector<Point2> places;
+        if (segment != nullptr) {
+            places = {segment->start, segment->end};
+        } else {
+            places = polyline->vertices;
+        }
+        // The heights the string carried, one per vertex, so each point keeps
+        // its own rather than the list of all of them.
+        std::vector<std::string> heights;
+        const auto found = entity.properties.find("elevations");
+        if (found != entity.properties.end()) {
+            if (const auto* list = std::get_if<std::string>(&found->second)) {
+                std::size_t at = 0;
+                while (at <= list->size()) {
+                    const std::size_t space = list->find(' ', at);
+                    heights.push_back(list->substr(
+                        at, space == std::string::npos ? std::string::npos : space - at));
+                    if (space == std::string::npos) {
+                        break;
+                    }
+                    at = space + 1;
+                }
+            }
+        }
+
+        std::size_t added = 0;
+        for (std::size_t i = 0; i < places.size(); ++i) {
+            Entity point = entity;
+            point.geometry = katana::entity::PointGeometry{places[i]};
+            point.properties.erase("elevations");
+            if (i < heights.size() && heights[i] != "null" && !heights[i].empty()) {
+                if (const auto value = parseReal(heights[i])) {
+                    point.properties.insert_or_assign("elevation", PropertyValue(*value));
+                }
+            }
+            // Which vertex of the string this was, so the points can be told
+            // apart and put back in order.
+            point.metadata.insert_or_assign(std::string(kMetaVertex),
+                                            static_cast<std::int64_t>(i + 1));
+            added += add(std::move(point), what) ? 1 : 0;
+        }
+        if (added != 0) {
+            pointStringsSplit_ += 1;
+            pointsFromStrings_ += added;
+        }
+        return added;
+    }
+
+    // See kMetaSymbolPrefix for the two forms a symbol takes. A string with
+    // ONE block takes that symbol as its style however many vertices it has:
+    // a 12d vertex symbol goes on EVERY vertex, which is what `mode vertex`
+    // means in a library and where cad::styleDrawing puts it.
+    //
+    // This was once limited to a string of one vertex, and a survey of
+    // standing infrastructure paid for it: a 61-vertex string of drill holes,
+    // every one of which should carry a "MARK Drill Hole and Wing", was drawn
+    // as a polyline through them with no symbols at all.
+    //
+    // A per-vertex list of MORE than one block - which the format allows and
+    // 12d does not write - is still kept whole and counted, because there is
+    // no single symbol for the string to be drawn with.
     template <typename Meta>
     void importSymbols(const VertexString& string, Entity& entity, const Meta& meta)
     {
@@ -674,13 +751,13 @@ class Importer {
         }
         const FieldList& first = *blocks.front();
         const std::string symbolStyle = first.text("style");
-        if (string.vertices.size() == 1 && blocks.size() == 1 && !symbolStyle.empty()) {
+        if (blocks.size() == 1 && !symbolStyle.empty()) {
             const katana::entity::Style& style = styleFor(symbolStyle, &first);
             entity.style = style.name;
             if (string.header.style != symbolStyle) {
                 meta(std::string(kMetaStringStyle), string.header.style);
             }
-            // What the point LOOKS like is its symbol, so the symbol's
+            // What the string LOOKS like is its symbol, so the symbol's
             // colour is the entity's. The string's own colour name stays in
             // 12d.colour: the two are the same name in every sample archive,
             // but the format allows two and neither may be lost.
@@ -1658,6 +1735,12 @@ class Importer {
                                " strings carry per-vertex or per-segment annotation settings "
                                "beyond the text height and angle that were taken");
         }
+        if (pointStringsSplit_ != 0) {
+            problem(std::to_string(pointStringsSplit_) +
+                    " strings marked `breakline point` held more than one vertex and became " +
+                    std::to_string(pointsFromStrings_) +
+                    " points, which is what that flag means");
+        }
         if (colouredTins_ != 0) {
             warnings.push_back(std::to_string(colouredTins_) +
                                " surfaces carry per-triangle colours, which a surface here does "
@@ -1701,6 +1784,8 @@ class Importer {
     std::size_t symbolsLeft_ = 0;
     std::size_t annotationsLeft_ = 0;
     std::size_t colouredTins_ = 0;
+    std::size_t pointStringsSplit_ = 0;
+    std::size_t pointsFromStrings_ = 0;
 };
 
 } // namespace
