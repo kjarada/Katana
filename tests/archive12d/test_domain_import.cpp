@@ -255,7 +255,11 @@ TEST(DomainImport, WhatOnlyTwelveDKnowsAboutAStringTravelsInItsMetadata)
     ASSERT_EQ(domain.stylesNeeded.size(), 1u);
     EXPECT_EQ(domain.stylesNeeded[0].name, "Kerb");
     EXPECT_EQ(domain.stylesNeeded[0].description, "12d linestyle");
-    EXPECT_EQ(domain.stylesNeeded[0].linetype, katana::entity::kContinuousLinetype);
+    // The 12d LINESTYLE NAME, which is what the line should be drawn with.
+    // It used to be left as "continuous", so the name reached nowhere a
+    // renderer would look and a loaded 12d linestyle library could never be
+    // matched against it (PLAN.MD 20.3).
+    EXPECT_EQ(domain.stylesNeeded[0].linetype, "Kerb");
     EXPECT_EQ(std::get<std::string>(m.at("12d.colour")), "cyan");
     EXPECT_EQ(std::get<double>(m.at("12d.chainage")), 12.5);
     EXPECT_EQ(std::get<std::string>(m.at("12d.breakline")), "line");

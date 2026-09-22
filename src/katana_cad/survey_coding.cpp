@@ -51,7 +51,34 @@ using katana::entity::SurveyMatch;
     return text != nullptr && !text->empty() ? text : nullptr;
 }
 
+// Which of the candidates any entity actually carries as TEXT. The first
+// with a value wins; none of them gives the first candidate back, so the
+// report can still name what was looked for.
+[[nodiscard]] std::string findCodeProperty(const katana::entity::Model& model,
+                                           const std::vector<EntityId>& subject)
+{
+    for (const std::string& candidate : codePropertyCandidates()) {
+        for (const EntityId id : subject) {
+            const Entity* entity = model.entities.find(id);
+            if (entity != nullptr && codeOf(*entity, candidate) != nullptr) {
+                return candidate;
+            }
+        }
+    }
+    return codePropertyCandidates().front();
+}
+
 } // namespace
+
+const std::vector<std::string>& codePropertyCandidates()
+{
+    static const std::vector<std::string> candidates = {
+        "code",     // a survey file's own field code
+        "12d.name", // a 12da string's name, which is what a coded survey puts there
+        "Code",     "CODE", "feature_code",
+    };
+    return candidates;
+}
 
 katana::core::Result<katana::commands::CommandPtr>
 applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
@@ -65,6 +92,9 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
     if (subject.empty()) {
         subject = model.entities.ids();
     }
+    const std::string property =
+        options.property.empty() ? findCodeProperty(model, subject) : options.property;
+    tally.property = property;
 
     // Grouped, so that one command covers every entity that resolved the same
     // way: a survey of 30,000 points is a few hundred codes, and a command
@@ -83,7 +113,7 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
         if (entity == nullptr) {
             continue;
         }
-        const std::string* code = codeOf(*entity, options.property);
+        const std::string* code = codeOf(*entity, property);
         if (code == nullptr) {
             continue;
         }

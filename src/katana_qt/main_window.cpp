@@ -52,6 +52,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/archive12d/customisation.hpp"
+#include "katana/cad/survey_coding.hpp"
 #include "katana/archive12d/domain.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
@@ -286,6 +287,11 @@ void MainWindow::buildActions()
                    "code draws what the customisation says it should");
     connect(customiseAction, &QAction::triggered, this, [this] { loadCustomisation(); });
 
+    QAction* codeAction = makeAction(Icon::Import, "Apply Survey &Codes",
+                                     "Give every entity carrying a field code the model, style "
+                                     "and attributes the loaded mapfile says it should have");
+    connect(codeAction, &QAction::triggered, this, [this] { applySurveyCodes(); });
+
     QMenu* fileMenu = menuBar()->addMenu("&File");
     fileMenu->addActions({newAction, openAction});
     fileMenu->addSeparator();
@@ -293,7 +299,7 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({importAction, exportAction});
     fileMenu->addSeparator();
-    fileMenu->addAction(customiseAction);
+    fileMenu->addActions({customiseAction, codeAction});
     fileMenu->addSeparator();
     fileMenu->addAction(plotAction);
     fileMenu->addSeparator();
@@ -1384,6 +1390,54 @@ void MainWindow::loadCustomisation()
         paths.emplace_back(one.toStdString());
     }
     applyCustomisation(paths);
+}
+
+// Applying the loaded mapfile to the drawing. One undoable step, and a
+// report - including which property the codes were read from, because "no
+// entity carries a code" and "they carry it under another name" are
+// different problems and look identical from the outside (PLAN.MD 20.3).
+void MainWindow::applySurveyCodes()
+{
+    if (document_.surveyMap().empty()) {
+        warnUser("No mapfile",
+                 "Load a 12d customisation first: File > Load 12d Customisation...");
+        return;
+    }
+    katana::cad::SurveyCodingOptions options;
+    options.colourOf = [](std::string_view name) {
+        return katana::archive12d::standardColour(name);
+    };
+    if (!document_.selection().empty()) {
+        options.ids = document_.selection().ids();
+        logMessage("Applying survey codes to the " + grouped(options.ids.size()) + " selected.");
+    }
+    katana::cad::SurveyCodingReport report;
+    auto command = katana::cad::applySurveyCodes(document_, options, &report);
+    if (!command) {
+        warnUser("Survey codes failed", QString::fromStdString(command.error().describe()));
+        return;
+    }
+    logMessage(grouped(report.coded) + " entities carry a \"" +
+               QString::fromStdString(report.property) + "\", " + grouped(report.matched) +
+               " of them codes the mapfile has a rule for.");
+    if (!report.unmatchedCodes.empty()) {
+        logMessage(grouped(report.unmatchedCodes.size()) + " codes have no rule, starting with \"" +
+                   QString::fromStdString(report.unmatchedCodes.front()) + "\"");
+    }
+    if (!report.missingDefinitions.empty()) {
+        logMessage(grouped(report.missingDefinitions.size()) +
+                   " linestyles or symbols named but not in the loaded library");
+    }
+    if (*command == nullptr) {
+        logMessage("Nothing to change.");
+        return;
+    }
+    if (const auto status = document_.execute(std::move(*command)); !status) {
+        warnUser("Survey codes failed", QString::fromStdString(status.error().describe()));
+        return;
+    }
+    logMessage("Applied: " + grouped(report.layersCreated.size()) + " layers and " +
+               grouped(report.stylesCreated.size()) + " styles created. Undo puts it all back.");
 }
 
 void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& paths)

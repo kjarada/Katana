@@ -3,12 +3,12 @@
 // Loading a 12d customisation: the linestyle library, the symbol library and
 // the mapfile, from files (PLAN.MD 20.3, slice 6).
 //
-// THE EXTENSION DOES NOT SAY WHAT A FILE IS. Of the four files this was built
-// against, `TfNSW_Survey_Detail.mapfile` and `names.4d` are both mapfiles
-// while `user_linestyl_TfNSWv15.4d` and `user_symbols_TfNSWv15.4d` are both
-// style libraries - so `.4d` is two different formats and a loader that went
-// by the name would read half the customisation as the wrong thing. What a
-// file IS is decided by looking inside it.
+// THE EXTENSION DOES NOT SAY WHAT A FILE IS. Of the four files in the
+// reference customisation this was built against, two are mapfiles and two
+// are style libraries, and THREE of them end in `.4d` - so that extension is
+// two different formats, and a loader that went by the name would read half
+// the customisation as the wrong thing. What a file IS is decided by looking
+// inside it.
 //
 // This lives here, beside the readers, rather than in a front end, because
 // both front ends need it and neither should own it: `katana_cli` and the Qt
@@ -50,9 +50,9 @@ struct Customisation {
     [[nodiscard]] bool empty() const { return library.empty() && map.empty(); }
     // The linestyle and symbol names the mapfile asks for that no loaded
     // library defines, in name order. A customisation need not be
-    // self-contained - the Transport for NSW mapfile names two symbols from
-    // 12d's own standard library and the plain lines "0" and "1" - so this is
-    // reported rather than treated as a fault.
+    // self-contained - the reference mapfile names two symbols from 12d's own
+    // standard library and the plain lines "0" and "1" - so this is reported
+    // rather than treated as a fault.
     [[nodiscard]] std::vector<std::string> unresolvedStyles() const;
 };
 

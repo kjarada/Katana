@@ -8,7 +8,7 @@
 //   worldstyle "CULT Bollard" {
 //       xorigin 0   yorigin 0
 //       mode   vertex                 // this one is a symbol
-//       group  "TfNSW Survey/CULT"
+//       group  "Survey/CULT"
 //       move 0 0
 //       arc 1.75 0 180
 //       draw 1.2 -0.4
@@ -19,9 +19,9 @@
 // or a setting; see entity::LineStyle for what each means.
 //
 // The text must already be UTF-8: run the bytes through decodeText first, as
-// the Archive reader does. The Transport for NSW symbol library is UTF-16LE
-// and its linestyle library is plain ASCII, so a reader that assumed either
-// one would read half the customisation.
+// the Archive reader does. In the reference customisation the symbol library
+// is UTF-16LE while the linestyle library beside it is plain ASCII, so a
+// reader that assumed either one would read half the customisation.
 //
 // Like readArchive, this reports rather than guesses: every keyword it does
 // not know is counted and named, so "did it take all of it?" has a list for

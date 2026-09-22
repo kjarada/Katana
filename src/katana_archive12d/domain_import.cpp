@@ -258,12 +258,24 @@ class Importer {
         if (known == result_.stylesNeeded.end()) {
             katana::entity::Style style;
             style.name = linestyle;
+            // The 12d LINESTYLE NAME, kept as the name to draw the line with.
+            // A loaded linestyle library is looked up by this, and a project
+            // with no library falls back to a plain line - which is what
+            // happened before, when this was left as "continuous" and the
+            // name was recorded nowhere a renderer would look.
+            style.linetype = linestyle;
             style.description = "12d linestyle";
             result_.stylesNeeded.push_back(std::move(style));
             known = std::prev(result_.stylesNeeded.end());
         }
         if (symbolBlock != nullptr && known->symbol.empty()) {
-            known->symbol = std::string(symbolForLinestyle(linestyle));
+            // The REAL 12d symbol name, not one of the sixteen shapes Katana
+            // draws without a library. This used to store the guess and throw
+            // the name away, which meant a loaded symbol library could never
+            // be matched against it - the symbols were there and nothing
+            // could find them. The guess now happens when it is drawn, only
+            // if nothing defines the name (entity::builtInSymbolFor).
+            known->symbol = linestyle;
             known->symbolSize = std::max(0.0, symbolBlock->real("size").value_or(0.0));
             known->description = "12d symbol";
         }
