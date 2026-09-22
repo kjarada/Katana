@@ -669,6 +669,37 @@ Not drawn, by decision rather than omission: a symbol on the vertices of a
 line (12d draws fence posts that way; a Katana line's vertices have no
 style, and the blocks are kept for export), and a point symbol's rotation.
 
+## The styles and linetypes manager, and what a rename is
+
+One dialog for the `Style` and `Linetype` tables (PLAN.MD 20.2 slice 3,
+`src/katana_qt/style_manager.cpp`), because they are one subject: a style
+names a linetype, and a 12d import fills both at once - 211 styles and their
+linetypes from one file.
+
+Three decisions worth keeping:
+
+- **The preview draws through the drawing code.** `cad::qtDashPattern` and
+  `cad::symbolStrokes` are what the viewport and the PDF plot use, so the
+  sample in the dialog is evidence about what will be drawn rather than a
+  second implementation that can disagree with it. The preview states its
+  scale (20 pixels to the model unit) rather than picking pixels, so a 1 m
+  dash and a 1.5 m symbol are in proportion to each other.
+- **The table is read-only; the form edits.** Editing in the table would run
+  a command from inside the table's own `itemChanged` signal - the shape of
+  the crash recorded under "Panels refresh on the event loop" below. There is
+  no `itemChanged` handler here at all, so the bug cannot be written.
+- **A rename is a move, not an edit of a name field.** A `NamedTable` is
+  keyed by name, so `renameStyle` removes, re-adds under the new name and
+  repoints every holder (entities for a style; layers and styles for a
+  linetype) in one command, and therefore one undo step. It then asks the
+  DELETE guard whether anything still names the old item: the guard and the
+  repoint are two readings of the same set of references, and a holder the
+  repoint missed would leave an entity naming a style that no longer exists.
+  Making them check each other costs one line and removes the class of bug
+  that a second implementation of "who uses this" invites. A protected item
+  ("continuous") is protected from a rename as much as from a delete -
+  everything that resolves to it by name would silently change what it draws.
+
 ## Grading: the batter belongs to the edge, not to the bisector
 
 `cad::gradeToSurface` runs a batter outward from a feature line to the ground

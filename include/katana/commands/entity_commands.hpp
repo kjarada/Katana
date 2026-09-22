@@ -114,6 +114,11 @@ struct EntityAttributes {
 [[nodiscard]] CommandPtr updateLinetype(katana::entity::Linetype linetype);
 // Refuses while any layer or style still names it, and refuses "continuous".
 [[nodiscard]] CommandPtr deleteLinetype(std::string name);
+// Renames it and repoints every layer and style that named it, as one undo
+// step. Refuses an existing target name - two linetypes of the same name
+// would have to be merged, and picking one definition would change how
+// everything wearing the other draws.
+[[nodiscard]] CommandPtr renameLinetype(std::string from, std::string to);
 
 // ---- dimension styles ------------------------------------------------------------
 [[nodiscard]] CommandPtr createDimensionStyle(katana::entity::DimensionStyle style);
@@ -134,6 +139,10 @@ struct EntityAttributes {
 [[nodiscard]] CommandPtr createStyle(katana::entity::Style style);
 [[nodiscard]] CommandPtr updateStyle(katana::entity::Style style);
 [[nodiscard]] CommandPtr deleteStyle(std::string name);
+// Renames it and repoints every entity that wore it, as one undo step.
+// A 12d import names a style after a linestyle ("TOPO Natural Surface
+// Point"), which is the first thing a user wants to shorten.
+[[nodiscard]] CommandPtr renameStyle(std::string from, std::string to);
 
 // ---- alignments ------------------------------------------------------------------
 // Create and update validate the definition by solving it, so an alignment

@@ -42,6 +42,8 @@ class QDockWidget;
 class QKeySequence;
 namespace katana::qt {
 
+class StyleManagerDialog;
+
 class MainWindow final : public QMainWindow {
   public:
     explicit MainWindow(QWidget* parent = nullptr);
@@ -84,6 +86,11 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
+
+    // The styles and linetypes manager, built but not shown. The menu shows
+    // it modally; the headless --style-manager switch grabs it instead, so
+    // that the dialog is built and painted by a test.
+    [[nodiscard]] std::unique_ptr<StyleManagerDialog> makeStyleManager();
 
   protected:
     void closeEvent(QCloseEvent* event) override;

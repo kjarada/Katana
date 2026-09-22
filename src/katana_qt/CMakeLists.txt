@@ -31,6 +31,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     render_view_widget.hpp
     section_view_widget.cpp
     section_view_widget.hpp
+    style_manager.cpp
+    style_manager.hpp
     icons.cpp
     icons.hpp
     theme.cpp

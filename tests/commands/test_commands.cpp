@@ -611,3 +611,89 @@ TEST_F(CommandFixture, NonFiniteMetadataIsRejectedLikeNonFiniteProperties)
     EXPECT_TRUE(stack.execute(createEntities({withValue("elevation", 42.5, false)})).ok());
     EXPECT_EQ(model.entities.size(), 2u);
 }
+
+// ---- renaming a table item (PLAN.MD 20.2, slice 3) ----------------------------------
+
+using CommandTableRename = Fixture;
+
+TEST_F(CommandTableRename, RenamingAStyleCarriesEveryEntityThatWoreIt)
+{
+    katana::entity::Style style;
+    style.name = "SEWR Manhole Cover";
+    style.symbol = "manhole";
+    style.symbolSize = 1.2;
+    ASSERT_TRUE(stack.execute(createStyle(style)).ok());
+    const EntityId marked = mustCreate(createPoint(katana::geometry::Point2(1.0, 2.0)));
+    const EntityId plain = mustCreate(createPoint(katana::geometry::Point2(3.0, 4.0)));
+    ASSERT_TRUE(stack.execute(setEntityStyle({marked}, "SEWR Manhole Cover")).ok());
+
+    ASSERT_TRUE(stack.execute(renameStyle("SEWR Manhole Cover", "Manhole")).ok());
+    EXPECT_FALSE(model.styles.contains("SEWR Manhole Cover"));
+    ASSERT_TRUE(model.styles.contains("Manhole"));
+    EXPECT_EQ(model.styles.find("Manhole")->symbol, "manhole") << "the definition travels with the name";
+    EXPECT_DOUBLE_EQ(model.styles.find("Manhole")->symbolSize, 1.2);
+    EXPECT_EQ(model.entities.find(marked)->style, "Manhole");
+    EXPECT_TRUE(model.entities.find(plain)->style.empty()) << "ByLayer is not a style being renamed";
+
+    // One undo step puts back the name AND everything that wore it.
+    ASSERT_TRUE(stack.undo().ok());
+    EXPECT_TRUE(model.styles.contains("SEWR Manhole Cover"));
+    EXPECT_FALSE(model.styles.contains("Manhole"));
+    EXPECT_EQ(model.entities.find(marked)->style, "SEWR Manhole Cover");
+    ASSERT_TRUE(stack.redo().ok());
+    EXPECT_EQ(model.entities.find(marked)->style, "Manhole");
+}
+
+TEST_F(CommandTableRename, RenamingALinetypeCarriesTheLayersAndStylesThatNamedIt)
+{
+    katana::entity::Linetype fence;
+    fence.name = "fence";
+    fence.pattern = {{1.0}, {-0.5}};
+    ASSERT_TRUE(stack.execute(createLinetype(fence)).ok());
+    Layer layer;
+    layer.name = "Boundary";
+    layer.linetype = "fence";
+    ASSERT_TRUE(stack.execute(createLayer(layer)).ok());
+    katana::entity::Style style;
+    style.name = "boundary";
+    style.linetype = "fence";
+    ASSERT_TRUE(stack.execute(createStyle(style)).ok());
+
+    ASSERT_TRUE(stack.execute(renameLinetype("fence", "post and rail")).ok());
+    EXPECT_EQ(model.layers.find("Boundary")->linetype, "post and rail");
+    EXPECT_EQ(model.styles.find("boundary")->linetype, "post and rail");
+    EXPECT_FALSE(model.linetypes.contains("fence"));
+    // The delete guard reads the same holders the rename repointed, so it
+    // now answers about the new name and no longer knows the old one - which
+    // is the proof that the holders really moved rather than the table alone.
+    EXPECT_EQ(stack.execute(deleteLinetype("post and rail")).error().code,
+              ErrorCode::CommandRejected);
+    EXPECT_EQ(stack.execute(deleteLinetype("fence")).error().code, ErrorCode::NotFound);
+
+    ASSERT_TRUE(stack.undo().ok());
+    EXPECT_EQ(model.layers.find("Boundary")->linetype, "fence");
+    EXPECT_EQ(model.styles.find("boundary")->linetype, "fence");
+    EXPECT_TRUE(model.linetypes.contains("fence"));
+}
+
+TEST_F(CommandTableRename, ARenameOntoAnExistingNameOrOfAProtectedItemIsRefused)
+{
+    katana::entity::Style a;
+    a.name = "a";
+    katana::entity::Style b;
+    b.name = "b";
+    ASSERT_TRUE(stack.execute(createStyle(a)).ok());
+    ASSERT_TRUE(stack.execute(createStyle(b)).ok());
+
+    EXPECT_EQ(stack.execute(renameStyle("a", "b")).error().code, ErrorCode::AlreadyExists);
+    EXPECT_EQ(stack.execute(renameStyle("nope", "c")).error().code, ErrorCode::NotFound);
+    EXPECT_EQ(stack.execute(renameStyle("a", "")).error().code, ErrorCode::InvalidArgument);
+    // Merging two tables by renaming one onto the other is refused for the
+    // same reason a rename in any table is: the two definitions differ and
+    // silently picking one would change how everything wearing it draws.
+    EXPECT_EQ(stack.execute(renameLinetype("continuous", "solid")).error().code,
+              ErrorCode::CommandRejected)
+        << "the continuous linetype is what an unset ByLayer chain resolves to";
+    EXPECT_TRUE(model.styles.contains("a")) << "a refused rename changes nothing";
+    EXPECT_TRUE(model.linetypes.contains("continuous"));
+}

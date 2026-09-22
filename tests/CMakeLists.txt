@@ -108,4 +108,22 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+
+    # The styles and linetypes manager (PLAN.MD 20.2 slice 3), opened over a
+    # 12d import so that its tables hold real linestyles and symbols. What it
+    # protects is that the dialog builds, lays out and PAINTS - its tables,
+    # its form, its two previews - which is otherwise only ever checked by a
+    # person opening the menu.
+    add_test(NAME qt_style_manager_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/symbols.12da"
+            "-DSTYLE_MANAGER=ON"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/style_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_style_manager_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 endif()

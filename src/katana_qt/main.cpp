@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "icons.hpp"
+#include "style_manager.hpp"
 #include "katana/cad/plot.hpp"
 #include "theme.hpp"
 #include "main_window.hpp"
@@ -16,6 +17,7 @@
 //                 [--landscape | --portrait] [--dpi N]
 //   katana [project-directory] [data-file...] --screenshot out.png
 //   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
+//   katana [project-directory] [data-file...] --style-manager --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -31,6 +33,11 @@
 // click does, before the screenshot, and fails if the application does not
 // come through it cleanly (MainWindow::toggleLayerThroughPanel). It is the
 // regression test for a crash on the first click of that box.
+//
+// --style-manager opens the styles and linetypes manager before the
+// screenshot and grabs THAT window instead of the main one, so the dialog -
+// its tables, its form and its two previews - is built and painted in a test
+// rather than only by a person who opens the menu.
 //
 // --screenshot lays the main window out exactly as it would appear, grabs it
 // to a PNG and exits. It exists so that the LOOK of the application can be
@@ -51,6 +58,7 @@ int main(int argc, char* argv[])
     std::optional<QString> plotPath;
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
+    bool styleManager = false;
     bool fit = true;
     katana::cad::PlotSettings settings;
     QStringList inputs;
@@ -66,6 +74,8 @@ int main(int argc, char* argv[])
             screenshotPath = value();
         } else if (argument == "--toggle-layer") {
             toggleLayer = value();
+        } else if (argument == "--style-manager") {
+            styleManager = true;
         } else if (argument == "--fit") {
             fit = true;
         } else if (argument == "--scale") {
@@ -134,6 +144,18 @@ int main(int argc, char* argv[])
                 return 1;
             }
             QApplication::processEvents();
+        }
+        if (styleManager) {
+            auto dialog = window.makeStyleManager();
+            dialog->show();
+            dialog->showFirstRows();
+            QApplication::processEvents();
+            QApplication::processEvents();
+            if (!dialog->grab().save(*screenshotPath, "PNG")) {
+                std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
+                return 1;
+            }
+            return 0;
         }
         if (!window.grab().save(*screenshotPath, "PNG")) {
             std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));

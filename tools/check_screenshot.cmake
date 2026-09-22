@@ -40,12 +40,17 @@ file(REMOVE "${OUTPUT}")
 # for a 12d archive holding a tin, opens the 3D view and so replaces the plan
 # viewport. The toggle after that once called a listener of the viewport that
 # had been destroyed.
+# With -DSTYLE_MANAGER=ON the styles and linetypes manager is opened and IT
+# is what the PNG holds, so the dialog is built and painted by a test.
 set(extra)
 if(DEFINED IMPORT)
     list(APPEND extra "${IMPORT}")
 endif()
 if(DEFINED TOGGLE_LAYER)
     list(APPEND extra --toggle-layer "${TOGGLE_LAYER}")
+endif()
+if(STYLE_MANAGER)
+    list(APPEND extra --style-manager)
 endif()
 
 execute_process(
@@ -62,10 +67,15 @@ if(NOT EXISTS "${OUTPUT}")
 endif()
 
 # A 1360 x 860 window with a drawing in it compresses to tens of kilobytes; a
-# window that painted nothing but its background is a few. Compared as hex for
-# the reason given in check_plot.cmake.
+# window that painted nothing but its background is a few. The dialog is a
+# smaller window of mostly flat panels, so it gets its own floor. Compared as
+# hex for the reason given in check_plot.cmake.
+set(floor 20000)
+if(STYLE_MANAGER)
+    set(floor 10000)
+endif()
 file(SIZE "${OUTPUT}" size)
-if(size LESS 20000)
+if(size LESS floor)
     message(FATAL_ERROR "the PNG is only ${size} bytes: the window painted next to nothing")
 endif()
 file(READ "${OUTPUT}" head LIMIT 4 HEX)

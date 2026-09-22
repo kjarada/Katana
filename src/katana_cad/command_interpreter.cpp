@@ -249,11 +249,12 @@ Edit      OFFSET id distance side-point | TRIM id pick-point cutter-id...
 Select    SELECT ALL | NONE | id... | LAYER name | TYPE name
 Layers    LAYER LIST | NEW name [#RRGGBB] | SET name | DELETE name
           LAYER SHOW|HIDE|LOCK|UNLOCK name | LAYER LTYPE layer linetype
-Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name
+Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
           angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
-Style     STYLE LIST | SYMBOLS | NEW name | SET name field value | DELETE name | APPLY name
+Style     STYLE LIST | SYMBOLS | NEW name | SET name field value | RENAME old new
+          STYLE DELETE name | APPLY name
           fields: linetype weight colour hatch symbol symbolsize description; APPLY - = ByLayer
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
           SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
@@ -448,7 +449,8 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
     }
 
     static constexpr const char* kUsage =
-        "STYLE LIST | SYMBOLS | NEW name | SET name field value | DELETE name | APPLY name\n"
+        "STYLE LIST | SYMBOLS | NEW name | SET name field value | RENAME old new | DELETE name |"
+        " APPLY name\n"
         "  fields: linetype, weight (mm), colour (#RRGGBB or bylayer), hatch, symbol,\n"
         "  symbolsize (model units, 0 for the default mark), description\n"
         "  APPLY sets the style of the selection; APPLY - clears it (ByLayer)";
@@ -456,17 +458,49 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
         return usage(kUsage);
     }
     const std::string& name = args[1];
+    // A 12d style name has spaces in it ("TOPO Natural Surface Point"), and
+    // STYLE NEW TOPO Natural Surface Point used to make a style called
+    // "TOPO" and drop the rest without a word. Everything but SET, whose
+    // description takes the rest of the line, now says so.
+    const auto wants = [&](std::size_t count) -> std::optional<Reply> {
+        if (args.size() <= count) {
+            return std::nullopt;
+        }
+        return Reply(makeError(ErrorCode::InvalidArgument,
+                               "too many arguments: put a name with spaces in double quotes",
+                               args[count]));
+    };
 
     if (action == "NEW") {
+        if (const auto wrong = wants(2)) {
+            return *wrong;
+        }
         katana::entity::Style item;
         item.name = name;
         return finish(document_.execute(cmd::createStyle(std::move(item))),
                       "style " + name + " created");
     }
     if (action == "DELETE") {
+        if (const auto wrong = wants(2)) {
+            return *wrong;
+        }
         return finish(document_.execute(cmd::deleteStyle(name)), "style " + name + " deleted");
     }
+    if (action == "RENAME") {
+        if (args.size() < 3) {
+            return usage("STYLE RENAME old new");
+        }
+        if (const auto wrong = wants(3)) {
+            return *wrong;
+        }
+        return finish(document_.execute(cmd::renameStyle(name, args[2])),
+                      "style " + name + " renamed to " + args[2] +
+                          " (every entity wearing it came too)");
+    }
     if (action == "APPLY") {
+        if (const auto wrong = wants(2)) {
+            return *wrong;
+        }
         const std::vector<EntityId> ids = document_.selection().ids();
         if (ids.empty()) {
             return makeError(ErrorCode::InvalidState, "nothing is selected");
@@ -1532,6 +1566,8 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
 
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
 {
+    static constexpr const char* kLinetypeUsage =
+        "LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name";
     const auto& model = document_.model();
     const std::string action = args.empty() ? "LIST" : upper(args[0]);
 
@@ -1562,7 +1598,7 @@ CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
     }
 
     if (args.size() < 2) {
-        return usage("LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name");
+        return usage(kLinetypeUsage);
     }
     const std::string& name = args[1];
 
@@ -1595,7 +1631,15 @@ CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
         return finish(document_.execute(cmd::deleteLinetype(name)),
                       "linetype " + name + " deleted");
     }
-    return usage("LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name");
+    if (action == "RENAME") {
+        if (args.size() < 3) {
+            return usage("LINETYPE RENAME old new");
+        }
+        return finish(document_.execute(cmd::renameLinetype(name, args[2])),
+                      "linetype " + name + " renamed to " + args[2] +
+                          " (every layer and style naming it came too)");
+    }
+    return usage(kLinetypeUsage);
 }
 
 CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)

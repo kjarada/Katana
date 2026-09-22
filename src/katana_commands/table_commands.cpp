@@ -11,7 +11,13 @@
 //   * the item that may not be deleted (continuous, Standard, none);
 //   * an update that may not be made (the "none" hatch given a fill);
 //   * who still uses an item, so that a deletion is refused NAMING the holder
-//     rather than leaving a layer to draw solid with nothing to say why.
+//     rather than leaving a layer to draw solid with nothing to say why;
+//   * how to repoint those holders, which is what a rename is.
+//
+// The guard and the repoint are two readings of the same references, so a
+// rename ENDS by asking the guard whether anything still names the old item:
+// if the two ever disagree it fails loudly instead of leaving an entity
+// pointing at a style that no longer exists.
 //
 // Command names ("CreateLinetype", "DeleteStyle" ...) are unchanged, since a
 // history shows them.
@@ -19,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "katana/commands/entity_commands.hpp"
 
@@ -29,6 +36,64 @@ using katana::core::makeError;
 using katana::core::Status;
 
 namespace {
+
+// Repointing helpers for the renames below. Each walks one table and
+// rewrites the named field of every holder of `from`, through that table's
+// own update/replace so that validation and change notification happen
+// exactly as they would for a user edit.
+template <typename Member>
+Status repointLayers(katana::entity::Model& model, Member member, std::string_view from,
+                     const std::string& to)
+{
+    for (const std::string& name : model.layers.names()) {
+        const katana::entity::Layer* current = model.layers.find(name);
+        if (current == nullptr || current->*member != from) {
+            continue;
+        }
+        katana::entity::Layer updated = *current;
+        updated.*member = to;
+        if (auto status = model.layers.update(updated); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+template <typename Member>
+Status repointStyles(katana::entity::Model& model, Member member, std::string_view from,
+                     const std::string& to)
+{
+    for (const katana::entity::Style& style : model.styles.all()) {
+        if (style.*member != from) {
+            continue;
+        }
+        katana::entity::Style updated = style;
+        updated.*member = to;
+        if (auto status = model.styles.update(updated); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
+Status repointEntityStyles(katana::entity::Model& model, std::string_view from,
+                           const std::string& to)
+{
+    // Collected first: forEach may not mutate the database underneath itself.
+    std::vector<katana::entity::Entity> wearers;
+    model.entities.forEach([&](const katana::entity::Entity& entity) {
+        if (entity.style == from) {
+            wearers.push_back(entity);
+        }
+    });
+    for (katana::entity::Entity& entity : wearers) {
+        entity.style = to;
+        if (auto status = model.entities.replace(std::move(entity)); !status) {
+            return status;
+        }
+    }
+    return {};
+}
 
 template <typename T> struct TablePolicy;
 
@@ -61,6 +126,15 @@ template <> struct TablePolicy<katana::entity::Linetype> {
             }
         }
         return {};
+    }
+    static Status repoint(katana::entity::Model& model, std::string_view from,
+                          const std::string& to)
+    {
+        if (auto status = repointLayers(model, &katana::entity::Layer::linetype, from, to);
+            !status) {
+            return status;
+        }
+        return repointStyles(model, &katana::entity::Style::linetype, from, to);
     }
 };
 
@@ -168,6 +242,11 @@ template <> struct TablePolicy<katana::entity::Style> {
                              "id=" + std::to_string(holder));
         }
         return {};
+    }
+    static Status repoint(katana::entity::Model& model, std::string_view from,
+                          const std::string& to)
+    {
+        return repointEntityStyles(model, from, to);
     }
 };
 
@@ -283,6 +362,72 @@ template <typename T> class DeleteItemCommand final : public Command {
     std::string name_;
 };
 
+// Remove, re-add under the new name, repoint every holder. NOT an update of
+// the name field: a NamedTable is keyed by name, so a rename is a move, and
+// remove+add keeps the table's own validation of the new name rather than a
+// second copy of those rules here.
+template <typename T> class RenameItemCommand final : public Command {
+  public:
+    RenameItemCommand(std::string from, std::string to)
+        : from_(std::move(from)), to_(std::move(to)), name_(commandName<T>("Rename"))
+    {
+    }
+    [[nodiscard]] std::string_view name() const override { return name_; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        // A protected item is protected from being renamed away as much as
+        // from being deleted: everything that resolves to it by name would
+        // silently change what it draws.
+        if (auto status = TablePolicy<T>::deletable(from_); !status) {
+            return status;
+        }
+        const T* current = TablePolicy<T>::table(context.model).find(from_);
+        if (current == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             std::string(TablePolicy<T>::kNoun) + " does not exist", from_);
+        }
+        if (TablePolicy<T>::table(context.model).contains(to_)) {
+            return makeError(ErrorCode::AlreadyExists,
+                             std::string(TablePolicy<T>::kNoun) + " already exists", to_);
+        }
+        T renamed = *current;
+        renamed.name = to_;
+        return katana::entity::validate(renamed);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        return move(context.model, from_, to_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        return move(context.model, to_, from_);
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    static Status move(katana::entity::Model& model, const std::string& from,
+                       const std::string& to)
+    {
+        auto removed = TablePolicy<T>::table(model).remove(from);
+        if (!removed) {
+            return removed.error();
+        }
+        T item = std::move(*removed);
+        item.name = to;
+        if (auto status = TablePolicy<T>::table(model).add(std::move(item)); !status) {
+            return status;
+        }
+        if (auto status = TablePolicy<T>::repoint(model, from, to); !status) {
+            return status;
+        }
+        return TablePolicy<T>::inUse(model, from);
+    }
+
+    std::string from_;
+    std::string to_;
+    std::string name_;
+};
+
 } // namespace
 
 CommandPtr createLinetype(katana::entity::Linetype linetype)
@@ -296,6 +441,11 @@ CommandPtr updateLinetype(katana::entity::Linetype linetype)
 CommandPtr deleteLinetype(std::string name)
 {
     return std::make_unique<DeleteItemCommand<katana::entity::Linetype>>(std::move(name));
+}
+CommandPtr renameLinetype(std::string from, std::string to)
+{
+    return std::make_unique<RenameItemCommand<katana::entity::Linetype>>(std::move(from),
+                                                                        std::move(to));
 }
 
 CommandPtr createDimensionStyle(katana::entity::DimensionStyle style)
@@ -348,6 +498,11 @@ CommandPtr updateStyle(katana::entity::Style style)
 CommandPtr deleteStyle(std::string name)
 {
     return std::make_unique<DeleteItemCommand<katana::entity::Style>>(std::move(name));
+}
+CommandPtr renameStyle(std::string from, std::string to)
+{
+    return std::make_unique<RenameItemCommand<katana::entity::Style>>(std::move(from),
+                                                                     std::move(to));
 }
 
 } // namespace katana::commands

@@ -1447,8 +1447,37 @@ something; it is delivered under slice 3. OUTSTANDING: that dialog (slice
 3); a symbol on the vertices of a line is kept, counted and not drawn; a
 point symbol's rotation is kept and not drawn.
 
-**STATUS: slice 3 (styles manager: Style and Linetype tables, symbol and
-pattern preview) next.**
+**Slice 3 DELIVERED (2026-09-22).** One dialog for both tables -
+`src/katana_qt/style_manager.cpp`, Edit > Styles and Linetypes... - listing
+every style (linetype, weight, colour, hatch, symbol and its size,
+description) and every linetype (pattern, period, description), with a form
+below and a preview that draws the sample through the SAME
+`cad::qtDashPattern` and `cad::symbolStrokes` the viewport and the plot use,
+so a preview that looks right is evidence and not a second opinion. New,
+rename, delete, save changes, apply to the selection, and assign a linetype
+to a layer; everything through the ordinary commands, so a change made here
+is on the same undo stack as one typed on the command line.
+
+The new engine piece is `renameStyle` / `renameLinetype`
+(`table_commands.cpp`): a rename is a move in a name-keyed table, so it is
+remove + add + repoint every holder - entities for a style, layers and
+styles for a linetype - as ONE undo step. A protected item ("continuous")
+may not be renamed away for the same reason it may not be deleted. The
+rename ENDS by asking the delete guard whether anything still names the old
+item, so the two readings of the same references police each other rather
+than drifting. `STYLE RENAME` and `LINETYPE RENAME` expose it without the
+GUI, and `STYLE NEW/DELETE/APPLY/RENAME` now refuse trailing arguments
+instead of silently dropping them - `STYLE NEW TOPO Natural Surface Point`
+used to make a style called "TOPO".
+
+The table is read-only and edited through the form: a table that edited in
+place would run a command from inside its own `itemChanged` signal, which is
+exactly the shape of the layer-panel crash in `docs/cad.md`.
+`qt_style_manager_headless` builds and paints the dialog over a 12d import.
+OUTSTANDING: the dialog's buttons are driven by hand - the commands beneath
+them are covered by tests, the dialog itself only by "it builds and paints".
+
+**STATUS: slice 4 (trimeshes as SceneMesh) next.**
 
 ---
 

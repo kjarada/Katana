@@ -1108,6 +1108,43 @@ TEST(CadInterpreter, StylesCanBeDefinedTunedAppliedAndListed)
     EXPECT_TRUE(session.document.model().entities.find(ids[0])->style.empty());
 }
 
+TEST(CadInterpreter, RenamingAStyleOrALinetypeTakesEverythingThatNamedItAlong)
+{
+    // What a 12d import leaves to tidy: a style named after a linestyle and
+    // worn by the points, and a linetype named by a layer and a style.
+    Session session;
+    session.ok("LINETYPE NEW fence 1 -0.5");
+    // Quoted, because a 12d style name has spaces and dropping the rest of
+    // one silently is what the arity check below now refuses.
+    session.ok("STYLE NEW \"TOPO Natural Surface Point\"");
+    EXPECT_EQ(session.fails("STYLE NEW TOPO Natural Surface Point"), ErrorCode::InvalidArgument);
+    session.ok("STYLE SET \"TOPO Natural Surface Point\" linetype fence");
+    session.ok("LAYER NEW survey");
+    session.ok("LAYER LTYPE survey fence");
+    session.ok("POINT 1,1");
+    session.ok("SELECT ALL");
+    session.ok("STYLE APPLY \"TOPO Natural Surface Point\"");
+    const auto ids = session.document.model().entities.ids();
+    ASSERT_EQ(ids.size(), 1u);
+
+    session.ok("STYLE RENAME \"TOPO Natural Surface Point\" Ground");
+    EXPECT_EQ(session.document.model().entities.find(ids[0])->style, "Ground");
+    EXPECT_FALSE(session.document.model().styles.contains("TOPO Natural Surface Point"));
+
+    session.ok("LINETYPE RENAME fence \"post and rail\"");
+    EXPECT_EQ(session.document.model().layers.find("survey")->linetype, "post and rail");
+    EXPECT_EQ(session.document.model().styles.find("Ground")->linetype, "post and rail");
+
+    // One undo step each, entities and holders included.
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.model().layers.find("survey")->linetype, "fence");
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.model().entities.find(ids[0])->style, "TOPO Natural Surface Point");
+
+    EXPECT_EQ(session.fails("STYLE RENAME nosuch x"), ErrorCode::NotFound);
+    EXPECT_EQ(session.fails("LINETYPE RENAME continuous solid"), ErrorCode::CommandRejected);
+}
+
 TEST(CadInterpreter, StyleRejectsNonsenseWithItsOwnReason)
 {
     Session session;

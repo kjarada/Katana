@@ -3,6 +3,7 @@
 #include "theme.hpp"
 
 #include "icons.hpp"
+#include "style_manager.hpp"
 
 #include <QAction>
 #include <QActionGroup>
@@ -329,6 +330,12 @@ void MainWindow::buildActions()
     editMenu->addAction(selectAllAction);
     editMenu->addAction("&Deselect", QKeySequence(Qt::Key_Escape), this, [this] { views_->cancel(); });
     editMenu->addAction(eraseAction);
+    editMenu->addSeparator();
+    editMenu->addAction("St&yles and Linetypes...", this, [this] {
+        auto dialog = makeStyleManager();
+        dialog->showFirstRows();
+        dialog->exec();
+    });
 
     QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
     editBar->addActions({undoAction_, redoAction_});
@@ -910,6 +917,13 @@ void MainWindow::openDocument()
     if (!directory.isEmpty()) {
         openProject(directory);
     }
+}
+
+std::unique_ptr<StyleManagerDialog> MainWindow::makeStyleManager()
+{
+    return std::make_unique<StyleManagerDialog>(
+        document_, [this](const QString& message, bool isError) { logMessage(message, isError); },
+        this);
 }
 
 void MainWindow::openProject(const QString& directory)
