@@ -9,6 +9,7 @@
 #include "katana/archive12d/map_file.hpp"
 #include "katana/archive12d/style_library.hpp"
 #include "katana/archive12d/text_encoding.hpp"
+#include "builtin_customisation.hpp"
 
 namespace katana::archive12d {
 
@@ -59,6 +60,85 @@ std::vector<std::string> Customisation::unresolvedStyles() const
         }
     }
     return {missing.begin(), missing.end()};
+}
+
+const Customisation& builtinCustomisation()
+{
+    // Parsed once, on first use. A function-local static so the cost is paid
+    // by whoever first needs a linestyle and never by a session that does
+    // not, and so that nothing depends on static initialisation order.
+    static const Customisation built = [] {
+        Customisation customisation;
+        for (const std::string_view bytes : detail::builtinCustomisationFiles()) {
+            const auto decoded = decodeText(std::string(bytes));
+            if (!decoded) {
+                continue; // a file that will not decode cannot be part of a build
+            }
+            const auto kind = customisationKind(decoded->text);
+            if (!kind) {
+                continue;
+            }
+            if (*kind == CustomisationFile::MapFile) {
+                auto read = readMapFileInto(std::move(customisation.map), decoded->text);
+                if (read) {
+                    customisation.map = std::move(read->map);
+                }
+            } else {
+                auto read = readStyleLibraryInto(std::move(customisation.library), decoded->text);
+                if (read) {
+                    customisation.library = std::move(read->library);
+                }
+            }
+        }
+        return customisation;
+    }();
+    return built;
+}
+
+std::vector<std::filesystem::path>
+customisationSearchPath(const std::filesystem::path& executable)
+{
+    std::vector<std::filesystem::path> places;
+    std::error_code ignored;
+    const std::filesystem::path bin =
+        executable.has_parent_path() ? executable.parent_path() : std::filesystem::current_path(ignored);
+    places.push_back(bin.parent_path() / "share" / "katana" / "customisation");
+    // A development tree: bin is <source>/build/<config>/bin.
+    places.push_back(bin.parent_path().parent_path().parent_path() / "docs" / "12d Refrence Files");
+    return places;
+}
+
+std::vector<std::filesystem::path> findCustomisation(const std::filesystem::path& executable)
+{
+    std::error_code ignored;
+    for (const std::filesystem::path& directory : customisationSearchPath(executable)) {
+        if (!std::filesystem::is_directory(directory, ignored)) {
+            continue;
+        }
+        std::vector<std::filesystem::path> found;
+        for (const auto& entry : std::filesystem::directory_iterator(directory, ignored)) {
+            if (!entry.is_regular_file(ignored)) {
+                continue;
+            }
+            // Ask the file what it is rather than trusting its name: `.4d` is
+            // the extension of both a style library and a mapfile.
+            std::ifstream file(entry.path(), std::ios::binary);
+            if (!file) {
+                continue;
+            }
+            std::ostringstream buffer;
+            buffer << file.rdbuf();
+            const auto decoded = decodeText(buffer.str());
+            if (decoded && customisationKind(decoded->text)) {
+                found.push_back(entry.path());
+            }
+        }
+        if (!found.empty()) {
+            std::sort(found.begin(), found.end());
+            return found;
+        }
+    }
+    return {};
 }
 
 katana::core::Result<Customisation> readCustomisationInto(Customisation into,

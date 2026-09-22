@@ -1849,6 +1849,23 @@ customisation now reports how many of the drawing's styles it answers for -
 whether nothing is loaded, the library does not define what the drawing
 names, or the drawing's styles are 12d's plain lines.
 
+### The customisation is compiled in (the user's instruction of 2026-09-22)
+
+> i dont want it be loded at everytime softwares opens i want it as solid part
+> of the software not as a customization
+
+Done: `tools/embed_customisation.py` turns the customisation files into a
+generated source at build time and `archive12d::builtinCustomisation` parses
+them once, so the linestyles, symbols and survey codes are part of the binary
+and nothing is found, loaded or configured. Verified by moving the files away
+entirely and running: 792 definitions and 1,624 rules, still there.
+
+The bytes are embedded rather than generated as C++ structures - one reader
+for a built-in and a loaded customisation, and 21 ms in Release once per
+session against a multi-megabyte translation unit. The generated source is
+never committed, since the customisation is third-party material under its own
+licence; a checkout without it builds an empty table and draws plain lines.
+
 **STATUS: DELIVERED, bar the two things named earlier and repeated here.** The
 chain the user asked for works end to end: a mapfile, a linestyle library and
 a symbol library load together; a survey code resolves through the mapfile to
