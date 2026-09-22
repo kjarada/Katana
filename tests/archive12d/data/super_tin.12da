@@ -1,0 +1,184 @@
+// ---------------------------------------------------------------------------
+// Synthetic example: a SUPER TIN made of THREE tins — one large natural
+// surface plus two smaller pad tins that sit WITHIN the large tin's
+// footprint.
+//
+// Format per documentation/06-super-tin.md and 12d A File Format sec 1.4.8
+// (pp.26-27): super_tin has a MANDATORY name and a MANDATORY tins { } block
+// listing the member tin names in order ("name of the first tin making up
+// the super tin", "name of the second tin", ...). That order is the member
+// RANK: where members overlap, a later (higher-rank) tin substitutes the
+// surface of the tins listed before it. So the base surface is listed
+// FIRST and the design pads AFTER it — over each pad's footprint the super
+// tin takes the pad's surface, elsewhere it takes the natural surface.
+//
+// The member tins must exist in the project for the super tin to be fully
+// defined (sec 1.4.8 note), so all three are included in this file
+// (sec 1.4.7.2 "tin" format — visible triangles only).
+//
+// PAD A is a fill pad (flat at RL 22.2, above the natural surface).
+// PAD B is a cut pad (flat at RL 18.0, below the natural surface).
+//
+// Coordinates: MGA2020 Zone 56 (load with System "Australia - MGA2020",
+// Zone 56).
+// ---------------------------------------------------------------------------
+
+tin {
+  name "NATURAL SURFACE"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+  }
+
+  points {
+    554000.0 6883500.0 19.6
+    554060.0 6883500.0 19.9
+    554120.0 6883500.0 20.1
+    554180.0 6883500.0 19.8
+    554240.0 6883500.0 19.5
+    554000.0 6883560.0 19.9
+    554060.0 6883560.0 20.4
+    554120.0 6883560.0 20.7
+    554180.0 6883560.0 20.3
+    554240.0 6883560.0 19.8
+    554000.0 6883620.0 20.1
+    554060.0 6883620.0 20.7
+    554120.0 6883620.0 21.0
+    554180.0 6883620.0 20.6
+    554240.0 6883620.0 20.0
+    554000.0 6883680.0 19.8
+    554060.0 6883680.0 20.3
+    554120.0 6883680.0 20.6
+    554180.0 6883680.0 20.2
+    554240.0 6883680.0 19.7
+    554000.0 6883740.0 19.5
+    554060.0 6883740.0 19.9
+    554120.0 6883740.0 20.1
+    554180.0 6883740.0 19.8
+    554240.0 6883740.0 19.4
+  }
+
+  triangles {
+    1 6 2
+    2 6 7
+    2 7 3
+    3 7 8
+    3 8 4
+    4 8 9
+    4 9 5
+    5 9 10
+    6 11 7
+    7 11 12
+    7 12 8
+    8 12 13
+    8 13 9
+    9 13 14
+    9 14 10
+    10 14 15
+    11 16 12
+    12 16 17
+    12 17 13
+    13 17 18
+    13 18 14
+    14 18 19
+    14 19 15
+    15 19 20
+    16 21 17
+    17 21 22
+    17 22 18
+    18 22 23
+    18 23 19
+    19 23 24
+    19 24 20
+    20 24 25
+  }
+
+  colour green
+}
+
+tin {
+  name "PAD A"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+  }
+
+  points {
+    554040.0 6883550.0 22.2
+    554070.0 6883550.0 22.2
+    554100.0 6883550.0 22.2
+    554040.0 6883580.0 22.2
+    554070.0 6883580.0 22.2
+    554100.0 6883580.0 22.2
+    554040.0 6883610.0 22.2
+    554070.0 6883610.0 22.2
+    554100.0 6883610.0 22.2
+  }
+
+  triangles {
+    1 4 2
+    2 4 5
+    2 5 3
+    3 5 6
+    4 7 5
+    5 7 8
+    5 8 6
+    6 8 9
+  }
+
+  colour green
+}
+
+tin {
+  name "PAD B"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+  }
+
+  points {
+    554140.0 6883630.0 18.0
+    554170.0 6883630.0 18.0
+    554200.0 6883630.0 18.0
+    554140.0 6883660.0 18.0
+    554170.0 6883660.0 18.0
+    554200.0 6883660.0 18.0
+    554140.0 6883690.0 18.0
+    554170.0 6883690.0 18.0
+    554200.0 6883690.0 18.0
+  }
+
+  triangles {
+    1 4 2
+    2 4 5
+    2 5 3
+    3 5 6
+    4 7 5
+    5 7 8
+    5 8 6
+    6 8 9
+  }
+
+  colour green
+}
+
+super_tin {
+  name "COMBINED SURFACE"
+
+  attributes {
+    text "Style"   "1"
+  }
+
+  colour green
+
+  // Rank order: base surface first, then the pads that substitute it
+  // over their footprints.
+  tins {
+    "NATURAL SURFACE"
+    "PAD A"
+    "PAD B"
+  }
+}

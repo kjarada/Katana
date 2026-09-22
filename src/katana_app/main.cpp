@@ -24,6 +24,7 @@
 
 #if defined(KATANA_WITH_INTEROP)
 #include "katana/commands/entity_commands.hpp"
+#include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
@@ -160,6 +161,83 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         }
         return true;
     }
+    case interop::SourceKind::Archive12d: {
+        interop::Archive12dImportOptions options;
+        auto probe = interop::importArchive12d(file, options);
+        if (probe && shiftToLocal && !probe->bounds.empty()) {
+            options.originShift = katana::geometry::Vec2(probe->bounds.min.x, probe->bounds.min.y);
+        }
+        auto imported = shiftToLocal && probe ? interop::importArchive12d(file, options)
+                                             : std::move(probe);
+        if (!imported) {
+            std::cerr << "error: " << imported.error().describe() << '\n';
+            return false;
+        }
+        // Layers, entities and alignments are ONE undo step, like any import.
+        auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
+        for (const katana::entity::Layer& layer : imported->layersNeeded) {
+            if (!document.model().layers.contains(layer.name)) {
+                transaction->add(cmd::createLayer(layer));
+            }
+        }
+        const std::size_t count = imported->entities.size();
+        const auto existingBounds = document.model().entities.bounds();
+        if (count != 0) {
+            transaction->add(cmd::createEntities(std::move(imported->entities)));
+        }
+        std::size_t alignments = 0;
+        for (katana::entity::Alignment& alignment : imported->alignments) {
+            // A name the drawing already has would fail the whole transaction.
+            const std::string base = alignment.name;
+            for (int copy = 2; document.model().alignments.contains(alignment.name); ++copy) {
+                alignment.name = base + " (" + std::to_string(copy) + ")";
+            }
+            transaction->add(cmd::createAlignment(alignment));
+            ++alignments;
+        }
+        const auto status = document.execute(std::move(transaction));
+        if (!status) {
+            std::cerr << "error: " << status.error().describe() << '\n';
+            return false;
+        }
+        std::cout << "imported " << count << " entities and " << alignments
+                  << " alignments from " << file.filename().string() << " ("
+                  << imported->encoding;
+        if (!imported->archiveVersion.empty()) {
+            std::cout << ", 12d archive " << imported->archiveVersion;
+        }
+        std::cout << ")\n";
+        for (const auto& tally : imported->tally) {
+            std::cout << "  " << tally.keyword << ": " << tally.read << " read, " << tally.imported
+                      << " imported\n";
+        }
+        for (const auto& surface : imported->surfaces) {
+            // The CLI has nowhere to keep a surface; the desktop application
+            // does. Said, so that "12 tins read" is not taken for "12 kept".
+            std::cout << "  surface \"" << surface.name << "\": "
+                      << surface.surface.triangleCount() << " triangles (read and checked; the "
+                      << "CLI holds no surfaces - import in the desktop application to use it)\n";
+        }
+        for (auto& cloud : imported->clouds) {
+            std::cout << "  point cloud \"" << cloud.name << "\": " << cloud.points.size()
+                      << " points\n";
+            state.reference.add(std::move(cloud));
+        }
+        for (const std::string& warning : imported->warnings) {
+            std::cout << "  " << warning << '\n';
+        }
+        if (!imported->bounds.empty()) {
+            std::cout << "  extent " << imported->bounds.min.x << "," << imported->bounds.min.y
+                      << " to " << imported->bounds.max.x << "," << imported->bounds.max.y << '\n';
+        }
+        const auto advice = interop::advisePlacement(existingBounds, imported->bounds);
+        if (advice.farApart) {
+            std::cout << "  WARNING: " << advice.message << '\n'
+                      << "  undo, then re-import with  IMPORT <file> LOCAL  to shift it "
+                         "alongside the drawing\n";
+        }
+        return true;
+    }
     case interop::SourceKind::Raster: {
         auto raster = interop::importRaster(path);
         if (!raster) {
@@ -210,7 +288,23 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
 bool exportPath(katana::cad::Document& document, const std::string& text)
 {
     namespace interop = katana::interop;
-    auto result = interop::exportVector(document.model(), std::filesystem::path(text));
+    const std::filesystem::path target(text);
+    if (interop::kindForPath(target) == interop::SourceKind::Archive12d) {
+        // No surfaces: the CLI holds none.
+        auto archive = interop::exportArchive12d(document.model(), {}, target);
+        if (!archive) {
+            std::cerr << "error: " << archive.error().describe() << '\n';
+            return false;
+        }
+        std::cout << "exported " << archive->entitiesWritten << " entities and "
+                  << archive->alignmentsWritten << " alignments (12d archive, "
+                  << archive->bytesWritten << " bytes)\n";
+        for (const std::string& warning : archive->warnings) {
+            std::cout << "  " << warning << '\n';
+        }
+        return true;
+    }
+    auto result = interop::exportVector(document.model(), target);
     if (!result) {
         std::cerr << "error: " << result.error().describe() << '\n';
         return false;

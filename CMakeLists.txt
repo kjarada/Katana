@@ -79,6 +79,7 @@ set(KATANA_MODULES
     katana_geodesy
     katana_survey
     katana_terrain
+    katana_archive12d
     katana_render
     katana_cad
 )

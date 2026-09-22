@@ -329,7 +329,7 @@ The required progression is:
 | 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; COPC conversion and resolution queries in the engine; import-time conversion and view-driven re-query outstanding |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
-| 20 | File Interoperability | partial — raster, vector and point cloud import/export in GUI and CLI; no DWG/LandXML/IFC |
+| 20 | File Interoperability | partial — raster, vector, point cloud and 12d Archive import/export in GUI and CLI; no DWG/LandXML/IFC |
 | 21 | Civil Engineering | partial — sections; clothoid; alignments and profiles; corridor quantities and surface, cross-checked; parcels with bearings, area, deed wording and labels; richer assemblies and grading outstanding |
 | 22 | Drawing/Plotting | partial — Plot to PDF through the screen's own drawing code at ISO sizes and standard scales, `Layer::lineWeight` finally honoured; layouts, title blocks, annotation scaling, printing outstanding |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
@@ -1223,6 +1223,7 @@ Reference Data panel) and in `katana_cli` (`IMPORT`, `EXPORT`, `REFS`):
 | Vector out | the same, driver chosen by extension |
 | Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG/JPEG and the rest of GDAL's readers |
 | Point cloud | LAS, LAZ in and out |
+| 12d Archive | `.12da`, `.12daz`, `.12dz` in and out - every element of the format |
 
 Vector import produces plain `Entity` values which the caller wraps in
 `createEntities`, so an import is one validated, atomic, undoable command like
@@ -1258,12 +1259,44 @@ build tree and in a bundle alike - and DXF import now puts each entity on its
 own CAD layer instead of all 51 000 on one layer called `entities`. Record in
 `docs/interop.md`.
 
+**The 12d Archive format is delivered** (`katana_archive12d`, a module of
+its own beside `commands` so that it builds and sanitizes without GDAL;
+`interop/archive12d.hpp` for the file and the zip container; File > Import /
+Export and `IMPORT`/`EXPORT` in the CLI). Every element the 12d Model V15
+manual defines is read - the current string types, the seven superseded ones,
+tins in both forms, super tins, trimeshes, LAS clouds in all eleven point
+formats - and `coverage.hpp` holds the list against the reader in a test, so
+"all elements accounted for" is asserted rather than claimed. Strings become
+entities with their heights, attributes and everything 12d knows about them
+in metadata; super alignments become named Alignments where their geometry is
+PI-definable and VERIFIED against 12d's own solved vertices; tins become
+surfaces; clouds become reference layers; trimeshes are read and reported
+(Katana has no mesh entity). Export writes entities, alignments and the
+session's surfaces back, and what was imported and exported unchanged is the
+string it was. Three conventions the manual gets wrong or leaves out - the
+hand of a radius, the description of a trailing transition, the definition of
+the cubic parabola - were measured against 12d Model's output and are
+recorded in `src/katana_archive12d/plan_geometry.hpp`; the rest of the
+reasoning is in `docs/interop.md`. An adversarial review found nineteen
+defects, all fixed with regression tests; 185 hostile inputs crash nothing.
+12d Model 15's own 58 MB exports read in a quarter of a second.
+
+Two things this taught the application. Surface From Drawing now reads
+per-vertex heights and leaves a null vertex out of the surface instead of
+triangulating it at the datum. And a headless session (`--plot`,
+`--screenshot`) no longer opens a question nobody can answer: the first
+scripted 12da import hung on the "far from the current drawing" box.
+
 **OUTSTANDING: DWG, LandXML and IFC**, and **text and dimensions are skipped on
 DXF export** although DXF has both (the vector path models only points, lines
 and polygons). **No coordinate transformation on import**: a file's declared
 CRS is reported but coordinates are never reprojected, so mixing coordinate
 systems is the user's responsibility. Reference layers are not yet persisted
 into the project - the pixels are re-read from the source path each session.
+For the 12d archive: trimeshes and vertex symbols are read and not drawn,
+super tins are reported and not built, and the test-quality lens of the
+review did not complete - the module's tests were written to CLAUDE.md
+section 3 but have not been audited against it by a second reader.
 
 ---
 

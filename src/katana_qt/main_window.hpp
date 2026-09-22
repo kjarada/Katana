@@ -58,6 +58,14 @@ class MainWindow final : public QMainWindow {
     // can plot headlessly from the command line, which is what lets a test
     // open the result. Fails with InvalidState when there is no plan
     // viewport, and with whatever the fit or the plot refuses.
+    // A headless session (--plot, --screenshot) has nobody to answer a
+    // question: anything that would open a modal dialog logs its advice and
+    // takes the non-destructive default instead - imported survey coordinates
+    // are kept, never shifted. Without this an import in a scripted run
+    // waits on a box no one can see, which is how the first headless 12da
+    // import hung.
+    void setHeadless(bool headless) { headless_ = headless; }
+
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
@@ -123,6 +131,7 @@ class MainWindow final : public QMainWindow {
     // ---- import / export (PLAN.MD Phase 20) ---------------------------------
     void importFile();
     void importVectorFile(const std::filesystem::path& path);
+    void importArchive12dFile(const std::filesystem::path& path);
     void importRasterFile(const std::filesystem::path& path);
     void importPointCloudFile(const std::filesystem::path& path);
     void exportVectorFile();
@@ -190,6 +199,7 @@ class MainWindow final : public QMainWindow {
 
     bool refreshingLayers_ = false;     // suppresses cellChanged while rebuilding
     bool refreshingReferences_ = false; // ditto, for the reference table
+    bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history
 };
 

@@ -21,6 +21,9 @@ set(KATANA_ALLOWED_survey "core;math")
 set(KATANA_ALLOWED_terrain "core;math;geometry")
 set(KATANA_ALLOWED_entity "core;math;geometry")
 set(KATANA_ALLOWED_commands "core;math;geometry;entity")
+# The 12d Archive format. Pure text handling plus the mapping onto entities,
+# alignments and surfaces, so it sits beside commands and needs no GDAL.
+set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
 set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
 # gis and pointcloud are both implemented by src/katana_io.
 set(KATANA_ALLOWED_gis "core;pointcloud")
@@ -28,7 +31,7 @@ set(KATANA_ALLOWED_pointcloud "core")
 # interop converts what gis and pointcloud read into the domain model, so it is
 # the only layer allowed to see both the external readers and the entity model.
 set(KATANA_ALLOWED_interop
-    "core;math;geometry;entity;commands;gis;pointcloud")
+    "core;math;geometry;terrain;entity;commands;archive12d;gis;pointcloud")
 # render sits beside terrain: it consumes a DrawList of plain geometry and has
 # no idea an Entity or a Document exists, which is Rule 3 made structural.
 set(KATANA_ALLOWED_render "core;math;geometry")
@@ -38,9 +41,9 @@ set(KATANA_ALLOWED_render "core;math;geometry")
 set(KATANA_ALLOWED_cad
     "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage")
 set(KATANA_ALLOWED_app
-    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;gis;pointcloud;interop")
+    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop")
 set(KATANA_ALLOWED_qt
-    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;gis;pointcloud;interop;app")
+    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop;app")
 
 # src/<directory> -> layer
 set(KATANA_SRC_LAYER_katana_core core)
@@ -52,6 +55,7 @@ set(KATANA_SRC_LAYER_katana_terrain terrain)
 set(KATANA_SRC_LAYER_katana_render render)
 set(KATANA_SRC_LAYER_katana_entity entity)
 set(KATANA_SRC_LAYER_katana_commands commands)
+set(KATANA_SRC_LAYER_katana_archive12d archive12d)
 set(KATANA_SRC_LAYER_katana_storage storage)
 set(KATANA_SRC_LAYER_katana_cad cad)
 set(KATANA_SRC_LAYER_katana_io gis)

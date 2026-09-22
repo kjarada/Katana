@@ -7,6 +7,7 @@ find_package(PDAL CONFIG REQUIRED)
 add_library(katana_io STATIC
     gdal_adapter.cpp
     point_cloud_engine.cpp
+    zip_container.cpp
 )
 katana_target_defaults(katana_io)
 target_link_libraries(katana_io

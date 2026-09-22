@@ -6,9 +6,10 @@ add_library(katana_interop STATIC
     reference_data.cpp
     import.cpp
     export.cpp
+    archive12d.cpp
 )
 katana_target_defaults(katana_interop)
 target_link_libraries(katana_interop
-    PUBLIC katana_core katana_geometry katana_entity katana_io
+    PUBLIC katana_core katana_geometry katana_entity katana_archive12d katana_io
     PRIVATE katana_commands
 )

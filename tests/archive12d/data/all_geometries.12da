@@ -1,0 +1,726 @@
+// ---------------------------------------------------------------------------
+// comprehensive-all-geometries.12da
+//
+// A hand-written, self-contained 12da fixture that exercises EVERY geometry
+// type the viewer supports, with rich nested attributes on each feature.
+// Used for manual QA and automated parser round-trip tests.
+//
+// Coordinates are MGA2020 Zone 56 (Brisbane area).  Confirm the CRS in the
+// UI as "MGA2020 / Zone 56" to see everything placed on the Leaflet map,
+// or load with "Unknown / arbitrary" to inspect geometry without a CRS.
+//
+// Geometry coverage:
+//   - Individual points     (breakline-point strings, 1 point each)
+//   - Polylines             (open strings, multiple vertices)
+//   - Polygons              (closed strings, closed = 1)
+//   - Super alignment       (horizontal_data + vertical_data coord polylines,
+//                            geometry_data arc segment)
+//   - TIN surface           (full_tin with points + triangle indices)
+//   - Trimesh               (primitive_3d -> trimesh_3d with vertices + faces)
+//   - Text labels           (single-line `text "label" E N Z` form)
+//   - Arc string            (centre + start + end keyword form)
+//   - Circle string         (centre + radius keyword form)
+//   - Feature string        (centre + radius keyword form)
+//   - Interface string      (data rows with trailing cut/fill mode column)
+//   - Polyline string       (superseded; x y z radius bulge rows with an arc)
+//   - 4d string             (superseded; x y z "text" rows -> text entities)
+//   - Alignment string      (superseded; hipdata/vipdata IP definitions)
+//   - Pipeline string       (superseded; alignment + diameter)
+//   - Drainage string       (data + pit/pipe sub-blocks -> pit markers)
+//   - Plot frame            (sheet rectangle from origin/size/scale)
+//   - LAS cloud             (points_v10_p0 tagged + compact point records)
+//   - Curved super string   (data_2d + geometry_data arc densification)
+//
+// Attribute coverage per feature:
+//   - Nested `group { ... }` hierarchies (mix of text / real / integer)
+//   - Shallow top-level attribute lists
+// ---------------------------------------------------------------------------
+
+// archive_version "15.01.08.60"
+// decimal_places 3
+// null -999
+// null_keyword true
+
+// ---------------------------------------------------------------------------
+//  Model: Survey Control — three individual permanent-mark points
+// ---------------------------------------------------------------------------
+model "Survey Control"
+
+string super {
+  name      "PM001 Permanent Mark"
+  chainage  0
+  breakline point
+  colour    red
+  style     "PermanentMark"
+
+  attributes {
+    group {
+      name "Identification"
+      attributes {
+        text    "AssetIdentifier"   "PM-BN-001"
+        text    "AssetType"         "Permanent Mark"
+        text    "AssetOwner"        "Queensland Cadastre"
+      }
+    }
+    group {
+      name "SurveyData"
+      attributes {
+        real    "ReducedLevel"       32.451
+        text    "Datum"              "AHD"
+        text    "DateEstablished"    "2024-09-14"
+        integer "OrderOfAccuracy"    2
+      }
+    }
+    text    "Remarks"   "Brass plate in concrete footpath; adjacent to street tree."
+  }
+  closed 0
+  data_3d {
+    502000.000 6960000.000 32.451
+  }
+}
+
+string super {
+  name      "PM002 Permanent Mark"
+  chainage  0
+  breakline point
+  colour    red
+  style     "PermanentMark"
+
+  attributes {
+    group {
+      name "Identification"
+      attributes {
+        text    "AssetIdentifier"   "PM-BN-002"
+        text    "AssetType"         "Permanent Mark"
+        text    "AssetOwner"        "Queensland Cadastre"
+      }
+    }
+    group {
+      name "SurveyData"
+      attributes {
+        real    "ReducedLevel"       34.112
+        text    "Datum"              "AHD"
+        integer "OrderOfAccuracy"    3
+      }
+    }
+  }
+  closed 0
+  data_3d {
+    502250.000 6960125.000 34.112
+  }
+}
+
+string super {
+  name      "BM003 Church Benchmark"
+  chainage  0
+  breakline point
+  colour    yellow
+  style     "Benchmark"
+
+  attributes {
+    text    "AssetIdentifier"   "BM-CHURCH-01"
+    text    "AssetType"         "Benchmark"
+    real    "ReducedLevel"      36.008
+    text    "Remarks"           "Church foundation corner stone"
+  }
+  closed 0
+  data_3d {
+    502480.000 6960280.000 36.008
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Underground Services — two polylines with full asset attribution
+// ---------------------------------------------------------------------------
+model "Underground Services"
+
+string super {
+  name      "Telstra Conduit 4-way HDPE"
+  chainage  0
+  colour    magenta
+  style     "Comms-Conduit"
+
+  attributes {
+    group {
+      name "SourceAttributes"
+      attributes {
+        text    "USIFileName"         "SMWSDDS-RPS-COMMS-BN-001.12daz"
+        text    "USIModelName"        "E COMMS Tel Conduit BN"
+        text    "USIElementName"      "TD"
+        text    "USIFileImportDate"   "241014"
+      }
+    }
+    group {
+      name "Asset"
+      attributes {
+        text    "AssetIdentifier"   "C-001042"
+        text    "AssetType"         "Communication"
+        text    "AssetSubtype"      "Conduit"
+        text    "AssetOwner"        "Telstra"
+        text    "AssetStatus"       "In Service"
+        text    "Material"          "HDPE"
+        text    "Orientation"       "UG"
+        real    "Size"              0.100
+        integer "Ways"              4
+      }
+    }
+    group {
+      name "Dimensions"
+      attributes {
+        real    "CoverToObvert"     0.900
+        real    "InternalDiameter"  0.100
+        real    "ExternalDiameter"  0.114
+      }
+    }
+    text    "SurveyDate"   "2024-10-14"
+  }
+  closed 0
+  data_3d {
+    502000.000 6960000.000 30.450
+    502050.000 6960020.000 30.380
+    502100.000 6960045.000 30.310
+    502150.000 6960075.000 30.280
+    502200.000 6960105.000 30.250
+    502250.000 6960125.000 30.220
+  }
+}
+
+string super {
+  name      "Kerb Breakline BL-047"
+  chainage  0
+  colour    cyan
+  style     "Kerb"
+
+  attributes {
+    text    "AssetType"       "Kerb"
+    text    "AssetSubtype"    "Lip-Edge"
+    real    "ChainageStart"   0.000
+    real    "ChainageEnd"     92.500
+  }
+  closed 0
+  data_3d {
+    502030.000 6960040.000 31.200
+    502070.000 6960060.000 31.180
+    502110.000 6960085.000 31.150
+    502160.000 6960110.000 31.120
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Cadastre — two closed polygons (closed 1)
+// ---------------------------------------------------------------------------
+model "Cadastre"
+
+string super {
+  name      "Lot 12 SP285312"
+  chainage  0
+  colour    orange
+  style     "Cadastre"
+
+  attributes {
+    group {
+      name "Title"
+      attributes {
+        text    "LotOnPlan"       "12SP285312"
+        text    "Tenure"          "Freehold"
+        text    "RegisteredOwner" "BRISBANE CITY COUNCIL"
+        text    "LandUse"         "Road Reserve"
+      }
+    }
+    group {
+      name "Dimensions"
+      attributes {
+        real    "Area_m2"     10000.000
+        real    "Perimeter_m"   400.000
+      }
+    }
+  }
+  closed 1
+  data_3d {
+    502300.000 6960200.000 35.000
+    502400.000 6960200.000 35.200
+    502400.000 6960300.000 35.800
+    502300.000 6960300.000 35.500
+  }
+}
+
+string super {
+  name      "Drainage Reserve DR-04"
+  chainage  0
+  colour    green
+  style     "DrainageReserve"
+
+  attributes {
+    text    "ReserveType"   "Drainage"
+    text    "Administrator" "Brisbane City Council"
+    real    "Area_m2"       5000.000
+  }
+  closed 1
+  data_3d {
+    502050.000 6960300.000 30.000
+    502150.000 6960300.000 30.250
+    502150.000 6960350.000 30.500
+    502050.000 6960350.000 30.250
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Labels — three text entities (single-line `text "..."` form)
+// ---------------------------------------------------------------------------
+model "Labels"
+
+text "PM001 RL=32.451" 502000.000 6960000.000 32.500
+text "PM002 RL=34.112" 502250.000 6960125.000 34.200
+text "Ch 100+00"       502100.000 6960045.000 30.350
+
+// ---------------------------------------------------------------------------
+//  Model: Road Centreline Alignment — super_alignment with horizontal_data
+//  and vertical_data blocks (the format the WASM parser expects).
+// ---------------------------------------------------------------------------
+model "Road Centreline Alignment"
+
+string super_alignment {
+  name      "MC-01 North-Bound Carriageway"
+  chainage  0
+  breakline line
+  colour    cyan
+  style     "RoadCentreline"
+  weight    1
+
+  attributes {
+    group {
+      name "Design"
+      attributes {
+        text    "Standard"          "AustRoads Geometric Design 2024"
+        real    "DesignSpeed_kmh"    60.000
+        real    "NormalCrossfall"    0.030
+        real    "MaxSuperelevation"  0.060
+      }
+    }
+    group {
+      name "Construction"
+      attributes {
+        text    "Contractor"        "TBA"
+        text    "DesignPhase"       "Detailed"
+        integer "RevisionNumber"    3
+      }
+    }
+    text    "ProjectReference"   "BCC-RD-2024-047"
+  }
+
+  closed 0
+
+  horizontal_data {
+    name      "MC-01 North-Bound Carriageway"
+    chainage  0
+    breakline line
+    colour    cyan
+    style     "1"
+    weight    1
+    closed 0
+    data_2d {
+      502000.000 6960000.000
+      502100.000 6960050.000
+      502200.000 6960125.000
+      502280.000 6960180.000
+      502400.000 6960250.000
+    }
+    geometry_data {
+      straight { }
+      arc { radius 80 major 0 }
+      straight { }
+      straight { }
+    }
+  }
+
+  vertical_data {
+    name      "MC-01 North-Bound Carriageway"
+    chainage  0
+    breakline line
+    colour    cyan
+    style     "1"
+    weight    1
+    closed 0
+    data_2d {
+      0.000   30.000
+      120.000 33.600
+      200.000 35.200
+      330.000 35.850
+    }
+    geometry_data {
+      straight { }
+      straight { }
+      straight { }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Ground TIN — 6 vertices, 4 triangles
+//
+//  NB: the attribute group names avoid anything that looks like a model
+//  name (the parser's `model "..."` detection is lenient enough that a
+//  quoted "name" token inside a group can otherwise switch context).
+// ---------------------------------------------------------------------------
+model "Ground TIN"
+
+full_tin {
+  name "Natural Surface TIN"
+
+  // NB: attributes here use only flat leaves (not nested groups) because the
+  // TIN parser treats any `name "X"` token — even inside a nested
+  // attribute group — as a rename of the TIN destination model.  Flat
+  // text/real/integer attrs sidestep that entirely.
+  attributes {
+    real    "NullLengthFactor"    1.500
+    real    "NullAngle_rad"       0.000
+    integer "WeedPoints"          0
+    integer "FaceCount"           4
+    text    "Style"               "1"
+    text    "SourceJob"           "Pre-Construction Survey 2024"
+  }
+
+  // Per the 12d file-format spec, full_tin points ALWAYS begin with 4
+  // construction points — the corners of a rectangle surrounding the data.
+  // Triangles that touch them are construction triangles (never displayed),
+  // so real data points start at id 5.
+  points {
+    501900.000 6959900.000 0.000
+    501900.000 6960200.000 0.000
+    502300.000 6960200.000 0.000
+    502300.000 6959900.000 0.000
+    502000.000 6960000.000 30.000
+    502100.000 6960000.000 31.000
+    502200.000 6960000.000 31.500
+    502000.000 6960100.000 30.500
+    502100.000 6960100.000 31.200
+    502200.000 6960100.000 31.700
+  }
+
+  triangles {
+    vertices {
+      5 6 8
+      6 9 8
+      6 7 9
+      7 10 9
+    }
+  }
+
+  // 2 = visible, 1 = nulled — mandatory in full_tin exports.
+  nulling {
+    2 2 2 2
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Super Tin — groups the natural surface TIN (sec 1.4.8). Members are
+//  referenced by name; the viewer shows it as a group row in the TIN tree.
+// ---------------------------------------------------------------------------
+
+super_tin {
+  name "Site Surfaces"
+  colour green
+  tins {
+    "Natural Surface TIN"
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Site Mesh — free-form trimesh (primitive_3d -> trimesh_3d)
+// ---------------------------------------------------------------------------
+model "Site Mesh"
+
+primitive_3d {
+
+  attributes {
+    group {
+      name "VolumeData"
+      attributes {
+        real    "Volume_m3"       350.500
+        real    "BaseArea_m2"     400.000
+        real    "ApexHeight_m"      3.500
+      }
+    }
+    text    "Material"         "Crushed Rock"
+    text    "SurveyDate"       "2024-10-15"
+    integer "SurveyPointCount"  128
+  }
+
+  name Stockpile_SP_02
+  colour brown
+
+  trimesh_3d {
+    info {
+      flag 0
+      key  1
+      colour brown
+      name  Stockpile_SP_02
+    }
+    vertices {
+      502500.000 6960050.000 30.000
+      502520.000 6960050.000 30.000
+      502520.000 6960070.000 30.000
+      502500.000 6960070.000 30.000
+      502510.000 6960060.000 33.500
+    }
+    faces {
+      1 2 5
+      2 3 5
+      3 4 5
+      4 1 5
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Geometry Primitives — arc, circle and feature strings, whose
+//  geometry is defined entirely by keyword fields (no data block).
+// ---------------------------------------------------------------------------
+model "Geometry Primitives"
+
+string arc {
+  name "Cul-de-sac Arc"
+  colour blue
+  style "RoadEdge"
+  chainage 0 interval 1 radius 15
+  xcentre 502600.000 ycentre 6960100.000 zcentre 31.000
+  xstart 502615.000 ystart 6960100.000 zstart 31.000
+  xend 502600.000 yend 6960115.000 zend 31.500
+}
+
+string circle {
+  name "Water Tank Outline"
+  colour blue
+  style "Tank"
+  chainage 0 interval 1 radius 8
+  zcentre 32.000 xcentre 502650.000 ycentre 6960200.000
+}
+
+string feature {
+  name "Tree Canopy 3m"
+  colour green
+  style "Tree"
+  chainage 0 interval 1 radius 3
+  zcentre 31.000 xcentre 502700.000 ycentre 6960250.000
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Batter Interface — interface string (4th data column = cut/fill
+//  mode: -1 cut, 0 surface, 1 fill; positions must ignore it).
+// ---------------------------------------------------------------------------
+model "Batter Interface"
+
+string interface {
+  name "Daylight Line"
+  colour red
+  style "Interface"
+  chainage 0
+  breakline line
+  data {
+    502800.000 6960300.000 31.000 -1
+    502820.000 6960310.000 31.500 0
+    502840.000 6960320.000 32.000 1
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Legacy Strings — superseded polyline (radius/bulge arc) and a
+//  4d string whose per-vertex text becomes text entities.
+// ---------------------------------------------------------------------------
+model "Legacy Strings"
+
+string polyline {
+  name "Fence with Arc"
+  colour white
+  style "Fence"
+  chainage 0
+  closed 0
+  data {
+    502900.000 6960000.000 30.000 12 0
+    502920.000 6960000.000 30.000 0 0
+    502940.000 6960010.000 30.000 0 0
+  }
+}
+
+string 4d {
+  name "Tree Labels"
+  colour green
+  chainage 0
+  data {
+    502950.000 6960050.000 30.000 "GUM-01"
+    502960.000 6960060.000 30.100 "GUM-02"
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Road Alignment IP — superseded alignment and pipeline strings,
+//  defined by intersection points (hipdata/vipdata). Both map onto super
+//  alignments in the parser.
+// ---------------------------------------------------------------------------
+model "Road Alignment IP"
+
+string alignment {
+  name "AL-EAST"
+  colour yellow
+  style "Alignment"
+  chainage 0 interval 10
+  draw_mode 1
+  spiral_type "clothoid"
+  hipdata {
+    503000.000 6960000.000 0
+    503100.000 6960000.000 40
+    503150.000 6960100.000 0
+  }
+  vipdata {
+    0.000 30.000 0
+    100.000 33.000 40 parabola
+    220.000 31.000 0
+  }
+}
+
+string pipeline {
+  name "Trunk Main 375"
+  colour blue
+  style "WaterMain"
+  diameter 0.375 length 6
+  chainage 0 interval 10
+  spiral_type "clothoid"
+  hipdata {
+    503200.000 6960000.000 0
+    503300.000 6960050.000 0
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Drainage Network — water (drainage) string with pit and pipe
+//  sub-blocks. Pits become named point markers; the pipe/property blocks
+//  must never leak coordinates into the line geometry.
+// ---------------------------------------------------------------------------
+model "Drainage Network"
+
+string drainage {
+  name "SW Line A"
+  colour cyan
+  style "Stormwater"
+  chainage 0
+  attributes {
+    text Tin "Natural Surface TIN"
+  }
+  outfall 28.500
+  flow_direction 1
+  data {
+    503400.000 6960000.000 29.000 0 0
+    503450.000 6960020.000 29.500 0 0
+    503500.000 6960040.000 30.000 0 0
+  }
+  pit {
+    name "A1"
+    type "Grated"
+    x 503400.000 y 6960000.000 z 31.000
+  }
+  pit {
+    name "A2"
+    type "Junction"
+    x 503450.000 y 6960020.000 z 31.500
+  }
+  pipe {
+    name "A1-A2"
+    type "RCP"
+    diameter 0.375
+    us_level 29.500
+    ds_level 29.000
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Plot Frames — A3 sheet at 1:500 (420mm x 297mm -> 210m x 148.5m).
+// ---------------------------------------------------------------------------
+model "Plot Frames"
+
+string plot_frame {
+  name "Sheet 01"
+  border 1
+  width 420
+  height 297
+  scale 500
+  rotation 0
+  xorigin 503600.000
+  yorigin 6960000.000
+  colour white
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Point Cloud Sample — LAS cloud with tagged and compact records.
+// ---------------------------------------------------------------------------
+model "Point Cloud Sample"
+
+string las_cloud_data {
+  name "LiDAR Patch"
+  colour green
+  data {
+    categories {
+      true false false
+    }
+    format v10_p0
+    range {
+      xmin 503700 xmax 503710 ymin 6960000 ymax 6960010
+    }
+    points_v10_p0 {
+      p {
+        x 503700.000
+        y 6960000.000
+        z 30.100
+        i 1200
+        rn 1
+        rc 1
+        sd 0
+        fe 0
+        cl 2
+        sr 0
+        ud 0
+        id 1
+      }
+      p {
+        x 503705.000 y 6960005.000 z 30.400
+      }
+    }
+    compact_points_v10_p0 {
+      p {
+        503710.000
+        6960010.000
+        30.700
+        900
+        1
+        1
+        0
+        0
+        2
+        0
+        0
+        1
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Model: Curved Super String — data_2d vertices + geometry_data arc, which
+//  the parser densifies into a smooth polyline at constant z.
+// ---------------------------------------------------------------------------
+model "Curved Super String"
+
+string super {
+  name "Kerb Return KR-01"
+  colour cyan
+  style "Kerb"
+  chainage 0
+  z 31.250
+  closed 0
+  data_2d {
+    503800.000 6960000.000
+    503810.000 6960010.000
+  }
+  geometry_data {
+    arc { radius 10 major 0 }
+  }
+}

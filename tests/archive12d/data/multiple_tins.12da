@@ -1,0 +1,159 @@
+// ---------------------------------------------------------------------------
+// Synthetic example: FOUR tins in one file, spatially separated (2 x 2 grid,
+// ~150 m apart) so per-TIN colour differentiation is easy to eyeball.
+// All four tins carry the same default `text "Style" "1"` attribute that real
+// 12d exports write, so without differentiation they would all render the
+// same green.
+//
+// Format per documentation/05-tin.md (12d A File Format sec 1.4.7.2 "tin" —
+// visible triangles only): name, optional attributes, MANDATORY points block
+// (implicitly numbered from 1), MANDATORY triangles block (vertices clockwise
+// viewed from above), optional base colour.
+//
+// Coordinates: MGA2020 Zone 56 (load with System "Australia - MGA2020",
+// Zone 56).
+// ---------------------------------------------------------------------------
+
+tin {
+  name "TIN SOUTH WEST"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+    real    "null_length"  0.0
+    real    "null_angle"   0.0
+  }
+
+  points {
+    554000.0 6883000.0 10.0
+    554050.0 6883000.0 10.5
+    554100.0 6883000.0 10.2
+    554000.0 6883050.0 10.8
+    554050.0 6883050.0 12.5
+    554100.0 6883050.0 11.0
+    554000.0 6883100.0 10.4
+    554050.0 6883100.0 11.2
+    554100.0 6883100.0 10.6
+  }
+
+  triangles {
+    1 4 2
+    2 4 5
+    2 5 3
+    3 5 6
+    4 7 5
+    5 7 8
+    5 8 6
+    6 8 9
+  }
+
+  colour green
+}
+
+tin {
+  name "TIN SOUTH EAST"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+    real    "null_length"  0.0
+    real    "null_angle"   0.0
+  }
+
+  points {
+    554250.0 6883000.0 12.0
+    554300.0 6883000.0 12.6
+    554350.0 6883000.0 12.3
+    554250.0 6883050.0 12.9
+    554300.0 6883050.0 14.8
+    554350.0 6883050.0 13.1
+    554250.0 6883100.0 12.5
+    554300.0 6883100.0 13.4
+    554350.0 6883100.0 12.7
+  }
+
+  triangles {
+    1 4 2
+    2 4 5
+    2 5 3
+    3 5 6
+    4 7 5
+    5 7 8
+    5 8 6
+    6 8 9
+  }
+
+  colour green
+}
+
+tin {
+  name "TIN NORTH WEST"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+    real    "null_length"  0.0
+    real    "null_angle"   0.0
+  }
+
+  points {
+    554000.0 6883250.0 14.0
+    554050.0 6883250.0 14.4
+    554100.0 6883250.0 14.1
+    554000.0 6883300.0 14.7
+    554050.0 6883300.0 16.2
+    554100.0 6883300.0 14.9
+    554000.0 6883350.0 14.3
+    554050.0 6883350.0 15.0
+    554100.0 6883350.0 14.5
+  }
+
+  triangles {
+    1 4 2
+    2 4 5
+    2 5 3
+    3 5 6
+    4 7 5
+    5 7 8
+    5 8 6
+    6 8 9
+  }
+
+  colour green
+}
+
+tin {
+  name "TIN NORTH EAST"
+
+  attributes {
+    text    "Style"        "1"
+    integer "Faces"        0
+    real    "null_length"  0.0
+    real    "null_angle"   0.0
+  }
+
+  points {
+    554250.0 6883250.0 16.0
+    554300.0 6883250.0 16.5
+    554350.0 6883250.0 16.2
+    554250.0 6883300.0 16.8
+    554300.0 6883300.0 18.4
+    554350.0 6883300.0 17.0
+    554250.0 6883350.0 16.4
+    554300.0 6883350.0 17.1
+    554350.0 6883350.0 16.6
+  }
+
+  triangles {
+    1 4 2
+    2 4 5
+    2 5 3
+    3 5 6
+    4 7 5
+    5 7 8
+    5 8 6
+    6 8 9
+  }
+
+  colour green
+}

@@ -1,4 +1,4 @@
-# Interoperability — GIS, rasters and point clouds
+# Interoperability — GIS, rasters, point clouds and 12d archives
 
 `katana_io` (the GDAL and PDAL adapters, exposed as `katana::gis` and
 `katana::pointcloud`) and `katana_interop` (conversion to and from the domain
@@ -41,8 +41,9 @@ adapter boundary and converted, so nothing throws across the interface.
 | Vector out | the same, driver inferred from the extension |
 | Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2, ECW — GDAL's readers |
 | Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD, E57 in; LAS/LAZ out |
+| 12d Archive | .12da, .12daz, .12dz in and out — every element of the format; see below |
 
-Not supported: **DWG, LandXML, IFC**, and DXF *import* (export only, via GDAL).
+Not supported: **DWG, LandXML, IFC**.
 
 ## Two kinds of imported data
 
@@ -253,3 +254,306 @@ wins, and no empty `entities` layer is created when nothing ends up on it.
 **Still open:** text and dimensions are skipped on DXF export, though DXF has
 both, because the vector path models only points, lines and polygons.
 
+## The 12d Archive format (.12da, .12daz, .12dz)
+
+12d Model is the civil design package most Australian survey and road work is
+delivered in, and its interchange format - the 12d Archive, `.12da`, and its
+zipped form `.12daz` (some tools write `.12dz`) - is what a surveyor hands
+over. Katana reads every element the format defines and writes back everything
+it can represent. This section records what was decided and, more usefully,
+what the manual does not say and had to be measured.
+
+### Where it lives, and why it is not part of `katana_interop`
+
+The format is a module of its own, `katana_archive12d`, beside `commands` in
+the layering: it sees `core`, `math`, `geometry`, `terrain` and `entity` and
+nothing else. Reading a 12da needs no third-party library - it is text - and
+keeping it that way means the module builds with `-DKATANA_BUILD_IO=OFF`,
+which is the configuration the sanitizer job runs. A hand-written parser of
+untrusted text is exactly the code that most needs to run under
+AddressSanitizer, and it would have been excluded from that had it lived
+behind GDAL.
+
+Only the ZIP container needs a library. That stays in `katana_io` behind
+`gis/zip_container.hpp`, opened through GDAL's `/vsizip/`, and only bytes cross
+the wall. **Rejected:** a small inflate of our own inside `katana_archive12d`,
+which would have made `.12daz` available without GDAL. Nobody needs that - a
+build without GDAL has no importer at all - and it would have been a second
+implementation of something zlib already does, written by us, on untrusted
+input.
+
+The container itself was established from an archive written by 12d Model:
+one member, DEFLATE, DOS platform header, named after the *project* rather
+than the zip (`UT5527 Appin Rd V5.12daz` holds `Appin Rd V5.12da`). So the
+importer does not predict the member's name; it takes the one member that is
+a `.12da`, and refuses an archive with two rather than guess.
+
+### Three layers: text, archive, domain
+
+`readArchive` turns text into an `Archive` - typed values, every element the
+manual defines, with its own vocabulary and no knowledge of entities.
+`toDomain` maps that onto entities, alignments, surfaces and point clouds.
+`writeArchive` and `fromDomain` are the inverses. The split is what makes
+"every element accounted for" a checkable claim: `coverage.hpp` lists the
+format's elements with the manual section each comes from, and a test writes
+a minimal instance of every row, reads it, and fails if the reader skips any
+block of it or the import does other than the row claims. The table in this
+document is generated from those rows, not maintained beside them.
+
+**12d Model writes far more than its manual documents.** A real export
+carries `drawables`, `geometry_modifiers`, `equalities`, `extrude_value`,
+`vertex_uid_data`, `time_created`, `weight`, `solid_fill` and dozens more, and
+the construction methods of a super alignment other than IPs are declared
+undocumented by the manual itself. So the reader does not pretend the
+vocabulary is closed: a scalar it has no member for is kept, in order, in the
+element's `extras`, and written back; a *block* it has no member for is
+skipped whole and counted by path in `Archive::unrecognised`, and the import
+lists those counts in its warnings. An import says exactly what it did not
+take. Nothing scalar is lost between a file and the file exported from it -
+the extras travel through an entity as `12d.x.<key>` metadata.
+
+**The superseded string types are super strings.** The manual says of the 2d,
+3d, 4d, pipe and polyline strings that each "has been superseded by the super
+string", and a super string expresses every one of them; the alignment and
+pipeline strings likewise by the super alignment. They are read into the same
+structures, tagged with the kind they came from, and written back as the
+current types - which is what 12d Model itself does.
+
+### The encoding is not what the manual implies
+
+The manual calls a 12da "a Unicode file" and says no more. Every archive
+written by 12d Model 15 that this was developed against - nine files, 4 to
+58 MB - is UTF-16 little-endian with a byte order mark; the hand-written ones
+are UTF-8. A reader that assumed UTF-8 would fail on every file that came out
+of the program the format belongs to. So the bytes are decoded first: by their
+mark; failing that by where the NUL bytes fall (ASCII as UTF-16 has one in
+every other byte); failing that as UTF-8 if the bytes validate and as
+Windows-1252 if they do not, and the fallback is reported. Katana writes
+UTF-16LE with a mark by default, as 12d does, and UTF-8 on request.
+
+### What the manual does not say, measured against 12d's own output
+
+Three conventions were settled against `test Super Alignment.12da`, written
+by 12d Model 15.0C1t, which holds 32 arcs and 16 transitions whose end points
+are all recorded. The reasoning and the numbers are in
+`src/katana_archive12d/plan_geometry.hpp`; in short:
+
+1. **A positive radius turns right.** The manual says "+ve is above the line
+   connecting the vertices", which does not say which way is up. All 18 arcs
+   that follow a straight agree: 10 positive, all clockwise; 8 negative, all
+   counter-clockwise.
+2. **A trailing transition is described backwards.** The manual defines
+   `l1 r1 a1` as the values "at the start vertex" and says a full trailing
+   transition has `r2 = 0, l2 = 0`. What 12d writes is `l1 = 0, r1 = 0` for
+   trailing transitions too, with `a1` the tangent at the segment's *second*
+   vertex pointing back along the string. Read that way all 16 transitions
+   land on their recorded end points; read the manual's way every trailing one
+   misses by 40 to 195 m.
+3. **"Cubic parabola" is `y = m x³` in the frame of the tangent,** with `m`
+   chosen so that the *true* curvature at the end is `1/R` and the *arc
+   length* to the end is `L`. Under that definition all 16 close to under
+   0.01 mm and reproduce `a2` to the four decimals written. The textbook
+   `y = x³/(6RL)`, and a clothoid, both miss by up to 0.3 m on a railway
+   transition of `L = 80, R = 210`.
+
+Two more came from real files rather than the manual: trimesh flags are
+one-based indices into their info table with 0 meaning none (the manual's own
+example - two infos, flags `2 0 1 2 0` - reads no other way, and 12d's exports
+agree); and 12d Model 15 writes both `pipe_data` and `culvert_data` on every
+culvert string although the manual says a string "cannot have both", so that
+is not a warning.
+
+The other transition types the manual names and does not define (Westrail
+cubic, cubic spiral, Bloss, sinusoidal, cosinusoidal) are drawn as the
+clothoid with the same end radii and moved to meet the vertex 12d recorded,
+and the size of that movement is reported - it *is* the error. A transition
+that would have to move more than a metre, or more than its own chord, is not
+an approximation of anything and is drawn straight and counted.
+
+### Where each element goes
+
+The mapping is documented in full at the head of
+`include/katana/archive12d/domain.hpp`. The decisions worth defending:
+
+- **Models are layers.** 12d model names are already `/`-separated tree names
+  (`Stage 1/Water/Drainage`), which is exactly what a Katana layer path is.
+  Model names are compared as the manual says - case ignored, blanks trimmed -
+  so `" Fred "` and `"FRED"` are one model and land on one layer.
+- **Heights.** Entities are 2D. A string whose vertices share one height
+  carries it as the `elevation` property, which Surface From Drawing already
+  read; one whose heights differ carries them all in `elevations`, in vertex
+  order, with `null` where 12d had no height. Surface From Drawing now reads
+  both, leaves a null vertex out and breaks the breakline there: a null is
+  "not surveyed", and triangulating it at zero would dig a pit to the datum
+  under every unlevelled point. `entityHeights` is the one reader of that
+  list, used by export and the application alike.
+- **Alignments.** Katana defines an alignment by its PIs; a 12d super
+  alignment stores the solved elements and, separately, however the designer
+  constructed them. Where the construction is the IP method the PIs are taken
+  directly. Otherwise they are *reconstructed* from the solved elements - each
+  run of spiral/arc/spiral between two straights is one PI at the intersection
+  of those straights, with the arc's tangents taken exactly from the circle
+  (a chord's direction is off by half the angle it subtends, and a PI built
+  from chords drawn to a millionth of a unit still landed 9 mm out) - and the
+  reconstruction is then **checked**: Katana solves it and every vertex 12d
+  recorded must lie within 10 mm of the result. Where the check fails, or the
+  geometry has no PI form (a compound curve, an alignment starting on an arc,
+  a transition type Katana does not have), the alignment is imported as its
+  polyline only, with the reason. An IP-only definition with a transition
+  type Katana lacks is taken with clothoids of the same lengths and says so,
+  since there is nothing to check it against and a centimetre-out alignment is
+  worth far more than none. What can be drawn always is: the tangent polygon
+  through the IPs when nothing else can be solved.
+- **Attributes** become typed properties; a group flattens into
+  `Group/Sub/Name` and is rebuilt on export. Vertex and segment attributes
+  become `vertex/3/Name` and `segment/2/Name`; a one-vertex string's vertex
+  attributes are simply its own. Everything else 12d knows about a string -
+  name, style, colour name, chainage, breakline, point ids, pipe sizes,
+  visibility, tinability, segment colours, interface modes - travels in
+  `12d.*` metadata and is written back, so a string imported and exported
+  unchanged is the string it was.
+- **Colours.** A 12da carries colour *names*; the RGB behind a name lives in
+  the 12d project and can be redefined there, so no table can be "right".
+  The standard names 12d ships with get the X11 values of the same names
+  (with grey's shades set either side of grey, since X11's DarkGray is
+  lighter than its Gray); an unknown name (`pen 025`, `vis concrete`) leaves
+  the entity ByLayer and is kept as metadata. On export the name is written
+  back unless the colour has been changed since, when the nearest standard
+  name is written instead - the old name would be a lie.
+- **Drainage.** The line becomes a polyline carrying its pipes as properties
+  (pipe *i* joins pit *i* to *i+1* and has no position of its own), each pit
+  a point at its top with its name, type and size, each house connection a
+  point at its *adopted level* - the manual marks `z` "internal use only"
+  there, and 12d writes 0, thirty metres below the job.
+- **Tins.** A `full_tin` lists every triangle including the nulled ones and
+  the ones touching its four construction points; the surface is the rest,
+  and a triangle with a null-height vertex has no surface to give. Triangles
+  are accepted either way round - the manual wants clockwise, other writers
+  do not comply, and a surface built inside out fails as a whole. Katana
+  writes the `tin` form (visible triangles only), which the manual
+  recommends to "most software packages" and which cannot get the
+  mandatory neighbours block wrong. Per-triangle colours are kept and written
+  back but a surface here has no use for them, which is said.
+- **Trimeshes are read in full and not imported:** Katana has no 3D mesh
+  entity. They are counted and reported, never silently dropped.
+- **Point clouds** become reference layers. A `ref_data` cloud names a LAS
+  file relative to a 12d project the archive has left behind; it is reported
+  for the user to import, not chased.
+
+### The null value
+
+12d's null height is a *value* (`null -999`, the default) that a `null`
+command can change part way through a file and a string's own `null_value`
+can override; 12d Model 15 also writes the keyword `null`. The reader keeps
+raw heights while an element is being read and applies the value in force
+once the element is whole, so a `null_value` written after its data - string
+commands are order-free - still applies. The writer writes one null value
+for the whole file, and chooses one that equals no real height in the archive:
+the archive's own where it is safe, else sentinels below the Mariana Trench.
+Without that, a height read under one null value and written under another
+came back as null - silently, from a plain read and write - which is the
+first defect the review below found.
+
+### What the reader will not guess
+
+A file it cannot make structural sense of is a `ParseFailure` naming the
+line: a brace never closed, a data block whose values do not divide into rows,
+a word where a number belongs, a triangle naming a point that does not exist.
+Guessing at any of those would shift every coordinate after the mistake. A
+string that lacks what defines it - an arc without its centre, text without a
+position - is ignored and named, as the manual says (1.4.6), rather than
+placed at the origin, which in an MGA job is six thousand kilometres away.
+Mandatory blocks that are absent are reported; a documented key that happens
+to be followed by a bare word the reader knows (`text PIT`, `title_1 Scale`,
+`plotter model` - all legal, the manual requires quotes only around text that
+is not alphanumeric) is read as the value it is. Limits on element count,
+block size and nesting depth make a hostile file a refusal rather than an
+exhaustion; 185 hostile and degenerate inputs, from a lone `}` to 100 000
+nested braces to 1e308 coordinates, produce a clean failure or a sensible
+result and no crash.
+
+### An adversarial review found nineteen defects before anyone else did
+
+Once the module passed its own tests, seven independent reviewers audited it
+by lens - one per chapter of the manual, real files, hostile input, geometry,
+test quality - and every finding was handed to a second reviewer told to
+refute it. Nineteen survived, all fixed, each with a regression test in
+`tests/archive12d/test_review_findings.cpp`. The ones that would have hurt:
+the null-value collision above; documented keys mis-read as flags; arcs and
+text placed at the origin for want of a coordinate; house connections thirty
+metres underground; a superseded alignment that could not be solved dropped
+entirely while the message said "imported as a polyline"; vertical arcs
+honouring `major`, which the manual says to ignore, and losing the whole
+grade line; per-segment pipe sizes, vertex attributes, segment text,
+visibility and tinability silently dropped; a LAS colour that is 64 unsigned
+bits parsed as signed. Four of the seven reviewers did not complete, so the
+real-file sweep, the hostile-input fuzzing and a geometry check were done by
+hand afterwards; the test-quality review was not, and is recorded as
+outstanding in `PLAN.MD`.
+
+### Coverage
+
+Every element of the 12d Model V15 manual, with what Katana does with it. The
+handling column is asserted by `tests/archive12d/test_coverage.cpp`.
+
+| Element | Manual | Handling | In Katana |
+|---|---|---|---|
+| `model` | 1.4.1 | import and export | a layer; a tree name such as Stage 1/Water arrives as that nested layer |
+| `colour` | 1.4.2 | import and export | the entity's colour where the name is one of 12d's standard colours; the name is always kept |
+| `style` | 1.4.3 | import and export | kept on the entity as 12d.style and written back |
+| `breakline` | 1.4.4 | import and export | kept on the entity as 12d.breakline and written back |
+| `null` | 1.4.5 | import and export | a height equal to the null value, or the null keyword, is no height at all |
+| `attributes` | 1.3 | import and export | typed entity properties; a group flattens into Group/Name and is rebuilt on export |
+| `project_attributes` | - | read | read into the archive; a Katana project has no attributes of its own |
+| `tin` | 1.4.7.2 | import and export | a surface (terrain::TinSurface) |
+| `full_tin` | 1.4.7.1 | import | a surface of its visible, non-construction triangles; written back as a tin |
+| `super_tin` | 1.4.8 | read | reported; its member tins are what is imported |
+| `primitive_3d` | 1.4.9 | read | read in full, not imported: Katana has no 3D mesh entity |
+| `string arc` | 1.5.1 | import | an Arc; exported arcs are written as two-vertex super strings |
+| `string circle` | 1.5.2 | import and export | a Circle |
+| `string drainage` | 1.5.3 | import | the line as a Polyline carrying its pipes, each pit and house connection as a Point |
+| `string face` | 1.5.4 | import and export | a closed Polyline, written back as a face |
+| `string feature` | 1.5.5 | import | a Circle |
+| `string interface` | 1.5.6 | import and export | a Polyline with its cut/fill modes, written back as an interface |
+| `string plot_frame` | 1.5.7 | import | the sheet rectangle, paper size times plot scale, as a closed Polyline |
+| `string super` | 1.5.8 | import and export | a Point, Line or Polyline; arcs and transitions chorded to a stated tolerance |
+| `string super_alignment` | 1.5.9 | import and export | a named Alignment where its geometry is PI-definable and verifies, and always a Polyline of the centreline |
+| `string text` | 1.5.10 | import and export | Text |
+| `string 2d` | 1.5.11 | import | as string super |
+| `string 3d` | 1.5.12 | import | as string super |
+| `string 4d` | 1.5.13 | import | as string super, with its vertex text as Text |
+| `string pipe` | 1.5.14 | import | as string super, with its diameter |
+| `string polyline` | 1.5.15 | import | as string super |
+| `string alignment` | 1.5.16 | import | as string super_alignment |
+| `string pipeline` | 1.5.17 | import | as string super_alignment |
+| `string las_cloud_data` | 1.5.18 | import | a point cloud reference layer; all eleven point record formats, tagged and compact |
+
+### Measured
+
+Release, GCC 16.2, this machine (see `CLAUDE.md` for the toolchain): the
+58 MB Windsor Road export (2 364 super strings with per-vertex attributes,
+1 453 trimeshes, UTF-16) decodes in 0.06 s, reads in 0.14 s and maps in
+0.08 s; the 55 MB `Test 4 with Tin` (7 820 strings and a 233 946-triangle
+full_tin written in hexadecimal floats) reads in 0.13 s and builds its
+229 462-triangle surface in 0.13 s; the 33 MB `Test 4 without tin` (26 683
+elements) reads in 0.12 s. Writing the 55 MB file back takes 0.5 s. All from
+`katana_12da_probe`, which prints them.
+
+`katana_12da_probe <file.12da> [--rewrite out.12da]` is the tool for the
+question "did the importer take all of it?": it lists every kind of element
+with how many were read and imported, every block the reader has no member
+for, and every warning, and with `--rewrite` checks that the file written back
+reads the same.
+
+### Not done
+
+The Windsor Road file's 1 453 trimeshes, and the 13 353 strings in `Test 4`
+that carry vertex symbols, are read and reported and go no further: there is
+no mesh entity and no symbol on a vertex. Per-vertex annotation settings
+beyond text height and angle (offset, raise, justification, slant) are not
+taken. Super tins are reported, not built - Katana has no notion of one
+surface overriding another where they overlap. The undocumented parts of a
+super alignment (`computator`, `floating_arc_end_radius_length` and the rest)
+are read as fields and not interpreted; such an alignment arrives through its
+solved geometry, which is what the manual says a reader should use. A 12da
+declares no coordinate system, so nothing is reprojected.

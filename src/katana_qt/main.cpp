@@ -94,6 +94,7 @@ int main(int argc, char* argv[])
     }
 
     katana::qt::MainWindow window;
+    window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
     if (!plotPath && !screenshotPath) {
         window.show();
     }

@@ -1,5 +1,7 @@
 #include "katana/interop/import.hpp"
 
+#include "katana/interop/archive12d.hpp"
+
 #include <sstream>
 
 #include <algorithm>
@@ -112,6 +114,8 @@ const char* toString(SourceKind kind)
         return "raster";
     case SourceKind::PointCloud:
         return "point cloud";
+    case SourceKind::Archive12d:
+        return "12d archive";
     case SourceKind::Unknown:
         break;
     }
@@ -139,6 +143,9 @@ SourceKind kindForPath(const std::filesystem::path& path)
     const std::string extension = lowerExtension(path);
     if (extension.empty()) {
         return SourceKind::Unknown;
+    }
+    if (contains(archive12dExtensions(), extension)) {
+        return SourceKind::Archive12d;
     }
     // Point cloud first: PDAL and GDAL both claim .ply, and a .ply in a survey
     // context is a point cloud far more often than it is a vector layer.

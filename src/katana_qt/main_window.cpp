@@ -47,6 +47,8 @@
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/archive12d/domain.hpp"
+#include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/storage/project_store.hpp"
@@ -1177,8 +1179,10 @@ QString importFilter()
     const QString vector = patternsFor(interop::vectorExtensions());
     const QString raster = patternsFor(interop::rasterExtensions());
     const QString cloud = patternsFor(interop::pointCloudExtensions());
-    return "All supported (" + vector + ' ' + raster + ' ' + cloud + ");;" + "Vector (" + vector +
-           ");;" + "Raster (" + raster + ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
+    const QString archive = patternsFor(interop::archive12dExtensions());
+    return "All supported (" + vector + ' ' + archive + ' ' + raster + ' ' + cloud + ");;" +
+           "Vector (" + vector + ");;" + "12d Archive (" + archive + ");;" + "Raster (" + raster +
+           ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
 }
 
 QString grouped(std::uint64_t value)
@@ -1202,6 +1206,9 @@ void MainWindow::importPath(const QString& path)
         return;
     case interop::SourceKind::PointCloud:
         importPointCloudFile(file);
+        return;
+    case interop::SourceKind::Archive12d:
+        importArchive12dFile(file);
         return;
     case interop::SourceKind::Unknown:
         break;
@@ -1227,12 +1234,16 @@ void MainWindow::importFile()
     case interop::SourceKind::PointCloud:
         importPointCloudFile(path);
         return;
+    case interop::SourceKind::Archive12d:
+        importArchive12dFile(path);
+        return;
     case interop::SourceKind::Unknown:
         break;
     }
     QMessageBox::warning(this, "Import",
                          "Katana does not recognise the extension of\n" + selected +
                              "\n\nSupported: " + patternsFor(interop::vectorExtensions()) + ' ' +
+                             patternsFor(interop::archive12dExtensions()) + ' ' +
                              patternsFor(interop::rasterExtensions()) + ' ' +
                              patternsFor(interop::pointCloudExtensions()));
 }
@@ -1257,7 +1268,9 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
     // to be discovered by zooming to extents.
     const auto advice =
         interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    if (advice.farApart) {
+    if (advice.farApart && headless_) {
+        logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
+    } else if (advice.farApart) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle("Far from the current drawing");
@@ -1340,6 +1353,134 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
     views_->zoomExtents();
 }
 
+void MainWindow::importArchive12dFile(const std::filesystem::path& path)
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto imported = interop::importArchive12d(path);
+    QApplication::restoreOverrideCursor();
+    if (!imported.ok()) {
+        logMessage(QString::fromStdString(imported.error().describe()), true);
+        QMessageBox::warning(this, "Import failed",
+                             QString::fromStdString(imported.error().describe()));
+        return;
+    }
+
+    // The same question a vector import asks, for the same reason: a 12da is
+    // survey data at survey coordinates. Surfaces and clouds are shifted with
+    // the entities - the shift is applied inside the importer, to everything.
+    const auto advice =
+        interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
+    if (advice.farApart && headless_) {
+        logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
+    } else if (advice.farApart) {
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Question);
+        box.setWindowTitle("Far from the current drawing");
+        box.setText(QString::fromStdString(advice.message) + ".");
+        box.setInformativeText(
+            "Shifting moves everything in the file as one piece so it sits beside the drawing; "
+            "its shape and internal dimensions are unchanged.");
+        QPushButton* shift = box.addButton("Shift Alongside", QMessageBox::AcceptRole);
+        box.addButton("Keep Survey Coordinates", QMessageBox::DestructiveRole);
+        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(shift);
+        box.exec();
+        if (box.clickedButton() == cancel) {
+            logMessage("Import cancelled.");
+            return;
+        }
+        if (box.clickedButton() == shift) {
+            interop::Archive12dImportOptions options;
+            options.originShift = advice.suggestedShift;
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            auto shifted = interop::importArchive12d(path, options);
+            QApplication::restoreOverrideCursor();
+            if (!shifted.ok()) {
+                logMessage(QString::fromStdString(shifted.error().describe()), true);
+                return;
+            }
+            imported = std::move(shifted);
+            logMessage(QString("Shifted the imported data by %1,%2 to sit beside the drawing.")
+                           .arg(advice.suggestedShift.x, 0, 'f', 3)
+                           .arg(advice.suggestedShift.y, 0, 'f', 3));
+        } else {
+            logMessage(QString::fromStdString(advice.message) + ".", true);
+        }
+    }
+
+    // Layers, entities and alignments: one transaction, one Ctrl+Z.
+    auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
+    for (const Layer& layer : imported->layersNeeded) {
+        if (!document_.model().layers.contains(layer.name)) {
+            transaction->add(cmd::createLayer(layer));
+        }
+    }
+    const std::size_t created = imported->entities.size();
+    if (created != 0) {
+        transaction->add(cmd::createEntities(std::move(imported->entities)));
+    }
+    std::size_t alignments = 0;
+    for (katana::entity::Alignment& alignment : imported->alignments) {
+        // A name the drawing already has would fail the whole transaction.
+        const std::string base = alignment.name;
+        for (int copy = 2; document_.model().alignments.contains(alignment.name); ++copy) {
+            alignment.name = base + " (" + std::to_string(copy) + ")";
+        }
+        transaction->add(cmd::createAlignment(alignment));
+        ++alignments;
+    }
+    const auto status = document_.execute(std::move(transaction));
+    if (!status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        QMessageBox::warning(this, "Import failed",
+                             QString::fromStdString(status.error().describe()));
+        return;
+    }
+
+    QString summary = "Imported " + grouped(created) + " entities";
+    if (alignments != 0) {
+        summary += ", " + grouped(alignments) + " alignments";
+    }
+    if (!imported->surfaces.empty()) {
+        summary += ", " + grouped(imported->surfaces.size()) + " surfaces";
+    }
+    if (!imported->clouds.empty()) {
+        summary += ", " + grouped(imported->clouds.size()) + " point clouds";
+    }
+    summary += " from " + fromPath(path.filename()) + " (" +
+               QString::fromStdString(imported->encoding);
+    if (!imported->archiveVersion.empty()) {
+        summary += ", 12d archive " + QString::fromStdString(imported->archiveVersion);
+    }
+    logMessage(summary + ")");
+    for (const auto& tally : imported->tally) {
+        logMessage(QString("  %1: %2 read, %3 imported")
+                       .arg(QString::fromStdString(tally.keyword))
+                       .arg(grouped(tally.read))
+                       .arg(grouped(tally.imported)),
+                   tally.imported < tally.read);
+    }
+    for (const std::string& warning : imported->warnings) {
+        logMessage("  " + QString::fromStdString(warning));
+    }
+
+    // Surfaces and clouds are session data, outside undo - see interop/
+    // reference_data.hpp for why - and are added after the transaction so that
+    // a rejected import leaves nothing behind.
+    for (auto& surface : imported->surfaces) {
+        addSurface(surface.name, std::move(surface.surface));
+    }
+    if (!imported->clouds.empty()) {
+        for (auto& cloud : imported->clouds) {
+            reference_.add(std::move(cloud));
+        }
+        views_->invalidateReferenceCache();
+        refreshReferences();
+    }
+    views_->refreshAll();
+    views_->zoomExtents();
+}
+
 void MainWindow::importRasterFile(const std::filesystem::path& path)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -1402,7 +1543,8 @@ void MainWindow::importPointCloudFile(const std::filesystem::path& path)
 
 void MainWindow::exportVectorFile()
 {
-    if (document_.model().entities.empty()) {
+    if (document_.model().entities.empty() && document_.model().alignments.empty() &&
+        sceneSurfaces_.empty()) {
         QMessageBox::information(this, "Export", "The drawing is empty.");
         return;
     }
@@ -1412,8 +1554,9 @@ void MainWindow::exportVectorFile()
         filters << (QString::fromStdString(format.description) + " (*." +
                     QString::fromStdString(format.extension) + ")");
     }
+    filters << "12d Archive (*.12da)" << "12d Archive, zipped (*.12daz)";
     QString chosenFilter;
-    const QString selected = QFileDialog::getSaveFileName(this, "Export Vector", QString(),
+    const QString selected = QFileDialog::getSaveFileName(this, "Export", QString(),
                                                           filters.join(";;"), &chosenFilter);
     if (selected.isEmpty()) {
         return;
@@ -1435,6 +1578,36 @@ void MainWindow::exportVectorFile()
     }
 
     const std::filesystem::path path = toPath(selected);
+    if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
+        // A 12d archive carries what the other formats cannot: the alignments
+        // and the surfaces of the session go with the drawing.
+        std::vector<katana::archive12d::ExportSurface> surfaces;
+        if (options.entities.empty()) {
+            for (const auto& item : sceneSurfaces_) {
+                surfaces.push_back({item.name, item.surface});
+            }
+        }
+        interop::Archive12dExportOptions archiveOptions;
+        archiveOptions.entities = options.entities;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        auto archive = interop::exportArchive12d(document_.model(), surfaces, path, archiveOptions);
+        QApplication::restoreOverrideCursor();
+        if (!archive.ok()) {
+            logMessage(QString::fromStdString(archive.error().describe()), true);
+            QMessageBox::warning(this, "Export failed",
+                                 QString::fromStdString(archive.error().describe()));
+            return;
+        }
+        logMessage(QString("Exported %1 entities, %2 alignments and %3 surfaces to %4 (12d archive)")
+                       .arg(grouped(archive->entitiesWritten))
+                       .arg(grouped(archive->alignmentsWritten))
+                       .arg(grouped(archive->surfacesWritten))
+                       .arg(fromPath(path.filename())));
+        for (const std::string& warning : archive->warnings) {
+            logMessage("  " + QString::fromStdString(warning));
+        }
+        return;
+    }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto result = interop::exportVector(document_.model(), path, options);
     QApplication::restoreOverrideCursor();
@@ -1915,46 +2088,74 @@ void MainWindow::buildSurfaceFromRaster()
 
 void MainWindow::buildSurfaceFromDrawing()
 {
-    // Points and polyline vertices in the drawing, at the elevation stored in
-    // their "elevation" property where they carry one. A 2D CAD drawing has no
-    // Z of its own, so without that property everything lands on the datum and
-    // the surface is flat - which is reported rather than left to puzzle over.
+    // Points and polyline vertices in the drawing, at the heights their
+    // "elevation" property gives them - or, for a 3D string that came from a
+    // 12d archive, the per-vertex "elevations" list. A 2D CAD drawing has no Z
+    // of its own, so without either everything lands on the datum and the
+    // surface is flat - which is reported rather than left to puzzle over.
+    //
+    // A vertex whose height is NULL is left out, and the breakline is broken
+    // there: a null is "not surveyed", and triangulating it at zero would dig a
+    // pit to the datum under every unlevelled point.
     katana::terrain::TinInput input;
     std::size_t withElevation = 0;
-
-    const auto elevationOf = [&withElevation](const Entity& entity) -> double {
-        const auto found = entity.properties.find("elevation");
-        if (found == entity.properties.end()) {
-            return 0.0;
-        }
-        if (const auto* value = std::get_if<double>(&found->second)) {
-            ++withElevation;
-            return *value;
-        }
-        return 0.0;
-    };
+    std::size_t withoutHeight = 0;
 
     document_.model().entities.forEach([&](const Entity& entity) {
         if (!entity.visible) {
             return;
         }
-        const double z = elevationOf(entity);
+        const bool carriesHeights = entity.properties.contains("elevation") ||
+                                    entity.properties.contains("elevations");
+        withElevation += carriesHeights ? 1 : 0;
+        const auto heightAt = [&](const std::vector<std::optional<double>>& heights,
+                                  std::size_t index) -> std::optional<double> {
+            if (!carriesHeights) {
+                return 0.0; // a plain 2D drawing: the datum, as before
+            }
+            return heights[index];
+        };
         if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry)) {
-            input.points.push_back(
-                katana::geometry::Point3(point->position.x, point->position.y, z));
+            const auto heights = katana::archive12d::entityHeights(entity, 1);
+            if (const auto z = heightAt(heights, 0)) {
+                input.points.push_back(
+                    katana::geometry::Point3(point->position.x, point->position.y, *z));
+            } else {
+                ++withoutHeight;
+            }
         } else if (const auto* polyline =
                        std::get_if<katana::geometry::Polyline2>(&entity.geometry)) {
+            const auto heights =
+                katana::archive12d::entityHeights(entity, polyline->vertices.size());
             katana::terrain::Breakline breakline;
-            breakline.closed = polyline->closed;
-            for (const auto& vertex : polyline->vertices) {
-                breakline.vertices.push_back(katana::geometry::Point3(vertex.x, vertex.y, z));
-                input.points.push_back(katana::geometry::Point3(vertex.x, vertex.y, z));
+            const auto flush = [&] {
+                if (breakline.vertices.size() >= 2) {
+                    input.breaklines.push_back(breakline);
+                }
+                breakline.vertices.clear();
+            };
+            bool whole = true;
+            for (std::size_t i = 0; i < polyline->vertices.size(); ++i) {
+                const auto& vertex = polyline->vertices[i];
+                const auto z = heightAt(heights, i);
+                if (!z) {
+                    ++withoutHeight;
+                    whole = false;
+                    flush();
+                    continue;
+                }
+                breakline.vertices.push_back(katana::geometry::Point3(vertex.x, vertex.y, *z));
+                input.points.push_back(katana::geometry::Point3(vertex.x, vertex.y, *z));
             }
-            if (breakline.vertices.size() >= 2) {
-                input.breaklines.push_back(std::move(breakline));
-            }
+            // Closing only makes sense for a ring that lost none of its vertices.
+            breakline.closed = polyline->closed && whole;
+            flush();
         }
     });
+    if (withoutHeight != 0) {
+        logMessage(QString("%1 vertices have no height and were left out of the surface.")
+                       .arg(grouped(withoutHeight)));
+    }
 
     if (input.points.size() < 3) {
         logMessage("The drawing has fewer than three points to triangulate.", true);

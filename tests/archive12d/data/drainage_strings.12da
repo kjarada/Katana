@@ -1,0 +1,166 @@
+// ---------------------------------------------------------------------------
+// Synthetic example: WATER STRINGS (drainage strings) per
+// documentation/09-drainage-string.md (12d A File Format sec 1.5.3).
+//
+// Two storm-water lines. Each `string drainage` block carries the header
+// fields from the spec (chainage, name, colour, style, breakline,
+// attributes with the special Tin / NSTin / "_floating" keys, outfall,
+// flow_direction), a data { } block with the string geometry as
+// x y z radius bulge rows, one pit { } record per node in order along the
+// string, and one pipe { } record per link between nodes.
+//
+// The viewer renders the data { } geometry in the "Water Strings (Drainage)"
+// layer and the pits as named point markers.
+//
+// Coordinates: MGA2020 Zone 56 (load with System "Australia - MGA2020",
+// Zone 56).
+// ---------------------------------------------------------------------------
+
+model "STORM DRAINAGE"
+
+string drainage {
+  chainage  0
+  name      "STORM LINE A"
+  colour    cyan
+  style     "WS"
+  breakline line
+
+  attributes {
+    text    "Tin"        "DESIGN"
+    text    "NSTin"      "NATURAL"
+    integer "_floating"  0
+  }
+
+  outfall         8.0
+  flow_direction  1
+
+  data {
+    554400.0 6883000.0 9.8 0 0
+    554400.0 6883120.0 9.2 0 0
+    554480.0 6883220.0 8.6 0 0
+    554560.0 6883300.0 8.0 0 0
+  }
+
+  pit {
+    name      "A1"
+    type      "1050 dia Access Chamber"
+    diameter  1.05
+    floating  no
+    x         554400.0
+    y         6883000.0
+    z         11.4
+  }
+
+  pit {
+    name      "A2"
+    type      "1050 dia Access Chamber"
+    diameter  1.05
+    floating  no
+    x         554400.0
+    y         6883120.0
+    z         10.9
+  }
+
+  pit {
+    name      "A3"
+    type      "1200 dia Junction Pit"
+    diameter  1.2
+    floating  no
+    x         554480.0
+    y         6883220.0
+    z         10.3
+  }
+
+  pit {
+    name      "A4"
+    type      "Headwall"
+    diameter  1.2
+    floating  no
+    x         554560.0
+    y         6883300.0
+    z         9.5
+  }
+
+  pipe {
+    name      "A1-A2"
+    type      "RCP"
+    diameter  0.375
+    us_level  9.8
+    ds_level  9.2
+  }
+
+  pipe {
+    name      "A2-A3"
+    type      "RCP"
+    diameter  0.45
+    us_level  9.2
+    ds_level  8.6
+  }
+
+  pipe {
+    name      "A3-A4"
+    type      "RCP"
+    diameter  0.525
+    us_level  8.6
+    ds_level  8.0
+  }
+}
+
+string drainage {
+  chainage  0
+  name      "STORM LINE B"
+  colour    dark blue
+  style     "WS"
+  breakline line
+
+  attributes {
+    text    "Tin"        "DESIGN"
+    text    "NSTin"      "NATURAL"
+    integer "_floating"  0
+  }
+
+  outfall         8.6
+  flow_direction  1
+
+  data {
+    554550.0 6883000.0 10.2 0 0
+    554520.0 6883120.0 9.4 0 0
+    554480.0 6883220.0 8.6 0 0
+  }
+
+  pit {
+    name      "B1"
+    type      "900 dia Access Chamber"
+    diameter  0.9
+    floating  no
+    x         554550.0
+    y         6883000.0
+    z         11.8
+  }
+
+  pit {
+    name      "B2"
+    type      "900 dia Access Chamber"
+    diameter  0.9
+    floating  no
+    x         554520.0
+    y         6883120.0
+    z         11.0
+  }
+
+  pipe {
+    name      "B1-B2"
+    type      "RCP"
+    diameter  0.3
+    us_level  10.2
+    ds_level  9.4
+  }
+
+  pipe {
+    name      "B2-A3"
+    type      "RCP"
+    diameter  0.375
+    us_level  9.4
+    ds_level  8.6
+  }
+}
