@@ -1780,9 +1780,20 @@ code's treatment is the UNION of the aspects that match it:
 4. **Applying a code.** A command that takes entities carrying a survey code
    and sets the layer, colour, style, symbol and attributes the mapfile gives
    them - undoable, and reporting every code the mapfile has no rule for.
-5. **The model and the project.** `Style::symbol` stops being a closed set
-   (it is resolved at draw time exactly as `Style::linetype` already is), and
-   a project remembers which library and mapfile it was drawn with.
+5. **The model and the project. PARTIALLY DELIVERED.** `Style::symbol` is no
+   longer a closed set: it is a name resolved when it is drawn, exactly as
+   `Style::linetype` already was. `cad::Document` carries the loaded
+   `StyleLibrary` and `SurveyMap` - not in the Model, because a customisation
+   is named by a project rather than copied into it - and `definitionFor` is
+   the one place that resolves a name.
+
+   The model accepts any name because a project may be opened before its
+   library is loaded; the COMMAND still refuses one nothing defines, so a
+   typo is caught where a person typed it. `STYLE SET s symbol CULT Bollard`
+   also now takes the rest of the line, since a library name has spaces in it.
+
+   OUTSTANDING: a project does not yet remember which library and mapfile it
+   was drawn with, so they must be loaded again each session.
 6. **The GUI.** Loading the three files, a library browser showing the groups
    with a preview of each definition, and applying the mapfile to a selection
    or to everything.

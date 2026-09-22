@@ -296,4 +296,21 @@ void Document::notify()
     }
 }
 
+void Document::setStyleLibrary(katana::entity::StyleLibrary library)
+{
+    library_ = std::move(library);
+    notify();
+}
+
+void Document::setSurveyMap(katana::entity::SurveyMap map)
+{
+    surveyMap_ = std::move(map);
+    notify();
+}
+
+const katana::entity::LineStyle* Document::definitionFor(std::string_view name) const
+{
+    return name.empty() ? nullptr : library_.find(name);
+}
+
 } // namespace katana::cad
