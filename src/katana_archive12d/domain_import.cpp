@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "katana/archive12d/domain.hpp"
+#include "katana/terrain/super_surface.hpp"
 #include "katana/archive12d/reader.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/layer_path.hpp"
@@ -184,6 +185,7 @@ class Importer {
             ++tally.read;
             tally.imported += imported == 0 ? 0 : 1;
         }
+        buildSuperTins();
         finishWarnings();
         return std::move(result_);
     }
@@ -1545,6 +1547,61 @@ class Importer {
         return 1;
     }
 
+    // A super tin is a ranking of tins, and the tins are read as separate
+    // surfaces - so this can only be done once every element has been, and
+    // it is: the list may name a tin that appears later in the file.
+    void buildSuperTins()
+    {
+        // The members stay in the list as well. A tin and a super tin are
+        // separate objects in 12d, and a user who asked for both should get
+        // both rather than have the parts swallowed by the whole.
+        const std::size_t members = result_.surfaces.size();
+        for (const SuperTin& superTin : result_.superTins) {
+            std::vector<const katana::terrain::TinSurface*> ranked;
+            std::vector<std::string> missing;
+            for (const std::string& name : superTin.tins) {
+                const auto found =
+                    std::find_if(result_.surfaces.begin(), result_.surfaces.begin() +
+                                                               static_cast<std::ptrdiff_t>(members),
+                                 [&name](const ImportedSurface& surface) {
+                                     // Names are compared without case (manual 1.4.8).
+                                     return detail::lowered(surface.name) == detail::lowered(name);
+                                 });
+                if (found == result_.surfaces.begin() + static_cast<std::ptrdiff_t>(members)) {
+                    missing.push_back(name);
+                    continue;
+                }
+                ranked.push_back(&found->surface);
+            }
+            if (!missing.empty()) {
+                std::string names;
+                for (const std::string& name : missing) {
+                    names += (names.empty() ? "" : ", ") + name;
+                }
+                problem("super tin \"" + superTin.name + "\" names " +
+                        std::to_string(missing.size()) + " tins the archive does not carry (" +
+                        names + "); it is built from the rest");
+            }
+            if (ranked.empty()) {
+                continue;
+            }
+            auto combined = katana::terrain::combineSurfaces(ranked);
+            if (!combined) {
+                problem("super tin \"" + superTin.name +
+                        "\" could not be built: " + combined.error().describe());
+                continue;
+            }
+            ImportedSurface surface;
+            surface.name = superTin.name.empty() ? "super tin" : superTin.name;
+            surface.colour = superTin.colour;
+            surface.trianglesInFile = combined->triangleCount();
+            surface.surface = std::move(*combined);
+            result_.bounds.expand(surface.surface.bounds());
+            result_.surfaces.push_back(std::move(surface));
+            ++superTinsBuilt_;
+        }
+    }
+
     void finishWarnings()
     {
         auto& warnings = result_.warnings;
@@ -1613,6 +1670,7 @@ class Importer {
     std::set<std::string> noted_;
     detail::ChordReport chordReport_;
     std::size_t namedProblems_ = 0;
+    std::size_t superTinsBuilt_ = 0;
     std::size_t trimeshesEmpty_ = 0;
     std::size_t trimeshFacesDropped_ = 0;
     std::size_t partlyInvisible_ = 0;

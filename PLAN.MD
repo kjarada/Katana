@@ -1566,7 +1566,35 @@ it is made. Measured in the sample archives: every annotation is
 so justification and colour are what actually change a real file, and the
 width estimate behind justification never fires on one.
 
-**STATUS: slice 8 (super tins built, ref_data clouds found) next.**
+**Slice 8 DELIVERED (2026-09-22).** A super tin is built into a surface
+(`terrain::combineSurfaces`, a new `super_surface.hpp`) in which a LATER
+member overrides an earlier one wherever it covers it; the members stay as
+surfaces of their own, because a tin and a super tin are separate objects in
+12d. `test super tin.12da` now arrives as four surfaces - NATURAL SURFACE,
+PAD A, PAD B and COMBINED SURFACE of 34 triangles, the base's 32 minus the
+18 the pads took, plus the pads' 16. A `ref_data` point cloud is looked for
+BESIDE the archive by file name and read when it is there; when it is not,
+the warning now says so rather than implying it was never tried.
+
+Three decisions recorded where they are made. A triangle of a lower member
+is dropped WHOLE if a higher one covers any part of it, not merely its
+middle: two sheets over one point would make `elevationAt` answer with
+whichever triangle it met first, which is the base as often as the pad, and
+a ragged seam that gives NO answer just outside a pad is honest where a
+wrong level is not. The rank order (later wins) is not in the manual, which
+lists the tins and says nothing; it follows the sample archive's own comment
+("Rank order: base surface first, then the pads that substitute it over
+their footprints") and is one comparison to reverse, with the test that pins
+it saying so. And only the file NAME of a `ref_data` reference is used -
+following "..\..\scans\site.las" out of the directory the archive sits in
+would let a file choose what gets read.
+
+OUTSTANDING: the seam is exact to within one triangle of the lower member,
+not exactly clipped; clipping each triangle against the higher surface's
+boundary and re-triangulating the offcuts is the exact answer and is
+recorded in `super_surface.hpp` as the alternative rejected.
+
+**STATUS: slice 9 (round trip on the fourteen real archives) next.**
 
 ---
 

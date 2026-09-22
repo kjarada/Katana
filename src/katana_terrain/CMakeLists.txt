@@ -13,6 +13,7 @@ add_library(katana_terrain STATIC
     contours.cpp
     volume.cpp
     tiled_terrain.cpp
+    super_surface.cpp
 )
 katana_target_defaults(katana_terrain)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)

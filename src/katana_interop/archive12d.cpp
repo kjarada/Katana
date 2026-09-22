@@ -10,6 +10,7 @@
 #include "katana/archive12d/text_encoding.hpp"
 #include "katana/archive12d/writer.hpp"
 #include "katana/gis/zip_container.hpp"
+#include "katana/interop/import.hpp"
 
 namespace katana::interop {
 
@@ -124,6 +125,29 @@ PointCloudLayer toLayer(const katana::archive12d::ImportedCloud& cloud,
     return layer;
 }
 
+// The LAS file a ref_data cloud names, if it sits beside the archive.
+// Only the file NAME is taken from the reference: a 12da records something
+// like "..\..\scans\site.las", and following that out of the directory the
+// archive was found in would let a file choose what gets read.
+std::optional<PointCloudLayer> referencedCloud(const std::filesystem::path& archive,
+                                               const std::string& reference)
+{
+    if (reference.empty()) {
+        return std::nullopt;
+    }
+    std::error_code ignored;
+    const std::filesystem::path beside =
+        archive.parent_path() / std::filesystem::path(reference).filename();
+    if (!std::filesystem::is_regular_file(beside, ignored)) {
+        return std::nullopt;
+    }
+    auto cloud = importPointCloud(beside);
+    if (!cloud) {
+        return std::nullopt;
+    }
+    return std::move(*cloud);
+}
+
 } // namespace
 
 std::vector<std::string> archive12dExtensions()
@@ -194,12 +218,24 @@ Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& pat
     }
     for (const katana::archive12d::ImportedCloud& cloud : domain->clouds) {
         if (cloud.points.empty()) {
-            // A ref_data cloud names a LAS file rather than holding points.
-            // Its path is relative to a 12d project this file has left behind,
-            // so it is reported for the user to import, not chased.
+            // A ref_data cloud names a LAS file rather than holding points,
+            // by a path relative to a 12d project this archive has left
+            // behind. The file is LOOKED FOR beside the archive - where a
+            // 12da and its scans travel together when they are sent on -
+            // and imported when it is there. It is not chased any further
+            // than that: a relative path out of a project directory that no
+            // longer exists would have this reading arbitrary files from
+            // wherever the archive happens to sit.
+            if (auto found = referencedCloud(path, cloud.referenceFile)) {
+                found->name = cloud.name.empty() ? found->name : cloud.name;
+                result.warnings.push_back("point cloud \"" + cloud.name + "\" was read from '" +
+                                          cloud.referenceFile + "', found beside the archive");
+                result.clouds.push_back(std::move(*found));
+                continue;
+            }
             result.warnings.push_back("point cloud \"" + cloud.name + "\" refers to the file '" +
-                                      cloud.referenceFile + "', which was not read; import it " +
-                                      "separately");
+                                      cloud.referenceFile + "', which is not beside the archive; "
+                                      "import it separately");
             continue;
         }
         result.clouds.push_back(toLayer(cloud, path));

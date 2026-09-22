@@ -3,10 +3,12 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <string>
 
 #include "katana/gis/zip_container.hpp"
 #include "katana/interop/archive12d.hpp"
+#include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 
 namespace interop = katana::interop;
@@ -176,9 +178,14 @@ TEST(Archive12dImport, AZippedArchiveGivesWhatThePlainFileGives)
     EXPECT_EQ(zipped->archiveVersion, "15.01.08.60");
     EXPECT_EQ(zipped->encoding, "UTF-8");
     // What the fixture is known to hold (counted by hand in its own header):
-    // one tin of 4 triangles and a cloud of 3 points.
-    ASSERT_EQ(zipped->surfaces.size(), 1u);
+    // one tin of 4 triangles and a cloud of 3 points - and the super tin
+    // "Site Surfaces" built from that tin (PLAN.MD 20.2 slice 8), which is a
+    // separate object in 12d and so a separate surface here.
+    ASSERT_EQ(zipped->surfaces.size(), 2u);
     EXPECT_EQ(zipped->surfaces[0].surface.triangleCount(), 4u);
+    EXPECT_EQ(zipped->surfaces[1].name, "Site Surfaces");
+    EXPECT_EQ(zipped->surfaces[1].surface.triangleCount(), 4u)
+        << "a super tin of one member is that member";
     ASSERT_EQ(zipped->clouds.size(), 1u);
     EXPECT_EQ(zipped->clouds[0].points.size(), 3u);
     EXPECT_EQ(zipped->clouds[0].name, "LiDAR Patch");
@@ -320,8 +327,14 @@ TEST(Archive12dExport, AnOriginShiftTakenOnImportIsGivenBackOnExport)
     EXPECT_EQ(std::get<katana::entity::PointGeometry>(imported->entities.at(0).geometry).position,
               Point2(0.0, 0.0));
     EXPECT_LT(imported->bounds.max.x, 2000.0);
-    ASSERT_EQ(imported->surfaces.size(), 1u);
-    EXPECT_LT(imported->surfaces[0].surface.bounds().max.x, 2000.0) << "surfaces move with it";
+    // The tin, and the super tin built from it (PLAN.MD 20.2 slice 8): the
+    // fixture's "Site Surfaces" names "Natural Surface TIN", and a tin and a
+    // super tin are separate objects in 12d, so both arrive.
+    ASSERT_EQ(imported->surfaces.size(), 2u);
+    EXPECT_EQ(imported->surfaces[1].name, "Site Surfaces");
+    for (const auto& surface : imported->surfaces) {
+        EXPECT_LT(surface.surface.bounds().max.x, 2000.0) << "surfaces move with it";
+    }
     ASSERT_EQ(imported->clouds.size(), 1u);
     EXPECT_EQ(imported->clouds[0].bounds.minX, 1700.0) << "and so do clouds";
 
@@ -337,4 +350,57 @@ TEST(Archive12dExport, AnOriginShiftTakenOnImportIsGivenBackOnExport)
     ASSERT_TRUE(back.ok());
     EXPECT_EQ(std::get<katana::entity::PointGeometry>(back->entities.at(0).geometry).position,
               Point2(502000.0, 6960000.0));
+}
+
+// ---- referenced point clouds (PLAN.MD 20.2, slice 8) -------------------------------
+
+TEST(Archive12dImport, ARefDataCloudIsReadWhenTheLasFileSitsBesideTheArchive)
+{
+    // 12d writes a ref_data cloud as a PATH into a project that the archive
+    // has left behind. The file is looked for beside the archive - where the
+    // two travel together when a job is sent on - and read when it is there.
+    TempDir directory("refdata-found");
+    katana::interop::PointCloudLayer scan;
+    scan.name = "scan";
+    for (int i = 0; i < 12; ++i) {
+        katana::pointcloud::PointCloudPoint point;
+        point.x = 502000.0 + i;
+        point.y = 6960000.0;
+        point.z = 30.0 + i * 0.5;
+        scan.points.push_back(point);
+    }
+    const auto las = directory / "site.las";
+    ASSERT_TRUE(katana::interop::exportPointCloud(scan, las).ok());
+
+    // The archive names it by a path out of a directory that is not there.
+    const auto archive = directory / "job.12da";
+    write(archive, R"(string las_cloud_data { name "Survey Scan"
+  ref_data { file_name "..\..\scans\site.las" } })");
+
+    const auto imported = katana::interop::importArchive12d(archive);
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    ASSERT_EQ(imported->clouds.size(), 1u);
+    EXPECT_EQ(imported->clouds[0].name, "Survey Scan") << "the name the archive gave it";
+    EXPECT_EQ(imported->clouds[0].points.size(), 12u);
+    EXPECT_TRUE(std::any_of(imported->warnings.begin(), imported->warnings.end(),
+                            [](const std::string& w) {
+                                return w.find("found beside the archive") != std::string::npos;
+                            }))
+        << "and it says it went and got it";
+}
+
+TEST(Archive12dImport, ARefDataCloudThatIsNotThereIsReportedAndNotChased)
+{
+    TempDir directory("refdata-missing");
+    const auto archive = directory / "job.12da";
+    write(archive, R"(string las_cloud_data { name "Missing" ref_data { file_name "nowhere.las" } })");
+
+    const auto imported = katana::interop::importArchive12d(archive);
+    ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    EXPECT_TRUE(imported->clouds.empty());
+    EXPECT_TRUE(std::any_of(imported->warnings.begin(), imported->warnings.end(),
+                            [](const std::string& w) {
+                                return w.find("not beside the archive") != std::string::npos;
+                            }))
+        << "a missing scan is a fact about the file, not a failure of the import";
 }

@@ -507,9 +507,23 @@ The mapping is documented in full at the head of
   a face naming a vertex that does not exist is refused by the READER,
   which can say which line. Vertex and edge infos, the edge list ("for
   checking only", manual 1.4.9) and `blend` are read and not modelled.
+- **Super tins are built.** A super tin is a ranked list of tins that
+  behaves as one surface, and the 12da carries only the list (manual 1.4.8):
+  `terrain::combineSurfaces` makes the surface, a later member overriding an
+  earlier one wherever it covers it. The members remain surfaces of their
+  own, because a tin and a super tin are separate objects in 12d. Which end
+  of the list wins is NOT in the manual - this follows the sample archive's
+  own comment, "base surface first, then the pads that substitute it over
+  their footprints" - and a triangle of a lower member is dropped whole
+  where a higher one covers any of it, so the seam is ragged by up to one
+  triangle and no point ever has two answers. See docs/cad.md for why that
+  trade was made in that direction.
 - **Point clouds** become reference layers. A `ref_data` cloud names a LAS
-  file relative to a 12d project the archive has left behind; it is reported
-  for the user to import, not chased.
+  file relative to a 12d project the archive has left behind; the file is
+  looked for BESIDE the archive - where a 12da and its scans travel together
+  when a job is sent on - and read when it is there. Only the file name of
+  the reference is used: following "..\..\scans\site.las" out of the
+  directory the archive was found in would let a file choose what gets read.
 
 ### The null value
 
@@ -626,8 +640,7 @@ mesh is session data, so it is drawn but not saved with the project - the
 same open question as a surface. A mesh's vertex and edge infos, its edge
 list and its `blend` are read and not modelled. A text's slant and width factor are kept and not
 drawn: Katana text has neither, and inventing them in the renderer would be
-a worse lie than leaving the text upright. Super tins are reported, not built - Katana has no notion of one
-surface overriding another where they overlap. The undocumented parts of a
+a worse lie than leaving the text upright. The undocumented parts of a
 super alignment (`computator`, `floating_arc_end_radius_length` and the rest)
 are read as fields and not interpreted; such an alignment arrives through its
 solved geometry, which is what the manual says a reader should use. A 12da
