@@ -142,3 +142,76 @@ Checked with a script, outside Katana:
 
 So a customisation is not necessarily self-contained, and an unresolved name
 has to be reported rather than treated as a fault in the file.
+
+## The mapfile is written in sections, and the section is the meaning
+
+This is the thing that is easy to get wrong, and the first version of the
+reader did get it wrong. `<map_file>` does not hold one list of rules. It
+holds up to ten SECTIONS, and which section a rule is in is what says what the
+rule is about:
+
+| Section | What its rules say | Detail mapfile | `names.4d` |
+|---|---|---|---|
+| `map_data` | model, colour, breakline, linestyle, weight, group | 457 | 573 |
+| `vertex_symbol_data` (and `_v9`) | the symbol at each vertex, and `hide` | 200 | 201 |
+| `vertex_textstyle_data` | how the code's text is drawn | 7 | 7 |
+| `pipe_data` | the string drawn as a pipe, and its attributes | 16 | - |
+| `vertex_pipe_data` | the same per vertex | 16 | - |
+| `segment_pipe_data` | the same per segment | 16 | - |
+| `string_attribute_data` | attributes on the string | 12 | - |
+| `vertex_attribute_data` | attributes on each vertex | 1 | - |
+| `tinable_data` | whether the code is used in a surface | - | 119 |
+
+Reading only `<map_data>` takes 457 of the detail mapfile's 725 rules and
+quietly loses every symbol - which is exactly what the first version did, and
+exactly what the test against the real file caught. The element name inside a
+rule is not enough either: `<map_attributes>` means attributes on the STRING
+inside `string_attribute_data` and attributes on each VERTEX inside
+`vertex_attribute_data`. That is why `SurveyRule` records the section it came
+from.
+
+`names.4d` is a second mapfile, despite carrying the extension a linestyle
+library also uses. What makes a file a mapfile is that it contains a
+`<map_file>` element, not what it is called.
+
+## How a code resolves
+
+A key is either exact (`PABB`) or a prefix (`WM*`). Measured over both
+mapfiles: 1,364 distinct keys, and **not one** uses a wildcard anywhere but at
+the end. A key of any other shape is refused rather than matched
+approximately - putting a code in the wrong model is worse than reporting that
+a rule could not be used.
+
+`lookup` collects every rule whose key matches and combines them, most
+specific first:
+
+1. an exact key beats every prefix;
+2. a longer prefix beats a shorter one;
+3. `*` is last;
+4. rules of equal specificity keep the order they were read, so an earlier
+   mapfile wins over a later one.
+
+For each field, the first rule that says anything about it wins. **Attributes
+are the exception: they accumulate.** A `*` rule saying every pipe has a
+`DepthLocation` and a `SW*` rule giving the material are both meant - that is
+the whole reason the mapfiles carry a `*` rule beside the coded ones - so they
+are merged by name, with the more specific rule's value kept where both name
+the same attribute.
+
+This combination rule is Katana's reading. No documentation of the mapfile
+format was available here, so the evidence is the files: rules in different
+sections never contradict each other (they are about different things), and
+where two rules in one section match a code the wildcard one is plainly the
+fallback. Where the rule is load-bearing it is stated in a test, so a
+different reading would have to change a test to take effect rather than
+slipping in.
+
+## What the reader takes
+
+| | rules | warnings |
+|---|---|---|
+| `TfNSW_Survey_Detail.mapfile` | 725 over 465 distinct keys | none |
+| `names.4d` | 899 | one, and it is right: an `<item>` holding only a `<group>`, which names no code and so could never apply |
+
+An unknown section is named with how many rules went unread; an unknown field
+inside a rule is named and the rest of the rule is kept.

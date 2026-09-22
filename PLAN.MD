@@ -1751,9 +1751,26 @@ code's treatment is the UNION of the aspects that match it:
    a symbol at a point (replacing the closed set of sixteen built-ins with a
    lookup that falls back to them), and a linestyle repeated along a polyline
    with paper and world scaling.
-3. **The mapfile reader.** `cad::MapFile`, the XML above, with `lookup(code)`
-   resolving each aspect separately, most specific first: an exact key beats
-   the longest matching prefix, which beats a shorter one, which beats `*`.
+3. **The mapfile reader. DELIVERED.** `entity::SurveyMap` and `SurveyRule`
+   (`include/katana/entity/survey_map.hpp`) are the table;
+   `archive12d::readMapFile` (`include/katana/archive12d/map_file.hpp`) reads
+   it, on a small strict XML reader written for the purpose
+   (`src/katana_archive12d/xml.cpp`) rather than a linked one, so this module
+   keeps its no-third-party-dependency property and stays under the sanitizer
+   job. `readMapFileInto` loads several mapfiles as one customisation.
+
+   The plan above said the aspects are told apart by which fields a rule
+   carries. THAT IS WRONG, and the test against the real file is what caught
+   it: a mapfile is written in up to ten SECTIONS and the section is the
+   meaning - `<map_attributes>` is attributes on the string inside
+   `string_attribute_data` and attributes on each vertex inside
+   `vertex_attribute_data`. Reading only `<map_data>` takes 457 of the 725
+   rules and loses every symbol. See docs/survey_coding.md.
+
+   Evidence: 15 tests. The Transport for NSW detail mapfile reads as 725
+   rules over 465 keys with no warnings; `names.4d` - a second mapfile,
+   despite the extension a linestyle library also uses - reads as 899 rules
+   with one warning, which is correct.
 4. **Applying a code.** A command that takes entities carrying a survey code
    and sets the layer, colour, style, symbol and attributes the mapfile gives
    them - undoable, and reporting every code the mapfile has no rule for.

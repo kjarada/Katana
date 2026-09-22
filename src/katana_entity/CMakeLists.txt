@@ -10,6 +10,7 @@ add_library(katana_entity STATIC
     dimension_text.cpp
     serialization.cpp
     style_library.cpp
+    survey_map.cpp
     validation.cpp
 )
 katana_target_defaults(katana_entity)
