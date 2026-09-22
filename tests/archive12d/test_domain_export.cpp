@@ -334,6 +334,45 @@ TEST(DomainExport, ASurfaceIsWrittenClockwiseAndReadsBackAsTheSameGround)
     EXPECT_NEAR(back.surfaces[0].surface.planArea(), 100.0, 1e-9);
 }
 
+TEST(DomainExport, ASurfacesCoordinatesCrossTheFileWithoutLosingABit)
+{
+    // Thirds and sevenths at survey magnitude, which eight decimal places
+    // cannot hold. Eight places moves a point by up to 5e-9 - twenty times
+    // less than the tolerance at which a triangle counts as flat, so it
+    // cannot turn a real triangle inside out, but it is still not ours to
+    // throw away: a tin's coordinates are computed, not typed.
+    const double x = 187008.0 + 1.0 / 3.0;
+    const double y = 6184863.0 + 1.0 / 7.0;
+    auto surface = katana::terrain::TinSurface::create(
+        {{x, y, 8.0 + 2.0 / 3.0},
+         {x + 10.0, y, 9.5},
+         {x + 10.0, y + 10.0, 10.25},
+         {x, y + 10.0, 11.0}},
+        {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(surface.ok()) << (surface.ok() ? "" : surface.error().describe());
+    katana::entity::Model model;
+    const auto back = roundTrip(model, {a12::ExportSurface{"DESIGN", &*surface}});
+    ASSERT_EQ(back.surfaces.size(), 1u);
+
+    // The importer numbers vertices in the order the triangles first use them,
+    // so compare the sets rather than the lists.
+    const auto sorted = [](std::vector<katana::geometry::Point3> points) {
+        std::sort(points.begin(), points.end(),
+                  [](const katana::geometry::Point3& a, const katana::geometry::Point3& b) {
+                      if (a.x != b.x) {
+                          return a.x < b.x;
+                      }
+                      if (a.y != b.y) {
+                          return a.y < b.y;
+                      }
+                      return a.z < b.z;
+                  });
+        return points;
+    };
+    EXPECT_EQ(sorted(back.surfaces[0].surface.vertices()), sorted(surface->vertices()))
+        << "every vertex must arrive as exactly the double it left as";
+}
+
 TEST(DomainExport, AnEmptyModelIsAnEmptyArchiveAndBadOptionsAreRefused)
 {
     katana::entity::Model model;

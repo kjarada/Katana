@@ -1411,6 +1411,22 @@ class Importer {
                 ++surface.trianglesNulled;
                 continue;
             }
+            const katana::geometry::Triangle2 shape{plan(tin.points[triangle[0]]),
+                                                    plan(tin.points[triangle[1]]),
+                                                    plan(tin.points[triangle[2]])};
+            // Nor has one with no area in PLAN: there is no ground under it to
+            // interpolate over. Worse, which way round such a triangle was
+            // listed is noise rather than information - its doubled area is
+            // below the rounding error of computing it - so keeping it would
+            // hand TinSurface an edge direction chosen by the last bits of a
+            // subtraction, and one inside-out triangle refuses the whole
+            // surface. Real 12d tins carry them: `plot_PW_example_data.12da`
+            // has seven, the smallest with a doubled area of 4.9e-15 m^2 over
+            // coordinates of 6.2e6 m.
+            if (shape.isDegenerate()) {
+                ++surface.trianglesNulled;
+                continue;
+            }
             katana::terrain::TinTriangle mapped{};
             for (std::size_t k = 0; k < 3; ++k) {
                 std::uint32_t& slot = remap[triangle[k]];
@@ -1426,11 +1442,7 @@ class Importer {
             // it counter-clockwise. The sign is MEASURED rather than assumed,
             // because writers other than 12d get this wrong, and a surface
             // built inside out fails as a whole.
-            const auto& a = vertices[mapped[0]];
-            const auto& b = vertices[mapped[1]];
-            const auto& c = vertices[mapped[2]];
-            const double area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-            if (area2 <= 0.0) {
+            if (shape.signedArea() < 0.0) {
                 std::swap(mapped[1], mapped[2]);
             }
             triangles.push_back(mapped);

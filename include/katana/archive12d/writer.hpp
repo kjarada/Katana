@@ -27,7 +27,14 @@ struct WriteOptions {
     // Write tin points as C99 hexadecimal floats, as 12d Model does by default
     // (`output_tin_hex_floats true`): a double written in hex reads back
     // bit for bit, which decimal at 8 places does not.
-    bool hexFloatTins = false;
+    //
+    // ON by default, because a tin's coordinates are not numbers a user typed
+    // - they are computed, and the SIGN OF A TRIANGLE'S AREA depends on their
+    // last bits. Eight places moves a point by up to 5e-9, which is enough to
+    // turn a sliver triangle inside out; a surface with one inside-out
+    // triangle is refused whole. Measured on plot_PW_example_data.12da: four
+    // of its eight surfaces would not read back.
+    bool hexFloatTins = true;
     // Comment written at the head of the file, one line per line of text.
     std::string banner = "Written by Katana";
 };

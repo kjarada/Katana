@@ -366,7 +366,7 @@ TEST(Writer, ANullHeightIsWrittenAsTheArchivesNullValue)
     EXPECT_FALSE(std::get<a12::VertexString>(back->elements[0]).vertices[1].z.has_value());
 }
 
-TEST(Writer, HexadecimalTinPointsReadBackBitForBit)
+TEST(Writer, TinPointsReadBackBitForBitBecauseHexadecimalIsTheDefault)
 {
     a12::Archive archive;
     a12::Tin tin;
@@ -378,13 +378,16 @@ TEST(Writer, HexadecimalTinPointsReadBackBitForBit)
     tin.triangles = {{0, 2, 1}};
     archive.elements.emplace_back(tin);
 
-    a12::WriteOptions options;
-    options.hexFloatTins = true;
-    const a12::Archive back = reread(archive, options);
+    // No options at all: a tin's coordinates are computed rather than typed,
+    // and the orientation of a sliver triangle lives in their last bits, so
+    // the default follows 12d Model's (`output_tin_hex_floats true`).
+    const a12::Archive back = reread(archive);
     EXPECT_EQ(std::get<a12::Tin>(back.elements.at(0)).points, tin.points);
 
-    // ... which decimal at the default eight places does not quite manage.
-    const a12::Archive decimal = reread(archive);
+    // ... which decimal at eight places does not quite manage.
+    a12::WriteOptions options;
+    options.hexFloatTins = false;
+    const a12::Archive decimal = reread(archive, options);
     EXPECT_NE(std::get<a12::Tin>(decimal.elements.at(0)).points, tin.points);
 }
 
