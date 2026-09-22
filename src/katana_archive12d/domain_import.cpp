@@ -387,6 +387,102 @@ class Importer {
         return true;
     }
 
+    // Where 12d's anchor point puts the LEFT END OF THE BASELINE, which is
+    // what a Katana TextGeometry's position is.
+    //
+    // justify is "top|middle|bottom" and "-left|-centre|-right" (manual
+    // 1.5.8.4.9); every annotation in the sample archives is "bottom-left",
+    // which is already Katana's meaning, but the format allows the other
+    // eight and a text anchored by its centre sits half its width away.
+    // The width is ESTIMATED at 0.6 of the height per character - there is
+    // no font here, and the renderer that will draw it has its own metrics;
+    // the estimate only has to be better than ignoring justification, which
+    // is out by the whole width.
+    [[nodiscard]] static Point2 baselineLeft(const Point2& anchor, const std::string& text,
+                                             double height, double rotation,
+                                             const std::string& justify)
+    {
+        constexpr double kWidthPerHeight = 0.6;
+        const double width =
+            static_cast<double>(text.size()) * height * kWidthPerHeight;
+        const std::string wanted = detail::lowered(justify);
+        double along = 0.0;
+        if (wanted.find("centre") != std::string::npos ||
+            wanted.find("center") != std::string::npos) {
+            along = -0.5 * width;
+        } else if (wanted.find("right") != std::string::npos) {
+            along = -width;
+        }
+        // "top" and "middle" are measured from the cap line and the middle of
+        // it; the baseline is below both.
+        double across = 0.0;
+        if (wanted.starts_with("top")) {
+            across = -height;
+        } else if (wanted.starts_with("middle")) {
+            across = -0.5 * height;
+        }
+        const double c = std::cos(rotation);
+        const double sn = std::sin(rotation);
+        return Point2(anchor.x + along * c - across * sn, anchor.y + along * sn + across * c);
+    }
+
+    // Everything a 12d annotation says about a piece of text, applied to the
+    // entity Katana will draw. See kMetaTextPrefix for what is kept rather
+    // than applied, and why.
+    void applyAnnotation(Entity& entity, katana::entity::TextGeometry& geometry,
+                         const FieldList* annotation)
+    {
+        if (annotation == nullptr) {
+            return;
+        }
+        geometry.rotation = radians(annotation->real("angle").value_or(0.0));
+        // The text's own colour, which is not the string's: "no_colour"
+        // means take the string's, which the entity already has.
+        const std::string colour = annotation->text("colour", annotation->text("text_colour"));
+        if (!colour.empty() && colour != "no_colour") {
+            if (const auto rgb = standardColour(colour)) {
+                entity.color = rgb;
+            }
+            entity.metadata.insert_or_assign(std::string(kMetaTextPrefix) + "colour", colour);
+        }
+        if (const std::string style = annotation->text("textstyle"); !style.empty()) {
+            entity.style = styleFor(style).name;
+        }
+        // An offset is in the same units as the SIZE, and only worldsize is
+        // model units; a papersize offset is millimetres on a plot, which
+        // has no model-unit meaning without a plot scale - the same reason
+        // textHeight() falls back. The direction the manual does not give:
+        // it is taken as perpendicular to the text, to the left, which is
+        // where 12d puts an offset annotation above a line.
+        const bool worldUnits = annotation->real("worldsize").value_or(0.0) > 0.0;
+        for (const char* key : {"offset", "raise", "slant", "x_factor", "xfactor", "justify",
+                                "papersize", "screensize"}) {
+            if (const Field* field = annotation->find(key); field != nullptr) {
+                entity.metadata.insert_or_assign(std::string(kMetaTextPrefix) + key, field->value);
+            }
+        }
+        const double offset = annotation->real("offset").value_or(0.0);
+        if (worldUnits && offset != 0.0) {
+            const double c = std::cos(geometry.rotation);
+            const double sn = std::sin(geometry.rotation);
+            geometry.position = Point2(geometry.position.x - offset * sn,
+                                       geometry.position.y + offset * c);
+        }
+        // `raise` raises the LEVEL: it is a height, not a plan displacement,
+        // so it goes onto the elevation the text already carries.
+        const double raised = annotation->real("raise").value_or(0.0);
+        if (raised != 0.0) {
+            const auto found = entity.properties.find(std::string(kElevationProperty));
+            if (found != entity.properties.end()) {
+                if (const auto* z = std::get_if<double>(&found->second)) {
+                    found->second = *z + raised;
+                }
+            }
+        }
+        geometry.position = baselineLeft(geometry.position, geometry.text, geometry.height,
+                                         geometry.rotation, annotation->text("justify"));
+    }
+
     [[nodiscard]] static double textHeight(const FieldList* annotation)
     {
         // Only `worldsize` is a height in model units. papersize (mm on the
@@ -420,14 +516,12 @@ class Importer {
             geometry.position = plan(string.vertices[i]);
             geometry.text = *text;
             geometry.height = textHeight(annotation);
-            if (annotation != nullptr) {
-                geometry.rotation = radians(annotation->real("angle").value_or(0.0));
-            }
-            entity.geometry = std::move(geometry);
             const auto& z = string.vertices[i].z ? string.vertices[i].z : string.constantZ;
             if (z) {
                 entity.properties.insert_or_assign(std::string(kElevationProperty), *z);
             }
+            applyAnnotation(entity, geometry, annotation);
+            entity.geometry = std::move(geometry);
             added += add(std::move(entity), "vertex text of " + describe(string.header, "string"))
                          ? 1
                          : 0;
@@ -646,9 +740,7 @@ class Importer {
             geometry.position = plan(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
             geometry.text = *text;
             geometry.height = textHeight(annotation);
-            if (annotation != nullptr) {
-                geometry.rotation = radians(annotation->real("angle").value_or(0.0));
-            }
+            applyAnnotation(entity, geometry, annotation);
             entity.geometry = std::move(geometry);
             added += add(std::move(entity), "segment text of " + describe(string.header, "string"))
                          ? 1
@@ -699,9 +791,9 @@ class Importer {
         geometry.position = plan(text.position);
         geometry.text = text.text;
         geometry.height = textHeight(&text.annotation);
-        geometry.rotation = radians(text.annotation.real("angle").value_or(0.0));
-        entity.geometry = std::move(geometry);
         setElevations({text.position.z}, entity.properties);
+        applyAnnotation(entity, geometry, &text.annotation);
+        entity.geometry = std::move(geometry);
         return add(std::move(entity), describe(text.header, "string text")) ? 1 : 0;
     }
 

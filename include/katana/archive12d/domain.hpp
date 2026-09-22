@@ -110,6 +110,12 @@ inline constexpr std::string_view kMetaExtraPrefix = "12d.x.";
 // holding one value per block, the way segment colours are kept, and the
 // import says the symbols are not drawn.
 inline constexpr std::string_view kMetaSymbolPrefix = "12d.symbol.";
+// What a text annotation says that Katana's TextGeometry has no field for,
+// as `12d.text.<key>`: the slant and width factor (Katana text has neither),
+// the justification and the sizing mode it was placed by, and an offset in
+// paper millimetres, which has no model-unit meaning without a plot scale.
+// Kept so that a text imported and exported unchanged is the text it was.
+inline constexpr std::string_view kMetaTextPrefix = "12d.text.";
 inline constexpr std::string_view kMetaStringStyle = "12d.string_style";
 
 struct ImportOptions {

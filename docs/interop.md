@@ -450,6 +450,23 @@ The mapping is documented in full at the head of
   what happens when they differ, and the answer was that the string's colour
   was lost. A symbol colour Katana has no RGB for is kept by name and
   written back.
+- **Text is placed where 12d put it.** A 12d annotation anchors text by one
+  of nine justifications ("top|middle|bottom" by "left|centre|right"); a
+  Katana `TextGeometry` position IS the left end of the baseline, so the
+  anchor is moved by the justification it was placed with. The width that
+  needs is ESTIMATED at 0.6 of the height per character - there is no font
+  here - which only has to beat ignoring justification, which is out by the
+  whole width. Every annotation in the sample archives is "bottom-left",
+  which is already Katana's meaning, so this shows only on files that use
+  the format's freedom. The text's own colour (`text_colour`, or `colour`
+  inside a vertex or segment annotation) is the entity's, with 12d's
+  "no_colour" meaning "the string's"; its `textstyle` is a Katana style like
+  any other. An `offset` is in the same units as the SIZE, so it is applied
+  only with `worldsize` (model units) and kept as metadata with `papersize`
+  (millimetres on a plot, meaningless without a plot scale - the rule the
+  height already follows); its direction is not in the manual and is taken
+  as perpendicular to the text, to the left. A `raise` is a LEVEL, so it is
+  added to the text's elevation and moves nothing in plan.
 - **Attributes** become typed properties; a group flattens into
   `Group/Sub/Name` and is rebuilt on export. Vertex and segment attributes
   become `vertex/3/Name` and `segment/2/Name`; a one-vertex string's vertex
@@ -607,9 +624,9 @@ symbol's rotation, offset and raise are kept and not drawn either: a Katana
 point has no rotation, and offset and raise are paper-space quantities. A
 mesh is session data, so it is drawn but not saved with the project - the
 same open question as a surface. A mesh's vertex and edge infos, its edge
-list and its `blend` are read and not modelled. Per-vertex annotation settings
-beyond text height and angle (offset, raise, justification, slant) are not
-taken. Super tins are reported, not built - Katana has no notion of one
+list and its `blend` are read and not modelled. A text's slant and width factor are kept and not
+drawn: Katana text has neither, and inventing them in the renderer would be
+a worse lie than leaving the text upright. Super tins are reported, not built - Katana has no notion of one
 surface overriding another where they overlap. The undocumented parts of a
 super alignment (`computator`, `floating_arc_end_radius_length` and the rest)
 are read as fields and not interpreted; such an alignment arrives through its

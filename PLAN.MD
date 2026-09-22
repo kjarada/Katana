@@ -1544,7 +1544,29 @@ command at all - the current layer is session state like the selection, and
 putting it on the undo stack would make Ctrl+Z undo where the next line
 will be drawn.
 
-**STATUS: slice 7 (text as 12d draws it) next.**
+**Slice 7 DELIVERED (2026-09-22).** One `applyAnnotation` in the importer
+serves all three places text arrives - `string text`, vertex text and
+segment text - and applies what 12d says about it: justification (the anchor
+is moved to where the baseline starts, since a Katana text position IS the
+left end of the baseline), the text's own colour ("no_colour" meaning the
+string's), its textstyle as a Katana style, an `offset` where the size is
+`worldsize` and so in model units, and a `raise` added to the elevation
+because a raise is a level and not a plan displacement. Slant, width factor,
+justification and a paper-millimetre offset are kept as `12d.text.*`.
+
+**The plan asked for offset, raise and slant to be "applied"; two of those
+are recorded here as wrong.** Slant and width factor have no field in a
+Katana `TextGeometry`, and inventing them in the renderer would be a worse
+lie than leaving the text upright - they are kept and written back instead.
+The manual does not give the DIRECTION of a text offset; it is taken as
+perpendicular to the text, to the left, and that assumption is stated where
+it is made. Measured in the sample archives: every annotation is
+"bottom-left", `raise`, `slant` and `x_factor` are always 0, 0 and 1, and
+`offset` is 0 except 12 (with `papersize 10`) and 0.2 (with `worldsize`) -
+so justification and colour are what actually change a real file, and the
+width estimate behind justification never fires on one.
+
+**STATUS: slice 8 (super tins built, ref_data clouds found) next.**
 
 ---
 
