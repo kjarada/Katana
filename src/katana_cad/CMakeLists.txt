@@ -10,6 +10,7 @@ add_library(katana_cad STATIC
     corridor.cpp
     grading.cpp
     symbols.cpp
+    style_drawing.cpp
     parcel.cpp
     plot.cpp
     dimension_draw.cpp
