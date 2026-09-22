@@ -51,6 +51,7 @@
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/archive12d/customisation.hpp"
 #include "katana/archive12d/domain.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
@@ -279,12 +280,20 @@ void MainWindow::buildActions()
     connect(exportAction, &QAction::triggered, this, [this] { exportVectorFile(); });
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
 
+    QAction* customiseAction =
+        makeAction(Icon::Import, "Load 12d &Customisation...",
+                   "Load 12d linestyle and symbol libraries (.4d) and mapfiles, so a survey "
+                   "code draws what the customisation says it should");
+    connect(customiseAction, &QAction::triggered, this, [this] { loadCustomisation(); });
+
     QMenu* fileMenu = menuBar()->addMenu("&File");
     fileMenu->addActions({newAction, openAction});
     fileMenu->addSeparator();
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
     fileMenu->addActions({importAction, exportAction});
+    fileMenu->addSeparator();
+    fileMenu->addAction(customiseAction);
     fileMenu->addSeparator();
     fileMenu->addAction(plotAction);
     fileMenu->addSeparator();
@@ -1354,6 +1363,60 @@ void MainWindow::importPath(const QString& path)
         break;
     }
     logMessage("No importer for " + path, true);
+}
+
+// Loading a 12d customisation: the linestyle library, the symbol library and
+// the mapfile. Several files at once, because they are useless apart - and
+// WHICH is which is decided by looking inside each one, since `.4d` is the
+// extension of both a style library and a mapfile (PLAN.MD 20.3).
+void MainWindow::loadCustomisation()
+{
+    const QStringList chosen = QFileDialog::getOpenFileNames(
+        this, "Load 12d Customisation", QString(),
+        "12d customisation (*.4d *.mapfile);;All files (*)");
+    if (chosen.isEmpty()) {
+        logMessage("Loading a customisation was cancelled.");
+        return;
+    }
+    std::vector<std::filesystem::path> paths;
+    paths.reserve(static_cast<std::size_t>(chosen.size()));
+    for (const QString& one : chosen) {
+        paths.emplace_back(one.toStdString());
+    }
+    applyCustomisation(paths);
+}
+
+void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& paths)
+{
+    auto loaded = katana::archive12d::readCustomisation(paths);
+    if (!loaded) {
+        warnUser("Customisation failed", QString::fromStdString(loaded.error().describe()));
+        return;
+    }
+    for (const katana::archive12d::LoadedFile& file : loaded->files) {
+        logMessage(fromPath(file.path.filename()) + ": " +
+                   QString::fromStdString(katana::archive12d::toString(file.kind)) + ", " +
+                   grouped(file.read) +
+                   (file.kind == katana::archive12d::CustomisationFile::MapFile ? " rules"
+                                                                               : " definitions"));
+    }
+    for (const std::string& warning : loaded->warnings) {
+        logMessage("Warning: " + QString::fromStdString(warning));
+    }
+    // A customisation need not be self-contained. Naming what is missing is
+    // the difference between a symbol that is plainly absent and one that is
+    // silently drawn as a plain mark.
+    const std::vector<std::string> missing = loaded->unresolvedStyles();
+    if (!missing.empty()) {
+        logMessage(grouped(missing.size()) +
+                   " names the mapfile asks for are in no loaded library, starting with \"" +
+                   QString::fromStdString(missing.front()) + "\"");
+    }
+    logMessage("Customisation: " + grouped(loaded->library.size()) + " definitions (" +
+               grouped(katana::entity::vertexStyleNames(loaded->library).size()) +
+               " symbols) and " + grouped(loaded->map.size()) + " survey code rules.");
+    document_.setStyleLibrary(std::move(loaded->library));
+    document_.setSurveyMap(std::move(loaded->map));
 }
 
 void MainWindow::importFile()

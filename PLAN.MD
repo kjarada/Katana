@@ -1777,9 +1777,12 @@ code's treatment is the UNION of the aspects that match it:
    rules over 465 keys with no warnings; `names.4d` - a second mapfile,
    despite the extension a linestyle library also uses - reads as 899 rules
    with one warning, which is correct.
-4. **Applying a code.** A command that takes entities carrying a survey code
-   and sets the layer, colour, style, symbol and attributes the mapfile gives
-   them - undoable, and reporting every code the mapfile has no rule for.
+4. **Applying a code. NOT YET STARTED, and the last substantial piece.** A
+   command that takes entities carrying a survey code and sets the layer,
+   colour, style, symbol and attributes the mapfile gives them - undoable, and
+   reporting every code the mapfile has no rule for. Everything it needs is in
+   place: `SurveyMap::lookup` resolves the code, the Document carries the map,
+   and the viewport already draws whatever a style names.
 5. **The model and the project. PARTIALLY DELIVERED.** `Style::symbol` is no
    longer a closed set: it is a name resolved when it is drawn, exactly as
    `Style::linetype` already was. `cad::Document` carries the loaded
@@ -1794,10 +1797,23 @@ code's treatment is the UNION of the aspects that match it:
 
    OUTSTANDING: a project does not yet remember which library and mapfile it
    was drawn with, so they must be loaded again each session.
-6. **The GUI.** Loading the three files, a library browser showing the groups
-   with a preview of each definition, and applying the mapfile to a selection
-   or to everything.
-7. **The CLI and the documentation.**
+6. **Loading and drawing. PARTIALLY DELIVERED.**
+   `archive12d::readCustomisation` loads any mix of libraries and mapfiles,
+   deciding what each file is BY LOOKING INSIDE IT - `.4d` is the extension of
+   both formats in the reference customisation, so the name cannot be
+   trusted. `File > Load 12d Customisation...` in the application, `CUSTOMISE
+   <file>...` in `katana_cli`, and `--customise <file>...` headlessly; all
+   three take the same path and write the same report.
+
+   The viewport draws them: a point whose style names a definition gets that
+   definition's strokes, a line whose linetype names one has it laid along
+   the line, and a `colour` command inside a definition changes the pen.
+
+   OUTSTANDING: a library BROWSER - the groups tree with a preview of each
+   definition - is not built; the style manager still lists only the
+   document's own styles.
+7. **The CLI and the documentation. DELIVERED** for what exists so far:
+   `CUSTOMISE` with its report, and `docs/survey_coding.md`.
 
 **STATUS: IN PROGRESS.**
 

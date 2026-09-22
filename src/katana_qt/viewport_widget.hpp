@@ -23,6 +23,7 @@
 #include "katana/cad/scene.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/snapping.hpp"
+#include "katana/cad/style_drawing.hpp"
 #include "katana/cad/view_transform.hpp"
 #include "katana/interop/reference_data.hpp"
 
@@ -123,6 +124,14 @@ class ViewportWidget final : public QWidget {
     void drawPointClouds(QPainter& painter) const;
     void drawEntities(QPainter& painter) const;
     void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
+    // A 12d definition's strokes and texts, honouring the pen changes in it.
+    void drawStyleDrawing(QPainter& painter, const katana::cad::StyleDrawing& drawing) const;
+    void drawStyleText(QPainter& painter, const katana::cad::StyleTextMark& text) const;
+    void drawLineStyle(QPainter& painter, const katana::entity::LineStyle& definition,
+                       const katana::entity::Geometry& geometry) const;
+    [[nodiscard]] static QPen penFor(const QPen& entityPen, const std::string& pen);
+    // Model units to one plot millimetre, which is what a `paperstyle` uses.
+    [[nodiscard]] double paperScale() const;
     void drawSymbol(QPainter& painter, const std::string& symbol, const Point2& centre,
                     double size) const;
     void drawMeshFootprints(QPainter& painter) const;
