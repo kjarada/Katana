@@ -14,7 +14,13 @@ else()
     set(KATANA_PYTHON "python")
 endif()
 
-set(CMAKE_CXX_STANDARD 23)
+# The C++ standard the whole project is built to. A variable rather than a
+# constant so that a build can be made to another standard and MEASURED
+# against this one rather than argued about - see docs/performance.md.
+set(KATANA_CXX_STANDARD "26" CACHE STRING "C++ standard (23 or 26)")
+set_property(CACHE KATANA_CXX_STANDARD PROPERTY STRINGS 23 26)
+
+set(CMAKE_CXX_STANDARD ${KATANA_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

@@ -230,6 +230,44 @@ half-finished feature to keep moving — §5 still applies, and every commit lan
 green. And it does not license silence: hand back a runnable build and an
 honest account at each milestone (§5.1), then carry on.
 
+## 5.3 Use parallel agents whenever they are faster — MANDATORY
+
+**When a task splits into parts that do not touch the same files, run them as
+parallel subagents rather than doing them one after another.** The user asked
+for this explicitly (2026-09-22): finishing sooner is worth more than the
+tidiness of a single thread.
+
+It is faster, and so worth doing, when ALL of these hold:
+
+- the work divides into two or more parts whose file sets do not overlap;
+- each part can be judged on its own - it builds, or its tests pass, without
+  the others;
+- the parts together are more than a few minutes of work.
+
+It is NOT faster, and must not be used, when:
+
+- the parts edit the same files - two agents in one file is a merge conflict
+  and a lost change, not speed;
+- the work is a single edit, or a measurement that must be taken on one
+  machine in one state (a benchmark comparison is one job, not four);
+- correctness depends on doing the parts in order.
+
+How to run them so the result is trustworthy:
+
+- **Give each agent a disjoint, named file set.** Say which files are its own
+  and that it must not touch any other.
+- **Give each agent its own git worktree** (`isolation: "worktree"`) when the
+  parts build or test, so four builds do not fight over one build directory.
+- **Ask each for evidence**, not a description: what it changed, the test it
+  ran, and the measurement if the change is a performance one.
+- **Verify centrally afterwards.** An agent's report is a claim. Build the
+  merged result and run the WHOLE suite yourself before believing any of it,
+  and say so in the commit.
+
+An analysis sweep - "find the bottlenecks in these five modules" - is the
+clearest win: it is read-only, so there is nothing to conflict, and it would
+otherwise fill this context with files rather than conclusions.
+
 ## 6. Self-improvement — leave the codebase easier to work on
 
 You are expected to improve the *conditions* for the next contributor, not only
