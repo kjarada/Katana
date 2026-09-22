@@ -1614,21 +1614,36 @@ layer, colour and style that polyline wore (before this they were hard-coded
 to model "Alignments", colour red, style "1", so an alignment now keeps its
 appearance for the first time).
 
-**OUTSTANDING, and the reason this slice is not fully delivered:** four
-surfaces of `plot_PW_example_data.12da` - `Design/2/LOTS`, `Design/2/ROADS`,
-`Design/2/ROADS DETAIL` and `Super/FS` - build on the first import and are
+**The surface defect this slice found, and its cause.** Four surfaces of
+`plot_PW_example_data.12da` - `Design/2/LOTS`, `Design/2/ROADS`,
+`Design/2/ROADS DETAIL` and `Super/FS` - built on the first import and were
 REFUSED on the second with "two triangles run along an edge in the same
-direction". The other four surfaces of that file, and every surface of every
-other archive, survive. The import normalises each triangle's winding by
-measuring its area, so a wrong winding cannot be the cause; the hypothesis
-to test next is a duplicated or exactly-overlapping pair of triangles
-surviving the nulled-triangle filter. Nothing is lost silently - the surface
-is refused with its reason - but a surface that will not read back is a real
-loss, and it is the next thing to do here.
+direction". The hypothesis recorded here was a duplicated triangle pair. It
+was wrong. The cause was a FLAT triangle, and there were two independent
+faults behind it:
 
-**STATUS: 20.2 is delivered but for the surface defect above and the
-property DEFINITIONS left over from slice 5. Both are recorded; neither
-blocks the application.**
+1. 12d's own tins carry triangles with no plan area. Counted directly from
+   the file's hexadecimal floats (outside Katana, by
+   `tools/sliver_census.py`): seven triangles across the eight surfaces
+   have a doubled area below 6e-14 m^2 over coordinates of 6.2e6 m - smaller
+   than the rounding error of computing that area, so which way round they
+   were listed is noise. Katana measured the sign anyway and handed
+   `TinSurface` an edge direction chosen by the last bits of a subtraction.
+   **Fixed**: the import nulls a triangle that is degenerate in plan, exactly
+   as it already nulls one with a null height. The census predicted the four
+   failures and the four survivors with no exceptions.
+2. The writer put tin points out at eight decimal places, moving each by up
+   to 5e-9 - enough to flatten a sliver that was not quite flat. 12d Model's
+   own default is `output_tin_hex_floats true` for this reason, and there was
+   already a test in the repository showing eight places loses the value.
+   **Fixed**: `WriteOptions::hexFloatTins` now defaults to true.
+
+Either fix alone makes the file stable (both were measured that way); both
+are kept, because they are answers to different questions - what a degenerate
+triangle means, and whose bits those are to throw away.
+
+**STATUS: 20.2 is delivered but for the property DEFINITIONS left over from
+slice 5, which is recorded and does not block the application.**
 
 ---
 

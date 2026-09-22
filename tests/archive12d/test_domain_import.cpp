@@ -587,6 +587,20 @@ TEST(DomainImportTin, TrianglesAreAcceptedWhicheverWayRoundTheWriterListedThem)
     EXPECT_NEAR(domain.surfaces[0].surface.planArea(), 100.0, 1e-9);
 }
 
+TEST(DomainImportTin, ATriangleWithNoAreaInPlanHasNoSurfaceToGiveEither)
+{
+    // (0,0) (10,0) (20,0) are collinear: no ground under the triangle, and no
+    // side for it to have been listed from. Left in, its edge 2-3 runs the
+    // same way round as the neighbour's below the line, and one such pair
+    // refuses the whole surface - which is how four surfaces of
+    // plot_PW_example_data.12da were lost.
+    const auto domain = import("tin { name \"T\" points { 0 0 1  10 0 1  20 0 1  15 -5 2 }"
+                               " triangles { 1 2 3   3 2 4 } }");
+    ASSERT_EQ(domain.surfaces.size(), 1u) << allWarnings(domain);
+    EXPECT_EQ(domain.surfaces[0].surface.triangleCount(), 1u);
+    EXPECT_EQ(domain.surfaces[0].trianglesNulled, 1u);
+}
+
 TEST(DomainImportTin, ATriangleWithANullHeightHasNoSurfaceToGive)
 {
     const auto domain = import("tin { name \"T\" points { 0 0 1  10 0 1  0 10 1  10 10 null }"

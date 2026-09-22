@@ -656,7 +656,7 @@ the fourteen on 2026-09-22:
 | test super tin, test multiple tins | stable, surfaces included |
 | test drainage strings, test Super Alignment, test las point cloud | stable |
 | comprehensive-all-geometries, repro-2vertex-pipe-bucketing | stable |
-| **plot_PW_example_data** | **NOT stable: 4 of its 8 surfaces are refused on the way back in** |
+| plot_PW_example_data | stable: 4469 entities, 8 surfaces (after the flat-triangle fix below) |
 
 Two defects came out of this, which is what it was written for. The first is
 fixed: exporting a drawing imported from a 12da wrote every alignment TWICE
@@ -668,16 +668,46 @@ style that polyline wore (they were hard-coded to model "Alignments",
 colour red, style "1" before, so this is also the first time an alignment
 keeps its appearance).
 
-The second is open and recorded in `PLAN.MD` 20.2: four surfaces of
-`plot_PW_example_data.12da` - `Design/2/LOTS`, `Design/2/ROADS`,
-`Design/2/ROADS DETAIL` and `Super/FS` - build on the first import and are
-refused on the second with "two triangles run along an edge in the same
-direction". The other four surfaces of the same file, and every surface of
-every other archive, survive. The import normalises each triangle's winding
-by MEASURING its area, so an inconsistent winding cannot be the cause; a
-duplicated or exactly-overlapping triangle pair surviving the nulled-triangle
-filter is the hypothesis to test next. Nothing is silently lost: the surface
-is refused with its reason and the import says so.
+The second is fixed, and is the more interesting of the two. Four surfaces of
+`plot_PW_example_data.12da` built on the first import and were refused on the
+second with "two triangles run along an edge in the same direction". The
+cause was not a duplicated triangle, which is what it looks like: it was a
+**flat** one.
+
+12d's tins contain triangles whose three points are collinear. Counted from
+the file's own hexadecimal floats, outside Katana (`tools/sliver_census.py`),
+seven of them across the
+eight surfaces have a doubled plan area below 6e-14 m^2 - over coordinates of
+6.2e6 m, where the arithmetic that computes that area cannot resolve better
+than about 1e-14. So the SIGN of such a triangle's area is not information.
+The import measured it anyway to decide which way round the triangle went,
+and handed `TinSurface` an edge direction decided by the last bits of a
+subtraction; one triangle facing the wrong way refuses the whole surface.
+
+The import now nulls a triangle with no plan area, exactly as it already
+nulls one whose heights are null - there is no ground under it to interpolate
+over, and `geometry::Triangle2::isDegenerate` is the tolerance policy that
+already says what "no plan area" means. The census (a triangle is flat when
+its plan area's sign flips as the coordinates are rounded to eight places)
+predicted precisely the four failures and the four survivors:
+
+| Surface | Flat triangles | Read back |
+|---|---|---|
+| Design/2/BASIN, CHANNEL, SWALE, Existing/SURVEY | 0 | always did |
+| Design/2/LOTS | 2 | was refused |
+| Design/2/ROADS | 4 | was refused |
+| Design/2/ROADS DETAIL | 1 | was refused |
+| Super/FS | inherits its members' | was refused |
+
+The second fault was ours: the writer put tin points out at eight decimal
+places, which moves a point by up to 5e-9 and so can flatten a sliver that
+was not flat. `WriteOptions::hexFloatTins` now defaults to true - 12d Model's
+own default (`output_tin_hex_floats true`), and for its reason. Note the
+arithmetic: 5e-9 is twenty times below `tolerance::kGeometric`, so rounding
+can only ever flatten a triangle that already counts as flat. That is why
+either fix alone makes the file stable, and both are kept: one says what a
+degenerate triangle means, the other says whose bits those were to throw
+away.
 
 ### Not done
 
