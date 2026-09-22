@@ -333,3 +333,48 @@ which is what gave it away.
 It now takes a DIRECTORY and globs it, so there is no list to mangle, and the
 helper prints how many files it found. A test that cannot report what it
 actually exercised is a test that can pass for the wrong reason.
+
+## Applying a code
+
+`cad::applySurveyCodes` is what the three files are FOR. An entity carries a
+field code in a property - `code` by default - and this turns the mapfile's
+answer into the layer, the style and the properties it should have.
+
+It PLANS rather than acts: everything comes back as one
+`commands::Transaction`, so twenty thousand coded points are **one undo**, not
+twenty thousand. A command per entity would make an undo stack nobody could
+use.
+
+Decisions worth recording:
+
+- **12d's model becomes Katana's layer.** Both are `/`-separated paths naming
+  where something lives, and it is the mapping the 12da import already makes.
+- **The style is named after the 12d linestyle**, or the symbol where there is
+  no linestyle. The same rule the 12da import follows, so a drawing coded here
+  and a drawing imported from 12d share style names instead of growing two
+  sets of them.
+- **A name the library does not define is still recorded**, and reported. It
+  is what 12d says the thing is; it draws as a plain line or mark until a
+  library defines it, which is better than dropping the information.
+- **`$PipeDiameter` is left alone.** An attribute whose value names another
+  attribute cannot be resolved without the survey data the drawing was made
+  from. It is counted and reported rather than written literally.
+- **Only text is a code.** A number in the code property is a measurement
+  someone named badly; treating `1.5` as a field code would file it under
+  whatever the rule for `1*` says.
+- **The colour comes through a callback.** 12d's colour names are known to
+  `archive12d`, which `cad` may not see, so the front ends pass
+  `archive12d::standardColour`. Without one, colours are left alone rather
+  than guessed at.
+
+From the command line, the whole chain:
+
+```
+katana_cli
+  -c 'CUSTOMISE "…/user_linestyl_TfNSWv15.4d" "…/user_symbols_TfNSWv15.4d" "…/TfNSW_Survey_Detail.mapfile"'
+  -c 'POINT 0,0' -c 'SELECT ALL' -c 'PROP SET code WM01 text' -c 'CODE' -c 'LIST'
+
+  2 entities carry a "code", 2 of them codes the mapfile has a rule for
+  Applied: 1 layers and 1 styles created. UNDO puts it all back.
+  1  Point  layer=SURVEY SERVICES  at 0,0
+```

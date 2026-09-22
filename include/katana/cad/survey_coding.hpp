@@ -1,0 +1,73 @@
+#pragma once
+
+// Applying a survey code to a drawing (PLAN.MD 20.3, slice 4).
+//
+// This is what the three files are FOR. An entity carries a field code -
+// `WM01` - and the mapfile says a water main goes in model SURVEY SERVICES,
+// coloured "sui water potable", drawn with the "WATR Main" linestyle. This
+// turns that into the layer, the style and the properties the entity should
+// have, as ONE undoable command.
+//
+// It plans rather than acts: everything it decides comes back as a
+// `commands::Transaction`, so it is undoable in one step, and a report says
+// what it did and - just as important - which codes the mapfile had no rule
+// for. A code silently left alone looks exactly like a code that was handled.
+//
+// The colour is resolved through a callback because 12d's colour NAMES are
+// known to `archive12d`, which `cad` may not see. The front ends pass
+// `archive12d::standardColour`. A name the callback does not know leaves the
+// entity's colour alone rather than guessing at one.
+
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "katana/cad/document.hpp"
+#include "katana/commands/command_stack.hpp"
+#include "katana/entity/entity.hpp"
+
+namespace katana::cad {
+
+struct SurveyCodingOptions {
+    // The entity property holding the field code. A 12da import puts the
+    // string's name in "12d.name"; a survey file's points carry "code".
+    std::string property{"code"};
+    // Only these entities, or every entity when empty.
+    std::vector<katana::entity::EntityId> ids{};
+    // 12d colour name -> RGB. Without one, colours are left alone.
+    std::function<std::optional<katana::entity::Color>(std::string_view)> colourOf{};
+    // A rule naming a model or a linestyle the drawing has no layer or style
+    // for creates one. Off, such an entity keeps what it has and is counted.
+    bool createLayers = true;
+    bool createStyles = true;
+    // Attach the attributes the mapfile gives as entity properties. A value
+    // that names another attribute ("$PipeDiameter") is skipped: resolving it
+    // needs the survey data this drawing was made from, which is not here.
+    bool setAttributes = true;
+};
+
+struct SurveyCodingReport {
+    std::size_t coded = 0;   // entities carrying a code at all
+    std::size_t matched = 0; // ... that the mapfile had a rule for
+    std::size_t changed = 0; // ... that this actually alters
+    std::vector<std::string> unmatchedCodes{};    // distinct, in name order
+    std::vector<std::string> layersCreated{};     // in name order
+    std::vector<std::string> stylesCreated{};     // in name order
+    // Linestyles and symbols the rules name that the loaded library does not
+    // define. They are still set on the style - the name is what 12d records
+    // - and they draw as a plain line or mark until a library defines them.
+    std::vector<std::string> missingDefinitions{};
+    // Attributes skipped because their value names another attribute.
+    std::size_t deferredAttributes = 0;
+};
+
+// nullptr with no error when there is nothing to do - no entity carries a
+// code the map has a rule for - so a caller can tell "nothing to do" from
+// "something went wrong". Fails only on a rule that cannot be turned into a
+// valid layer or style.
+[[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
+                 SurveyCodingReport* report = nullptr);
+
+} // namespace katana::cad

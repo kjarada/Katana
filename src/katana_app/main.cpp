@@ -21,7 +21,9 @@
 
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/archive12d/customisation.hpp"
+#include "katana/archive12d/domain.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/survey_coding.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
 #include "katana/commands/entity_commands.hpp"
@@ -108,6 +110,58 @@ bool runCustomise(katana::cad::Document& document, const std::vector<std::string
     }
     document.setStyleLibrary(std::move(loaded->library));
     document.setSurveyMap(std::move(loaded->map));
+    return true;
+}
+
+// CODE applies the loaded mapfile to the drawing: every entity carrying a
+// field code gets the model, the style and the attributes the mapfile says it
+// should have, as ONE undoable command.
+bool runCode(katana::cad::Document& document, const std::string& property)
+{
+    if (document.surveyMap().empty()) {
+        std::cerr << "error: InvalidState: no mapfile is loaded; use CUSTOMISE <file> first\n";
+        return false;
+    }
+    katana::cad::SurveyCodingOptions options;
+    if (!property.empty()) {
+        options.property = property;
+    }
+    options.colourOf = [](std::string_view name) {
+        return katana::archive12d::standardColour(name);
+    };
+    katana::cad::SurveyCodingReport report;
+    auto command = katana::cad::applySurveyCodes(document, options, &report);
+    if (!command) {
+        std::cerr << "error: " << command.error().describe() << "\n";
+        return false;
+    }
+    std::cout << report.coded << " entities carry a \"" << options.property << "\", "
+              << report.matched << " of them codes the mapfile has a rule for\n";
+    if (!report.unmatchedCodes.empty()) {
+        std::cout << "  " << report.unmatchedCodes.size() << " codes with no rule:";
+        for (std::size_t i = 0; i < report.unmatchedCodes.size() && i < 10; ++i) {
+            std::cout << (i == 0 ? " " : ", ") << report.unmatchedCodes[i];
+        }
+        std::cout << (report.unmatchedCodes.size() > 10 ? ", ...\n" : "\n");
+    }
+    if (!report.missingDefinitions.empty()) {
+        std::cout << "  " << report.missingDefinitions.size()
+                  << " linestyles or symbols named but not in the loaded library\n";
+    }
+    if (report.deferredAttributes != 0) {
+        std::cout << "  " << report.deferredAttributes
+                  << " attributes left: their value names another attribute\n";
+    }
+    if (*command == nullptr) {
+        std::cout << "Nothing to change.\n";
+        return true;
+    }
+    if (const auto status = document.execute(std::move(*command)); !status) {
+        std::cerr << "error: " << status.error().describe() << "\n";
+        return false;
+    }
+    std::cout << "Applied: " << report.layersCreated.size() << " layers and "
+              << report.stylesCreated.size() << " styles created. UNDO puts it all back.\n";
     return true;
 }
 
@@ -463,6 +517,11 @@ bool runLine(Session& session, const std::string& line)
     if (!line.empty() && line.front() == '#') {
         return true;
     }
+    if (upperVerb(line) == "CODE") {
+        const std::size_t space = line.find_first_of(" \t");
+        return runCode(session.document,
+                       space == std::string::npos ? std::string{} : argumentOf(line, space));
+    }
     if (upperVerb(line) == "CUSTOMISE" || upperVerb(line) == "CUSTOMIZE") {
         // Paths may have spaces, so they are taken as quoted words where they
         // are quoted and as plain words where they are not.
@@ -542,7 +601,9 @@ int main(int argc, char* argv[])
             std::cout << "usage: katana_cli [script-file] [-c \"command\"]...\n\n"
                       << katana::cad::CommandInterpreter::helpText() << '\n';
 #if defined(KATANA_WITH_INTEROP)
-            std::cout << "Survey    CUSTOMISE <file> [<file>...]  load 12d linestyle and symbol\n"
+            std::cout << "Survey    CODE [<property>]  apply the loaded mapfile to every entity\n"
+                         "          carrying a field code (default property: code)\n"
+                         "          CUSTOMISE <file> [<file>...]  load 12d linestyle and symbol\n"
                          "          libraries (.4d) and mapfiles; CUSTOMISE alone reports what "
                          "is loaded\n"
                          "Interop   IMPORT <file> | EXPORT <file> | REFS\n"

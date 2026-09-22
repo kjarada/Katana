@@ -11,6 +11,7 @@ add_library(katana_cad STATIC
     grading.cpp
     symbols.cpp
     style_drawing.cpp
+    survey_coding.cpp
     parcel.cpp
     plot.cpp
     dimension_draw.cpp
