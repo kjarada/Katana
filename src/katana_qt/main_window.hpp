@@ -90,6 +90,10 @@ class MainWindow final : public QMainWindow {
     // headless --customise switch drives the same path the menu item does, so
     // what a test exercises is what a person gets.
     void applyCustomisation(const std::vector<std::filesystem::path>& paths);
+    // The customisation the application ships with or finds beside itself,
+    // loaded at startup so a survey drawing is drawn with its linestyles,
+    // symbols and survey codes without anyone being asked for them.
+    void loadDefaultCustomisation();
 
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,

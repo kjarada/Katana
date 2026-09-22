@@ -26,6 +26,25 @@ add_library(katana_archive12d STATIC
     map_file.cpp
     customisation.cpp
 )
+# The customisation compiled into the build: its linestyles, symbols and
+# survey codes become part of the program rather than something it is given.
+# The source is GENERATED, never committed - the customisation is third-party
+# material under its own licence and is not in this repository, and a checkout
+# without it generates an empty table (see tools/embed_customisation.py).
+set(_customisation "${PROJECT_SOURCE_DIR}/docs/12d Refrence Files")
+set(_embedded "${CMAKE_CURRENT_BINARY_DIR}/builtin_customisation.cpp")
+file(GLOB _customisation_files "${_customisation}/*")
+add_custom_command(
+    OUTPUT "${_embedded}"
+    COMMAND ${CMAKE_COMMAND} -E env
+            "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/embed_customisation.py"
+            "${_embedded}" "${_customisation}"
+    DEPENDS "${PROJECT_SOURCE_DIR}/tools/embed_customisation.py" ${_customisation_files}
+    COMMENT "Embedding the 12d customisation"
+    VERBATIM)
+target_sources(katana_archive12d PRIVATE "${_embedded}")
+target_include_directories(katana_archive12d PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
 katana_target_defaults(katana_archive12d)
 target_link_libraries(katana_archive12d
     PUBLIC katana_core katana_geometry katana_entity katana_terrain

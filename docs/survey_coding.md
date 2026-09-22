@@ -482,3 +482,34 @@ one now reports which:
 ```
 
 `cad::customisationCoverage` is the one place that counts it.
+
+## The customisation is part of the program
+
+Not a file to load, not a setting to point somewhere: the linestyles, symbols
+and survey codes are **compiled into the binary**. Every drawing has them the
+moment it is opened, on any machine, with nothing configured.
+
+`tools/embed_customisation.py` runs at build time and turns each customisation
+file into a byte array in a generated source; `archive12d::builtinCustomisation`
+parses them once, lazily, and keeps the result. The front ends seed the
+Document from it at startup.
+
+Two decisions worth recording:
+
+**The BYTES are embedded, not generated C++ structures.** Generating the 792
+definitions and 35,000 strokes as brace-initialised structs would skip the
+parse, but it is a multi-megabyte translation unit that costs more to compile
+than the parse costs to run - measured at **21 ms in Release** for the whole
+customisation, once per session, and that figure includes reading four files
+from disk, which the built-in does not do. It also means one reader: a
+built-in customisation and a loaded one go through exactly the same parser,
+so there is no second way for the two to disagree.
+
+**The generated source is never committed.** The customisation is third-party
+material under its own licence and is not in this repository, so a checkout
+without it generates an EMPTY table and Katana draws plain lines - exactly as
+12d does without one. Drop a customisation into `docs/12d Refrence Files` and
+rebuild to have it compiled in.
+
+`File > Load 12d Customisation...` still overrides what is built in, which is
+how a site tries a new library without reissuing the application.

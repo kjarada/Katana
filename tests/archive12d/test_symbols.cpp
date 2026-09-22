@@ -211,7 +211,7 @@ TEST(SymbolImport, ALinesVertexSymbolsAreKeptAsOneListPerKeyAndWrittenBackWhole)
     EXPECT_EQ(*meta(fence, "12d.symbol.rotation"), "0 90 \"\"")
         << "a field the third block lacks is an empty item, so the columns stay aligned";
     EXPECT_EQ(*meta(fence, "12d.symbol.colour"), "red red \"dark green\"");
-    EXPECT_TRUE(anyContains(domain.warnings, "1 strings carry vertex symbols"))
+    EXPECT_TRUE(anyContains(domain.warnings, "1 strings carry a DIFFERENT symbol per vertex"))
         << joined(domain.warnings);
 
     const auto archive = exportOf(modelOf(domain));
