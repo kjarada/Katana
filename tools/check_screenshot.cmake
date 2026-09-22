@@ -52,6 +52,10 @@ endif()
 if(STYLE_MANAGER)
     list(APPEND extra --style-manager)
 endif()
+# -DATTRIBUTES=<entity id> opens the attribute manager on that entity.
+if(DEFINED ATTRIBUTES)
+    list(APPEND extra --attributes "${ATTRIBUTES}")
+endif()
 
 execute_process(
     COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
@@ -71,7 +75,7 @@ endif()
 # smaller window of mostly flat panels, so it gets its own floor. Compared as
 # hex for the reason given in check_plot.cmake.
 set(floor 20000)
-if(STYLE_MANAGER)
+if(STYLE_MANAGER OR DEFINED ATTRIBUTES)
     set(floor 10000)
 endif()
 file(SIZE "${OUTPUT}" size)

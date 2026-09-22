@@ -43,6 +43,7 @@ class QKeySequence;
 namespace katana::qt {
 
 class StyleManagerDialog;
+class AttributeManagerDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -91,6 +92,13 @@ class MainWindow final : public QMainWindow {
     // it modally; the headless --style-manager switch grabs it instead, so
     // that the dialog is built and painted by a test.
     [[nodiscard]] std::unique_ptr<StyleManagerDialog> makeStyleManager();
+    // The attribute manager, built but not shown - as makeStyleManager.
+    [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
+    // Selects every entity on an unlocked layer, as Edit > Select All does,
+    // or just the one with this id. For the headless --attributes switch,
+    // whose dialog acts on a selection.
+    void selectAll();
+    void selectOnly(katana::entity::EntityId id);
 
   protected:
     void closeEvent(QCloseEvent* event) override;

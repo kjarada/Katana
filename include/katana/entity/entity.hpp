@@ -111,6 +111,16 @@ using PropertyValue = std::variant<bool, std::int64_t, double, std::string>;
 // Ordered so that iteration, serialisation and diffs are deterministic.
 using PropertyMap = std::map<std::string, PropertyValue, std::less<>>;
 
+// A property value as a person reads it: "true", "42", "31.25", the text
+// itself. ONE definition, because the property panel, the command line and
+// the attribute manager must not disagree about what a value says. A real
+// is written with enough digits to read back as the same double, since a
+// level shown as 31.2 that is actually 31.249 is a lie in survey work.
+[[nodiscard]] std::string toString(const PropertyValue& value);
+// "text", "integer", "real" or "boolean": what the attribute manager and
+// `PROP SET ... <type>` name the four kinds.
+[[nodiscard]] std::string_view typeName(const PropertyValue& value);
+
 struct Entity {
     EntityId id = kInvalidEntityId;
     Geometry geometry{};

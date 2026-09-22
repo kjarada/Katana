@@ -3,6 +3,7 @@
 #include "theme.hpp"
 
 #include "icons.hpp"
+#include "attribute_manager.hpp"
 #include "style_manager.hpp"
 
 #include <QAction>
@@ -156,13 +157,9 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
 
 QString describeProperty(const katana::entity::PropertyValue& value)
 {
-    struct Visitor {
-        QString operator()(bool v) const { return v ? "true" : "false"; }
-        QString operator()(std::int64_t v) const { return QString::number(v); }
-        QString operator()(double v) const { return QString::number(v, 'g', 12); }
-        QString operator()(const std::string& v) const { return QString::fromStdString(v); }
-    };
-    return std::visit(Visitor{}, value);
+    // One definition of what a value says, in entity: the panel, the command
+    // line and the attribute manager must not disagree about it.
+    return QString::fromStdString(katana::entity::toString(value));
 }
 
 } // namespace
@@ -316,9 +313,7 @@ void MainWindow::buildActions()
             logMessage(QString::fromStdString(status.error().describe()), true);
         }
     });
-    connect(selectAllAction, &QAction::triggered, this, [this] {
-        logMessage(QString::fromStdString(interpreter_.run("SELECT ALL").valueOr("")));
-    });
+    connect(selectAllAction, &QAction::triggered, this, [this] { selectAll(); });
     connect(eraseAction, &QAction::triggered, this, [this] {
         commandInput_->setText("ERASE");
         runCommandLine();
@@ -335,6 +330,13 @@ void MainWindow::buildActions()
         auto dialog = makeStyleManager();
         dialog->showFirstRows();
         dialog->exec();
+    });
+    editMenu->addAction("&Attributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
+        auto dialog = makeAttributeManager();
+        dialog->expandAll();
+        dialog->exec();
+        // The panel shows the same properties, so it follows the dialog.
+        refreshProperties();
     });
 
     QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
@@ -917,6 +919,24 @@ void MainWindow::openDocument()
     if (!directory.isEmpty()) {
         openProject(directory);
     }
+}
+
+void MainWindow::selectAll()
+{
+    logMessage(QString::fromStdString(interpreter_.run("SELECT ALL").valueOr("")));
+}
+
+void MainWindow::selectOnly(katana::entity::EntityId id)
+{
+    logMessage(QString::fromStdString(
+        interpreter_.run("SELECT " + std::to_string(id)).valueOr("")));
+}
+
+std::unique_ptr<AttributeManagerDialog> MainWindow::makeAttributeManager()
+{
+    return std::make_unique<AttributeManagerDialog>(
+        document_, [this](const QString& message, bool isError) { logMessage(message, isError); },
+        this);
 }
 
 std::unique_ptr<StyleManagerDialog> MainWindow::makeStyleManager()

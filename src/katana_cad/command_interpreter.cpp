@@ -210,6 +210,45 @@ std::string describe(const Entity& entity)
 }
 
 // "true"/"false" -> bool, whole numbers -> integer, other numbers -> real, else text.
+// A value of a STATED type, for the times the guess below would be wrong:
+// a code that reads as a number ("2"), a level that must stay real ("31").
+katana::core::Result<katana::entity::PropertyValue> typedPropertyValue(const std::string& type,
+                                                                      const std::string& text)
+{
+    const std::string wanted = upper(type);
+    if (wanted == "TEXT" || wanted == "STRING") {
+        return katana::entity::PropertyValue(text);
+    }
+    if (wanted == "INTEGER" || wanted == "INT") {
+        std::int64_t integer = 0;
+        const char* const end = text.data() + text.size();
+        const auto [parsed, error] = std::from_chars(text.data(), end, integer);
+        if (error != std::errc{} || parsed != end) {
+            return makeError(ErrorCode::ParseFailure, "not an integer", text);
+        }
+        return katana::entity::PropertyValue(integer);
+    }
+    if (wanted == "REAL" || wanted == "DOUBLE") {
+        const auto number = parseNumber(text);
+        if (!number) {
+            return number.error();
+        }
+        return katana::entity::PropertyValue(*number);
+    }
+    if (wanted == "BOOLEAN" || wanted == "BOOL") {
+        const std::string folded = upper(text);
+        if (folded == "TRUE" || folded == "1") {
+            return katana::entity::PropertyValue(true);
+        }
+        if (folded == "FALSE" || folded == "0") {
+            return katana::entity::PropertyValue(false);
+        }
+        return makeError(ErrorCode::ParseFailure, "not a boolean", text);
+    }
+    return makeError(ErrorCode::InvalidArgument,
+                     "the type must be text, integer, real or boolean", type);
+}
+
 katana::entity::PropertyValue parsePropertyValue(const std::string& text)
 {
     const std::string folded = upper(text);
@@ -267,7 +306,9 @@ Parcel    PARCEL id            bearings, distances, area and centroid of a close
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
-Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER | PROP key value   (selection)
+Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
+Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
+          PROP RENAME old new   (selection; the type is guessed unless stated)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id | HELP
@@ -1789,12 +1830,66 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
         }
         return finish(document_.execute(cmd::setEntityColor(ids, color)), count + " recoloured");
     }
-    // PROP
-    if (args.size() != 2) {
-        return usage("PROP key value");
+    // PROP. Verb-first, as LAYER, STYLE, LINETYPE and HATCH are: the old
+    // bare `PROP key value` could not be extended without becoming
+    // ambiguous, since a property may be named DELETE.
+    static constexpr const char* kPropUsage =
+        "PROP LIST | SET key value [text|integer|real|boolean] | DELETE key | RENAME old new";
+    const std::string action = args.empty() ? std::string("LIST") : upper(args[0]);
+
+    if (action == "LIST") {
+        std::ostringstream out;
+        for (const EntityId id : ids) {
+            const katana::entity::Entity* entity = document_.model().entities.find(id);
+            if (entity == nullptr) {
+                continue;
+            }
+            out << "  " << id << ":";
+            if (entity->properties.empty()) {
+                out << " (none)";
+            }
+            for (const auto& [key, value] : entity->properties) {
+                out << " " << key << "=" << katana::entity::toString(value) << " ("
+                    << katana::entity::typeName(value) << ")";
+            }
+            out << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text;
     }
-    return finish(document_.execute(cmd::setEntityProperty(ids, args[0], parsePropertyValue(args[1]))),
-                  "property " + args[0] + " set on " + count);
+    if (action == "SET") {
+        if (args.size() < 3 || args.size() > 4) {
+            return usage(kPropUsage);
+        }
+        // The type is guessed from the value unless it is stated. 12d
+        // attributes are typed, and "2" as text is not 2 as an integer.
+        auto value = args.size() == 4 ? typedPropertyValue(args[3], args[2])
+                                      : katana::core::Result<katana::entity::PropertyValue>(
+                                            parsePropertyValue(args[2]));
+        if (!value) {
+            return value.error();
+        }
+        return finish(document_.execute(cmd::setEntityProperty(ids, args[1], std::move(*value))),
+                      "property " + args[1] + " set on " + count);
+    }
+    if (action == "DELETE") {
+        if (args.size() != 2) {
+            return usage(kPropUsage);
+        }
+        return finish(document_.execute(cmd::removeEntityProperty(ids, args[1])),
+                      "property " + args[1] + " removed from " + count);
+    }
+    if (action == "RENAME") {
+        if (args.size() != 3) {
+            return usage(kPropUsage);
+        }
+        return finish(document_.execute(cmd::renameEntityProperty(ids, args[1], args[2])),
+                      "property " + args[1] + " renamed to " + args[2] + " on " + count);
+    }
+    return usage(kPropUsage);
 }
 
 // ---- history / file / inspect -----------------------------------------------------------------

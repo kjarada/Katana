@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "icons.hpp"
+#include "attribute_manager.hpp"
 #include "style_manager.hpp"
 #include "katana/cad/plot.hpp"
 #include "theme.hpp"
@@ -18,6 +19,7 @@
 //   katana [project-directory] [data-file...] --screenshot out.png
 //   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
 //   katana [project-directory] [data-file...] --style-manager --screenshot out.png
+//   katana [project-directory] [data-file...] --attributes --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -59,6 +61,8 @@ int main(int argc, char* argv[])
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
     bool styleManager = false;
+    bool attributeManager = false;
+    long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
     QStringList inputs;
@@ -76,6 +80,13 @@ int main(int argc, char* argv[])
             toggleLayer = value();
         } else if (argument == "--style-manager") {
             styleManager = true;
+        } else if (argument == "--attributes") {
+            attributeManager = true;
+            // An optional entity id: with one entity selected the manager
+            // shows values, with several it shows where they differ.
+            if (i + 1 < arguments.size() && arguments.at(i + 1).toLongLong() > 0) {
+                attributeEntity = arguments.at(++i).toLongLong();
+            }
         } else if (argument == "--fit") {
             fit = true;
         } else if (argument == "--scale") {
@@ -144,6 +155,25 @@ int main(int argc, char* argv[])
                 return 1;
             }
             QApplication::processEvents();
+        }
+        if (attributeManager) {
+            // Everything selected, because the manager acts on the selection
+            // and an empty one would show an empty tree.
+            if (attributeEntity > 0) {
+                window.selectOnly(static_cast<katana::entity::EntityId>(attributeEntity));
+            } else {
+                window.selectAll();
+            }
+            auto dialog = window.makeAttributeManager();
+            dialog->show();
+            dialog->expandAll();
+            QApplication::processEvents();
+            QApplication::processEvents();
+            if (!dialog->grab().save(*screenshotPath, "PNG")) {
+                std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
+                return 1;
+            }
+            return 0;
         }
         if (styleManager) {
             auto dialog = window.makeStyleManager();

@@ -1,6 +1,7 @@
 #include "katana/entity/entity_geometry.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -20,6 +21,34 @@ using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
 using katana::geometry::Vec2;
 using katana::math::Mat3;
+
+std::string toString(const PropertyValue& value)
+{
+    struct Visitor {
+        std::string operator()(bool v) const { return v ? "true" : "false"; }
+        std::string operator()(std::int64_t v) const { return std::to_string(v); }
+        std::string operator()(double v) const
+        {
+            // Shortest text that reads back as the same double.
+            char buffer[32];
+            const auto result = std::to_chars(buffer, buffer + sizeof buffer, v);
+            return std::string(buffer, result.ptr);
+        }
+        std::string operator()(const std::string& v) const { return v; }
+    };
+    return std::visit(Visitor{}, value);
+}
+
+std::string_view typeName(const PropertyValue& value)
+{
+    struct Visitor {
+        std::string_view operator()(bool) const { return "boolean"; }
+        std::string_view operator()(std::int64_t) const { return "integer"; }
+        std::string_view operator()(double) const { return "real"; }
+        std::string_view operator()(const std::string&) const { return "text"; }
+    };
+    return std::visit(Visitor{}, value);
+}
 
 std::string_view toString(EntityType type)
 {

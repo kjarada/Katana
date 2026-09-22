@@ -586,6 +586,32 @@ CommandPtr removeEntityProperty(std::vector<EntityId> ids, std::string key)
                       });
 }
 
+CommandPtr renameEntityProperty(std::vector<EntityId> ids, std::string from, std::string to)
+{
+    return modifyEach("RENAME_PROPERTY", std::move(ids),
+                      [from = std::move(from), to = std::move(to)](Entity& entity) -> Status {
+                          if (to.empty()) {
+                              return makeError(ErrorCode::InvalidArgument,
+                                               "property name is empty");
+                          }
+                          const auto found = entity.properties.find(from);
+                          if (found == entity.properties.end()) {
+                              return makeError(ErrorCode::NotFound,
+                                               "entity does not have this property",
+                                               idContext(entity.id) + " key=" + from);
+                          }
+                          if (from != to && entity.properties.contains(to)) {
+                              return makeError(ErrorCode::AlreadyExists,
+                                               "the entity already has a property of that name",
+                                               idContext(entity.id) + " key=" + to);
+                          }
+                          katana::entity::PropertyValue value = found->second;
+                          entity.properties.erase(found);
+                          entity.properties[to] = std::move(value);
+                          return {};
+                      });
+}
+
 CommandPtr setEntityGeometry(EntityId id, Geometry geometry)
 {
     return modifyEach("SET_GEOMETRY", {id}, [geometry = std::move(geometry)](Entity& entity) {

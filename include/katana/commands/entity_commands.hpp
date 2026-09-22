@@ -91,6 +91,13 @@ struct EntityAttributes {
 [[nodiscard]] CommandPtr setEntityProperty(std::vector<EntityId> ids, std::string key,
                                            katana::entity::PropertyValue value);
 [[nodiscard]] CommandPtr removeEntityProperty(std::vector<EntityId> ids, std::string key);
+// Renames a property on every entity that has it, keeping its value and its
+// type. Refuses a target the entity already has: the two values differ, and
+// silently keeping one of them would lose the other. A 12d import names
+// properties after the attribute tree it flattened ("Asset/Dimensions/Size"),
+// which is the first thing a user wants to tidy.
+[[nodiscard]] CommandPtr renameEntityProperty(std::vector<EntityId> ids, std::string from,
+                                              std::string to);
 // Replaces the geometry of one entity (property editor, grip editing).
 [[nodiscard]] CommandPtr setEntityGeometry(EntityId id, katana::entity::Geometry geometry);
 

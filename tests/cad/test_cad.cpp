@@ -718,10 +718,10 @@ TEST(CadInterpreter, LayersAndAttributes)
     s.ok("SELECT ALL");
     s.ok("CHLAYER 0");
     s.ok("COLOR #00FF00");
-    s.ok("PROP elevation 101.25");
-    s.ok("PROP code IP");
-    s.ok("PROP order 2");
-    s.ok("PROP verified true");
+    s.ok("PROP SET elevation 101.25");
+    s.ok("PROP SET code IP");
+    s.ok("PROP SET order 2");
+    s.ok("PROP SET verified true");
     const auto& properties = s.entity(1).properties;
     EXPECT_DOUBLE_EQ(std::get<double>(properties.at("elevation")), 101.25);
     EXPECT_EQ(std::get<std::string>(properties.at("code")), "IP");
@@ -1106,6 +1106,51 @@ TEST(CadInterpreter, StylesCanBeDefinedTunedAppliedAndListed)
     EXPECT_EQ(session.document.model().entities.find(ids[0])->style, "Kerb");
     session.ok("STYLE APPLY -");
     EXPECT_TRUE(session.document.model().entities.find(ids[0])->style.empty());
+}
+
+TEST(CadInterpreter, PropertiesAreListedTypedRenamedAndRemoved)
+{
+    // PLAN.MD 20.2 slice 5: what the attribute manager does, without the GUI.
+    Session s;
+    s.ok("POINT 1,1");
+    s.ok("SELECT ALL");
+
+    // The type is guessed from the value, unless it is stated - and a 12d
+    // feature code like "2" must be able to stay text.
+    s.ok("PROP SET Level 31.25");
+    s.ok("PROP SET Code 2 text");
+    s.ok("PROP SET Order 2");
+    EXPECT_EQ(std::get<std::string>(s.entity(1).properties.at("Code")), "2");
+    EXPECT_EQ(std::get<std::int64_t>(s.entity(1).properties.at("Order")), 2);
+    EXPECT_DOUBLE_EQ(std::get<double>(s.entity(1).properties.at("Level")), 31.25);
+    EXPECT_EQ(s.fails("PROP SET Bad x integer"), ErrorCode::ParseFailure);
+    EXPECT_EQ(s.fails("PROP SET Bad 1 colour"), ErrorCode::InvalidArgument);
+
+    const std::string listed = s.ok("PROP LIST");
+    EXPECT_NE(listed.find("Code=2 (text)"), std::string::npos) << listed;
+    EXPECT_NE(listed.find("Order=2 (integer)"), std::string::npos) << listed;
+    EXPECT_NE(listed.find("Level=31.25 (real)"), std::string::npos) << listed;
+
+    // Rename keeps the value and its type; it is one undoable step.
+    s.ok("PROP RENAME Level RL");
+    EXPECT_FALSE(s.entity(1).properties.contains("Level"));
+    EXPECT_DOUBLE_EQ(std::get<double>(s.entity(1).properties.at("RL")), 31.25);
+    s.ok("UNDO");
+    EXPECT_DOUBLE_EQ(std::get<double>(s.entity(1).properties.at("Level")), 31.25);
+    s.ok("REDO");
+
+    // Renaming onto a name the entity already has would drop one of the two
+    // values, so it is refused rather than guessed.
+    EXPECT_EQ(s.fails("PROP RENAME RL Code"), ErrorCode::AlreadyExists);
+    EXPECT_EQ(s.fails("PROP RENAME Nope x"), ErrorCode::NotFound);
+    EXPECT_DOUBLE_EQ(std::get<double>(s.entity(1).properties.at("RL")), 31.25)
+        << "a refused rename changes nothing";
+
+    s.ok("PROP DELETE Code");
+    EXPECT_FALSE(s.entity(1).properties.contains("Code"));
+    EXPECT_EQ(s.fails("PROP DELETE Code"), ErrorCode::NotFound);
+    s.ok("UNDO");
+    EXPECT_EQ(std::get<std::string>(s.entity(1).properties.at("Code")), "2");
 }
 
 TEST(CadInterpreter, RenamingAStyleOrALinetypeTakesEverythingThatNamedItAlong)

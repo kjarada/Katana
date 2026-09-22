@@ -1505,7 +1505,32 @@ infos, the edge list and `blend` are read and not modelled; the Reference
 Data panel does not list meshes, so there is no way to hide or delete one
 from the GUI yet.
 
-**STATUS: slice 5 (attribute manager) next.**
+**Slice 5 PARTIALLY DELIVERED (2026-09-22).** Edit > Attributes... (Ctrl+1)
+shows the selection's properties as the TREE 12d had them - the importer
+flattens `group { name "Asset" ... }` to "Asset/Dimensions/Size" and this
+puts the branches back - with each value's type, and Add, Save Value,
+Rename and Remove as ordinary commands on the one undo stack. It acts on
+the whole selection: a value the selected entities do not share, or a
+property only some of them carry, shows as `<varies>` rather than as one of
+them, because a manager that showed the first entity's value and wrote it to
+all of them would quietly overwrite the rest.
+
+The engine gained `renameEntityProperty` (keeps the value and its type,
+refuses a name the entity already has - the two values differ and keeping
+one would lose the other) and `entity::toString`/`typeName`, ONE definition
+of what a property value says, which the panel, the command line and the
+dialog now share. `PROP` became verb-first like every other table verb -
+`PROP LIST | SET key value [text|integer|real|boolean] | DELETE key |
+RENAME old new` - because the old bare `PROP key value` could not be
+extended without becoming ambiguous (a property may be named DELETE), and
+because a 12d feature code of "2" must be able to stay text.
+
+OUTSTANDING: property DEFINITIONS - the schema, what 12d calls attribute
+definitions - are not managed here or anywhere; the dialog edits the
+attributes an entity has rather than declaring what attributes a kind of
+entity should have. That is what remains of this slice.
+
+**STATUS: slice 6 (layer manager) next.**
 
 ---
 

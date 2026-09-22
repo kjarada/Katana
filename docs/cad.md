@@ -703,6 +703,32 @@ What follows from that:
   rather than trusting `validate()` to have been called. The scene builder
   is the last thing between a file and a read past the end of a vector.
 
+## The attribute manager: the tree 12d had, and what "varies" protects
+
+A 12d string carries a tree of attributes; the importer flattens it to
+properties keyed "Asset/Dimensions/Size", and per-vertex attributes to
+"vertex/3/Name". The flat keys are honest - the model has one property map
+per entity and no nesting - but unreadable on a survey string with thirty of
+them, so the manager (PLAN.MD 20.2 slice 5) rebuilds the branches for
+display and writes back the flat key. Nothing in the model changes: the tree
+is a view of the names, exactly as the layer panel is a view of "/"-separated
+layer paths (see `layer_path.hpp` for why that tree is derived and not
+stored).
+
+The decision worth keeping is `<varies>`. The dialog acts on the whole
+selection, and shows a value only where every selected entity agrees on it;
+a property only some of them carry counts as a disagreement too. The
+alternative - showing the first entity's value - looks tidier and is a trap:
+pressing Save would then write that value over the others without anyone
+asking for it. Showing `<varies>` means a user who saves has said what they
+want all of them to be.
+
+Values are formatted by `entity::toString`, which is in `entity` and not in
+the dialog, because the properties panel and the `PROP` command line print
+the same values and must not disagree about them. A real is written with
+enough digits to read back as the same double: a level shown as 31.2 that is
+really 31.249 is a lie in survey work.
+
 ## The styles and linetypes manager, and what a rename is
 
 One dialog for the `Style` and `Linetype` tables (PLAN.MD 20.2 slice 3,
