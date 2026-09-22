@@ -8,6 +8,7 @@ add_library(katana_cad STATIC
     dashing.cpp
     hatching.cpp
     corridor.cpp
+    grading.cpp
     parcel.cpp
     plot.cpp
     dimension_draw.cpp

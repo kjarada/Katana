@@ -636,6 +636,29 @@ the name that would allow it. There is no light theme. The dialogs (corridor,
 plot) are themed but plain. There are no toolbar buttons for the command-line
 only operations (rotate, scale, mirror, array, trim, extend, offset, fillet).
 
+## Grading: the batter belongs to the edge, not to the bisector
+
+`cad::gradeToSurface` runs a batter outward from a feature line to the ground
+using the corridor's daylight search - march in half-metre steps until the
+batter and the ground change order, bisect to a millimetre - pointed
+perpendicular to each edge and along the bisector at each vertex. The one
+thing that had to be got right, and is easy to get wrong, is the slope IN
+THE DIRECTION OF MARCH at a vertex. A 1 in 2 batter is 1 in 2 perpendicular
+to its edge; along the bisector of a right-angle corner the same plane is
+1 in 2√2. Marching the bisector at 1 in 2 puts the corner daylight 4 m out
+on flat ground for a 2 m pad where the two batter planes actually meet at
+4√2 m - a chamfered corner 29% short, and a volume to match. So the run per
+rise is divided by the cosine of half the corner (`Sample::cosine`), and the
+corner comes out mitred, which is what plane batters give and what the
+frustum test checks exactly: 2/3 (100 + 324 + 180) = 402.667 m³.
+
+**Rejected:** grading by offsetting the feature line a fixed width and
+reading the ground there. That is a bench, not a batter: the daylight width
+depends on the ground and differs on every side of the same pad on a slope.
+**Rejected for now:** rounded (radial) corners, an option in every grading
+package, because a plane batter to a mitre is what a bulldozer produces and
+the rounded corner exists to look nicer on a drawing.
+
 ## Panels refresh on the event loop, never inside their own signal
 
 Switching a layer off in the layer panel crashed the application. The chain

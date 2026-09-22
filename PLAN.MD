@@ -1478,11 +1478,29 @@ inverse, area, centroid); the one conversion from (x, y) to (northing,
 easting) is in one function and the tests check bearings, not only areas,
 because that is what an axis swap would break. Record in `docs/cad.md`.
 
+**Ninth slice PARTIALLY DELIVERED: grading, the engine.** `cad::gradeToSurface`
+takes a feature line - a closed pad at its design heights, or an open line
+graded on one side - and carries a batter of the given cut or fill slope
+outward from every vertex and every interval along every edge until it meets
+the ground, by the corridor's march-and-bisect, then triangulates the feature
+line, the daylight line and every batter as breaklines into the grading
+surface and measures the earthwork against the ground with the exact overlay.
+At a vertex the batter runs along the bisector and is FLATTER by the cosine
+of half the corner, so the daylight corner is where the two batter planes
+meet - the mitre a machine builds - not a chamfer 29% short. Tested against
+hand-worked frustums (a 10 m pad 2 m up at 1 in 2: an 18 m daylight square
+and 402.667 m^3, exact) and a sloping ground where each side daylights at its
+own distance. **OUTSTANDING:** no way to reach it from the application yet
+(Terrain > Grade Pad... is the intended command: select a closed polyline,
+give elevation and slopes, get the surface and the daylight polyline);
+rounded corners; benches; grading to a fixed width or elevation rather than
+to a surface. Set aside on 2026-09-22 for the 12d programme in section 25.2,
+which takes precedence over everything else in this plan until it is done.
+
 **OUTSTANDING in this phase:** richer assemblies (kerbs, verges, benches,
 subgrades) as a table of their own; the prismoidal correction, deliberately
-not applied; grading (feature lines, pads, slopes, daylight to a surface,
-grading surfaces). `deleteAlignment` still has no in-use guard because
-nothing references an alignment by name.
+not applied; grading in the application (above). `deleteAlignment` still has
+no in-use guard because nothing references an alignment by name.
 
 ## Alignments
 
