@@ -49,6 +49,11 @@ class SelectionSet {
 // Visible entity on a visible layer (locked layers still draw).
 [[nodiscard]] bool isDrawn(const katana::entity::Model& model,
                            const katana::entity::Entity& entity);
+// The same rule for a caller that has already found the layer. The viewport
+// draws tens of thousands of entities a frame and looked the layer up twice
+// for every one of them: once here and once to read its colour.
+[[nodiscard]] bool isDrawn(const katana::entity::Layer* layer,
+                           const katana::entity::Entity& entity);
 
 // Nearest selectable entity whose geometry lies within `tolerance` (model units)
 // of `point`. Ties go to the higher id: the entity drawn last, i.e. on top.

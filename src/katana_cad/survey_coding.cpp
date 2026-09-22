@@ -84,7 +84,9 @@ CustomisationCoverage customisationCoverage(const Document& document)
 {
     CustomisationCoverage coverage;
     std::set<std::string> missing;
-    for (const katana::entity::Style& style : document.model().styles.all()) {
+    // forEach rather than all(): all() returns the whole style table by
+    // value, and this only reads it.
+    document.model().styles.forEach([&](const katana::entity::Style& style) {
         ++coverage.styles;
         // A style names a definition through either field; "continuous" and
         // an empty symbol name nothing, and neither do 12d's plain lines "0"
@@ -105,7 +107,7 @@ CustomisationCoverage customisationCoverage(const Document& document)
         }
         coverage.named += names ? 1 : 0;
         coverage.resolved += found ? 1 : 0;
-    }
+    });
     coverage.unresolved.assign(missing.begin(), missing.end());
     return coverage;
 }
