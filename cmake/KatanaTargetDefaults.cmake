@@ -9,12 +9,12 @@ function(katana_target_defaults target)
     get_target_property(_type ${target} TYPE)
     if(_type STREQUAL "INTERFACE_LIBRARY")
         target_include_directories(${target} INTERFACE "${PROJECT_SOURCE_DIR}/include")
-        target_compile_features(${target} INTERFACE cxx_std_23)
+        target_compile_features(${target} INTERFACE cxx_std_${KATANA_CXX_STANDARD})
         return()
     endif()
 
     target_include_directories(${target} PUBLIC "${PROJECT_SOURCE_DIR}/include")
-    target_compile_features(${target} PUBLIC cxx_std_23)
+    target_compile_features(${target} PUBLIC cxx_std_${KATANA_CXX_STANDARD})
 
     if(MSVC)
         target_compile_options(${target} PRIVATE
