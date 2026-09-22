@@ -72,6 +72,23 @@ struct SurveyCodingReport {
     std::size_t deferredAttributes = 0;
 };
 
+// How much of THIS drawing the loaded customisation actually answers for.
+//
+// It exists because "the linestyles are not showing" has several causes that
+// look identical from the outside - no customisation loaded, a customisation
+// that does not define what this drawing names, or a drawing whose styles are
+// 12d's plain lines - and a person cannot tell them apart by looking. This
+// says which.
+struct CustomisationCoverage {
+    std::size_t styles = 0;   // styles the drawing has
+    std::size_t named = 0;    // ... that name a linestyle or a symbol
+    std::size_t resolved = 0; // ... that the loaded library defines
+    // The names that resolve to nothing, distinct and in name order.
+    std::vector<std::string> unresolved{};
+};
+
+[[nodiscard]] CustomisationCoverage customisationCoverage(const Document& document);
+
 // nullptr with no error when there is nothing to do - no entity carries a
 // code the map has a rule for - so a caller can tell "nothing to do" from
 // "something went wrong". Fails only on a rule that cannot be turned into a

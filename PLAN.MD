@@ -1823,50 +1823,33 @@ code's treatment is the UNION of the aspects that match it:
 7. **The CLI and the documentation. DELIVERED** for what exists so far:
    `CUSTOMISE` with its report, and `docs/survey_coding.md`.
 
-### Two defects found by looking at a production archive, diagnosed and NOT yet fixed
+### Two defects a production archive found, both now FIXED
 
-Both were found with the user's own 15 MB archive and both are measured, so
-whoever picks this up starts from evidence rather than a guess. Neither is
-started: the working tree is green.
+Found with a real 15 MB archive and fixed with its numbers in hand.
 
-**1. A `breakline point` string of several vertices is drawn as a polyline.**
-`breakline point` means the string IS points - the user confirmed it, and it
-is rare. In their archive every string states it: 12,280 `line` (all
-multi-vertex) and 13,379 `point`, of which 13,326 have a single vertex and
-**53 have several**. Those 53 - a 61-vertex string of drill holes among them,
-in model `SURVEY INFRASTRUCTURE V2` - come in as one polyline through the
-points instead of as points.
+**1. A `breakline point` string of several vertices was drawn as a polyline.**
+That flag means the vertices ARE points. Measured in that archive: every
+string states it - 12,280 `line`, 13,379 `point` - and 53 of the point ones
+have several vertices, including a 61-vertex string of drill holes in a
+`SURVEY INFRASTRUCTURE V2` model. Each vertex is now its own point entity,
+and the import says how many it made. The trap, recorded in
+docs/survey_coding.md: the CURRENT breakline type defaults to `point`, so 21
+hand-written fixtures that meant lines became points; they now say
+`breakline line` once at file level.
 
-The import reads the flag and keeps it as `12d.breakline` but never acts on
-it. The fix is to split such a string into one point entity per vertex,
-carrying the string's layer, style, colour, metadata and its own height.
+**2. A string's symbol was taken onto its style only when the string had ONE
+vertex**, so that drill-hole string drew no symbols where 12d draws 61. A
+string with one symbol block now takes it whatever its length, and the
+exporter's symbol block moved out of its `PointGeometry` branch so a line is
+written back with it.
 
-It was tried and reverted, because of a trap worth recording: the manual
-(commands, 1.4.4) says the CURRENT breakline type defaults to `point`, so a
-hand-written fixture that never says `breakline` inherits Point - and 23
-tests, whose fixtures are all multi-vertex strings meaning lines, turned into
-points. Real archives state it on every string; the fixtures must say
-`breakline line` where they mean one. That is the work.
+**3. And a diagnostic, because neither was visible as a fault.** Loading a
+customisation now reports how many of the drawing's styles it answers for -
+`cad::customisationCoverage` - since "no linestyles showing" looks the same
+whether nothing is loaded, the library does not define what the drawing
+names, or the drawing's styles are 12d's plain lines.
 
-**2. A string's symbol is drawn only when the string has ONE vertex.**
-A 12d vertex symbol goes on EVERY vertex. That 61-vertex drill-hole string
-carries one `symbol_value { style "MARK Drill Hole and Wing" }`, and 12d
-draws 61 of them; Katana draws none, because `importSymbols` only takes the
-symbol onto the style for a string of one vertex.
-
-Both halves of the fix are known and were tried: let a string with one symbol
-block take it whatever its vertex count, and have the viewport draw an
-`atVertices` definition along a line (`cad::styleDrawing` already places one
-at every vertex). It was reverted because the EXPORT then loses the symbol: a
-line's block used to be rebuilt from `12d.symbol.*` metadata, and the block
-built from the style is written only inside the `PointGeometry` branch of the
-exporter. Lifting that block out of the point branch so a line uses it too is
-the remaining work, and two tests say so precisely -
-`SymbolImport.ALineWithOneSymbolForEveryVertexIsWrittenBackInTheValueForm`
-and `ReviewImport.PerSegmentSizesAndPerVertexDataAreAllAccountedFor`.
-
-**STATUS: DELIVERED, bar the two defects above and the two things named
-earlier and repeated here.** The
+**STATUS: DELIVERED, bar the two things named earlier and repeated here.** The
 chain the user asked for works end to end: a mapfile, a linestyle library and
 a symbol library load together; a survey code resolves through the mapfile to
 a model, a colour, a linestyle and a symbol; the entity gets them; and the

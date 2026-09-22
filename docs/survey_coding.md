@@ -433,3 +433,52 @@ katana_cli
   Applied: 1 layers and 1 styles created. UNDO puts it all back.
   1  Point  layer=SURVEY SERVICES  at 0,0
 ```
+
+## `breakline point` means the vertices ARE points
+
+Not a display hint and not only a TIN flag: a string marked `breakline point`
+is a set of separate survey shots that 12d keeps in one string for
+convenience. It is the rare case - in a production archive of 25,659 strings,
+12,280 say `line` and 13,379 say `point`, and of those only **53** have more
+than one vertex.
+
+Those 53 were the ones that looked wrong: one is a 61-vertex string of drill
+holes in a `SURVEY INFRASTRUCTURE V2` model, and Katana drew a polyline
+through them. The import now gives each vertex its own point entity, carrying
+the string's layer, style, colour, metadata and its own height, and says how
+many it made.
+
+**The trap, which cost a first attempt.** The format has a CURRENT breakline
+type and its default is `point` (commands, 1.4.4). Every string in a real
+archive states the flag - that production file has no file-level `breakline`
+command at all and leaves nothing to the default - but a hand-written fixture
+does not, so 21 test fixtures that plainly meant lines became points. The
+fixtures now say `breakline line` once at file level, which is the format's
+own way of saying it, and a fixture wanting points overrides it per string.
+
+## A vertex symbol goes on every vertex
+
+A 12d `symbol_value` block on a string puts that symbol on EVERY vertex -
+that is what `mode vertex` means in the library. Katana used to take the
+symbol onto the style only for a string of ONE vertex, so that drill-hole
+string drew no symbols at all where 12d draws 61.
+
+A string with one symbol block now takes it whatever its length. That needed
+the exporter to change too: the block built from a style was written only
+inside its `PointGeometry` branch, so a line's symbol was written back from
+`12d.symbol.*` metadata instead - and once the symbol lived on the style
+there was no metadata to write. `setSymbolFromStyle` is now a member both use.
+
+## Saying whether it is working
+
+"The linestyles are not showing" has several causes that look identical: no
+customisation loaded, a customisation that does not define what this drawing
+names, or a drawing whose styles are 12d's plain lines `0` and `1`. Loading
+one now reports which:
+
+```
+4 of this drawing's 4 styles are drawn with a loaded definition
+  (4 name one; the rest are 12d's plain lines).
+```
+
+`cad::customisationCoverage` is the one place that counts it.

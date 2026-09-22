@@ -174,6 +174,7 @@ class MainWindow final : public QMainWindow {
     void importFile();
     void loadCustomisation();
     void applySurveyCodes();
+    void reportCustomisationCoverage();
     void importVectorFile(const std::filesystem::path& path);
     void importArchive12dFile(const std::filesystem::path& path);
     void importRasterFile(const std::filesystem::path& path);

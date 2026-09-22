@@ -27,9 +27,19 @@ a12::Archive read(const std::string& text)
     return archive.ok() ? std::move(*archive) : a12::Archive{};
 }
 
+// These fixtures are hand-written, and a hand-written 12da inherits the
+// format's CURRENT BREAKLINE TYPE, whose default is `point` (commands,
+// 1.4.4). A fixture that means a line has to say so, exactly as every string
+// in a real archive does - 12d writes the flag on all 25,659 strings of a
+// production file and leaves nothing to the default. Rather than repeat it in
+// every fixture, the helper states it once at file level, which is the
+// format's own way of saying it; a fixture that wants POINTS says
+// `breakline point` inside the string and overrides this.
+constexpr const char* kBreaklineLine = "breakline line\n";
+
 a12::DomainImport import(const std::string& text)
 {
-    auto domain = a12::toDomain(read(text));
+    auto domain = a12::toDomain(read(kBreaklineLine + text));
     EXPECT_TRUE(domain.ok());
     return domain.ok() ? std::move(*domain) : a12::DomainImport{};
 }
@@ -396,16 +406,33 @@ string super { name one data_3d { 5 5 5 } vertex_attribute_data { attributes { t
     EXPECT_EQ(std::get<std::string>(domain.entities.at(6).properties.at("QualityLevel")), "B");
     EXPECT_TRUE(anyContains(domain.warnings, "1 strings have invisible vertices or segments"))
         << joined(domain.warnings);
-    // full is a line: its vertex symbol is kept, not drawn (slice 2 draws a
-    // symbol on a point), and the import says so.
-    EXPECT_TRUE(anyContains(domain.warnings, "1 strings carry vertex symbols"))
+    // full is a LINE with one vertex symbol, and that symbol is now what it
+    // is drawn with: a 12d vertex symbol goes on every vertex, so the style
+    // carries it and there is nothing left over to warn about. It used to be
+    // kept as metadata and drawn nowhere.
+    EXPECT_FALSE(anyContains(domain.warnings, "strings carry vertex symbols"))
         << joined(domain.warnings);
-    EXPECT_EQ(std::get<std::string>(full.metadata.at("12d.symbol.style")), "Tree");
+    EXPECT_EQ(full.style, "Tree");
+    const auto tree = std::find_if(domain.stylesNeeded.begin(), domain.stylesNeeded.end(),
+                                   [](const katana::entity::Style& style) {
+                                       return style.name == "Tree";
+                                   });
+    ASSERT_NE(tree, domain.stylesNeeded.end());
+    EXPECT_EQ(tree->symbol, "Tree") << "the real 12d name, resolved when it is drawn";
+    EXPECT_EQ(tree->symbolSize, 2.0);
+    EXPECT_FALSE(full.metadata.contains("12d.symbol.style"))
+        << "the style carries it now, so it is not also loose in the metadata";
 
     // The whole lot back out and in again: the same strings.
     katana::entity::Model model;
     for (const auto& layer : domain.layersNeeded) {
         ASSERT_TRUE(model.layers.add(layer).ok());
+    }
+    // The styles too: an import returns stylesNeeded so a caller can add
+    // them, and a string is written with the symbol ITS STYLE carries - a
+    // model without them is a drawing that has forgotten what it looks like.
+    for (const auto& style : domain.stylesNeeded) {
+        ASSERT_TRUE(model.styles.add(style).ok());
     }
     for (const auto& entity : domain.entities) {
         ASSERT_TRUE(model.entities.add(entity).ok());

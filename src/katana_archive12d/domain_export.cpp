@@ -294,6 +294,36 @@ class Exporter {
         return true;
     }
 
+    // A string whose style draws a symbol is written with the block 12d draws
+    // it from (see kMetaSymbolPrefix): the `symbol_value` form, which puts
+    // one symbol on EVERY vertex.
+    //
+    // This used to live inside the point branch, so only a string of one
+    // vertex was written with its symbol. A 61-vertex string of drill holes
+    // came back with none, and the import that had just learned to read them
+    // had nowhere to write them back to.
+    void setSymbolFromStyle(const Entity& entity, VertexString& string) const
+    {
+        const auto* style = model_.styles.find(entity.style);
+        if (style == nullptr || style->symbol.empty()) {
+            return;
+        }
+        FieldList symbol;
+        symbol.setText("style", style->name);
+        const auto* colour = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "colour");
+        symbol.setText("colour", colour != nullptr ? *colour : string.header.colour);
+        // The block's fields are kept as the text they were, so a size that
+        // differs from the style's is text too.
+        const auto* size = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "size");
+        symbol.setReal("size",
+                       (size != nullptr ? parseReal(*size) : std::nullopt).value_or(style->symbolSize));
+        for (const char* key : {"rotation", "offset", "raise"}) {
+            const auto* kept = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + key);
+            symbol.add(key, kept != nullptr ? *kept : std::string("0"));
+        }
+        string.symbol = std::move(symbol);
+    }
+
     bool write(const Entity& entity)
     {
         if (isCentrelineOfAWrittenAlignment(entity)) {
@@ -308,26 +338,7 @@ class Exporter {
                 VertexString string;
                 string.header = self.headerFor(entity, Breakline::Point);
                 string.vertices.push_back(self.vertex(point.position, heightsOf(entity, 1)[0]));
-                // A point whose style draws a symbol is written with the
-                // block 12d draws it from (see kMetaSymbolPrefix): the
-                // `symbol_value` form, which is what 12d writes on a point.
-                if (const auto* style = self.model_.styles.find(entity.style);
-                    style != nullptr && !style->symbol.empty()) {
-                    FieldList symbol;
-                    symbol.setText("style", style->name);
-                    const auto* colour = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "colour");
-                    symbol.setText("colour", colour != nullptr ? *colour : string.header.colour);
-                    // The block's fields are kept as the text they were, so a
-                    // size that differs from the style's is text too.
-                    const auto* size = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "size");
-                    symbol.setReal("size", (size != nullptr ? parseReal(*size) : std::nullopt)
-                                               .value_or(style->symbolSize));
-                    for (const char* key : {"rotation", "offset", "raise"}) {
-                        const auto* kept = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + key);
-                        symbol.add(key, kept != nullptr ? *kept : std::string("0"));
-                    }
-                    string.symbol = std::move(symbol);
-                }
+                self.setSymbolFromStyle(entity, string);
                 self.finish(entity, std::move(string));
                 return true;
             }
@@ -545,6 +556,11 @@ class Exporter {
         if (options_.propertiesAsAttributes) {
             string.vertexAttributes = positionalAttributes(entity, "vertex", vertices);
             string.segmentAttributes = positionalAttributes(entity, "segment", segments);
+        }
+        // The style's symbol first - it is the one the drawing is drawn with -
+        // and the kept per-vertex lists only where there is no single symbol.
+        if (!string.symbol) {
+            setSymbolFromStyle(entity, string);
         }
         if (!string.symbol) {
             restoreSymbolBlocks(entity, string);

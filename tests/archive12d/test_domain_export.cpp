@@ -142,7 +142,10 @@ TEST(DomainExport, HeightsPropertiesAndTwelveDsOwnFieldsSurviveTheTrip)
     string.style = "Comms-Conduit";
     string.metadata["12d.colour"] = std::string("pen 025");
     string.metadata["12d.chainage"] = 12.5;
-    string.metadata["12d.breakline"] = std::string("point");
+    // A conduit is a LINE. Saying `point` here would be saying its three
+    // vertices are three separate points, which is what that flag means and
+    // what the import now does with it.
+    string.metadata["12d.breakline"] = std::string("line");
     string.metadata["12d.point_ids"] = std::string("101,A 7,103");
     add(model, string);
     Entity point = make(katana::entity::PointGeometry{Point2(1.0, 1.0)});

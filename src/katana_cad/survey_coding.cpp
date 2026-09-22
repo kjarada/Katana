@@ -80,6 +80,36 @@ const std::vector<std::string>& codePropertyCandidates()
     return candidates;
 }
 
+CustomisationCoverage customisationCoverage(const Document& document)
+{
+    CustomisationCoverage coverage;
+    std::set<std::string> missing;
+    for (const katana::entity::Style& style : document.model().styles.all()) {
+        ++coverage.styles;
+        // A style names a definition through either field; "continuous" and
+        // an empty symbol name nothing, and neither do 12d's plain lines "0"
+        // and "1", which are meant to draw plainly.
+        bool names = false;
+        bool found = false;
+        for (const std::string* name : {&style.linetype, &style.symbol}) {
+            if (name->empty() || *name == katana::entity::kContinuousLinetype || *name == "0" ||
+                *name == "1") {
+                continue;
+            }
+            names = true;
+            if (document.definitionFor(*name) != nullptr) {
+                found = true;
+            } else {
+                missing.insert(*name);
+            }
+        }
+        coverage.named += names ? 1 : 0;
+        coverage.resolved += found ? 1 : 0;
+    }
+    coverage.unresolved.assign(missing.begin(), missing.end());
+    return coverage;
+}
+
 katana::core::Result<katana::commands::CommandPtr>
 applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
                  SurveyCodingReport* report)

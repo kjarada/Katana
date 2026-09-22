@@ -15,9 +15,19 @@ using katana::geometry::Point2;
 
 namespace {
 
+// These fixtures are hand-written, and a hand-written 12da inherits the
+// format's CURRENT BREAKLINE TYPE, whose default is `point` (commands,
+// 1.4.4). A fixture that means a line has to say so, exactly as every string
+// in a real archive does - 12d writes the flag on all 25,659 strings of a
+// production file and leaves nothing to the default. Rather than repeat it in
+// every fixture, the helper states it once at file level, which is the
+// format's own way of saying it; a fixture that wants POINTS says
+// `breakline point` inside the string and overrides this.
+constexpr const char* kBreaklineLine = "breakline line\n";
+
 a12::DomainImport import(const std::string& text)
 {
-    auto archive = a12::readArchive(text);
+    auto archive = a12::readArchive(kBreaklineLine + text);
     EXPECT_TRUE(archive.ok()) << (archive.ok() ? "" : archive.error().describe());
     auto domain = a12::toDomain(archive.ok() ? *archive : a12::Archive{}, {});
     EXPECT_TRUE(domain.ok()) << (domain.ok() ? "" : domain.error().describe());
