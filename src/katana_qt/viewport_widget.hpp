@@ -12,6 +12,10 @@
 
 #include <functional>
 #include <optional>
+#include <map>
+#include <string>
+#include <utility>
+#include <QList>
 #include <vector>
 
 #include <QImage>
@@ -123,6 +127,11 @@ class ViewportWidget final : public QWidget {
     void drawRasters(QPainter& painter) const;
     void drawPointClouds(QPainter& painter) const;
     void drawEntities(QPainter& painter) const;
+    // Dash patterns already built THIS FRAME, by linetype name and pen width.
+    // A pattern also depends on the view scale, which is constant within a
+    // frame, so the cache is cleared at the top of every drawEntities. It is
+    // mutable because drawing does not change the document.
+    mutable std::map<std::pair<std::string, double>, QList<qreal>> dashCache_;
     void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
     // A 12d definition's strokes and texts, honouring the pen changes in it.
     void drawStyleDrawing(QPainter& painter, const katana::cad::StyleDrawing& drawing) const;

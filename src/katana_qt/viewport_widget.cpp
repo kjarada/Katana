@@ -789,14 +789,24 @@ void ViewportWidget::drawEntities(QPainter& painter) const
     // the extent: 22.3 ms scanning, 0.090 ms indexed. forEachCandidate falls
     // back to the ordered scan for a zoomed-out repaint, where asking the
     // index for everything would be slower than walking the model once.
+    // A dash pattern is a function of the linetype, the pen width and the
+    // VIEW SCALE. The scale is fixed for a frame and changes between them,
+    // so the cache lives exactly one frame.
+    dashCache_.clear();
     std::vector<katana::geometry::SpatialId> scratch;
     cad::detail::forEachCandidate(
         model, &document_.spatialIndex(), visible, scratch, [&](const Entity& entity) {
-        if (!cad::isDrawn(model, entity) ||
+        // The layer is found ONCE and the visibility rule is asked about
+        // that layer, rather than looking it up again inside isDrawn.
+        const katana::entity::Layer* layer = model.layers.find(entity.layer);
+        // This box test is NOT the one forEachCandidate already did:
+        // queryExtents is deliberately wider than the geometry (an arc offers
+        // its centre for snapping), so this is the tighter, drawing-specific
+        // filter and removing it would paint entities that are off screen.
+        if (!cad::isDrawn(layer, entity) ||
             !katana::entity::boundingBox(entity.geometry).intersects(visible)) {
             return;
         }
-        const katana::entity::Layer* layer = model.layers.find(entity.layer);
         // Through the one resolution chain, so this agrees with the 3D view
         // and so that a named style can finally change how an entity looks -
         // Style::color was stored and validated and read by nothing.
@@ -822,19 +832,34 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             // not pixels, which is why the width is passed in rather than
             // assumed - at 1.5 px a pattern that forgot it would be half again
             // too long.
+            // The pattern depends only on the linetype, the view scale and
+            // the pen width, and the view scale is fixed for a whole frame.
+            // Computing it per entity rebuilt the same handful of patterns
+            // tens of thousands of times a frame and allocated twice for each.
             if (const auto* linetype = model.linetypes.find(display.linetype);
                 linetype != nullptr) {
-                cad::DashOptions dash;
-                dash.viewScale = view_.scale;
-                const auto pattern = cad::qtDashPattern(*linetype, dash, penWidthPixels);
-                if (!pattern.empty()) {
-                    pen.setDashPattern(QList<qreal>(pattern.begin(), pattern.end()));
+                const auto key = std::make_pair(display.linetype, penWidthPixels);
+                auto cached = dashCache_.find(key);
+                if (cached == dashCache_.end()) {
+                    cad::DashOptions dash;
+                    dash.viewScale = view_.scale;
+                    const auto pattern = cad::qtDashPattern(*linetype, dash, penWidthPixels);
+                    cached = dashCache_.emplace(key, QList<qreal>(pattern.begin(), pattern.end()))
+                                 .first;
+                }
+                if (!cached->second.isEmpty()) {
+                    pen.setDashPattern(cached->second);
                 }
             }
             painter.setPen(pen);
         }
-        dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
-        hatch_ = cad::resolveHatchPattern(model, entity);
+        // Resolved once above and reused: resolveHatchPattern used to do a
+        // second full resolveDisplay of its own, and the dimension style was
+        // looked up for every entity although only a dimension can use it.
+        hatch_ = cad::resolveHatchPattern(model, display);
+        if (std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry)) {
+            dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
+        }
         if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry);
             point != nullptr && !display.symbol.empty()) {
             drawSymbol(painter, display.symbol, point->position, display.symbolSize);

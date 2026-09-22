@@ -69,12 +69,12 @@ namespace {
 //
 // options.defaultColor now only applies where the entity has no layer at all.
 [[nodiscard]] Rgba colorOf(const katana::entity::Model& model, const Entity& entity,
+                           const katana::entity::ResolvedDisplay& display,
                            const SceneOptions& options)
 {
     if (model.layers.find(entity.layer) == nullptr && !entity.color.has_value()) {
         return options.defaultColor;
     }
-    const auto display = katana::entity::resolveDisplay(model, entity);
     return katana::render::rgba(display.color.r, display.color.g, display.color.b,
                                 display.color.a);
 }
@@ -368,10 +368,13 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
             return;
         }
         const bool selected = selection.contains(entity.id);
-        const Rgba color =
-            selected ? options.selectionColor : colorOf(document.model(), entity, options);
-        const float width = selected ? options.selectedLineWidth : options.entityLineWidth;
+        // One resolution per entity. It used to be two - colorOf resolved on
+        // its own and then the linetype was resolved again - and a resolution
+        // walks the layer and style tables and builds three std::strings.
         const auto display = katana::entity::resolveDisplay(document.model(), entity);
+        const Rgba color = selected ? options.selectionColor
+                                    : colorOf(document.model(), entity, display, options);
+        const float width = selected ? options.selectedLineWidth : options.entityLineWidth;
         // A selected entity is drawn in the selection style, dashes and all.
         const katana::entity::Linetype* linetype =
             selected ? nullptr : document.model().linetypes.find(display.linetype);

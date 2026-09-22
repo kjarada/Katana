@@ -48,7 +48,13 @@ std::vector<Segment2> hatchSegments(const Polyline2& boundary,
 const katana::entity::HatchPattern* resolveHatchPattern(const katana::entity::Model& model,
                                                         const katana::entity::Entity& entity)
 {
-    const auto display = katana::entity::resolveDisplay(model, entity);
+    return resolveHatchPattern(model, katana::entity::resolveDisplay(model, entity));
+}
+
+const katana::entity::HatchPattern*
+resolveHatchPattern(const katana::entity::Model& model,
+                    const katana::entity::ResolvedDisplay& display)
+{
     const katana::entity::HatchPattern* pattern = model.hatchPatterns.find(display.hatchPattern);
     // An entity may name a pattern that has been removed, exactly as it may
     // name a removed layer. Not hatched is the right reading of that, and it

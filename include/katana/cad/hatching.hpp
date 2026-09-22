@@ -17,6 +17,7 @@
 
 #include <vector>
 
+#include "katana/entity/display.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/geometry/polygon.hpp"
@@ -67,5 +68,12 @@ enum class HatchDrawing {
 // resolves the NAME; this looks that name up in the document's table.
 [[nodiscard]] const katana::entity::HatchPattern*
 resolveHatchPattern(const katana::entity::Model& model, const katana::entity::Entity& entity);
+// The same answer for a caller that has already resolved the display. Every
+// entity drawn used to be resolved TWICE a frame - once by the caller and
+// once inside here - and a resolution walks the layer and style tables and
+// builds three std::strings.
+[[nodiscard]] const katana::entity::HatchPattern*
+resolveHatchPattern(const katana::entity::Model& model,
+                    const katana::entity::ResolvedDisplay& display);
 
 } // namespace katana::cad

@@ -135,6 +135,18 @@ template <class T, class Policy> class NamedTable {
         return result;
     }
 
+    // Visits every record in name order WITHOUT copying it. `all()` returns a
+    // vector by value, which is convenient for a caller that wants to keep
+    // the answer and wasteful for one that only wants to read it - the
+    // viewport called all() once a frame and deep-copied every alignment,
+    // profile and PI vector to draw them.
+    template <typename Visit> void forEach(Visit&& visit) const
+    {
+        for (const auto& entry : items_) {
+            visit(entry.second);
+        }
+    }
+
     [[nodiscard]] std::vector<T> all() const // ascending by name
     {
         std::vector<T> result;

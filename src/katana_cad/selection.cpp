@@ -57,7 +57,11 @@ bool SelectionSet::prune(const katana::entity::EntityDatabase& entities)
 
 bool isDrawn(const Model& model, const Entity& entity)
 {
-    const katana::entity::Layer* layer = model.layers.find(entity.layer);
+    return isDrawn(model.layers.find(entity.layer), entity);
+}
+
+bool isDrawn(const katana::entity::Layer* layer, const Entity& entity)
+{
     return entity.visible && layer != nullptr && layer->visible;
 }
 
