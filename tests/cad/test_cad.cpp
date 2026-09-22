@@ -396,7 +396,7 @@ TEST(CadDocument, NotifiesListenersOfModelSelectionAndLayerChanges)
 {
     Document document;
     int notifications = 0;
-    document.addListener([&] { ++notifications; });
+    const auto listener = document.addListener([&] { ++notifications; });
 
     mustCreate(document, cmd::createPoint(Point2(0, 0)));
     EXPECT_EQ(notifications, 1);
@@ -407,6 +407,65 @@ TEST(CadDocument, NotifiesListenersOfModelSelectionAndLayerChanges)
     EXPECT_EQ(notifications, 2); // failed commands change nothing
     ASSERT_TRUE(document.undo().ok());
     EXPECT_EQ(notifications, 3);
+}
+
+TEST(CadDocument, AListenerWhoseHandleHasDiedIsNeverCalledAgain)
+{
+    // The bug this guards: a viewport widget registered [this]{ update(); },
+    // was replaced by a layout change, and the next command called into the
+    // freed widget. With the handle gone, the registration is gone.
+    Document document;
+    int calls = 0;
+    {
+        const auto listener = document.addListener([&] { ++calls; });
+        mustCreate(document, cmd::createPoint(Point2(0, 0)));
+        EXPECT_EQ(calls, 1);
+    }
+    mustCreate(document, cmd::createPoint(Point2(1, 0)));
+    EXPECT_EQ(calls, 1);
+
+    // Moved, the registration follows the handle.
+    Document::ListenerHandle kept;
+    {
+        auto listener = document.addListener([&] { ++calls; });
+        kept = std::move(listener);
+    }
+    mustCreate(document, cmd::createPoint(Point2(2, 0)));
+    EXPECT_EQ(calls, 2);
+    EXPECT_TRUE(kept.active());
+    kept.reset();
+    EXPECT_FALSE(kept.active());
+    mustCreate(document, cmd::createPoint(Point2(3, 0)));
+    EXPECT_EQ(calls, 2);
+}
+
+TEST(CadDocument, AHandleThatOutlivesItsDocumentDoesNothingWhenItDies)
+{
+    // Qt deletes child widgets after the window's own members - the Document
+    // among them - are gone, so the widget's handle dies last.
+    Document::ListenerHandle orphan;
+    {
+        Document document;
+        orphan = document.addListener([] {});
+        EXPECT_TRUE(orphan.active());
+    }
+    EXPECT_FALSE(orphan.active());
+    orphan.reset(); // must not touch the dead registry
+}
+
+TEST(CadDocument, AListenerMayEndAnotherRegistrationWhileNotificationsRun)
+{
+    Document document;
+    int second = 0;
+    Document::ListenerHandle secondHandle;
+    const auto first = document.addListener([&] { secondHandle.reset(); });
+    secondHandle = document.addListener([&] { ++second; });
+    // The first listener removes the second before it runs; the loop must
+    // survive the vector changing under it, and honour the removal.
+    mustCreate(document, cmd::createPoint(Point2(0, 0)));
+    EXPECT_EQ(second, 0);
+    mustCreate(document, cmd::createPoint(Point2(1, 0)));
+    EXPECT_EQ(second, 0);
 }
 
 TEST(CadDocument, SaveReopenAndModifiedFlag)

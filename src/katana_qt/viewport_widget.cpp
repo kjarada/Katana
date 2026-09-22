@@ -99,7 +99,7 @@ ViewportWidget::ViewportWidget(cad::Document& document, QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::CrossCursor);
     view_.scale = 10.0;
-    document_.addListener([this] { update(); });
+    documentListener_ = document_.addListener([this] { update(); });
 }
 
 QPointF ViewportWidget::toScreen(const Point2& world) const

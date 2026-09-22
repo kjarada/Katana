@@ -669,3 +669,32 @@ and says so, and every "Import failed" box (`warnUser`) becomes a line in the
 log. A scripted import of a file that did not exist used to sit on a warning
 box until the test harness killed it.
 
+## A listener lives exactly as long as the thing it notifies
+
+`Document::addListener` used to return nothing and offer no removal. A
+`ViewportWidget` registered `[this] { update(); }` in its constructor; when a
+12d archive brought a surface, the layout switched to a split view, the plan
+viewport was destroyed, and its registration stayed in the document. The
+next command - a click on a layer's visibility box - called `update()` on
+freed memory: a crash five runs in six, and a clean run the sixth time.
+
+`addListener` now returns a `ListenerHandle` that owns the registration and
+ends it when destroyed; `[[nodiscard]]`, so a registration cannot be made
+without something owning it. The widget keeps the handle as a member declared
+after the document reference, so it is the first thing destroyed. The handle
+holds the registry through a `weak_ptr` because of a Qt ordering that is easy
+to forget: child widgets are deleted in `~QWidget`, which runs AFTER the
+window's own members - the `Document` among them - have been destroyed, so
+the viewport's handle dies after the document it points to and must find
+nothing there rather than something freed. `notify()` walks a copy of the ids
+so that a listener may end a registration while notifications run.
+
+**Rejected:** `QPointer` or a Qt signal in place of the std::function. The
+Document is in `katana_cad`, which does not see Qt (Rule 4), and the fix
+belongs where the defect is - a registry that hands out an obligation should
+hand out the means to discharge it.
+
+`qt_import_12da_then_toggle_headless` runs the scenario; the proof that the
+mechanism works is in `test_cad.cpp`, since a run that survives by luck
+still passes the headless test.
+

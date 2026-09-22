@@ -139,6 +139,9 @@ class ViewportWidget final : public QWidget {
     void drawSnapMarker(QPainter& painter) const;
 
     katana::cad::Document& document_;
+    // Declared after document_ and destroyed before anything else here: the
+    // listener it owns captures this widget.
+    katana::cad::Document::ListenerHandle documentListener_;
     katana::cad::ViewTransform view_;
     bool viewInitialised_ = false;
 

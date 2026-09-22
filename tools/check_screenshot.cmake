@@ -29,9 +29,16 @@ file(REMOVE "${OUTPUT}")
 # With -DTOGGLE_LAYER=<name> the layer's visibility box is flipped through the
 # panel first (see --toggle-layer in main.cpp); the application refuses to
 # take the screenshot if it did not come through that cleanly.
+# With -DIMPORT=<file> that file is imported into the project first - which,
+# for a 12d archive holding a tin, opens the 3D view and so replaces the plan
+# viewport. The toggle after that once called a listener of the viewport that
+# had been destroyed.
 set(extra)
+if(DEFINED IMPORT)
+    list(APPEND extra "${IMPORT}")
+endif()
 if(DEFINED TOGGLE_LAYER)
-    set(extra --toggle-layer "${TOGGLE_LAYER}")
+    list(APPEND extra --toggle-layer "${TOGGLE_LAYER}")
 endif()
 
 execute_process(

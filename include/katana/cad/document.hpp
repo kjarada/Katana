@@ -10,6 +10,7 @@
 // Threading: single-threaded, owned by the application's main thread.
 
 #include <filesystem>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -30,6 +31,51 @@ namespace katana::cad {
 class Document {
   public:
     using Listener = std::function<void()>;
+
+    // Owns a registration made by addListener and ends it when destroyed.
+    //
+    // A listener captures the object it notifies, so it must not outlive it:
+    // a viewport that registered `[this] { update(); }` and was then replaced
+    // by a layout change left a dangling call in the document, and the next
+    // command after a 12da import crashed on it. The handle holds the
+    // registry weakly, so a widget that outlives the Document - Qt deletes
+    // child widgets in ~QWidget, after the window's own members have gone -
+    // finds nothing to remove and does nothing.
+    class ListenerHandle {
+      public:
+        ListenerHandle() = default;
+        ~ListenerHandle() { reset(); }
+        ListenerHandle(ListenerHandle&& other) noexcept
+            : registry_(std::move(other.registry_)), id_(other.id_)
+        {
+            other.id_ = 0;
+        }
+        ListenerHandle& operator=(ListenerHandle&& other) noexcept
+        {
+            if (this != &other) {
+                reset();
+                registry_ = std::move(other.registry_);
+                id_ = other.id_;
+                other.id_ = 0;
+            }
+            return *this;
+        }
+        ListenerHandle(const ListenerHandle&) = delete;
+        ListenerHandle& operator=(const ListenerHandle&) = delete;
+
+        void reset();
+        [[nodiscard]] bool active() const { return id_ != 0 && !registry_.expired(); }
+
+      private:
+        friend class Document;
+        struct Registry;
+        ListenerHandle(std::weak_ptr<Registry> registry, std::uint64_t id)
+            : registry_(std::move(registry)), id_(id)
+        {
+        }
+        std::weak_ptr<Registry> registry_;
+        std::uint64_t id_ = 0;
+    };
 
     explicit Document(katana::core::Logger* logger = nullptr);
     ~Document();
@@ -85,7 +131,9 @@ class Document {
 
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
-    void addListener(Listener listener);
+    // The registration lasts as long as the handle does - keep it as a member
+    // of the object the listener captures, declared so that it dies first.
+    [[nodiscard]] ListenerHandle addListener(Listener listener);
 
   private:
     void rebuildStack();
@@ -104,7 +152,7 @@ class Document {
     katana::storage::ProjectMetadata metadata_;
     SelectionSet selection_;
     std::string currentLayer_{katana::entity::kDefaultLayerName};
-    std::vector<Listener> listeners_;
+    std::shared_ptr<ListenerHandle::Registry> listeners_;
     bool metadataModified_ = false;
 };
 

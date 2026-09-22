@@ -208,7 +208,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // Switching a layer off crashed the application for exactly that reason.
     // Deferring to the event loop also coalesces one refresh per transaction
     // instead of one per command.
-    document_.addListener([this] { scheduleRefresh(); });
+    documentListener_ = document_.addListener([this] { scheduleRefresh(); });
     refreshAll();
     views_->setTool(Tool::Select);
     logMessage("Katana ready. Type HELP for the command list.");

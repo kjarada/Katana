@@ -75,4 +75,22 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+
+    # The same click after a 12d archive import that brought a surface, a
+    # point cloud and a split layout: the plan viewport is replaced, and its
+    # document listener must go with it. This crashed 5 runs in 6 before
+    # Document::ListenerHandle; a run that survives by luck still passes,
+    # which is why the unit tests in test_cad.cpp carry the proof.
+    add_test(NAME qt_import_12da_then_toggle_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/all_geometries.12daz"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_toggle_headless.png"
+            "-DTOGGLE_LAYER=Cadastre"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_import_12da_then_toggle_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 endif()

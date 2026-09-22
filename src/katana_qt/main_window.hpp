@@ -176,6 +176,7 @@ class MainWindow final : public QMainWindow {
 
     katana::core::Logger logger_;
     katana::cad::Document document_{&logger_};
+    katana::cad::Document::ListenerHandle documentListener_;
     katana::cad::CommandInterpreter interpreter_{document_};
 
     ViewportContainer* views_ = nullptr;

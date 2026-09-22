@@ -2,6 +2,7 @@
 
 #include "katana/cad/spatial_query.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace katana::cad {
@@ -241,9 +242,32 @@ void Document::setMetadata(katana::storage::ProjectMetadata metadata)
     }
 }
 
-void Document::addListener(Listener listener)
+struct Document::ListenerHandle::Registry {
+    struct Entry {
+        std::uint64_t id;
+        Listener listener;
+    };
+    std::vector<Entry> entries;
+    std::uint64_t nextId = 1;
+};
+
+void Document::ListenerHandle::reset()
 {
-    listeners_.push_back(std::move(listener));
+    if (const auto registry = registry_.lock(); registry && id_ != 0) {
+        std::erase_if(registry->entries, [this](const auto& entry) { return entry.id == id_; });
+    }
+    id_ = 0;
+    registry_.reset();
+}
+
+Document::ListenerHandle Document::addListener(Listener listener)
+{
+    if (!listeners_) {
+        listeners_ = std::make_shared<ListenerHandle::Registry>();
+    }
+    const std::uint64_t id = listeners_->nextId++;
+    listeners_->entries.push_back({id, std::move(listener)});
+    return ListenerHandle(listeners_, id);
 }
 
 void Document::pruneSelection()
@@ -253,8 +277,22 @@ void Document::pruneSelection()
 
 void Document::notify()
 {
-    for (const Listener& listener : listeners_) {
-        listener();
+    if (!listeners_) {
+        return;
+    }
+    // By id, not by iterator: a listener may end a registration - its own,
+    // or another's - while it runs, and the vector then moves under a loop.
+    std::vector<std::uint64_t> ids;
+    ids.reserve(listeners_->entries.size());
+    for (const auto& entry : listeners_->entries) {
+        ids.push_back(entry.id);
+    }
+    for (const std::uint64_t id : ids) {
+        const auto found = std::find_if(listeners_->entries.begin(), listeners_->entries.end(),
+                                        [id](const auto& entry) { return entry.id == id; });
+        if (found != listeners_->entries.end()) {
+            found->listener();
+        }
     }
 }
 
