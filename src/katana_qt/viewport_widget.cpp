@@ -840,13 +840,19 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             drawSymbol(painter, display.symbol, point->position, display.symbolSize);
             return;
         }
-        drawGeometry(painter, entity.geometry);
-        // A 12d linestyle is strokes laid ALONG the line, not a dash pattern
-        // cut out of it, so it is drawn in addition to the line: the ticks of
-        // a fence style sit on the fence (PLAN.MD 20.3).
-        if (const auto* definition = document_.definitionFor(display.linetype);
-            definition != nullptr && !definition->atVertices) {
-            drawLineStyle(painter, *definition, entity.geometry);
+        // A 12d linestyle IS the line, gaps and all: "move 0 0 / draw 3 0 /
+        // move 5 0" is a three-unit dash followed by a two-unit gap, and a
+        // fence style carries the fence as well as its ticks. So it REPLACES
+        // the plain line rather than being drawn over it. Drawing both filled
+        // in every gap, which made every linestyle look continuous.
+        const auto* definition = document_.definitionFor(display.linetype);
+        const bool drawnByStyle = definition != nullptr && !definition->atVertices &&
+                                  drawLineStyle(painter, *definition, entity.geometry);
+        // A hatch is painted inside drawGeometry, so an entity carrying one
+        // is drawn anyway and puts up with a doubled outline. A 12da never
+        // brings a hatch; this is for a drawing given one in Katana.
+        if (!drawnByStyle || hatch_ != nullptr) {
+            drawGeometry(painter, entity.geometry);
         }
     });
 }
@@ -1005,18 +1011,25 @@ void ViewportWidget::drawStyleText(QPainter& painter, const cad::StyleTextMark& 
 // A linestyle runs along whatever plan shape the entity has. An arc and a
 // circle are chorded first, because a pattern is laid by distance along a
 // path and a path is what a polyline is.
-void ViewportWidget::drawLineStyle(QPainter& painter,
+bool ViewportWidget::drawLineStyle(QPainter& painter,
                                    const katana::entity::LineStyle& definition,
                                    const katana::entity::Geometry& geometry) const
 {
+    bool drew = false;
     const double scale = paperScale();
     // A quarter of a pixel, the same accuracy drawGeometry chords to, so a
     // pattern laid along a curve follows the curve that was drawn.
     const double chordTolerance = 0.25 / std::max(view_.scale, 1e-12);
     const auto run = [&](const katana::geometry::Polyline2& shape) {
-        if (shape.vertices.size() >= 2) {
-            drawStyleDrawing(painter, cad::styleDrawing(definition, shape, scale));
+        if (shape.vertices.size() < 2) {
+            return;
         }
+        const cad::StyleDrawing drawing = cad::styleDrawing(definition, shape, scale);
+        if (drawing.empty()) {
+            return; // nothing came of it; the caller draws the plain line
+        }
+        drawStyleDrawing(painter, drawing);
+        drew = true;
     };
     std::visit(
         [&](const auto& shape) {
@@ -1035,6 +1048,7 @@ void ViewportWidget::drawLineStyle(QPainter& painter,
             // A point, a text and a mesh have no line to lay a pattern along.
         },
         geometry);
+    return drew;
 }
 
 void ViewportWidget::drawSymbol(QPainter& painter, const std::string& symbol,

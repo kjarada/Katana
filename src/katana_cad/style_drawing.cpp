@@ -57,6 +57,26 @@ struct Local {
         std::string pen;
     };
     std::vector<Text> texts;
+
+    // How far the PEN travelled along the definition's x, moves included.
+    //
+    // This is the period of the pattern when the file gives no `length`, and
+    // it is not the same as the span of what was drawn: a linestyle ends its
+    // period with a bare `move`, and that move IS the gap.
+    // "move 0 0 / draw 3 0 / move 5 0" is a three-unit dash and a two-unit
+    // gap. Measuring only the drawn part gave a period of 3, so every dash
+    // butted against the next and the whole linestyle came out as a solid
+    // line - which is exactly what it looked like.
+    double lowestX = 0.0;
+    double highestX = 0.0;
+    bool anyPoint = false;
+
+    void reach(const Point2& point)
+    {
+        lowestX = anyPoint ? std::min(lowestX, point.x) : point.x;
+        highestX = anyPoint ? std::max(highestX, point.x) : point.x;
+        anyPoint = true;
+    }
 };
 
 void addArc(std::vector<Point2>& into, const Point2& centre, double radius, double fromDegrees,
@@ -99,6 +119,7 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
             break;
         case StrokeOp::Move:
             pen = stroke.point;
+            local.reach(place(pen));
             run = nullptr;
             break;
         case StrokeOp::Draw: {
@@ -108,6 +129,7 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
             }
             pen = stroke.point;
             run->points.push_back(place(pen));
+            local.reach(place(pen));
             break;
         }
         case StrokeOp::Circle: {
@@ -115,6 +137,8 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
             ring.closed = true;
             ring.pen = ink;
             const Point2 centre = place(pen);
+            local.reach({centre.x - stroke.radius * factor, centre.y});
+            local.reach({centre.x + stroke.radius * factor, centre.y});
             for (int i = 0; i < kCircleChords; ++i) {
                 const double angle = 2.0 * kPi * i / kCircleChords;
                 ring.points.emplace_back(centre.x + stroke.radius * factor * std::cos(angle),
@@ -160,22 +184,7 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
 // pattern when the file does not give a `length`.
 [[nodiscard]] double naturalPeriod(const Local& local)
 {
-    double lowest = 0.0;
-    double highest = 0.0;
-    bool any = false;
-    for (const Local::Run& run : local.runs) {
-        for (const Point2& point : run.points) {
-            lowest = any ? std::min(lowest, point.x) : point.x;
-            highest = any ? std::max(highest, point.x) : point.x;
-            any = true;
-        }
-    }
-    for (const Local::Text& text : local.texts) {
-        lowest = any ? std::min(lowest, text.at.x) : text.at.x;
-        highest = any ? std::max(highest, text.at.x) : text.at.x;
-        any = true;
-    }
-    return any ? highest - lowest : 0.0;
+    return local.anyPoint ? local.highestX - local.lowestX : 0.0;
 }
 
 // Where a distance along a polyline lands, and which way the line is going

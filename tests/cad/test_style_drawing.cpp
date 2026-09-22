@@ -289,3 +289,20 @@ TEST(StyleDrawing, TheFactorScalesEveryCoordinateAndTheOriginIsWhereTheDefinitio
     EXPECT_EQ(drawing.strokes[0].path.vertices[0], Point2(100, 200));
     EXPECT_EQ(drawing.strokes[0].path.vertices[1], Point2(104, 200));
 }
+
+TEST(StyleDrawing, ATrailingMoveIsTheGapAndCountsTowardsThePeriod)
+{
+    // "move 0 0 / draw 3 0 / move 5 0" is a three-unit dash and a TWO-UNIT
+    // GAP: the bare move at the end is how a 12d linestyle ends its period.
+    // Measuring only what was drawn made the period 3, so every dash butted
+    // against the next one and the whole linestyle came out as a solid line.
+    const LineStyle style = definition({move(0, 0), draw(3, 0), move(5, 0)});
+    const StyleDrawing drawing = katana::cad::linestyleDrawing(
+        style, Polyline2{{Point2(0, 0), Point2(20, 0)}, false});
+    ASSERT_EQ(drawing.strokes.size(), 5u) << "at 0, 5, 10, 15 and 20";
+    EXPECT_EQ(drawing.strokes[0].path.vertices[0], Point2(0, 0));
+    EXPECT_EQ(drawing.strokes[0].path.vertices[1], Point2(3, 0));
+    EXPECT_EQ(drawing.strokes[1].path.vertices[0], Point2(5, 0)) << "the gap is two long";
+    // Five dashes of three: a pattern that is 3 long in 5 covers 60% of it.
+    EXPECT_NEAR(drawnLength(drawing), 15.0, 1e-9);
+}
