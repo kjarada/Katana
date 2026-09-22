@@ -199,6 +199,9 @@ start the next one in the same session.
 
 Take the next work item in this order:
 
+0. **`PLAN.MD` section 20.2, the 12d Model programme, until every slice of it
+   is DELIVERED.** Nothing else is started or resumed before then (the user's
+   instruction of 2026-09-22); the only exception is a defect that blocks it.
 1. The phase you are part-way through, to a point where it is DELIVERED rather
    than partially delivered.
 2. A real defect found on the way — fix it if it is small and adjacent, record

@@ -397,6 +397,10 @@ is complete. Running out of obvious next steps is not a stopping condition: the
 table in this section lists what remains, and `CLAUDE.md` section 6 lists the
 standing improvement work.
 
+**Until section 20.2 (the 12d Model programme) is DELIVERED in full, it is
+the only work to be done.** No other phase is started or resumed before then
+(instruction of 2026-09-22).
+
 This does not license committing a half-finished feature to keep moving. Every
 commit still lands green, with the plan and documentation updated in the same
 change.
@@ -1330,6 +1334,82 @@ seeing.
 a shift is a translation, not a transformation - two files in different
 projections still will not line up. Raster and point-cloud imports get no
 equivalent check.
+
+## 20.2 The 12d Model programme — TAKES PRECEDENCE OVER EVERY OTHER PHASE
+
+**Instruction (2026-09-22, from the user): nothing in any other phase of this
+plan is to be started or resumed until every slice below is DELIVERED.** The
+grading command, the plotting phases, the point-cloud work and the rest wait.
+`CLAUDE.md` section 5.2 carries the same instruction. The one exception is a
+defect that blocks a slice here.
+
+12d Model is what Katana's users exchange work with. Section 25 delivered the
+archive format - every element read, written and mapped. This programme
+finishes the JOB: everything a 12d archive carries has a home in Katana, can
+be seen, managed and edited, and goes back out as it came in. The measure is
+the fourteen real archives in the user's `kjarada.github.io/examples/test-files`
+(4 to 58 MB, written by 12d Model 15), which carry among them 270 distinct
+linestyle names, 109 colour names, 7 text styles, 28 479 vertex symbols,
+1 719 trimeshes, seven kinds of attribute block and every string type.
+
+There are only two container forms: `.12da` and `.12daz`. There is no
+`.12dz`; the extension was accepted in error and is withdrawn in slice 1.
+
+### Slices, in order
+
+1. **Names become tables.** A 12d linestyle name becomes a Katana `Style`
+   (created by the import, continuous unless known) and the entity carries it
+   as its style - not as metadata. A 12d text style becomes a Katana style
+   too. Colours: the standard names as now; every other name (`sui
+   electricity`, `shade 48`, `pen 025a`) is kept as the style's description so
+   that nothing is anonymous. `.12dz` withdrawn. Export writes the names back
+   from the tables.
+2. **Symbols.** A `Symbol` is a named marker - a shape from a fixed set
+   (circle, square, triangle, cross, diamond, tick, tree, pole, manhole ...)
+   at a size, in a colour or ByLayer - held in the `Style` table so that "the
+   style of a point" and "the style of a line" are one thing, as they are in
+   12d. A point entity draws its style's symbol in plan; `symbol_value` and
+   `symbol_data` on import set it; export writes them back. A **Symbols
+   manager** lists, creates, edits and previews them.
+3. **Line styles manager.** One dialog for the `Style` and `Linetype` tables
+   together: name, linetype (with pattern editing and a preview), line
+   weight, colour, hatch, symbol; new, edit, rename, delete with the
+   in-use guard; assign to the selection or to a layer.
+4. **Trimeshes.** A `SceneMesh` - name, vertices, triangular faces, colour,
+   per-face colours where the file has them - drawn in the 3D view like a
+   surface and as its outline in plan, held with the surfaces in the session
+   (persistence of session data is a separate, later question for surfaces
+   and meshes alike). Import creates one per `primitive_3d`; export writes
+   `primitive_3d` back with its infos and flags.
+5. **Attribute manager.** A dialog on the selection showing every property
+   as the tree 12d had it (`Group/Sub/Name`, `vertex/3/Name`), typed, with
+   add, edit, remove and rename, each an undoable command; property
+   definitions (the schema) managed in the same place. Text, integer and real
+   attributes as themselves; groups as branches.
+6. **Layer manager.** A dialog with the whole layer table - visible, locked,
+   colour, linetype, line weight, dimension style, hatch, entity count - with
+   new, new child, rename, delete, move, and assign-to-selection; the dock
+   stays as the quick view.
+7. **Text as 12d draws it.** Justification, offset, raise and slant applied
+   on import so the text sits where 12d put it; text style as a Katana style;
+   width factor and the rest kept and written back.
+8. **Super tins built, and referenced clouds found.** A super tin becomes a
+   surface in which each member overrides the members before it within its
+   footprint; a `ref_data` cloud is looked for beside the archive and imported
+   when found.
+9. **The round trip, on the real archives.** Import each of the fourteen
+   archives, export it, import the export: every element kind present in the
+   same numbers, every string with the same vertices, heights, style, colour,
+   attributes and symbols, every mesh with the same faces. A test that reads
+   the small fixtures does this in ctest; a script does it on the large ones
+   and its results are recorded in `docs/interop.md`.
+
+Each slice: tests first, engine, application, docs, commit. The status line
+below is updated as each lands.
+
+**STATUS: slice 1 in progress.**
+
+---
 
 # 26. Phase 21 — Civil and Survey Engineering
 
