@@ -70,6 +70,8 @@ class MainWindow final : public QMainWindow {
     // many times it is asked before then. See the listener in the constructor
     // for why it must not happen synchronously.
     void scheduleRefresh();
+    // A warning box, or in a headless session a line in the log.
+    void warnUser(const QString& title, const QString& text);
 
     // Flips the visibility box of `layer` in the layer panel THROUGH THE
     // WIDGET, as a click does, and reports whether the application survived

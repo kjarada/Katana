@@ -652,6 +652,19 @@ void MainWindow::scheduleRefresh()
     });
 }
 
+void MainWindow::warnUser(const QString& title, const QString& text)
+{
+    // Already in the command log by the time this is called; the box is for
+    // the person at the screen, and in a headless run there is none - a
+    // modal box there is a hang. A missing file on a scripted import used to
+    // do exactly that.
+    if (headless_) {
+        logMessage(title + ": " + text.simplified(), true);
+        return;
+    }
+    QMessageBox::warning(this, title, text);
+}
+
 katana::core::Status MainWindow::toggleLayerThroughPanel(const QString& layer)
 {
     using katana::core::ErrorCode;
@@ -1317,7 +1330,7 @@ void MainWindow::importFile()
     case interop::SourceKind::Unknown:
         break;
     }
-    QMessageBox::warning(this, "Import",
+    warnUser( "Import",
                          "Katana does not recognise the extension of\n" + selected +
                              "\n\nSupported: " + patternsFor(interop::vectorExtensions()) + ' ' +
                              patternsFor(interop::archive12dExtensions()) + ' ' +
@@ -1333,7 +1346,7 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
 
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
-        QMessageBox::warning(this, "Import failed",
+        warnUser( "Import failed",
                              QString::fromStdString(imported.error().describe()));
         return;
     }
@@ -1408,7 +1421,7 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
     const auto status = document_.execute(std::move(transaction));
     if (!status) {
         logMessage(QString::fromStdString(status.error().describe()), true);
-        QMessageBox::warning(this, "Import failed",
+        warnUser( "Import failed",
                              QString::fromStdString(status.error().describe()));
         return;
     }
@@ -1437,7 +1450,7 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
     QApplication::restoreOverrideCursor();
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
-        QMessageBox::warning(this, "Import failed",
+        warnUser( "Import failed",
                              QString::fromStdString(imported.error().describe()));
         return;
     }
@@ -1509,7 +1522,7 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
     const auto status = document_.execute(std::move(transaction));
     if (!status) {
         logMessage(QString::fromStdString(status.error().describe()), true);
-        QMessageBox::warning(this, "Import failed",
+        warnUser( "Import failed",
                              QString::fromStdString(status.error().describe()));
         return;
     }
@@ -1566,7 +1579,7 @@ void MainWindow::importRasterFile(const std::filesystem::path& path)
 
     if (!raster.ok()) {
         logMessage(QString::fromStdString(raster.error().describe()), true);
-        QMessageBox::warning(this, "Import failed",
+        warnUser( "Import failed",
                              QString::fromStdString(raster.error().describe()));
         return;
     }
@@ -1597,7 +1610,7 @@ void MainWindow::importPointCloudFile(const std::filesystem::path& path)
 
     if (!cloud.ok()) {
         logMessage(QString::fromStdString(cloud.error().describe()), true);
-        QMessageBox::warning(this, "Import failed",
+        warnUser( "Import failed",
                              QString::fromStdString(cloud.error().describe()));
         return;
     }
@@ -1671,7 +1684,7 @@ void MainWindow::exportVectorFile()
         QApplication::restoreOverrideCursor();
         if (!archive.ok()) {
             logMessage(QString::fromStdString(archive.error().describe()), true);
-            QMessageBox::warning(this, "Export failed",
+            warnUser( "Export failed",
                                  QString::fromStdString(archive.error().describe()));
             return;
         }
@@ -1691,7 +1704,7 @@ void MainWindow::exportVectorFile()
 
     if (!result.ok()) {
         logMessage(QString::fromStdString(result.error().describe()), true);
-        QMessageBox::warning(this, "Export failed",
+        warnUser( "Export failed",
                              QString::fromStdString(result.error().describe()));
         return;
     }

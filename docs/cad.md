@@ -662,3 +662,10 @@ afterwards. `qt_toggle_layer_headless` runs it on the sample; with the
 listener made synchronous again it fails with "the layer panel was rebuilt
 inside its own itemChanged signal", which is how the test earned its place.
 
+A related rule, from the same afternoon: **a headless session never opens a
+modal box.** `--plot` and `--screenshot` set `MainWindow::setHeadless`, under
+which the "far from the current drawing" question keeps survey coordinates
+and says so, and every "Import failed" box (`warnUser`) becomes a line in the
+log. A scripted import of a file that did not exist used to sit on a warning
+box until the test harness killed it.
+
