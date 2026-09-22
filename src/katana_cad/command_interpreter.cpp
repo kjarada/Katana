@@ -592,7 +592,27 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
             }
             changed.hatchPattern = value == "-" ? std::string() : value;
         } else if (field == "SYMBOL") {
-            changed.symbol = value == "-" ? std::string() : value;
+            // A library symbol's name has spaces in it - "CULT Bollard" -
+            // so the rest of the line is the name, as DESCRIPTION does.
+            std::string name12d;
+            for (std::size_t i = 3; i < args.size(); ++i) {
+                name12d += (i > 3 ? " " : "") + args[i];
+            }
+            if (name12d == "-") {
+                changed.symbol.clear();
+            } else {
+                // The model itself accepts any name, because a project can be
+                // opened before its library is loaded (see entity::validate).
+                // A person TYPING one should still be told about a typo, which
+                // is the same courtesy HATCH above pays.
+                if (!katana::entity::isBuiltInSymbolName(name12d) &&
+                    document_.definitionFor(name12d) == nullptr) {
+                    return makeError(ErrorCode::NotFound,
+                                     "no symbol of that name is built in or in the loaded library",
+                                     name12d);
+                }
+                changed.symbol = name12d;
+            }
         } else if (field == "SYMBOLSIZE") {
             const auto size = parseNumber(value);
             if (!size) {

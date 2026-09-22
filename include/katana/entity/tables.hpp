@@ -255,8 +255,11 @@ using LinetypeDatabase = NamedTable<Linetype, LinetypePolicy>;
 // the names are the ones survey and civil packages use for the same marks.
 // kNoSymbol draws the plain point mark of the viewport.
 inline constexpr std::string_view kNoSymbol = "";
+// The symbols Katana draws with no library loaded. NOT the set of names a
+// style may use: a loaded 12d symbol library adds hundreds more, so this is
+// what a chooser offers, not what validation allows.
 [[nodiscard]] const std::vector<std::string_view>& symbolNames();
-[[nodiscard]] bool isSymbolName(std::string_view name);
+[[nodiscard]] bool isBuiltInSymbolName(std::string_view name);
 
 struct Style {
     std::string name{};
@@ -272,10 +275,13 @@ struct Style {
     // still known by name. Appended last, as every field is, so the storage
     // columns keep their order.
     std::string description{};
-    // How a POINT in this style is drawn: one of symbolNames(), or kNoSymbol
-    // for the viewport's plain mark. A 12d vertex symbol is a linestyle drawn
-    // at a vertex, which is why the symbol lives on the style and not on the
-    // point: "the style of a point" and "the style of a line" are one thing.
+    // How a POINT in this style is drawn: a name RESOLVED when it is drawn,
+    // against the loaded 12d symbol library first and symbolNames() after,
+    // or kNoSymbol for the viewport's plain mark. Not a closed set - see
+    // validate() - because a library brings hundreds of its own. A 12d vertex
+    // symbol is a linestyle drawn at a vertex, which is why the symbol lives
+    // on the style and not on the point: "the style of a point" and "the
+    // style of a line" are one thing.
     std::string symbol{kNoSymbol};
     // The symbol's width in model units - a 12d symbol `size` - or 0 for the
     // viewport's default mark size.
@@ -284,8 +290,8 @@ struct Style {
     friend bool operator==(const Style&, const Style&) = default;
 };
 
-// Fails with InvalidArgument for a bad name, a non-finite or negative line
-// weight or symbol size, or a symbol that is not one of symbolNames().
+// Fails with InvalidArgument for a bad name, or a non-finite or negative line
+// weight or symbol size.
 [[nodiscard]] katana::core::Status validate(const Style& style);
 
 // ---- hatch patterns -------------------------------------------------------------

@@ -23,6 +23,8 @@
 #include "katana/core/error.hpp"
 #include "katana/core/log.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/entity/style_library.hpp"
+#include "katana/entity/survey_map.hpp"
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/storage/project_store.hpp"
 
@@ -85,6 +87,27 @@ class Document {
 
     [[nodiscard]] const katana::entity::Model& model() const { return model_; }
 
+    // ---- the survey customisation (PLAN.MD 20.3) -----------------------------
+    //
+    // The 12d linestyle and symbol definitions this drawing is drawn with, and
+    // the mapfile that says what a survey code becomes. They are NOT part of
+    // the model and are not saved inside the project: a customisation is a
+    // site-wide thing a project NAMES rather than copies, which is 12d's own
+    // arrangement and keeps 35,000 strokes out of every project file. See
+    // docs/survey_coding.md.
+    //
+    // They are not undoable either, and deliberately: loading a library is not
+    // an edit to the drawing, it is a change to what the drawing is looked at
+    // through. Undoing a line should not silently unload a library.
+    [[nodiscard]] const katana::entity::StyleLibrary& styleLibrary() const { return library_; }
+    [[nodiscard]] const katana::entity::SurveyMap& surveyMap() const { return surveyMap_; }
+    void setStyleLibrary(katana::entity::StyleLibrary library);
+    void setSurveyMap(katana::entity::SurveyMap map);
+    // The definition a style's `symbol` or `linetype` names, or nullptr. One
+    // place to ask, so that "which library does this name come from" is not a
+    // question every caller answers for itself.
+    [[nodiscard]] const katana::entity::LineStyle* definitionFor(std::string_view name) const;
+
     // Broad-phase index over the entities, kept in step with the model
     // (PLAN.MD Phase 18). Maintained incrementally from the per-entity changes
     // every command reports, and rebuilt whole whenever the model is replaced -
@@ -146,6 +169,8 @@ class Document {
 
     katana::core::Logger* logger_ = nullptr;
     katana::entity::Model model_;
+    katana::entity::StyleLibrary library_;
+    katana::entity::SurveyMap surveyMap_;
     katana::geometry::SpatialIndex index_;
     std::unique_ptr<katana::commands::CommandStack> stack_;
     std::unique_ptr<katana::storage::ProjectStore> store_;

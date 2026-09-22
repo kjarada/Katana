@@ -1197,7 +1197,9 @@ TEST(CadInterpreter, StyleRejectsNonsenseWithItsOwnReason)
     EXPECT_EQ(session.fails("STYLE NEW s"), ErrorCode::AlreadyExists);
     EXPECT_EQ(session.fails("STYLE SET s linetype nosuch"), ErrorCode::NotFound);
     EXPECT_EQ(session.fails("STYLE SET s hatch nosuch"), ErrorCode::NotFound);
-    EXPECT_EQ(session.fails("STYLE SET s symbol blob"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("STYLE SET s symbol blob"), ErrorCode::NotFound)
+        << "a symbol name is no longer a closed set, but one nothing defines does not exist - "
+           "reported the way `hatch nosuch` on the line above is";
     EXPECT_EQ(session.fails("STYLE SET s symbolsize -1"), ErrorCode::InvalidArgument);
     EXPECT_EQ(session.fails("STYLE SET s weight -0.5"), ErrorCode::InvalidArgument);
     EXPECT_EQ(session.fails("STYLE SET s colour notacolour"), ErrorCode::ParseFailure)
@@ -1205,6 +1207,35 @@ TEST(CadInterpreter, StyleRejectsNonsenseWithItsOwnReason)
     EXPECT_EQ(session.fails("STYLE SET nosuch weight 1"), ErrorCode::NotFound);
     EXPECT_EQ(session.fails("STYLE APPLY s"), ErrorCode::InvalidState) << "nothing selected";
     EXPECT_EQ(session.fails("STYLE DELETE nosuch"), ErrorCode::NotFound);
+}
+
+TEST(CadInterpreter, AStyleCanNameASymbolFromTheLoadedLibraryButNotOneFromNowhere)
+{
+    // The point of PLAN.MD 20.3: a 12d customisation brings hundreds of
+    // symbols, so the sixteen built-in names stopped being the whole set.
+    Session session;
+    session.ok("STYLE NEW s");
+    EXPECT_EQ(session.fails("STYLE SET s symbol CULT Bollard"), ErrorCode::NotFound)
+        << "no library is loaded yet";
+
+    katana::entity::StyleLibrary library;
+    katana::entity::LineStyle bollard;
+    bollard.name = "CULT Bollard";
+    bollard.atVertices = true;
+    bollard.strokes.push_back({katana::entity::StrokeOp::Move, katana::geometry::Point2(0, 0)});
+    ASSERT_TRUE(library.add(bollard).ok());
+    session.document.setStyleLibrary(std::move(library));
+
+    session.ok("STYLE SET s symbol CULT Bollard");
+    const katana::entity::Style* style = session.document.model().styles.find("s");
+    ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->symbol, "CULT Bollard") << "the whole name, spaces and all";
+    EXPECT_NE(session.document.definitionFor("CULT Bollard"), nullptr);
+    EXPECT_EQ(session.document.definitionFor("nothing"), nullptr);
+
+    // A built-in still works with no library at all.
+    session.ok("STYLE SET s symbol circle");
+    EXPECT_EQ(session.document.model().styles.find("s")->symbol, "circle");
 }
 
 TEST(CadInterpreter, DeletingAStyleAnEntityStillUsesIsRefusedAndNamesTheEntity)

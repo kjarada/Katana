@@ -305,7 +305,7 @@ TEST(SymbolNames, TheShapeIsReadFromTheLinestyleNameMostSpecificWordFirst)
     };
     for (const auto& [name, shape] : cases) {
         EXPECT_EQ(a12::symbolForLinestyle(name), shape) << name;
-        EXPECT_TRUE(katana::entity::isSymbolName(a12::symbolForLinestyle(name))) << name;
+        EXPECT_TRUE(katana::entity::isBuiltInSymbolName(a12::symbolForLinestyle(name))) << name;
     }
 }
 

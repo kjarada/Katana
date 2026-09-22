@@ -680,7 +680,7 @@ const std::vector<std::string_view>& symbolNames()
     return names;
 }
 
-bool isSymbolName(std::string_view name)
+bool isBuiltInSymbolName(std::string_view name)
 {
     if (name == kNoSymbol) {
         return true;
@@ -697,9 +697,17 @@ Status validate(const Style& style)
     if (auto status = validateLineWeight(style.lineWeight); !status) {
         return status;
     }
-    if (!isSymbolName(style.symbol)) {
-        return makeError(ErrorCode::InvalidArgument, "that is not a symbol Katana can draw",
-                         style.symbol);
+    // A symbol name is RESOLVED when the style is drawn, exactly as
+    // `Style::linetype` already is, and not checked against a closed set
+    // here. It stopped being a closed set when a project could load a 12d
+    // symbol library: the Transport for NSW customisation alone names 473 of
+    // them, and none is one of the sixteen Katana draws without a library
+    // (PLAN.MD 20.3). A name with no definition behind it draws the plain
+    // point mark and is reported by whoever looked it up - the same thing
+    // that already happens for a linetype the document does not have.
+    if (!isValidUtf8(style.symbol)) {
+        return makeError(ErrorCode::InvalidArgument, "symbol name is not valid UTF-8",
+                         style.name);
     }
     if (!(std::isfinite(style.symbolSize) && style.symbolSize >= 0.0)) {
         return makeError(ErrorCode::InvalidArgument,

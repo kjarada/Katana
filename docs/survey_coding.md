@@ -253,3 +253,24 @@ is still a doorway; shearing it would be a mistake that looks like a feature.
 **A pattern cannot run away.** A definition with a 1 mm period laid along a
 30 km traverse would ask for thirty million instances. It is capped at 20,000
 and what comes back is still a drawing.
+
+## A symbol name stopped being a closed set
+
+`Style::symbol` used to be validated against sixteen built-in names. The
+Transport for NSW library alone names 473 symbols and **not one** of them is
+among the sixteen, so that check made the mapfile unusable: a style saying
+`CULT Bollard` was refused by the model.
+
+It is now a name resolved when it is drawn, exactly as `Style::linetype`
+already was - which also makes the two consistent, where before one was a
+closed set and its twin was not.
+
+The check was not simply deleted, because catching a typo is worth something:
+
+| Where | What it does | Why |
+|---|---|---|
+| `entity::validate(Style)` | accepts any name that is valid UTF-8 | a project can be opened before its library is loaded, and a 12da import brings names of its own |
+| the `STYLE SET ... symbol` command | refuses a name that is neither built in nor in the loaded library | a person typing a name should be told about a typo, which is the courtesy the `hatch` field already paid |
+
+`cad::Document` carries the loaded library and mapfile, and `definitionFor`
+is the single place a name is resolved.
