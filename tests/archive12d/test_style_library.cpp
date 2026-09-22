@@ -11,6 +11,8 @@
 #include "katana/archive12d/style_library.hpp"
 #include "katana/archive12d/text_encoding.hpp"
 
+#include "reference_files.hpp"
+
 namespace a12 = katana::archive12d;
 using katana::entity::LineStyle;
 using katana::entity::StrokeOp;
@@ -57,7 +59,7 @@ TEST(StyleLibrary, EveryCommandOfADefinitionIsKept)
 {
     const auto library = read(R"(// a header comment
 worldstyle "WATR Main" {
-    group  "TfNSW Survey/WATR"
+    group  "Survey/WATR"
     length 2.5
     factor 3
     xorigin 1
@@ -73,7 +75,7 @@ worldstyle "WATR Main" {
     ASSERT_EQ(library.library.size(), 1u) << allWarnings(library);
     const LineStyle* style = library.library.find("WATR Main");
     ASSERT_NE(style, nullptr);
-    EXPECT_EQ(style->group, "TfNSW Survey/WATR");
+    EXPECT_EQ(style->group, "Survey/WATR");
     EXPECT_EQ(style->units, StyleUnits::World);
     EXPECT_FALSE(style->atVertices) << "no `mode vertex`, so it runs along the line";
     EXPECT_EQ(style->length, 2.5);
@@ -176,7 +178,7 @@ worldstyle "S" { move 0 0 draw 1 1 })");
 
 TEST(StyleLibrary, TheLastDefinitionOfANameIsTheOneThatTakesEffect)
 {
-    // Four of the Transport for NSW definitions are in both library files.
+    // Four of the reference definitions are in both of its library files.
     const auto library = read(R"(worldstyle "BUIL Doorway" { move 0 0 draw 1 0 }
 worldstyle "BUIL Doorway" { move 0 0 draw 2 0 })");
     ASSERT_EQ(library.library.size(), 1u) << allWarnings(library);
@@ -240,66 +242,55 @@ TEST(StyleLibrary, TheBoundsOfADefinitionCoverItsStrokesWithTheFactorApplied)
 
 // ---- the customisation this was built against -------------------------------------------------
 //
-// A real Transport for NSW library, 796 definitions over two files. These
-// SKIP rather than fail when the files are not in the checkout: they carry
-// their author's licence notice and may not travel with the source.
+// A real production customisation, 796 definitions over two files. It is
+// third-party material under its own licence and is NOT in this repository,
+// so this SKIPS when it is absent - see tests/archive12d/reference_files.hpp
+// for why the files are found by looking inside them rather than by name.
 
-namespace {
-
-std::optional<std::string> referenceFile(const std::string& name)
+TEST(StyleLibrary, TheReferenceCustomisationIsReadWhole)
 {
-    std::ifstream file(std::string(KATANA_12D_REFERENCE_FILES) + "/" + name, std::ios::binary);
-    if (!file) {
-        return std::nullopt;
-    }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    const auto decoded = a12::decodeText(buffer.str());
-    EXPECT_TRUE(decoded.ok()) << (decoded.ok() ? "" : decoded.error().describe());
-    return decoded.ok() ? std::optional<std::string>(decoded->text) : std::nullopt;
-}
-
-} // namespace
-
-TEST(StyleLibrary, TheTransportForNswCustomisationIsReadWhole)
-{
-    const auto linestyles = referenceFile("user_linestyl_TfNSWv15.4d");
-    const auto symbols = referenceFile("user_symbols_TfNSWv15.4d");
-    if (!linestyles || !symbols) {
+    const auto customisation = katana::testing::referenceCustomisation();
+    if (customisation.libraries.size() < 2) {
         GTEST_SKIP() << "the reference customisation is not in this checkout";
     }
 
-    auto first = a12::readStyleLibrary(*linestyles);
-    ASSERT_TRUE(first.ok()) << first.error().describe();
-    // Counted from the file itself, outside Katana: 322 blocks - 238
-    // paperstyle, 47 twoptstyle, 37 worldstyle - of which "BDYS Parish" is
-    // defined twice, so 321 definitions survive.
-    EXPECT_EQ(first->library.size(), 321u);
-    EXPECT_EQ(first->replaced, 1u);
-    EXPECT_EQ(readCount(*first, "paperstyle"), 238u);
-    EXPECT_EQ(readCount(*first, "twoptstyle"), 47u);
-    EXPECT_EQ(readCount(*first, "worldstyle"), 37u);
-    EXPECT_EQ(readCount(*first, "move"), 10969u);
-    EXPECT_EQ(readCount(*first, "draw"), 10770u);
-    EXPECT_TRUE(first->warnings.empty()) << allWarnings(*first);
+    // Loaded as one customisation, later winning, which is how a site loads
+    // several library files.
+    katana::entity::StyleLibrary library;
+    std::size_t replaced = 0;
+    std::size_t moves = 0;
+    std::size_t draws = 0;
+    std::size_t blocks = 0;
+    for (const std::string& text : customisation.libraries) {
+        auto read = a12::readStyleLibraryInto(std::move(library), text);
+        ASSERT_TRUE(read.ok()) << read.error().describe();
+        // The strongest claim there is, and it does not depend on which file
+        // this was: every keyword in it is one the reader knows.
+        EXPECT_TRUE(read->warnings.empty()) << allWarnings(*read);
+        library = std::move(read->library);
+        replaced += read->replaced;
+        moves += readCount(*read, "move");
+        draws += readCount(*read, "draw");
+        for (const char* kind : {"worldstyle", "paperstyle", "twoptstyle"}) {
+            blocks += readCount(*read, kind);
+        }
+    }
 
-    auto both = a12::readStyleLibraryInto(std::move(first->library), *symbols);
-    ASSERT_TRUE(both.ok()) << both.error().describe();
-    EXPECT_EQ(readCount(*both, "worldstyle"), 473u);
-    EXPECT_EQ(readCount(*both, "twoptstyle"), 1u);
-    EXPECT_TRUE(both->warnings.empty()) << allWarnings(*both);
-    // Three of this file's 474 are already defined by the first: "BUIL
-    // Doorway", "TOPO Tree Foliage" and "C TOPO Tree Foliage".
-    EXPECT_EQ(both->replaced, 3u);
-    EXPECT_EQ(both->library.size(), 792u);
+    // Counted from the files by a script that uses none of Katana's code:
+    // 796 definition blocks, of which four are defined twice, so 792 survive.
+    EXPECT_EQ(blocks, 796u);
+    EXPECT_EQ(replaced, 4u);
+    EXPECT_EQ(library.size(), 792u);
+    EXPECT_EQ(moves, 17045u);
+    EXPECT_EQ(draws, 17317u);
 
     // The symbols are the definitions that say `mode vertex`.
-    EXPECT_EQ(katana::entity::vertexStyleNames(both->library).size(), 157u);
-    EXPECT_EQ(katana::entity::styleGroups(both->library).size(), 71u);
+    EXPECT_EQ(katana::entity::vertexStyleNames(library).size(), 157u);
+    EXPECT_EQ(katana::entity::styleGroups(library).size(), 71u);
 
-    // The one the user named: a water main's linestyle.
-    const LineStyle* main = both->library.find("WATR Main");
-    ASSERT_NE(main, nullptr) << "the mapfile sends survey code WM* to this";
-    EXPECT_EQ(main->group, "TfNSW Survey/WATR");
+    // The one a water main is drawn with: the mapfile sends code WM* to it.
+    const LineStyle* main = library.find("WATR Main");
+    ASSERT_NE(main, nullptr);
+    EXPECT_FALSE(main->group.empty());
     EXPECT_FALSE(main->strokes.empty());
 }

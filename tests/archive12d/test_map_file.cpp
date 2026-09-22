@@ -11,6 +11,8 @@
 #include "katana/archive12d/map_file.hpp"
 #include "katana/archive12d/text_encoding.hpp"
 
+#include "reference_files.hpp"
+
 namespace a12 = katana::archive12d;
 using katana::entity::SurveyBreakline;
 using katana::entity::SurveyMap;
@@ -60,24 +62,11 @@ bool anyWarningContains(const a12::MapFileRead& map, std::string_view needle)
                        });
 }
 
-std::optional<std::string> referenceFile(const std::string& name)
-{
-    std::ifstream file(std::string(KATANA_12D_REFERENCE_FILES) + "/" + name, std::ios::binary);
-    if (!file) {
-        return std::nullopt;
-    }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    const auto decoded = a12::decodeText(buffer.str());
-    EXPECT_TRUE(decoded.ok()) << (decoded.ok() ? "" : decoded.error().describe());
-    return decoded.ok() ? std::optional<std::string>(decoded->text) : std::nullopt;
-}
-
 } // namespace
 
 TEST(MapFile, AWaterMainIsAModelAColourALineAndALinestyle)
 {
-    // The rule the user named, copied from TfNSW_Survey_Detail.mapfile.
+    // The rule a water main gets, copied from the reference mapfile.
     const auto map = read(mapData(R"(
       <item>
         <key>WM*</key>
@@ -87,7 +76,7 @@ TEST(MapFile, AWaterMainIsAModelAColourALineAndALinestyle)
         <linestyle>WATR Main</linestyle>
         <weight>0</weight>
         <comment>[WM*] Main</comment>
-        <group>TfNSW SURVEY - WATR</group>
+        <group>SURVEY - WATR</group>
       </item>)"));
     ASSERT_EQ(map.map.size(), 1u) << allWarnings(map);
     EXPECT_EQ(map.version, "11.0");
@@ -100,7 +89,7 @@ TEST(MapFile, AWaterMainIsAModelAColourALineAndALinestyle)
     EXPECT_EQ(match.resolved.linestyle, "WATR Main");
     ASSERT_TRUE(match.resolved.breakline.has_value());
     EXPECT_EQ(*match.resolved.breakline, SurveyBreakline::Line);
-    EXPECT_EQ(match.resolved.group, "TfNSW SURVEY - WATR");
+    EXPECT_EQ(match.resolved.group, "SURVEY - WATR");
 
     EXPECT_TRUE(map.map.lookup("SW01").empty()) << "a code no rule covers resolves to nothing";
     EXPECT_TRUE(map.map.lookup("W").empty()) << "shorter than the prefix is not a match";
@@ -288,44 +277,42 @@ TEST(MapFile, TwoMapfilesLoadAsOneAndTheFirstWinsWhatBothSet)
 
 // ---- the customisation this was built against -------------------------------------------------
 
-TEST(MapFile, TheTransportForNswMapfilesAreReadWhole)
+TEST(MapFile, TheReferenceMapfilesAreReadWhole)
 {
-    const auto detail = referenceFile("TfNSW_Survey_Detail.mapfile");
-    const auto names = referenceFile("names.4d");
-    if (!detail || !names) {
+    const auto customisation = katana::testing::referenceCustomisation();
+    if (customisation.mapfiles.size() < 2) {
         GTEST_SKIP() << "the reference customisation is not in this checkout";
     }
 
-    auto first = a12::readMapFile(*detail);
-    ASSERT_TRUE(first.ok()) << first.error().describe();
-    // Counted from the file itself, outside Katana.
-    EXPECT_EQ(first->map.size(), 725u) << allWarnings(*first);
-    EXPECT_EQ(first->map.keys().size(), 465u);
-    EXPECT_TRUE(first->warnings.empty()) << allWarnings(*first);
-    EXPECT_EQ(first->version, "11.0");
+    katana::entity::SurveyMap map;
+    std::vector<std::size_t> perFile;
+    std::size_t warnings = 0;
+    for (const std::string& text : customisation.mapfiles) {
+        const std::size_t before = map.size();
+        auto read = a12::readMapFileInto(std::move(map), text);
+        ASSERT_TRUE(read.ok()) << read.error().describe();
+        map = std::move(read->map);
+        perFile.push_back(map.size() - before);
+        warnings += read->warnings.size();
+    }
+    std::sort(perFile.begin(), perFile.end());
 
-    // The rule the user named.
-    const auto water = first->map.lookup("WM01");
+    // Counted from the files by a script using none of Katana's code. Sorted,
+    // so this says nothing about which file is which.
+    EXPECT_EQ(perFile, (std::vector<std::size_t>{725u, 899u}));
+    EXPECT_EQ(map.size(), 1624u);
+    // One warning, and it is right: an <item> holding only a <group>, which
+    // names no code and so could never apply to one.
+    EXPECT_EQ(warnings, 1u);
+
+    // The rule a water main gets, end to end.
+    const auto water = map.lookup("WM01");
     ASSERT_FALSE(water.empty());
     EXPECT_EQ(water.resolved.model, "SURVEY SERVICES");
     EXPECT_EQ(water.resolved.linestyle, "WATR Main");
     ASSERT_TRUE(water.resolved.breakline.has_value());
     EXPECT_EQ(*water.resolved.breakline, SurveyBreakline::Line);
-
-    // `names.4d` is a second mapfile, despite the extension a linestyle
-    // library also uses: what makes a file a mapfile is <map_file>.
-    auto both = a12::readMapFileInto(std::move(first->map), *names);
-    ASSERT_TRUE(both.ok()) << both.error().describe();
-    EXPECT_EQ(both->map.size(), 725u + 899u);
-    // One warning, and it is right: `names.4d` ends with an <item> that holds
-    // only a <group> and names no code, so there is nothing it could apply
-    // to. 900 items, 899 rules.
-    ASSERT_EQ(both->warnings.size(), 1u) << allWarnings(*both);
-    EXPECT_TRUE(anyWarningContains(*both, "has no <key>")) << allWarnings(*both);
-
-    // Between them they name 372 distinct linestyles and symbols, which is
-    // what a library has to provide for this customisation to draw.
-    EXPECT_GE(both->map.stylesReferenced().size(), 200u);
+    EXPECT_GE(map.stylesReferenced().size(), 200u);
 }
 
 // ---- the XML a hand-edited mapfile might contain ----------------------------------------------

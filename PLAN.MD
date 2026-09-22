@@ -1664,14 +1664,17 @@ exception is a defect that blocks this work.
 
 ### What the three files are
 
-They are a real production customisation - Transport for NSW's, prepared by
-Extra Dimension Solutions - and they are how a survey becomes a drawing:
+They are a real production customisation from a road authority, and they are
+how a survey becomes a drawing. The files are third-party material under
+their own licence and are NOT part of this repository; everything that uses
+them skips when they are absent:
 
 | File | What it is |
 |---|---|
-| `TfNSW_Survey_Detail.mapfile` | XML (UTF-16LE). 728 rules keyed by survey code: what MODEL, colour, linestyle, weight and breakline a code becomes, which symbol it gets, what attributes it carries. |
-| `user_linestyl_TfNSWv15.4d` | 322 linestyle definitions - the strokes a line is drawn with. ASCII. |
-| `user_symbols_TfNSWv15.4d` | 474 symbol definitions, same grammar. UTF-16LE. |
+| a detail mapfile (`.mapfile`) | XML (UTF-16LE). 728 rules keyed by survey code: what MODEL, colour, linestyle, weight and breakline a code becomes, which symbol it gets, what attributes it carries. |
+| a linestyle library (`.4d`) | 322 linestyle definitions - the strokes a line is drawn with. ASCII. |
+| a symbol library (`.4d`) | 474 symbol definitions, same grammar. UTF-16LE. |
+| a second mapfile (`.4d`) | 900 more rules, sharing its extension with the libraries. |
 
 A surveyor codes a point `WM01`. The mapfile's `WM*` rule puts it in model
 `SURVEY SERVICES`, colour `sui water potable`, breakline `Line`, linestyle
@@ -1687,7 +1690,7 @@ be the same symbol (**defined as a linestyle**) for every vertex"
 
 ```
 <kind> "NAME" {                 kind = paperstyle | worldstyle | twoptstyle
-  group "TfNSW Survey/WATR"     a folder path for the library tree
+  group "Survey/WATR"           a folder path for the library tree
   mode vertex                   drawn at each vertex rather than along the line
   length 2.5                    the period of the pattern along the line
   factor 5                      a scale applied to every coordinate
@@ -1737,7 +1740,7 @@ code's treatment is the UNION of the aspects that match it:
    files, later winning. See `docs/survey_coding.md` for the grammar, where
    each piece lives and why, and the measurements.
 
-   Evidence: 12 tests. The real Transport for NSW customisation reads with
+   Evidence: 12 tests. The real reference customisation reads with
    NO warnings - 796 definitions, 792 after the four defined twice, 157 of
    them symbols, in 71 groups - and every count is checked against a script
    that uses none of Katana's code.
@@ -1773,7 +1776,7 @@ code's treatment is the UNION of the aspects that match it:
    `vertex_attribute_data`. Reading only `<map_data>` takes 457 of the 725
    rules and loses every symbol. See docs/survey_coding.md.
 
-   Evidence: 15 tests. The Transport for NSW detail mapfile reads as 725
+   Evidence: 15 tests. The reference detail mapfile reads as 725
    rules over 465 keys with no warnings; `names.4d` - a second mapfile,
    despite the extension a linestyle library also uses - reads as 899 rules
    with one warning, which is correct.
