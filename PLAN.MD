@@ -1777,12 +1777,17 @@ code's treatment is the UNION of the aspects that match it:
    rules over 465 keys with no warnings; `names.4d` - a second mapfile,
    despite the extension a linestyle library also uses - reads as 899 rules
    with one warning, which is correct.
-4. **Applying a code. NOT YET STARTED, and the last substantial piece.** A
-   command that takes entities carrying a survey code and sets the layer,
-   colour, style, symbol and attributes the mapfile gives them - undoable, and
-   reporting every code the mapfile has no rule for. Everything it needs is in
-   place: `SurveyMap::lookup` resolves the code, the Document carries the map,
-   and the viewport already draws whatever a style names.
+4. **Applying a code. DELIVERED.** `cad::applySurveyCodes`
+   (`include/katana/cad/survey_coding.hpp`) turns the mapfile's answer into
+   the layer, the style and the properties an entity should have, as ONE
+   undoable transaction - twenty thousand coded points are one undo, not
+   twenty thousand. `CODE [<property>]` in `katana_cli`. It reports what it
+   did AND every code the mapfile had no rule for, because a code silently
+   left alone looks exactly like a code that was handled. 7 tests; see
+   docs/survey_coding.md for the six decisions in it.
+
+   OUTSTANDING: it is not on a menu in the application yet - the CLI verb and
+   the library are the way to it.
 5. **The model and the project. PARTIALLY DELIVERED.** `Style::symbol` is no
    longer a closed set: it is a name resolved when it is drawn, exactly as
    `Style::linetype` already was. `cad::Document` carries the loaded
@@ -1815,7 +1820,18 @@ code's treatment is the UNION of the aspects that match it:
 7. **The CLI and the documentation. DELIVERED** for what exists so far:
    `CUSTOMISE` with its report, and `docs/survey_coding.md`.
 
-**STATUS: IN PROGRESS.**
+**STATUS: DELIVERED, bar two things named above and repeated here.** The
+chain the user asked for works end to end: a mapfile, a linestyle library and
+a symbol library load together; a survey code resolves through the mapfile to
+a model, a colour, a linestyle and a symbol; the entity gets them; and the
+viewport draws the definition's strokes.
+
+OUTSTANDING, neither blocking:
+- a library BROWSER - the groups tree with a preview of each definition - is
+  not built, so the 792 definitions can be used but not looked through;
+- a project does not remember which customisation it was drawn with, so it is
+  loaded again each session;
+- applying a code is a CLI verb, not a menu item.
 
 ---
 
