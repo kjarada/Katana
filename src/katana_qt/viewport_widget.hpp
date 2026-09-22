@@ -127,8 +127,12 @@ class ViewportWidget final : public QWidget {
     // A 12d definition's strokes and texts, honouring the pen changes in it.
     void drawStyleDrawing(QPainter& painter, const katana::cad::StyleDrawing& drawing) const;
     void drawStyleText(QPainter& painter, const katana::cad::StyleTextMark& text) const;
-    void drawLineStyle(QPainter& painter, const katana::entity::LineStyle& definition,
-                       const katana::entity::Geometry& geometry) const;
+    // Draws the definition along the entity's plan shape. FALSE when nothing
+    // came of it, so the caller knows to draw the plain line instead - a
+    // 12d linestyle replaces the line rather than decorating it.
+    [[nodiscard]] bool drawLineStyle(QPainter& painter,
+                                     const katana::entity::LineStyle& definition,
+                                     const katana::entity::Geometry& geometry) const;
     [[nodiscard]] static QPen penFor(const QPen& entityPen, const std::string& pen);
     // Model units to one plot millimetre, which is what a `paperstyle` uses.
     [[nodiscard]] double paperScale() const;
