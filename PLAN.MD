@@ -1530,7 +1530,21 @@ definitions - are not managed here or anywhere; the dialog edits the
 attributes an entity has rather than declaring what attributes a kind of
 entity should have. That is what remains of this slice.
 
-**STATUS: slice 6 (layer manager) next.**
+**Slice 6 DELIVERED (2026-09-22).** Edit > Layers... (Ctrl+L) is the whole
+table - name, on, locked, colour, linetype, weight, hatch and how many
+entities are on each - with a form below for the definition (including the
+dimension style, which the dock has no room for), and New, New Child, Save
+Changes, Rename or Move, Delete, Put Selection Here and Make Current. The
+dock stays as the quick view, as the slice asked.
+
+"Move" needed no new command: a layer name is a PATH, so moving a layer
+under another parent IS renaming it, and `renameLayer` already takes the
+subtree and the entities on it as one undo step. Make Current is not a
+command at all - the current layer is session state like the selection, and
+putting it on the undo stack would make Ctrl+Z undo where the next line
+will be drawn.
+
+**STATUS: slice 7 (text as 12d draws it) next.**
 
 ---
 

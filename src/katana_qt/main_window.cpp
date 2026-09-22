@@ -4,6 +4,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "layer_manager.hpp"
 #include "style_manager.hpp"
 
 #include <QAction>
@@ -330,6 +331,13 @@ void MainWindow::buildActions()
         auto dialog = makeStyleManager();
         dialog->showFirstRows();
         dialog->exec();
+    });
+    editMenu->addAction("&Layers...", QKeySequence(Qt::CTRL | Qt::Key_L), this, [this] {
+        auto dialog = makeLayerManager();
+        dialog->showFirstRow();
+        dialog->exec();
+        // The dock shows the same layers, so it follows the dialog.
+        scheduleRefresh();
     });
     editMenu->addAction("&Attributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
         auto dialog = makeAttributeManager();
@@ -930,6 +938,13 @@ void MainWindow::selectOnly(katana::entity::EntityId id)
 {
     logMessage(QString::fromStdString(
         interpreter_.run("SELECT " + std::to_string(id)).valueOr("")));
+}
+
+std::unique_ptr<LayerManagerDialog> MainWindow::makeLayerManager()
+{
+    return std::make_unique<LayerManagerDialog>(
+        document_, [this](const QString& message, bool isError) { logMessage(message, isError); },
+        this);
 }
 
 std::unique_ptr<AttributeManagerDialog> MainWindow::makeAttributeManager()

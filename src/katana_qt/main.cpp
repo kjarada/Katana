@@ -6,6 +6,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "layer_manager.hpp"
 #include "style_manager.hpp"
 #include "katana/cad/plot.hpp"
 #include "theme.hpp"
@@ -20,6 +21,7 @@
 //   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
 //   katana [project-directory] [data-file...] --style-manager --screenshot out.png
 //   katana [project-directory] [data-file...] --attributes --screenshot out.png
+//   katana [project-directory] [data-file...] --layer-manager --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -62,6 +64,7 @@ int main(int argc, char* argv[])
     std::optional<QString> toggleLayer;
     bool styleManager = false;
     bool attributeManager = false;
+    bool layerManager = false;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -80,6 +83,8 @@ int main(int argc, char* argv[])
             toggleLayer = value();
         } else if (argument == "--style-manager") {
             styleManager = true;
+        } else if (argument == "--layer-manager") {
+            layerManager = true;
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -155,6 +160,18 @@ int main(int argc, char* argv[])
                 return 1;
             }
             QApplication::processEvents();
+        }
+        if (layerManager) {
+            auto dialog = window.makeLayerManager();
+            dialog->show();
+            dialog->showFirstRow();
+            QApplication::processEvents();
+            QApplication::processEvents();
+            if (!dialog->grab().save(*screenshotPath, "PNG")) {
+                std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
+                return 1;
+            }
+            return 0;
         }
         if (attributeManager) {
             // Everything selected, because the manager acts on the selection

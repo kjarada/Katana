@@ -56,6 +56,9 @@ endif()
 if(DEFINED ATTRIBUTES)
     list(APPEND extra --attributes "${ATTRIBUTES}")
 endif()
+if(LAYER_MANAGER)
+    list(APPEND extra --layer-manager)
+endif()
 
 execute_process(
     COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
@@ -75,7 +78,7 @@ endif()
 # smaller window of mostly flat panels, so it gets its own floor. Compared as
 # hex for the reason given in check_plot.cmake.
 set(floor 20000)
-if(STYLE_MANAGER OR DEFINED ATTRIBUTES)
+if(STYLE_MANAGER OR DEFINED ATTRIBUTES OR LAYER_MANAGER)
     set(floor 10000)
 endif()
 file(SIZE "${OUTPUT}" size)

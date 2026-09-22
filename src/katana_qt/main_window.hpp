@@ -44,6 +44,7 @@ namespace katana::qt {
 
 class StyleManagerDialog;
 class AttributeManagerDialog;
+class LayerManagerDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -94,6 +95,7 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] std::unique_ptr<StyleManagerDialog> makeStyleManager();
     // The attribute manager, built but not shown - as makeStyleManager.
     [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
+    [[nodiscard]] std::unique_ptr<LayerManagerDialog> makeLayerManager();
     // Selects every entity on an unlocked layer, as Edit > Select All does,
     // or just the one with this id. For the headless --attributes switch,
     // whose dialog acts on a selection.

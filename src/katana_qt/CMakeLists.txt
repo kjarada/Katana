@@ -35,6 +35,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     style_manager.hpp
     attribute_manager.cpp
     attribute_manager.hpp
+    layer_manager.cpp
+    layer_manager.hpp
     icons.cpp
     icons.hpp
     theme.cpp

@@ -703,6 +703,25 @@ What follows from that:
   rather than trusting `validate()` to have been called. The scene builder
   is the last thing between a file and a read past the end of a vector.
 
+## The layer manager, and why "move" is "rename"
+
+The dock beside the drawing is the quick view; Edit > Layers... (PLAN.MD
+20.2 slice 6) is the whole table, with the fields a dock has no room for and
+the operations that need it: move a layer under another parent, and put the
+selection on a layer.
+
+Moving needed no new command. A layer name is a path ("design/surface/tin1"
+- see `layer_path.hpp` for why the tree is derived from the names rather
+than stored), so moving a layer under another parent is exactly renaming it,
+and `renameLayer` already carries the subtree and the entities on it as one
+undo step. A "move" command would have been a second spelling of the same
+thing.
+
+Make Current is deliberately NOT a command: the current layer is session
+state like the selection, and putting it on the undo stack would make Ctrl+Z
+undo where the next line will be drawn - which is not what anyone means by
+undo.
+
 ## The attribute manager: the tree 12d had, and what "varies" protects
 
 A 12d string carries a tree of attributes; the importer flattens it to
