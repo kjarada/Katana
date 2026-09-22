@@ -215,3 +215,41 @@ slipping in.
 
 An unknown section is named with how many rules went unread; an unknown field
 inside a rule is named and the rest of the rule is kept.
+
+## From a definition to geometry
+
+`cad::styleDrawing` turns a definition into polylines and texts in model
+coordinates, so the viewport, the plotter and a preview all paint the same
+thing - the arrangement `cad::symbolStrokes` already had, for the same reason.
+
+The definition decides how it is placed, not the caller:
+
+- `atVertices` - a symbol at each vertex, scaled and rotated.
+- `twoptstyle` - stretched across the whole line, its two anchors mapped onto
+  the ends.
+- otherwise - repeated along the line, the definition's +x running along and
+  its +y to the LEFT.
+
+Three decisions worth recording:
+
+**The pattern bends with the line.** Each point is placed by its own distance
+along the line rather than by rigidly transforming a whole instance, so a
+pattern that spans a corner follows it instead of flying off. On a straight
+run the two are identical. The cost is that a long pattern on a tight curve
+is distorted rather than detached, which is the right way round for survey
+linework.
+
+**On a corner the outgoing leg wins.** An instance landing exactly on a
+vertex has two directions to choose from. It takes the one it is about to be
+drawn along. This is arbitrary but has to be decided, so it is decided in one
+place and stated in a test.
+
+**A two-point style is scaled equally in both axes.** 12d's `stretch_mode`
+and `cycle_mode` are kept but not acted on, because no documentation
+available here says what their values mean. A similarity rather than an
+independent scale per axis means a doorway stretched across a wider opening
+is still a doorway; shearing it would be a mistake that looks like a feature.
+
+**A pattern cannot run away.** A definition with a 1 mm period laid along a
+30 km traverse would ask for thirty million instances. It is capped at 20,000
+and what comes back is still a drawing.

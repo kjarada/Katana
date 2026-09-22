@@ -1747,10 +1747,16 @@ code's treatment is the UNION of the aspects that match it:
    `cad`. A library is deliberately NOT part of a Model: it is a site-wide
    customisation a project NAMES rather than copies, which is how 12d works
    and avoids writing 35,000 strokes into every project file.
-2. **Strokes on demand.** A library definition resolves to plain geometry:
-   a symbol at a point (replacing the closed set of sixteen built-ins with a
-   lookup that falls back to them), and a linestyle repeated along a polyline
-   with paper and world scaling.
+2. **Strokes on demand. DELIVERED for the geometry.**
+   `cad::styleDrawing` (`include/katana/cad/style_drawing.hpp`) turns a
+   definition into polylines and texts in model coordinates - a symbol at each
+   vertex, a two-point style across the span, or a pattern repeated along the
+   line, with paper and world scaling. 14 tests, every expected value worked
+   out by hand. See docs/survey_coding.md for the three decisions in it.
+
+   OUTSTANDING: the sixteen built-in symbols are still a closed set that
+   `Style::symbol` is validated against, so a style naming a library
+   definition is refused by the model. That is slice 5, where it belongs.
 3. **The mapfile reader. DELIVERED.** `entity::SurveyMap` and `SurveyRule`
    (`include/katana/entity/survey_map.hpp`) are the table;
    `archive12d::readMapFile` (`include/katana/archive12d/map_file.hpp`) reads
