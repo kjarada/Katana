@@ -22,6 +22,8 @@ add_library(katana_archive12d STATIC
     domain_import.cpp
     domain_export.cpp
     style_library.cpp
+    xml.cpp
+    map_file.cpp
 )
 katana_target_defaults(katana_archive12d)
 target_link_libraries(katana_archive12d
