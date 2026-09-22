@@ -14,6 +14,14 @@
 // Zone 56).
 // ---------------------------------------------------------------------------
 
+// A hand-written 12da inherits the format's CURRENT BREAKLINE TYPE, whose
+// default is `point` (commands, 1.4.4), and `breakline point` means the
+// string's vertices are separate POINTS rather than a line through them. 12d
+// writes the flag on every string it exports and leaves nothing to the
+// default; this says it once for the strings below that do not, so that a
+// string meaning a line is read as one. A string that wants points overrides
+// it with `breakline point` of its own.
+breakline line
 tin {
   name "TIN SOUTH WEST"
 
