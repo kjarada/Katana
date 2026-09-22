@@ -1647,6 +1647,128 @@ slice 5, which is recorded and does not block the application.**
 
 ---
 
+## 20.3 The survey coding programme — TAKES PRECEDENCE OVER 20.2's REMAINDER AND EVERY OTHER PHASE
+
+**The user's instruction of 2026-09-22, and the reason this section exists:**
+
+> look at the files i put here `C:\GitHubProjects\Katana\docs\12d Refrence Files`,
+> they are all related, as survey code WM is a water main and gets a specific
+> linestyle in linestyles file, as well as some codes get a symbole, i want you
+> to implement all this, mapfile, symples and linestyles, this is more
+> important than other steps on the plan, so dont stop till it finishes and
+> fully implmented
+
+**Nothing else is started or resumed until every slice here is DELIVERED**,
+including the property definitions left over from 20.2 slice 5. The only
+exception is a defect that blocks this work.
+
+### What the three files are
+
+They are a real production customisation - Transport for NSW's, prepared by
+Extra Dimension Solutions - and they are how a survey becomes a drawing:
+
+| File | What it is |
+|---|---|
+| `TfNSW_Survey_Detail.mapfile` | XML (UTF-16LE). 728 rules keyed by survey code: what MODEL, colour, linestyle, weight and breakline a code becomes, which symbol it gets, what attributes it carries. |
+| `user_linestyl_TfNSWv15.4d` | 322 linestyle definitions - the strokes a line is drawn with. ASCII. |
+| `user_symbols_TfNSWv15.4d` | 474 symbol definitions, same grammar. UTF-16LE. |
+
+A surveyor codes a point `WM01`. The mapfile's `WM*` rule puts it in model
+`SURVEY SERVICES`, colour `sui water potable`, breakline `Line`, linestyle
+`WATR Main`; the linestyle library says what `WATR Main` is drawn with. A
+code like `AC*` additionally names a symbol (`CULT Bollard`) from the symbol
+library. That chain is what this section builds.
+
+### The grammar, as measured rather than assumed
+
+Both `.4d` files are ONE grammar - which the 12d manual confirms: "There can
+be the same symbol (**defined as a linestyle**) for every vertex"
+(`10-super-string.md` 510). A symbol is a linestyle whose `mode` is `vertex`.
+
+```
+<kind> "NAME" {                 kind = paperstyle | worldstyle | twoptstyle
+  group "TfNSW Survey/WATR"     a folder path for the library tree
+  mode vertex                   drawn at each vertex rather than along the line
+  length 2.5                    the period of the pattern along the line
+  factor 5                      a scale applied to every coordinate
+  xorigin 0   yorigin 0         worldstyle/paperstyle origin
+  xorigin1/yorigin1             twoptstyle: the first anchor
+  xorigin2/yorigin2             twoptstyle: the second anchor
+  stretch_mode 2  cycle_mode 2  twoptstyle: how it fills the span
+  colour "pen 035"              the pen for the strokes that follow;
+                                "view_colour" means the entity's own
+  move X Y                      pen up
+  draw X Y                      pen down
+  arc RADIUS START END          degrees, centred on the current point
+  circle RADIUS                 centred on the current point
+  dot 0
+  text "T" ANGLE HEIGHT "justify" "font" WIDTHFACTOR SLANT ? ?
+}
+```
+
+Counted over the two files: paperstyle 238, worldstyle 510, twoptstyle 48;
+`move` 17045, `draw` 17317, `circle` 312, `arc` 104, `dot` 179, `text` 514.
+`paperstyle` sizes are plot millimetres and so scale with the plot;
+`worldstyle` sizes are model units and stay on the ground.
+
+The mapfile's `<map_data>` is a list of `<item>`, each keyed by a survey code
+which is either exact (209 of the 465 distinct keys) or a prefix wildcard
+(`WM*`, 256 of them) - there is not one mid-string wildcard in the file. An
+item carries exactly ONE aspect, and 213 keys carry more than one item, so a
+code's treatment is the UNION of the aspects that match it:
+
+| Aspect | Fields | Count |
+|---|---|---|
+| geometry | `model` `colour` `breakline` `linestyle` `weight` `group` | 457 |
+| symbol | `symbol_data{style colour size rotation offset raise}` `hide` | 200 |
+| attributes | `attributes` / `vertex_attributes` / `segment_attributes`, with `justify` `shape` `size1` `size2` `active` | 48 |
+| map_attributes | `map_attributes{integer\|text{name value}}` | 13 |
+| textstyle | `textstyle_data{textstyle colour type size justify_x justify_y}` | 7 |
+
+### The slices
+
+1. **The style library reader. DELIVERED.** `entity::LineStyle` and
+   `entity::StyleLibrary` (`include/katana/entity/style_library.hpp`) are the
+   definitions - one type for linestyles and symbols alike, because in 12d a
+   symbol IS a linestyle and `mode vertex` is the only difference.
+   `archive12d::readStyleLibrary` (`include/katana/archive12d/style_library.hpp`)
+   reads a `.4d` into one, keeping every command and naming every command it
+   does not know. `readStyleLibraryInto` loads a customisation made of several
+   files, later winning. See `docs/survey_coding.md` for the grammar, where
+   each piece lives and why, and the measurements.
+
+   Evidence: 12 tests. The real Transport for NSW customisation reads with
+   NO warnings - 796 definitions, 792 after the four defined twice, 157 of
+   them symbols, in 71 groups - and every count is checked against a script
+   that uses none of Katana's code.
+
+   The types live in `entity`, not in `cad` as this plan first said, because
+   `commands` has to see them to apply a survey code and `commands` cannot see
+   `cad`. A library is deliberately NOT part of a Model: it is a site-wide
+   customisation a project NAMES rather than copies, which is how 12d works
+   and avoids writing 35,000 strokes into every project file.
+2. **Strokes on demand.** A library definition resolves to plain geometry:
+   a symbol at a point (replacing the closed set of sixteen built-ins with a
+   lookup that falls back to them), and a linestyle repeated along a polyline
+   with paper and world scaling.
+3. **The mapfile reader.** `cad::MapFile`, the XML above, with `lookup(code)`
+   resolving each aspect separately, most specific first: an exact key beats
+   the longest matching prefix, which beats a shorter one, which beats `*`.
+4. **Applying a code.** A command that takes entities carrying a survey code
+   and sets the layer, colour, style, symbol and attributes the mapfile gives
+   them - undoable, and reporting every code the mapfile has no rule for.
+5. **The model and the project.** `Style::symbol` stops being a closed set
+   (it is resolved at draw time exactly as `Style::linetype` already is), and
+   a project remembers which library and mapfile it was drawn with.
+6. **The GUI.** Loading the three files, a library browser showing the groups
+   with a preview of each definition, and applying the mapfile to a selection
+   or to everything.
+7. **The CLI and the documentation.**
+
+**STATUS: IN PROGRESS.**
+
+---
+
 # 26. Phase 21 — Civil and Survey Engineering
 
 **STATUS: PARTIALLY DELIVERED — profiles and cross sections only.**
