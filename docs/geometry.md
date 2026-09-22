@@ -456,3 +456,23 @@ where the water will. Details in `docs/cad.md`.
 Corridors, parcels and grading. Cut and fill *quantities* between design and
 ground along an alignment - the profile is drawn against the ground but
 nothing yet integrates the area between them; that is the corridor's job.
+
+## Rejecting early without changing the answer (`polygon.hpp`, `primitives2d.hpp`)
+
+`isSimple` is O(n^2) and runs on validation, so its constant matters: a
+512-vertex boundary took 3.2 ms and takes 0.80 ms. The saving is a bounding-box
+reject before the segment-segment intersection, with a margin of `4 *
+kGeometric` - **derived, not chosen**: `intersect()` reports a hit when the
+segments come within `2 * kGeometric` of each other, so two boxes further apart
+than twice that cannot contain a reported intersection. Removing the margin
+fails two polygon tests, which was checked by removing it.
+
+`clipPolygon` swaps its two vertex buffers rather than move-assigning them, so
+Sutherland-Hodgman's per-clip-edge lists are allocated once instead of once per
+edge. `Rectangle2::closestPoint` walks a stack `std::array<Point2, 4>` instead
+of building a `std::vector` of corners on every call - it is called once per
+candidate entity on every pick and every snap, and is 2.8x faster for it.
+
+The benchmarks for all three are in `benchmarks/bench_geometry.cpp`; they did
+not exist when the changes were made, which is recorded in
+`docs/performance.md` as a process failure rather than a footnote.

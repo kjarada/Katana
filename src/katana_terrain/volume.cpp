@@ -168,21 +168,24 @@ std::size_t clipTriangleToTriangle(const std::array<Point2, 3>& subject,
 // Elevation of the plane of `triangle` at the three given positions. The
 // weights are exact at the triangle's own vertices (1, 0, 0), which is what makes
 // the comparison of identical surfaces exactly zero.
-std::optional<std::array<double, 3>> planeElevations(const TinSurface& surface,
-                                                     std::uint32_t triangle,
-                                                     const std::array<Point2, 3>& positions)
+//
+// The plan triangle and its doubled area are passed in rather than looked up:
+// compareSurfaces evaluates a fan of pieces against the same pair of surface
+// triangles, so planTriangle() and the degeneracy test (three hypots and an
+// area, inside Triangle2::barycentric) are loop invariants. The caller asks
+// isDegenerate() once per surface triangle and skips it entirely when it says
+// yes, which is what the nullopt return used to do a piece at a time.
+std::array<double, 3> planeElevations(const TinSurface& surface, std::uint32_t triangle,
+                                      const Triangle2& plan, double twiceArea,
+                                      const std::array<Point2, 3>& positions)
 {
-    const Triangle2 plan = surface.planTriangle(triangle);
     const TinTriangle& tri = surface.triangles()[triangle];
     std::array<double, 3> elevations{};
     for (std::size_t i = 0; i < 3; ++i) {
-        const auto weights = plan.barycentric(positions[i]);
-        if (!weights) {
-            return std::nullopt;
-        }
-        elevations[i] = (*weights)[0] * surface.vertices()[tri[0]].z +
-                        (*weights)[1] * surface.vertices()[tri[1]].z +
-                        (*weights)[2] * surface.vertices()[tri[2]].z;
+        const std::array<double, 3> weights = plan.barycentric(positions[i], twiceArea);
+        elevations[i] = weights[0] * surface.vertices()[tri[0]].z +
+                        weights[1] * surface.vertices()[tri[1]].z +
+                        weights[2] * surface.vertices()[tri[2]].z;
     }
     return elevations;
 }
@@ -261,11 +264,23 @@ Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinS
         if (!boxExisting.intersects(region)) {
             continue;
         }
+        // Hoisted out of the candidate and fan loops below: a degenerate
+        // triangle has no plane to evaluate, so every piece cut from it was
+        // already being dropped one at a time.
+        if (planExisting.isDegenerate()) {
+            continue;
+        }
+        const double twiceAreaExisting = planExisting.twiceSignedArea();
         const std::array<Point2, 3> subject = orientedCorners(planExisting);
         index.query(boxExisting, candidates);
         for (const katana::geometry::SpatialId id : candidates) {
             const auto td = static_cast<std::uint32_t>(id);
-            const std::array<Point2, 3> window = orientedCorners(design.planTriangle(td));
+            const Triangle2 planDesign = design.planTriangle(td);
+            if (planDesign.isDegenerate()) {
+                continue;
+            }
+            const double twiceAreaDesign = planDesign.twiceSignedArea();
+            const std::array<Point2, 3> window = orientedCorners(planDesign);
             const std::size_t corners = clipTriangleToTriangle(subject, window, piece);
             if (corners < 3) {
                 continue;
@@ -282,18 +297,13 @@ Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinS
                 // `part` lies inside both triangles by construction, so both
                 // planes are evaluated with barycentric weights in [0, 1] and
                 // neither surface has to be searched for the triangle to use.
-                const auto zExisting = planeElevations(existing, static_cast<std::uint32_t>(te),
-                                                       part);
-                if (!zExisting) {
-                    continue;
-                }
-                const auto zDesign = planeElevations(design, td, part);
-                if (!zDesign) {
-                    continue;
-                }
-                integral.add(area, {(*zDesign)[0] - (*zExisting)[0],
-                                    (*zDesign)[1] - (*zExisting)[1],
-                                    (*zDesign)[2] - (*zExisting)[2]});
+                const std::array<double, 3> zExisting =
+                    planeElevations(existing, static_cast<std::uint32_t>(te), planExisting,
+                                    twiceAreaExisting, part);
+                const std::array<double, 3> zDesign =
+                    planeElevations(design, td, planDesign, twiceAreaDesign, part);
+                integral.add(area, {zDesign[0] - zExisting[0], zDesign[1] - zExisting[1],
+                                    zDesign[2] - zExisting[2]});
                 planArea.add(area);
                 ++result.overlayTriangleCount;
             }

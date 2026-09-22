@@ -322,9 +322,12 @@ ctest --test-dir build/debug -j 8
 ```
 
 `build/debug`, `build/rel` and `build/release` are the primary build
-directories. C++23, GCC 16.2 (MSYS2 UCRT64) on Windows - the toolchain is a
-rolling MSYS2 install, so check `g++ --version` before quoting it in a
-measurement; it moved from 15.2 to 16.2 on 2026-09-21.
+directories. C++26, GCC 16.2 (MSYS2 UCRT64) on Windows. The standard is the
+cache variable `KATANA_CXX_STANDARD` (default 26) so that a claim about it can
+be measured rather than argued about - see `PLAN.MD`, "The language standard is
+a build variable". The toolchain is a rolling MSYS2 install, so check
+`g++ --version` before quoting it in a measurement; it moved from 15.2 to 16.2
+on 2026-09-21.
 
 ## 8. Style
 

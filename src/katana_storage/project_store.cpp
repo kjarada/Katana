@@ -7,6 +7,7 @@
 #include <ctime>
 #include <set>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 
 #include "katana/entity/entity_geometry.hpp"
@@ -500,8 +501,32 @@ ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata
     return contents;
 }
 
-Status applyToModel(const ProjectContents& contents, katana::entity::Model& model)
+namespace {
+
+// One body for both applyToModel overloads. `Contents` deduces to a const
+// lvalue reference for the copying one and to a value for the consuming one;
+// `take` is then the identity or std::move, so the staging loops below read the
+// same either way and neither overload copies more than its caller asked for.
+//
+// Written as a template rather than as two functions because the loops ARE the
+// function: duplicating forty lines of insertion order and built-in-name rules
+// would be a second place for them to drift apart.
+//
+// Every table below takes its item BY VALUE (NamedTable::add,
+// PropertyTable::define, EntityDatabase::insert), so `take` reaches all the way
+// in. update() takes a const reference and cannot, but it only ever applies to
+// the four built-in names.
+template <typename Contents> Status applyContents(Contents&& contents, katana::entity::Model& model)
 {
+    constexpr bool kConsume = !std::is_lvalue_reference_v<Contents&&>;
+    const auto take = []<typename T>(T& value) -> decltype(auto) {
+        if constexpr (kConsume) {
+            return std::move(value);
+        } else {
+            return (value);
+        }
+    };
+
     if (auto status = validateContents(contents); !status) {
         return status;
     }
@@ -515,62 +540,62 @@ Status applyToModel(const ProjectContents& contents, katana::entity::Model& mode
     // opposite ("a failed open leaves the current drawing exactly as it was")
     // and relies on it.
     katana::entity::Model staged;
-    for (const Layer& layer : contents.layers) {
+    for (auto& layer : contents.layers) {
         auto status = layer.name == katana::entity::kDefaultLayerName
                           ? staged.layers.update(layer)
-                          : staged.layers.add(layer);
+                          : staged.layers.add(take(layer));
         if (!status) {
             return status;
         }
     }
-    for (const Style& style : contents.styles) {
-        if (auto status = staged.styles.add(style); !status) {
+    for (auto& style : contents.styles) {
+        if (auto status = staged.styles.add(take(style)); !status) {
             return status;
         }
     }
-    for (const katana::entity::Linetype& linetype : contents.linetypes) {
+    for (auto& linetype : contents.linetypes) {
         // "continuous" is built in, so a stored one updates rather than adds -
         // the same rule layer "0" follows above.
         auto status = linetype.name == katana::entity::kContinuousLinetype
                           ? staged.linetypes.update(linetype)
-                          : staged.linetypes.add(linetype);
+                          : staged.linetypes.add(take(linetype));
         if (!status) {
             return status;
         }
     }
-    for (const katana::entity::DimensionStyle& style : contents.dimensionStyles) {
+    for (auto& style : contents.dimensionStyles) {
         auto status = style.name == katana::entity::kDefaultDimensionStyleName
                           ? staged.dimensionStyles.update(style)
-                          : staged.dimensionStyles.add(style);
+                          : staged.dimensionStyles.add(take(style));
         if (!status) {
             return status;
         }
     }
-    for (const katana::entity::HatchPattern& pattern : contents.hatchPatterns) {
+    for (auto& pattern : contents.hatchPatterns) {
         // "none" is built in, so a stored one updates rather than adds - the
         // same rule layer "0" and the continuous linetype follow above.
         auto status = pattern.name == katana::entity::kNoHatch
                           ? staged.hatchPatterns.update(pattern)
-                          : staged.hatchPatterns.add(pattern);
+                          : staged.hatchPatterns.add(take(pattern));
         if (!status) {
             return status;
         }
     }
-    for (const katana::entity::Alignment& alignment : contents.alignments) {
+    for (auto& alignment : contents.alignments) {
         // add() solves the definition, so a file holding an alignment that
         // cannot be built is refused here with the PI named, not opened and
         // drawn wrong.
-        if (auto status = staged.alignments.add(alignment); !status) {
+        if (auto status = staged.alignments.add(take(alignment)); !status) {
             return status;
         }
     }
-    for (const PropertyDefinition& definition : contents.propertyDefinitions) {
-        if (auto status = staged.properties.define(definition); !status) {
+    for (auto& definition : contents.propertyDefinitions) {
+        if (auto status = staged.properties.define(take(definition)); !status) {
             return status;
         }
     }
-    for (const Entity& entity : contents.entities) {
-        if (auto status = staged.entities.insert(entity); !status) {
+    for (auto& entity : contents.entities) {
+        if (auto status = staged.entities.insert(take(entity)); !status) {
             return status;
         }
     }
@@ -579,6 +604,18 @@ Status applyToModel(const ProjectContents& contents, katana::entity::Model& mode
     // Nothing below can fail, so this is the commit point.
     model.adoptContents(std::move(staged));
     return {};
+}
+
+} // namespace
+
+Status applyToModel(const ProjectContents& contents, katana::entity::Model& model)
+{
+    return applyContents(contents, model);
+}
+
+Status applyToModel(ProjectContents&& contents, katana::entity::Model& model)
+{
+    return applyContents(std::move(contents), model);
 }
 
 // ---- ProjectStore -----------------------------------------------------------------------
@@ -1220,7 +1257,7 @@ Result<ProjectContents> ProjectStore::load()
             out.reset();
             return {};
         }
-        const auto color = katana::entity::Color::fromHex(row.columnText(column));
+        const auto color = katana::entity::Color::fromHex(row.columnTextView(column));
         if (!color) {
             return color.error();
         }
@@ -1510,15 +1547,38 @@ Result<ProjectContents> ProjectStore::load()
         return status.error();
     }
 
+    // Sized up front: every reallocation of this vector moves every Entity in
+    // it, and an Entity carries two std::maps. COUNT(*) is one extra b-tree
+    // walk; contents.nextEntityId would be free but is only an upper bound, and
+    // a drawing that has had most of its entities deleted would reserve for the
+    // ids rather than for the rows.
+    std::int64_t entityCount = 0;
+    status = forEachRow("SELECT COUNT(*) FROM entities", [&](SqliteStatement& row) -> Status {
+        entityCount = row.columnInt64(0);
+        return {};
+    });
+    if (!status) {
+        return status.error();
+    }
+    if (entityCount > 0) {
+        contents.entities.reserve(static_cast<std::size_t>(entityCount));
+    }
+
     status = forEachRow(
         "SELECT id, layer, style, color, visible, geometry, properties, metadata, geometry_blob"
         " FROM entities ORDER BY id",
         [&](SqliteStatement& row) -> Status {
             Entity entity;
             entity.id = static_cast<EntityId>(row.columnInt64(0));
-            const std::string context = "entity id=" + std::to_string(entity.id);
-            entity.layer = row.columnText(1);
-            entity.style = row.columnText(2);
+            // Built only when something fails: on a sound project this ran once
+            // per row - 50k string allocations - to describe an error that
+            // never happened.
+            const auto context = [&entity] { return "entity id=" + std::to_string(entity.id); };
+            // The text and blob columns below are BORROWED from SQLite's row
+            // buffer and parsed before the statement steps on; see
+            // SqliteStatement::columnTextView for the lifetime rule.
+            entity.layer = row.columnTextView(1);
+            entity.style = row.columnTextView(2);
             if (auto colorStatus = readColor(row, 3, entity.color); !colorStatus) {
                 return colorStatus;
             }
@@ -1529,28 +1589,27 @@ Result<ProjectContents> ProjectStore::load()
             // are present means a half-migrated database still reads the
             // newer of the two rather than the staler.
             if (!row.columnIsNull(8)) {
-                const std::vector<std::byte> blob = row.columnBlob(8);
-                auto geometry = katana::entity::geometryFromBlob(blob);
+                auto geometry = katana::entity::geometryFromBlob(row.columnBlobSpan(8));
                 if (!geometry) {
                     return makeError(geometry.error().code, geometry.error().message,
-                                     context + " " + geometry.error().context);
+                                     context() + " " + geometry.error().context);
                 }
                 entity.geometry = std::move(*geometry);
             } else {
-                auto geometry = katana::entity::geometryFromJson(row.columnText(5));
+                auto geometry = katana::entity::geometryFromJson(row.columnTextView(5));
                 if (!geometry) {
                     return makeError(geometry.error().code, geometry.error().message,
-                                     context + " " + geometry.error().context);
+                                     context() + " " + geometry.error().context);
                 }
                 entity.geometry = std::move(*geometry);
             }
-            auto properties = katana::entity::propertiesFromJson(row.columnText(6));
-            auto metadata = katana::entity::propertiesFromJson(row.columnText(7));
+            auto properties = katana::entity::propertiesFromJson(row.columnTextView(6));
             if (!properties) {
-                return makeError(properties.error().code, properties.error().message, context);
+                return makeError(properties.error().code, properties.error().message, context());
             }
+            auto metadata = katana::entity::propertiesFromJson(row.columnTextView(7));
             if (!metadata) {
-                return makeError(metadata.error().code, metadata.error().message, context);
+                return makeError(metadata.error().code, metadata.error().message, context());
             }
             entity.properties = std::move(*properties);
             entity.metadata = std::move(*metadata);

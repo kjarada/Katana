@@ -147,24 +147,41 @@ double SqliteStatement::columnDouble(int column) const
     return sqlite3_column_double(impl_->statement, column);
 }
 
-std::string SqliteStatement::columnText(int column) const
+std::string_view SqliteStatement::columnTextView(int column) const
 {
+    // sqlite3_column_bytes must follow sqlite3_column_text: it reports the size
+    // of the value AS CONVERTED by the preceding call, and a blob or an integer
+    // read as text has a different length before and after.
     const unsigned char* text = sqlite3_column_text(impl_->statement, column);
     const int size = sqlite3_column_bytes(impl_->statement, column);
-    return text != nullptr ? std::string(reinterpret_cast<const char*>(text),
-                                         static_cast<std::size_t>(size))
-                           : std::string{};
+    if (text == nullptr || size <= 0) {
+        return {};
+    }
+    return std::string_view(reinterpret_cast<const char*>(text), static_cast<std::size_t>(size));
 }
 
-std::vector<std::byte> SqliteStatement::columnBlob(int column) const
+std::span<const std::byte> SqliteStatement::columnBlobSpan(int column) const
 {
     const void* bytes = sqlite3_column_blob(impl_->statement, column);
     const int size = sqlite3_column_bytes(impl_->statement, column);
     if (bytes == nullptr || size <= 0) {
         return {};
     }
-    const auto* first = static_cast<const std::byte*>(bytes);
-    return std::vector<std::byte>(first, first + size);
+    return std::span<const std::byte>(static_cast<const std::byte*>(bytes),
+                                      static_cast<std::size_t>(size));
+}
+
+// The owning accessors are the borrowing ones plus a copy, so there is one
+// place that knows how SQLite hands a value over.
+std::string SqliteStatement::columnText(int column) const
+{
+    return std::string(columnTextView(column));
+}
+
+std::vector<std::byte> SqliteStatement::columnBlob(int column) const
+{
+    const std::span<const std::byte> bytes = columnBlobSpan(column);
+    return std::vector<std::byte>(bytes.begin(), bytes.end());
 }
 
 // ---- SqliteDatabase ----------------------------------------------------------------

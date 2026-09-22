@@ -152,13 +152,19 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     if (!contents) {
         return contents.error();
     }
+    // Taken out BEFORE the contents are consumed below, and installed only
+    // once the apply has succeeded - a failed open must leave this document
+    // exactly as it was, metadata included.
+    auto metadata = std::move(contents->metadata);
     // applyToModel validates before it touches the model, so a bad project
-    // leaves the current drawing as it was.
-    if (auto status = katana::storage::applyToModel(*contents, model_); !status) {
+    // leaves the current drawing as it was. The contents are consumed: they are
+    // a local that dies either way, and copying every entity into the model was
+    // the single largest allocator of the whole open.
+    if (auto status = katana::storage::applyToModel(std::move(*contents), model_); !status) {
         return status;
     }
     store_ = std::make_unique<katana::storage::ProjectStore>(std::move(*store));
-    metadata_ = std::move(contents->metadata);
+    metadata_ = std::move(metadata);
     metadataModified_ = false;
     rebuildStack();
     // Whole rebuild rather than incremental: the model was replaced, and a

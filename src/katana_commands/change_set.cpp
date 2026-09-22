@@ -1,5 +1,6 @@
 #include "katana/commands/change_set.hpp"
 
+#include <cstddef>
 #include <set>
 #include <utility>
 
@@ -116,7 +117,10 @@ ChangeSetCommand::ChangeSetCommand(std::string name, Builder builder, bool destr
 
 Status ChangeSetCommand::validate(const CommandContext& context) const
 {
-    const auto changes = builder_(context);
+    // Rebuilt on every call so validate() keeps answering for the model as it
+    // is now; kept so the execute() that follows need not repeat the work.
+    built_.emplace(builder_(context));
+    const katana::core::Result<ChangeSet>& changes = *built_;
     if (!changes) {
         return changes.error();
     }
@@ -133,7 +137,11 @@ Status ChangeSetCommand::execute(CommandContext& context)
         return makeError(ErrorCode::InvalidState, "command was already executed",
                          std::string(name_));
     }
-    auto built = builder_(context);
+    if (!built_) {
+        built_.emplace(builder_(context));
+    }
+    auto built = std::move(*built_);
+    built_.reset(); // single use: a later execute() builds afresh
     if (!built) {
         return built.error();
     }
@@ -153,7 +161,8 @@ Status ChangeSetCommand::execute(CommandContext& context)
     const auto fail = [&](const katana::core::Error& cause) -> Status {
         (void)undo(context); // state_ is Applied below; restores whatever was recorded
         state_ = State::Pending;
-        added_.clear();
+        addedIds_.clear();
+        addedImages_.clear();
         before_.clear();
         after_.clear();
         removed_.clear();
@@ -161,6 +170,11 @@ Status ChangeSetCommand::execute(CommandContext& context)
                          cause.describe());
     };
     state_ = State::Applied;
+
+    removed_.reserve(changes.remove.size());
+    before_.reserve(changes.modify.size());
+    after_.reserve(changes.modify.size());
+    addedIds_.reserve(changes.add.size());
 
     for (const EntityId id : changes.remove) {
         auto removed = entities.remove(id);
@@ -170,20 +184,22 @@ Status ChangeSetCommand::execute(CommandContext& context)
         removed_.push_back(std::move(*removed));
     }
     for (Entity& entity : changes.modify) {
-        const Entity previous = *entities.find(entity.id);
+        Entity previous = *entities.find(entity.id);
         if (auto status = entities.replace(entity); !status) {
             return fail(status.error());
         }
-        before_.push_back(previous);
+        before_.push_back(std::move(previous));
         after_.push_back(std::move(entity));
     }
     for (Entity& entity : changes.add) {
-        auto id = entities.add(entity);
+        // `changes` is this command's own build, so the entity can be handed
+        // straight over; the image undo()/redo() need comes back out of the
+        // database when it is removed again.
+        auto id = entities.add(std::move(entity));
         if (!id) {
             return fail(id.error());
         }
-        entity.id = *id;
-        added_.push_back(std::move(entity));
+        addedIds_.push_back(*id);
     }
     return {};
 }
@@ -200,10 +216,17 @@ Status ChangeSetCommand::undo(CommandContext& context)
             firstFailure = std::move(status);
         }
     };
-    // Reverse order of execute().
-    for (auto it = added_.rbegin(); it != added_.rend(); ++it) {
-        auto removed = entities.remove(it->id);
-        note(removed ? Status{} : Status{removed.error()});
+    // Reverse order of execute(). remove() returns the entity it took out, which
+    // is the image redo() has to put back, so it is captured here rather than
+    // copied when the entity was created.
+    addedImages_.resize(addedIds_.size());
+    for (std::size_t i = addedIds_.size(); i-- > 0;) {
+        auto removed = entities.remove(addedIds_[i]);
+        if (removed) {
+            addedImages_[i] = std::move(*removed);
+        } else {
+            note(Status{removed.error()});
+        }
     }
     for (auto it = before_.rbegin(); it != before_.rend(); ++it) {
         note(entities.replace(*it));
@@ -234,7 +257,7 @@ Status ChangeSetCommand::redo(CommandContext& context)
     for (const Entity& entity : after_) {
         note(entities.replace(entity));
     }
-    for (const Entity& entity : added_) {
+    for (const Entity& entity : addedImages_) {
         note(entities.insert(entity)); // same ids as the first execution
     }
     state_ = State::Applied;
@@ -243,14 +266,7 @@ Status ChangeSetCommand::redo(CommandContext& context)
 
 std::vector<EntityId> ChangeSetCommand::createdEntities() const
 {
-    std::vector<EntityId> ids;
-    if (state_ == State::Applied) {
-        ids.reserve(added_.size());
-        for (const Entity& entity : added_) {
-            ids.push_back(entity.id);
-        }
-    }
-    return ids;
+    return state_ == State::Applied ? addedIds_ : std::vector<EntityId>{};
 }
 
 } // namespace katana::commands

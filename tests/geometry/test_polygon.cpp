@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <string>
 #include <vector>
 
+#include "katana/geometry/intersection.hpp"
 #include "katana/geometry/polygon.hpp"
 #include "support/property.hpp"
 
@@ -415,4 +417,90 @@ TEST(Hatching, ABoundaryThatFallsBetweenTwoLinesHatchesToNothing)
     const auto lines = hatchLines(sliver, 0.0, 5.0);
     ASSERT_TRUE(lines.ok()) << lines.error().describe();
     EXPECT_TRUE(lines.value().empty());
+}
+
+// ---- isSimple culls segment pairs by bounding box, and must not cull a hit --
+
+namespace {
+
+// isSimple as it read before the bounding-box reject went in: intersect() on
+// every pair, nothing skipped. The culled version has to agree with this on
+// every polygon, which is what makes the cull a speed change and not a
+// behaviour change (CLAUDE.md section 4).
+bool isSimpleExhaustively(const Polyline2& polygon)
+{
+    const std::size_t n = polygon.vertices.size();
+    if (!polygon.closed || n < 3) {
+        return false;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const Segment2 first = polygon.segment(i);
+        if (first.isDegenerate()) {
+            return false;
+        }
+        for (std::size_t j = i + 1; j < n; ++j) {
+            const IntersectionResult hit = intersect(first, polygon.segment(j));
+            if (!hit.exists()) {
+                continue;
+            }
+            const bool adjacent = (j == i + 1) || (i == 0 && j == n - 1);
+            if (!adjacent || hit.kind == IntersectionKind::Overlap) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+TEST(PolygonSimplicity, TheBoundingBoxRejectAgreesWithTestingEverySegmentPair)
+{
+    Random random(31337);
+    std::vector<Polyline2> cases{
+        square(10.0),
+        lShape(),
+        Polyline2{{Point2(0, 0), Point2(10, 0), Point2(0, 10), Point2(10, 10)}, true}, // bowtie
+        Polyline2{{Point2(0, 0), Point2(10, 0), Point2(10, 10)}, true},
+        // Two edges that miss each other by 1e-8, an order INSIDE kGeometric:
+        // intersect() calls that a hit, so the box reject must not throw the
+        // pair away. This is the pair that a zero-margin box test would lose.
+        Polyline2{{Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(5, 1e-8)}, true},
+        // And the same shape with the gap four orders ABOVE kGeometric, which
+        // is a genuine miss.
+        Polyline2{{Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(5, 1e-3)}, true},
+    };
+    for (int i = 0; i < 60; ++i) { // random quadrilaterals, simple and crossed alike
+        std::vector<Point2> vertices;
+        for (int k = 0; k < 4; ++k) {
+            vertices.emplace_back(random.real(-10.0, 10.0), random.real(-10.0, 10.0));
+        }
+        cases.push_back(Polyline2{std::move(vertices), true});
+    }
+
+    std::size_t simple = 0;
+    std::size_t notSimple = 0;
+    for (std::size_t c = 0; c < cases.size(); ++c) {
+        const bool culled = isSimple(cases[c]);
+        EXPECT_EQ(culled, isSimpleExhaustively(cases[c])) << "case " << c;
+        if (culled) {
+            ++simple;
+        } else {
+            ++notSimple;
+        }
+    }
+    EXPECT_GT(simple, 5u) << "the sample must contain simple polygons";
+    EXPECT_GT(notSimple, 5u) << "and self-intersecting ones";
+}
+
+TEST(PolygonSimplicity, EdgesThatPassWithinTheGeometricToleranceStillCount)
+{
+    // Pinned on its own so that a future narrowing of the box margin fails
+    // here rather than silently calling a self-touching polygon simple. The
+    // near-touch is 1e-8 m against kGeometric = 1e-7 m.
+    const Polyline2 touching{
+        {Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(5, 1e-8)}, true};
+    EXPECT_FALSE(isSimple(touching));
+    const Polyline2 clear{{Point2(0, 0), Point2(10, 0), Point2(10, 10), Point2(5, 1e-3)}, true};
+    EXPECT_TRUE(isSimple(clear));
 }

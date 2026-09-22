@@ -436,3 +436,50 @@ TEST(TiledTerrainErrors, DegenerateExtentsStillGiveOneTile)
         EXPECT_TRUE(terrain.tileSurface(tile)->empty()) << "tile " << tile;
     }
 }
+
+// ---- buildAll builds the tiles across the cores ----------------------------
+
+TEST(TiledTerrainBuild, BuildingEveryTileAtOnceGivesTheSameSurfacesAsBuildingThemInTurn)
+{
+    // buildAll() hands the tiles to the task pool; buildTile() in a loop is the
+    // serial run. A tile's triangulation depends on its own buffered points and
+    // nothing else, so the two must agree vertex for vertex and triangle for
+    // triangle - not merely in elevation (Rule 7).
+    Random random(20260923);
+    TiledTerrainOptions options;
+    options.tileSize = 40.0;
+    options.bufferWidth = 8.0;
+    const std::vector<Point3> points = roughGround(200.0, 4000, random);
+
+    auto parallel = TiledTerrain::create(inputFrom(points), options);
+    ASSERT_TRUE(parallel.ok()) << parallel.error().describe();
+    auto serial = TiledTerrain::create(inputFrom(points), options);
+    ASSERT_TRUE(serial.ok()) << serial.error().describe();
+
+    ASSERT_GT(parallel->tileCount(), 8u) << "one tile would share nothing out";
+    ASSERT_TRUE(parallel->buildAll().ok());
+    for (std::size_t tile = 0; tile < serial->tileCount(); ++tile) {
+        ASSERT_TRUE(serial->buildTile(tile).ok()) << "tile " << tile;
+    }
+
+    ASSERT_EQ(parallel->tileCount(), serial->tileCount());
+    std::size_t trianglesSeen = 0;
+    for (std::size_t tile = 0; tile < parallel->tileCount(); ++tile) {
+        const TinSurface* a = parallel->tileSurface(tile);
+        const TinSurface* b = serial->tileSurface(tile);
+        ASSERT_NE(a, nullptr) << "tile " << tile;
+        ASSERT_NE(b, nullptr) << "tile " << tile;
+        ASSERT_EQ(a->vertices().size(), b->vertices().size()) << "tile " << tile;
+        ASSERT_EQ(a->triangleCount(), b->triangleCount()) << "tile " << tile;
+        for (std::size_t v = 0; v < a->vertices().size(); ++v) {
+            EXPECT_EQ(a->vertices()[v].x, b->vertices()[v].x) << "tile " << tile << " vertex " << v;
+            EXPECT_EQ(a->vertices()[v].y, b->vertices()[v].y) << "tile " << tile << " vertex " << v;
+            EXPECT_EQ(a->vertices()[v].z, b->vertices()[v].z) << "tile " << tile << " vertex " << v;
+        }
+        for (std::size_t t = 0; t < a->triangleCount(); ++t) {
+            EXPECT_EQ(a->triangles()[t], b->triangles()[t]) << "tile " << tile << " triangle " << t;
+        }
+        trianglesSeen += a->triangleCount();
+    }
+    EXPECT_GT(trianglesSeen, 1000u) << "the comparison must have had something to compare";
+}

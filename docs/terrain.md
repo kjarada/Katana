@@ -170,3 +170,45 @@ each of which plain addition rounds up to 0.125, the ulp at 1e15, landing at
 asserted plain addition would drift; it barely did, and the +1e15 / -1e15
 round trip then rounded the drift away to exactly 100 000 by luck. That order
 is the case Kahan already handles and proves nothing about Neumaier.
+
+## Culling that has to be exact (`super_surface.hpp`, `tin_surface.hpp`)
+
+`combineSurfaces` asks, for every triangle of a lower member, whether a higher
+member covers it - and answered by scanning every vertex of that member. On a
+diagonal corridor over a 200 000-point base that is thirty-one seconds. The
+member's vertices now go into a bucket grid, built once per member, and only the
+candidates in the triangle's own cells are tested. **125x**, with the answer
+unchanged: `docs/performance.md` has the numbers and the two shapes the
+benchmark takes.
+
+Two guards keep the indexed set a strict SUPERSET of what the exhaustive scan
+accepted, which is the only thing that makes this safe:
+
+- A triangle whose doubled signed area is exactly `0.0` falls back to the
+  exhaustive scan. The three sign tests sum identically to that doubled area, so
+  a zero one makes the accepted set a line or the whole plane, which no box
+  bounds. A TIN does not contain such a triangle; the fallback is there because
+  "does not" is not "cannot".
+- The query box is grown by `kGeometric + 64 * eps * scale`, to cover rounding in
+  the sign tests themselves.
+
+`TheIndexedVertexTestKeepsExactlyTheTrianglesTheExhaustiveScanKept` asserts the
+two agree. Its first version did **not** discriminate - coarse pads gave the grid
+cells so much slack that a wrong box still passed - so it now carries a
+knife-edge case whose deciding vertices sit exactly on a base triangle's box
+edge. Shrinking the query box by 2 m fails it; that was checked by doing it.
+
+`elevationsAt` spreads over `TaskPool` at a grain of 256 positions, a number
+taken from the measured 1.09 us cost of one `elevationAt` - below one chunk it
+runs inline rather than waking the pool, because waking it costs more than the
+work. `TiledTerrain::buildAll` puts one tile in each chunk. Both are asserted to
+give bit-identical answers to the serial path, and `buildAll` now builds every
+tile even when one fails, returning the lowest-index failure; that is a
+behaviour change and it is stated in the header.
+
+## Hoisting a triangle's doubled area
+
+`Triangle2::twiceSignedArea()` is exposed so that a caller evaluating many
+points against one triangle can hoist it. `barycentric(p)` is now literally
+`barycentric(p, twiceSignedArea())` behind an `isDegenerate()` check, so the
+arithmetic is bit-identical and lives in one place rather than two.

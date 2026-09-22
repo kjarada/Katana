@@ -230,6 +230,16 @@ CommandPtr createDimension(katana::entity::DimensionGeometry dimension, EntityAt
 
 CommandPtr createEntities(std::vector<Entity> entities)
 {
+    // The copy here is deliberate and cannot become a move. A builder is a pure
+    // function of the model (command.hpp: "validate() has no side effects and
+    // may be called at any time"), and validate() really is called twice on the
+    // first command of a Transaction - once by Transaction::validate and again
+    // by Transaction::execute. A builder that moved its captured entities out
+    // would hand the second call an empty set, and the command would be
+    // rejected as one that "would not change anything". ChangeSetCommand keeps
+    // what validate() built and hands it to execute(), so this copy is made once
+    // per command rather than once per call, and execute() then moves the
+    // entities into the database instead of copying them again.
     return makeCommand("CREATE_ENTITIES",
                        [entities = std::move(entities)](const CommandContext&) -> Result<ChangeSet> {
                            ChangeSet changes;

@@ -15,6 +15,7 @@
 #include "katana/geometry/editing.hpp"
 #include "katana/geometry/intersection.hpp"
 #include "katana/geometry/polygon.hpp"
+#include "katana/geometry/primitives2d.hpp"
 
 using namespace katana::geometry;
 
@@ -237,5 +238,64 @@ void BM_TrimSegment(benchmark::State& state)
     state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(cutters.size()));
 }
 BENCHMARK(BM_TrimSegment);
+
+
+// ---- validation, clipping and picking ----------------------------------------
+
+// isSimple is O(n^2) by construction and runs on validation, so the constant in
+// front of the square is what decides whether a 512-vertex boundary can be
+// checked while the user waits. A SIMPLE polygon is the worst case: no pair of
+// edges crosses, so nothing can return early - measuring a self-intersecting
+// one would measure how quickly the first crossing is found instead.
+void BM_IsSimple(benchmark::State& state)
+{
+    const Polyline2 polygon = makeStarPolygon(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(isSimple(polygon));
+    }
+    state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+BENCHMARK(BM_IsSimple)->Arg(64)->Arg(512);
+
+// Sutherland-Hodgman walks the whole subject once per clip edge, so a four-sided
+// window means four passes and four result lists. A viewport crop and a boundary
+// trim are both this.
+void BM_ClipPolygon(benchmark::State& state)
+{
+    const Polyline2 subject = makeStarPolygon(512);
+    Polyline2 window;
+    window.closed = true;
+    window.vertices = {Point2(kEasting - 300.0, kNorthing - 300.0),
+                       Point2(kEasting + 300.0, kNorthing - 300.0),
+                       Point2(kEasting + 300.0, kNorthing + 300.0),
+                       Point2(kEasting - 300.0, kNorthing + 300.0)};
+    for (auto _ : state) {
+        auto clipped = clipPolygon(subject, window);
+        benchmark::DoNotOptimize(clipped);
+    }
+}
+BENCHMARK(BM_ClipPolygon);
+
+// Called once per candidate entity on every pick and every snap, so it is small
+// and very hot - the kind of function where one heap allocation for four
+// corners does not show in a profile of itself but shows in the cursor.
+void BM_RectangleClosestPoint(benchmark::State& state)
+{
+    const Rectangle2 rectangle{Point2(kEasting, kNorthing), 120.0, 80.0};
+    auto engine = makeEngine();
+    std::uniform_real_distribution<double> offset(-200.0, 200.0);
+    std::vector<Point2> probes;
+    probes.reserve(1024);
+    for (int i = 0; i < 1024; ++i) {
+        probes.emplace_back(kEasting + offset(engine), kNorthing + offset(engine));
+    }
+    for (auto _ : state) {
+        for (const Point2& probe : probes) {
+            benchmark::DoNotOptimize(rectangle.closestPoint(probe));
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * 1024);
+}
+BENCHMARK(BM_RectangleClosestPoint);
 
 } // namespace

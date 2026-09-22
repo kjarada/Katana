@@ -5,6 +5,8 @@
 #include <string>
 #include <utility>
 
+#include "katana/core/task_pool.hpp"
+
 #include "summation.hpp"
 
 namespace katana::terrain {
@@ -446,10 +448,27 @@ std::optional<double> TinSurface::elevationAt(const Point2& position) const
 std::vector<std::optional<double>>
 TinSurface::elevationsAt(std::span<const Point2> positions) const
 {
-    std::vector<std::optional<double>> elevations;
-    elevations.reserve(positions.size());
-    for (const Point2& position : positions) {
-        elevations.push_back(elevationAt(position));
+    // Positions per parallel chunk. elevationAt() measured 1.09 us on the
+    // 200 000 triangle surface of BM_ElevationAt (Release, GCC 16.2,
+    // 16 x 2496 MHz), so a chunk is a quarter of a millisecond of work - far
+    // above what publishing a job to the pool costs, and still small enough
+    // that a 4096-position section leaves every thread a share.
+    constexpr std::size_t kElevationGrain = 256;
+    // Sized up front and written by index, never appended: each position's
+    // answer depends on nothing but that position, so the bytes returned are
+    // the same at any thread count (Rule 7). locate() is const and reads only
+    // the immutable surface, which is this class's concurrency promise.
+    std::vector<std::optional<double>> elevations(positions.size());
+    const auto fill = [&](std::size_t lo, std::size_t hi) {
+        for (std::size_t i = lo; i < hi; ++i) {
+            elevations[i] = elevationAt(positions[i]);
+        }
+    };
+    if (positions.size() <= kElevationGrain) {
+        fill(0, positions.size()); // nothing to share out; waking the pool would cost more
+    } else {
+        katana::core::TaskPool::shared().parallelRanges(0, positions.size(), kElevationGrain,
+                                                        fill);
     }
     return elevations;
 }

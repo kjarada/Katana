@@ -21,6 +21,8 @@
 #include <vector>
 
 #include "katana/terrain/contours.hpp"
+#include "katana/terrain/super_surface.hpp"
+#include "katana/terrain/tiled_terrain.hpp"
 #include "katana/terrain/tin_builder.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "katana/terrain/volume.hpp"
@@ -243,5 +245,136 @@ void BM_CompareSurfaces(benchmark::State& state)
     }
 }
 BENCHMARK(BM_CompareSurfaces)->Unit(benchmark::kMillisecond);
+
+
+// ---------------------------------------------------------------------------
+// Combining and batching
+// ---------------------------------------------------------------------------
+
+// A band running DIAGONALLY across the site. The diagonal is the point: its
+// bounding box is nearly the whole site, so the cheap box reject in overlaps()
+// almost never fires, while the strip it actually covers is narrow - so most
+// base triangles reach the vertex scan that the box reject exists to avoid.
+//
+// An axis-aligned band of the same area does NOT measure this: its bounding box
+// culls nine triangles in ten, and overlaps() returns on its first sample point
+// for most of the rest. That version of this benchmark showed no difference
+// between the exhaustive scan and the indexed one, which was a fact about the
+// benchmark and not about the code.
+const TinSurface& sharedBandSurface()
+{
+    static const TinSurface surface = [] {
+        katana::terrain::TinInput input;
+        Lcg rng(4242u);
+        input.points.reserve(20000);
+        for (std::size_t i = 0; i < 20000; ++i) {
+            const double along = 50.0 + rng.next() * 900.0;
+            const double across = (rng.next() - 0.5) * 100.0;
+            const double x = along;
+            const double y = along + across;
+            input.points.emplace_back(x, y, groundElevation(x, y) + 2.0);
+        }
+        auto built = katana::terrain::buildTin(input);
+        return built ? std::move(built->surface) : TinSurface{};
+    }();
+    return surface;
+}
+
+// A pad over 4% of the site - a building platform or a car park, which is the
+// common shape - where the box reject does fire for most base triangles.
+const TinSurface& sharedPadSurface()
+{
+    static const TinSurface surface = [] {
+        katana::terrain::TinInput input;
+        Lcg rng(2024u);
+        input.points.reserve(20000);
+        for (std::size_t i = 0; i < 20000; ++i) {
+            const double x = 400.0 + rng.next() * 200.0;
+            const double y = 400.0 + rng.next() * 200.0;
+            input.points.emplace_back(x, y, groundElevation(x, y) + 2.0);
+        }
+        auto built = katana::terrain::buildTin(input);
+        return built ? std::move(built->surface) : TinSurface{};
+    }();
+    return surface;
+}
+
+// What a 12d super tin costs on import: every triangle of a lower member is
+// kept or dropped by asking whether a higher member covers its centroid.
+//
+// The two shapes are the two regimes, and both are measured on purpose. A pad
+// is rejected by the members' bounding boxes for most triangles, so it is fast
+// however the coverage test is written; a band is not, so it is the shape that
+// says whether the coverage test itself is affordable. Optimising against the
+// pad alone would show nothing and prove nothing.
+void BM_CombineSurfaces(benchmark::State& state)
+{
+    const TinSurface& base = sharedSurface();
+    const TinSurface& upper = state.range(0) == 0 ? sharedPadSurface() : sharedBandSurface();
+    const std::vector<const TinSurface*> members{&base, &upper};
+    double triangles = 0.0;
+    for (auto _ : state) {
+        auto combined = katana::terrain::combineSurfaces(members);
+        if (combined) {
+            triangles = static_cast<double>(combined->triangleCount());
+            benchmark::DoNotOptimize(triangles);
+        }
+    }
+    state.counters["triangles"] = triangles;
+}
+// 0: the pad (box reject fires). 1: the band (it does not).
+BENCHMARK(BM_CombineSurfaces)->Arg(0)->Arg(1)->Unit(benchmark::kMillisecond);
+
+// Spot elevations in bulk - a level sheet, a set of design checks, a contour
+// label pass. This is elevationAt a hundred thousand times over, which is why
+// it is worth spreading over cores while a single elevationAt is not: one query
+// is around a microsecond, and waking a thread pool costs more than that.
+void BM_ElevationsAt(benchmark::State& state)
+{
+    const TinSurface& surface = sharedSurface();
+    Lcg rng(31337u);
+    constexpr std::size_t kProbes = 100000;
+    std::vector<Point2> probes;
+    probes.reserve(kProbes);
+    for (std::size_t i = 0; i < kProbes; ++i) {
+        probes.emplace_back(rng.next() * 1000.0, rng.next() * 1000.0);
+    }
+    for (auto _ : state) {
+        auto elevations = surface.elevationsAt(probes);
+        benchmark::DoNotOptimize(elevations.size());
+    }
+    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) *
+                            static_cast<std::int64_t>(kProbes));
+}
+BENCHMARK(BM_ElevationsAt)->Unit(benchmark::kMillisecond);
+
+// A survey too big for one triangulation is tiled, and every tile is
+// independent - so this measures whether that independence is actually spent.
+// The tiles are evicted with the clock stopped, because what is being measured
+// is the build and not the free.
+void BM_TiledTerrainBuildAll(benchmark::State& state)
+{
+    katana::terrain::TinInput input;
+    input.points = scatteredGround(150000, 1000.0);
+    katana::terrain::TiledTerrainOptions options;
+    options.tileSize = 125.0;   // 8 x 8 = 64 tiles over a 1 km site
+    options.bufferWidth = 10.0; // several times the ~2.6 m mean point spacing
+    auto terrain = katana::terrain::TiledTerrain::create(std::move(input), options);
+    if (!terrain) {
+        state.SkipWithError("the tiled terrain could not be created");
+        return;
+    }
+    for (auto _ : state) {
+        const auto status = terrain->buildAll();
+        benchmark::DoNotOptimize(status.ok());
+        state.PauseTiming();
+        for (std::size_t tile = 0; tile < terrain->tileCount(); ++tile) {
+            terrain->evictTile(tile);
+        }
+        state.ResumeTiming();
+    }
+    state.counters["tiles"] = static_cast<double>(terrain->tileCount());
+}
+BENCHMARK(BM_TiledTerrainBuildAll)->Unit(benchmark::kMillisecond);
 
 } // namespace

@@ -5,6 +5,9 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "katana/core/task_pool.hpp"
 
 namespace katana::terrain {
 
@@ -190,9 +193,28 @@ Status TiledTerrain::buildTile(std::size_t tile)
 
 Status TiledTerrain::buildAll()
 {
-    for (std::size_t tile = 0; tile < tileCount(); ++tile) {
-        if (const Status status = buildTile(tile); !status) {
-            return status;
+    const std::size_t count = tileCount();
+    // Tiles are independent by construction: computeTile() is const and reads
+    // only the points and the options, and buildTile() writes nothing but
+    // tiles_[tile], whose slot already exists - so no two chunks touch the same
+    // bytes. One tile per chunk because a tile is a whole triangulation.
+    //
+    // Each tile's Status is kept in its own slot and the LOWEST-index failure
+    // is the one reported, so the error does not depend on which thread lost
+    // (Rule 7). The serial version stopped at the first failure and left the
+    // tiles after it unbuilt; this one builds them, which is a fact about
+    // recovery rather than about the answer - the Status returned is the same,
+    // and a caller that cares asks isBuilt().
+    std::vector<Status> failures(count);
+    katana::core::TaskPool::shared().parallelRanges(0, count, 1, [&](std::size_t lo,
+                                                                    std::size_t hi) {
+        for (std::size_t tile = lo; tile < hi; ++tile) {
+            failures[tile] = buildTile(tile);
+        }
+    });
+    for (std::size_t tile = 0; tile < count; ++tile) {
+        if (!failures[tile]) {
+            return failures[tile];
         }
     }
     return {};
