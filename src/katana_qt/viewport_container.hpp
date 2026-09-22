@@ -56,6 +56,7 @@ class ViewportContainer final : public QWidget {
     // them. Passing them here re-points every existing and future cell.
     void setReferenceData(katana::interop::ReferenceData* reference);
     void setSurfaces(const std::vector<katana::cad::SceneSurface>* surfaces);
+    void setMeshes(const std::vector<katana::cad::SceneMesh>* meshes);
     void setSceneOptions(const katana::cad::SceneOptions& options);
     [[nodiscard]] const katana::cad::SceneOptions& sceneOptions() const { return options_; }
 
@@ -126,6 +127,7 @@ class ViewportContainer final : public QWidget {
 
     katana::interop::ReferenceData* reference_ = nullptr;
     const std::vector<katana::cad::SceneSurface>* surfaces_ = nullptr;
+    const std::vector<katana::cad::SceneMesh>* meshes_ = nullptr;
     katana::cad::SceneOptions options_{};
 
     // Settings mirrored onto every plan viewport as it is created, so a new

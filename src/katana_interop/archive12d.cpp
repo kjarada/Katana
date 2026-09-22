@@ -183,6 +183,7 @@ Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& pat
     result.stylesNeeded = std::move(domain->stylesNeeded);
     result.alignments = std::move(domain->alignments);
     result.surfaces = std::move(domain->surfaces);
+    result.meshes = std::move(domain->meshes);
     result.tally = std::move(domain->tally);
     result.bounds = domain->bounds;
     result.warnings = std::move(domain->warnings);

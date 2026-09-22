@@ -478,3 +478,126 @@ TEST(CadScene, AnUnknownLinetypeNameDrawsSolidRatherThanFailing)
     builder.build(document, {}, plainOptions(), list);
     EXPECT_EQ(list.lines.size(), 1u) << "drawn solid, exactly as it drew before linetypes existed";
 }
+
+// ---- meshes (PLAN.MD 20.2, slice 4) ------------------------------------------------
+
+namespace {
+
+// A tetrahedron: four vertices, four faces, nothing shared with a surface.
+katana::geometry::TriangleMesh tetrahedron()
+{
+    katana::geometry::TriangleMesh mesh;
+    mesh.vertices = {katana::geometry::Point3(0, 0, 0), katana::geometry::Point3(10, 0, 0),
+                     katana::geometry::Point3(0, 10, 0), katana::geometry::Point3(0, 0, 6)};
+    mesh.faces = {{0, 2, 1}, {0, 1, 3}, {1, 2, 3}, {2, 0, 3}};
+    return mesh;
+}
+
+} // namespace
+
+TEST(SceneMeshes, AShadedMeshGivesTheRendererOneTrianglePerFace)
+{
+    const auto mesh = tetrahedron();
+    katana::cad::SceneMesh item;
+    item.name = "pit";
+    item.mesh = &mesh;
+    item.style = SurfaceStyle::Shaded;
+
+    SceneOptions options;
+    options.drawGrid = false;
+    options.drawEntities = false;
+    DrawList out;
+    SceneBuilder builder;
+    builder.appendMeshes({item}, options, out);
+    EXPECT_EQ(out.triangles.size(), 4u);
+    EXPECT_TRUE(out.lines.empty()) << "Shaded draws no edges";
+}
+
+TEST(SceneMeshes, EveryEdgeOfEveryFaceIsDrawnBecauseAMeshHasNoNeighbourTable)
+{
+    // A surface halves its edge count by drawing each shared edge once, which
+    // it can because a TIN knows its neighbours. A mesh does not, so all
+    // three edges of all four faces are drawn: twelve lines, not six.
+    const auto mesh = tetrahedron();
+    katana::cad::SceneMesh item;
+    item.mesh = &mesh;
+    item.style = SurfaceStyle::Wireframe;
+
+    SceneOptions options;
+    options.drawGrid = false;
+    options.drawEntities = false;
+    DrawList out;
+    SceneBuilder builder;
+    builder.appendMeshes({item}, options, out);
+    EXPECT_EQ(out.lines.size(), 12u);
+    EXPECT_TRUE(out.triangles.empty()) << "Wireframe fills nothing";
+}
+
+TEST(SceneMeshes, APerFaceColourIsUsedAndAMissingOneFallsBackToTheMeshColour)
+{
+    const auto mesh = tetrahedron();
+    katana::cad::SceneMesh item;
+    item.mesh = &mesh;
+    item.style = SurfaceStyle::Shaded;
+    item.flatColor = katana::render::rgba(10, 20, 30);
+    // Two of the four faces coloured: the other two take the mesh's colour,
+    // so a partly coloured mesh is still wholly drawn.
+    item.faceColors = {katana::render::rgba(200, 0, 0), katana::render::rgba(0, 200, 0)};
+
+    SceneOptions options;
+    options.drawGrid = false;
+    options.drawEntities = false;
+    options.lightDirection = katana::render::Vec3(0, 0, 0); // unlit: colours as given
+    DrawList out;
+    SceneBuilder builder;
+    builder.appendMeshes({item}, options, out);
+    ASSERT_EQ(out.triangles.size(), 4u);
+    EXPECT_EQ(out.colors[out.triangles[0].a], katana::render::rgba(200, 0, 0));
+    EXPECT_EQ(out.colors[out.triangles[1].a], katana::render::rgba(0, 200, 0));
+    EXPECT_EQ(out.colors[out.triangles[2].a], katana::render::rgba(10, 20, 30));
+    EXPECT_EQ(out.colors[out.triangles[3].a], katana::render::rgba(10, 20, 30));
+}
+
+TEST(SceneMeshes, AMeshIsFramedAndExaggeratedLikeASurface)
+{
+    const auto mesh = tetrahedron();
+    katana::cad::SceneMesh item;
+    item.mesh = &mesh;
+    Document document;
+    SceneOptions options;
+    options.drawEntities = false;
+
+    const auto plain = sceneBounds(document, {}, options, {item});
+    EXPECT_EQ(plain.min, katana::render::Vec3(0, 0, 0));
+    EXPECT_EQ(plain.max, katana::render::Vec3(10, 10, 6));
+
+    // Exaggeration is applied as the scene is built, so the framing agrees
+    // with what is drawn - the same rule surfaces follow.
+    options.verticalExaggeration = 3.0;
+    const auto tall = sceneBounds(document, {}, options, {item});
+    EXPECT_EQ(tall.max.z, 18.0);
+
+    katana::cad::SceneMesh hidden = item;
+    hidden.visible = false;
+    EXPECT_TRUE(sceneBounds(document, {}, options, {hidden}).empty())
+        << "what is not drawn is not framed";
+}
+
+TEST(SceneMeshes, AFaceNamingAVertexThatDoesNotExistIsSkippedRatherThanRead)
+{
+    // The scene builder is the last line of defence: a mesh that never went
+    // through validate() must not read past its vertices.
+    auto mesh = tetrahedron();
+    mesh.faces.push_back({0, 1, 99});
+    katana::cad::SceneMesh item;
+    item.mesh = &mesh;
+    item.style = SurfaceStyle::Shaded;
+
+    SceneOptions options;
+    options.drawGrid = false;
+    options.drawEntities = false;
+    DrawList out;
+    SceneBuilder builder;
+    builder.appendMeshes({item}, options, out);
+    EXPECT_EQ(out.triangles.size(), 4u) << "the four sound faces, and no fifth";
+}

@@ -1477,7 +1477,35 @@ exactly the shape of the layer-panel crash in `docs/cad.md`.
 OUTSTANDING: the dialog's buttons are driven by hand - the commands beneath
 them are covered by tests, the dialog itself only by "it builds and paints".
 
-**STATUS: slice 4 (trimeshes as SceneMesh) next.**
+**Slice 4 DELIVERED (2026-09-22).** A 12d `primitive_3d` becomes a
+`geometry::TriangleMesh` - vertices and faces, deliberately NOT a
+`TinSurface`, because a surface is single-valued in x and y and a mesh may
+be closed or overhang, and keeping them separate types is what stops a pipe
+being asked for "the level at this station". It is held in the session
+beside the surfaces (`MainWindow::addMesh`), drawn in the 3D view like a
+surface, and in plan as its FOOTPRINT - the convex hull of its vertices,
+which is exact and cheap for any topology, dashed and lightly filled under
+the drawing. Per-face colours survive both ways: the one-based
+`face_flags` into `face_infos` on the way in, one info per distinct colour
+on the way out. `Test 4`'s Windsor Road archive brings 1 453 meshes of
+90 656 triangles in 0.11 s; `test trimishes complex.12da` brings 266 of
+126 536.
+
+Two decisions recorded where they apply. A mesh defaults to `Shaded` and
+not `ShadedWithEdges`: it has no neighbour table, so every edge of every
+face is drawn and each line costs two triangles - measured in Release,
+886 504 triangles at 24.9 ms with edges against 127 288 at 18.0 ms without
+(`include/katana/cad/scene.hpp`). And the plan view draws the footprint
+rather than the triangles, because 1 453 meshes of 90 656 triangles would
+bury the drawing they are context for.
+
+OUTSTANDING: a mesh is session data, so it is not saved with the project
+(the same open question as surfaces - PLAN.MD Phase 07); vertex and edge
+infos, the edge list and `blend` are read and not modelled; the Reference
+Data panel does not list meshes, so there is no way to hide or delete one
+from the GUI yet.
+
+**STATUS: slice 5 (attribute manager) next.**
 
 ---
 

@@ -56,6 +56,8 @@ struct Archive12dImportResult {
     // that the drawing already has, or createAlignment will refuse it.
     std::vector<katana::entity::Alignment> alignments;
     std::vector<katana::archive12d::ImportedSurface> surfaces;
+    // 12d trimeshes: session data like the surfaces, held by the caller.
+    std::vector<katana::archive12d::ImportedMesh> meshes;
     std::vector<PointCloudLayer> clouds;
     std::vector<katana::archive12d::ElementTally> tally;
 

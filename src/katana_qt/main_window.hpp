@@ -110,6 +110,10 @@ class MainWindow final : public QMainWindow {
     void buildSurfaceFromRaster();
     void buildSurfaceFromDrawing();
     void addSurface(std::string name, katana::terrain::TinSurface surface);
+    // Session data like a surface: not an entity, not undoable, and drawn in
+    // 3D with its footprint in plan.
+    void addMesh(std::string name, katana::geometry::TriangleMesh mesh,
+                 katana::render::Rgba color, std::vector<katana::render::Rgba> faceColors);
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
     void corridorQuantities();
@@ -197,6 +201,9 @@ class MainWindow final : public QMainWindow {
     // dangle every one of those pointers - the moment it reallocated.
     std::vector<std::unique_ptr<katana::terrain::TinSurface>> surfaceStore_;
     std::vector<katana::cad::SceneSurface> sceneSurfaces_;
+    // Meshes (12d trimeshes), held the same way and for the same reasons.
+    std::vector<std::unique_ptr<katana::geometry::TriangleMesh>> meshStore_;
+    std::vector<katana::cad::SceneMesh> sceneMeshes_;
     QTreeWidget* layerTree_ = nullptr;
     QTableWidget* referenceTable_ = nullptr;
     QTableWidget* propertyTable_ = nullptr;

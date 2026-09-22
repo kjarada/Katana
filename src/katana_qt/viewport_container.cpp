@@ -36,6 +36,7 @@ ViewContext ViewportContainer::contextFor() const
     ViewContext context;
     context.document = &document_;
     context.surfaces = surfaces_;
+    context.meshes = meshes_;
     context.options = options_;
     return context;
 }
@@ -297,6 +298,20 @@ void ViewportContainer::setSurfaces(const std::vector<katana::cad::SceneSurface>
     for (Cell& cell : cells_) {
         if (cell.render) {
             cell.render->setContext(contextFor());
+        }
+    }
+}
+
+void ViewportContainer::setMeshes(const std::vector<katana::cad::SceneMesh>* meshes)
+{
+    meshes_ = meshes;
+    for (Cell& cell : cells_) {
+        if (cell.render) {
+            cell.render->setContext(contextFor());
+        }
+        // A plan viewport draws each mesh's footprint, so it needs them too.
+        if (cell.plan) {
+            cell.plan->setMeshes(meshes);
         }
     }
 }

@@ -480,8 +480,16 @@ The mapping is documented in full at the head of
   recommends to "most software packages" and which cannot get the
   mandatory neighbours block wrong. Per-triangle colours are kept and written
   back but a surface here has no use for them, which is said.
-- **Trimeshes are read in full and not imported:** Katana has no 3D mesh
-  entity. They are counted and reported, never silently dropped.
+- **Trimeshes become meshes in the session.** A `primitive_3d` is a
+  `geometry::TriangleMesh` held beside the surfaces, drawn in 3D and as its
+  footprint in plan (docs/cad.md, "A mesh is not a surface"). Per-face
+  colours survive both ways: the one-based `face_flags` into `face_infos` on
+  the way in, one info per DISTINCT colour on the way out, because an info
+  is a colour and not a face. A face that repeats a vertex or uses one with
+  no height is dropped and counted - it names no triangle in space - while
+  a face naming a vertex that does not exist is refused by the READER,
+  which can say which line. Vertex and edge infos, the edge list ("for
+  checking only", manual 1.4.9) and `blend` are read and not modelled.
 - **Point clouds** become reference layers. A `ref_data` cloud names a LAS
   file relative to a 12d project the archive has left behind; it is reported
   for the user to import, not chased.
@@ -554,7 +562,7 @@ handling column is asserted by `tests/archive12d/test_coverage.cpp`.
 | `tin` | 1.4.7.2 | import and export | a surface (terrain::TinSurface) |
 | `full_tin` | 1.4.7.1 | import | a surface of its visible, non-construction triangles; written back as a tin |
 | `super_tin` | 1.4.8 | read | reported; its member tins are what is imported |
-| `primitive_3d` | 1.4.9 | read | read in full, not imported: Katana has no 3D mesh entity |
+| `primitive_3d` | 1.4.9 | import and export | a mesh in the session (geometry::TriangleMesh), drawn in 3D and as its footprint in plan; per-face colours kept and written back |
 | `string arc` | 1.5.1 | import | an Arc; exported arcs are written as two-vertex super strings |
 | `string circle` | 1.5.2 | import and export | a Circle |
 | `string drainage` | 1.5.3 | import | the line as a Polyline carrying its pipes, each pit and house connection as a Point |
@@ -593,12 +601,13 @@ reads the same.
 
 ### Not done
 
-The Windsor Road file's 1 453 trimeshes are read and reported and go no
-further: there is no mesh entity. A symbol on the vertices of a LINE (468
-fence and kerb strings in Windsor Road, 18 in `Test 4`) is kept and written
-back but not drawn, and a point symbol's rotation, offset and raise are kept
-and not drawn either: a Katana point has no rotation, and offset and raise
-are paper-space quantities. Per-vertex annotation settings
+A symbol on the vertices of a LINE (468 fence and kerb strings in Windsor
+Road, 18 in `Test 4`) is kept and written back but not drawn, and a point
+symbol's rotation, offset and raise are kept and not drawn either: a Katana
+point has no rotation, and offset and raise are paper-space quantities. A
+mesh is session data, so it is drawn but not saved with the project - the
+same open question as a surface. A mesh's vertex and edge infos, its edge
+list and its `blend` are read and not modelled. Per-vertex annotation settings
 beyond text height and angle (offset, raise, justification, slant) are not
 taken. Super tins are reported, not built - Katana has no notion of one
 surface overriding another where they overlap. The undocumented parts of a

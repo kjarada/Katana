@@ -223,6 +223,17 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
                       << surface.surface.triangleCount() << " triangles (read and checked; the "
                       << "CLI holds no surfaces - import in the desktop application to use it)\n";
         }
+        if (!imported->meshes.empty()) {
+            // Same as a surface: read, checked, and nowhere for the CLI to
+            // keep it. Said in numbers so it is not taken for kept.
+            std::size_t triangles = 0;
+            for (const auto& mesh : imported->meshes) {
+                triangles += mesh.mesh.triangleCount();
+            }
+            std::cout << "  " << imported->meshes.size() << " meshes, " << triangles
+                      << " triangles (read and checked; the CLI holds no meshes - import in the "
+                      << "desktop application to see them)\n";
+        }
         for (auto& cloud : imported->clouds) {
             std::cout << "  point cloud \"" << cloud.name << "\": " << cloud.points.size()
                       << " points\n";

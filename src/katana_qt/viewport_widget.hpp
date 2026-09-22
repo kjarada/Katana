@@ -20,6 +20,7 @@
 #include <QWidget>
 
 #include "katana/cad/plot.hpp"
+#include "katana/cad/scene.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/cad/view_transform.hpp"
@@ -61,6 +62,10 @@ class ViewportWidget final : public QWidget {
     // the viewport only paints it, and never mutates it (Rule 3). Null until the
     // window supplies one.
     void setReferenceData(katana::interop::ReferenceData* reference);
+    // The session's meshes (PLAN.MD 20.2 slice 4), drawn in plan as their
+    // footprints. A pointer to the MainWindow's vector, so one added later
+    // appears without this being called again.
+    void setMeshes(const std::vector<katana::cad::SceneMesh>* meshes);
     // Drops the cached QImages and per-point colours. Call after a layer is
     // added, removed, or has its display settings changed.
     void invalidateReferenceCache();
@@ -120,6 +125,7 @@ class ViewportWidget final : public QWidget {
     void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
     void drawSymbol(QPainter& painter, const std::string& symbol, const Point2& centre,
                     double size) const;
+    void drawMeshFootprints(QPainter& painter) const;
     // `height` in model units; `rotation` in radians, counter-clockwise.
     // Fills a closed polyline with the hatch pattern resolved for the entity
     // being drawn, if any. `screen` is that boundary already transformed, so a
@@ -157,6 +163,7 @@ class ViewportWidget final : public QWidget {
     katana::cad::SnapModes snapModes_ = katana::cad::kDefaultSnapModes;
 
     katana::interop::ReferenceData* reference_ = nullptr;
+    const std::vector<katana::cad::SceneMesh>* meshes_ = nullptr;
 
     // The dimension style in force for the entity currently being drawn.
     // Resolved once per entity in drawEntities rather than per draw call, and

@@ -669,6 +669,40 @@ Not drawn, by decision rather than omission: a symbol on the vertices of a
 line (12d draws fence posts that way; a Katana line's vertices have no
 style, and the blocks are kept for export), and a point symbol's rotation.
 
+## A mesh is not a surface
+
+`geometry::TriangleMesh` (PLAN.MD 20.2 slice 4) is a list of points and a
+list of triangles naming three of them each: what a 12d `primitive_3d`
+carries, and what an IFC solid or an OBJ would. It is a separate type from
+`terrain::TinSurface` on purpose. A surface is a function of x and y -
+single-valued, sampled for a height, the thing a profile and a volume are
+computed against. A mesh may be closed, may overhang, and may have several
+sheets above one point; a pipe, a pit and a fence post are meshes. Giving
+them one type would mean either a surface that cannot answer "the level
+here" or a mesh that lies when asked.
+
+What follows from that:
+
+- **No elevation ramp.** A surface colours by height because height is what
+  it is; a mesh takes one colour, or one per face where the file gives them.
+- **Every edge of every face, or none.** A TIN halves its edge count by
+  drawing each shared edge once, which it can because it knows its
+  neighbours. A bag of triangles does not, and computing adjacency would
+  cost more than the lines save - so `SceneMesh` defaults to `Shaded`. The
+  numbers are in `scene.hpp` beside the default.
+- **In plan it is a footprint.** `TriangleMesh::planHull()` is the convex
+  hull of the vertices: exact and cheap whatever the topology, unlike a
+  silhouette. It is a HULL and says so - a horseshoe-shaped mesh's hull
+  covers ground the mesh does not. A degenerate footprint comes back as it
+  is rather than as nothing: a vertical wall gives the two ends of a
+  segment, because seen from above a wall IS a line and drawing that line is
+  the truth about where it stands. One real archive brings 1 453 meshes of
+  90 656 triangles, so drawing their triangles in plan would bury the
+  drawing they are context for.
+- **`triangle(i)` refuses a face that names a vertex which does not exist**,
+  rather than trusting `validate()` to have been called. The scene builder
+  is the last thing between a file and a read past the end of a vector.
+
 ## The styles and linetypes manager, and what a rename is
 
 One dialog for the `Style` and `Linetype` tables (PLAN.MD 20.2 slice 3,

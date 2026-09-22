@@ -59,7 +59,7 @@ const std::map<std::string, std::string>& minimalInstances()
 std::size_t thingsImported(const a12::DomainImport& domain)
 {
     return domain.entities.size() + domain.alignments.size() + domain.surfaces.size() +
-           domain.clouds.size();
+           domain.clouds.size() + domain.meshes.size();
 }
 
 } // namespace

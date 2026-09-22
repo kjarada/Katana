@@ -1367,10 +1367,71 @@ class Importer {
         return 1;
     }
 
-    std::size_t import(const Trimesh&)
+    // A trimesh becomes a mesh in the session, beside the surfaces. Its
+    // vertices come across whole - 12d's indices are one-based and the
+    // reader has already subtracted - and a face that names a vertex which
+    // does not exist is dropped and counted rather than costing the mesh.
+    std::size_t import(const Trimesh& trimesh)
     {
-        ++trimeshes_;
-        return 0;
+        ImportedMesh imported;
+        imported.name = trimesh.name.empty() ? "trimesh" : trimesh.name;
+        imported.layer = layerPathForModel(trimesh.model, options_.layerPrefix);
+        imported.colourName = trimesh.colour;
+        imported.color = standardColour(trimesh.colour);
+        imported.edgesInFile = trimesh.edges.size();
+        imported.vertexInfosInFile = trimesh.vertexInfos.size();
+        imported.edgeInfosInFile = trimesh.edgeInfos.size();
+        if (options_.attributesAsProperties) {
+            flattenAttributes(trimesh.attributes, {}, imported.properties);
+        }
+
+        imported.mesh.vertices.reserve(trimesh.vertices.size());
+        for (const Vertex& vertex : trimesh.vertices) {
+            // A mesh vertex with no height is not a vertex: a face that used
+            // it is dropped below, because it names a point in space.
+            imported.mesh.vertices.emplace_back(vertex.x, vertex.y, vertex.z.value_or(0.0));
+        }
+        std::size_t dropped = 0;
+        const std::uint32_t count = static_cast<std::uint32_t>(trimesh.vertices.size());
+        for (std::size_t i = 0; i < trimesh.faces.size(); ++i) {
+            const auto& face = trimesh.faces[i];
+            const bool named = face[0] < count && face[1] < count && face[2] < count;
+            const bool distinct = face[0] != face[1] && face[1] != face[2] && face[2] != face[0];
+            const bool solid = named && trimesh.vertices[face[0]].z &&
+                               trimesh.vertices[face[1]].z && trimesh.vertices[face[2]].z;
+            if (!named || !distinct || !solid) {
+                ++dropped;
+                continue;
+            }
+            imported.mesh.faces.push_back(face);
+            // face_flags are ONE-based into face_infos, 0 meaning none
+            // (manual 1.4.9); a flag out of range is treated as none.
+            std::string colour;
+            if (i < trimesh.faceFlags.size()) {
+                const std::uint32_t flag = trimesh.faceFlags[i];
+                if (flag != 0 && flag <= trimesh.faceInfos.size()) {
+                    colour = trimesh.faceInfos[flag - 1].colour;
+                }
+            }
+            imported.faceColourNames.push_back(colour);
+            imported.faceColors.push_back(colour.empty() ? std::nullopt : standardColour(colour));
+        }
+        // All or nothing: a table of face colours with a gap in it would be
+        // read by position, so if no face was coloured it is no table.
+        if (std::all_of(imported.faceColourNames.begin(), imported.faceColourNames.end(),
+                        [](const std::string& colour) { return colour.empty(); })) {
+            imported.faceColourNames.clear();
+            imported.faceColors.clear();
+        }
+        if (dropped != 0) {
+            trimeshFacesDropped_ += dropped;
+        }
+        if (imported.mesh.faces.empty()) {
+            ++trimeshesEmpty_;
+            return 0;
+        }
+        result_.meshes.push_back(std::move(imported));
+        return 1;
     }
 
     std::size_t import(const LasCloud& cloud)
@@ -1399,10 +1460,15 @@ class Importer {
             warnings.push_back(std::to_string(namedProblems_ - kMaxNamedProblems) +
                                " further elements had problems and are not listed");
         }
-        if (trimeshes_ != 0) {
-            warnings.push_back(std::to_string(trimeshes_) +
-                               " trimeshes were read but not imported: Katana has no 3D mesh "
-                               "entity to hold them");
+        if (trimeshesEmpty_ != 0) {
+            warnings.push_back(std::to_string(trimeshesEmpty_) +
+                               " trimeshes have no triangle that names three distinct vertices "
+                               "with heights, and are not imported");
+        }
+        if (trimeshFacesDropped_ != 0) {
+            warnings.push_back(std::to_string(trimeshFacesDropped_) +
+                               " mesh faces were dropped: they name a vertex that does not "
+                               "exist, repeat one, or have no height");
         }
         if (partlyInvisible_ != 0) {
             warnings.push_back(std::to_string(partlyInvisible_) +
@@ -1455,7 +1521,8 @@ class Importer {
     std::set<std::string> noted_;
     detail::ChordReport chordReport_;
     std::size_t namedProblems_ = 0;
-    std::size_t trimeshes_ = 0;
+    std::size_t trimeshesEmpty_ = 0;
+    std::size_t trimeshFacesDropped_ = 0;
     std::size_t partlyInvisible_ = 0;
     std::size_t symbolsLeft_ = 0;
     std::size_t annotationsLeft_ = 0;

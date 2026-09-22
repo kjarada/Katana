@@ -218,6 +218,84 @@ void SceneBuilder::appendSurfaces(const std::vector<SceneSurface>& surfaces,
     }
 }
 
+// A mesh is drawn like a surface, with two differences that follow from what
+// it is: no elevation ramp (a closed mesh has no "the height here"), and its
+// edges are drawn from every face rather than once per shared edge, because a
+// TriangleMesh carries no neighbour table - a mesh is a bag of triangles, and
+// working out adjacency to halve the line count would cost more than the lines
+// save.
+void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const SceneOptions& options,
+                                DrawList& out)
+{
+    const double exaggeration =
+        std::isfinite(options.verticalExaggeration) && options.verticalExaggeration > 0.0
+            ? options.verticalExaggeration
+            : 1.0;
+    const double datum = std::isfinite(options.exaggerationDatum) ? options.exaggerationDatum : 0.0;
+    const auto liftZ = [exaggeration, datum](double z) {
+        return datum + (z - datum) * exaggeration;
+    };
+
+    Vec3 light = options.lightDirection;
+    const double lightLength = light.length();
+    const bool lit = lightLength > 1.0e-9;
+    if (lit) {
+        light = light / lightLength;
+    }
+    const double ambient = std::clamp(options.ambient, 0.0, 1.0);
+
+    for (const SceneMesh& item : meshes) {
+        if (!item.visible || item.mesh == nullptr || item.mesh->empty() ||
+            item.style == SurfaceStyle::Hidden) {
+            continue;
+        }
+        const katana::geometry::TriangleMesh& mesh = *item.mesh;
+        const bool shaded =
+            item.style == SurfaceStyle::Shaded || item.style == SurfaceStyle::ShadedWithEdges;
+        const bool edges =
+            item.style == SurfaceStyle::Wireframe || item.style == SurfaceStyle::ShadedWithEdges;
+        const Rgba edgeColor =
+            shaded ? katana::render::rgba(40, 40, 45) : katana::render::rgba(190, 190, 190);
+        const float bias = shaded ? 3.0e-4f : 0.0f;
+
+        for (std::size_t f = 0; f < mesh.triangleCount(); ++f) {
+            // triangle() refuses a face that names a vertex which does not
+            // exist, so an unvalidated mesh cannot be read past its end here.
+            const auto face = mesh.triangle(f);
+            if (!face) {
+                continue;
+            }
+            const Rgba base = f < item.faceColors.size() ? item.faceColors[f] : item.flatColor;
+            const Vec3 a(face->a.x, face->a.y, liftZ(face->a.z));
+            const Vec3 b(face->b.x, face->b.y, liftZ(face->b.z));
+            const Vec3 c(face->c.x, face->c.y, liftZ(face->c.z));
+            if (shaded) {
+                Rgba color = base;
+                if (lit) {
+                    const Vec3 normal = (b - a).cross(c - a);
+                    const double area = normal.length();
+                    if (area > 1.0e-12) {
+                        // Absolute value, as for a surface: a mesh is lit from
+                        // whichever side it is seen.
+                        color = katana::render::shade(
+                            base, ambient + (1.0 - ambient) * std::abs((normal / area).dot(light)));
+                    }
+                }
+                out.addTriangle(out.addVertex(a, color), out.addVertex(b, color),
+                                out.addVertex(c, color));
+            }
+            if (edges) {
+                const VertexIndex ea = out.addVertex(a, edgeColor);
+                const VertexIndex eb = out.addVertex(b, edgeColor);
+                const VertexIndex ec = out.addVertex(c, edgeColor);
+                out.addLine(ea, eb, 1.0f, bias);
+                out.addLine(eb, ec, 1.0f, bias);
+                out.addLine(ec, ea, 1.0f, bias);
+            }
+        }
+    }
+}
+
 // ---- entities -------------------------------------------------------------------
 
 void SceneBuilder::appendEntities(const Document& document, const SceneOptions& options,
@@ -395,20 +473,22 @@ void SceneBuilder::appendGrid(const SceneOptions& options, const AABB& around, D
 }
 
 void SceneBuilder::build(const Document& document, const std::vector<SceneSurface>& surfaces,
-                         const SceneOptions& options, DrawList& out)
+                         const SceneOptions& options, DrawList& out,
+                         const std::vector<SceneMesh>& meshes)
 {
     out.clear();
     if (options.drawGrid) {
-        appendGrid(options, sceneBounds(document, surfaces, options), out);
+        appendGrid(options, sceneBounds(document, surfaces, options, meshes), out);
     }
     appendSurfaces(surfaces, options, out);
+    appendMeshes(meshes, options, out);
     if (options.drawEntities) {
         appendEntities(document, options, out);
     }
 }
 
 AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surfaces,
-                 const SceneOptions& options)
+                 const SceneOptions& options, const std::vector<SceneMesh>& meshes)
 {
     const double exaggeration =
         std::isfinite(options.verticalExaggeration) && options.verticalExaggeration > 0.0
@@ -430,6 +510,18 @@ AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surf
                         datum + (item.surface->minElevation() - datum) * exaggeration));
         box.expand(Vec3(plan.max.x, plan.max.y,
                         datum + (item.surface->maxElevation() - datum) * exaggeration));
+    }
+    for (const SceneMesh& item : meshes) {
+        if (!item.visible || item.mesh == nullptr || item.mesh->empty() ||
+            item.style == SurfaceStyle::Hidden) {
+            continue;
+        }
+        const AABB space = item.mesh->bounds();
+        if (space.empty()) {
+            continue;
+        }
+        box.expand(Vec3(space.min.x, space.min.y, datum + (space.min.z - datum) * exaggeration));
+        box.expand(Vec3(space.max.x, space.max.y, datum + (space.max.z - datum) * exaggeration));
     }
     if (options.drawEntities) {
         const auto plan = document.model().entities.bounds();

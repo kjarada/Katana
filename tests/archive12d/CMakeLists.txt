@@ -11,6 +11,7 @@ katana_add_test_suite(archive12d
         test_domain_export.cpp
         test_review_findings.cpp
         test_symbols.cpp
+        test_meshes.cpp
 )
 # The fixtures are small hand-written archives; the multi-megabyte exports the
 # format was learned from are real project data and are not in the repository.

@@ -82,7 +82,8 @@ void RenderViewWidget::setVerticalExaggeration(double factor)
     if (context_.document != nullptr && context_.surfaces != nullptr) {
         katana::cad::SceneOptions flat = context_.options;
         flat.verticalExaggeration = 1.0;
-        const auto box = katana::cad::sceneBounds(*context_.document, *context_.surfaces, flat);
+        const auto box =
+            katana::cad::sceneBounds(*context_.document, *context_.surfaces, flat, meshes());
         context_.options.exaggerationDatum = box.empty() ? 0.0 : box.center().z;
     }
     invalidateScene();
@@ -96,7 +97,7 @@ void RenderViewWidget::rebuildIfNeeded()
     }
     static const std::vector<katana::cad::SceneSurface> kNoSurfaces;
     const auto& surfaces = context_.surfaces != nullptr ? *context_.surfaces : kNoSurfaces;
-    builder_.build(*context_.document, surfaces, context_.options, list_);
+    builder_.build(*context_.document, surfaces, context_.options, list_, meshes());
     sceneDirty_ = false;
 }
 
@@ -107,7 +108,7 @@ void RenderViewWidget::zoomExtents()
     }
     static const std::vector<katana::cad::SceneSurface> kNoSurfaces;
     const auto& surfaces = context_.surfaces != nullptr ? *context_.surfaces : kNoSurfaces;
-    auto box = katana::cad::sceneBounds(*context_.document, surfaces, context_.options);
+    auto box = katana::cad::sceneBounds(*context_.document, surfaces, context_.options, meshes());
     if (box.empty()) {
         // Nothing to frame: show a sensible patch of ground rather than
         // leaving the camera wherever it was, which looks like a broken view.

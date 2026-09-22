@@ -99,7 +99,8 @@ class Exporter {
     {
     }
 
-    DomainExport run(const std::vector<ExportSurface>& surfaces)
+    DomainExport run(const std::vector<ExportSurface>& surfaces,
+                     const std::vector<ExportMesh>& meshes)
     {
         const std::unordered_set<katana::entity::EntityId> wanted(options_.entities.begin(),
                                                                   options_.entities.end());
@@ -126,6 +127,11 @@ class Exporter {
         for (const ExportSurface& surface : surfaces) {
             if (surface.surface != nullptr && !surface.surface->empty()) {
                 write(surface);
+            }
+        }
+        for (const ExportMesh& mesh : meshes) {
+            if (mesh.mesh != nullptr && !mesh.mesh->empty()) {
+                write(mesh);
             }
         }
         return std::move(result_);
@@ -654,6 +660,46 @@ class Exporter {
         }
     }
 
+    void write(const ExportMesh& mesh)
+    {
+        Trimesh trimesh;
+        trimesh.name = mesh.name.empty() ? "trimesh" : mesh.name;
+        trimesh.model = mesh.layer;
+        trimesh.colour = mesh.colourName.empty() ? "green" : mesh.colourName;
+        const Vec2 shift = options_.originShift.value_or(Vec2{});
+        for (const auto& vertex : mesh.mesh->vertices) {
+            trimesh.vertices.push_back(Vertex{vertex.x + shift.x, vertex.y + shift.y, vertex.z});
+        }
+        trimesh.faces = mesh.mesh->faces;
+        // The face colours become the `face_infos` table and the ONE-based
+        // `face_flags` that index it, which is how 12d carries them: one
+        // info per DISTINCT colour, because that is what the format is for.
+        if (mesh.faceColourNames.size() == mesh.mesh->faces.size()) {
+            std::vector<std::string> distinct;
+            trimesh.faceFlags.reserve(mesh.faceColourNames.size());
+            for (const std::string& colour : mesh.faceColourNames) {
+                if (colour.empty()) {
+                    trimesh.faceFlags.push_back(0);
+                    continue;
+                }
+                const auto found = std::find(distinct.begin(), distinct.end(), colour);
+                if (found == distinct.end()) {
+                    distinct.push_back(colour);
+                    TrimeshInfo info;
+                    info.flag = static_cast<std::int64_t>(distinct.size());
+                    info.colour = colour;
+                    trimesh.faceInfos.push_back(std::move(info));
+                    trimesh.faceFlags.push_back(static_cast<std::uint32_t>(distinct.size()));
+                } else {
+                    trimesh.faceFlags.push_back(
+                        static_cast<std::uint32_t>(found - distinct.begin() + 1));
+                }
+            }
+        }
+        result_.archive.elements.emplace_back(std::move(trimesh));
+        ++result_.meshesWritten;
+    }
+
     void write(const ExportSurface& surface)
     {
         // The `tin` form: visible triangles only, no neighbours to get wrong.
@@ -740,7 +786,8 @@ std::vector<std::optional<double>> entityHeights(const katana::entity::Entity& e
 
 katana::core::Result<DomainExport> fromDomain(const katana::entity::Model& model,
                                               const std::vector<ExportSurface>& surfaces,
-                                              const ExportOptions& options)
+                                              const ExportOptions& options,
+                                              const std::vector<ExportMesh>& meshes)
 {
     if (!(options.curveTolerance > 0.0) || !std::isfinite(options.curveTolerance)) {
         return makeError(ErrorCode::InvalidArgument, "the curve tolerance must be positive");
@@ -750,7 +797,7 @@ katana::core::Result<DomainExport> fromDomain(const katana::entity::Model& model
         return makeError(ErrorCode::InvalidArgument, "the origin shift is not finite");
     }
     Exporter exporter(model, options);
-    return exporter.run(surfaces);
+    return exporter.run(surfaces, meshes);
 }
 
 } // namespace katana::archive12d

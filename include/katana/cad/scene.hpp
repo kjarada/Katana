@@ -17,6 +17,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/geometry/mesh.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
 #include "katana/terrain/tin_surface.hpp"
@@ -46,6 +47,29 @@ struct SceneSurface {
     SurfaceStyle style = SurfaceStyle::ShadedWithEdges;
     SurfaceColoring coloring = SurfaceColoring::Elevation;
     katana::render::Rgba flatColor = katana::render::rgba(170, 170, 160);
+    bool visible = true;
+};
+
+// A mesh in the session (PLAN.MD 20.2, slice 4): a 12d trimesh, drawn like
+// a surface but NOT one - it may be closed or overhang, so it is never
+// sampled for a height and carries no elevation ramp. Colouring is flat or
+// per face, because that is what the file gives.
+struct SceneMesh {
+    std::string name;
+    const katana::geometry::TriangleMesh* mesh = nullptr;
+    // Shaded, NOT ShadedWithEdges as a surface is. A mesh has no neighbour
+    // table, so every edge of every face is drawn and each line costs two
+    // triangles. Measured on `test trimishes complex.12da` (266 meshes,
+    // 126 536 faces) in Release on this machine, at the framing the import
+    // leaves: with edges 886 504 triangles rasterised in 24.9 ms, without
+    // them 127 288 in 18.0 ms. On a mesh of this density the edges also read
+    // as noise. The style is per mesh, so a user who wants to see the
+    // triangulation of one asks for it.
+    SurfaceStyle style = SurfaceStyle::Shaded;
+    katana::render::Rgba flatColor = katana::render::rgba(190, 170, 140);
+    // Empty, or one per face. A face whose colour the file did not give
+    // takes flatColor, so a partly coloured mesh is still wholly drawn.
+    std::vector<katana::render::Rgba> faceColors;
     bool visible = true;
 };
 
@@ -103,11 +127,14 @@ class SceneBuilder {
   public:
     // Appends the whole scene to `out`, which is cleared first.
     void build(const Document& document, const std::vector<SceneSurface>& surfaces,
-               const SceneOptions& options, katana::render::DrawList& out);
+               const SceneOptions& options, katana::render::DrawList& out,
+               const std::vector<SceneMesh>& meshes = {});
 
     // Just the surfaces, for a view that shows terrain alone.
     void appendSurfaces(const std::vector<SceneSurface>& surfaces, const SceneOptions& options,
                         katana::render::DrawList& out);
+    void appendMeshes(const std::vector<SceneMesh>& meshes, const SceneOptions& options,
+                      katana::render::DrawList& out);
     void appendEntities(const Document& document, const SceneOptions& options,
                         katana::render::DrawList& out);
     void appendGrid(const SceneOptions& options, const katana::math::AABB& around,
@@ -121,6 +148,7 @@ class SceneBuilder {
 // exaggeration applied. What a viewport frames when asked to zoom to extents.
 [[nodiscard]] katana::math::AABB sceneBounds(const Document& document,
                                              const std::vector<SceneSurface>& surfaces,
-                                             const SceneOptions& options);
+                                             const SceneOptions& options,
+                                             const std::vector<SceneMesh>& meshes = {});
 
 } // namespace katana::cad

@@ -8,6 +8,7 @@ add_library(katana_geometry STATIC
     spatial_index.cpp
     polygon.cpp
     editing.cpp
+    mesh.cpp
 )
 katana_target_defaults(katana_geometry)
 target_link_libraries(katana_geometry PUBLIC katana_math)

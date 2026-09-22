@@ -100,6 +100,16 @@ int main(int argc, char* argv[])
     for (const a12::ElementTally& tally : domain->tally) {
         std::printf("  %-28s %10zu %10zu\n", tally.keyword.c_str(), tally.read, tally.imported);
     }
+    if (!domain->meshes.empty()) {
+        std::size_t faces = 0;
+        std::size_t coloured = 0;
+        for (const a12::ImportedMesh& mesh : domain->meshes) {
+            faces += mesh.mesh.triangleCount();
+            coloured += mesh.faceColourNames.empty() ? 0 : 1;
+        }
+        std::printf("  %zu meshes, %zu triangles, %zu with per-face colours\n",
+                    domain->meshes.size(), faces, coloured);
+    }
     for (const a12::ImportedSurface& surface : domain->surfaces) {
         std::printf("  surface \"%s\": %zu of %zu triangles\n", surface.name.c_str(),
                     surface.surface.triangleCount(), surface.trianglesInFile);

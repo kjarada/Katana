@@ -25,8 +25,9 @@ const std::vector<ElementCoverage>& elementCoverage()
          "a surface of its visible, non-construction triangles; written back as a tin"},
         {"super_tin", "1.4.8", Handling::ReadOnly,
          "reported; its member tins are what is imported"},
-        {"primitive_3d", "1.4.9", Handling::ReadOnly,
-         "read in full, not imported: Katana has no 3D mesh entity"},
+        {"primitive_3d", "1.4.9", Handling::Full,
+         "a mesh in the session (geometry::TriangleMesh), drawn in 3D and as its footprint in "
+         "plan; written back with its per-face colours"},
         {"string arc", "1.5.1", Handling::ImportOnly,
          "an Arc; exported arcs are written as two-vertex super strings"},
         {"string circle", "1.5.2", Handling::Full, "a Circle"},

@@ -1554,6 +1554,9 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
     if (!imported->surfaces.empty()) {
         summary += ", " + grouped(imported->surfaces.size()) + " surfaces";
     }
+    if (!imported->meshes.empty()) {
+        summary += ", " + grouped(imported->meshes.size()) + " meshes";
+    }
     if (!imported->clouds.empty()) {
         summary += ", " + grouped(imported->clouds.size()) + " point clouds";
     }
@@ -1579,6 +1582,32 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
     // a rejected import leaves nothing behind.
     for (auto& surface : imported->surfaces) {
         addSurface(surface.name, std::move(surface.surface));
+    }
+    for (auto& mesh : imported->meshes) {
+        // A 12d colour Katana has no RGB for leaves the mesh its default
+        // clay, which is visible against a surface and against the drawing.
+        constexpr katana::render::Rgba kMeshDefault = katana::render::rgba(190, 170, 140);
+        const auto toRgba = [](const std::optional<katana::entity::Color>& colour,
+                               katana::render::Rgba fallback) {
+            return colour ? katana::render::rgba(colour->r, colour->g, colour->b) : fallback;
+        };
+        const katana::render::Rgba base = toRgba(mesh.color, kMeshDefault);
+        std::vector<katana::render::Rgba> faces;
+        faces.reserve(mesh.faceColors.size());
+        for (const auto& colour : mesh.faceColors) {
+            faces.push_back(toRgba(colour, base));
+        }
+        addMesh(mesh.name, std::move(mesh.mesh), base, std::move(faces));
+    }
+    // A mesh is a 3D thing: in plan it is only a footprint, so the first
+    // import that brings one opens the 3D view, exactly as a surface does.
+    // Once, after the loop - not once per mesh, and a real archive brings
+    // 1 453 of them.
+    if (!imported->meshes.empty() && views_->activeRenderView() == nullptr) {
+        views_->setLayoutKind(cad::LayoutKind::SplitVertical);
+        views_->layout().setActiveIndex(1);
+        views_->setActiveViewKind(cad::ViewKind::Model3D);
+        refreshViewMenu();
     }
     if (!imported->clouds.empty()) {
         for (auto& cloud : imported->clouds) {
@@ -2004,6 +2033,25 @@ void MainWindow::setVerticalExaggeration()
         renderView->zoomExtents();
     }
     logMessage(QString("Vertical exaggeration x%1.").arg(factor, 0, 'f', 2));
+}
+
+void MainWindow::addMesh(std::string name, katana::geometry::TriangleMesh mesh,
+                         katana::render::Rgba color,
+                         std::vector<katana::render::Rgba> faceColors)
+{
+    meshStore_.push_back(std::make_unique<katana::geometry::TriangleMesh>(std::move(mesh)));
+
+    cad::SceneMesh item;
+    item.name = std::move(name);
+    item.mesh = meshStore_.back().get();
+    item.flatColor = color;
+    item.faceColors = std::move(faceColors);
+    sceneMeshes_.push_back(std::move(item));
+
+    // As for surfaces: the views hold a pointer to the VECTOR, and the
+    // meshes themselves are behind unique_ptr so this push_back cannot move
+    // them out from under it.
+    views_->setMeshes(&sceneMeshes_);
 }
 
 void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surface)

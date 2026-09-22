@@ -28,7 +28,10 @@ namespace katana::qt {
 // all of it; a view never copies the model.
 struct ViewContext {
     katana::cad::Document* document = nullptr;
+    // Pointers to the MainWindow's vectors, not copies: a surface or a mesh
+    // added later must reach every view without rebuilding them.
     const std::vector<katana::cad::SceneSurface>* surfaces = nullptr;
+    const std::vector<katana::cad::SceneMesh>* meshes = nullptr;
     katana::cad::SceneOptions options{};
 };
 
@@ -38,6 +41,17 @@ class RenderViewWidget final : public QWidget {
     // camera lives there so that a layout change does not reset the view.
     RenderViewWidget(ViewContext context, katana::cad::ViewportCell* cell,
                      QWidget* parent = nullptr);
+
+  private:
+    // Never null: a view with no meshes draws none rather than testing for
+    // a pointer at each of the three places that ask.
+    [[nodiscard]] const std::vector<katana::cad::SceneMesh>& meshes() const
+    {
+        static const std::vector<katana::cad::SceneMesh> kNone;
+        return context_.meshes != nullptr ? *context_.meshes : kNone;
+    }
+
+  public:
 
     void setContext(const ViewContext& context);
     void setCell(katana::cad::ViewportCell* cell);

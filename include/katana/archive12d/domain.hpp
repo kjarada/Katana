@@ -78,6 +78,7 @@
 #include "katana/entity/entity.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/tables.hpp"
+#include "katana/geometry/mesh.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
@@ -139,6 +140,30 @@ struct ImportedSurface {
     std::size_t trianglesNulled = 0; // nulled, construction, or null-height
 };
 
+// A `primitive_3d` (manual 1.4.9): a mesh of triangles that is NOT a
+// surface - it may be closed, may overhang, and 12d writes pipes, pits and
+// structures as one. Held beside the surfaces in the session, for the same
+// reason and with the same consequence: it is not an entity and is not
+// undoable.
+struct ImportedMesh {
+    std::string name;
+    std::string layer;     // the 12d model, as a layer path
+    std::string colourName; // 12d's name for it, kept whatever Katana makes of it
+    std::optional<katana::entity::Color> color;
+    katana::geometry::TriangleMesh mesh;
+    // One per face where the file colours its faces (`face_infos` +
+    // `face_flags`), otherwise empty. The name is kept beside the RGB so a
+    // colour Katana has no RGB for still goes back out as it came in.
+    std::vector<std::string> faceColourNames;
+    std::vector<std::optional<katana::entity::Color>> faceColors;
+    katana::entity::PropertyMap properties;
+    // Read, reported, and not modelled: an edge list is a drawing decision
+    // 12d makes about ITS viewer, and per-vertex and per-edge infos likewise.
+    std::size_t edgesInFile = 0;
+    std::size_t vertexInfosInFile = 0;
+    std::size_t edgeInfosInFile = 0;
+};
+
 struct ImportedCloudPoint {
     double x = 0.0;
     double y = 0.0;
@@ -172,6 +197,7 @@ struct DomainImport {
     std::vector<katana::entity::Style> stylesNeeded;
     std::vector<katana::entity::Alignment> alignments;
     std::vector<ImportedSurface> surfaces;
+    std::vector<ImportedMesh> meshes;
     std::vector<ImportedCloud> clouds;
     // Super tins, as (name, member names): nothing to import, but a caller
     // may want to say they were there.
@@ -195,6 +221,17 @@ struct ExportSurface {
     const katana::terrain::TinSurface* surface = nullptr;
 };
 
+// A mesh to write back as a `primitive_3d`. The face colours, where given,
+// become the `face_infos` table and the one-based `face_flags` that index
+// it, which is how 12d carries them.
+struct ExportMesh {
+    std::string name;
+    std::string layer;
+    std::string colourName;
+    const katana::geometry::TriangleMesh* mesh = nullptr;
+    std::vector<std::string> faceColourNames;
+};
+
 struct ExportOptions {
     // Empty exports the whole model; otherwise only these entities.
     std::vector<katana::entity::EntityId> entities;
@@ -212,6 +249,7 @@ struct DomainExport {
     std::size_t entitiesSkipped = 0;
     std::size_t alignmentsWritten = 0;
     std::size_t surfacesWritten = 0;
+    std::size_t meshesWritten = 0;
     std::vector<std::string> warnings;
 };
 
@@ -219,7 +257,7 @@ struct DomainExport {
 // written. Dimensions do not: they are skipped and counted.
 [[nodiscard]] katana::core::Result<DomainExport>
 fromDomain(const katana::entity::Model& model, const std::vector<ExportSurface>& surfaces,
-           const ExportOptions& options = {});
+           const ExportOptions& options = {}, const std::vector<ExportMesh>& meshes = {});
 
 // ---- shared pieces, exposed for testing -------------------------------------
 

@@ -576,6 +576,9 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     }
     drawPointClouds(painter);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    // Beneath the drawing, like a surface: a mesh is context for what is
+    // drawn over it, not a thing to be picked in plan.
+    drawMeshFootprints(painter);
     drawEntities(painter);
     drawAlignments(painter);
     drawPreview(painter);
@@ -835,6 +838,54 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         }
         drawGeometry(painter, entity.geometry);
     });
+}
+
+void ViewportWidget::setMeshes(const std::vector<katana::cad::SceneMesh>* meshes)
+{
+    meshes_ = meshes;
+    update();
+}
+
+// A mesh in plan is its FOOTPRINT - the hull of its vertices - and not its
+// triangles: 1 453 meshes of 90 656 triangles arrive from one real archive,
+// and drawing those in plan would bury the drawing they are context for. The
+// 3D view is where a mesh is looked at.
+void ViewportWidget::drawMeshFootprints(QPainter& painter) const
+{
+    if (meshes_ == nullptr) {
+        return;
+    }
+    for (const katana::cad::SceneMesh& item : *meshes_) {
+        if (!item.visible || item.mesh == nullptr || item.mesh->empty() ||
+            item.style == cad::SurfaceStyle::Hidden) {
+            continue;
+        }
+        const auto hull = item.mesh->planHull();
+        if (hull.size() < 2) {
+            continue;
+        }
+        const QColor colour(katana::render::redOf(item.flatColor),
+                            katana::render::greenOf(item.flatColor),
+                            katana::render::blueOf(item.flatColor));
+        QColor outline = colour;
+        outline.setAlpha(190);
+        painter.setPen(QPen(outline, 1, Qt::DashLine));
+        QColor fill = colour;
+        fill.setAlpha(40);
+        QPolygonF polygon;
+        polygon.reserve(static_cast<int>(hull.size()) + 1);
+        for (const auto& vertex : hull) {
+            polygon << toScreen(vertex);
+        }
+        // Two points are a wall seen from above: a line, with nothing to fill.
+        if (hull.size() == 2) {
+            painter.drawPolyline(polygon);
+            continue;
+        }
+        painter.setBrush(fill);
+        painter.drawPolygon(polygon);
+        painter.setBrush(Qt::NoBrush);
+    }
 }
 
 void ViewportWidget::drawSymbol(QPainter& painter, const std::string& symbol,

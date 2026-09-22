@@ -619,14 +619,16 @@ primitive_3d { name M trimesh_3d { vertices { 0 0 0 1 0 0 0 1 0 } faces { 1 2 3 
     EXPECT_EQ(domain.clouds[0].points[0].intensity, 900);
     EXPECT_EQ(domain.clouds[0].points[0].classification, 2);
     EXPECT_EQ(domain.clouds[1].referenceFile, "site.las");
-    EXPECT_TRUE(anyWarningContains(domain, "1 trimeshes were read but not imported"))
-        << allWarnings(domain);
+    // The trimesh becomes a mesh in the session (PLAN.MD 20.2 slice 4).
+    ASSERT_EQ(domain.meshes.size(), 1u);
+    EXPECT_EQ(domain.meshes[0].name, "M");
+    EXPECT_EQ(domain.meshes[0].mesh.triangleCount(), 1u);
     // The tally says the same thing in numbers.
     const auto mesh = std::find_if(domain.tally.begin(), domain.tally.end(),
                                    [](const auto& t) { return t.keyword == "primitive_3d"; });
     ASSERT_NE(mesh, domain.tally.end());
     EXPECT_EQ(mesh->read, 1u);
-    EXPECT_EQ(mesh->imported, 0u);
+    EXPECT_EQ(mesh->imported, 1u);
 }
 
 TEST(DomainImport, WhatTheReaderDidNotReadIsSaidInTheImportsWarnings)
