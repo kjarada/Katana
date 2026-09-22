@@ -188,8 +188,10 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
 }
 
 // Where a distance along a polyline lands, and which way the line is going
-// there. Distances past either end run on along the end segment, so a pattern
-// instance that overhangs is still placed rather than folded back.
+// there. A distance outside the line is CLAMPED to its end, and the caller is
+// told, so that a stroke reaching past the end stops at the end and one
+// entirely beyond it is dropped. Letting it run on drew a 164 m dash for a
+// 30 m fence and scribbled it across the drawing.
 struct Frame {
     Point2 at{};
     Vec2 along{1.0, 0.0};
@@ -229,6 +231,7 @@ class Path {
 
     [[nodiscard]] Frame at(double distance) const
     {
+        distance = std::clamp(distance, 0.0, length_);
         // The segment whose span contains the distance; the first or last
         // where it falls outside, so an overhang keeps going straight.
         const auto found = std::upper_bound(starts_.begin(), starts_.end(), distance);
@@ -251,14 +254,20 @@ class Path {
 };
 
 // One local point put on the line: `start` along, then the local x further
-// along and the local y to the left of wherever that lands.
-[[nodiscard]] Point2 onPath(const Path& path, double start, const Point2& local, double scale)
+// along and the local y to the left of wherever that lands. `inside` says
+// whether that distance was on the line at all.
+[[nodiscard]] Point2 onPath(const Path& path, double start, const Point2& local, double scale,
+                            bool& inside)
 {
-    const Frame frame = path.at(start + local.x * scale);
+    const double along = start + local.x * scale;
+    inside = along >= -kShortestPeriod && along <= path.length() + kShortestPeriod;
+    const Frame frame = path.at(std::clamp(along, 0.0, path.length()));
     const double offset = local.y * scale;
     return Point2(frame.at.x - frame.along.y * offset, frame.at.y + frame.along.x * offset);
 }
 
+// For the placements that put a definition down whole - a symbol, a two-point
+// style - where there is no line to clip against.
 void appendRuns(StyleDrawing& into, const Local& local, const auto& map)
 {
     for (const Local::Run& run : local.runs) {
@@ -398,9 +407,32 @@ StyleDrawing linestyleDrawing(const LineStyle& style, const Polyline2& line, dou
         kMaxInstances, static_cast<std::size_t>(std::floor(path.length() / period)) + 1);
     for (std::size_t i = 0; i < instances; ++i) {
         const double start = static_cast<double>(i) * period;
-        const auto map = [&](const Point2& point) { return onPath(path, start, point, scale); };
-        appendRuns(drawing, local, map);
+        // Every run clipped to the line: a point past the end is pulled back
+        // to it, and a run that lies wholly outside is not drawn at all.
+        for (const Local::Run& run : local.runs) {
+            StyleStroke stroke;
+            stroke.pen = run.pen;
+            stroke.path.closed = run.closed;
+            stroke.path.vertices.reserve(run.points.size());
+            bool anyInside = false;
+            for (const Point2& point : run.points) {
+                bool inside = false;
+                stroke.path.vertices.push_back(onPath(path, start, point, scale, inside));
+                anyInside = anyInside || inside;
+            }
+            if (anyInside) {
+                drawing.strokes.push_back(std::move(stroke));
+            }
+        }
+        const auto map = [&](const Point2& point) {
+            bool ignored = false;
+            return onPath(path, start, point, scale, ignored);
+        };
         for (const Local::Text& text : local.texts) {
+            const double along = start + text.at.x * scale;
+            if (along < 0.0 || along > path.length()) {
+                continue; // the whole word would sit off the end of the line
+            }
             StyleTextMark mark;
             mark.at = map(text.at);
             mark.text = text.text->text;

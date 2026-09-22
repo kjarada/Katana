@@ -64,10 +64,12 @@ TEST(StyleDrawing, AMoveStartsARunAndADrawExtendsIt)
     EXPECT_EQ(drawing.strokes[0].path.vertices.size(), 2u);
     EXPECT_EQ(drawing.strokes[0].path.vertices[0], Point2(0, 0));
     EXPECT_EQ(drawing.strokes[0].path.vertices[1], Point2(3, 0));
-    // The period is the span of the strokes, 5, so 100/5 + 1 = 21 instances,
-    // each drawing 3 + 1.
-    EXPECT_EQ(drawing.strokes.size(), 21u * 2u);
-    EXPECT_NEAR(drawnLength(drawing), 21.0 * 4.0, 1e-9);
+    // The period is the pen's span, 5, so 100/5 + 1 = 21 instances of two
+    // runs each. The twenty-first starts exactly AT the end of the line: its
+    // dash is clipped to nothing and its tick, which would sit five further
+    // on, is dropped - a pattern belongs to the line it is laid along.
+    EXPECT_EQ(drawing.strokes.size(), 21u * 2u - 1u);
+    EXPECT_NEAR(drawnLength(drawing), 20.0 * 4.0, 1e-9);
 }
 
 TEST(StyleDrawing, TheStatedLengthIsThePeriodRatherThanTheStrokesSpan)
@@ -110,7 +112,9 @@ TEST(StyleDrawing, ThePatternsYIsAcrossTheLineAndBendsWithIt)
 TEST(StyleDrawing, APaperStyleIsMeasuredInPlotMillimetresAndAWorldStyleIsNot)
 {
     const std::vector<Stroke> strokes{move(0, 0), draw(2, 0)};
-    const Polyline2 line{{Point2(0, 0), Point2(100, 0)}, false};
+    // Long enough that 2 mm at 1:500 - a kilometre of ground - still fits on
+    // it, since a pattern is clipped to the line it is drawn along.
+    const Polyline2 line{{Point2(0, 0), Point2(5000, 0)}, false};
     // 500 model units to the millimetre is a 1:500 plot.
     const StyleDrawing paper =
         katana::cad::linestyleDrawing(definition(strokes, StyleUnits::Paper), line, 500.0);
@@ -303,6 +307,50 @@ TEST(StyleDrawing, ATrailingMoveIsTheGapAndCountsTowardsThePeriod)
     EXPECT_EQ(drawing.strokes[0].path.vertices[0], Point2(0, 0));
     EXPECT_EQ(drawing.strokes[0].path.vertices[1], Point2(3, 0));
     EXPECT_EQ(drawing.strokes[1].path.vertices[0], Point2(5, 0)) << "the gap is two long";
-    // Five dashes of three: a pattern that is 3 long in 5 covers 60% of it.
-    EXPECT_NEAR(drawnLength(drawing), 15.0, 1e-9);
+    // Four dashes of three, and a fifth that starts exactly at the end of
+    // the line and so is clipped to nothing.
+    EXPECT_NEAR(drawnLength(drawing), 12.0, 1e-9);
+}
+
+TEST(StyleDrawing, APatternIsClippedToTheLineRatherThanRunningOffTheEndOfIt)
+{
+    // A dash longer than the line it is laid along stops where the line does.
+    // Letting it run on drew a 164 m dash for a 30 m fence and scribbled it
+    // across the drawing, which is what a zoomed-out survey looked like.
+    LineStyle style = definition({move(0, 0), draw(50, 0)});
+    style.length = 100.0;
+    const StyleDrawing drawing = katana::cad::linestyleDrawing(
+        style, Polyline2{{Point2(0, 0), Point2(10, 0)}, false});
+    ASSERT_EQ(drawing.strokes.size(), 1u);
+    EXPECT_EQ(drawing.strokes[0].path.vertices.back(), Point2(10, 0)) << "stops at the end";
+
+    // And a run that lies WHOLLY beyond the end is not drawn at all.
+    LineStyle beyond = definition({move(0, 0), draw(1, 0), move(80, 0), draw(90, 0)});
+    beyond.length = 100.0;
+    const StyleDrawing clipped = katana::cad::linestyleDrawing(
+        beyond, Polyline2{{Point2(0, 0), Point2(10, 0)}, false});
+    ASSERT_EQ(clipped.strokes.size(), 1u) << "only the run that is on the line";
+    EXPECT_EQ(clipped.strokes[0].path.vertices.back(), Point2(1, 0));
+}
+
+TEST(StyleDrawing, ATextThatWouldSitOffTheEndOfTheLineIsNotDrawn)
+{
+    LineStyle style = definition({move(90, 0)});
+    StrokeText text;
+    text.text = "W";
+    text.height = 1.0;
+    style.texts.push_back(text);
+    Stroke mark;
+    mark.op = StrokeOp::Text;
+    mark.text = 0;
+    style.strokes.push_back(mark);
+    style.length = 100.0;
+    // The word would sit 90 along a line that is only 10 long.
+    EXPECT_TRUE(katana::cad::linestyleDrawing(
+                    style, Polyline2{{Point2(0, 0), Point2(10, 0)}, false})
+                    .texts.empty());
+    // On a line long enough for it, it is drawn.
+    EXPECT_FALSE(katana::cad::linestyleDrawing(
+                     style, Polyline2{{Point2(0, 0), Point2(200, 0)}, false})
+                     .texts.empty());
 }

@@ -1823,7 +1823,50 @@ code's treatment is the UNION of the aspects that match it:
 7. **The CLI and the documentation. DELIVERED** for what exists so far:
    `CUSTOMISE` with its report, and `docs/survey_coding.md`.
 
-**STATUS: DELIVERED, bar two things named above and repeated here.** The
+### Two defects found by looking at a production archive, diagnosed and NOT yet fixed
+
+Both were found with the user's own 15 MB archive and both are measured, so
+whoever picks this up starts from evidence rather than a guess. Neither is
+started: the working tree is green.
+
+**1. A `breakline point` string of several vertices is drawn as a polyline.**
+`breakline point` means the string IS points - the user confirmed it, and it
+is rare. In their archive every string states it: 12,280 `line` (all
+multi-vertex) and 13,379 `point`, of which 13,326 have a single vertex and
+**53 have several**. Those 53 - a 61-vertex string of drill holes among them,
+in model `SURVEY INFRASTRUCTURE V2` - come in as one polyline through the
+points instead of as points.
+
+The import reads the flag and keeps it as `12d.breakline` but never acts on
+it. The fix is to split such a string into one point entity per vertex,
+carrying the string's layer, style, colour, metadata and its own height.
+
+It was tried and reverted, because of a trap worth recording: the manual
+(commands, 1.4.4) says the CURRENT breakline type defaults to `point`, so a
+hand-written fixture that never says `breakline` inherits Point - and 23
+tests, whose fixtures are all multi-vertex strings meaning lines, turned into
+points. Real archives state it on every string; the fixtures must say
+`breakline line` where they mean one. That is the work.
+
+**2. A string's symbol is drawn only when the string has ONE vertex.**
+A 12d vertex symbol goes on EVERY vertex. That 61-vertex drill-hole string
+carries one `symbol_value { style "MARK Drill Hole and Wing" }`, and 12d
+draws 61 of them; Katana draws none, because `importSymbols` only takes the
+symbol onto the style for a string of one vertex.
+
+Both halves of the fix are known and were tried: let a string with one symbol
+block take it whatever its vertex count, and have the viewport draw an
+`atVertices` definition along a line (`cad::styleDrawing` already places one
+at every vertex). It was reverted because the EXPORT then loses the symbol: a
+line's block used to be rebuilt from `12d.symbol.*` metadata, and the block
+built from the style is written only inside the `PointGeometry` branch of the
+exporter. Lifting that block out of the point branch so a line uses it too is
+the remaining work, and two tests say so precisely -
+`SymbolImport.ALineWithOneSymbolForEveryVertexIsWrittenBackInTheValueForm`
+and `ReviewImport.PerSegmentSizesAndPerVertexDataAreAllAccountedFor`.
+
+**STATUS: DELIVERED, bar the two defects above and the two things named
+earlier and repeated here.** The
 chain the user asked for works end to end: a mapfile, a linestyle library and
 a symbol library load together; a survey code resolves through the mapfile to
 a model, a colour, a linestyle and a symbol; the entity gets them; and the
