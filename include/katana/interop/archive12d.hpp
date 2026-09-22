@@ -95,6 +95,7 @@ struct Archive12dExportResult {
 [[nodiscard]] katana::core::Result<Archive12dExportResult>
 exportArchive12d(const katana::entity::Model& model,
                  const std::vector<katana::archive12d::ExportSurface>& surfaces,
-                 const std::filesystem::path& path, const Archive12dExportOptions& options = {});
+                 const std::filesystem::path& path, const Archive12dExportOptions& options = {},
+                 const std::vector<katana::archive12d::ExportMesh>& meshes = {});
 
 } // namespace katana::interop

@@ -630,6 +630,55 @@ with how many were read and imported, every block the reader has no member
 for, and every warning, and with `--rewrite` checks that the file written back
 reads the same.
 
+### The round trip, measured
+
+`tests/interop/test_round_trip.cpp` imports a fixture, puts everything it
+gave into a model, exports it, and imports that - three times. The FIRST
+export normalises, because the format has several spellings of one thing and
+Katana writes one of them: an arc goes out as a two-vertex super string, a
+drainage string as its line plus a point per pit, a `full_tin` as a `tin`.
+So the property that must hold is not "the first reading equals the second"
+but **"every reading after the first is identical"**, plus "the first pass
+loses nothing" - every style with its symbol, every layer, every mesh with
+its faces and face colours, every surface's triangles.
+
+`katana_12da_probe <file.12da> --roundtrip` runs the same thing on the large
+archives, which are real project data and are not in the repository. Run over
+the fourteen on 2026-09-22:
+
+| Archive | Result |
+|---|---|
+| Windsor Road (58 MB, 1 453 meshes) | stable: 2 409 entities, 82 styles, 1 453 meshes |
+| Test 4 without tin / Test_V2 (33 MB) | stable: 27 177 entities, 212 styles |
+| Test 4 with Tin (55 MB) | stable: 7 820 entities, 1 surface |
+| PV tri Lat Long | stable: 311 entities, 116 meshes, 2 alignments |
+| test trimishes complex | stable: 2 888 entities, 266 meshes |
+| test super tin, test multiple tins | stable, surfaces included |
+| test drainage strings, test Super Alignment, test las point cloud | stable |
+| comprehensive-all-geometries, repro-2vertex-pipe-bucketing | stable |
+| **plot_PW_example_data** | **NOT stable: 4 of its 8 surfaces are refused on the way back in** |
+
+Two defects came out of this, which is what it was written for. The first is
+fixed: exporting a drawing imported from a 12da wrote every alignment TWICE
+- once as the alignment and once as the centreline polyline the import had
+made to draw it with - and each round trip read the duplicate back and added
+another. The exporter now skips a polyline that is the centreline of an
+alignment it is writing, and the alignment carries the layer, colour and
+style that polyline wore (they were hard-coded to model "Alignments",
+colour red, style "1" before, so this is also the first time an alignment
+keeps its appearance).
+
+The second is open and recorded in `PLAN.MD` 20.2: four surfaces of
+`plot_PW_example_data.12da` - `Design/2/LOTS`, `Design/2/ROADS`,
+`Design/2/ROADS DETAIL` and `Super/FS` - build on the first import and are
+refused on the second with "two triangles run along an edge in the same
+direction". The other four surfaces of the same file, and every surface of
+every other archive, survive. The import normalises each triangle's winding
+by MEASURING its area, so an inconsistent winding cannot be the cause; a
+duplicated or exactly-overlapping triangle pair surviving the nulled-triangle
+filter is the hypothesis to test next. Nothing is silently lost: the surface
+is refused with its reason and the import says so.
+
 ### Not done
 
 A symbol on the vertices of a LINE (468 fence and kerb strings in Windsor

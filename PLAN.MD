@@ -1594,7 +1594,41 @@ not exactly clipped; clipping each triangle against the higher surface's
 boundary and re-triangulating the offcuts is the exact answer and is
 recorded in `super_surface.hpp` as the alternative rejected.
 
-**STATUS: slice 9 (round trip on the fourteen real archives) next.**
+**Slice 9 PARTIALLY DELIVERED (2026-09-22).**
+`tests/interop/test_round_trip.cpp` takes six fixtures through import,
+export, import, export, import. The first export NORMALISES (an arc is
+written as a two-vertex super string, a drainage string as its line plus its
+pits, a full_tin as a tin), so the property asserted is that every reading
+after the first is identical - the same entities, styles with their symbols,
+layers, meshes with their faces and face colours, tallies and per-string
+summaries - and that the first pass loses nothing.
+`katana_12da_probe --roundtrip` does the same on the large archives and
+`docs/interop.md` records the run over all fourteen: thirteen are stable.
+
+It found two defects, which is what it was for. **Fixed:** exporting a
+drawing imported from a 12da wrote every alignment twice - as the alignment
+AND as the centreline polyline the import made to draw it with - and each
+round trip read the duplicate back and added another. The exporter now skips
+a centreline whose alignment it is writing, and the alignment carries the
+layer, colour and style that polyline wore (before this they were hard-coded
+to model "Alignments", colour red, style "1", so an alignment now keeps its
+appearance for the first time).
+
+**OUTSTANDING, and the reason this slice is not fully delivered:** four
+surfaces of `plot_PW_example_data.12da` - `Design/2/LOTS`, `Design/2/ROADS`,
+`Design/2/ROADS DETAIL` and `Super/FS` - build on the first import and are
+REFUSED on the second with "two triangles run along an edge in the same
+direction". The other four surfaces of that file, and every surface of every
+other archive, survive. The import normalises each triangle's winding by
+measuring its area, so a wrong winding cannot be the cause; the hypothesis
+to test next is a duplicated or exactly-overlapping pair of triangles
+surviving the nulled-triangle filter. Nothing is lost silently - the surface
+is refused with its reason - but a surface that will not read back is a real
+loss, and it is the next thing to do here.
+
+**STATUS: 20.2 is delivered but for the surface defect above and the
+property DEFINITIONS left over from slice 5. Both are recorded; neither
+blocks the application.**
 
 ---
 

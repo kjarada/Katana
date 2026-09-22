@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <numbers>
 #include <unordered_set>
 
@@ -114,6 +115,12 @@ class Exporter {
                 ++result_.entitiesSkipped;
             }
         });
+        if (!centrelines_.empty()) {
+            result_.warnings.push_back(
+                std::to_string(centrelines_.size()) +
+                " centreline polylines were not written as strings: the alignments they came "
+                "from wrote them");
+        }
         if (dimensions_ != 0) {
             result_.warnings.push_back(std::to_string(dimensions_) +
                                        " dimensions were not written: the 12da format has no "
@@ -257,8 +264,41 @@ class Exporter {
         return entityHeights(entity, count);
     }
 
+    // The polyline an alignment was imported as, which the alignment will
+    // write for itself. Importing a super_alignment gives BOTH an Alignment
+    // and a polyline of its centreline - the polyline so that something is
+    // drawn when the alignment cannot be solved - and writing both puts the
+    // same line in the file twice. Worse, it compounds: each round trip read
+    // the duplicate back and added another, which is how the round-trip test
+    // found this.
+    [[nodiscard]] bool isCentrelineOfAWrittenAlignment(const Entity& entity)
+    {
+        if (!options_.includeAlignments) {
+            return false;
+        }
+        const auto* element = textOf(entity.metadata, kMetaElement);
+        if (element == nullptr || (*element != "string super_alignment" &&
+                                   *element != "string alignment" &&
+                                   *element != "string pipeline")) {
+            return false;
+        }
+        const auto* name = textOf(entity.metadata, kMetaName);
+        if (name == nullptr || !model_.alignments.contains(*name)) {
+            return false;
+        }
+        // Kept so the alignment can write the layer, colour and style the
+        // centreline wore. Without this the appearance would go with the
+        // duplicate: an alignment carries its geometry and its name, and
+        // everything else about how it is drawn lived on the polyline.
+        centrelines_.emplace(*name, &entity);
+        return true;
+    }
+
     bool write(const Entity& entity)
     {
+        if (isCentrelineOfAWrittenAlignment(entity)) {
+            return true; // written, by its alignment
+        }
         struct Visitor {
             Exporter& self;
             const Entity& entity;
@@ -521,10 +561,15 @@ class Exporter {
             return;
         }
         SuperAlignment out;
+        const auto centreline = centrelines_.find(alignment.name);
+        if (centreline != centrelines_.end()) {
+            out.header = headerFor(*centreline->second, Breakline::Line);
+        } else {
+            out.header.model = kAlignmentModel;
+            out.header.colour = "red";
+            out.header.style = "1";
+        }
         out.header.name = alignment.name;
-        out.header.model = kAlignmentModel;
-        out.header.colour = "red";
-        out.header.style = "1";
         out.header.chainage = alignment.horizontal.startStation;
         // Katana's transition is the exact Euler spiral, which is what 12d
         // calls the natural clothoid; its plain "clothoid" is an approximation.
@@ -723,6 +768,8 @@ class Exporter {
     ExportOptions options_;
     DomainExport result_;
     std::size_t dimensions_ = 0;
+    // By alignment name, so the alignment can write what its centreline wore.
+    std::map<std::string, const Entity*> centrelines_;
 };
 
 } // namespace

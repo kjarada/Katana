@@ -254,7 +254,8 @@ Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& pat
 Result<Archive12dExportResult>
 exportArchive12d(const katana::entity::Model& model,
                  const std::vector<katana::archive12d::ExportSurface>& surfaces,
-                 const std::filesystem::path& path, const Archive12dExportOptions& options)
+                 const std::filesystem::path& path, const Archive12dExportOptions& options,
+                 const std::vector<katana::archive12d::ExportMesh>& meshes)
 {
     const std::string extension = lowerExtension(path);
     const auto known = archive12dExtensions();
@@ -266,7 +267,7 @@ exportArchive12d(const katana::entity::Model& model,
     katana::archive12d::ExportOptions mapping;
     mapping.entities = options.entities;
     mapping.originShift = options.originShift;
-    auto domain = katana::archive12d::fromDomain(model, surfaces, mapping);
+    auto domain = katana::archive12d::fromDomain(model, surfaces, mapping, meshes);
     if (!domain) {
         return domain.error();
     }

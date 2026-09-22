@@ -10,6 +10,15 @@
 // whether the second reading equals the first - the writer's promise, checked
 // against a real file rather than a fixture.
 //
+// --roundtrip goes further: it takes what the DOMAIN made of the archive,
+// puts it in a model as the application would, writes that, and reads it
+// back - the trip a user's drawing makes. The first pass normalises (an arc
+// is written as a two-vertex string, a drainage string as its line plus its
+// pits), so what it reports is whether the SECOND and THIRD passes agree,
+// which is the property that must hold. tests/interop/test_round_trip.cpp
+// asserts the same thing on the fixtures; this is for the large archives,
+// which are real project data and are not in the repository.
+//
 // Plain .12da only. The zipped .12daz needs GDAL, which this module
 // deliberately does not link; unzip it first, or use `katana_cli IMPORT`.
 
@@ -17,8 +26,12 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
+
+#include "katana/entity/model.hpp"
 
 #include "katana/archive12d/domain.hpp"
 #include "katana/archive12d/reader.hpp"
@@ -39,13 +52,21 @@ double secondsSince(std::chrono::steady_clock::time_point start)
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: katana_12da_probe <file.12da> [--rewrite <out.12da>]\n");
+        std::fprintf(stderr,
+                     "usage: katana_12da_probe <file.12da> [--rewrite <out.12da>] "
+                     "[--roundtrip]\n");
         return 2;
     }
     const std::string path = argv[1];
     std::string rewritePath;
-    if (argc >= 4 && std::string(argv[2]) == "--rewrite") {
-        rewritePath = argv[3];
+    bool roundTrip = false;
+    for (int i = 2; i < argc; ++i) {
+        const std::string argument = argv[i];
+        if (argument == "--rewrite" && i + 1 < argc) {
+            rewritePath = argv[++i];
+        } else if (argument == "--roundtrip") {
+            roundTrip = true;
+        }
     }
 
     std::ifstream file(path, std::ios::binary);
@@ -118,6 +139,98 @@ int main(int argc, char* argv[])
         std::printf("\n  warnings:\n");
         for (const std::string& warning : domain->warnings) {
             std::printf("    %s\n", warning.c_str());
+        }
+    }
+
+    if (roundTrip) {
+        // Model -> archive -> text -> archive -> domain, twice: the first
+        // pass puts the drawing into the form Katana writes, and every pass
+        // after it must change nothing.
+        const auto pass = [](const a12::DomainImport& from) -> std::optional<a12::DomainImport> {
+            katana::entity::Model model;
+            for (const auto& layer : from.layersNeeded) {
+                if (!model.layers.add(layer)) {
+                    return std::nullopt;
+                }
+            }
+            for (const auto& style : from.stylesNeeded) {
+                if (!model.styles.add(style)) {
+                    return std::nullopt;
+                }
+            }
+            for (const auto& entity : from.entities) {
+                if (!model.entities.add(entity)) {
+                    return std::nullopt;
+                }
+            }
+            for (const auto& alignment : from.alignments) {
+                if (!model.alignments.add(alignment)) {
+                    return std::nullopt;
+                }
+            }
+            std::vector<a12::ExportSurface> surfaces;
+            for (const auto& surface : from.surfaces) {
+                surfaces.push_back(a12::ExportSurface{surface.name, &surface.surface});
+            }
+            std::vector<a12::ExportMesh> meshes;
+            for (const auto& mesh : from.meshes) {
+                meshes.push_back(a12::ExportMesh{mesh.name, mesh.layer, mesh.colourName,
+                                                 &mesh.mesh, mesh.faceColourNames});
+            }
+            auto written = a12::fromDomain(model, surfaces, {}, meshes);
+            if (!written) {
+                return std::nullopt;
+            }
+            auto read = a12::readArchive(a12::writeArchive(written->archive));
+            if (!read) {
+                return std::nullopt;
+            }
+            auto back = a12::toDomain(*read);
+            if (!back) {
+                return std::nullopt;
+            }
+            return std::move(*back);
+        };
+
+        start = std::chrono::steady_clock::now();
+        const auto second = pass(*domain);
+        if (!second) {
+            std::fprintf(stderr, "the round trip failed on the first pass\n");
+            return 1;
+        }
+        const auto third = pass(*second);
+        if (!third) {
+            std::fprintf(stderr, "the round trip failed on the second pass\n");
+            return 1;
+        }
+        const auto describe = [](const a12::DomainImport& d) {
+            return std::to_string(d.entities.size()) + " entities, " +
+                   std::to_string(d.layersNeeded.size()) + " layers, " +
+                   std::to_string(d.stylesNeeded.size()) + " styles, " +
+                   std::to_string(d.surfaces.size()) + " surfaces, " +
+                   std::to_string(d.meshes.size()) + " meshes, " +
+                   std::to_string(d.alignments.size()) + " alignments";
+        };
+        std::printf("\n  round trip in %.2f s\n    read:   %s\n    pass 1: %s\n    pass 2: %s\n",
+                    secondsSince(start), describe(*domain).c_str(), describe(*second).c_str(),
+                    describe(*third).c_str());
+        // Anything the first pass REFUSED on the way back in: a surface that
+        // will not read is the loss this tool exists to show, and it does not
+        // change the counts below because it is gone from both passes.
+        for (const std::string& warning : second->warnings) {
+            if (warning.find("skipped") != std::string::npos) {
+                std::printf("    refused on re-import: %s\n", warning.c_str());
+            }
+        }
+        const bool stable = second->entities.size() == third->entities.size() &&
+                            second->layersNeeded.size() == third->layersNeeded.size() &&
+                            second->stylesNeeded.size() == third->stylesNeeded.size() &&
+                            second->surfaces.size() == third->surfaces.size() &&
+                            second->meshes.size() == third->meshes.size() &&
+                            second->tally == third->tally;
+        std::printf("    the form Katana writes is %s\n", stable ? "STABLE" : "NOT STABLE");
+        if (!stable) {
+            return 1;
         }
     }
 
