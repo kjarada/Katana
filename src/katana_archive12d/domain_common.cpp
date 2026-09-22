@@ -59,6 +59,43 @@ constexpr std::array<NamedColour, 27> kStandardColours = {{
 
 } // namespace
 
+std::string_view symbolForLinestyle(std::string_view name)
+{
+    const std::string key = detail::lowered(name);
+    const auto has = [&key](std::string_view word) { return key.find(word) != std::string::npos; };
+    // Most specific first: "Pole - Light" is a pole, "Suspended Light" a
+    // light, "Gully Pit Point" a pit and not a point.
+    if (has("tree") || has("shrub") || has("palm")) {
+        return "tree";
+    }
+    if (has("manhole") || has("pit") || has("chamber") || has("sump")) {
+        return "manhole";
+    }
+    if (has("pole") || has("post") || has("column") || has("pier")) {
+        return "pole";
+    }
+    if (has("mark") || has("station") || has("bench") || has("stns") || has("control")) {
+        return "target";
+    }
+    if (has("sign") || has("flag")) {
+        return "flag";
+    }
+    if (has("light") || has("lamp") || has("lantern")) {
+        return "star";
+    }
+    if (has("valve") || has("hydrant") || has("tap") || has("meter")) {
+        return "diamond";
+    }
+    if (has("bollard") || has("peg") || has("nail") || has("spike")) {
+        return "dot";
+    }
+    if (has("point") || has("spot") || has("surface") || has("level") || has("invert") ||
+        has("obvert")) {
+        return "cross";
+    }
+    return "circle";
+}
+
 std::optional<Color> standardColour(std::string_view name)
 {
     std::string key = detail::lowered(detail::trimmed(name));

@@ -148,8 +148,13 @@ class Exporter {
             header.name = *name;
         }
         // The entity's own style is the 12d linestyle; ByLayer has no name in
-        // 12d, and "1" is its default linestyle (manual 1.4.3).
-        header.style = entity.style.empty() ? "1" : entity.style;
+        // 12d, and "1" is its default linestyle (manual 1.4.3). A point that
+        // took its symbol's style still writes the linestyle it came with.
+        if (const auto* stringStyle = textOf(entity.metadata, kMetaStringStyle)) {
+            header.style = *stringStyle;
+        } else {
+            header.style = entity.style.empty() ? "1" : entity.style;
+        }
         header.chainage = realOf(entity.metadata, kMetaChainage).value_or(0.0);
         const auto* breakline = textOf(entity.metadata, kMetaBreakline);
         header.breakline = breakline == nullptr ? fallback
@@ -165,7 +170,13 @@ class Exporter {
                 rgb = layer->color;
             }
         }
-        if (named != nullptr && (!entity.color || standardColour(*named) == entity.color ||
+        // A point that took its colour from its symbol (kMetaSymbolPrefix)
+        // has a string colour that is deliberately not the entity's, so the
+        // entity's colour must not be used to second-guess the name.
+        const bool colourIsTheSymbols =
+            textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "colour") != nullptr;
+        if (named != nullptr && (colourIsTheSymbols || !entity.color ||
+                                 standardColour(*named) == entity.color ||
                                  !standardColour(*named))) {
             header.colour = *named;
         } else if (rgb) {
@@ -251,6 +262,26 @@ class Exporter {
                 VertexString string;
                 string.header = self.headerFor(entity, Breakline::Point);
                 string.vertices.push_back(self.vertex(point.position, heightsOf(entity, 1)[0]));
+                // A point whose style draws a symbol is written with the
+                // block 12d draws it from (see kMetaSymbolPrefix): the
+                // `symbol_value` form, which is what 12d writes on a point.
+                if (const auto* style = self.model_.styles.find(entity.style);
+                    style != nullptr && !style->symbol.empty()) {
+                    FieldList symbol;
+                    symbol.setText("style", style->name);
+                    const auto* colour = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "colour");
+                    symbol.setText("colour", colour != nullptr ? *colour : string.header.colour);
+                    // The block's fields are kept as the text they were, so a
+                    // size that differs from the style's is text too.
+                    const auto* size = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "size");
+                    symbol.setReal("size", (size != nullptr ? parseReal(*size) : std::nullopt)
+                                               .value_or(style->symbolSize));
+                    for (const char* key : {"rotation", "offset", "raise"}) {
+                        const auto* kept = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + key);
+                        symbol.add(key, kept != nullptr ? *kept : std::string("0"));
+                    }
+                    string.symbol = std::move(symbol);
+                }
                 self.finish(entity, std::move(string));
                 return true;
             }
@@ -334,6 +365,47 @@ class Exporter {
             }
         };
         return std::visit(Visitor{*this, entity}, entity.geometry);
+    }
+
+    // The symbol blocks a line's vertices carried, kept as one list per key
+    // (see kMetaSymbolPrefix), go back as one block (`symbol_value`) or one
+    // per vertex (`symbol_data`) by the length of the lists. Lists of
+    // unequal length are the sign of an edit that broke them, and are not
+    // written: a symbol block with a missing field is one 12d cannot draw.
+    void restoreSymbolBlocks(const Entity& entity, VertexString& string) const
+    {
+        std::vector<std::pair<std::string, std::vector<std::string>>> columns;
+        for (const auto& [key, value] : entity.metadata) {
+            if (!key.starts_with(kMetaSymbolPrefix)) {
+                continue;
+            }
+            if (const auto* text = std::get_if<std::string>(&value)) {
+                columns.emplace_back(key.substr(kMetaSymbolPrefix.size()), splitList(*text));
+            }
+        }
+        if (columns.empty()) {
+            return;
+        }
+        const std::size_t count = columns.front().second.size();
+        const bool aligned = std::all_of(columns.begin(), columns.end(), [count](const auto& column) {
+            return column.second.size() == count;
+        });
+        if (!aligned || count == 0) {
+            return;
+        }
+        std::vector<FieldList> blocks(count);
+        for (const auto& [key, values] : columns) {
+            for (std::size_t i = 0; i < count; ++i) {
+                if (!values[i].empty()) {
+                    blocks[i].add(key, values[i], key == "style" || key == "colour");
+                }
+            }
+        }
+        if (count == 1) {
+            string.symbol = std::move(blocks.front());
+        } else {
+            string.symbols = std::move(blocks);
+        }
     }
 
     void finish(const Entity& entity, VertexString string)
@@ -427,6 +499,9 @@ class Exporter {
         if (options_.propertiesAsAttributes) {
             string.vertexAttributes = positionalAttributes(entity, "vertex", vertices);
             string.segmentAttributes = positionalAttributes(entity, "segment", segments);
+        }
+        if (!string.symbol) {
+            restoreSymbolBlocks(entity, string);
         }
         result_.archive.elements.emplace_back(std::move(string));
     }

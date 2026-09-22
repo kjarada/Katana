@@ -1,0 +1,145 @@
+// symbols.12da - vertex symbols the way 12d Model 15 writes them (PLAN.MD
+// 20.2 slice 2). Hand-written; the forms and field order are those of the
+// real archives this reader was learned from.
+//
+//   - four surveyed points, each a `symbol_value` or a one-block
+//     `symbol_data`, the string's own linestyle "0" beside the symbol's
+//   - a fence line with a post at every vertex (`symbol_data`, one block per
+//     vertex), which Katana keeps and writes back but does not draw
+//   - a point in a linestyle that carries no symbol at all
+//
+// Coordinates are MGA2020 zone 56, beside all_geometries.12da.
+
+string super {
+  name      "PSMH"
+  chainage  0
+  breakline point
+  colour    "yellow"
+  style     "0"
+  closed 0
+  data_3d {
+    502010.000 6960010.000 31.25
+  }
+  symbol_value {
+    style     "SEWR Manhole Cover"
+    colour    "yellow"
+    size      1
+    rotation  0
+    offset    0
+    raise     0
+  }
+}
+
+string super {
+  name      "PP"
+  chainage  0
+  breakline point
+  colour    "cyan"
+  style     "0"
+  closed 0
+  data_3d {
+    502020.000 6960010.000 31.80
+  }
+  symbol_data {
+    properties {
+      style     "ELEC Pole - Power"
+      colour    "cyan"
+      size      1.5
+      rotation  0
+      offset    0
+      raise     0
+    }
+  }
+}
+
+string super {
+  name      "TREE"
+  chainage  0
+  breakline point
+  colour    "green"
+  style     "0"
+  closed 0
+  data_3d {
+    502030.000 6960010.000 31.60
+  }
+  symbol_value {
+    style     "VEG Tree - Deciduous"
+    colour    "green"
+    size      3
+    rotation  0
+    offset    0
+    raise     0
+  }
+}
+
+string super {
+  name      "SSM"
+  chainage  0
+  breakline point
+  colour    "red"
+  style     "0"
+  closed 0
+  data_3d {
+    502040.000 6960010.000 32.05
+  }
+  symbol_value {
+    style     "STNS Default MX Survey Mark"
+    colour    "red"
+    size      2
+    rotation  45
+    offset    0
+    raise     0
+  }
+}
+
+string super {
+  name      "FENCE"
+  chainage  0
+  breakline line
+  colour    "white"
+  style     "CULT Fence - Timber"
+  closed 0
+  data_3d {
+    502010.000 6960020.000 31.30
+    502025.000 6960022.000 31.55
+    502040.000 6960020.000 31.90
+  }
+  symbol_data {
+    properties {
+      style     "CULT Fence Post - Guide Post"
+      colour    "white"
+      size      0.5
+      rotation  0
+      offset    0
+      raise     0
+    }
+    properties {
+      style     "CULT Fence Post - Guide Post"
+      colour    "white"
+      size      0.5
+      rotation  0
+      offset    0
+      raise     0
+    }
+    properties {
+      style     "CULT Fence Post - Guide Post"
+      colour    "white"
+      size      0.5
+      rotation  0
+      offset    0
+      raise     0
+    }
+  }
+}
+
+string super {
+  name      "SPOT"
+  chainage  0
+  breakline point
+  colour    "magenta"
+  style     "TOPO Natural Surface Point"
+  closed 0
+  data_3d {
+    502025.000 6960030.000 31.70
+  }
+}

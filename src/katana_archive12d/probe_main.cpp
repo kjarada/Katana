@@ -91,6 +91,11 @@ int main(int argc, char* argv[])
                 "%zu point clouds\n",
                 secondsSince(start), domain->entities.size(), domain->layersNeeded.size(),
                 domain->alignments.size(), domain->surfaces.size(), domain->clouds.size());
+    std::size_t symbolStyles = 0;
+    for (const auto& style : domain->stylesNeeded) {
+        symbolStyles += style.symbol.empty() ? 0 : 1;
+    }
+    std::printf("  %zu styles, %zu of them symbols\n", domain->stylesNeeded.size(), symbolStyles);
     std::printf("\n  %-28s %10s %10s\n", "element", "read", "imported");
     for (const a12::ElementTally& tally : domain->tally) {
         std::printf("  %-28s %10zu %10zu\n", tally.keyword.c_str(), tally.read, tally.imported);

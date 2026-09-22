@@ -21,9 +21,16 @@ foreach(variable APP PROJECT OUTPUT)
 endforeach()
 
 get_filename_component(work "${OUTPUT}" DIRECTORY)
-set(copy "${work}/screenshot_headless_project")
+get_filename_component(stem "${OUTPUT}" NAME_WE)
+set(copy "${work}/${stem}_project")
 file(REMOVE_RECURSE "${copy}")
-file(COPY "${PROJECT}/" DESTINATION "${copy}")
+if(IS_DIRECTORY "${PROJECT}")
+    file(COPY "${PROJECT}/" DESTINATION "${copy}")
+else()
+    # No project at all: the application must say so in its log and carry on
+    # with the imports, not stop on a box nobody can close.
+    file(MAKE_DIRECTORY "${copy}")
+endif()
 file(REMOVE "${OUTPUT}")
 
 # With -DTOGGLE_LAYER=<name> the layer's visibility box is flipped through the

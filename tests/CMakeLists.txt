@@ -93,4 +93,19 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+
+    # Point symbols painted from their styles (PLAN.MD 20.2 slice 2), into a
+    # directory that is NOT a project: "Open Failed" was a modal box, which in
+    # a headless run is a hang the TIMEOUT below catches.
+    add_test(NAME qt_import_symbols_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/symbols.12da"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_symbols_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_import_symbols_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 endif()

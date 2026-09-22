@@ -49,6 +49,10 @@ struct ResolvedDisplay {
     // "none" when the entity is not hatched, never empty, so a renderer looks
     // the name up rather than testing for emptiness first.
     std::string hatchPattern{kNoHatch};
+    // For a point: the symbol its style draws it with, kNoSymbol for the
+    // viewport's plain mark; and the size, 0 for the viewport's own.
+    std::string symbol{kNoSymbol};
+    double symbolSize = 0.0;
 
     friend bool operator==(const ResolvedDisplay&, const ResolvedDisplay&) = default;
 };

@@ -29,6 +29,10 @@ ResolvedDisplay resolveDisplay(const Model& model, const Entity& entity)
             if (!style->hatchPattern.empty()) {
                 resolved.hatchPattern = style->hatchPattern;
             }
+            // A symbol is the style's alone: a layer has none, and a point
+            // with no style draws the plain mark.
+            resolved.symbol = style->symbol;
+            resolved.symbolSize = style->symbolSize;
         }
     }
 

@@ -636,6 +636,39 @@ the name that would allow it. There is no light theme. The dialogs (corridor,
 plot) are themed but plain. There are no toolbar buttons for the command-line
 only operations (rotate, scale, mirror, array, trim, extend, offset, fillet).
 
+## Point symbols (PLAN.MD 20.2, slice 2)
+
+A point is drawn with the symbol its *style* names - `Style::symbol`, one of
+`entity::symbolNames()` (circle, square, triangle, diamond, cross, plus,
+tick, star, dot, ring, tree, pole, manhole, arrow, flag, target) - at
+`Style::symbolSize`, which is the symbol's width in model units, or 0 for the
+viewport's own mark. `cad::symbolStrokes(name, centre, halfWidth, rotation)`
+is the one definition of what each shape looks like: plain polylines in
+model units, so the viewport, a plotter and a preview paint the same thing.
+A circle is 24 chords, fixed: a symbol is small on any output and the eye
+cannot tell 24 chords from a circle at that size.
+
+Why the symbol is on the style and not on the entity: 12d Model, which is
+where survey points with symbols come from, defines a symbol as a linestyle
+drawn at a vertex, so "the style of a point" and "the style of a line" are
+one table there; keeping them one table here means one manager, one
+assignment command (`STYLE APPLY`) and one answer to "what does this point
+look like". **Rejected:** a `symbol` field on `Entity` - a second place an
+appearance can come from, and 27 000 surveyed points would each carry a
+copy of what their style already says. **Rejected:** glyphs from a font or
+SVG - a symbol has to plot as vectors at any scale and be picked by its
+geometry, which strokes give for free.
+
+Size is a width, not a radius, because that is what 12d's `size` is and
+what a user types (`STYLE SET s symbolsize 1.5` is a 1.5 m manhole); the
+viewport halves it for the strokes. A size of 0 draws the plain mark's
+pixel size, so a style that never got a size is still a visible mark and
+not a dot of no extent.
+
+Not drawn, by decision rather than omission: a symbol on the vertices of a
+line (12d draws fence posts that way; a Katana line's vertices have no
+style, and the blocks are kept for export), and a point symbol's rotation.
+
 ## Grading: the batter belongs to the edge, not to the bisector
 
 `cad::gradeToSurface` runs a batter outward from a feature line to the ground

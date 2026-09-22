@@ -916,8 +916,9 @@ void MainWindow::openProject(const QString& directory)
 {
     const std::filesystem::path path = toPath(directory);
     auto status = document_.open(path);
-    if (!status && status.error().code == katana::core::ErrorCode::DatabaseFailure) {
-        // Damaged database: offer the newest sound backup. Nothing is deleted.
+    // Damaged database: offer the newest sound backup. Nothing is deleted. A
+    // headless run has nobody to answer and does not restore.
+    if (!status && status.error().code == katana::core::ErrorCode::DatabaseFailure && !headless_) {
         const auto answer = QMessageBox::question(
             this, "Project Damaged",
             QString::fromStdString(status.error().describe()) +
@@ -933,7 +934,7 @@ void MainWindow::openProject(const QString& directory)
         }
     }
     if (!status) {
-        QMessageBox::critical(this, "Open Failed", QString::fromStdString(status.error().describe()));
+        warnUser("Open Failed", QString::fromStdString(status.error().describe()));
         return;
     }
     views_->resetInteraction();
@@ -950,7 +951,7 @@ bool MainWindow::saveDocument()
     }
     const auto status = document_.save();
     if (!status) {
-        QMessageBox::critical(this, "Save Failed", QString::fromStdString(status.error().describe()));
+        warnUser("Save Failed", QString::fromStdString(status.error().describe()));
         return false;
     }
     logMessage("Saved.");
@@ -969,7 +970,7 @@ bool MainWindow::saveDocumentAs()
     }
     const auto status = document_.saveAs(toPath(target));
     if (!status) {
-        QMessageBox::critical(this, "Save Failed", QString::fromStdString(status.error().describe()));
+        warnUser("Save Failed", QString::fromStdString(status.error().describe()));
         return false;
     }
     logMessage("Saved to " + target);

@@ -238,32 +238,41 @@ class Importer {
     }
 
     // The Katana style for a 12d linestyle name: created once per name. A
-    // name Katana cannot hold (empty) means ByLayer.
-    const std::string& styleFor(const std::string& linestyle)
+    // name Katana cannot hold (empty) means ByLayer. A style named by a
+    // symbol block gets the symbol its name suggests at the size the first
+    // such block gave; met as a line first, it stays a line style until a
+    // symbol block names it.
+    katana::entity::Style& styleFor(const std::string& linestyle,
+                                    const FieldList* symbolBlock = nullptr)
     {
-        static const std::string kByLayer;
+        static katana::entity::Style byLayer;
         if (linestyle.empty()) {
-            return kByLayer;
+            return byLayer;
         }
-        const auto known = std::find_if(result_.stylesNeeded.begin(), result_.stylesNeeded.end(),
-                                        [&](const katana::entity::Style& style) {
-                                            return style.name == linestyle;
-                                        });
-        if (known != result_.stylesNeeded.end()) {
-            return known->name;
+        auto known = std::find_if(result_.stylesNeeded.begin(), result_.stylesNeeded.end(),
+                                  [&](const katana::entity::Style& style) {
+                                      return style.name == linestyle;
+                                  });
+        if (known == result_.stylesNeeded.end()) {
+            katana::entity::Style style;
+            style.name = linestyle;
+            style.description = "12d linestyle";
+            result_.stylesNeeded.push_back(std::move(style));
+            known = std::prev(result_.stylesNeeded.end());
         }
-        katana::entity::Style style;
-        style.name = linestyle;
-        style.description = "12d linestyle";
-        result_.stylesNeeded.push_back(std::move(style));
-        return result_.stylesNeeded.back().name;
+        if (symbolBlock != nullptr && known->symbol.empty()) {
+            known->symbol = std::string(symbolForLinestyle(linestyle));
+            known->symbolSize = std::max(0.0, symbolBlock->real("size").value_or(0.0));
+            known->description = "12d symbol";
+        }
+        return *known;
     }
 
     [[nodiscard]] Entity makeEntity(const StringHeader& header, std::string_view keyword)
     {
         Entity entity;
         entity.layer = layerFor(header.model, header.colour);
-        entity.style = styleFor(header.style);
+        entity.style = styleFor(header.style).name;
         // A 12d string has a colour of its own; there is no ByLayer in 12d.
         // A name Katana has no RGB for is left to the layer, and kept below.
         entity.color = standardColour(header.colour);
@@ -524,11 +533,9 @@ class Importer {
                                   entity.properties);
             }
         }
-        // Symbols and per-vertex annotation properties have no Katana form at
-        // all; they are counted, so that the import can say what it left.
-        if (string.symbol || !string.symbols.empty()) {
-            ++symbolsLeft_;
-        }
+        importSymbols(string, entity, meta);
+        // Per-vertex annotation properties have no Katana form at all; they
+        // are counted, so that the import can say what it left.
         if (!string.vertexAnnotations.empty() || !string.segmentAnnotations.empty() ||
             (string.segmentAnnotation && string.segmentText.empty() && !string.segmentTextValue)) {
             ++annotationsLeft_;
@@ -538,6 +545,80 @@ class Importer {
         added += addVertexText(string);
         added += addSegmentText(string);
         return added;
+    }
+
+    // See kMetaSymbolPrefix for the two forms a symbol takes. Only a point
+    // with ONE block can take the symbol as its style; anything else - a line,
+    // or a point with a per-vertex list of more than one block, which the
+    // format allows and 12d does not write - is kept whole and counted.
+    template <typename Meta>
+    void importSymbols(const VertexString& string, Entity& entity, const Meta& meta)
+    {
+        std::vector<const FieldList*> blocks;
+        if (string.symbol) {
+            blocks.push_back(&*string.symbol);
+        }
+        for (const FieldList& block : string.symbols) {
+            blocks.push_back(&block);
+        }
+        if (blocks.empty()) {
+            return;
+        }
+        const FieldList& first = *blocks.front();
+        const std::string symbolStyle = first.text("style");
+        if (string.vertices.size() == 1 && blocks.size() == 1 && !symbolStyle.empty()) {
+            const katana::entity::Style& style = styleFor(symbolStyle, &first);
+            entity.style = style.name;
+            if (string.header.style != symbolStyle) {
+                meta(std::string(kMetaStringStyle), string.header.style);
+            }
+            // What the point LOOKS like is its symbol, so the symbol's
+            // colour is the entity's. The string's own colour name stays in
+            // 12d.colour: the two are the same name in every sample archive,
+            // but the format allows two and neither may be lost.
+            const std::string symbolColour = first.text("colour");
+            if (const auto rgb = standardColour(symbolColour)) {
+                entity.color = rgb;
+            }
+            for (const Field& field : first.fields()) {
+                // The style carries the shape and the size, the entity the
+                // colour where it agrees with the string's; the rest of the
+                // block is kept only where it says something - 12d writes
+                // rotation, offset and raise as 0 on tens of thousands of
+                // points, and metadata is not free.
+                const bool onStyle = field.key == "style" ||
+                                     (field.key == "size" &&
+                                      first.real("size").value_or(-1.0) == style.symbolSize);
+                const bool onEntity = field.key == "colour" && symbolColour == string.header.colour;
+                const bool isDefault = (field.key == "rotation" || field.key == "offset" ||
+                                        field.key == "raise") &&
+                                       first.real(field.key) == 0.0;
+                if (!onStyle && !onEntity && !isDefault) {
+                    meta(std::string(kMetaSymbolPrefix) + field.key, field.value);
+                }
+            }
+            return;
+        }
+        // One list per key, a value per block, in the order the keys first
+        // appear; a key a block lacks holds an empty item so the columns
+        // stay aligned.
+        std::vector<std::string> keys;
+        for (const FieldList* block : blocks) {
+            for (const Field& field : block->fields()) {
+                if (std::find(keys.begin(), keys.end(), field.key) == keys.end()) {
+                    keys.push_back(field.key);
+                }
+            }
+        }
+        for (const std::string& key : keys) {
+            std::vector<std::string> values;
+            values.reserve(blocks.size());
+            for (const FieldList* block : blocks) {
+                values.push_back(block->text(key));
+            }
+            meta(std::string(kMetaSymbolPrefix) + key, joinList(values));
+        }
+        ++symbolsLeft_;
     }
 
     // Text on a segment is drawn at its middle (manual 1.5.8.4.9 gives it an
@@ -1330,7 +1411,8 @@ class Importer {
         }
         if (symbolsLeft_ != 0) {
             warnings.push_back(std::to_string(symbolsLeft_) +
-                               " strings carry vertex symbols, which Katana has no way to draw");
+                               " strings carry vertex symbols that are kept and written back but "
+                               "not drawn: Katana draws a symbol on a point, from its style");
         }
         if (annotationsLeft_ != 0) {
             warnings.push_back(std::to_string(annotationsLeft_) +

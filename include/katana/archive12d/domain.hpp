@@ -97,6 +97,19 @@ inline constexpr std::string_view kMetaSource = "source";
 // Every scalar a string carried that Katana has no field for, as
 // `12d.x.<key>`; export writes them back as they were.
 inline constexpr std::string_view kMetaExtraPrefix = "12d.x.";
+// A vertex symbol (manual 1.5.8.4.10) is a linestyle drawn at a vertex, with
+// a colour, a size, a rotation, an offset and a raise. On a POINT it is the
+// point's whole appearance, so the point takes the symbol's linestyle as its
+// style (the Style carries the shape and the size) and the symbol's colour
+// as its colour; what remains of the block, and only where it is not the
+// default, is `12d.symbol.<key>`. The string's own linestyle, which 12d
+// writes on a point beside the symbol's, is kept as kMetaStringStyle when
+// the two differ so that export can put it back. On a LINE the vertices
+// have no style of their own; every block is kept as `12d.symbol.<key>`
+// holding one value per block, the way segment colours are kept, and the
+// import says the symbols are not drawn.
+inline constexpr std::string_view kMetaSymbolPrefix = "12d.symbol.";
+inline constexpr std::string_view kMetaStringStyle = "12d.string_style";
 
 struct ImportOptions {
     // Largest distance a chord may stand off the arc or transition it
@@ -216,6 +229,15 @@ fromDomain(const katana::entity::Model& model, const std::vector<ExportSurface>&
 // entity::validateLayerPath. An empty name becomes "12d".
 [[nodiscard]] std::string layerPathForModel(std::string_view modelName,
                                             std::string_view prefix = {});
+
+// The Katana symbol a 12d point linestyle is best drawn with, from its name:
+// "ELEC Pole - Power" is a pole, "DRAIN Gully Pit Point" a manhole, "STNS
+// Default MX Survey Mark" a target, "TOPO Natural Surface Point" a cross.
+// A 12da carries only the NAME of a linestyle - what it looks like lives in
+// the 12d project - so this is a reading of the name, made once when the
+// style is created and changed in the style manager if it is wrong. Never
+// empty: a name that says nothing is a circle.
+[[nodiscard]] std::string_view symbolForLinestyle(std::string_view name);
 
 // The RGB of one of 12d Model's standard colour names, matched without regard
 // to case. nullopt for any other name: colours are defined per project in

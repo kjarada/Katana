@@ -26,6 +26,7 @@
 #include <QWheelEvent>
 
 #include "katana/cad/selection.hpp"
+#include "katana/cad/symbols.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/interop/reference_data.hpp"
@@ -789,13 +790,13 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             return;
         }
         const katana::entity::Layer* layer = model.layers.find(entity.layer);
+        // Through the one resolution chain, so this agrees with the 3D view
+        // and so that a named style can finally change how an entity looks -
+        // Style::color was stored and validated and read by nothing.
+        const auto display = katana::entity::resolveDisplay(model, entity);
         if (selection.contains(entity.id)) {
             painter.setPen(QPen(kSelection, 2, Qt::DashLine));
         } else {
-            // Through the one resolution chain, so this agrees with the 3D
-            // view and so that a named style can finally change how an entity
-            // looks - Style::color was stored and validated and read by nothing.
-            const auto display = katana::entity::resolveDisplay(model, entity);
             QColor color = toQColor(display.color);
             if (layer->locked) {
                 color.setAlpha(110); // locked layers read as background
@@ -827,8 +828,35 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         }
         dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
         hatch_ = cad::resolveHatchPattern(model, entity);
+        if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry);
+            point != nullptr && !display.symbol.empty()) {
+            drawSymbol(painter, display.symbol, point->position, display.symbolSize);
+            return;
+        }
         drawGeometry(painter, entity.geometry);
     });
+}
+
+void ViewportWidget::drawSymbol(QPainter& painter, const std::string& symbol,
+                                const Point2& centre, double size) const
+{
+    // The style's size is the symbol's width, as 12d's is; the strokes take
+    // a half-width. A symbol with no size of its own is the plain mark's
+    // size, in model units at the current scale, so it stays a mark and not
+    // a blob.
+    const double half =
+        size > 0.0 ? 0.5 * size : kPointMarkerPixels / std::max(view_.scale, 1e-12);
+    for (const auto& stroke : cad::symbolStrokes(symbol, centre, half)) {
+        QPolygonF polygon;
+        polygon.reserve(static_cast<int>(stroke.vertices.size()) + 1);
+        for (const auto& vertex : stroke.vertices) {
+            polygon << toScreen(vertex);
+        }
+        if (stroke.closed && !stroke.vertices.empty()) {
+            polygon << toScreen(stroke.vertices.front());
+        }
+        painter.drawPolyline(polygon);
+    }
 }
 
 void ViewportWidget::drawGeometry(QPainter& painter,

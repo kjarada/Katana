@@ -277,7 +277,8 @@ struct Style {
     // at a vertex, which is why the symbol lives on the style and not on the
     // point: "the style of a point" and "the style of a line" are one thing.
     std::string symbol{kNoSymbol};
-    // Symbol size in model units; 0 means the viewport's default mark size.
+    // The symbol's width in model units - a 12d symbol `size` - or 0 for the
+    // viewport's default mark size.
     double symbolSize = 0.0;
 
     friend bool operator==(const Style&, const Style&) = default;

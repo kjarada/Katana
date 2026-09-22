@@ -167,3 +167,31 @@ TEST(ResolveDisplay, ResolutionIsPureAndRepeatable)
         EXPECT_EQ(resolveDisplay(model, entity), first);
     }
 }
+
+TEST(ResolveDisplay, ThePointSymbolComesFromTheStyleAndNowhereElse)
+{
+    // PLAN.MD 20.2 slice 2. A layer has no symbol - a layer holds lines and
+    // points alike - so a point on a layer with no style draws the plain mark,
+    // and a point in a style with a symbol draws that at the style's size.
+    Model model = modelWithLayerAndStyle();
+    Style manhole;
+    manhole.name = "manhole";
+    manhole.symbol = "manhole";
+    manhole.symbolSize = 1.2;
+    ASSERT_TRUE(model.styles.add(manhole).ok());
+
+    Entity plain = onLayer("kerb");
+    EXPECT_EQ(resolveDisplay(model, plain).symbol, katana::entity::kNoSymbol);
+    EXPECT_DOUBLE_EQ(resolveDisplay(model, plain).symbolSize, 0.0);
+
+    Entity marked = onLayer("kerb");
+    marked.style = "manhole";
+    const auto display = resolveDisplay(model, marked);
+    EXPECT_EQ(display.symbol, "manhole");
+    EXPECT_DOUBLE_EQ(display.symbolSize, 1.2);
+    EXPECT_EQ(display.color, kRed) << "a style that says nothing about colour leaves the layer's";
+
+    marked.style = "heavy";
+    EXPECT_EQ(resolveDisplay(model, marked).symbol, katana::entity::kNoSymbol)
+        << "a line style draws a point with the plain mark";
+}

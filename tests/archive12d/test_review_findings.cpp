@@ -396,7 +396,11 @@ string super { name one data_3d { 5 5 5 } vertex_attribute_data { attributes { t
     EXPECT_EQ(std::get<std::string>(domain.entities.at(6).properties.at("QualityLevel")), "B");
     EXPECT_TRUE(anyContains(domain.warnings, "1 strings have invisible vertices or segments"))
         << joined(domain.warnings);
-    EXPECT_TRUE(anyContains(domain.warnings, "1 strings carry vertex symbols")) << joined(domain.warnings);
+    // full is a line: its vertex symbol is kept, not drawn (slice 2 draws a
+    // symbol on a point), and the import says so.
+    EXPECT_TRUE(anyContains(domain.warnings, "1 strings carry vertex symbols"))
+        << joined(domain.warnings);
+    EXPECT_EQ(std::get<std::string>(full.metadata.at("12d.symbol.style")), "Tree");
 
     // The whole lot back out and in again: the same strings.
     katana::entity::Model model;
@@ -426,6 +430,9 @@ string super { name one data_3d { 5 5 5 } vertex_attribute_data { attributes { t
     EXPECT_EQ(std::get<std::string>(f.vertexAttributes[2].at(0).value), "x y");
     ASSERT_EQ(f.segmentAttributes.size(), 3u);
     EXPECT_EQ(std::get<double>(f.segmentAttributes[0].at(0).value), 0.02);
+    ASSERT_TRUE(f.symbol.has_value()) << "one symbol for every vertex goes back as symbol_value";
+    EXPECT_EQ(f.symbol->text("style"), "Tree");
+    EXPECT_EQ(f.symbol->real("size"), 2.0);
 }
 
 TEST(ReviewImport, SplitListIsTheInverseOfWhatImportJoins)

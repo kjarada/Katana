@@ -415,6 +415,41 @@ The mapping is documented in full at the head of
   guessing a dash pattern from the name ("DRAIN Water Course" is probably
   dashed): wrong more often than right, and a wrong pattern is worse than a
   solid line the user knows to fix.
+- **Symbols are on the style, and a point takes its symbol's style.** A
+  12d vertex symbol (`symbol_value` for the string, `symbol_data` per
+  vertex) is a linestyle drawn at a vertex with a colour, a size, a rotation,
+  an offset and a raise; 12d writes one on every surveyed point - 27 075 of
+  them across the sample archives, the string's own linestyle "0" beside
+  the symbol's. On a one-vertex point string the symbol is the point's whole
+  appearance, so the point's `style` becomes the symbol's linestyle, the
+  `Style` row carries the shape and the size, and the symbol's colour is the
+  entity's colour. The shape is read from the linestyle name
+  (`symbolForLinestyle`: "SEWR Manhole Cover" is a manhole, "ELEC Pole -
+  Light" a pole, "TOPO Natural Surface Point" a cross, anything unreadable a
+  circle), because a 12da carries only the name and what it looks like lives
+  in the 12d project; the style manager is where a wrong guess is put right,
+  once per name rather than once per point. The string's own linestyle is
+  kept as `12d.string_style` and written back, so the string is the string
+  it was. What 12d writes on tens of thousands of points as `rotation 0
+  offset 0 raise 0` is not kept: only a value that says something becomes
+  `12d.symbol.<key>` metadata, and export writes the defaults. On a LINE the
+  vertices have no style of their own; every block is kept as one list per
+  key (`12d.symbol.style` = `Post Post "Gate Post"`), written back as
+  `symbol_value` or `symbol_data` by the length of the lists, and counted in
+  a warning because they are not drawn. **Rejected:** a symbol field on the
+  entity - it would mean two places a point's appearance can come from, and
+  12d's own answer is that a symbol IS a linestyle. **Rejected:** making the
+  symbol's colour a second colour on the entity: a point has one colour on a
+  Katana screen, and it is the symbol's, because the symbol is what you see.
+  The string's own colour name is a different thing and is NOT overwritten by
+  it: it stays in `12d.colour` and export writes it back unexamined when the
+  entity's colour came from a symbol (the rule that rewrites a colour name
+  the user has since changed would otherwise rename the string after its
+  symbol). In every sample archive the two names are the same, so this only
+  ever shows on a file that uses the format's freedom; it was found by asking
+  what happens when they differ, and the answer was that the string's colour
+  was lost. A symbol colour Katana has no RGB for is kept by name and
+  written back.
 - **Attributes** become typed properties; a group flattens into
   `Group/Sub/Name` and is rebuilt on export. Vertex and segment attributes
   become `vertex/3/Name` and `segment/2/Name`; a one-vertex string's vertex
@@ -511,7 +546,7 @@ handling column is asserted by `tests/archive12d/test_coverage.cpp`.
 |---|---|---|---|
 | `model` | 1.4.1 | import and export | a layer; a tree name such as Stage 1/Water arrives as that nested layer |
 | `colour` | 1.4.2 | import and export | the entity's colour where the name is one of 12d's standard colours; the name is always kept |
-| `style` | 1.4.3 | import and export | kept on the entity as 12d.style and written back |
+| `style` | 1.4.3 | import and export | a Katana Style of that name in the entity's own style field; a vertex symbol's linestyle is the point's style, with the symbol on it |
 | `breakline` | 1.4.4 | import and export | kept on the entity as 12d.breakline and written back |
 | `null` | 1.4.5 | import and export | a height equal to the null value, or the null keyword, is no height at all |
 | `attributes` | 1.3 | import and export | typed entity properties; a group flattens into Group/Name and is rebuilt on export |
@@ -558,9 +593,12 @@ reads the same.
 
 ### Not done
 
-The Windsor Road file's 1 453 trimeshes, and the 13 353 strings in `Test 4`
-that carry vertex symbols, are read and reported and go no further: there is
-no mesh entity and no symbol on a vertex. Per-vertex annotation settings
+The Windsor Road file's 1 453 trimeshes are read and reported and go no
+further: there is no mesh entity. A symbol on the vertices of a LINE (468
+fence and kerb strings in Windsor Road, 18 in `Test 4`) is kept and written
+back but not drawn, and a point symbol's rotation, offset and raise are kept
+and not drawn either: a Katana point has no rotation, and offset and raise
+are paper-space quantities. Per-vertex annotation settings
 beyond text height and angle (offset, raise, justification, slant) are not
 taken. Super tins are reported, not built - Katana has no notion of one
 surface overriding another where they overlap. The undocumented parts of a

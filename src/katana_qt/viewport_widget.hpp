@@ -118,6 +118,8 @@ class ViewportWidget final : public QWidget {
     void drawPointClouds(QPainter& painter) const;
     void drawEntities(QPainter& painter) const;
     void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
+    void drawSymbol(QPainter& painter, const std::string& symbol, const Point2& centre,
+                    double size) const;
     // `height` in model units; `rotation` in radians, counter-clockwise.
     // Fills a closed polyline with the hatch pattern resolved for the entity
     // being drawn, if any. `screen` is that boundary already transformed, so a

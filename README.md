@@ -28,11 +28,11 @@ and the command line are two thin front ends over the same engine.
 | 17 | Point clouds | partial — LAS/LAZ read/write, budgeted decimation, 2D display; no out-of-core LOD |
 | 18 | Spatial indexing | partial — sparse hash grid behind snapping, picking, box selection and viewport repaint (50×–310× measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance architecture | partial — deterministic `TaskPool` drives the renderer; no task graph, no SIMD |
-| 20 | File interoperability | partial — raster, vector, point cloud and 12d Archive (.12da/.12daz) import/export in the GUI and the CLI, every element of the 12d format accounted for; no DWG/LandXML/IFC |
+| 20 | File interoperability | partial — raster, vector, point cloud and 12d Archive (.12da/.12daz) import/export in the GUI and the CLI, every element of the 12d format accounted for, 12d linestyles as styles and 12d point symbols drawn from them; no DWG/LandXML/IFC |
 | 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
 | 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
 
-1089 tests pass in Debug and Release, including the architectural layering check, a headless plot to PDF, a headless build of the main window and a headless click on a layer's visibility box.
+1106 tests pass in Debug and Release, including the architectural layering check, a headless plot to PDF, a headless build of the main window, a headless click on a layer's visibility box and a headless import of surveyed points drawn with their symbols.
 
 ## Building
 

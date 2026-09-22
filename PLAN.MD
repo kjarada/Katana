@@ -1422,7 +1422,33 @@ SET | DELETE | APPLY` in the interpreter. `.12dz` withdrawn. Colour names
 Katana has no RGB for stay on the entity as `12d.colour` rather than on the
 style, because a 12d colour belongs to the string, not to its linestyle.
 
-**STATUS: slice 2 (symbols) in progress.**
+**Slice 2 PARTIALLY DELIVERED (2026-09-22) - the engine and the drawing;
+the manager dialog is folded into slice 3.** `cad::symbolStrokes` is the
+one definition of the sixteen shapes (`include/katana/cad/symbols.hpp`);
+`resolveDisplay` carries the style's symbol and size; the plan viewport and
+the PDF plot draw a point's symbol from its style (`ViewportWidget::
+drawSymbol`, size = width as 12d's is, 0 = the plain mark). A 12d
+`symbol_value`/`symbol_data` on a point makes the point's style the
+symbol's linestyle, with the shape read from the name
+(`archive12d::symbolForLinestyle`: manhole, pole, tree, target, flag, star,
+diamond, dot, cross, else circle) and the size from the block; the symbol's
+colour is the point's; `12d.string_style` keeps the string's own linestyle;
+only non-default rotation/offset/raise, a non-standard colour and a size
+unlike the style's become `12d.symbol.*`. A line's per-vertex blocks are
+kept as one list per key and written back as `symbol_value` or
+`symbol_data`. `Test 4 without tin` arrives with 113 of its 211 styles as
+symbols; the fixture `tests/archive12d/data/symbols.12da` is drawn by
+`qt_import_symbols_headless`. The rest of the work is in `docs/cad.md`
+(Point symbols) and `docs/interop.md` (Symbols are on the style).
+**Decision:** the "Symbols manager" this slice asked for and the "Line
+styles manager" of slice 3 are ONE dialog, because a symbol is a field of a
+Style and a second dialog on the same table would be the second way of doing
+something; it is delivered under slice 3. OUTSTANDING: that dialog (slice
+3); a symbol on the vertices of a line is kept, counted and not drawn; a
+point symbol's rotation is kept and not drawn.
+
+**STATUS: slice 3 (styles manager: Style and Linetype tables, symbol and
+pattern preview) next.**
 
 ---
 
