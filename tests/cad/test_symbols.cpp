@@ -22,7 +22,7 @@ double radius(const Point2& vertex, const Point2& centre)
 
 } // namespace
 
-TEST(Symbols, EveryNamedSymbolHasAShapeAndNothingElseDoes)
+TEST(Symbols, EveryNamedSymbolHasItsOwnShapeAndAnyOtherNameFallsBackToOne)
 {
     for (const std::string_view name : katana::entity::symbolNames()) {
         const auto strokes = symbolStrokes(name, Point2(0.0, 0.0), 1.0);
@@ -37,8 +37,17 @@ TEST(Symbols, EveryNamedSymbolHasAShapeAndNothingElseDoes)
             }
         }
     }
+    // Only "no symbol" draws nothing. A name that is not one of the sixteen
+    // is a real 12d linestyle name - "SEWR Manhole Cover" - and falls back to
+    // the shape its words suggest, because the alternative is a point that
+    // draws nothing at all when no library defines its name.
     EXPECT_TRUE(symbolStrokes(katana::entity::kNoSymbol, Point2(0.0, 0.0), 1.0).empty());
-    EXPECT_TRUE(symbolStrokes("blob", Point2(0.0, 0.0), 1.0).empty());
+    EXPECT_FALSE(symbolStrokes("SEWR Manhole Cover", Point2(0.0, 0.0), 1.0).empty());
+    EXPECT_EQ(symbolStrokes("SEWR Manhole Cover", Point2(0.0, 0.0), 1.0),
+              symbolStrokes("manhole", Point2(0.0, 0.0), 1.0));
+    // A name suggesting nothing still draws: a circle is the last resort.
+    EXPECT_EQ(symbolStrokes("blob", Point2(0.0, 0.0), 1.0),
+              symbolStrokes("circle", Point2(0.0, 0.0), 1.0));
 }
 
 TEST(Symbols, ACircleIsChordsOnTheCircleOfTheGivenSizeAboutTheCentre)

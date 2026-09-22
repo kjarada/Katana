@@ -9,10 +9,10 @@
 // the table that says so, and this is that table.
 //
 // A rule is keyed by a code pattern which is either EXACT ("PABB") or a
-// PREFIX ("WM*"). The two Transport for NSW mapfiles hold 1,624 rules over
-// 1,364 distinct keys between them, and not one uses a wildcard anywhere but
-// at the end - so a key of any other shape is refused rather than matched
-// approximately.
+// PREFIX ("WM*"). The two mapfiles of the reference customisation hold 1,624
+// rules over 1,364 distinct keys between them, and not one uses a wildcard
+// anywhere but at the end - so a key of any other shape is refused rather
+// than matched approximately.
 //
 // A mapfile is written in SECTIONS, and a rule carries only what its section
 // is about: where the code goes, or the symbol it gets, or the attributes it

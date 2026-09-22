@@ -21,9 +21,9 @@
 // is how 12d works: the libraries are a site-wide customisation shared by
 // every project, named by a project rather than copied into it. The
 // alternative - a table in the Model beside Layer and Linetype - was rejected
-// because the Transport for NSW libraries alone are 792 definitions and
-// 35,000 strokes, which would be copied into every project file that used one
-// of them, and because two projects would then be able to disagree about what
+// because one production customisation alone is 792 definitions and 35,000
+// strokes, which would be copied into every project file that used one of
+// them, and because two projects would then be able to disagree about what
 // "WATR Main" looks like.
 
 #include <array>
@@ -69,7 +69,7 @@ enum class StrokeOp {
 
 // What a `text` command carries beyond the point it sits at. Kept beside the
 // strokes rather than in them because a library is overwhelmingly move and
-// draw - 17,317 draws against 514 texts in the two Transport for NSW files -
+// draw - 17,317 draws against 514 texts in the two reference library files -
 // and two std::strings on every one of those would cost far more than this
 // indirection does.
 struct StrokeText {
@@ -108,8 +108,8 @@ struct Stroke {
 
 struct LineStyle {
     std::string name{};
-    // A `/`-separated path, "TfNSW Survey/WATR" - the tree a library browser
-    // shows, the same shape as a layer path and for the same reason.
+    // A `/`-separated path, "Survey/WATR" - the tree a library browser shows,
+    // the same shape as a layer path and for the same reason.
     std::string group{};
     StyleUnits units = StyleUnits::World;
     // `mode vertex`: drawn at each vertex of a string rather than along it,
@@ -154,8 +154,8 @@ struct LineStylePolicy : NamedTablePolicy<LineStyle> {
 // regard to CASE, as they do in the rest of the model, although 12d's own
 // comparisons are case-insensitive ("Bypass" and "BYPASS" are one linestyle
 // there). That difference is deliberate and measured rather than overlooked:
-// of the 372 references the Transport for NSW mapfile makes into these two
-// libraries, every single one matches exactly and none needs case folding. A
+// of the 372 references the reference mapfile makes into its two libraries,
+// every single one matches exactly and none needs case folding. A
 // name that does not resolve is reported by the caller rather than guessed
 // at, so if another customisation ever does spell one differently it will say
 // so instead of drawing the wrong mark.

@@ -260,6 +260,14 @@ inline constexpr std::string_view kNoSymbol = "";
 // what a chooser offers, not what validation allows.
 [[nodiscard]] const std::vector<std::string_view>& symbolNames();
 [[nodiscard]] bool isBuiltInSymbolName(std::string_view name);
+// The built-in shape that best fits a name, for a name nothing defines: a
+// linestyle with "Manhole" in it is drawn as a manhole rather than as
+// nothing. Always one of symbolNames(); "circle" when nothing matches.
+//
+// It lives here because the two layers that need it - the 12d reader, which
+// records real 12d names, and the drawing code, which has to put something
+// on the page for a name no loaded library defines - cannot see each other.
+[[nodiscard]] std::string_view builtInSymbolFor(std::string_view name);
 
 struct Style {
     std::string name{};

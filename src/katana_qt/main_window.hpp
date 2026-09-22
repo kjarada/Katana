@@ -173,6 +173,7 @@ class MainWindow final : public QMainWindow {
     // ---- import / export (PLAN.MD Phase 20) ---------------------------------
     void importFile();
     void loadCustomisation();
+    void applySurveyCodes();
     void importVectorFile(const std::filesystem::path& path);
     void importArchive12dFile(const std::filesystem::path& path);
     void importRasterFile(const std::filesystem::path& path);

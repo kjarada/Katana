@@ -135,7 +135,7 @@ bool runCode(katana::cad::Document& document, const std::string& property)
         std::cerr << "error: " << command.error().describe() << "\n";
         return false;
     }
-    std::cout << report.coded << " entities carry a \"" << options.property << "\", "
+    std::cout << report.coded << " entities carry a \"" << report.property << "\", "
               << report.matched << " of them codes the mapfile has a rule for\n";
     if (!report.unmatchedCodes.empty()) {
         std::cout << "  " << report.unmatchedCodes.size() << " codes with no rule:";

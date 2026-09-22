@@ -93,7 +93,12 @@ TEST(SymbolImport, APointTakesItsSymbolsLinestyleAsItsStyleAndTheStyleCarriesThe
     EXPECT_EQ(point.style, "SEWR Manhole Cover");
     const auto* style = styleNamed(domain, "SEWR Manhole Cover");
     ASSERT_NE(style, nullptr);
-    EXPECT_EQ(style->symbol, "manhole") << "the name says what it is";
+    // The REAL 12d name, kept so a loaded symbol library can be matched
+    // against it. What it DRAWS as without one is the shape its words
+    // suggest, which is asserted where that guess lives.
+    EXPECT_EQ(style->symbol, "SEWR Manhole Cover");
+    EXPECT_EQ(katana::entity::builtInSymbolFor(style->symbol), "manhole")
+        << "the name still says what it is";
     EXPECT_EQ(style->symbolSize, 1.0);
     EXPECT_EQ(style->description, "12d symbol");
     // The string's own linestyle "0" is not the point's style, but it is
@@ -121,7 +126,7 @@ TEST(SymbolImport, TheSymbolValueFormAndTheSymbolDataFormAreOneSymbol)
     EXPECT_EQ(value.entities[0].style, "ELEC Pole - Power");
     EXPECT_EQ(data.entities[0].style, "ELEC Pole - Power");
     EXPECT_EQ(value.stylesNeeded, data.stylesNeeded);
-    EXPECT_EQ(styleNamed(value, "ELEC Pole - Power")->symbol, "pole");
+    EXPECT_EQ(styleNamed(value, "ELEC Pole - Power")->symbol, "ELEC Pole - Power");
     EXPECT_EQ(styleNamed(value, "ELEC Pole - Power")->symbolSize, 2.5);
 }
 
@@ -136,7 +141,9 @@ string super { name b breakline point data_3d { 5 5 0 }
     ASSERT_EQ(domain.entities.size(), 2u);
     const auto* style = styleNamed(domain, "CULT Sign Post");
     ASSERT_NE(style, nullptr);
-    EXPECT_EQ(style->symbol, "pole") << "a post is a pole, before a sign is a flag";
+    EXPECT_EQ(style->symbol, "CULT Sign Post") << "the name the fixture declares";
+    EXPECT_EQ(katana::entity::builtInSymbolFor(style->symbol), "pole")
+        << "a post is a pole, before a sign is a flag";
     EXPECT_EQ(style->symbolSize, 1.0) << "the first size seen";
 
     const Entity& b = domain.entities[1];
@@ -173,7 +180,7 @@ string super { name p breakline point style "1" data_3d { 5 5 0 }
   symbol_value { style "Tree" colour green size 2 } })");
     const auto* style = styleNamed(domain, "Tree");
     ASSERT_NE(style, nullptr);
-    EXPECT_EQ(style->symbol, "tree");
+    EXPECT_EQ(katana::entity::builtInSymbolFor(style->symbol), "tree");
     EXPECT_EQ(style->symbolSize, 2.0);
     EXPECT_EQ(domain.stylesNeeded.size(), 2u) << "Tree and 1: one style per name";
 }

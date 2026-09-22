@@ -15,7 +15,7 @@ using katana::geometry::Point2;
 
 namespace {
 
-// The rules the Transport for NSW mapfile gives these codes, cut down.
+// The rules the reference mapfile gives these codes, cut down.
 katana::entity::SurveyMap waterAndBollards()
 {
     katana::entity::SurveyMap map;

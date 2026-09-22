@@ -11,6 +11,7 @@
 #include <optional>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 #include <QPdfWriter>
@@ -945,9 +946,17 @@ QPen ViewportWidget::penFor(const QPen& entityPen, const std::string& pen)
 double ViewportWidget::paperScale() const
 {
     // Model units to one plot millimetre, which is what a `paperstyle` is
-    // measured in. With no paper scale to go on, a millimetre is a pixel.
-    const double pixelsPerMillimetre =
-        paperPixelsPerMillimetre_ > 0.0 ? paperPixelsPerMillimetre_ : 1.0;
+    // measured in. Dividing by the view scale is what makes such a mark keep
+    // its size on the PAGE as you zoom, which is the whole point of one.
+    //
+    // With no plot scale set, a millimetre is a millimetre OF SCREEN. It used
+    // to be one pixel, which made every paper linestyle about four times too
+    // small: the ticks of a fence style came out a pixel tall and vanished
+    // into the line they sit on, so the feature looked broken when it was
+    // only invisible.
+    const double pixelsPerMillimetre = paperPixelsPerMillimetre_ > 0.0
+                                           ? paperPixelsPerMillimetre_
+                                           : std::max(1.0, logicalDpiX() / 25.4);
     return pixelsPerMillimetre / std::max(view_.scale, 1e-12);
 }
 

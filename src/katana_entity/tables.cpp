@@ -680,6 +680,45 @@ const std::vector<std::string_view>& symbolNames()
     return names;
 }
 
+std::string_view builtInSymbolFor(std::string_view name)
+{
+    std::string key(name);
+    std::transform(key.begin(), key.end(), key.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto has = [&key](std::string_view word) { return key.find(word) != std::string::npos; };
+    // Most specific first: "Pole - Light" is a pole, "Suspended Light" a
+    // light, "Gully Pit Point" a pit and not a point.
+    if (has("tree") || has("shrub") || has("palm")) {
+        return "tree";
+    }
+    if (has("manhole") || has("pit") || has("chamber") || has("sump")) {
+        return "manhole";
+    }
+    if (has("pole") || has("post") || has("column") || has("pier")) {
+        return "pole";
+    }
+    if (has("mark") || has("station") || has("bench") || has("stns") || has("control")) {
+        return "target";
+    }
+    if (has("sign") || has("flag")) {
+        return "flag";
+    }
+    if (has("light") || has("lamp") || has("lantern")) {
+        return "star";
+    }
+    if (has("valve") || has("hydrant") || has("tap") || has("meter")) {
+        return "diamond";
+    }
+    if (has("bollard") || has("peg") || has("nail") || has("spike")) {
+        return "dot";
+    }
+    if (has("point") || has("spot") || has("surface") || has("level") || has("invert") ||
+        has("obvert")) {
+        return "cross";
+    }
+    return "circle";
+}
+
 bool isBuiltInSymbolName(std::string_view name)
 {
     if (name == kNoSymbol) {
@@ -700,8 +739,8 @@ Status validate(const Style& style)
     // A symbol name is RESOLVED when the style is drawn, exactly as
     // `Style::linetype` already is, and not checked against a closed set
     // here. It stopped being a closed set when a project could load a 12d
-    // symbol library: the Transport for NSW customisation alone names 473 of
-    // them, and none is one of the sixteen Katana draws without a library
+    // symbol library: one production customisation alone names 473 of them,
+    // and none is one of the sixteen Katana draws without a library
     // (PLAN.MD 20.3). A name with no definition behind it draws the plain
     // point mark and is reported by whoever looked it up - the same thing
     // that already happens for a linetype the document does not have.

@@ -30,9 +30,12 @@
 namespace katana::cad {
 
 struct SurveyCodingOptions {
-    // The entity property holding the field code. A 12da import puts the
-    // string's name in "12d.name"; a survey file's points carry "code".
-    std::string property{"code"};
+    // The entity property holding the field code. EMPTY means find it: the
+    // first of `codePropertyCandidates()` that any entity actually carries,
+    // which the report names. A drawing imported from a 12da carries the
+    // string name in "12d.name" and a survey file's points carry "code", and
+    // asking the caller which is asking them to know how the drawing got here.
+    std::string property{};
     // Only these entities, or every entity when empty.
     std::vector<katana::entity::EntityId> ids{};
     // 12d colour name -> RGB. Without one, colours are left alone.
@@ -47,7 +50,14 @@ struct SurveyCodingOptions {
     bool setAttributes = true;
 };
 
+// Where a field code is looked for, in order, when none is named.
+[[nodiscard]] const std::vector<std::string>& codePropertyCandidates();
+
 struct SurveyCodingReport {
+    // The property the codes were actually read from - what was asked for, or
+    // what was found. Reported because "0 entities carry a code" is a
+    // different problem from "they carry it under another name".
+    std::string property{};
     std::size_t coded = 0;   // entities carrying a code at all
     std::size_t matched = 0; // ... that the mapfile had a rule for
     std::size_t changed = 0; // ... that this actually alters

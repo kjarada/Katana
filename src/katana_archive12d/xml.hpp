@@ -9,10 +9,10 @@
 //
 // Supported: the XML declaration and other processing instructions, comments,
 // CDATA, self-closing elements, attributes in single or double quotes, and
-// the five predefined entities. Measured against the two Transport for NSW
-// mapfiles, which between them use a processing instruction, attributes on
-// the root element only, 467 self-closing elements, no entity reference, no
-// CDATA and no comment.
+// the five predefined entities. Measured against two production mapfiles,
+// which between them use a processing instruction, attributes on the root
+// element only, 467 self-closing elements, no entity reference, no CDATA and
+// no comment.
 //
 // Not supported, and reported: a document type declaration, a namespace
 // prefix that is not simply part of the name, and any entity reference other

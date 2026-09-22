@@ -1,5 +1,7 @@
 #include "katana/cad/symbols.hpp"
 
+#include "katana/entity/tables.hpp"
+
 #include <cmath>
 #include <numbers>
 
@@ -103,7 +105,15 @@ Unit unitShape(std::string_view symbol)
 std::vector<Polyline2> symbolStrokes(std::string_view symbol, const Point2& centre, double size,
                                      double rotation)
 {
+    // Exact first, then the shape the name's words suggest. Katana used to
+    // store the GUESS on the style and throw the real name away, which meant
+    // a loaded 12d symbol library could never be matched against it. The real
+    // name is kept now, so the guess belongs here - at the last moment, when
+    // nothing better has answered.
     Unit unit = unitShape(symbol);
+    if (unit.strokes.empty() && !symbol.empty()) {
+        unit = unitShape(katana::entity::builtInSymbolFor(symbol));
+    }
     const double c = std::cos(rotation);
     const double s = std::sin(rotation);
     for (Polyline2& stroke : unit.strokes) {
