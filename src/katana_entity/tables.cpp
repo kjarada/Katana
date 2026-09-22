@@ -1,5 +1,7 @@
 #include "katana/entity/tables.hpp"
 
+#include "validation.hpp"
+
 #include "katana/math/numerics.hpp"
 
 #include <algorithm>
@@ -17,13 +19,7 @@ using katana::core::Status;
 
 namespace {
 
-Status validateName(std::string_view name, const char* what)
-{
-    if (name.empty()) {
-        return makeError(ErrorCode::InvalidArgument, std::string(what) + " name is empty");
-    }
-    return {};
-}
+using katana::entity::detail::validateName;
 
 Status validateLineWeight(double lineWeight)
 {

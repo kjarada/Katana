@@ -21,8 +21,9 @@ set(KATANA_ALLOWED_survey "core;math")
 set(KATANA_ALLOWED_terrain "core;math;geometry")
 set(KATANA_ALLOWED_entity "core;math;geometry")
 set(KATANA_ALLOWED_commands "core;math;geometry;entity")
-# The 12d Archive format. Pure text handling plus the mapping onto entities,
-# alignments and surfaces, so it sits beside commands and needs no GDAL.
+# The 12d file formats: the Archive, and the survey coding libraries beside it.
+# Pure text handling plus the mapping onto entities, alignments and surfaces, so
+# it sits beside commands and needs no GDAL.
 set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
 set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
 # gis and pointcloud are both implemented by src/katana_io.

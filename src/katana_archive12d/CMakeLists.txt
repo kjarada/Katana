@@ -1,5 +1,8 @@
-# The 12d Archive format (.12da): text <-> typed archive <-> the domain model
-# (PLAN.MD Phase 20).
+# The 12d file formats: the Archive (.12da) - text <-> typed archive <-> the
+# domain model (PLAN.MD Phase 20) - and beside it the survey coding files a
+# customisation is made of, the linestyle and symbol libraries (.4d) and the
+# mapfile (PLAN.MD 20.3). They share an encoding, a lexer and a set of colour
+# names, which is why they share a module.
 #
 # Deliberately NOT part of katana_interop. Reading a 12da needs no third-party
 # library, so this module builds with -DKATANA_BUILD_IO=OFF - which puts a
@@ -18,6 +21,7 @@ add_library(katana_archive12d STATIC
     domain_common.cpp
     domain_import.cpp
     domain_export.cpp
+    style_library.cpp
 )
 katana_target_defaults(katana_archive12d)
 target_link_libraries(katana_archive12d

@@ -9,6 +9,8 @@ add_library(katana_entity STATIC
     display.cpp
     dimension_text.cpp
     serialization.cpp
+    style_library.cpp
+    validation.cpp
 )
 katana_target_defaults(katana_entity)
 target_link_libraries(katana_entity
