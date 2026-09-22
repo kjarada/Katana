@@ -355,3 +355,18 @@ paths and the table derives a tree from them (`children`, `subtree`,
 `removeSubtree`, `rename`), so it is a different structure that happens to be
 keyed by name. `PropertyDatabase` is not one either: it validates *values*
 against definitions, which no other table does.
+
+## Reading a named table without copying it
+
+`NamedTable::all()` returns a `std::vector<T>` **by value**, which is right for
+a caller that wants to keep the answer and wasteful for one that only wants to
+read it - the viewport called `all()` once a frame and deep-copied every
+alignment, profile and PI vector in order to draw them. `forEach(visit)` walks
+the records in the same name order without copying any of them. `all()` stays:
+the copy is what makes a caller safe to go on and modify the table.
+
+`ChangeSetCommand` no longer keeps an image of every entity it creates.
+`EntityDatabase::remove()` returns the entity it removed, and `undo()` always
+runs before `redo()`, so the image `redo()` needs is captured at undo time
+instead of copied at execute time. See `docs/performance.md` for what that cost:
+12.25 allocations per created entity, now 4.75.

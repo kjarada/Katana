@@ -180,3 +180,37 @@ cmake --build build/release --target katana_benchmarks
 
 Re-run this before changing anything in this document. A decision recorded
 without its measurement is an opinion.
+
+## Loading a project without copying it twice
+
+Opening a 50 000-entity project allocated 1.38 million times, and 287 563 of
+those - 22.6% - were `applyToModel` duplicating every `Entity` on its way from
+the loaded `ProjectContents` into the model. The contents are thrown away on the
+next line.
+
+`applyToModel` therefore has two overloads, a copying one and a consuming one,
+sharing a single templated body so that the insertion order and the built-in
+name rules cannot drift apart between them. `Document::open` uses the consuming
+one, taking the metadata out **before** the call and installing it only after
+the apply succeeds - a failed open must leave the document exactly as it was,
+and that promise is what the staging in `applyToModel` exists to keep.
+
+`ConsumingTheContentsBuildsExactlyTheModelCopyingThemDoes` builds a project with
+something in every table `applyToModel` fills, applies one copy of it each way
+and compares the two models value for value - not by id, because the failure a
+move introduces is a field left behind, not a missing record. Rewriting the
+layer loop as the plausible "add, and fall back to update if it is already
+there" - which reads a layer after moving from it - fails that test; that was
+checked by writing it.
+
+`SqliteStatement::columnTextView` and `columnBlobSpan` borrow SQLite's own row
+buffer for values parsed and discarded within the row. `columnText` and
+`columnBlob` are now those plus a copy, so one place knows how SQLite hands a
+value over. The lifetime rule is on the declarations, and it is sharp: a view
+dies at the next `step()`, `reset()` or `run()`, and at a second read of the
+same column through a different accessor, because SQLite converts in place.
+
+The entity vector is sized from `SELECT COUNT(*)` rather than from
+`nextEntityId`. The counter is free but is only an upper bound, and a drawing
+that has had most of its entities deleted would reserve for its ids instead of
+its rows.

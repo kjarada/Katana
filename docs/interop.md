@@ -724,3 +724,38 @@ super alignment (`computator`, `floating_arc_end_radius_length` and the rest)
 are read as fields and not interpreted; such an alignment arrives through its
 solved geometry, which is what the manual says a reader should use. A 12da
 declares no coordinate system, so nothing is reprojected.
+
+## Reading a large 12da archive
+
+A 62.8 MB archive of 100 000 elements took two seconds to read and now takes
+four tenths of one. Nothing about the parse changed; what changed is that it
+stopped building strings to throw away:
+
+- The keyword table is a case-folded hash set asked with the token **as
+  written**. Both call sites used to lower-case the token first, allocating for
+  every keyword in the file.
+- `detail::CaseBuffer` folds into a 64-byte inline array and spills to the heap
+  only for a longer token, replacing 2.4 million heap-allocating `lowered()`
+  calls per read. Twenty-two sites use it; the ones that keep the folded string
+  do not, because for those the `std::string` is the point.
+- Model lookup is a case-folded hash map instead of a linear scan - 20.1 million
+  case-insensitive comparisons per read before. Its key is **owned rather than a
+  view**: `modelNames` grows, and a short name moved by that growth takes its
+  bytes with it.
+- `Scope` holds a `std::string_view`. `Scope(Reader&, std::string&&)` is
+  **deleted** so that a temporary cannot be borrowed by the next contributor,
+  with a `const char*` overload so keyword literals stay unambiguous.
+
+Correctness was demonstrated rather than argued: a reference build of the
+pre-change sources and the new one produce byte-identical probe reports and
+byte-identical rewritten archives across all six repository fixtures, three
+synthetic archives, all five text encodings and nine deliberately malformed
+archives - and again with the inline buffer cut to one byte, which forces the
+heap-spill branch that real keywords never reach.
+
+Two changes were **measured and rejected**; `docs/performance.md` carries the
+numbers. Reserving the value vectors made a TIN-heavy read slower, not faster,
+because the same code runs for many small blocks. Reserving the element vector
+saves 7% but cannot be sized without a second pass over the text, and `Element`
+is 1040 bytes, so a guessed constant either falls far short or wastes 30 MB on a
+15 MB file.

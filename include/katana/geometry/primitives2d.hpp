@@ -251,6 +251,10 @@ struct Triangle2 {
     Point2 c;
 
     [[nodiscard]] double signedArea() const; // positive when a,b,c are counter-clockwise
+    // The cross product signedArea() halves, and the divisor of the barycentric
+    // weights. Exposed so a caller evaluating many points in one triangle can
+    // hoist it out of the loop rather than recompute it per point.
+    [[nodiscard]] double twiceSignedArea() const;
     [[nodiscard]] double area() const;
     [[nodiscard]] double perimeter() const;
     [[nodiscard]] Point2 centroid() const;
@@ -264,6 +268,13 @@ struct Triangle2 {
 
     // Weights (wa, wb, wc) with p = wa*a + wb*b + wc*c. nullopt when degenerate.
     [[nodiscard]] std::optional<std::array<double, 3>> barycentric(const Point2& p) const;
+    // The same weights, from a doubled signed area the caller already has. The
+    // one-argument form is this one behind isDegenerate(), which costs three
+    // hypots and an area - both loop invariants when many points are weighted
+    // against one triangle, as the surface overlay in terrain/volume.cpp does.
+    // Meaningless when `twiceArea` is zero; ask isDegenerate() once, outside
+    // the loop.
+    [[nodiscard]] std::array<double, 3> barycentric(const Point2& p, double twiceArea) const;
     // nullopt when degenerate.
     [[nodiscard]] std::optional<Circle2> circumcircle() const;
 

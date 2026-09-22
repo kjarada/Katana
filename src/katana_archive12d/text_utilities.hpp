@@ -3,6 +3,8 @@
 // Small text helpers shared by the reader, the writer and the domain mapping.
 // Internal to the module.
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,6 +15,43 @@ namespace katana::archive12d::detail {
 [[nodiscard]] std::string lowered(std::string_view text);
 [[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b);
 [[nodiscard]] std::string_view trimmed(std::string_view text);
+
+// Folds a token to lower case WITHOUT allocating, for the common case where
+// the folded text is compared and then thrown away. The reader asks this of
+// every keyword it meets: 2.4 million times in a 63 MB archive, and half a
+// million of those tokens are longer than a std::string holds internally, so
+// `lowered` pays a heap allocation for each.
+//
+// The view returned is valid until the NEXT call on the same buffer. A
+// function needing two folded tokens at once therefore needs two buffers, and
+// the buffer belongs on the stack of the function that reads it rather than
+// to the reader, so that a nested block cannot overwrite an enclosing one's.
+class CaseBuffer {
+  public:
+    [[nodiscard]] std::string_view lower(std::string_view text);
+
+  private:
+    // The longest keyword in the format is `segment_attribute_data`, 22
+    // characters. 64 covers that with room for whatever a file names that
+    // this does not know; anything longer still folds, through `spill_`.
+    std::array<char, 64> inline_{};
+    std::string spill_;
+};
+
+// Hash and compare text the way the 12da format does (manual 1.1: case is
+// stored but not compared), so that an unordered container can be asked with
+// the token as it was written and no folded copy of it.
+struct CaseFoldedHash {
+    using is_transparent = void;
+    [[nodiscard]] std::size_t operator()(std::string_view text) const noexcept;
+};
+struct CaseFoldedEqual {
+    using is_transparent = void;
+    [[nodiscard]] bool operator()(std::string_view a, std::string_view b) const
+    {
+        return equalsIgnoringCase(a, b);
+    }
+};
 
 // Decimal integers only, with an optional sign. nullopt for anything else -
 // including a real, which must not be silently truncated into an index.

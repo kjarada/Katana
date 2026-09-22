@@ -131,6 +131,11 @@ katana::core::Result<DecodedText> decodeText(std::string_view bytes)
     };
 
     DecodedText decoded;
+    // Set once, for every path below: each one either appends code points,
+    // which cannot produce ill-formed UTF-8, or validates the bytes and
+    // returns an error, so no DecodedText carrying the claim ever escapes
+    // with text that would fail the check.
+    decoded.validatedUtf8 = true;
     if (bytes.size() >= 2 && byteAt(0) == 0xFF && byteAt(1) == 0xFE) {
         auto text = fromUtf16(bytes.substr(2), true);
         if (!text) {

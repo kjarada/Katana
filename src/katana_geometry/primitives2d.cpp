@@ -382,7 +382,22 @@ Containment Rectangle2::classify(const Point2& p) const
 
 Point2 Rectangle2::closestPoint(const Point2& p) const
 {
-    return *toPolyline().closestPoint(p);
+    // The same walk toPolyline().closestPoint(p) performs - first corner, then
+    // the four edges in order, keeping a strictly nearer candidate - on the
+    // stack. Building the Polyline2 heap-allocated a four-point vector, and
+    // classify() calls this for every containment test.
+    const std::array<Point2, 4> c = corners();
+    Point2 best = c[0];
+    double bestDistance = best.distanceTo(p);
+    for (std::size_t i = 0; i < 4; ++i) {
+        const Point2 candidate = Segment2{c[i], c[(i + 1) % 4]}.closestPoint(p);
+        const double distance = candidate.distanceTo(p);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = candidate;
+        }
+    }
+    return best;
 }
 
 double Rectangle2::distanceTo(const Point2& p) const
@@ -392,9 +407,14 @@ double Rectangle2::distanceTo(const Point2& p) const
 
 // ---- Triangle2 ---------------------------------------------------------------
 
+double Triangle2::twiceSignedArea() const
+{
+    return (b - a).cross(c - a);
+}
+
 double Triangle2::signedArea() const
 {
-    return 0.5 * (b - a).cross(c - a);
+    return 0.5 * twiceSignedArea();
 }
 
 double Triangle2::area() const
@@ -447,15 +467,19 @@ Containment Triangle2::classify(const Point2& p) const
     return (hasNegative && hasPositive) ? Containment::Outside : Containment::Inside;
 }
 
+std::array<double, 3> Triangle2::barycentric(const Point2& p, double twiceArea) const
+{
+    const double wb = (p - a).cross(c - a) / twiceArea;
+    const double wc = (b - a).cross(p - a) / twiceArea;
+    return std::array<double, 3>{1.0 - wb - wc, wb, wc};
+}
+
 std::optional<std::array<double, 3>> Triangle2::barycentric(const Point2& p) const
 {
     if (isDegenerate()) {
         return std::nullopt;
     }
-    const double twiceArea = (b - a).cross(c - a);
-    const double wb = (p - a).cross(c - a) / twiceArea;
-    const double wc = (b - a).cross(p - a) / twiceArea;
-    return std::array<double, 3>{1.0 - wb - wc, wb, wc};
+    return barycentric(p, twiceSignedArea());
 }
 
 std::optional<Circle2> Triangle2::circumcircle() const

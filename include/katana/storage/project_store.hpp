@@ -86,6 +86,21 @@ struct ProjectContents {
 [[nodiscard]] katana::core::Status applyToModel(const ProjectContents& contents,
                                                 katana::entity::Model& model);
 
+// The same, CONSUMING the contents. Opening a project loads a ProjectContents,
+// applies it and throws it away, and the copy in between was 22.6% of every
+// heap allocation a 50,000-entity open made - an Entity carries two std::maps
+// and a geometry variant holding vectors, and each one was duplicated into the
+// model and destroyed moments later.
+//
+// `contents` is moved-from on return, on success AND on failure: the vectors
+// keep their size, but every element in them has been emptied into the model,
+// so the contents must not be read or applied a second time. `model` is still
+// untouched when this fails, so a failed open leaves the caller's drawing as it
+// was - but take anything you still need out of the contents (the metadata)
+// BEFORE calling this.
+[[nodiscard]] katana::core::Status applyToModel(ProjectContents&& contents,
+                                                katana::entity::Model& model);
+
 struct RecoveryReport {
     bool restored = false;                     // false: project.db was already sound
     std::filesystem::path restoredFrom{};      // backup that was used

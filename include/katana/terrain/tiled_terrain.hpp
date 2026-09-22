@@ -20,9 +20,11 @@
 // stay uncertified: there the tile answer is a valid interpolation of the nearby
 // points, but may differ from a monolithic TIN and from the neighbouring tile.
 //
-// Tiles are built on request. computeTile() is const, touches no shared state
-// and can therefore run for different tiles at the same time once Katana gets
-// its job system (Phase 19); this class starts no threads itself.
+// Tiles are built on request. computeTile() is const and touches no shared
+// state, so different tiles can be built at the same time: buildAll() does
+// exactly that through core::TaskPool (Phase 19). Nothing else here starts a
+// thread, and buildAll()'s answer - the surfaces and the Status - does not
+// depend on the thread count.
 //
 // Not supported yet: breaklines, boundaries and holes (create() fails with
 // Unsupported rather than building a surface that ignores them), and

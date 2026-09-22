@@ -41,6 +41,13 @@ struct DecodedText {
     // mark, or the Windows-1252 fallback. Unmarked UTF-8 is not flagged -
     // UTF-8 is self-checking, so bytes that validate as it are it.
     bool guessed = false;
+    // True when `text` is KNOWN to be well-formed UTF-8, which decodeText
+    // establishes on every path: it either builds the text from code points,
+    // which cannot come out ill-formed, or checks the bytes and fails. A
+    // caller holding one of these can skip its own check, which on a 58 MB
+    // archive is a second pass over the whole file. Default false so that a
+    // DecodedText assembled by hand is still checked.
+    bool validatedUtf8 = false;
 };
 
 // Fails with ParseFailure for UTF-16 that is not well formed: an odd number of
