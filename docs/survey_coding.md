@@ -16,11 +16,12 @@ Three files do that, and they are useless apart:
 | a **linestyle library** (`.4d`) | what each linestyle is drawn with |
 | a **symbol library** (`.4d`) | what each symbol is drawn with |
 
-The work was built against a real Transport for NSW customisation prepared by
-Extra Dimension Solutions - 728 mapfile rules, 322 linestyles, 474 symbols -
-which is in `docs/12d Refrence Files`. **It carries its author's licence
-notice.** Every test that uses it skips when it is absent, so the suite stays
-green in a checkout without it.
+The work was built against a real production customisation from a road
+authority - 728 mapfile rules, 322 linestyles, 474 symbols, and a second
+mapfile of 900 more rules. **It is third-party material under its own licence
+and is NOT part of this repository.** Drop it in `docs/12d Refrence Files` to
+use it; every test that touches it skips when it is absent, so the suite
+stays green without it, and nothing in the source names the files.
 
 ## A symbol is a linestyle
 
@@ -40,7 +41,7 @@ line are one thing".
 
 ```
 <kind> "NAME" {                 kind = paperstyle | worldstyle | twoptstyle
-  group "TfNSW Survey/WATR"     a folder path, the tree a browser shows
+  group "Survey/WATR"           a folder path, the tree a browser shows
   mode vertex                   a symbol: strokes go at each vertex
   length 2.5                    the period of the pattern along a line
   factor 5                      a scale on every coordinate
@@ -91,7 +92,7 @@ plainly unstyled.
 is how 12d works - the libraries are a site-wide customisation shared by every
 project, named by a project rather than copied into it. The alternative, a
 table in the Model beside Layer and Linetype, was rejected for two reasons:
-the Transport for NSW libraries alone are 792 definitions and 35,000 strokes,
+one production customisation alone is 792 definitions and 35,000 strokes,
 which would be written into every project file that used one of them; and two
 projects would then be able to disagree about what "WATR Main" looks like.
 
@@ -105,7 +106,7 @@ named things, rather than a new one.
 case-sensitive, and the library is one of them.
 
 That difference is measured rather than overlooked. Of the **372 references**
-the Transport for NSW mapfile makes into the two libraries, every single one
+the reference mapfile makes into its two libraries, every single one
 matches exactly and not one needs case folding. Making the table
 case-insensitive would have meant either a second container or a change to
 `NamedTable` that the evidence did not ask for. A name that does not resolve
@@ -120,8 +121,8 @@ uses none of Katana's code:
 
 | | definitions | commands |
 |---|---|---|
-| `user_linestyl_TfNSWv15.4d` | 322 blocks (238 paperstyle, 47 twoptstyle, 37 worldstyle), 321 kept - "BDYS Parish" is defined twice | 10,969 `move`, 10,770 `draw` |
-| `user_symbols_TfNSWv15.4d` | 474 blocks (473 worldstyle, 1 twoptstyle) | |
+| the linestyle library | 322 blocks (238 paperstyle, 47 twoptstyle, 37 worldstyle), 321 kept - one name is defined twice | 10,969 `move`, 10,770 `draw` |
+| the symbol library | 474 blocks (473 worldstyle, 1 twoptstyle) | 6,076 `move`, 6,547 `draw` |
 | both, loaded as one customisation | 792 definitions, 157 of them symbols, in 71 groups | |
 
 **No warnings.** Every keyword in 1.2 MB of production data is one the reader
@@ -210,7 +211,7 @@ slipping in.
 
 | | rules | warnings |
 |---|---|---|
-| `TfNSW_Survey_Detail.mapfile` | 725 over 465 distinct keys | none |
+| the detail mapfile | 725 over 465 distinct keys | none |
 | `names.4d` | 899 | one, and it is right: an `<item>` holding only a `<group>`, which names no code and so could never apply |
 
 An unknown section is named with how many rules went unread; an unknown field
@@ -257,7 +258,7 @@ and what comes back is still a drawing.
 ## A symbol name stopped being a closed set
 
 `Style::symbol` used to be validated against sixteen built-in names. The
-Transport for NSW library alone names 473 symbols and **not one** of them is
+reference symbol library alone names 473 symbols and **not one** of them is
 among the sixteen, so that check made the mapfile unusable: a style saying
 `CULT Bollard` was refused by the model.
 
@@ -279,11 +280,10 @@ is the single place a name is resolved.
 
 `archive12d::readCustomisation` takes a list of files and works out what each
 one is BY LOOKING INSIDE IT. That is not fastidiousness: of the four files
-this was built against, `TfNSW_Survey_Detail.mapfile` and `names.4d` are both
-mapfiles while `user_linestyl_TfNSWv15.4d` and `user_symbols_TfNSWv15.4d` are
-both style libraries, so `.4d` is two different formats in one folder and a
-loader that went by the extension would read half the customisation as the
-wrong thing.
+this was built against, two are mapfiles and two are style libraries - and
+THREE of the four end in `.4d`, so that extension is two different formats in
+one folder and a loader that went by the name would read half the
+customisation as the wrong thing.
 
 It lives beside the readers rather than in a front end because both front ends
 need it, and it needs no third-party library, so it costs `archive12d` nothing
@@ -292,10 +292,10 @@ of the property that lets it build with `-DKATANA_BUILD_IO=OFF`.
 Loading the real customisation, from the command line:
 
 ```
-katana_cli -c 'CUSTOMISE "docs/12d Refrence Files/user_linestyl_TfNSWv15.4d" ...'
-  user_linestyl_TfNSWv15.4d: style library, 322 definitions (1 replacing one already loaded)
-  user_symbols_TfNSWv15.4d: style library, 474 definitions (3 replacing one already loaded)
-  TfNSW_Survey_Detail.mapfile: mapfile, 725 rules
+katana_cli -c 'CUSTOMISE "docs/12d Refrence Files/<linestyles>.4d" ...'
+  <linestyles>.4d: style library, 322 definitions (1 replacing one already loaded)
+  <symbols>.4d:    style library, 474 definitions (3 replacing one already loaded)
+  <detail>.mapfile: mapfile, 725 rules
   names.4d: mapfile, 899 rules
   warning: names.4d: an <item> of <map_data> has no <key> and was skipped
   5 names the mapfile asks for that no loaded library defines: "0", "1", ...
@@ -319,6 +319,61 @@ built-in shapes after:
   the fence;
 - a `colour` command inside a definition changes the pen for the strokes that
   follow it, and `view_colour` means the entity's own colour.
+
+## A 12d linestyle IS the line
+
+Two bugs came out of looking at a real customisation on screen, and both made
+every linestyle come out as a plain continuous line. They are worth writing
+down because the same mistake is easy to make twice.
+
+**The definition replaces the line; it does not decorate it.** Look at what a
+definition actually contains:
+
+```
+paperstyle "BDGE Abutment Bottom" {
+  move 0 0
+  draw 3 0     <- the line itself, for three units
+  move 5 0     <- and then a two-unit GAP
+}
+```
+
+That is a dash pattern written as strokes. A fence style carries the fence as
+well as its ticks. So drawing the plain line underneath fills in every gap,
+and everything looks continuous - which is exactly what it did. The plain line
+is now drawn only when no definition applies, or when the entity carries a
+hatch (which is painted inside the same call, and which a 12da never brings).
+
+**A trailing `move` is the gap, and counts towards the period.** The period of
+a pattern, when the file gives no `length`, is how far the PEN travels - not
+the span of what was drawn. Measuring only the drawn part read
+`BDGE Abutment Bottom` as a period of 3 rather than 5, so each dash butted
+against the next and the pattern was solid even after the first fix. The pen
+extent now includes bare moves, and `StyleDrawing.ATrailingMoveIsTheGap...`
+is the test.
+
+**A millimetre is not a pixel.** `paperScale` treated one plot millimetre as
+one pixel, making every paper linestyle about four times too small: a fence
+style's ticks came out a pixel tall and vanished into the line. It is now a
+millimetre of screen, from the widget's own DPI.
+
+## The import has to keep the real names
+
+The readers, the drawing and the menu can all be right and nothing appears,
+because the 12da import was never connected to them:
+
+| What the import did | Why nothing drew |
+|---|---|
+| set `Style::name` to the 12d linestyle name but left `Style::linetype` as `"continuous"` | the name reached nowhere a renderer looks |
+| stored `builtInSymbolFor(name)` instead of the name - "SEWR Manhole Cover" became "manhole" | the 473 symbols in a loaded library could never be matched |
+| put a survey code nowhere called "code" - a 12da carries it as the string NAME | `CODE` found nothing to apply |
+
+All three are fixed: the import keeps the REAL 12d names, the guess at a
+built-in shape happens at draw time only when nothing defines the name, and
+the code property is found rather than assumed.
+
+Measured before assuming this would help: of 82 distinct linestyle names in
+one real archive, 79 are in the reference library; 214 of 217 in another. The
+misses are `0`, `1` and the empty name - 12d's own plain lines.
 
 ## A test that passed while doing nothing
 
@@ -371,7 +426,7 @@ From the command line, the whole chain:
 
 ```
 katana_cli
-  -c 'CUSTOMISE "…/user_linestyl_TfNSWv15.4d" "…/user_symbols_TfNSWv15.4d" "…/TfNSW_Survey_Detail.mapfile"'
+  -c 'CUSTOMISE "…/<linestyles>.4d" "…/<symbols>.4d" "…/<detail>.mapfile"'
   -c 'POINT 0,0' -c 'SELECT ALL' -c 'PROP SET code WM01 text' -c 'CODE' -c 'LIST'
 
   2 entities carry a "code", 2 of them codes the mapfile has a rule for

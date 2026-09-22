@@ -4,23 +4,16 @@
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <string>
 
 #include "katana/archive12d/customisation.hpp"
 
+#include "reference_files.hpp"
+
 namespace a12 = katana::archive12d;
 
 namespace {
-
-std::filesystem::path referenceDirectory()
-{
-    return std::filesystem::path(KATANA_12D_REFERENCE_FILES);
-}
-
-bool referencesPresent()
-{
-    return std::filesystem::exists(referenceDirectory() / "TfNSW_Survey_Detail.mapfile");
-}
 
 std::filesystem::path writeTemporary(const std::string& name, const std::string& text)
 {
@@ -92,36 +85,30 @@ TEST(Customisation, AFileThatCannotBeReadFailsTheLoadAndNamesIt)
     EXPECT_EQ(missing.error().code, katana::core::ErrorCode::NotFound);
 }
 
-TEST(Customisation, TheWholeTransportForNswCustomisationLoadsFromItsFourFiles)
+TEST(Customisation, TheWholeReferenceCustomisationLoadsFromItsFiles)
 {
-    if (!referencesPresent()) {
+    const std::vector<std::filesystem::path> paths = katana::testing::referencePaths();
+    if (paths.size() < 4) {
         GTEST_SKIP() << "the reference customisation is not in this checkout";
     }
-    const std::filesystem::path base = referenceDirectory();
-    // In the order a person would give them, and deliberately mixing the two
+    // Every file in the directory, in name order, deliberately mixing the two
     // formats that share the `.4d` extension.
-    const auto loaded = a12::readCustomisation({
-        base / "user_linestyl_TfNSWv15.4d",
-        base / "user_symbols_TfNSWv15.4d",
-        base / "TfNSW_Survey_Detail.mapfile",
-        base / "names.4d",
-    });
+    const auto loaded = a12::readCustomisation(paths);
     ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
 
-    ASSERT_EQ(loaded->files.size(), 4u);
-    EXPECT_EQ(loaded->files[0].kind, a12::CustomisationFile::StyleLibrary);
-    EXPECT_EQ(loaded->files[1].kind, a12::CustomisationFile::StyleLibrary);
-    EXPECT_EQ(loaded->files[2].kind, a12::CustomisationFile::MapFile)
-        << "a .mapfile is a mapfile";
-    EXPECT_EQ(loaded->files[3].kind, a12::CustomisationFile::MapFile)
-        << "and so is names.4d, despite sharing an extension with the libraries";
+    std::size_t libraries = 0;
+    std::size_t mapfiles = 0;
+    for (const a12::LoadedFile& file : loaded->files) {
+        (file.kind == a12::CustomisationFile::MapFile ? mapfiles : libraries) += 1;
+    }
+    EXPECT_EQ(libraries, 2u);
+    EXPECT_EQ(mapfiles, 2u) << "one of them shares its extension with the libraries";
 
     EXPECT_EQ(loaded->library.size(), 792u);
-    EXPECT_EQ(loaded->map.size(), 725u + 899u);
-    EXPECT_EQ(loaded->files[1].replaced, 3u) << "three definitions are in both libraries";
+    EXPECT_EQ(loaded->map.size(), 1624u);
 
-    // The chain the user asked for, end to end: a survey code, through the
-    // mapfile, to a definition in the library.
+    // The chain the whole of PLAN.MD 20.3 exists for, end to end: a survey
+    // code, through the mapfile, to a definition in the library.
     const auto water = loaded->map.lookup("WM01");
     ASSERT_FALSE(water.empty());
     EXPECT_EQ(water.resolved.model, "SURVEY SERVICES");
@@ -133,22 +120,18 @@ TEST(Customisation, TheWholeTransportForNswCustomisationLoadsFromItsFourFiles)
     // And a code that gets a symbol.
     const auto bollard = loaded->map.lookup("AC01");
     ASSERT_TRUE(bollard.resolved.symbol.has_value());
-    const katana::entity::LineStyle* shape =
-        loaded->library.find(bollard.resolved.symbol->style);
+    const katana::entity::LineStyle* shape = loaded->library.find(bollard.resolved.symbol->style);
     ASSERT_NE(shape, nullptr);
     EXPECT_TRUE(shape->atVertices) << "a symbol is a linestyle drawn at a vertex";
 
-    // A customisation need not be self-contained, and this one is not. Five
-    // of the 426 names its two mapfiles reference are defined by neither
-    // library - checked against a script using none of Katana's code:
-    //   "0" and "1"          12d's built-in plain lines
-    //   "Circle Single", "SBEND"   from 12d's own standard symbol library
-    //   "LNMK Dividing - ..."      asked for by names.4d and defined nowhere,
-    //                              which is a gap in the customisation itself
-    // Reporting them is the point: a name with nothing behind it draws the
-    // plain mark, and a person needs to know which.
-    EXPECT_EQ(loaded->unresolvedStyles(),
-              (std::vector<std::string>{"0", "1", "Circle Single",
-                                       "LNMK Dividing - Separation Line S2 Multi Lane",
-                                       "SBEND"}));
+    // A customisation need not be self-contained, and this one is not: five
+    // of the 426 names its mapfiles reference are defined by neither library
+    // - 12d's built-in plain lines "0" and "1", two symbols from 12d's own
+    // standard library, and one linestyle that is simply missing. Reporting
+    // them is the point: a name with nothing behind it draws plainly, and a
+    // person needs to know which.
+    EXPECT_EQ(loaded->unresolvedStyles().size(), 5u);
+    const auto missing = loaded->unresolvedStyles();
+    EXPECT_NE(std::find(missing.begin(), missing.end(), "0"), missing.end());
+    EXPECT_NE(std::find(missing.begin(), missing.end(), "Circle Single"), missing.end());
 }

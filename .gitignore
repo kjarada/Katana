@@ -11,3 +11,9 @@ third_party/_cache/
 CMakeUserPresets.json
 aqtinstall.log
 legacy-scaffold-*.zip
+
+# A 12d customisation - linestyle and symbol libraries, mapfiles - is
+# third-party material under its own licence. Drop one here to use it; it is
+# deliberately not part of this repository, and every test that touches it
+# skips when it is absent (tests/archive12d/reference_files.hpp).
+docs/12d Refrence Files/
