@@ -1198,6 +1198,79 @@ recorded here as struck rather than silently replaced, because CLAUDE.md
 section 3 forbids trusting a figure without a source and this plan was briefly
 guilty of exactly that.
 
+## The optimisation pass of 2026-09-23 — DELIVERED
+
+Five hot paths, analysed and changed at once by parallel agents on disjoint
+directories (`CLAUDE.md` §5.3), then re-measured centrally. Full tables, method
+and rejected findings in `docs/performance.md`; the reasoning lives beside the
+code it governs in `docs/terrain.md`, `docs/geometry.md`, `docs/storage.md` and
+`docs/interop.md`. Release, interleaved A/B on an idle machine:
+
+* **`combineSurfaces` was 30 984 ms, now 248 ms (125x).** A 12d super tin of a
+  diagonal corridor over a 200 000-point base took **thirty-one seconds**. Every
+  triangle of a lower member scanned every vertex of every higher member; the
+  vertices now go into a bucket grid built once per member. The output is
+  identical - 402 719 triangles either way - and a test asserts that equality
+  rather than inferring it from the timing.
+* **`TiledTerrain::buildAll` 184 ms to 34 ms (5.3x)** and **`elevationsAt` 17.9
+  ms to 2.5 ms (5.9x)**, both over `TaskPool`, both asserted bit-identical to
+  the serial path. `buildAll` now builds every tile even when one fails and
+  returns the lowest-index failure; that is a behaviour change and it is stated
+  in the header.
+* **`isSimple` 3.19 ms to 0.80 ms at 512 vertices (3.9x)**, from a bounding-box
+  reject whose margin is *derived* from `intersect()`'s own acceptance rule
+  rather than chosen. **`Rectangle2::closestPoint` 2.8x**, from a stack array
+  instead of a heap vector of four corners.
+* **Opening a 50 000-entity project: 184 ms to 170 ms (-7.6%)**, and creating
+  27 000 entities **2.0x** faster on 61% fewer allocations. Three separate
+  copies of every entity were removed - `ChangeSetCommand` built its change set
+  twice, kept an image of every created entity that `remove()` already returns,
+  and `applyToModel` duplicated the whole project on its way into the model.
+* **Reading a 62.8 MB 12da archive: ~1.96 s to ~0.42 s (4.7x)**, by not building
+  strings to throw away. Proved byte-identical on 21 archives including nine
+  malformed ones. **This is the one figure here that was not re-measured
+  centrally** - the archives are synthetic and not in the repository - and it is
+  recorded as the implementing agent's measurement.
+
+**A benchmark that lied, recorded because it is the useful part.** The first
+`BM_CombineSurfaces` used an axis-aligned band and showed *no difference at
+all*. `overlaps()` rejects by bounding box, then returns on the first covered
+sample point, and only then scans vertices - so an axis-aligned band never
+reaches the code that was changed. A diagonal band has a bounding box covering
+the whole site while covering only a strip, which is what a road corridor or a
+watercourse actually looks like. Both shapes are kept. The agents' own report
+claimed 5.9x for this work from a harness with the same flaw; the real figure
+is twenty times larger.
+
+**OUTSTANDING.** Five of these optimisations had **no benchmark in the
+repository** when they were made - they were measured in scratch harnesses that
+are now gone, which `CLAUDE.md` §4 exists to prevent. They have benchmarks now
+(`BM_CombineSurfaces`, `BM_ElevationsAt`, `BM_TiledTerrainBuildAll`,
+`BM_IsSimple`, `BM_ClipPolygon`, `BM_RectangleClosestPoint`). Still missing: a
+benchmark for a 12da read, and one for scene building and the per-frame draw
+path, which is why the viewport work of 2026-09-22 quotes no figure.
+`Importer::tallyFor` (`domain_import.cpp`) is a linear scan per element, the
+third instance of that shape, worth about 1% of an import and left alone.
+
+## The language standard is a build variable
+
+The project builds as **C++26** (`KATANA_CXX_STANDARD`, default 26; GCC 16.2
+accepts `-std=c++26`, `__cplusplus 202400L`, and the whole suite passes on it).
+A C++23 build is one cache variable away, and exists so that a claim about the
+standard can be **measured** rather than argued about:
+
+```sh
+cmake -S . -B build/rel23 -G Ninja -DCMAKE_BUILD_TYPE=Release -DKATANA_CXX_STANDARD=23
+```
+
+**No figure is claimed for C++23 versus C++26.** Two attempts to produce one
+were unsound - the first was Windows clock quantisation reported as a result,
+the second compared two sequential runs eight minutes apart on a laptop and
+would have attributed thermal drift to the language. The A/A control that would
+settle it was not run. `docs/performance.md` records both attempts so that the
+next person starts from the control rather than from the A/B.
+
+
 Latency, throughput, memory bandwidth and cache behaviour are still not
 benchmarked as section 32 requires.
 

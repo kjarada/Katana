@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <optional>
 #include <vector>
 
+#include "katana/core/task_pool.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "terrain_test_support.hpp"
 
@@ -359,4 +362,64 @@ TEST(TinSurfaceLargeCoordinates, PlaneAtUtmMagnitude)
     ASSERT_TRUE(slopeAspect.has_value());
     // Slope from coordinates carrying 4.7e-10 m of rounding over edges of ~1 m.
     EXPECT_NEAR(slopeAspect->slope, std::sqrt(0.13), 1e-7);
+}
+
+// ---- elevationsAt runs across the cores and must not notice ----------------
+
+TEST(TinSurfaceBatchQuery, ElevationsAtGivesExactlyWhatElevationAtGivesOneAtATime)
+{
+    Random random(4242);
+    const Plane plane{0.25, -0.125, 40.0}; // exact in binary, so a mismatch is a real one
+    const TinSurface surface = buildFromPoints(planePoints(plane, 100.0, 4000, random));
+    ASSERT_FALSE(surface.empty());
+
+    // Well past the 256-position chunk, so the work is genuinely shared out,
+    // and deliberately half off the surface so both answers - a level and no
+    // level at all - are carried back from the worker threads.
+    std::vector<Point2> probes;
+    probes.reserve(5000);
+    for (int i = 0; i < 5000; ++i) {
+        probes.emplace_back(random.real(-50.0, 150.0), random.real(-50.0, 150.0));
+    }
+
+    const std::vector<std::optional<double>> batch = surface.elevationsAt(probes);
+    ASSERT_EQ(batch.size(), probes.size());
+
+    std::size_t onSurface = 0;
+    std::size_t offSurface = 0;
+    for (std::size_t i = 0; i < probes.size(); ++i) {
+        const std::optional<double> one = surface.elevationAt(probes[i]);
+        ASSERT_EQ(batch[i].has_value(), one.has_value()) << "probe " << i;
+        if (one.has_value()) {
+            EXPECT_EQ(*batch[i], *one) << "probe " << i; // identical bits, not merely close
+            ++onSurface;
+        } else {
+            ++offSurface;
+        }
+    }
+    EXPECT_GT(onSurface, 1000u) << "the probes must actually land on the surface";
+    EXPECT_GT(offSurface, 1000u) << "and off it";
+}
+
+TEST(TinSurfaceBatchQuery, ElevationsAtGivesTheSameAnswerOnOneThreadAsOnAllOfThem)
+{
+    Random random(99);
+    const Plane plane{-0.5, 0.25, 8.0};
+    const TinSurface surface = buildFromPoints(planePoints(plane, 64.0, 3000, random));
+    ASSERT_FALSE(surface.empty());
+
+    std::vector<Point2> probes;
+    probes.reserve(3000);
+    for (int i = 0; i < 3000; ++i) {
+        probes.emplace_back(random.real(-8.0, 72.0), random.real(-8.0, 72.0));
+    }
+
+    const std::vector<std::optional<double>> many = surface.elevationsAt(probes);
+    // A parallelRanges() issued while the pool is already busy runs its whole
+    // range on the calling thread (task_pool.hpp), so this is the same call
+    // made with a concurrency of one. Rule 7 says it must be the same bytes.
+    std::vector<std::optional<double>> one;
+    katana::core::TaskPool::shared().parallelRanges(
+        0, 1, 1, [&](std::size_t, std::size_t) { one = surface.elevationsAt(probes); });
+    EXPECT_EQ(one, many);
 }

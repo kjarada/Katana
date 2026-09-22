@@ -62,8 +62,21 @@ bool isSimple(const Polyline2& polygon)
         if (first.isDegenerate()) {
             return false;
         }
+        // intersect() accepts a hit only when the crossing point is within
+        // kGeometric of BOTH segments, and the collinear branch only when one
+        // lies within kGeometric of the other's carrier and their parameter
+        // ranges meet to within kGeometric along it. Either way a pair it
+        // reports is at most 2 * kGeometric apart, so boxes further apart than
+        // that cannot intersect - and rejecting them costs two comparisons
+        // instead of the eight-or-so hypots intersect() spends saying no. The
+        // margin is 4 * kGeometric to leave the bound room it does not need.
+        const Box2 firstBox = first.boundingBox().inflated(4.0 * tol::kGeometric);
         for (std::size_t j = i + 1; j < n; ++j) {
-            const IntersectionResult hit = intersect(first, polygon.segment(j));
+            const Segment2 second = polygon.segment(j);
+            if (!firstBox.intersects(second.boundingBox())) {
+                continue;
+            }
+            const IntersectionResult hit = intersect(first, second);
             if (!hit.exists()) {
                 continue;
             }
@@ -205,13 +218,18 @@ Result<Polyline2> clipPolygon(const Polyline2& subject, const Polyline2& clipReg
     }
 
     std::vector<Point2> output = subject.vertices;
+    // Two buffers swapped per edge rather than one moved from: a move leaves
+    // `output` with no capacity, so every clip edge grew its result from
+    // nothing again. Swapping hands back the buffer the previous edge read
+    // from, and after the first edge neither allocates.
+    std::vector<Point2> input;
     const std::size_t clipCount = clipCcw.vertices.size();
     for (std::size_t edge = 0; edge < clipCount && !output.empty(); ++edge) {
         const Point2& edgeStart = clipCcw.vertices[edge];
         const Vec2 edgeDirection = clipCcw.vertices[(edge + 1) % clipCount] - edgeStart;
         const auto side = [&](const Point2& p) { return edgeDirection.cross(p - edgeStart); };
 
-        const std::vector<Point2> input = std::move(output);
+        input.swap(output);
         output.clear();
         for (std::size_t i = 0; i < input.size(); ++i) {
             const Point2& current = input[i];

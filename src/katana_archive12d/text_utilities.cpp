@@ -21,6 +21,32 @@ std::string lowered(std::string_view text)
     return out;
 }
 
+std::string_view CaseBuffer::lower(std::string_view text)
+{
+    char* out = inline_.data();
+    if (text.size() > inline_.size()) {
+        spill_.resize(text.size());
+        out = spill_.data();
+    }
+    std::transform(text.begin(), text.end(), out, [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return {out, text.size()};
+}
+
+std::size_t CaseFoldedHash::operator()(std::string_view text) const noexcept
+{
+    // FNV-1a over the folded bytes. Source: Fowler/Noll/Vo, the 64-bit offset
+    // basis 14695981039346656037 and prime 1099511628211. Chosen because it
+    // needs no buffer to hash text this does not own a folded copy of.
+    std::size_t hash = 14695981039346656037ULL;
+    for (const char ch : text) {
+        hash ^= static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(ch)));
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
 bool equalsIgnoringCase(std::string_view a, std::string_view b)
 {
     return a.size() == b.size() &&

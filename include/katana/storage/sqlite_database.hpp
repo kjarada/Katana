@@ -52,6 +52,20 @@ class SqliteStatement {
     // different failures.
     [[nodiscard]] std::vector<std::byte> columnBlob(int column) const;
 
+    // BORROWED views of the same two columns, for a value that is parsed and
+    // discarded within the row: they point straight at SQLite's own row buffer
+    // and copy nothing, which is what makes loading 50k entities not allocate a
+    // string and a vector per row.
+    //
+    // LIFETIME. SQLite owns the bytes. A view is invalidated by the next
+    // step(), reset() or run() on the statement, by destroying it, and by
+    // reading the SAME column through a different accessor (SQLite converts the
+    // value in place). So: take the view, consume it, move on - never store one
+    // past the row it came from, and take columnText()/columnBlob() when the
+    // value has to outlive the row.
+    [[nodiscard]] std::string_view columnTextView(int column) const;
+    [[nodiscard]] std::span<const std::byte> columnBlobSpan(int column) const;
+
   private:
     friend class SqliteDatabase;
     struct Impl;

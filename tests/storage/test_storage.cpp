@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #include "katana/storage/project_store.hpp"
 #include "katana/storage/sqlite_database.hpp"
@@ -1383,3 +1384,102 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeProfilesKeepsItsAlignmentsUnprof
     EXPECT_FALSE(road->vertical.has_value());
 }
 
+// ---- the consuming overload is the same function ---------------------------------------------
+
+// applyToModel has two overloads: one that copies the contents and one that
+// consumes them, which is what Document::open uses so that opening a drawing
+// does not duplicate every entity on its way into the model. They must be the
+// SAME function, so this builds a project with something in EVERY table
+// applyToModel fills - including the four whose built-in names take the
+// update() path that cannot move - applies one copy of it each way, and
+// compares the two models value for value.
+//
+// A weaker test would compare only the entity ids: this compares whole values,
+// because the failure a move introduces is a field left behind, not a record.
+TEST_F(ProjectStoreRoundTrip, ConsumingTheContentsBuildsExactlyTheModelCopyingThemDoes)
+{
+    Model rich = sampleModel();
+
+    katana::entity::Linetype dashed;
+    dashed.name = "dashed";
+    dashed.description = "Dashed  __  __  __";
+    dashed.pattern = {katana::entity::LinetypeElement{0.5}, katana::entity::LinetypeElement{-0.25},
+                      katana::entity::LinetypeElement{0.0}, katana::entity::LinetypeElement{-0.25}};
+    ASSERT_TRUE(rich.linetypes.add(dashed).ok());
+
+    katana::entity::DimensionStyle metric;
+    metric.name = "metric";
+    metric.suffix = " m";
+    metric.decimals = 2;
+    ASSERT_TRUE(rich.dimensionStyles.add(metric).ok());
+
+    katana::entity::HatchPattern brick;
+    brick.name = "brick";
+    brick.description = "Running bond";
+    brick.families.push_back(katana::entity::HatchLineFamily{0.0, 0.25, 0.0});
+    brick.families.push_back(katana::entity::HatchLineFamily{1.25, 0.5, 0.125});
+    ASSERT_TRUE(rich.hatchPatterns.add(brick).ok());
+
+    ASSERT_TRUE(rich.alignments.add(mainRoadWithProfile()).ok());
+
+    // captureModel carries the built-in names too - layer "0", "continuous",
+    // "none" and the default dimension style - so the update() path, the one
+    // that cannot move, is exercised as well.
+    ProjectContents contents = captureModel(rich, {});
+    ASSERT_FALSE(contents.entities.empty());
+    ASSERT_FALSE(contents.alignments.empty());
+    ASSERT_FALSE(contents.propertyDefinitions.empty());
+    const ProjectContents duplicate = contents; // the identical input, kept whole
+
+    Model copied;
+    ASSERT_TRUE(applyToModel(duplicate, copied).ok());
+    Model moved;
+    ASSERT_TRUE(applyToModel(std::move(contents), moved).ok());
+
+    // Every table applyToModel fills. Each of these types has a defaulted
+    // operator==, so this compares all of their fields, not their names.
+    EXPECT_EQ(copied.layers.all(), moved.layers.all());
+    EXPECT_EQ(copied.styles.all(), moved.styles.all());
+    EXPECT_EQ(copied.linetypes.all(), moved.linetypes.all());
+    EXPECT_EQ(copied.dimensionStyles.all(), moved.dimensionStyles.all());
+    EXPECT_EQ(copied.hatchPatterns.all(), moved.hatchPatterns.all());
+    EXPECT_EQ(copied.alignments.all(), moved.alignments.all());
+    EXPECT_EQ(copied.properties.all(), moved.properties.all());
+
+    const auto ids = copied.entities.ids();
+    ASSERT_EQ(ids, moved.entities.ids());
+    ASSERT_FALSE(ids.empty());
+    for (const auto id : ids) {
+        const Entity* left = copied.entities.find(id);
+        const Entity* right = moved.entities.find(id);
+        ASSERT_NE(left, nullptr) << "entity " << id;
+        ASSERT_NE(right, nullptr) << "entity " << id;
+        EXPECT_EQ(*left, *right) << "entity " << id << " differs between the two overloads";
+    }
+    // The retired id in sampleModel() makes this more than "count + 1".
+    EXPECT_EQ(copied.entities.nextId(), moved.entities.nextId());
+}
+
+// The consuming overload leaves the caller's model untouched when it fails,
+// exactly as the copying one does - Document::open relies on that and only then
+// installs the metadata it took out beforehand. What it does NOT promise is the
+// state of the contents, which are moved-from by then.
+TEST_F(ProjectStoreRoundTrip, AFailedConsumingLoadAlsoLeavesTheCallersModelUntouched)
+{
+    Model existing = sampleModel();
+    const auto idsBefore = existing.entities.ids();
+    const auto layersBefore = existing.layers.all();
+    ASSERT_FALSE(idsBefore.empty());
+
+    ProjectContents contents;
+    contents.layers.push_back(Layer{std::string(katana::entity::kDefaultLayerName)});
+    contents.styles.push_back(Style{"Duplicate"});
+    contents.styles.push_back(Style{"Duplicate"});
+    contents.nextEntityId = 1;
+
+    const auto status = applyToModel(std::move(contents), existing);
+    ASSERT_FALSE(status.ok()) << "a duplicate style should be refused";
+
+    EXPECT_EQ(existing.entities.ids(), idsBefore);
+    EXPECT_EQ(existing.layers.all(), layersBefore);
+}

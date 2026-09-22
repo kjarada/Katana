@@ -3,6 +3,7 @@
 #include <map>
 #include <numbers>
 #include <set>
+#include <unordered_map>
 #include <utility>
 
 #include "katana/archive12d/domain.hpp"
@@ -80,19 +81,33 @@ void addProperty(PropertyMap& properties, std::string key, PropertyValue value)
         return;
     }
     // Attribute names need not be unique in 12d. A map needs them to be, and
-    // the second "Remarks" is not worth less than the first.
-    std::string unique = key;
-    for (int copy = 2; properties.contains(unique); ++copy) {
-        unique = key + " (" + std::to_string(copy) + ")";
+    // the second "Remarks" is not worth less than the first. try_emplace
+    // leaves both of its arguments untouched when the name is already taken,
+    // so the qualified name - and the search for a free one - is built only
+    // when there is a collision, which almost never happens.
+    if (properties.try_emplace(std::move(key), std::move(value)).second) {
+        return;
     }
-    properties.emplace(std::move(unique), std::move(value));
+    for (int copy = 2;; ++copy) {
+        if (properties.try_emplace(key + " (" + std::to_string(copy) + ")", std::move(value))
+                .second) {
+            return;
+        }
+    }
 }
 
 void flattenAttributes(const AttributeList& attributes, const std::string& prefix,
                        PropertyMap& properties)
 {
+    // One buffer for every name under this prefix: the concatenation below is
+    // done once per attribute of every element in the archive.
+    std::string key;
     for (const Attribute& attribute : attributes) {
-        const std::string key = prefix.empty() ? attribute.name : prefix + "/" + attribute.name;
+        key.assign(prefix);
+        if (!prefix.empty()) {
+            key += '/';
+        }
+        key += attribute.name;
         if (const auto* group = std::get_if<AttributeList>(&attribute.value)) {
             flattenAttributes(*group, key, properties);
         } else if (const auto* integer = std::get_if<std::int64_t>(&attribute.value)) {
@@ -177,6 +192,10 @@ class Importer {
 
     DomainImport run()
     {
+        // Most elements become one entity, and none becomes more than a
+        // handful, so the element count is the right order for the first
+        // allocation - and it is memory the archive itself already holds.
+        result_.entities.reserve(archive_.elements.size());
         for (const Element& element : archive_.elements) {
             const std::string keyword = elementKeyword(element);
             const std::size_t imported =
@@ -251,11 +270,12 @@ class Importer {
         if (linestyle.empty()) {
             return byLayer;
         }
-        auto known = std::find_if(result_.stylesNeeded.begin(), result_.stylesNeeded.end(),
-                                  [&](const katana::entity::Style& style) {
-                                      return style.name == linestyle;
-                                  });
-        if (known == result_.stylesNeeded.end()) {
+        // Found through an index, NOT by searching stylesNeeded: this is asked
+        // once for every entity, and the search it replaces was O(entities x
+        // styles). The vector's first-use order is the contract (domain.hpp);
+        // the index only says where in it each name landed.
+        auto at = styleIndex_.find(linestyle);
+        if (at == styleIndex_.end()) {
             katana::entity::Style style;
             style.name = linestyle;
             // The 12d LINESTYLE NAME, kept as the name to draw the line with.
@@ -266,20 +286,21 @@ class Importer {
             style.linetype = linestyle;
             style.description = "12d linestyle";
             result_.stylesNeeded.push_back(std::move(style));
-            known = std::prev(result_.stylesNeeded.end());
+            at = styleIndex_.emplace(linestyle, result_.stylesNeeded.size() - 1).first;
         }
-        if (symbolBlock != nullptr && known->symbol.empty()) {
+        katana::entity::Style& known = result_.stylesNeeded[at->second];
+        if (symbolBlock != nullptr && known.symbol.empty()) {
             // The REAL 12d symbol name, not one of the sixteen shapes Katana
             // draws without a library. This used to store the guess and throw
             // the name away, which meant a loaded symbol library could never
             // be matched against it - the symbols were there and nothing
             // could find them. The guess now happens when it is drawn, only
             // if nothing defines the name (entity::builtInSymbolFor).
-            known->symbol = linestyle;
-            known->symbolSize = std::max(0.0, symbolBlock->real("size").value_or(0.0));
-            known->description = "12d symbol";
+            known.symbol = linestyle;
+            known.symbolSize = std::max(0.0, symbolBlock->real("size").value_or(0.0));
+            known.description = "12d symbol";
         }
-        return *known;
+        return known;
     }
 
     [[nodiscard]] Entity makeEntity(const StringHeader& header, std::string_view keyword)
@@ -379,6 +400,9 @@ class Importer {
 
         std::vector<std::optional<double>> heights;
         Polyline2 polyline;
+        // Exactly one of each per chorded point, so the size is known.
+        heights.reserve(points.size());
+        polyline.vertices.reserve(points.size());
         polyline.closed = closed && points.size() > 2;
         for (const detail::PlanPoint& point : points) {
             polyline.vertices.push_back(plan(point.point.x, point.point.y));
@@ -1774,6 +1798,8 @@ class Importer {
     ImportOptions options_;
     DomainImport result_;
     std::map<std::string, std::string> layerOfModel_;
+    // Linestyle name -> its place in result_.stylesNeeded; see styleFor.
+    std::unordered_map<std::string, std::size_t> styleIndex_;
     std::set<std::string> alignmentNames_;
     std::set<std::string> noted_;
     detail::ChordReport chordReport_;

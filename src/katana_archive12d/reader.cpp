@@ -1,11 +1,14 @@
 #include "katana/archive12d/reader.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <limits>
 #include <system_error>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "katana/archive12d/text_encoding.hpp"
@@ -257,9 +260,9 @@ class Reader {
         }
         std::string colour = token.text();
         if (token.kind == TokenKind::Word) {
-            const std::string first = lowered(colour);
-            if ((first == "dark" || first == "light") && peek().kind == TokenKind::Word &&
-                !isKnownKeyword(lowered(peek().raw))) {
+            const bool qualifier = detail::equalsIgnoringCase(colour, "dark") ||
+                                   detail::equalsIgnoringCase(colour, "light");
+            if (qualifier && peek().kind == TokenKind::Word && !isKnownKeyword(peek().raw)) {
                 colour += ' ';
                 colour += next().text();
             }
@@ -349,7 +352,7 @@ class Reader {
     [[nodiscard]] std::string pathWith(std::string_view leaf) const
     {
         std::string path;
-        for (const std::string& part : path_) {
+        for (const std::string_view part : path_) {
             path += part;
             path += '/';
         }
@@ -357,11 +360,19 @@ class Reader {
         return path;
     }
 
+    // The name is BORROWED, not copied: every block opens one of these, and
+    // the names are keyword literals or a `what` the caller already holds. The
+    // rvalue-string overload is deleted so that a caller cannot hand it a
+    // temporary whose bytes die at the semicolon.
     struct Scope {
-        Scope(Reader& reader, std::string name) : reader_(reader)
+        Scope(Reader& reader, std::string_view name) : reader_(reader)
         {
-            reader_.path_.push_back(std::move(name));
+            reader_.path_.push_back(name);
         }
+        // An exact match, so that a keyword literal is not ambiguous between
+        // the two below.
+        Scope(Reader& reader, const char* name) : Scope(reader, std::string_view(name)) {}
+        Scope(Reader& reader, std::string&& name) = delete;
         ~Scope() { reader_.path_.pop_back(); }
         Scope(const Scope&) = delete;
         Scope& operator=(const Scope&) = delete;
@@ -562,9 +573,10 @@ class Reader {
 
     void readAttributeBody(AttributeList& out)
     {
+        detail::CaseBuffer types;
         while (!atBlockEnd()) {
             const Token typeToken = next();
-            const std::string type = lowered(typeToken.raw);
+            const std::string_view type = types.lower(typeToken.raw);
             if (!typeToken.isWord()) {
                 warn("line " + std::to_string(typeToken.line) +
                      ": text where an attribute type was expected; ignored");
@@ -579,9 +591,10 @@ class Reader {
                 if (!expectOpen("group")) {
                     return;
                 }
+                detail::CaseBuffer keys;
                 while (!atBlockEnd()) {
                     const Token key = next();
-                    const std::string word = lowered(key.raw);
+                    const std::string_view word = keys.lower(key.raw);
                     if (key.isWord() && word == "name") {
                         group.name = nextValue("name");
                     } else if (key.isWord() && word == "attributes") {
@@ -653,7 +666,7 @@ class Reader {
         if (!expectOpen(what)) {
             return;
         }
-        const Scope scope(*this, std::string(what));
+        const Scope scope(*this, what);
         while (!atBlockEnd()) {
             const Token key = next();
             if (!key.isWord()) {
@@ -693,10 +706,11 @@ class Reader {
         if (!expectOpen(what)) {
             return;
         }
-        const Scope scope(*this, std::string(what));
+        const Scope scope(*this, what);
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (peek().kind != TokenKind::Open) {
                 continue; // stray word between records
             }
@@ -716,10 +730,11 @@ class Reader {
         if (!expectOpen(what)) {
             return;
         }
-        const Scope scope(*this, std::string(what));
+        const Scope scope(*this, what);
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (peek().kind != TokenKind::Open) {
                 continue;
             }
@@ -741,9 +756,10 @@ class Reader {
         }
         const Scope scope(*this, "geometry_data");
         segments.clear();
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (peek().kind != TokenKind::Open) {
                 continue;
             }
@@ -816,7 +832,7 @@ class Reader {
     }
 
     // The fields every string has. True when `key` was one and was consumed.
-    bool readHeaderField(StringHeader& header, const std::string& key)
+    bool readHeaderField(StringHeader& header, std::string_view key)
     {
         if (key == "name") {
             header.name = nextValue(key);
@@ -841,11 +857,10 @@ class Reader {
     Breakline readBreakline()
     {
         const Token token = next();
-        const std::string word = lowered(token.raw);
-        if (word == "point") {
+        if (detail::equalsIgnoringCase(token.raw, "point")) {
             return Breakline::Point;
         }
-        if (word != "line") {
+        if (!detail::equalsIgnoringCase(token.raw, "line")) {
             warn("line " + std::to_string(token.line) + ": breakline '" + std::string(token.raw) +
                  "' is neither point nor line; read as line");
         }
@@ -858,7 +873,7 @@ class Reader {
     // below, which stops an undocumented flag from swallowing the next keyword,
     // must not fire on `text Pipe` or `title_1 Scale`, which are legal - the
     // manual only requires quotes around text that is not alphanumeric.
-    void readUnknown(const Token& key, const std::string& word, FieldList& extras,
+    void readUnknown(const Token& key, std::string_view word, FieldList& extras,
                      bool documented = false)
     {
         if (!key.isWord()) {
@@ -871,23 +886,23 @@ class Reader {
             return;
         }
         if (atBlockEnd()) {
-            extras.add(word, {});
+            extras.add(std::string(word), {});
             return;
         }
         // A keyword this reader knows cannot be the VALUE of one it does not:
         // the unknown word is a flag with no value, and swallowing the next
         // keyword as its value would lose a real field.
-        if (!documented && peek().kind == TokenKind::Word && isKnownKeyword(lowered(peek().raw))) {
-            extras.add(word, {});
+        if (!documented && peek().kind == TokenKind::Word && isKnownKeyword(peek().raw)) {
+            extras.add(std::string(word), {});
             return;
         }
         if (word.ends_with("colour")) {
             const bool wasQuoted = peek().kind == TokenKind::Quoted;
-            extras.add(word, nextColour(word), wasQuoted);
+            extras.add(std::string(word), nextColour(word), wasQuoted);
             return;
         }
         const Token value = next();
-        extras.add(word, value.text(), value.kind == TokenKind::Quoted);
+        extras.add(std::string(word), value.text(), value.kind == TokenKind::Quoted);
     }
 
     void readVertexString(StringKind kind)
@@ -895,15 +910,18 @@ class Reader {
         VertexString string;
         string.kind = kind;
         string.header = newHeader();
-        const Scope scope(*this, "string " + std::string(toString(kind)));
+        // Named before the Scope so that the name outlives the borrow.
+        const std::string label = "string " + std::string(toString(kind));
+        const Scope scope(*this, label);
 
         std::vector<double> radii;
         std::vector<bool> majors;
         FieldList fourDAnnotation;
 
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (key.isWord() && readHeaderField(string.header, word)) {
                 continue;
             }
@@ -1009,7 +1027,8 @@ class Reader {
                 readFieldBlock(word, *string.interval);
             } else if (kind == StringKind::FourD && !block && isTextAnnotationKey(word)) {
                 const Token value = next();
-                fourDAnnotation.add(word, value.text(), value.kind == TokenKind::Quoted);
+                fourDAnnotation.add(std::string(word), value.text(),
+                                    value.kind == TokenKind::Quoted);
             } else {
                 // The face string's hatching (manual 1.5.4), and the fields
                 // every string may carry: documented, so they take a value.
@@ -1102,7 +1121,7 @@ class Reader {
         }
     }
 
-    [[nodiscard]] static bool isTextAnnotationKey(const std::string& word)
+    [[nodiscard]] static bool isTextAnnotationKey(std::string_view word)
     {
         static const std::vector<std::string_view> keys = {
             "angle",     "offset",     "raise",    "worldsize", "papersize", "screensize",
@@ -1164,10 +1183,11 @@ class Reader {
     void readScalarString(std::string_view what, StringHeader& header, FieldList& fields,
                           const std::vector<std::string_view>& documented)
     {
-        const Scope scope(*this, std::string(what));
+        const Scope scope(*this, what);
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (key.isWord() && readHeaderField(header, word)) {
                 continue;
             }
@@ -1354,9 +1374,10 @@ class Reader {
         DrainageString drainage;
         drainage.header = newHeader();
         const Scope scope(*this, "string drainage");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (key.isWord() && readHeaderField(drainage.header, word)) {
                 continue;
             }
@@ -1415,7 +1436,7 @@ class Reader {
         if (!expectOpen(what)) {
             return;
         }
-        const Scope scope(*this, std::string(what));
+        const Scope scope(*this, what);
         while (!atBlockEnd()) {
             const Token key = next();
             if (peek().kind != TokenKind::Open) {
@@ -1435,12 +1456,13 @@ class Reader {
         if (!expectOpen(what)) {
             return;
         }
-        const Scope scope(*this, std::string(what));
+        const Scope scope(*this, what);
         std::vector<double> radii;
         std::vector<bool> majors;
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (!key.isWord()) {
                 continue;
@@ -1480,9 +1502,10 @@ class Reader {
         SuperAlignment alignment;
         alignment.header = newHeader();
         const Scope scope(*this, "string super_alignment");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (key.isWord() && readHeaderField(alignment.header, word)) {
                 continue;
             }
@@ -1537,9 +1560,10 @@ class Reader {
         const Scope scope(*this, what);
         std::int64_t partId = 0;
 
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (key.isWord() && readHeaderField(alignment.header, word)) {
                 continue;
             }
@@ -1660,9 +1684,10 @@ class Reader {
         LasCloud cloud;
         cloud.header = newHeader();
         const Scope scope(*this, "string las_cloud_data");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (key.isWord() && readHeaderField(cloud.header, word)) {
                 continue;
             }
@@ -1686,15 +1711,16 @@ class Reader {
         }
     }
 
-    void readLasData(const std::string& what, LasCloud& cloud)
+    void readLasData(std::string_view what, LasCloud& cloud)
     {
         if (!expectOpen(what)) {
             return;
         }
         const Scope scope(*this, what);
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (!key.isWord()) {
                 continue;
@@ -1711,13 +1737,13 @@ class Reader {
             } else if (block && (word.starts_with("points_v") ||
                                  word.starts_with("compact_points_v"))) {
                 const bool compact = word.starts_with("compact_");
-                const std::string format = word.substr(compact ? 15 : 7);
+                const std::string format(word.substr(compact ? 15 : 7));
                 if (cloud.format.empty()) {
                     cloud.format = format;
                     cloud.pointFormat = pointFormatOf(format);
                 } else if (cloud.format != format) {
                     warn("line " + std::to_string(key.line) + ": point cloud declares format " +
-                         cloud.format + " but holds a " + word + " block");
+                         cloud.format + " but holds a " + std::string(word) + " block");
                 }
                 readLasPoints(word, compact, pointFormatOf(format), cloud.points);
             } else {
@@ -1738,7 +1764,7 @@ class Reader {
         return value && *value >= 0 && *value <= 10 ? static_cast<int>(*value) : 0;
     }
 
-    void readLasPoints(const std::string& what, bool compact, int pointFormat,
+    void readLasPoints(std::string_view what, bool compact, int pointFormat,
                        std::vector<LasPoint>& points)
     {
         if (!expectOpen(what)) {
@@ -1746,12 +1772,13 @@ class Reader {
         }
         const Scope scope(*this, what);
         const auto& order = lasFieldOrder(pointFormat);
+        detail::CaseBuffer tags;
         while (!atBlockEnd()) {
             const Token key = next();
             if (peek().kind != TokenKind::Open) {
                 continue;
             }
-            if (lowered(key.raw) != "p") {
+            if (!detail::equalsIgnoringCase(key.raw, "p")) {
                 skipUnknownBlock(lowered(key.raw));
                 continue;
             }
@@ -1771,7 +1798,8 @@ class Reader {
                 }
             } else {
                 for (std::size_t i = 0; i + 1 < tokens.size(); i += 2) {
-                    badLasFields_ += setLasField(point, lowered(tokens[i]), tokens[i + 1]) ? 0 : 1;
+                    badLasFields_ +=
+                        setLasField(point, tags.lower(tokens[i]), tokens[i + 1]) ? 0 : 1;
                 }
             }
             points.push_back(point);
@@ -1800,9 +1828,10 @@ class Reader {
         std::vector<std::int64_t> neighbours;
         std::vector<std::int64_t> nulling;
 
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (!key.isWord()) {
                 readUnknown(key, word, tin.extras);
@@ -1909,13 +1938,14 @@ class Reader {
             return;
         }
         const Scope scope(*this, "triangles");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             if (peek().kind == TokenKind::Word && detail::parseInteger(peek().raw)) {
                 readIntegersUntilClose("triangles", triangles);
                 continue;
             }
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (peek().kind != TokenKind::Open) {
                 fail(key.line, "'" + std::string(key.raw) + "' in triangles is not a point number");
                 return;
@@ -1934,12 +1964,12 @@ class Reader {
     // One-based indices in rows of three -> zero-based triangles. An index
     // outside the points is a failure: the triangle cannot be drawn, and one
     // bad index usually means every later one is wrong too.
-    bool buildTriangles(const std::string& what, std::uint32_t line, std::size_t pointCount,
+    bool buildTriangles(std::string_view what, std::uint32_t line, std::size_t pointCount,
                         const std::vector<std::int64_t>& indices,
                         std::vector<std::array<std::uint32_t, 3>>& out)
     {
         if (indices.size() % 3 != 0) {
-            fail(line, what + " lists " + std::to_string(indices.size()) +
+            fail(line, std::string(what) + " lists " + std::to_string(indices.size()) +
                            " point numbers, which is not a whole number of triangles");
             return false;
         }
@@ -1948,7 +1978,7 @@ class Reader {
         const bool zeroBased =
             std::find(indices.begin(), indices.end(), std::int64_t{0}) != indices.end();
         if (zeroBased) {
-            warn(what + " at line " + std::to_string(line) +
+            warn(std::string(what) + " at line " + std::to_string(line) +
                  " numbers its points from 0, not from 1 as the manual requires; read as such");
         }
         out.reserve(indices.size() / 3);
@@ -1957,7 +1987,7 @@ class Reader {
             for (std::size_t k = 0; k < 3; ++k) {
                 const std::int64_t index = indices[i + k] - (zeroBased ? 0 : 1);
                 if (index < 0 || static_cast<std::size_t>(index) >= pointCount) {
-                    fail(line, what + ": triangle " + std::to_string(i / 3 + 1) +
+                    fail(line, std::string(what) + ": triangle " + std::to_string(i / 3 + 1) +
                                    " names point " + std::to_string(indices[i + k]) +
                                    " but there are " + std::to_string(pointCount) + " points");
                     return false;
@@ -1975,9 +2005,10 @@ class Reader {
             return;
         }
         const Scope scope(*this, "input");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             if (word == "models" && peek().kind == TokenKind::Open) {
                 readTextBlock(word, tin.inputModels);
             } else {
@@ -1995,9 +2026,10 @@ class Reader {
             return;
         }
         const Scope scope(*this, "super_tin");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (key.isWord() && word == "name" && !block) {
                 superTin.name = nextValue(word);
@@ -2038,9 +2070,10 @@ class Reader {
         }
         const Scope scope(*this, "primitive_3d");
         bool sawMesh = false;
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (key.isWord() && word == "name" && !block) {
                 mesh.name = nextValue(word);
@@ -2081,9 +2114,10 @@ class Reader {
         const Scope scope(*this, "trimesh_3d");
         std::vector<std::int64_t> faces;
         std::vector<std::int64_t> edges;
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (!key.isWord()) {
                 continue;
@@ -2158,7 +2192,7 @@ class Reader {
     }
 
     // flag key colour name, four to a row
-    void readInfos(const std::string& what, std::vector<TrimeshInfo>& out)
+    void readInfos(std::string_view what, std::vector<TrimeshInfo>& out)
     {
         const std::uint32_t line = peek().line;
         std::vector<std::string> tokens;
@@ -2180,7 +2214,7 @@ class Reader {
         }
     }
 
-    void readIndexBlock(const std::string& what, std::vector<std::uint32_t>& out)
+    void readIndexBlock(std::string_view what, std::vector<std::uint32_t>& out)
     {
         std::vector<std::int64_t> values;
         if (!readIntegerBlock(what, values)) {
@@ -2201,12 +2235,16 @@ class Reader {
     const std::string& noteModel(std::string_view name)
     {
         const std::string_view trimmed = detail::trimmed(name);
-        for (const std::string& known : archive_.modelNames) {
-            if (detail::equalsIgnoringCase(known, trimmed)) {
-                return known;
-            }
+        // Looked up rather than scanned: every element asks, so the scan this
+        // replaces was O(elements x models) - 20 million comparisons on an
+        // archive of 100 000 elements over 400 models. The map hashes and
+        // compares WITHOUT case, so it answers the manual's question directly
+        // and needs no folded copy of the name to ask it.
+        if (const auto known = modelIndex_.find(trimmed); known != modelIndex_.end()) {
+            return archive_.modelNames[known->second];
         }
         archive_.modelNames.emplace_back(trimmed);
+        modelIndex_.emplace(archive_.modelNames.back(), archive_.modelNames.size() - 1);
         return archive_.modelNames.back();
     }
 
@@ -2231,9 +2269,10 @@ class Reader {
             return;
         }
         const Scope scope(*this, "model");
+        detail::CaseBuffer keys;
         while (!atBlockEnd()) {
             const Token key = next();
-            const std::string word = lowered(key.raw);
+            const std::string_view word = keys.lower(key.raw);
             const bool block = peek().kind == TokenKind::Open;
             if (key.isWord() && word == "name" && !block) {
                 record.name = nextValue(word);
@@ -2427,9 +2466,17 @@ class Reader {
     // Every keyword some reader above has a case for. Used to tell a colour's
     // second word from the next keyword, and an unknown flag from an unknown
     // key and its value.
-    [[nodiscard]] static bool isKnownKeyword(const std::string& word)
+    // `word` is the token AS WRITTEN: the set folds case itself, so asking it
+    // costs no folded copy.
+    [[nodiscard]] static bool isKnownKeyword(std::string_view word)
     {
-        static const std::vector<std::string_view> keywords = {
+        // A set, not a list: this is asked once per colour and once per
+        // undocumented key, and the linear scan it replaces walked all 140
+        // entries for every miss - 14 million string comparisons on a
+        // 100 000-element archive.
+        static const std::unordered_set<std::string_view, detail::CaseFoldedHash,
+                                        detail::CaseFoldedEqual>
+            keywords = {
             "name", "model", "colour", "color", "style", "chainage", "breakline", "attributes",
             "closed", "z", "data", "data_2d", "data_3d", "radius_data", "major_data",
             "geometry_data", "colour_data", "point_data", "diameter", "diameter_value",
@@ -2455,15 +2502,20 @@ class Reader {
             // `colour dark` at the end of a header does not eat the next one
             "string", "tin", "full_tin", "super_tin", "primitive_3d", "null", "null_value",
             "project_attributes"};
-        return std::find(keywords.begin(), keywords.end(), word) != keywords.end();
+        return keywords.contains(word);
     }
 
     Lexer lexer_;
     ReadOptions options_;
     Archive archive_;
+    // Model names -> their place in archive_.modelNames. The key is owned,
+    // NOT a view into modelNames: that vector grows, and a short name moved
+    // by the growth moves its bytes with it.
+    std::unordered_map<std::string, std::size_t, detail::CaseFoldedHash, detail::CaseFoldedEqual>
+        modelIndex_;
     std::optional<Error> error_;
     Token end_{};
-    std::vector<std::string> path_;
+    std::vector<std::string_view> path_;
     std::size_t suppressedWarnings_ = 0;
     std::size_t nullAttributes_ = 0;
     std::size_t badLasFields_ = 0;
@@ -2501,6 +2553,17 @@ katana::core::Result<Archive> Reader::run()
 
 } // namespace
 
+namespace {
+
+// The reader proper. `text` must already be known to be UTF-8.
+katana::core::Result<Archive> readChecked(std::string_view text, const ReadOptions& options)
+{
+    Reader reader(text, options);
+    return reader.run();
+}
+
+} // namespace
+
 katana::core::Result<Archive> readArchive(std::string_view text, const ReadOptions& options)
 {
     // Every name and text in the archive ends up in the entity model, which
@@ -2510,8 +2573,7 @@ katana::core::Result<Archive> readArchive(std::string_view text, const ReadOptio
         return makeError(ErrorCode::ParseFailure,
                          "the text is not valid UTF-8; decode the file with decodeText first");
     }
-    Reader reader(text, options);
-    return reader.run();
+    return readChecked(text, options);
 }
 
 katana::core::Result<Archive> readArchiveBytes(std::string_view bytes, const ReadOptions& options)
@@ -2520,7 +2582,10 @@ katana::core::Result<Archive> readArchiveBytes(std::string_view bytes, const Rea
     if (!decoded) {
         return decoded.error();
     }
-    auto archive = readArchive(decoded->text, options);
+    // decodeText has already established what readArchive would check, so
+    // going through it would walk all 58 MB a second time for nothing.
+    auto archive = decoded->validatedUtf8 ? readChecked(decoded->text, options)
+                                          : readArchive(decoded->text, options);
     if (archive && decoded->guessed) {
         archive->warnings.insert(archive->warnings.begin(),
                                  std::string("the file has no byte order mark; read as ") +

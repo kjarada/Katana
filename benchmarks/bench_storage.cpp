@@ -120,11 +120,13 @@ void BM_ProjectOpenAndLoad(benchmark::State& state)
     for (auto _ : state) {
         auto store = ProjectStore::open(directory);
         if (store.ok()) {
-            const auto contents = store->load();
+            auto contents = store->load();
             benchmark::DoNotOptimize(contents.ok());
             if (contents.ok()) {
                 Model loaded;
-                const auto status = applyToModel(*contents, loaded);
+                // Consumed, as Document::open consumes it. `contents` is loaded
+                // afresh every iteration, so there is nothing to reuse.
+                const auto status = applyToModel(std::move(*contents), loaded);
                 benchmark::DoNotOptimize(status.ok());
             }
         }
