@@ -147,8 +147,9 @@ class Exporter {
         if (const auto* name = textOf(entity.metadata, kMetaName)) {
             header.name = *name;
         }
-        const auto* style = textOf(entity.metadata, kMetaStyle);
-        header.style = style != nullptr ? *style : "1"; // 12d's default linestyle
+        // The entity's own style is the 12d linestyle; ByLayer has no name in
+        // 12d, and "1" is its default linestyle (manual 1.4.3).
+        header.style = entity.style.empty() ? "1" : entity.style;
         header.chainage = realOf(entity.metadata, kMetaChainage).value_or(0.0);
         const auto* breakline = textOf(entity.metadata, kMetaBreakline);
         header.breakline = breakline == nullptr ? fallback

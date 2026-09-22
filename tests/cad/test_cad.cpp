@@ -1060,6 +1060,114 @@ TEST(CadInterpreter, CreatingAHatchPatternIsUndoable)
     EXPECT_TRUE(session.document.model().hatchPatterns.contains("brick"));
 }
 
+
+// ---- styles ---------------------------------------------------------------------------
+
+TEST(CadInterpreter, StylesCanBeDefinedTunedAppliedAndListed)
+{
+    Session session;
+    EXPECT_EQ(session.ok("STYLE LIST"), "no styles");
+    session.ok("LINETYPE NEW fence 1 -0.5");
+    session.ok("STYLE NEW Kerb");
+    session.ok("STYLE SET Kerb linetype fence");
+    session.ok("STYLE SET Kerb weight 0.5");
+    session.ok("STYLE SET Kerb colour #FF8000");
+    session.ok("STYLE SET Kerb symbol cross");
+    session.ok("STYLE SET Kerb symbolsize 1.5");
+    session.ok("STYLE SET Kerb description from 12d, colour shade 48");
+
+    const katana::entity::Style* kerb = session.document.model().styles.find("Kerb");
+    ASSERT_NE(kerb, nullptr);
+    EXPECT_EQ(kerb->linetype, "fence");
+    EXPECT_DOUBLE_EQ(kerb->lineWeight, 0.5);
+    ASSERT_TRUE(kerb->color.has_value());
+    EXPECT_EQ(kerb->color->toHex(), "#FF8000");
+    EXPECT_EQ(kerb->symbol, "cross");
+    EXPECT_DOUBLE_EQ(kerb->symbolSize, 1.5);
+    EXPECT_EQ(kerb->description, "from 12d, colour shade 48");
+    const std::string listed = session.ok("STYLE LIST");
+    EXPECT_NE(listed.find("Kerb"), std::string::npos);
+    EXPECT_NE(listed.find("symbol=cross@1.5"), std::string::npos) << listed;
+    EXPECT_NE(session.ok("STYLE SYMBOLS").find("manhole"), std::string::npos);
+
+    session.ok("POINT 1,1");
+    session.ok("SELECT ALL");
+    session.ok("STYLE APPLY Kerb");
+    const auto ids = session.document.model().entities.ids();
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(session.document.model().entities.find(ids[0])->style, "Kerb");
+    session.ok("STYLE APPLY -");
+    EXPECT_TRUE(session.document.model().entities.find(ids[0])->style.empty());
+}
+
+TEST(CadInterpreter, StyleRejectsNonsenseWithItsOwnReason)
+{
+    Session session;
+    session.ok("STYLE NEW s");
+    EXPECT_EQ(session.fails("STYLE NEW s"), ErrorCode::AlreadyExists);
+    EXPECT_EQ(session.fails("STYLE SET s linetype nosuch"), ErrorCode::NotFound);
+    EXPECT_EQ(session.fails("STYLE SET s hatch nosuch"), ErrorCode::NotFound);
+    EXPECT_EQ(session.fails("STYLE SET s symbol blob"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("STYLE SET s symbolsize -1"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("STYLE SET s weight -0.5"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(session.fails("STYLE SET s colour notacolour"), ErrorCode::ParseFailure)
+        << "a colour that does not parse is a parse failure, as LAYER NEW reports it";
+    EXPECT_EQ(session.fails("STYLE SET nosuch weight 1"), ErrorCode::NotFound);
+    EXPECT_EQ(session.fails("STYLE APPLY s"), ErrorCode::InvalidState) << "nothing selected";
+    EXPECT_EQ(session.fails("STYLE DELETE nosuch"), ErrorCode::NotFound);
+}
+
+TEST(CadInterpreter, DeletingAStyleAnEntityStillUsesIsRefusedAndNamesTheEntity)
+{
+    // An entity left naming a deleted style would draw ByLayer with nothing
+    // to say why.
+    Session session;
+    session.ok("STYLE NEW Kerb");
+    session.ok("POINT 1,1");
+    session.ok("SELECT ALL");
+    session.ok("STYLE APPLY Kerb");
+    const auto refused = session.interpreter.run("STYLE DELETE Kerb");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, ErrorCode::CommandRejected);
+    EXPECT_NE(refused.error().describe().find("id=1"), std::string::npos) << refused.error().describe();
+    session.ok("STYLE APPLY -");
+    session.ok("STYLE DELETE Kerb");
+    EXPECT_FALSE(session.document.model().styles.contains("Kerb"));
+}
+
+TEST(CadInterpreter, StyleEditsAreUndoableAndTheOtherTablesStillAre)
+{
+    // The table commands share one implementation now; each table's undo is
+    // still checked, so a change to the template cannot lose one of them.
+    Session session;
+    session.ok("STYLE NEW s");
+    session.ok("STYLE SET s weight 0.7");
+    session.ok("UNDO");
+    EXPECT_DOUBLE_EQ(session.document.model().styles.find("s")->lineWeight, 0.25);
+    session.ok("UNDO");
+    EXPECT_FALSE(session.document.model().styles.contains("s"));
+    session.ok("REDO");
+    session.ok("REDO");
+    EXPECT_DOUBLE_EQ(session.document.model().styles.find("s")->lineWeight, 0.7);
+    session.ok("STYLE DELETE s");
+    EXPECT_FALSE(session.document.model().styles.contains("s"));
+    session.ok("UNDO");
+    ASSERT_TRUE(session.document.model().styles.contains("s"));
+    EXPECT_DOUBLE_EQ(session.document.model().styles.find("s")->lineWeight, 0.7)
+        << "undo of a deletion restores the item as it was";
+
+    session.ok("LINETYPE NEW fence 1 -0.5");
+    session.ok("LINETYPE DELETE fence");
+    session.ok("UNDO");
+    EXPECT_TRUE(session.document.model().linetypes.contains("fence"));
+    session.ok("DIMSTYLE NEW site");
+    session.ok("UNDO");
+    EXPECT_FALSE(session.document.model().dimensionStyles.contains("site"));
+    EXPECT_EQ(session.fails("DIMSTYLE DELETE Standard"), ErrorCode::CommandRejected);
+    EXPECT_EQ(session.fails("LINETYPE DELETE continuous"), ErrorCode::CommandRejected);
+    EXPECT_EQ(session.fails("HATCH DELETE none"), ErrorCode::CommandRejected);
+}
+
 // ---- alignments -----------------------------------------------------------------------
 
 TEST(CadInterpreter, AnAlignmentIsDefinedByItsPIsAndSolvedOnDemand)

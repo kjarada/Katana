@@ -674,12 +674,52 @@ Status AlignmentPolicy::validate(const Alignment& alignment)
     return katana::entity::validate(alignment);
 }
 
-Status StylePolicy::validate(const Style& style)
+// The set a viewport can paint. Names as the survey packages use them: a
+// 12d "TOPO Natural Surface Point" style, for instance, is a cross.
+const std::vector<std::string_view>& symbolNames()
+{
+    static const std::vector<std::string_view> names = {
+        "circle", "square", "triangle", "diamond", "cross", "plus", "tick", "star",
+        "dot",    "ring",   "tree",     "pole",    "manhole", "arrow", "flag", "target"};
+    return names;
+}
+
+bool isSymbolName(std::string_view name)
+{
+    if (name == kNoSymbol) {
+        return true;
+    }
+    const auto& names = symbolNames();
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+
+Status validate(const Style& style)
 {
     if (auto status = validateName(style.name, "style"); !status) {
         return status;
     }
-    return validateLineWeight(style.lineWeight);
+    if (auto status = validateLineWeight(style.lineWeight); !status) {
+        return status;
+    }
+    if (!isSymbolName(style.symbol)) {
+        return makeError(ErrorCode::InvalidArgument, "that is not a symbol Katana can draw",
+                         style.symbol);
+    }
+    if (!(std::isfinite(style.symbolSize) && style.symbolSize >= 0.0)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "symbol size must be finite and not negative",
+                         std::to_string(style.symbolSize));
+    }
+    if (!isValidUtf8(style.description)) {
+        return makeError(ErrorCode::InvalidArgument, "style description is not valid UTF-8",
+                         style.name);
+    }
+    return {};
+}
+
+Status StylePolicy::validate(const Style& style)
+{
+    return katana::entity::validate(style);
 }
 
 // ---- PropertyDatabase ------------------------------------------------------------

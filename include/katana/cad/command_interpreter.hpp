@@ -64,6 +64,7 @@ class CommandInterpreter {
     [[nodiscard]] Reply linetype(const Tokens& args);
     [[nodiscard]] Reply dimensionStyle(const Tokens& args);
     [[nodiscard]] Reply hatchPattern(const Tokens& args);
+    [[nodiscard]] Reply style(const Tokens& args);
     [[nodiscard]] Reply alignment(const Tokens& args);
     [[nodiscard]] Reply parcel(const Tokens& args);
     [[nodiscard]] Reply attributes(const std::string& verb, const Tokens& args);

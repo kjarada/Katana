@@ -237,10 +237,33 @@ class Importer {
         return layerOfModel_.emplace(model, layer.name).first->second;
     }
 
+    // The Katana style for a 12d linestyle name: created once per name. A
+    // name Katana cannot hold (empty) means ByLayer.
+    const std::string& styleFor(const std::string& linestyle)
+    {
+        static const std::string kByLayer;
+        if (linestyle.empty()) {
+            return kByLayer;
+        }
+        const auto known = std::find_if(result_.stylesNeeded.begin(), result_.stylesNeeded.end(),
+                                        [&](const katana::entity::Style& style) {
+                                            return style.name == linestyle;
+                                        });
+        if (known != result_.stylesNeeded.end()) {
+            return known->name;
+        }
+        katana::entity::Style style;
+        style.name = linestyle;
+        style.description = "12d linestyle";
+        result_.stylesNeeded.push_back(std::move(style));
+        return result_.stylesNeeded.back().name;
+    }
+
     [[nodiscard]] Entity makeEntity(const StringHeader& header, std::string_view keyword)
     {
         Entity entity;
         entity.layer = layerFor(header.model, header.colour);
+        entity.style = styleFor(header.style);
         // A 12d string has a colour of its own; there is no ByLayer in 12d.
         // A name Katana has no RGB for is left to the layer, and kept below.
         entity.color = standardColour(header.colour);
@@ -253,10 +276,6 @@ class Importer {
         meta(kMetaElement, std::string(keyword));
         if (!header.name.empty()) {
             meta(kMetaName, header.name);
-        }
-        if (!header.style.empty()) {
-            // NOT Entity::style: that names a Katana style, which must exist.
-            meta(kMetaStyle, header.style);
         }
         if (!header.colour.empty()) {
             meta(kMetaColour, header.colour);

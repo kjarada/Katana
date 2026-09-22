@@ -41,7 +41,7 @@ adapter boundary and converted, so nothing throws across the interface.
 | Vector out | the same, driver inferred from the extension |
 | Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2, ECW — GDAL's readers |
 | Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD, E57 in; LAS/LAZ out |
-| 12d Archive | .12da, .12daz, .12dz in and out — every element of the format; see below |
+| 12d Archive | .12da and .12daz in and out — every element of the format; see below |
 
 Not supported: **DWG, LandXML, IFC**.
 
@@ -254,12 +254,12 @@ wins, and no empty `entities` layer is created when nothing ends up on it.
 **Still open:** text and dimensions are skipped on DXF export, though DXF has
 both, because the vector path models only points, lines and polygons.
 
-## The 12d Archive format (.12da, .12daz, .12dz)
+## The 12d Archive format (.12da, .12daz)
 
 12d Model is the civil design package most Australian survey and road work is
 delivered in, and its interchange format - the 12d Archive, `.12da`, and its
-zipped form `.12daz` (some tools write `.12dz`) - is what a surveyor hands
-over. Katana reads every element the format defines and writes back everything
+zipped form `.12daz` - is what a surveyor hands over. (There is no `.12dz`;
+Katana accepted the extension for a day by mistake.) Katana reads every element the format defines and writes back everything
 it can represent. This section records what was decided and, more usefully,
 what the manual does not say and had to be measured.
 
@@ -404,6 +404,17 @@ The mapping is documented in full at the head of
   since there is nothing to check it against and a centimetre-out alignment is
   worth far more than none. What can be drawn always is: the tangent polygon
   through the IPs when nothing else can be solved.
+- **Linestyles are styles.** A 12d linestyle name becomes a Katana `Style`
+  of that name, which the entity carries in its own `style` field - the field
+  the style panel, the `STYLE` verb and the plotter read - rather than as
+  metadata. The importer lists the styles it needs and the caller creates the
+  missing ones in the same transaction as the layers, so an import is still
+  one undo step. A 12da says nothing about what a linestyle looks like, so a
+  new one is continuous at the default weight and described as "12d
+  linestyle" for the user to finish in the style manager. **Rejected:**
+  guessing a dash pattern from the name ("DRAIN Water Course" is probably
+  dashed): wrong more often than right, and a wrong pattern is worse than a
+  solid line the user knows to fix.
 - **Attributes** become typed properties; a group flattens into
   `Group/Sub/Name` and is rebuilt on export. Vertex and segment attributes
   become `vertex/3/Name` and `segment/2/Name`; a one-vertex string's vertex

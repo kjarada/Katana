@@ -147,14 +147,16 @@ TEST(ZipContainer, AnEmptyMemberIsAnEmptyString)
     EXPECT_TRUE(bytes->empty());
 }
 
-TEST(Archive12dKinds, AllThreeExtensionsAreRecognisedWhateverTheirCase)
+TEST(Archive12dKinds, BothExtensionsAreRecognisedWhateverTheirCaseAndNoOther)
 {
-    for (const char* name : {"job.12da", "job.12daz", "job.12dz", "JOB.12DA", "Job.12Daz"}) {
+    for (const char* name : {"job.12da", "job.12daz", "JOB.12DA", "Job.12Daz"}) {
         EXPECT_EQ(interop::kindForPath(name), interop::SourceKind::Archive12d) << name;
     }
     EXPECT_FALSE(interop::isZippedArchive12d("job.12da"));
     EXPECT_TRUE(interop::isZippedArchive12d("job.12DAZ"));
-    EXPECT_TRUE(interop::isZippedArchive12d("job.12dz"));
+    // There is no such format; it was accepted for a while by mistake.
+    EXPECT_NE(interop::kindForPath("job.12dz"), interop::SourceKind::Archive12d);
+    EXPECT_FALSE(interop::isZippedArchive12d("job.12dz"));
     EXPECT_NE(interop::kindForPath("job.12d"), interop::SourceKind::Archive12d);
 }
 
@@ -195,9 +197,14 @@ TEST(Archive12dImport, EveryEntityIsOneTheModelWillAccept)
     for (const katana::entity::Layer& layer : imported->layersNeeded) {
         ASSERT_TRUE(model.layers.add(layer).ok()) << layer.name;
     }
+    for (const katana::entity::Style& style : imported->stylesNeeded) {
+        ASSERT_TRUE(model.styles.add(style).ok()) << style.name;
+    }
     ASSERT_FALSE(imported->entities.empty());
+    ASSERT_FALSE(imported->stylesNeeded.empty()) << "the fixture names linestyles";
     for (const katana::entity::Entity& entity : imported->entities) {
         EXPECT_TRUE(model.layers.contains(entity.layer)) << entity.layer;
+        EXPECT_TRUE(entity.style.empty() || model.styles.contains(entity.style)) << entity.style;
         EXPECT_TRUE(model.entities.add(entity).ok());
     }
     for (const katana::entity::Alignment& alignment : imported->alignments) {

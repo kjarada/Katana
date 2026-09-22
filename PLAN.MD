@@ -1407,7 +1407,22 @@ There are only two container forms: `.12da` and `.12daz`. There is no
 Each slice: tests first, engine, application, docs, commit. The status line
 below is updated as each lands.
 
-**STATUS: slice 1 in progress.**
+**Slice 1 DELIVERED (2026-09-22).** A 12d linestyle is a Katana `Style`
+the entity carries in its own `style` field; the importer lists the styles
+it needs (`stylesNeeded`) and the CLI and the desktop application create the
+missing ones in the import's transaction, beside the layers. `Test 4 without
+tin.12daz` (27 177 entities) arrives with its 98 linestyles as styles. The
+`Style` table gained `description`, `symbol` and `symbolSize` (schema 9,
+defaults reproducing every older project), a free `validate`, and its
+create/update/delete commands - by collapsing the four hand-written copies
+of the table command trio into one template with a policy per table
+(`table_commands.cpp`), which was the "second way of doing something" that
+CLAUDE.md section 6 says to remove when met. `STYLE LIST | SYMBOLS | NEW |
+SET | DELETE | APPLY` in the interpreter. `.12dz` withdrawn. Colour names
+Katana has no RGB for stay on the entity as `12d.colour` rather than on the
+style, because a 12d colour belongs to the string, not to its linestyle.
+
+**STATUS: slice 2 (symbols) in progress.**
 
 ---
 

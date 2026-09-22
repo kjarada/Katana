@@ -102,7 +102,7 @@ class ProjectStore {
     // 6: hatch patterns, and Layer/Style::hatchPattern (Phase 09).
     // 7: alignments, stored as their PI definitions (Phase 21).
     // 8: design profiles on alignments, as PVIs (Phase 21).
-    static constexpr int kCurrentSchemaVersion = 8;
+    static constexpr int kCurrentSchemaVersion = 9;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // Creates the directory layout and an empty database. Fails if a project

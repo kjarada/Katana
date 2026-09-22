@@ -1505,6 +1505,11 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
             transaction->add(cmd::createLayer(layer));
         }
     }
+    for (const katana::entity::Style& style : imported->stylesNeeded) {
+        if (!document_.model().styles.contains(style.name)) {
+            transaction->add(cmd::createStyle(style));
+        }
+    }
     const std::size_t created = imported->entities.size();
     if (created != 0) {
         transaction->add(cmd::createEntities(std::move(imported->entities)));

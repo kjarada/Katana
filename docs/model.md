@@ -340,6 +340,16 @@ does not.
   behaviour of projects written before it existed, or old drawings change
   appearance on open.
 
+The five tables that ARE plain named tables - linetypes, dimension styles,
+hatch patterns, alignments and styles - share one implementation of their
+create, update and delete commands (`src/katana_commands/table_commands.cpp`),
+parameterised by a `TablePolicy<T>` that holds the only things that differ:
+the item that may not be deleted, an update that may not be made, and who
+still uses an item so a deletion is refused naming the holder. There used to
+be four hand-written copies; adding a fifth for styles is what made the
+pattern visible, and a change to how these commands undo now lands in one
+place.
+
 `LayerDatabase` is deliberately not one of these. Layer names are `/`-separated
 paths and the table derives a tree from them (`children`, `subtree`,
 `removeSubtree`, `rename`), so it is a different structure that happens to be

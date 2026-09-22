@@ -153,7 +153,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"AR", "ARRAY"},   {"E", "ERASE"},       {"DELETE", "ERASE"},   {"DEL", "ERASE"},
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
-        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"},
+        {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"}, {"ST", "STYLE"},
         {"?", "HELP"},
     };
     return table;
@@ -253,6 +253,8 @@ Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | DELETE name
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
           angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
+Style     STYLE LIST | SYMBOLS | NEW name | SET name field value | DELETE name | APPLY name
+          fields: linetype weight colour hatch symbol symbolsize description; APPLY - = ByLayer
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
           SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
           DELETE name.  PI indices count from 0; radius 0 is a kink; spirals in MODEL units
@@ -380,6 +382,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (verb == "HATCH") {
         return hatchPattern(args);
     }
+    if (verb == "STYLE") {
+        return style(args);
+    }
     if (verb == "ALIGN") {
         return alignment(args);
     }
@@ -396,6 +401,142 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         return inspect(verb, args);
     }
     return makeError(ErrorCode::ParseFailure, "unknown command; type HELP", verb);
+}
+
+
+// ---- styles -------------------------------------------------------------------------------
+
+CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
+{
+    const auto& model = document_.model();
+    const std::string action = args.empty() ? "LIST" : upper(args[0]);
+
+    if (action == "LIST") {
+        std::ostringstream out;
+        out.precision(6);
+        for (const katana::entity::Style& item : model.styles.all()) {
+            out << "  " << item.name << "  linetype=" << item.linetype << "  weight=" << item.lineWeight;
+            if (item.color) {
+                out << "  colour=" << item.color->toHex();
+            }
+            if (!item.hatchPattern.empty()) {
+                out << "  hatch=" << item.hatchPattern;
+            }
+            if (!item.symbol.empty()) {
+                out << "  symbol=" << item.symbol;
+                if (item.symbolSize > 0.0) {
+                    out << "@" << item.symbolSize;
+                }
+            }
+            if (!item.description.empty()) {
+                out << "  " << item.description;
+            }
+            out << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text.empty() ? "no styles" : text;
+    }
+    if (action == "SYMBOLS") {
+        std::string names;
+        for (const std::string_view symbol : katana::entity::symbolNames()) {
+            names += (names.empty() ? "" : " ") + std::string(symbol);
+        }
+        return names;
+    }
+
+    static constexpr const char* kUsage =
+        "STYLE LIST | SYMBOLS | NEW name | SET name field value | DELETE name | APPLY name\n"
+        "  fields: linetype, weight (mm), colour (#RRGGBB or bylayer), hatch, symbol,\n"
+        "  symbolsize (model units, 0 for the default mark), description\n"
+        "  APPLY sets the style of the selection; APPLY - clears it (ByLayer)";
+    if (args.size() < 2) {
+        return usage(kUsage);
+    }
+    const std::string& name = args[1];
+
+    if (action == "NEW") {
+        katana::entity::Style item;
+        item.name = name;
+        return finish(document_.execute(cmd::createStyle(std::move(item))),
+                      "style " + name + " created");
+    }
+    if (action == "DELETE") {
+        return finish(document_.execute(cmd::deleteStyle(name)), "style " + name + " deleted");
+    }
+    if (action == "APPLY") {
+        const std::vector<EntityId> ids = document_.selection().ids();
+        if (ids.empty()) {
+            return makeError(ErrorCode::InvalidState, "nothing is selected");
+        }
+        const std::string wanted = name == "-" ? std::string() : name;
+        if (!wanted.empty() && !model.styles.contains(wanted)) {
+            return makeError(ErrorCode::NotFound, "style does not exist", wanted);
+        }
+        return finish(document_.execute(cmd::setEntityStyle(ids, wanted)),
+                      std::to_string(ids.size()) + " entities set to style " +
+                          (wanted.empty() ? "ByLayer" : wanted));
+    }
+    if (action == "SET") {
+        if (args.size() < 4) {
+            return usage(kUsage);
+        }
+        const katana::entity::Style* existing = model.styles.find(name);
+        if (existing == nullptr) {
+            return makeError(ErrorCode::NotFound, "style does not exist", name);
+        }
+        katana::entity::Style changed = *existing;
+        const std::string field = upper(args[2]);
+        const std::string& value = args[3];
+        if (field == "LINETYPE") {
+            if (!model.linetypes.contains(value)) {
+                return makeError(ErrorCode::NotFound, "linetype does not exist", value);
+            }
+            changed.linetype = value;
+        } else if (field == "WEIGHT") {
+            const auto weight = parseNumber(value);
+            if (!weight) {
+                return weight.error();
+            }
+            changed.lineWeight = *weight;
+        } else if (field == "COLOUR" || field == "COLOR") {
+            if (upper(value) == "BYLAYER") {
+                changed.color.reset();
+            } else {
+                const auto colour = katana::entity::Color::fromHex(value);
+                if (!colour) {
+                    return colour.error();
+                }
+                changed.color = *colour;
+            }
+        } else if (field == "HATCH") {
+            if (value != "-" && !model.hatchPatterns.contains(value)) {
+                return makeError(ErrorCode::NotFound, "hatch pattern does not exist", value);
+            }
+            changed.hatchPattern = value == "-" ? std::string() : value;
+        } else if (field == "SYMBOL") {
+            changed.symbol = value == "-" ? std::string() : value;
+        } else if (field == "SYMBOLSIZE") {
+            const auto size = parseNumber(value);
+            if (!size) {
+                return size.error();
+            }
+            changed.symbolSize = *size;
+        } else if (field == "DESCRIPTION") {
+            std::string text;
+            for (std::size_t i = 3; i < args.size(); ++i) {
+                text += (i > 3 ? " " : "") + args[i];
+            }
+            changed.description = text;
+        } else {
+            return usage(kUsage);
+        }
+        return finish(document_.execute(cmd::updateStyle(std::move(changed))),
+                      "style " + name + " updated");
+    }
+    return usage(kUsage);
 }
 
 // ---- draw -------------------------------------------------------------------------------

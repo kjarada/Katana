@@ -128,13 +128,13 @@ PointCloudLayer toLayer(const katana::archive12d::ImportedCloud& cloud,
 
 std::vector<std::string> archive12dExtensions()
 {
-    return {"12da", "12daz", "12dz"};
+    return {"12da", "12daz"};
 }
 
 bool isZippedArchive12d(const std::filesystem::path& path)
 {
     const std::string extension = lowerExtension(path);
-    return extension == "12daz" || extension == "12dz";
+    return extension == "12daz";
 }
 
 Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& path,
@@ -180,6 +180,7 @@ Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& pat
 
     result.entities = std::move(domain->entities);
     result.layersNeeded = std::move(domain->layersNeeded);
+    result.stylesNeeded = std::move(domain->stylesNeeded);
     result.alignments = std::move(domain->alignments);
     result.surfaces = std::move(domain->surfaces);
     result.tally = std::move(domain->tally);
@@ -222,7 +223,7 @@ exportArchive12d(const katana::entity::Model& model,
     const auto known = archive12dExtensions();
     if (std::find(known.begin(), known.end(), extension) == known.end()) {
         return makeError(ErrorCode::InvalidArgument,
-                         "a 12d archive must be named .12da, .12daz or .12dz", path.string());
+                         "a 12d archive must be named .12da or .12daz", path.string());
     }
 
     katana::archive12d::ExportOptions mapping;

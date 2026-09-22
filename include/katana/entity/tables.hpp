@@ -250,6 +250,14 @@ struct LinetypePolicy : NamedTablePolicy<Linetype> {
 
 using LinetypeDatabase = NamedTable<Linetype, LinetypePolicy>;
 
+// The named symbols a point may be drawn with. A fixed set, because a symbol
+// is a shape a viewport and a plotter both know how to paint at any size;
+// the names are the ones survey and civil packages use for the same marks.
+// kNoSymbol draws the plain point mark of the viewport.
+inline constexpr std::string_view kNoSymbol = "";
+[[nodiscard]] const std::vector<std::string_view>& symbolNames();
+[[nodiscard]] bool isSymbolName(std::string_view name);
+
 struct Style {
     std::string name{};
     std::optional<Color> color{}; // empty: ByLayer
@@ -259,9 +267,25 @@ struct Style {
     // "none": a style that says nothing about hatching must not override a
     // layer that does.
     std::string hatchPattern{};
+    // What the style is for, or where it came from: a 12d linestyle arrives
+    // with its 12d colour name here, so a colour Katana has no RGB for is
+    // still known by name. Appended last, as every field is, so the storage
+    // columns keep their order.
+    std::string description{};
+    // How a POINT in this style is drawn: one of symbolNames(), or kNoSymbol
+    // for the viewport's plain mark. A 12d vertex symbol is a linestyle drawn
+    // at a vertex, which is why the symbol lives on the style and not on the
+    // point: "the style of a point" and "the style of a line" are one thing.
+    std::string symbol{kNoSymbol};
+    // Symbol size in model units; 0 means the viewport's default mark size.
+    double symbolSize = 0.0;
 
     friend bool operator==(const Style&, const Style&) = default;
 };
+
+// Fails with InvalidArgument for a bad name, a non-finite or negative line
+// weight or symbol size, or a symbol that is not one of symbolNames().
+[[nodiscard]] katana::core::Status validate(const Style& style);
 
 // ---- hatch patterns -------------------------------------------------------------
 //

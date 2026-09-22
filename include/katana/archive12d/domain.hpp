@@ -39,10 +39,19 @@
 // type, and written with enough digits to read back exactly. Null heights are
 // the word `null` in that list.
 //
+// STYLES. A 12d linestyle name becomes a Katana Style of that name, which
+// the entity carries as its style - the same field a drawn entity's style
+// lives in, so the style panel, the STYLE verb and the plotter all see it.
+// The importer lists the styles it needs (`stylesNeeded`) and the caller
+// creates the missing ones in the same transaction as the layers. A 12da
+// says nothing about what a linestyle looks like, so a new one is continuous
+// at the default weight, described as coming from 12d, for the user to
+// finish in the style manager.
+//
 // ATTRIBUTES become entity properties, typed as they were (integer, real,
 // text); a group flattens into its members' names, `Group/Sub/Name`. What 12d
-// knows about a string that Katana has no field for - its name, style, colour
-// NAME, chainage, breakline, point ids - goes in `metadata` under `12d.*`, and
+// knows about a string that Katana has no field for - its name, colour NAME,
+// chainage, breakline, point ids - goes in `metadata` under `12d.*`, and
 // export reads it back from there, so a string that is imported and exported
 // unchanged is the string it was.
 //
@@ -79,7 +88,6 @@ namespace katana::archive12d {
 inline constexpr std::string_view kElevationProperty = "elevation";
 inline constexpr std::string_view kElevationsProperty = "elevations";
 inline constexpr std::string_view kMetaName = "12d.name";
-inline constexpr std::string_view kMetaStyle = "12d.style";
 inline constexpr std::string_view kMetaColour = "12d.colour";
 inline constexpr std::string_view kMetaChainage = "12d.chainage";
 inline constexpr std::string_view kMetaBreakline = "12d.breakline";
@@ -146,6 +154,9 @@ struct DomainImport {
     // Layers the entities reference, in first-use order, with the colour of
     // the first string seen on each where that colour is one Katana knows.
     std::vector<katana::entity::Layer> layersNeeded;
+    // Styles the entities reference, in first-use order: one per distinct 12d
+    // linestyle name. The caller creates those the drawing lacks.
+    std::vector<katana::entity::Style> stylesNeeded;
     std::vector<katana::entity::Alignment> alignments;
     std::vector<ImportedSurface> surfaces;
     std::vector<ImportedCloud> clouds;

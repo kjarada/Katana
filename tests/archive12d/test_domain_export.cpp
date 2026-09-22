@@ -139,7 +139,7 @@ TEST(DomainExport, HeightsPropertiesAndTwelveDsOwnFieldsSurviveTheTrip)
     string.properties["Asset/Dim/Cover"] = 0.9;
     string.properties["Live"] = true;
     string.metadata["12d.name"] = std::string("Conduit 4-way");
-    string.metadata["12d.style"] = std::string("Comms-Conduit");
+    string.style = "Comms-Conduit";
     string.metadata["12d.colour"] = std::string("pen 025");
     string.metadata["12d.chainage"] = 12.5;
     string.metadata["12d.breakline"] = std::string("point");
@@ -170,10 +170,12 @@ TEST(DomainExport, HeightsPropertiesAndTwelveDsOwnFieldsSurviveTheTrip)
     EXPECT_EQ(std::get<std::int64_t>(again.properties.at("Ways")), 4);
     EXPECT_EQ(std::get<double>(again.properties.at("Asset/Dim/Cover")), 0.9);
     EXPECT_EQ(std::get<std::int64_t>(again.properties.at("Live")), 1) << "12d has no boolean attribute";
-    for (const char* key : {"12d.name", "12d.style", "12d.colour", "12d.chainage", "12d.breakline",
+    for (const char* key : {"12d.name", "12d.colour", "12d.chainage", "12d.breakline",
                             "12d.point_ids"}) {
         EXPECT_EQ(again.metadata.at(key), string.metadata.at(key)) << key;
     }
+    EXPECT_EQ(again.style, "Comms-Conduit") << "the style went out as the 12d linestyle and came back";
+    EXPECT_EQ(written.header.style, "Comms-Conduit");
     EXPECT_EQ(std::get<double>(back.entities[1].properties.at("elevation")), 31.25);
 }
 

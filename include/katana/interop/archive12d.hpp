@@ -1,7 +1,7 @@
 #pragma once
 
-// 12d Archive files - .12da, and the zipped .12daz / .12dz - in and out
-// (PLAN.MD Phase 20).
+// 12d Archive files - .12da, and the zipped .12daz - in and out (PLAN.MD
+// Phase 20 and 20.2).
 //
 // The format itself lives in katana_archive12d, which needs no third-party
 // library and so can be built and sanitized without GDAL. This is only the
@@ -28,7 +28,8 @@
 
 namespace katana::interop {
 
-// Without the leading dot: 12da, 12daz, and the 12dz some tools write.
+// Without the leading dot: 12da and 12daz. There is no ".12dz"; it was
+// accepted for a while by mistake.
 [[nodiscard]] std::vector<std::string> archive12dExtensions();
 [[nodiscard]] bool isZippedArchive12d(const std::filesystem::path& path);
 
@@ -48,6 +49,9 @@ struct Archive12dImportOptions {
 struct Archive12dImportResult {
     std::vector<katana::entity::Entity> entities;
     std::vector<katana::entity::Layer> layersNeeded;
+    // One per distinct 12d linestyle; the caller creates those the drawing
+    // lacks, in the same transaction as the layers.
+    std::vector<katana::entity::Style> stylesNeeded;
     // Names are unique within the import; the caller must still rename any
     // that the drawing already has, or createAlignment will refuse it.
     std::vector<katana::entity::Alignment> alignments;
@@ -84,8 +88,8 @@ struct Archive12dExportResult {
     std::vector<std::string> warnings;
 };
 
-// The extension decides the container: .12daz and .12dz are zipped, holding
-// one member named after the file with the extension .12da, as 12d Model's are.
+// The extension decides the container: .12daz is zipped, holding one member
+// named after the file with the extension .12da, as 12d Model's are.
 [[nodiscard]] katana::core::Result<Archive12dExportResult>
 exportArchive12d(const katana::entity::Model& model,
                  const std::vector<katana::archive12d::ExportSurface>& surfaces,

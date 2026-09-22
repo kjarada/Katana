@@ -180,6 +180,11 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
                 transaction->add(cmd::createLayer(layer));
             }
         }
+        for (const katana::entity::Style& style : imported->stylesNeeded) {
+            if (!document.model().styles.contains(style.name)) {
+                transaction->add(cmd::createStyle(style));
+            }
+        }
         const std::size_t count = imported->entities.size();
         const auto existingBounds = document.model().entities.bounds();
         if (count != 0) {

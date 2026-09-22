@@ -371,6 +371,14 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 [[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
 {
     // Newest first: a migration is undone before the one it was built on.
+    if (version < 9) {
+        if (auto status = database.execute("ALTER TABLE styles DROP COLUMN description;"
+                                           "ALTER TABLE styles DROP COLUMN symbol;"
+                                           "ALTER TABLE styles DROP COLUMN symbol_size;");
+            !status) {
+            return status;
+        }
+    }
     if (version < 8) {
         if (auto status = database.execute("DROP TABLE IF EXISTS alignment_pvis;"); !status) {
             return status;
@@ -1030,6 +1038,55 @@ TEST_F(ProjectStoreMigration, AProjectFromBeforeDimensionStylesGetsTheDefaultAnd
     }
     EXPECT_TRUE(loaded.dimensionStyles.contains("Standard"));
     EXPECT_EQ(loaded.dimensionStyles.size(), 1u);
+}
+
+TEST_F(ProjectStoreMigration, AStylesDescriptionAndSymbolSurviveSavingTwiceAndAnOldProjectHasNone)
+{
+    Model model = sampleModel();
+    katana::entity::Style marked;
+    marked.name = "TOPO Natural Surface Point";
+    marked.description = "12d colour: shade 48";
+    marked.symbol = "cross";
+    marked.symbolSize = 1.5;
+    ASSERT_TRUE(model.styles.add(marked).ok());
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok()) << "the second save is the one that finds a missing DELETE";
+    }
+    {
+        auto reopened = ProjectStore::open(projectDir());
+        ASSERT_TRUE(reopened.ok()) << reopened.error().describe();
+        const auto contents = reopened->load();
+        ASSERT_TRUE(contents.ok());
+        Model loaded;
+        ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+        const katana::entity::Style* reloaded = loaded.styles.find(marked.name);
+        ASSERT_NE(reloaded, nullptr);
+        EXPECT_EQ(*reloaded, marked) << "a field was lost or reordered on the way through SQLite";
+    }
+
+    // A project from before schema 9: every style comes back with no
+    // description, no symbol and the default mark size - as it was.
+    {
+        auto database = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(database.ok());
+        ASSERT_TRUE(rewindSchemaTo(*database, 8).ok());
+    }
+    auto old = ProjectStore::open(projectDir());
+    ASSERT_TRUE(old.ok()) << old.error().describe();
+    EXPECT_EQ(*old->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
+    const auto contents = old->load();
+    ASSERT_TRUE(contents.ok());
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    const katana::entity::Style* plain = loaded.styles.find(marked.name);
+    ASSERT_NE(plain, nullptr);
+    EXPECT_TRUE(plain->description.empty());
+    EXPECT_EQ(plain->symbol, katana::entity::kNoSymbol);
+    EXPECT_EQ(plain->symbolSize, 0.0);
+    EXPECT_EQ(plain->lineWeight, marked.lineWeight) << "the older columns are untouched";
 }
 
 TEST_F(ProjectStoreMigration, AProjectFromBeforeHatchPatternsOpensUnhatched)

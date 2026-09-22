@@ -21,7 +21,7 @@
 
 namespace katana::interop {
 
-// Archive12d is a 12d Archive (.12da, .12daz, .12dz): not a vector file, since
+// Archive12d is a 12d Archive (.12da or .12daz): not a vector file, since
 // one can carry surfaces, alignments and point clouds too. See archive12d.hpp.
 enum class SourceKind { Unknown, Vector, Raster, PointCloud, Archive12d };
 

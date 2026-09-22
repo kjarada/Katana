@@ -127,6 +127,14 @@ struct EntityAttributes {
 // Refuses while any layer or style still names it, and refuses "none".
 [[nodiscard]] CommandPtr deleteHatchPattern(std::string name);
 
+// ---- styles ----------------------------------------------------------------------
+// A style is how an entity that is not ByLayer is drawn: linetype, weight,
+// colour, hatch and - for a point - its symbol. Delete refuses while any
+// entity still names it. Names are what a 12d linestyle arrives as.
+[[nodiscard]] CommandPtr createStyle(katana::entity::Style style);
+[[nodiscard]] CommandPtr updateStyle(katana::entity::Style style);
+[[nodiscard]] CommandPtr deleteStyle(std::string name);
+
 // ---- alignments ------------------------------------------------------------------
 // Create and update validate the definition by solving it, so an alignment
 // that cannot be built is refused naming its PI rather than stored.

@@ -217,6 +217,15 @@ constexpr Migration kMigrations[] = {
             PRIMARY KEY (alignment, position)
         ) WITHOUT ROWID;
     )sql"},
+    // A style's description and, for points, its symbol (PLAN.MD 20.2). The
+    // defaults are exactly what every style written before this had: no
+    // description, no symbol, the viewport's own mark size - so an old
+    // drawing draws as it did.
+    {9, R"sql(
+        ALTER TABLE styles ADD COLUMN description TEXT NOT NULL DEFAULT '';
+        ALTER TABLE styles ADD COLUMN symbol TEXT NOT NULL DEFAULT '';
+        ALTER TABLE styles ADD COLUMN symbol_size REAL NOT NULL DEFAULT 0;
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -933,8 +942,8 @@ Status ProjectStore::save(const ProjectContents& contents)
     }
 
     auto insertStyle = database.prepare(
-        "INSERT INTO styles (name, color, line_weight, linetype, hatch_pattern)"
-        " VALUES (?1, ?2, ?3, ?4, ?5)");
+        "INSERT INTO styles (name, color, line_weight, linetype, hatch_pattern, description,"
+        " symbol, symbol_size) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
     if (!insertStyle) {
         return insertStyle.error();
     }
@@ -942,7 +951,9 @@ Status ProjectStore::save(const ProjectContents& contents)
         if (auto status = Binder(*insertStyle)(1, std::string_view(style.name))
                               .color(2, style.color)(3, style.lineWeight)(
                                   4, std::string_view(style.linetype))(
-                                  5, std::string_view(style.hatchPattern))
+                                  5, std::string_view(style.hatchPattern))(
+                                  6, std::string_view(style.description))(
+                                  7, std::string_view(style.symbol))(8, style.symbolSize)
                               .run();
             !status) {
             return status;
@@ -1450,8 +1461,8 @@ Result<ProjectContents> ProjectStore::load()
         return status.error();
     }
 
-    status = forEachRow("SELECT name, color, line_weight, linetype, hatch_pattern"
-                        " FROM styles ORDER BY name",
+    status = forEachRow("SELECT name, color, line_weight, linetype, hatch_pattern, description,"
+                        " symbol, symbol_size FROM styles ORDER BY name",
                         [&](SqliteStatement& row) -> Status {
                             Style style;
                             style.name = row.columnText(0);
@@ -1461,6 +1472,9 @@ Result<ProjectContents> ProjectStore::load()
                             style.lineWeight = row.columnDouble(2);
                             style.linetype = row.columnText(3);
                             style.hatchPattern = row.columnText(4);
+                            style.description = row.columnText(5);
+                            style.symbol = row.columnText(6);
+                            style.symbolSize = row.columnDouble(7);
                             contents.styles.push_back(std::move(style));
                             return {};
                         });

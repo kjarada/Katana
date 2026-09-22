@@ -250,7 +250,12 @@ TEST(DomainImport, WhatOnlyTwelveDKnowsAboutAStringTravelsInItsMetadata)
     const auto& m = domain.entities.at(0).metadata;
     EXPECT_EQ(std::get<std::string>(m.at("12d.element")), "string super");
     EXPECT_EQ(std::get<std::string>(m.at("12d.name")), "Kerb BL-047");
-    EXPECT_EQ(std::get<std::string>(m.at("12d.style")), "Kerb");
+    EXPECT_FALSE(m.contains("12d.style")) << "the style is the entity's, not metadata";
+    EXPECT_EQ(domain.entities[0].style, "Kerb");
+    ASSERT_EQ(domain.stylesNeeded.size(), 1u);
+    EXPECT_EQ(domain.stylesNeeded[0].name, "Kerb");
+    EXPECT_EQ(domain.stylesNeeded[0].description, "12d linestyle");
+    EXPECT_EQ(domain.stylesNeeded[0].linetype, katana::entity::kContinuousLinetype);
     EXPECT_EQ(std::get<std::string>(m.at("12d.colour")), "cyan");
     EXPECT_EQ(std::get<double>(m.at("12d.chainage")), 12.5);
     EXPECT_EQ(std::get<std::string>(m.at("12d.breakline")), "line");
@@ -258,8 +263,6 @@ TEST(DomainImport, WhatOnlyTwelveDKnowsAboutAStringTravelsInItsMetadata)
     EXPECT_EQ(std::get<double>(m.at("12d.diameter")), 0.3);
     EXPECT_EQ(std::get<std::string>(m.at("12d.justify")), "invert");
     EXPECT_EQ(std::get<std::string>(m.at("source")), "job.12da");
-    EXPECT_TRUE(domain.entities[0].style.empty())
-        << "a 12d linestyle is not a Katana style, which would have to exist";
 }
 
 // ---- arcs: which way a radius turns ------------------------------------------------------------
