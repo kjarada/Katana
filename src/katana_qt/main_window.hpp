@@ -66,6 +66,19 @@ class MainWindow final : public QMainWindow {
     // import hung.
     void setHeadless(bool headless) { headless_ = headless; }
 
+    // Refreshes the panels on the next pass of the event loop, once, however
+    // many times it is asked before then. See the listener in the constructor
+    // for why it must not happen synchronously.
+    void scheduleRefresh();
+
+    // Flips the visibility box of `layer` in the layer panel THROUGH THE
+    // WIDGET, as a click does, and reports whether the application survived
+    // it properly: the tree must not have been rebuilt while its own signal
+    // was on the stack, and the document must show the change afterwards.
+    // For the headless --toggle-layer switch, which exists because the first
+    // click on that box crashed the application and nothing had tested it.
+    [[nodiscard]] katana::core::Status toggleLayerThroughPanel(const QString& layer);
+
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
@@ -199,6 +212,7 @@ class MainWindow final : public QMainWindow {
 
     bool refreshingLayers_ = false;     // suppresses cellChanged while rebuilding
     bool refreshingReferences_ = false; // ditto, for the reference table
+    bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
     bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history
 };

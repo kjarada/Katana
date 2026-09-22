@@ -58,3 +58,21 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# A layer switched off through its box in the layer panel, headlessly. This
+# crashed the application when the panel was rebuilt inside its own itemChanged
+# signal; the check is in MainWindow::toggleLayerThroughPanel. BUILDING is a
+# layer of the sample with entities on it.
+if(TARGET katana)
+    add_test(NAME qt_toggle_layer_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/toggle_layer_headless.png"
+            "-DTOGGLE_LAYER=BUILDING"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_toggle_layer_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

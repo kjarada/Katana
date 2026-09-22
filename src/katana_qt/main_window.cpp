@@ -35,6 +35,7 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QTableWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QToolBar>
@@ -198,7 +199,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 
     views_->setSurfaces(&sceneSurfaces_);
     refreshViewMenu();
-    document_.addListener([this] { refreshAll(); });
+    // QUEUED, NOT DIRECT. The listener fires inside Document::execute, and
+    // execute is called from the panels' own signal handlers - the layer
+    // tree's itemChanged when a layer is switched off, the property table's
+    // cellChanged when a value is edited. A refresh there rebuilds the widget
+    // that is mid-signal: QTreeWidget::clear() deletes the very item whose
+    // setData is still on the stack, and Qt touches it again on the way out.
+    // Switching a layer off crashed the application for exactly that reason.
+    // Deferring to the event loop also coalesces one refresh per transaction
+    // instead of one per command.
+    document_.addListener([this] { scheduleRefresh(); });
     refreshAll();
     views_->setTool(Tool::Select);
     logMessage("Katana ready. Type HELP for the command list.");
@@ -629,6 +639,75 @@ void MainWindow::buildStatusBar()
 }
 
 // ---- refresh --------------------------------------------------------------------------------
+
+void MainWindow::scheduleRefresh()
+{
+    if (refreshPending_) {
+        return;
+    }
+    refreshPending_ = true;
+    QTimer::singleShot(0, this, [this] {
+        refreshPending_ = false;
+        refreshAll();
+    });
+}
+
+katana::core::Status MainWindow::toggleLayerThroughPanel(const QString& layer)
+{
+    using katana::core::ErrorCode;
+    using katana::core::makeError;
+    const std::string name = layer.toStdString();
+    const Layer* before = document_.model().layers.find(name);
+    if (before == nullptr) {
+        return makeError(ErrorCode::NotFound, "no such layer", name);
+    }
+    const bool wasVisible = before->visible;
+
+    // The items as they are now. If the slot rebuilds the tree, these are
+    // deleted by the time setCheckState returns - the bug this checks for -
+    // and the tree holds different pointers. Only pointer VALUES are compared
+    // afterwards; the old items are never dereferenced.
+    std::vector<const QTreeWidgetItem*> itemsBefore;
+    QTreeWidgetItem* target = nullptr;
+    for (QTreeWidgetItemIterator it(layerTree_); *it != nullptr; ++it) {
+        itemsBefore.push_back(*it);
+        if ((*it)->data(kName, kLayerPathRole).toString() == layer) {
+            target = *it;
+        }
+    }
+    if (target == nullptr) {
+        return makeError(ErrorCode::NotFound, "the layer is not in the panel", name);
+    }
+    target->setCheckState(kVisible, wasVisible ? Qt::Unchecked : Qt::Checked);
+
+    std::vector<const QTreeWidgetItem*> itemsAfter;
+    for (QTreeWidgetItemIterator it(layerTree_); *it != nullptr; ++it) {
+        itemsAfter.push_back(*it);
+    }
+    if (itemsAfter != itemsBefore) {
+        return makeError(ErrorCode::Internal,
+                         "the layer panel was rebuilt inside its own itemChanged signal, "
+                         "deleting the item Qt was still using");
+    }
+
+    // The refresh runs on the event loop; give it that.
+    QApplication::processEvents();
+    QApplication::processEvents();
+    const Layer* after = document_.model().layers.find(name);
+    if (after == nullptr || after->visible == wasVisible) {
+        return makeError(ErrorCode::Internal, "the document did not record the change", name);
+    }
+    for (QTreeWidgetItemIterator it(layerTree_); *it != nullptr; ++it) {
+        if ((*it)->data(kName, kLayerPathRole).toString() == layer) {
+            const bool shown = (*it)->checkState(kVisible) == Qt::Checked;
+            if (shown != after->visible) {
+                return makeError(ErrorCode::Internal, "the panel does not show the change", name);
+            }
+            return {};
+        }
+    }
+    return makeError(ErrorCode::Internal, "the layer vanished from the panel", name);
+}
 
 void MainWindow::refreshAll()
 {
@@ -1110,21 +1189,19 @@ void MainWindow::onLayerItemChanged(QTreeWidgetItem* item, int column)
         changed.locked = checked;
         if (checked && name == document_.currentLayer()) {
             logMessage("The current layer cannot be locked.", true);
-            refreshLayers();
+            scheduleRefresh(); // puts the box back; never rebuild inside our own signal
             return;
         }
     }
     const auto status = document_.execute(cmd::updateLayer(std::move(changed)));
     if (!status) {
         logMessage(QString::fromStdString(status.error().describe()), true);
-        refreshLayers();
+        scheduleRefresh();
         return;
     }
-    // Visibility and lock inherit, so switching one changes how every layer
-    // beneath it reads. Rebuilding is what keeps the panel honest about that.
-    if (document_.model().layers.hasChildren(name)) {
-        refreshLayers();
-    }
+    // On success the document's listener has already scheduled the rebuild,
+    // which is what keeps the panel honest about visibility and lock
+    // inheriting down the tree.
 }
 
 void MainWindow::onLayerItemDoubleClicked(QTreeWidgetItem* item, int column)

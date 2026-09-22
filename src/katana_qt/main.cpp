@@ -15,6 +15,7 @@
 //                 [--fit | --scale N] [--paper A4|A3|A2|A1|A0]
 //                 [--landscape | --portrait] [--dpi N]
 //   katana [project-directory] [data-file...] --screenshot out.png
+//   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -25,6 +26,11 @@
 // widget and otherwise needs a person: the qt_plot_headless test runs this
 // under QT_QPA_PLATFORM=offscreen and opens the result. --fit is the default;
 // --scale N plots at 1 : N about the view centre.
+//
+// --toggle-layer flips a layer's visibility box in the layer panel the way a
+// click does, before the screenshot, and fails if the application does not
+// come through it cleanly (MainWindow::toggleLayerThroughPanel). It is the
+// regression test for a crash on the first click of that box.
 //
 // --screenshot lays the main window out exactly as it would appear, grabs it
 // to a PNG and exits. It exists so that the LOOK of the application can be
@@ -44,6 +50,7 @@ int main(int argc, char* argv[])
 
     std::optional<QString> plotPath;
     std::optional<QString> screenshotPath;
+    std::optional<QString> toggleLayer;
     bool fit = true;
     katana::cad::PlotSettings settings;
     QStringList inputs;
@@ -57,6 +64,8 @@ int main(int argc, char* argv[])
             plotPath = value();
         } else if (argument == "--screenshot") {
             screenshotPath = value();
+        } else if (argument == "--toggle-layer") {
+            toggleLayer = value();
         } else if (argument == "--fit") {
             fit = true;
         } else if (argument == "--scale") {
@@ -117,6 +126,15 @@ int main(int argc, char* argv[])
         window.show();
         QApplication::processEvents();
         QApplication::processEvents();
+        if (toggleLayer) {
+            const auto status = window.toggleLayerThroughPanel(*toggleLayer);
+            if (!status) {
+                std::fprintf(stderr, "--toggle-layer failed: %s\n",
+                             status.error().describe().c_str());
+                return 1;
+            }
+            QApplication::processEvents();
+        }
         if (!window.grab().save(*screenshotPath, "PNG")) {
             std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
             return 1;

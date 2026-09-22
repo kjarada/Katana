@@ -26,8 +26,16 @@ file(REMOVE_RECURSE "${copy}")
 file(COPY "${PROJECT}/" DESTINATION "${copy}")
 file(REMOVE "${OUTPUT}")
 
+# With -DTOGGLE_LAYER=<name> the layer's visibility box is flipped through the
+# panel first (see --toggle-layer in main.cpp); the application refuses to
+# take the screenshot if it did not come through that cleanly.
+set(extra)
+if(DEFINED TOGGLE_LAYER)
+    set(extra --toggle-layer "${TOGGLE_LAYER}")
+endif()
+
 execute_process(
-    COMMAND "${APP}" "${copy}" --screenshot "${OUTPUT}"
+    COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
     RESULT_VARIABLE rc
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err

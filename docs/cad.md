@@ -636,3 +636,29 @@ the name that would allow it. There is no light theme. The dialogs (corridor,
 plot) are themed but plain. There are no toolbar buttons for the command-line
 only operations (rotate, scale, mirror, array, trim, extend, offset, fillet).
 
+## Panels refresh on the event loop, never inside their own signal
+
+Switching a layer off in the layer panel crashed the application. The chain
+was: the box's `itemChanged` signal -> `execute(updateLayer)` -> the
+document's change listener -> `refreshAll()` -> `refreshLayers()` ->
+`QTreeWidget::clear()`, all synchronous, all while the item whose `setData`
+raised the signal was still on Qt's stack. `clear()` deleted it, and
+`QTreeWidgetItem::setData` read its parent pointer on the way out. The
+property table had the same shape of bug behind an edited value.
+
+The listener now calls `scheduleRefresh()`, which queues one `refreshAll()`
+on the event loop however many times it is asked before that runs. It also
+coalesces: a transaction of a hundred commands used to rebuild every panel a
+hundred times. **Rejected:** guarding each slot with a re-entrancy flag,
+because that leaves the next slot to make the same mistake; the rule is that
+a document change never rebuilds a widget synchronously, and one function
+holds it.
+
+`katana --toggle-layer NAME --screenshot out.png` flips the box through the
+real widget, headlessly, and refuses to continue if the tree was rebuilt
+during the signal (it compares the item pointers before and after, without
+dereferencing the old ones) or if the document and the panel disagree
+afterwards. `qt_toggle_layer_headless` runs it on the sample; with the
+listener made synchronous again it fails with "the layer panel was rebuilt
+inside its own itemChanged signal", which is how the test earned its place.
+
