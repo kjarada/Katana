@@ -470,7 +470,13 @@ TEST(CadDocument, AListenerMayEndAnotherRegistrationWhileNotificationsRun)
 
 TEST(CadDocument, SaveReopenAndModifiedFlag)
 {
-    const fs::path directory = fs::temp_directory_path() / "katana-cad-tests" / "document.katana";
+    // Its own directory, removed by name: these tests are separate ctest
+    // cases, so under `ctest -j` they run at the same time, and a
+    // remove_all() of a directory they SHARED deleted the other's project
+    // out from under it. Measured: CadInterpreter.SaveAndOpenRoundTrip...
+    // failed roughly one Release run in eight at -j 8 and never alone.
+    const fs::path directory =
+        fs::temp_directory_path() / "katana-cad-tests-document" / "document.katana";
     fs::remove_all(directory.parent_path());
     {
         Document document;
@@ -736,7 +742,9 @@ TEST(CadInterpreter, LayersAndAttributes)
 
 TEST(CadInterpreter, SaveAndOpenRoundTripThroughTheCommandLine)
 {
-    const fs::path directory = fs::temp_directory_path() / "katana-cad-tests" / "cli.katana";
+    // Its own directory: see CadDocument.SaveReopenAndModifiedFlag.
+    const fs::path directory =
+        fs::temp_directory_path() / "katana-cad-tests-cli" / "cli.katana";
     fs::remove_all(directory.parent_path());
     const std::string quoted = "\"" + directory.generic_string() + "\"";
     {
