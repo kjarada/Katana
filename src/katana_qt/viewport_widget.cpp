@@ -26,6 +26,9 @@
 #include <QWheelEvent>
 
 #include "katana/cad/selection.hpp"
+#include "katana/archive12d/domain.hpp"
+#include "katana/geometry/chording.hpp"
+#include "katana/cad/style_drawing.hpp"
 #include "katana/cad/symbols.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
@@ -837,6 +840,13 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             return;
         }
         drawGeometry(painter, entity.geometry);
+        // A 12d linestyle is strokes laid ALONG the line, not a dash pattern
+        // cut out of it, so it is drawn in addition to the line: the ticks of
+        // a fence style sit on the fence (PLAN.MD 20.3).
+        if (const auto* definition = document_.definitionFor(display.linetype);
+            definition != nullptr && !definition->atVertices) {
+            drawLineStyle(painter, *definition, entity.geometry);
+        }
     });
 }
 
@@ -888,9 +898,145 @@ void ViewportWidget::drawMeshFootprints(QPainter& painter) const
     }
 }
 
+void ViewportWidget::drawStyleDrawing(QPainter& painter, const cad::StyleDrawing& drawing) const
+{
+    // A definition can change pen part way through - `colour "pen 035"` - and
+    // an empty pen means the entity's own colour, which is whatever the
+    // painter already carries.
+    const QPen entityPen = painter.pen();
+    for (const auto& stroke : drawing.strokes) {
+        painter.setPen(penFor(entityPen, stroke.pen));
+        if (stroke.path.vertices.size() == 1) {
+            painter.drawPoint(toScreen(stroke.path.vertices.front())); // a `dot`
+            continue;
+        }
+        QPolygonF polygon;
+        polygon.reserve(static_cast<int>(stroke.path.vertices.size()) + 1);
+        for (const auto& vertex : stroke.path.vertices) {
+            polygon << toScreen(vertex);
+        }
+        if (stroke.path.closed && !stroke.path.vertices.empty()) {
+            polygon << toScreen(stroke.path.vertices.front());
+        }
+        painter.drawPolyline(polygon);
+    }
+    for (const auto& text : drawing.texts) {
+        painter.setPen(penFor(entityPen, text.pen));
+        drawStyleText(painter, text);
+    }
+    painter.setPen(entityPen);
+}
+
+QPen ViewportWidget::penFor(const QPen& entityPen, const std::string& pen)
+{
+    if (pen.empty()) {
+        return entityPen; // 12d's "view_colour": whatever the entity is
+    }
+    QPen changed = entityPen;
+    // 12d's standard colour names, which the archive reader already knows. A
+    // pen this does not know keeps the entity's own colour rather than
+    // guessing at one.
+    if (const auto colour = katana::archive12d::standardColour(pen); colour) {
+        changed.setColor(QColor(colour->r, colour->g, colour->b));
+    }
+    return changed;
+}
+
+double ViewportWidget::paperScale() const
+{
+    // Model units to one plot millimetre, which is what a `paperstyle` is
+    // measured in. With no paper scale to go on, a millimetre is a pixel.
+    const double pixelsPerMillimetre =
+        paperPixelsPerMillimetre_ > 0.0 ? paperPixelsPerMillimetre_ : 1.0;
+    return pixelsPerMillimetre / std::max(view_.scale, 1e-12);
+}
+
+void ViewportWidget::drawStyleText(QPainter& painter, const cad::StyleTextMark& text) const
+{
+    if (text.text.empty() || text.height <= 0.0) {
+        return;
+    }
+    const double pixels = text.height * view_.scale;
+    if (pixels < 3.0) {
+        return; // smaller than it is worth painting, and unreadable anyway
+    }
+    painter.save();
+    painter.translate(toScreen(text.at));
+    // Screen y grows downwards, so a counter-clockwise model angle turns the
+    // other way on the page.
+    painter.rotate(-text.angle * 180.0 / std::numbers::pi);
+    QFont font = painter.font();
+    font.setPixelSize(std::max(1, static_cast<int>(std::lround(pixels))));
+    if (!text.font.empty()) {
+        font.setFamily(QString::fromStdString(text.font));
+    }
+    painter.setFont(font);
+    const QString value = QString::fromStdString(text.text);
+    const QFontMetricsF metrics(font);
+    // 12d justifies as "vertical-horizontal": "middle-centre", "top-left".
+    // A spelling this does not know draws from the point, which is what an
+    // unjustified text already does.
+    double dx = 0.0;
+    double dy = 0.0;
+    if (text.justify.find("centre") != std::string::npos ||
+        text.justify.find("center") != std::string::npos) {
+        dx = -0.5 * metrics.horizontalAdvance(value);
+    } else if (text.justify.find("right") != std::string::npos) {
+        dx = -metrics.horizontalAdvance(value);
+    }
+    if (text.justify.find("middle") != std::string::npos) {
+        dy = 0.5 * metrics.capHeight();
+    } else if (text.justify.find("top") != std::string::npos) {
+        dy = metrics.capHeight();
+    }
+    painter.drawText(QPointF(dx, dy), value);
+    painter.restore();
+}
+
+// A linestyle runs along whatever plan shape the entity has. An arc and a
+// circle are chorded first, because a pattern is laid by distance along a
+// path and a path is what a polyline is.
+void ViewportWidget::drawLineStyle(QPainter& painter,
+                                   const katana::entity::LineStyle& definition,
+                                   const katana::entity::Geometry& geometry) const
+{
+    const double scale = paperScale();
+    // A quarter of a pixel, the same accuracy drawGeometry chords to, so a
+    // pattern laid along a curve follows the curve that was drawn.
+    const double chordTolerance = 0.25 / std::max(view_.scale, 1e-12);
+    const auto run = [&](const katana::geometry::Polyline2& shape) {
+        if (shape.vertices.size() >= 2) {
+            drawStyleDrawing(painter, cad::styleDrawing(definition, shape, scale));
+        }
+    };
+    std::visit(
+        [&](const auto& shape) {
+            using T = std::decay_t<decltype(shape)>;
+            if constexpr (std::is_same_v<T, katana::geometry::Segment2>) {
+                run(katana::geometry::Polyline2{{shape.start, shape.end}, false});
+            } else if constexpr (std::is_same_v<T, katana::geometry::Polyline2>) {
+                run(shape);
+            } else if constexpr (std::is_same_v<T, katana::geometry::Arc2>) {
+                run(katana::geometry::Polyline2{
+                    katana::geometry::chordArc(shape, chordTolerance), false});
+            } else if constexpr (std::is_same_v<T, katana::geometry::Circle2>) {
+                run(katana::geometry::Polyline2{
+                    katana::geometry::chordCircle(shape, chordTolerance), true});
+            }
+            // A point, a text and a mesh have no line to lay a pattern along.
+        },
+        geometry);
+}
+
 void ViewportWidget::drawSymbol(QPainter& painter, const std::string& symbol,
                                 const Point2& centre, double size) const
 {
+    // A loaded 12d symbol library answers first; the sixteen built-in shapes
+    // are what a name falls back to (PLAN.MD 20.3).
+    if (const auto* definition = document_.definitionFor(symbol); definition != nullptr) {
+        drawStyleDrawing(painter, cad::symbolDrawing(*definition, centre, size, 0.0, paperScale()));
+        return;
+    }
     // The style's size is the symbol's width, as 12d's is; the strokes take
     // a half-width. A symbol with no size of its own is the plain mark's
     // size, in model units at the current scale, so it stays a mark and not

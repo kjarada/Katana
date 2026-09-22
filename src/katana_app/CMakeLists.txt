@@ -1,7 +1,7 @@
 # Headless command-line front end. Proves the engine is complete without a GUI.
 add_executable(katana_cli main.cpp)
 katana_target_defaults(katana_cli)
-target_link_libraries(katana_cli PRIVATE katana_cad)
+target_link_libraries(katana_cli PRIVATE katana_cad katana_archive12d)
 
 # Interoperability is optional: with -DKATANA_BUILD_IO=OFF the CLI still builds
 # and simply has no IMPORT/EXPORT verbs, which is what the sanitizer job needs.

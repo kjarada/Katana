@@ -274,3 +274,62 @@ The check was not simply deleted, because catching a typo is worth something:
 
 `cad::Document` carries the loaded library and mapfile, and `definitionFor`
 is the single place a name is resolved.
+
+## Loading a customisation
+
+`archive12d::readCustomisation` takes a list of files and works out what each
+one is BY LOOKING INSIDE IT. That is not fastidiousness: of the four files
+this was built against, `TfNSW_Survey_Detail.mapfile` and `names.4d` are both
+mapfiles while `user_linestyl_TfNSWv15.4d` and `user_symbols_TfNSWv15.4d` are
+both style libraries, so `.4d` is two different formats in one folder and a
+loader that went by the extension would read half the customisation as the
+wrong thing.
+
+It lives beside the readers rather than in a front end because both front ends
+need it, and it needs no third-party library, so it costs `archive12d` nothing
+of the property that lets it build with `-DKATANA_BUILD_IO=OFF`.
+
+Loading the real customisation, from the command line:
+
+```
+katana_cli -c 'CUSTOMISE "docs/12d Refrence Files/user_linestyl_TfNSWv15.4d" ...'
+  user_linestyl_TfNSWv15.4d: style library, 322 definitions (1 replacing one already loaded)
+  user_symbols_TfNSWv15.4d: style library, 474 definitions (3 replacing one already loaded)
+  TfNSW_Survey_Detail.mapfile: mapfile, 725 rules
+  names.4d: mapfile, 899 rules
+  warning: names.4d: an <item> of <map_data> has no <key> and was skipped
+  5 names the mapfile asks for that no loaded library defines: "0", "1", ...
+792 linestyle and symbol definitions in 71 groups, 157 of them symbols
+1624 survey code rules over 632 distinct codes
+```
+
+In the application it is **File > Load 12d Customisation...**, which takes
+several files at once and writes the same report into the command log.
+
+## Drawing it
+
+The viewport resolves a name against the loaded library first and the sixteen
+built-in shapes after:
+
+- a point whose style names a definition is drawn with that definition's
+  strokes, at the style's size and the symbol's rotation;
+- a line whose style's `linetype` names a definition has that definition laid
+  ALONG it, in addition to the line itself - a 12d linestyle is strokes on the
+  line, not a dash pattern cut out of it, so the ticks of a fence style sit on
+  the fence;
+- a `colour` command inside a definition changes the pen for the strokes that
+  follow it, and `view_colour` means the entity's own colour.
+
+## A test that passed while doing nothing
+
+Worth recording, because it nearly got through. The headless test that loads
+the customisation into the real window first passed in 0.29 s having loaded
+**nothing**: the list of paths was passed to `cmake -P` as
+`-DCUSTOMISE=a\;b\;c`, the escaped separators arrived as part of the paths,
+every `EXISTS` failed, and the helper dutifully ran the application without
+the switch. The screenshot showed a window with no customisation in its log,
+which is what gave it away.
+
+It now takes a DIRECTORY and globs it, so there is no list to mangle, and the
+helper prints how many files it found. A test that cannot report what it
+actually exercised is a test that can pass for the wrong reason.

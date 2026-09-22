@@ -38,6 +38,12 @@
 // come through it cleanly (MainWindow::toggleLayerThroughPanel). It is the
 // regression test for a crash on the first click of that box.
 //
+// --customise loads 12d linestyle and symbol libraries and mapfiles before
+// anything is drawn, so a screenshot shows the drawing as the customisation
+// says it should look. It takes every path until the next switch, because a
+// customisation is several files and which is which is decided by looking
+// inside them rather than by their extension.
+//
 // --style-manager opens the styles and linetypes manager before the
 // screenshot and grabs THAT window instead of the main one, so the dialog -
 // its tables, its form and its two previews - is built and painted in a test
@@ -62,6 +68,7 @@ int main(int argc, char* argv[])
     std::optional<QString> plotPath;
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
+    std::vector<std::filesystem::path> customisation;
     bool styleManager = false;
     bool attributeManager = false;
     bool layerManager = false;
@@ -81,6 +88,12 @@ int main(int argc, char* argv[])
             screenshotPath = value();
         } else if (argument == "--toggle-layer") {
             toggleLayer = value();
+        } else if (argument == "--customise") {
+            // Every path until the next switch: a customisation is several
+            // files and they are useless apart.
+            while (i + 1 < arguments.size() && !arguments.at(i + 1).startsWith("--")) {
+                customisation.emplace_back(arguments.at(++i).toStdString());
+            }
         } else if (argument == "--style-manager") {
             styleManager = true;
         } else if (argument == "--layer-manager") {
@@ -191,6 +204,9 @@ int main(int argc, char* argv[])
                 return 1;
             }
             return 0;
+        }
+        if (!customisation.empty()) {
+            window.applyCustomisation(customisation);
         }
         if (styleManager) {
             auto dialog = window.makeStyleManager();

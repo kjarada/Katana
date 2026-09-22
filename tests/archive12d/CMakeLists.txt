@@ -15,6 +15,7 @@ katana_add_test_suite(archive12d
         test_text.cpp
         test_style_library.cpp
         test_map_file.cpp
+        test_customisation.cpp
 )
 # The fixtures are small hand-written archives; the multi-megabyte exports the
 # format was learned from are real project data and are not in the repository.

@@ -43,6 +43,26 @@ file(REMOVE "${OUTPUT}")
 # With -DSTYLE_MANAGER=ON the styles and linetypes manager is opened and IT
 # is what the PNG holds, so the dialog is built and painted by a test.
 set(extra)
+# With -DCUSTOMISE_DIR=<directory> every 12d library and mapfile in it is
+# loaded before anything is drawn, so the drawing appears as the customisation
+# says it should (PLAN.MD 20.3). A DIRECTORY rather than a list of files,
+# because a list of paths cannot survive being passed through `cmake -D`
+# without its separators being escaped into the paths themselves - which is
+# exactly what happened, and left this test passing while loading nothing.
+#
+# A customisation that is not in the checkout - the reference one carries its
+# author's licence notice - is reported and the run goes on without it, since
+# the suite must stay green in a checkout that does not include it.
+if(DEFINED CUSTOMISE_DIR)
+    file(GLOB _customisation "${CUSTOMISE_DIR}/*.4d" "${CUSTOMISE_DIR}/*.mapfile")
+    if(_customisation)
+        list(APPEND extra "--customise" ${_customisation})
+        list(LENGTH _customisation _count)
+        message(STATUS "customisation: ${_count} files from ${CUSTOMISE_DIR}")
+    else()
+        message(STATUS "no customisation files in ${CUSTOMISE_DIR}; running without them")
+    endif()
+endif()
 if(DEFINED IMPORT)
     list(APPEND extra "${IMPORT}")
 endif()

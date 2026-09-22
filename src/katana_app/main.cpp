@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "katana/cad/command_interpreter.hpp"
+#include "katana/archive12d/customisation.hpp"
 #include "katana/cad/document.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
@@ -45,6 +46,69 @@ bool isQuit(const std::string& line)
         verb += static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     }
     return verb == "QUIT" || verb == "EXIT";
+}
+
+// CUSTOMISE is here rather than in CommandInterpreter for the same reason
+// IMPORT is: the interpreter belongs to katana_cad, which may not see the 12d
+// readers. Unlike IMPORT it needs no third-party library, so it is outside
+// the interoperability guard and is offered even in a build with no GDAL.
+bool runCustomise(katana::cad::Document& document, const std::vector<std::string>& paths)
+{
+    if (paths.empty()) {
+        const auto& library = document.styleLibrary();
+        const auto& map = document.surveyMap();
+        if (library.empty() && map.empty()) {
+            std::cout << "No 12d customisation is loaded.\n"
+                      << "  CUSTOMISE <file> [<file>...]  loads linestyle and symbol libraries "
+                         "(.4d) and mapfiles\n";
+            return true;
+        }
+        std::cout << library.size() << " linestyle and symbol definitions in "
+                  << katana::entity::styleGroups(library).size() << " groups, "
+                  << katana::entity::vertexStyleNames(library).size() << " of them symbols\n"
+                  << map.size() << " survey code rules over " << map.keys().size()
+                  << " distinct codes\n";
+        return true;
+    }
+
+    std::vector<std::filesystem::path> files;
+    files.reserve(paths.size());
+    for (const std::string& path : paths) {
+        files.emplace_back(path);
+    }
+    auto loaded = katana::archive12d::readCustomisation(files);
+    if (!loaded) {
+        std::cerr << "error: " << loaded.error().describe() << "\n";
+        return false;
+    }
+    for (const katana::archive12d::LoadedFile& file : loaded->files) {
+        std::cout << "  " << file.path.filename().string() << ": "
+                  << katana::archive12d::toString(file.kind) << ", " << file.read;
+        std::cout << (file.kind == katana::archive12d::CustomisationFile::MapFile ? " rules"
+                                                                                  : " definitions");
+        if (file.replaced != 0) {
+            std::cout << " (" << file.replaced << " replacing one already loaded)";
+        }
+        std::cout << "\n";
+    }
+    for (const std::string& warning : loaded->warnings) {
+        std::cout << "  warning: " << warning << "\n";
+    }
+    // A customisation need not be self-contained. Saying what is missing is
+    // the difference between a symbol that is plainly absent and one that is
+    // silently drawn as a dot.
+    const std::vector<std::string> missing = loaded->unresolvedStyles();
+    if (!missing.empty()) {
+        std::cout << "  " << missing.size()
+                  << " names the mapfile asks for that no loaded library defines:";
+        for (std::size_t i = 0; i < missing.size() && i < 8; ++i) {
+            std::cout << (i == 0 ? " " : ", ") << "\"" << missing[i] << "\"";
+        }
+        std::cout << (missing.size() > 8 ? ", ...\n" : "\n");
+    }
+    document.setStyleLibrary(std::move(loaded->library));
+    document.setSurveyMap(std::move(loaded->map));
+    return true;
 }
 
 #if defined(KATANA_WITH_INTEROP)
@@ -399,6 +463,34 @@ bool runLine(Session& session, const std::string& line)
     if (!line.empty() && line.front() == '#') {
         return true;
     }
+    if (upperVerb(line) == "CUSTOMISE" || upperVerb(line) == "CUSTOMIZE") {
+        // Paths may have spaces, so they are taken as quoted words where they
+        // are quoted and as plain words where they are not.
+        std::vector<std::string> paths;
+        std::size_t at = line.find_first_of(" \t");
+        while (at != std::string::npos && at < line.size()) {
+            while (at < line.size() && (line[at] == ' ' || line[at] == '\t')) {
+                ++at;
+            }
+            if (at >= line.size()) {
+                break;
+            }
+            if (line[at] == '"') {
+                const std::size_t end = line.find('"', at + 1);
+                if (end == std::string::npos) {
+                    std::cerr << "error: InvalidArgument: a quoted path is never closed\n";
+                    return false;
+                }
+                paths.push_back(line.substr(at + 1, end - at - 1));
+                at = end + 1;
+            } else {
+                const std::size_t end = line.find_first_of(" \t", at);
+                paths.push_back(line.substr(at, end == std::string::npos ? end : end - at));
+                at = end;
+            }
+        }
+        return runCustomise(session.document, paths);
+    }
 #if defined(KATANA_WITH_INTEROP)
     // Interoperability verbs are handled before the interpreter sees the line,
     // because they live above katana_cad rather than inside it.
@@ -450,7 +542,10 @@ int main(int argc, char* argv[])
             std::cout << "usage: katana_cli [script-file] [-c \"command\"]...\n\n"
                       << katana::cad::CommandInterpreter::helpText() << '\n';
 #if defined(KATANA_WITH_INTEROP)
-            std::cout << "Interop   IMPORT <file> | EXPORT <file> | REFS\n"
+            std::cout << "Survey    CUSTOMISE <file> [<file>...]  load 12d linestyle and symbol\n"
+                         "          libraries (.4d) and mapfiles; CUSTOMISE alone reports what "
+                         "is loaded\n"
+                         "Interop   IMPORT <file> | EXPORT <file> | REFS\n"
                       << "          vector -> entities; raster and point cloud -> "
                          "reference layers\n";
 #endif

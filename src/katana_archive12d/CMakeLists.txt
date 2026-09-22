@@ -24,6 +24,7 @@ add_library(katana_archive12d STATIC
     style_library.cpp
     xml.cpp
     map_file.cpp
+    customisation.cpp
 )
 katana_target_defaults(katana_archive12d)
 target_link_libraries(katana_archive12d

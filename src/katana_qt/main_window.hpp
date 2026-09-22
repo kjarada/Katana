@@ -85,6 +85,12 @@ class MainWindow final : public QMainWindow {
     // click on that box crashed the application and nothing had tested it.
     [[nodiscard]] katana::core::Status toggleLayerThroughPanel(const QString& layer);
 
+    // Loads a 12d customisation - linestyle and symbol libraries, mapfiles -
+    // and reports what it found into the message log. Public because the
+    // headless --customise switch drives the same path the menu item does, so
+    // what a test exercises is what a person gets.
+    void applyCustomisation(const std::vector<std::filesystem::path>& paths);
+
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
@@ -166,6 +172,7 @@ class MainWindow final : public QMainWindow {
 
     // ---- import / export (PLAN.MD Phase 20) ---------------------------------
     void importFile();
+    void loadCustomisation();
     void importVectorFile(const std::filesystem::path& path);
     void importArchive12dFile(const std::filesystem::path& path);
     void importRasterFile(const std::filesystem::path& path);

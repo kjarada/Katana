@@ -59,6 +59,26 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
+# The whole main window with a 12d customisation loaded into it: the two
+# libraries and the mapfile read, resolved against each other, and reported.
+# This is the path the File > Load 12d Customisation menu item takes, so what
+# ctest exercises is what a person gets (PLAN.MD 20.3). It runs without the
+# files when they are not in the checkout - they carry their author's licence
+# notice - and then proves only that the switch does no harm.
+if(TARGET katana)
+    add_test(NAME qt_customisation_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_headless.png"
+            "-DCUSTOMISE_DIR=${PROJECT_SOURCE_DIR}/docs/12d Refrence Files"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_customisation_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # A layer switched off through its box in the layer panel, headlessly. This
 # crashed the application when the panel was rebuilt inside its own itemChanged
 # signal; the check is in MainWindow::toggleLayerThroughPanel. BUILDING is a
