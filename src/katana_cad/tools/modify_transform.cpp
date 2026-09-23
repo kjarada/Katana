@@ -128,7 +128,8 @@ constexpr std::string_view kNoDirection =
 // come to this. The same construction as duplicateEach in entity_commands.cpp,
 // which is private there; a copy keeps everything but its id, which the model
 // assigns.
-cmd::CommandPtr duplicated(std::string name, std::vector<EntityId> ids, std::vector<Mat3> transforms)
+cmd::CommandPtr duplicated(std::string name, std::vector<EntityId> ids,
+                           std::vector<Mat3> transforms)
 {
     return std::make_unique<cmd::ChangeSetCommand>(
         std::move(name),
@@ -368,7 +369,10 @@ class SelectionTool : public InteractiveTool {
     [[nodiscard]] virtual ToolFeedback stepPreview(const Point2& /*cursor*/) const { return {}; }
     [[nodiscard]] virtual std::optional<Point2> stepLastPoint() const { return std::nullopt; }
     // The selection is complete. Erase finishes here; the others go on.
-    [[nodiscard]] virtual ToolStep selected() { return ToolStep::next(counted(ids_.size()) + " selected"); }
+    [[nodiscard]] virtual ToolStep selected()
+    {
+        return ToolStep::next(counted(ids_.size()) + " selected");
+    }
 
     [[nodiscard]] const std::vector<EntityId>& ids() const { return ids_; }
     [[nodiscard]] const Document* document() const { return document_; }
@@ -559,7 +563,8 @@ class CopyTool final : public SelectionTool {
         case Displace::Typed: {
             const Vec2 offset = at - Point2();
             if (offset.length() <= tolerance::kGeometric) {
-                return ToolStep::rejected("a displacement of zero would put the copy on the original");
+                return ToolStep::rejected(
+                    "a displacement of zero would put the copy on the original");
             }
             return finish({offset});
         }
@@ -656,7 +661,8 @@ class CopyTool final : public SelectionTool {
     ToolStep place(const Point2& at)
     {
         if (coincident(at, state_.now.base)) {
-            return ToolStep::rejected("the second point is the base point: the copy would lie on the original");
+            return ToolStep::rejected(
+                "the second point is the base point: the copy would lie on the original");
         }
         state_.remember();
         state_.now.offsets.push_back(at - state_.now.base);
@@ -896,11 +902,13 @@ class RotateTool final : public SelectionTool {
     ToolStep finish(double radians)
     {
         if (katana::math::anglesEqual(radians, 0.0)) {
-            return ToolStep::rejected("a rotation of 0 degrees, or of whole turns, changes nothing");
+            return ToolStep::rejected(
+                "a rotation of 0 degrees, or of whole turns, changes nothing");
         }
         const State& now = state_.now;
-        auto command = now.copy ? duplicated("ROTATE", ids(), {Mat3::rotationAbout(now.base, radians)})
-                                : cmd::rotateEntities(ids(), now.base, radians);
+        auto command = now.copy
+                           ? duplicated("ROTATE", ids(), {Mat3::rotationAbout(now.base, radians)})
+                           : cmd::rotateEntities(ids(), now.base, radians);
         return ToolStep::done(std::move(command),
                               counted(ids().size()) + (now.copy ? " copied rotated" : " rotated"));
     }
@@ -920,7 +928,15 @@ class ScaleTool final : public SelectionTool {
     explicit ScaleTool(const ToolContext& context) : SelectionTool(context, "scale") {}
 
   private:
-    enum class Step { Base, Factor, ReferenceFirst, ReferenceSecond, NewLength, NewFirst, NewSecond };
+    enum class Step {
+        Base,
+        Factor,
+        ReferenceFirst,
+        ReferenceSecond,
+        NewLength,
+        NewFirst,
+        NewSecond
+    };
     struct State {
         Step step = Step::Base;
         Point2 base;
@@ -1055,7 +1071,8 @@ class ScaleTool final : public SelectionTool {
         ToolFeedback feedback;
         const State& now = state_.now;
         const auto grow = [&](const Point2& from) {
-            const double factor = from.distanceTo(cursor) / (now.step == Step::Factor ? 1.0 : now.reference);
+            const double per = now.step == Step::Factor ? 1.0 : now.reference;
+            const double factor = from.distanceTo(cursor) / per;
             if (factor > tolerance::kGeometric) {
                 addPreview(feedback, Mat3::scalingAbout(now.base, factor, factor));
             }
@@ -1121,9 +1138,9 @@ class ScaleTool final : public SelectionTool {
             return ToolStep::rejected("a scale factor of 1 changes nothing");
         }
         const State& now = state_.now;
-        auto command = now.copy
-                           ? duplicated("SCALE", ids(), {Mat3::scalingAbout(now.base, factor, factor)})
-                           : cmd::scaleEntities(ids(), now.base, factor);
+        auto command =
+            now.copy ? duplicated("SCALE", ids(), {Mat3::scalingAbout(now.base, factor, factor)})
+                     : cmd::scaleEntities(ids(), now.base, factor);
         return ToolStep::done(std::move(command),
                               counted(ids().size()) + (now.copy ? " copied scaled" : " scaled"));
     }
@@ -1320,7 +1337,8 @@ class ArrayRectangularTool final : public SelectionTool {
                 return notUnderstood(text, "a distance or a point");
             }
             if (std::abs(*distance) <= tolerance::kGeometric) {
-                return ToolStep::rejected("a spacing of zero would stack every copy on the original");
+                return ToolStep::rejected(
+                    "a spacing of zero would stack every copy on the original");
             }
             if (now.step == Step::RowSpacing && now.columns > 1) {
                 state_.remember();
@@ -1351,10 +1369,12 @@ class ArrayRectangularTool final : public SelectionTool {
         case Step::CellCorner: {
             const Vec2 cell = at - now.first;
             if (now.rows > 1 && std::abs(cell.y) <= tolerance::kGeometric) {
-                return ToolStep::rejected("the unit cell has no height: the rows would stack on each other");
+                return ToolStep::rejected(
+                    "the unit cell has no height: the rows would stack on each other");
             }
             if (now.columns > 1 && std::abs(cell.x) <= tolerance::kGeometric) {
-                return ToolStep::rejected("the unit cell has no width: the columns would stack on each other");
+                return ToolStep::rejected(
+                    "the unit cell has no width: the columns would stack on each other");
             }
             return finish(cell);
         }
@@ -1363,7 +1383,8 @@ class ArrayRectangularTool final : public SelectionTool {
             // any rise between the two points is not part of it.
             const double dx = at.x - now.first.x;
             if (std::abs(dx) <= tolerance::kGeometric) {
-                return ToolStep::rejected("the points are level across the columns: a spacing of zero would stack them");
+                return ToolStep::rejected("the points are level across the columns: a spacing of "
+                                          "zero would stack them");
             }
             return finish(Vec2(dx, now.rowSpacing));
         }
@@ -1616,7 +1637,8 @@ class ArrayPolarTool final : public SelectionTool {
     ToolStep fill(double degrees)
     {
         if (std::abs(degrees) <= tolerance::kAngular) {
-            return ToolStep::rejected("an angle to fill of 0 would stack every item on the original");
+            return ToolStep::rejected(
+                "an angle to fill of 0 would stack every item on the original");
         }
         if (std::abs(degrees) > 360.0) {
             return ToolStep::rejected("the angle to fill is at most 360 degrees either way");
@@ -1750,7 +1772,8 @@ struct Stretcher {
             return makeError(ErrorCode::InvalidArgument,
                              "stretching would bring the arc's ends together");
         }
-        const Point2 middle = (newStart + newEnd) * 0.5 + newChord.normalized().perpendicular() * height;
+        const Point2 middle =
+            (newStart + newEnd) * 0.5 + newChord.normalized().perpendicular() * height;
         const auto rebuilt = Arc2::throughPoints(newStart, middle, newEnd);
         if (!rebuilt) {
             return makeError(ErrorCode::InvalidArgument, "the stretched arc would be degenerate");
@@ -1760,7 +1783,8 @@ struct Stretcher {
 
     Result<std::optional<Geometry>> operator()(const Polyline2& polyline) const
     {
-        if (std::ranges::none_of(polyline.vertices, [&](const Point2& p) { return window.contains(p); })) {
+        if (std::ranges::none_of(polyline.vertices,
+                                 [&](const Point2& p) { return window.contains(p); })) {
             return std::optional<Geometry>();
         }
         Polyline2 out = polyline;
@@ -1788,7 +1812,8 @@ struct Stretcher {
         return std::optional<Geometry>(std::move(out));
     }
 
-    Result<std::optional<Geometry>> operator()(const katana::entity::DimensionGeometry& dimension) const
+    Result<std::optional<Geometry>>
+    operator()(const katana::entity::DimensionGeometry& dimension) const
     {
         if (!window.contains(dimension.start) && !window.contains(dimension.end)) {
             return std::optional<Geometry>();
@@ -1814,7 +1839,8 @@ Result<cmd::ChangeSet> stretchChanges(const katana::entity::Model& model,
     for (const EntityId id : ids) {
         const Entity* entity = model.entities.find(id);
         if (entity == nullptr) {
-            return makeError(ErrorCode::NotFound, "entity does not exist", "id=" + std::to_string(id));
+            return makeError(ErrorCode::NotFound, "entity does not exist",
+                             "id=" + std::to_string(id));
         }
         auto stretched = std::visit(stretcher, entity->geometry);
         if (!stretched) {
@@ -1935,7 +1961,8 @@ class StretchTool final : public InteractiveTool {
 
     [[nodiscard]] ToolStep undo() override
     {
-        return state_.back() ? ToolStep::next() : ToolStep::rejected("nothing to undo in this tool");
+        return state_.back() ? ToolStep::next()
+                             : ToolStep::rejected("nothing to undo in this tool");
     }
 
     [[nodiscard]] ToolFeedback preview(const Point2& cursor) const override
@@ -2003,8 +2030,8 @@ class StretchTool final : public InteractiveTool {
     static Polyline2 outline(Box2 box, const Point2& to)
     {
         box.expand(to);
-        return Polyline2{{box.min, Point2(box.max.x, box.min.y), box.max, Point2(box.min.x, box.max.y)},
-                         true};
+        return Polyline2{
+            {box.min, Point2(box.max.x, box.min.y), box.max, Point2(box.min.x, box.max.y)}, true};
     }
 
     ToolStep window(const Point2& opposite)
@@ -2017,10 +2044,11 @@ class StretchTool final : public InteractiveTool {
         if (document_ == nullptr) {
             return ToolStep::rejected("there is no drawing to stretch");
         }
-        std::vector<EntityId> caught = pickInBox(document_->model(), box, BoxSelectionMode::Crossing,
-                                                 {}, &document_->spatialIndex());
+        std::vector<EntityId> caught = pickInBox(
+            document_->model(), box, BoxSelectionMode::Crossing, {}, &document_->spatialIndex());
         if (!limit_.empty()) {
-            std::erase_if(caught, [&](EntityId id) { return !std::ranges::binary_search(limit_, id); });
+            std::erase_if(caught,
+                          [&](EntityId id) { return !std::ranges::binary_search(limit_, id); });
         }
         // Only what has a point inside can stretch: a line merely crossing the
         // window has neither end in it, and stays as it is.
