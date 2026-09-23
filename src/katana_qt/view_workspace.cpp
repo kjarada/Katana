@@ -157,7 +157,6 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
         auto* plan = new ViewportWidget(document_, state, view.dock);
         plan->setReferenceData(reference_);
         plan->setMeshes(meshes_);
-        plan->setTool(tool_);
         plan->setGridVisible(gridVisible_);
         plan->setSnapEnabled(snapEnabled_);
         plan->setSnapModes(snapModes_);
@@ -177,20 +176,7 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
                 onCursorMoved(world, snap);
             }
         };
-        plan->onToolChanged = [this](Tool tool) {
-            // A view that dropped back to Select on its own (a right-click
-            // with nothing picked) takes every other plan view with it, so the
-            // views never disagree about the tool the toolbar shows.
-            tool_ = tool;
-            for (ViewportWidget* other : planViews()) {
-                if (other->tool() != tool) {
-                    other->setTool(tool);
-                }
-            }
-            if (onToolChanged) {
-                onToolChanged(tool);
-            }
-        };
+        wireTools(*plan);
         plan->onActivated = [this, id] { activate(id); };
         view.plan = plan;
         break;
@@ -812,11 +798,80 @@ bool ViewWorkspace::showSection(katana::cad::Section section)
     return true;
 }
 
+void ViewWorkspace::wireTools(ViewportWidget& plan)
+{
+    plan.onToolChanged = [this](Tool tool) {
+        tool_ = tool;
+        if (onToolChanged) {
+            onToolChanged(tool);
+        }
+    };
+    plan.onActiveToolChanged = [this](const std::string& id) {
+        if (onActiveToolChanged) {
+            onActiveToolChanged(id);
+        }
+    };
+    plan.onToolMessage = [this](const QString& message) {
+        if (onToolMessage) {
+            onToolMessage(message);
+        } else if (onStatus) {
+            onStatus(message);
+        }
+    };
+}
+
+Status ViewWorkspace::startTool(std::string_view id)
+{
+    ViewportWidget* target = activePlanView();
+    if (target == nullptr) {
+        return makeError(ErrorCode::InvalidState, "there is no plan view to draw in",
+                         std::string(id));
+    }
+    if (katana::cad::toolCatalog().find(id) == nullptr) {
+        return makeError(ErrorCode::NotFound, "there is no tool '" + std::string(id) + "'");
+    }
+    // One tool at a time in the workspace: a second running in another view
+    // would hold picks the user can no longer see is pending.
+    for (ViewportWidget* plan : planViews()) {
+        if (plan != target && plan->toolActive()) {
+            plan->setTool(Tool::Select);
+        }
+    }
+    return target->startTool(id);
+}
+
+std::string ViewWorkspace::activeToolId() const
+{
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
+            return plan->activeToolId();
+        }
+    }
+    return {};
+}
+
+bool ViewWorkspace::typeIntoTool(const QString& text)
+{
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
+            return plan->typeIntoTool(text);
+        }
+    }
+    return false;
+}
+
 void ViewWorkspace::setTool(Tool tool)
 {
-    tool_ = tool;
-    for (ViewportWidget* plan : planViews()) {
-        plan->setTool(tool);
+    if (tool == Tool::Select) {
+        for (ViewportWidget* plan : planViews()) {
+            plan->setTool(Tool::Select);
+        }
+        tool_ = Tool::Select;
+        return;
+    }
+    const Status started = startTool(toolId(tool));
+    if (!started && onError) {
+        onError(QString::fromStdString(started.error().describe()));
     }
 }
 

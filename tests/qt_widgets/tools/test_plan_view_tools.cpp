@@ -1,0 +1,389 @@
+// The catalogue's tools hosted in a real plan view (src/katana_qt/
+// viewport_widget with tools/tool_host): clicks, typing, Enter, Esc and a
+// right-click sent to the widget as Qt events, and the result read back from
+// the Document - its entities and its undo history.
+//
+// Every view here is 400 x 300 pixels, centred on the model origin at 10
+// pixels a unit, and never framed, so a pixel's model point is worked by
+// hand from ViewTransform::screenToWorld:
+//     x = (px - 200) / 10        y = -(py - 150) / 10
+// e.g. pixel (300, 50) is model (10, 10) and pixel (250, 100) is (5, 5).
+
+#include <gtest/gtest.h>
+
+#include <string>
+#include <vector>
+
+#include <QKeyEvent>
+#include <QMouseEvent>
+
+#include "katana/cad/view_set.hpp"
+#include "katana/commands/entity_commands.hpp"
+#include "katana/geometry/primitives2d.hpp"
+#include "widget_harness.hpp"
+
+using katana::cad::Document;
+using katana::cad::ViewKind;
+using katana::cad::ViewSet;
+using katana::cad::ViewState;
+using katana::entity::EntityId;
+using katana::geometry::Point2;
+using katana::geometry::Segment2;
+using katana::qt::Tool;
+using katana::qt::ViewportWidget;
+using katana::qt::test::paint;
+
+namespace {
+
+// A plan view on a fresh document at the scale the header works through.
+// Snapping is off unless a test turns it on, so a click lands exactly where
+// the hand-worked sum says.
+struct PlanFixture {
+    Document document;
+    ViewSet views;
+    ViewState& state;
+    ViewportWidget view;
+    std::vector<QString> errors;
+    std::vector<QString> typedOut;
+
+    PlanFixture() : state(views.add(ViewKind::Plan)), view(document, state)
+    {
+        state.planFramed = true; // never framed: the centre and scale stay put
+        state.plan.center = Point2(0.0, 0.0);
+        state.plan.scale = 10.0;
+        state.plan.resize(400.0, 300.0);
+        view.resize(400, 300);
+        view.setSnapEnabled(false);
+        view.onError = [this](const QString& text) { errors.push_back(text); };
+        view.onTextTyped = [this](const QString& text) { typedOut.push_back(text); };
+        paint(view);
+    }
+
+    void press(double x, double y, Qt::MouseButton button = Qt::LeftButton,
+               Qt::KeyboardModifiers modifiers = Qt::NoModifier)
+    {
+        const QPointF at(x, y);
+        QMouseEvent down(QEvent::MouseButtonPress, at, view.mapToGlobal(at), button, button,
+                         modifiers);
+        QCoreApplication::sendEvent(&view, &down);
+        QMouseEvent up(QEvent::MouseButtonRelease, at, view.mapToGlobal(at), button,
+                       Qt::NoButton, modifiers);
+        QCoreApplication::sendEvent(&view, &up);
+    }
+    void move(double x, double y)
+    {
+        const QPointF at(x, y);
+        QMouseEvent moved(QEvent::MouseMove, at, view.mapToGlobal(at), Qt::NoButton,
+                          Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&view, &moved);
+    }
+    void key(int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier, const QString& text = {})
+    {
+        // A shortcut is offered to the widget first, as Qt does, so the
+        // view's ShortcutOverride handling is exercised too.
+        QKeyEvent override(QEvent::ShortcutOverride, code, modifiers, text);
+        QCoreApplication::sendEvent(&view, &override);
+        QKeyEvent down(QEvent::KeyPress, code, modifiers, text);
+        QCoreApplication::sendEvent(&view, &down);
+    }
+    // Types `text` a character at a time, as a keyboard does.
+    void type(const QString& text)
+    {
+        for (const QChar c : text) {
+            key(c.toUpper().unicode(), Qt::NoModifier, QString(c));
+        }
+    }
+    void enter() { key(Qt::Key_Return); }
+    void escape() { key(Qt::Key_Escape); }
+
+    [[nodiscard]] std::vector<const katana::entity::Entity*> entities() const
+    {
+        std::vector<const katana::entity::Entity*> out;
+        document.model().entities.forEach(
+            [&](const katana::entity::Entity& entity) { out.push_back(&entity); });
+        return out;
+    }
+    [[nodiscard]] std::size_t undoSteps() const { return document.history().undoCount(); }
+};
+
+void expectSegment(const katana::entity::Entity* entity, Point2 start, Point2 end)
+{
+    ASSERT_NE(entity, nullptr);
+    const auto* segment = std::get_if<Segment2>(&entity->geometry);
+    ASSERT_NE(segment, nullptr) << "not a line";
+    EXPECT_NEAR(segment->start.x, start.x, 1e-9);
+    EXPECT_NEAR(segment->start.y, start.y, 1e-9);
+    EXPECT_NEAR(segment->end.x, end.x, 1e-9);
+    EXPECT_NEAR(segment->end.y, end.y, 1e-9);
+}
+
+EntityId addLine(Document& document, Point2 start, Point2 end)
+{
+    EXPECT_TRUE(document.execute(katana::commands::createLine(start, end)).ok());
+    return document.lastCreatedEntities().front();
+}
+
+} // namespace
+
+TEST(PlanViewTools, ALineFromTheCatalogueIsTwoClicksAndEnterAndOneUndoStep)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    EXPECT_EQ(plan.view.activeToolId(), "draw.line");
+
+    plan.press(200, 150); // model (0, 0)
+    plan.press(300, 50);  // model (10, 10)
+    EXPECT_TRUE(plan.entities().empty()) << "the chain is the tool's until Enter";
+    plan.enter();
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    expectSegment(made.front(), Point2(0, 0), Point2(10, 10));
+    EXPECT_EQ(plan.undoSteps(), 1u);
+    EXPECT_TRUE(plan.errors.empty()) << plan.errors.front().toStdString();
+}
+
+TEST(PlanViewTools, ATypedRelativePointIsMeasuredFromTheLastClick)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(250, 100); // model (5, 5)
+    plan.type("@10,0");   // (5 + 10, 5 + 0) = (15, 5)
+    EXPECT_EQ(plan.view.typedInput(), "@10,0") << "shown after the prompt until Enter";
+    EXPECT_TRUE(plan.typedOut.empty()) << "a tool's input is not a command for the window";
+    plan.enter(); // sends the typed point
+    plan.enter(); // finishes the chain
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    expectSegment(made.front(), Point2(5, 5), Point2(15, 5));
+    EXPECT_EQ(plan.undoSteps(), 1u);
+}
+
+TEST(PlanViewTools, APolarPointTypedAfterAClickGoesThatFarAtThatAngle)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150); // model (0, 0)
+    // @5<90: 5 units at 90 degrees counter-clockwise from east, due north.
+    plan.type("@5<90");
+    plan.enter();
+    plan.enter();
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    expectSegment(made.front(), Point2(0, 0), Point2(0, 5));
+}
+
+TEST(PlanViewTools, EscAfterOneClickCreatesNothingAndEndsTheTool)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150);
+    plan.escape();
+
+    EXPECT_TRUE(plan.entities().empty());
+    EXPECT_EQ(plan.undoSteps(), 0u);
+    EXPECT_FALSE(plan.view.toolActive());
+}
+
+TEST(PlanViewTools, EscAfterASegmentKeepsTheLinesDrawnAsAutoCadDoes)
+{
+    // A LINE's segments are finished work once both ends are given; Esc
+    // ends the tool, and keeps them (ToolHost::cancel, escapeKeepsWork).
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150); // (0, 0)
+    plan.press(300, 150); // (10, 0)
+    plan.escape();
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    expectSegment(made.front(), Point2(0, 0), Point2(10, 0));
+    EXPECT_EQ(plan.undoSteps(), 1u);
+    EXPECT_FALSE(plan.view.toolActive());
+}
+
+TEST(PlanViewTools, TheFirstEscTakesBackWhatWasTypedAndLeavesTheToolRunning)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150);
+    plan.type("@3");
+    plan.escape();
+    EXPECT_TRUE(plan.view.typedInput().isEmpty());
+    EXPECT_TRUE(plan.view.toolActive());
+}
+
+TEST(PlanViewTools, TheRubberBandIsDrawnWhileHoveringAfterTheFirstPoint)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.move(300, 150);
+    paint(plan.view);
+    // Before the first point Line previews nothing: no segment, no marker.
+    EXPECT_EQ(plan.view.lastPreviewCount(), 0u);
+
+    plan.press(200, 150); // (0, 0)
+    plan.move(300, 150);  // (10, 0)
+    paint(plan.view);
+    // The band from (0, 0) to the cursor, and a marker on (0, 0): 1 + 1.
+    EXPECT_EQ(plan.view.lastPreviewCount(), 2u);
+    const auto feedback = plan.view.toolHost().feedback(Point2(10, 0));
+    ASSERT_EQ(feedback.shapes.size(), 1u);
+    const auto* band = std::get_if<Segment2>(&feedback.shapes.front());
+    ASSERT_NE(band, nullptr);
+    EXPECT_EQ(band->start, Point2(0, 0));
+    EXPECT_EQ(band->end, Point2(10, 0));
+}
+
+TEST(PlanViewTools, ARightClickIsEnterWhileAToolRuns)
+{
+    PlanFixture plan;
+    bool menuOpened = false;
+    plan.view.onContextMenu = [&](const QPoint&) { menuOpened = true; };
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150);                  // (0, 0)
+    plan.press(200, 50);                   // (0, 10)
+    plan.press(200, 50, Qt::RightButton);  // Enter
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    expectSegment(made.front(), Point2(0, 0), Point2(0, 10));
+    EXPECT_FALSE(menuOpened) << "the shortcut menu is for selecting, not for a tool";
+}
+
+TEST(PlanViewTools, CtrlZInsideAToolStepsBackAPointNotTheDrawing)
+{
+    PlanFixture plan;
+    addLine(plan.document, Point2(-50, -50), Point2(-40, -50));
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150); // (0, 0)
+    plan.press(300, 150); // (10, 0)
+    plan.press(300, 50);  // (10, 10)
+    plan.key(Qt::Key_Z, Qt::ControlModifier);
+    plan.enter();
+
+    // The existing line is still there, and the chain lost (10, 10):
+    // (0, 0)-(10, 0) and the line from before.
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 2u);
+    expectSegment(made.back(), Point2(0, 0), Point2(10, 0));
+    EXPECT_EQ(plan.undoSteps(), 2u);
+}
+
+TEST(PlanViewTools, CtrlZWithNothingToStepBackLeavesTheDrawingAloneAndSaysSo)
+{
+    PlanFixture plan;
+    addLine(plan.document, Point2(-50, -50), Point2(-40, -50));
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.key(Qt::Key_Z, Qt::ControlModifier);
+
+    EXPECT_EQ(plan.entities().size(), 1u);
+    EXPECT_EQ(plan.undoSteps(), 1u);
+    EXPECT_EQ(plan.errors.size(), 1u) << "the tool's refusal, not silence";
+    EXPECT_TRUE(plan.view.toolActive());
+}
+
+TEST(PlanViewTools, AClickSnapsToTheEndOfALineNearIt)
+{
+    PlanFixture plan;
+    addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    plan.view.setSnapEnabled(true);
+    plan.view.setSnapModes(static_cast<katana::cad::SnapModes>(katana::cad::SnapMode::Endpoint));
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    // Pixel (302, 152) is model (10.2, -0.2), 0.28 from the end (10, 0) and
+    // inside the 12-pixel aperture (1.2 units at this scale).
+    plan.press(302, 152);
+    plan.view.setSnapEnabled(false);
+    plan.press(300, 50); // (10, 10)
+    plan.enter();
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 2u);
+    expectSegment(made.back(), Point2(10, 0), Point2(10, 10));
+}
+
+TEST(PlanViewTools, MoveActsOnTheSelectionItStartedWith)
+{
+    PlanFixture plan;
+    const EntityId id = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    plan.document.selection().add(id);
+    ASSERT_TRUE(plan.view.startTool("modify.move").ok());
+    plan.press(200, 150); // base (0, 0)
+    plan.press(250, 100); // to (5, 5): the displacement is (5, 5)
+
+    const auto* moved = plan.document.model().entities.find(id);
+    expectSegment(moved, Point2(5, 5), Point2(15, 5));
+    EXPECT_EQ(plan.undoSteps(), 2u) << "the line, then the move";
+    EXPECT_FALSE(plan.view.toolActive()) << "Move ends; its next use needs a new selection";
+}
+
+TEST(PlanViewTools, AToolsSelectionStepGathersClicksUntilEnter)
+{
+    // Erase always asks. Two plain clicks pick both lines, as AutoCAD's
+    // "Select objects" gathers; the Select tool would keep only the last.
+    PlanFixture plan;
+    addLine(plan.document, Point2(0, 0), Point2(10, 0));   // through pixel (250, 150)
+    addLine(plan.document, Point2(0, 10), Point2(10, 10)); // through pixel (250, 50)
+    ASSERT_TRUE(plan.view.startTool("modify.erase").ok());
+    plan.press(250, 150);
+    plan.press(250, 50);
+    EXPECT_EQ(plan.document.selection().ids().size(), 2u);
+    plan.enter();
+
+    EXPECT_TRUE(plan.entities().empty());
+    EXPECT_EQ(plan.undoSteps(), 3u) << "two lines, then one erase";
+}
+
+TEST(PlanViewTools, TextTypedWithNoToolRunningStillGoesToTheWindow)
+{
+    PlanFixture plan;
+    plan.type("L");
+    ASSERT_EQ(plan.typedOut.size(), 1u);
+    EXPECT_EQ(plan.typedOut.front(), "L");
+}
+
+TEST(PlanViewTools, TheLegacyToolsStartTheirCatalogueTools)
+{
+    PlanFixture plan;
+    for (const Tool tool : {Tool::Point, Tool::Line, Tool::Polyline, Tool::Rectangle, Tool::Circle,
+                            Tool::Arc, Tool::Move, Tool::Copy}) {
+        ASSERT_NE(katana::cad::toolCatalog().find(katana::qt::toolId(tool)), nullptr)
+            << katana::qt::toString(tool);
+        plan.view.setTool(tool);
+        EXPECT_EQ(plan.view.activeToolId(), katana::qt::toolId(tool));
+        EXPECT_EQ(plan.view.tool(), tool);
+    }
+    plan.view.setTool(Tool::Select);
+    EXPECT_FALSE(plan.view.toolActive());
+    EXPECT_EQ(plan.view.tool(), Tool::Select);
+}
+
+TEST(PlanViewTools, AnUnknownToolIdIsRefusedAndTheRunningToolRunsOn)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    const auto refused = plan.view.startTool("draw.nothing");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, katana::core::ErrorCode::NotFound);
+    EXPECT_EQ(plan.view.activeToolId(), "draw.line");
+}
+
+TEST(PlanViewTools, TheLayerNewWorkIsDrawnOnIsTheDocumentsCurrentLayer)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.document
+                    .execute(katana::commands::createLayer(
+                        katana::entity::Layer{.name = "Kerbs"}))
+                    .ok());
+    ASSERT_TRUE(plan.document.setCurrentLayer("Kerbs").ok());
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150);
+    plan.press(300, 150);
+    plan.enter();
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    EXPECT_EQ(made.front()->layer, "Kerbs");
+}
