@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -297,10 +298,12 @@ TEST(MapFileWriter, TextIsEscapedForXml)
 TEST(MapFileWriter, SectionsAreWrittenIn12dsOrderAndRulesKeepTheirOrderWithinOne)
 {
     // Added deliberately out of order: a symbol, then two map rules, then a
-    // tinable rule.
+    // tinable rule - each of a DIFFERENT key, so putting them in 12d's order
+    // moves no rule ahead of an earlier rule of its own key (for that, see
+    // ARuleIsNeverWrittenAheadOfAnEarlierRuleOfItsOwnKey).
     katana::entity::SurveyMap map;
     SurveyRule symbol;
-    symbol.key = "AC*";
+    symbol.key = "PX*";
     symbol.section = katana::entity::SurveySection::VertexSymbol;
     symbol.symbol = katana::entity::SurveySymbol{.style = "S"};
     ASSERT_TRUE(map.add(symbol).ok());
@@ -410,5 +413,168 @@ TEST(MapFileWriter, TheReferenceMapfilesComeBackAsTheyWere)
             << "a rule changed on the way through the writer";
         EXPECT_EQ(again.comments, original.comments);
         EXPECT_EQ(again.version, original.version);
+    }
+}
+
+namespace {
+
+// Each key's rules, in map order: the order that decides what a code
+// resolves to (rules of DIFFERENT keys never compete - see writeMapFile).
+std::map<std::string, std::vector<SurveyRule>> rulesByKey(const katana::entity::SurveyMap& map)
+{
+    std::map<std::string, std::vector<SurveyRule>> out;
+    for (const SurveyRule& rule : map.rules()) {
+        out[rule.key].push_back(rule);
+    }
+    return out;
+}
+
+// The section elements of a written mapfile, in the order they are written:
+// the elements the writer indents two levels, less the three there that are
+// not sections.
+std::vector<std::string> sectionElements(const std::string& text)
+{
+    std::vector<std::string> out;
+    for (std::size_t at = text.find("\n    <"); at != std::string::npos;
+         at = text.find("\n    <", at + 1)) {
+        const std::size_t name = at + 6;
+        if (text[name] == '/' || text[name] == ' ') {
+            continue; // a closing tag, or deeper than two levels
+        }
+        const std::string element = text.substr(name, text.find_first_of(">/", name) - name);
+        if (element != "units" && element != "version" && element != "comments") {
+            out.push_back(element);
+        }
+    }
+    return out;
+}
+
+// SW*: a string_attribute_data rule, THEN a pipe_data rule, both naming
+// Material; AC*: a symbol rule with a comment, THEN a map_data rule with
+// another. 12d's section order is the reverse of each pair - and a map made
+// by loading one mapfile giving SW* string attributes and then another giving
+// it a pipe holds exactly this.
+katana::entity::SurveyMap keysOutOf12dsOrder()
+{
+    katana::entity::SurveyMap map;
+    SurveyRule attributes;
+    attributes.key = "SW*";
+    attributes.section = katana::entity::SurveySection::StringAttribute;
+    attributes.attributes = {{"text", "Material", "PVC"}};
+    EXPECT_TRUE(map.add(attributes).ok());
+    SurveyRule pipe;
+    pipe.key = "SW*";
+    pipe.section = katana::entity::SurveySection::Pipe;
+    pipe.attributes = {{"text", "Material", "$Mat"}};
+    pipe.pipe = katana::entity::SurveyPipe{.justify = "Invert", .shape = "diameter", .size1 = "0.3"};
+    EXPECT_TRUE(map.add(pipe).ok());
+    SurveyRule symbol;
+    symbol.key = "AC*";
+    symbol.section = katana::entity::SurveySection::VertexSymbol;
+    symbol.symbol = katana::entity::SurveySymbol{.style = "S"};
+    symbol.comment = "symbol comment";
+    EXPECT_TRUE(map.add(symbol).ok());
+    SurveyRule where;
+    where.key = "AC*";
+    where.model = "M";
+    where.comment = "map comment";
+    EXPECT_TRUE(map.add(where).ok());
+    return map;
+}
+
+} // namespace
+
+TEST(MapFileWriter, ARuleIsNeverWrittenAheadOfAnEarlierRuleOfItsOwnKey)
+{
+    const katana::entity::SurveyMap map = keysOutOf12dsOrder();
+    // What the map says before it is written: the EARLIER rule of a key wins
+    // a field two of its rules fill.
+    ASSERT_EQ(map.lookup("SW1").resolved.attributes.size(), 1u);
+    ASSERT_EQ(map.lookup("SW1").resolved.attributes[0].value, "PVC");
+    ASSERT_EQ(map.lookup("AC1").resolved.comment, "symbol comment");
+
+    const std::string text = writeMap(map);
+    const auto again = readMap(text);
+    ASSERT_TRUE(again.warnings.empty()) << again.warnings.front();
+
+    // Worked out by hand. A first pass of the sections, in 12d's order, holds
+    // AC*'s vertex_symbol_data rule and SW*'s string_attribute_data rule.
+    // AC*'s map_data rule and SW*'s pipe_data rule are in sections 12d writes
+    // EARLIER than their key's first rule, so they go in a second pass of the
+    // sections, after it.
+    EXPECT_EQ(sectionElements(text),
+              (std::vector<std::string>{"vertex_symbol_data", "string_attribute_data",
+                                        "map_data", "pipe_data"}))
+        << text;
+    EXPECT_TRUE(rulesByKey(again.map) == rulesByKey(map)) << text;
+    for (const char* code : {"SW1", "AC1"}) {
+        const auto before = map.lookup(code);
+        const auto after = again.map.lookup(code);
+        EXPECT_TRUE(after.resolved == before.resolved) << code << "\n" << text;
+        EXPECT_EQ(after.keys, before.keys) << code;
+    }
+    ASSERT_EQ(again.map.lookup("SW1").resolved.attributes.size(), 1u);
+    EXPECT_EQ(again.map.lookup("SW1").resolved.attributes[0].value, "PVC");
+    EXPECT_EQ(again.map.lookup("AC1").resolved.comment, "symbol comment");
+}
+
+TEST(MapFileWriter, AMapWhoseKeysAreEachIn12dsOrderHasEachSectionOnce)
+{
+    // The fixture is one file as 12d writes one: map_data, then
+    // vertex_symbol_data, then string_attribute_data, each once.
+    const auto original = readMap(fileText(kFixture / "test_survey.mapfile"));
+    const std::string text = writeMap(original.map);
+    EXPECT_EQ(sectionElements(text),
+              (std::vector<std::string>{"map_data", "vertex_symbol_data", "string_attribute_data"}))
+        << text;
+}
+
+TEST(MapFileWriter, TwoMapfilesLoadedTogetherExportAsOneThatResolvesEveryCodeAlike)
+{
+    // One file gives SW* its string attributes, a second gives it a pipe
+    // naming the same attribute: loaded in that order, the FIRST file's
+    // Material and comment are what SW1 gets, and the exported map must say
+    // the same.
+    auto first = a12::readMapFile(wrap(R"(<string_attribute_data>
+  <item><key>SW*</key><map_attributes><text><name>Material</name><value>PVC</value></text>
+  </map_attributes><comment>first</comment></item></string_attribute_data>)"));
+    ASSERT_TRUE(first.ok());
+    auto both = a12::readMapFileInto(std::move(first->map), wrap(R"(<pipe_data>
+  <item><key>SW*</key><attributes><text><name>Material</name><value>$Mat</value></text>
+  </attributes><justify>Invert</justify><comment>second</comment></item></pipe_data>)"));
+    ASSERT_TRUE(both.ok());
+    const katana::entity::SurveyMap& map = both->map;
+    ASSERT_EQ(map.lookup("SW1").resolved.attributes[0].value, "PVC");
+
+    const auto again = readMap(writeMap(map));
+    EXPECT_TRUE(again.map.rules() == map.rules()) << "one key, so its order is the whole order";
+    ASSERT_FALSE(again.map.lookup("SW1").resolved.attributes.empty());
+    EXPECT_EQ(again.map.lookup("SW1").resolved.attributes[0].value, "PVC");
+    EXPECT_EQ(again.map.lookup("SW1").resolved.comment, "first");
+}
+
+TEST(MapFileWriter, TheReferenceMapfilesLoadedTogetherExportAsOneThatResolvesEveryKeyAlike)
+{
+    // The built-in customisation is the reference mapfiles loaded one after
+    // the other, which can put a key's rules out of 12d's section order.
+    // Exported as one file, every key's rules must come back in their order,
+    // so every code resolves as it did.
+    const auto reference = katana::testing::referenceCustomisation();
+    if (reference.mapfiles.size() < 2) {
+        GTEST_SKIP() << "the reference customisation is not in this checkout";
+    }
+    katana::entity::SurveyMap map;
+    for (const std::string& text : reference.mapfiles) {
+        auto read = a12::readMapFileInto(std::move(map), text);
+        ASSERT_TRUE(read.ok());
+        map = std::move(read->map);
+    }
+    const auto again = readMap(writeMap(map));
+    EXPECT_EQ(again.map.size(), map.size());
+    EXPECT_TRUE(rulesByKey(again.map) == rulesByKey(map)) << "a key's rules changed order";
+    for (const std::string& key : map.keys()) {
+        // The shortest code the key matches: the key itself, or its prefix.
+        const std::string code = key.back() == '*' ? key.substr(0, key.size() - 1) : key;
+        EXPECT_TRUE(again.map.lookup(code).resolved == map.lookup(code).resolved) << key;
     }
 }
