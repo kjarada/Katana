@@ -16,6 +16,7 @@
 #include <optional>
 
 #include <QPoint>
+#include <QSize>
 #include <QWidget>
 
 #include "katana/cad/section.hpp"
@@ -64,7 +65,8 @@ class SectionViewWidget final : public QWidget {
     // Crossings the last paint left out because this view hides their layer.
     [[nodiscard]] std::size_t lastHiddenCrossingCount() const { return lastHiddenCrossings_; }
 
-    // Raised when this view is clicked or the keyboard focus moves into it.
+    // Raised when this view is clicked or the user moves the keyboard focus
+    // into it (view_focus.hpp).
     std::function<void()> onActivated;
     // Messages the user must see. Nothing here raises it today; it stays for
     // the window's wiring and for a failure this view may one day report.
@@ -84,7 +86,6 @@ class SectionViewWidget final : public QWidget {
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
-    void focusInEvent(QFocusEvent* event) override;
 
   private:
     // Station/elevation -> pixels. `scale_` is pixels per model unit
@@ -115,8 +116,14 @@ class SectionViewWidget final : public QWidget {
     double originStation_ = 0.0;  // station at the left edge of the plot area
     double originElevation_ = 0.0; // elevation at the bottom edge
     // False until the section has been framed once at a real size. The first
-    // paint frames it; a resize after that keeps what the user was looking at.
+    // paint frames it. After that a resize frames it again at the new size
+    // until the user pans or zooms (userMoved_), and from then on keeps their
+    // scale and the middle of what they were looking at.
     bool framed_ = false;
+    bool userMoved_ = false;
+    // The size the last resize left this widget at, which a resize delivered
+    // with no old size (one made while the widget was hidden) measures from.
+    QSize lastSize_;
     mutable std::size_t lastDrawnCrossings_ = 0;
     mutable std::size_t lastHiddenCrossings_ = 0;
 
