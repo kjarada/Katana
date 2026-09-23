@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QSpinBox>
+#include <QToolBar>
 
 #include <cstdio>
 #include <optional>
@@ -91,6 +92,12 @@ bool fillField(QWidget& dialog, const QString& assignment)
     }
     if (auto* choice = qobject_cast<QComboBox*>(widget)) {
         const int index = choice->findText(text);
+        // An editable choice takes a name it does not list, as typing does:
+        // that is how a picker keeps a name nothing defines.
+        if (index < 0 && choice->isEditable()) {
+            choice->setEditText(text);
+            return true;
+        }
         if (index < 0) {
             std::fprintf(stderr, "--fill: %s has no choice '%s'\n", qPrintable(name),
                          qPrintable(text));
@@ -197,6 +204,12 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // reads it: a dialog is driven the way a person drives it, not through a side
 // door.
 //
+// --panel NAME makes the window's own dock or toolbar with that object name
+// (PropertiesDock, PropertiesToolBar) what the fills and presses after it go
+// to, and what --screenshot grabs. --command TEXT runs TEXT as if typed on the
+// command line, wherever it comes among the steps, so a test can make the
+// styles, entities and selection a panel then acts on.
+//
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
 // --survey-dock ACTION shows the dock that action shows (the Point Manager,
@@ -269,7 +282,8 @@ int main(int argc, char* argv[])
         } else if (argument == "--select-all") {
             selectEverything = true;
         } else if (argument == "--survey-dialog" || argument == "--survey-dock" ||
-                   argument == "--fill" || argument == "--press") {
+                   argument == "--fill" || argument == "--press" || argument == "--panel" ||
+                   argument == "--command") {
             surveySteps.emplace_back(argument, value());
         } else if (argument == "--attributes") {
             attributeManager = true;
@@ -317,8 +331,13 @@ int main(int argc, char* argv[])
     katana::qt::MainWindow window;
     window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
-    // --customise on the command line is applied after and wins.
+    // --customise on the command line is merged in next, as File > Load 12d
+    // Customisation would, and so is loaded when a project is opened: its
+    // record of what it was drawn with is compared with what is loaded.
     window.loadDefaultCustomisation();
+    if (!customisation.empty()) {
+        window.applyCustomisation(customisation);
+    }
     if (!plotPath && !screenshotPath) {
         window.show();
     }
@@ -358,6 +377,27 @@ int main(int argc, char* argv[])
             QString targetName;
             std::vector<QDockWidget*> docks;
             for (const auto& [kind, text] : surveySteps) {
+                if (kind == "--command") {
+                    window.runCommand(text);
+                    // Twice: the document's listener defers the panels'
+                    // refresh to the event loop, which the next step reads.
+                    QApplication::processEvents();
+                    QApplication::processEvents();
+                    continue;
+                }
+                if (kind == "--panel") {
+                    auto* panel = window.findChild<QWidget*>(text);
+                    if (panel == nullptr ||
+                        (qobject_cast<QDockWidget*>(panel) == nullptr &&
+                         qobject_cast<QToolBar*>(panel) == nullptr)) {
+                        std::fprintf(stderr, "--panel: the window has no dock or toolbar %s\n",
+                                     qPrintable(text));
+                        return 1;
+                    }
+                    target = panel;
+                    targetName = text;
+                    continue;
+                }
                 if (kind == "--survey-dialog" || kind == "--survey-dock") {
                     QWidget* opened = nullptr;
                     if (kind == "--survey-dialog") {
@@ -408,7 +448,10 @@ int main(int argc, char* argv[])
                 std::fprintf(stderr, "%s: %s\n", qPrintable(dock->objectName()),
                              status != nullptr ? qPrintable(status->text()) : "(no status)");
             }
-            if (!target->grab().save(*screenshotPath, "PNG")) {
+            // Steps that were all --command leave no target: the window is
+            // what they changed.
+            QWidget* shot = target != nullptr ? target : static_cast<QWidget*>(&window);
+            if (!shot->grab().save(*screenshotPath, "PNG")) {
                 std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
                 return 1;
             }
@@ -473,9 +516,6 @@ int main(int argc, char* argv[])
                 return 1;
             }
             return 0;
-        }
-        if (!customisation.empty()) {
-            window.applyCustomisation(customisation);
         }
         if (styleManager) {
             auto dialog = window.makeStyleManager();
