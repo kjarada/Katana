@@ -3154,7 +3154,7 @@ allowed `core;math;geometry;survey`. It parses manufacturer formats into
 | 7 | Trimble: JobXML, CSV/ASCII, LandXML | pending |
 | 8 | Topcon: documented observation formats, CSV/ASCII | pending |
 | 8b | The `cad` bridge: a `SurveyProject` becomes ONE undoable command | **DELIVERED** |
-| 9 | The Survey menu and its commands | pending |
+| 9 | The Survey menu and its commands | partly: the Survey menu and toolbar exist (`katana_qt/survey/SurveyWorkbench`) with survey coding in them; the tools are in progress |
 | 10 | The import wizard, six steps, with validation and a warning/error report | pending |
 | 11 | Point Manager with source column and filtering | pending |
 | 12 | Instrument profiles, and import history undoable as one transaction | pending |
