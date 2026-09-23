@@ -69,7 +69,7 @@ endif()
 
 # The whole main window with a 12d customisation loaded into it: the two
 # libraries and the mapfile read, resolved against each other, and reported.
-# This is the path the File > Load 12d Customisation menu item takes, so what
+# This is the path the Format > Load 12d Customisation menu item takes, so what
 # ctest exercises is what a person gets (PLAN.MD 20.3). It runs without the
 # files when they are not in the checkout - they carry their author's licence
 # notice - and then proves only that the switch does no harm.
@@ -471,7 +471,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # ---- the window's wiring of the managers' foundations ----------------------
     #
-    # File > Load 12d Customisation merges (audit QT-21), through the window's
+    # Format > Load 12d Customisation merges (audit QT-21), through the window's
     # CUSTOMISE line, which runs the menu item's applyCustomisation: the
     # hand-written fixture mapfile REPLACES the map, then the symbol fixture
     # alone is MERGED in - and the map must still be there. By hand, from the
@@ -684,7 +684,8 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
-    # keys that silently do nothing (--check-shortcuts).
+    # keys that silently do nothing; and within each menu every underlined
+    # letter is one item's (--check-shortcuts).
     add_test(NAME qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
