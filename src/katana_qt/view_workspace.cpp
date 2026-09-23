@@ -277,6 +277,9 @@ void ViewWorkspace::installChrome(View& view)
         action->setCheckable(true);
         action->setData(static_cast<int>(choice));
         group->addAction(action);
+        // setViewKind and zoomExtents(id) below fail only for an id that is
+        // not open, and this menu and that button are deleted with the view's
+        // dock: there is no failure here to report.
         connect(action, &QAction::triggered, this, [this, id, choice] {
             (void)setViewKind(id, choice);
             activate(id);
