@@ -406,6 +406,7 @@ TEST(SurveyCodeManager, TheIssuesTabListsTheUnknownColourAndTheUndefinedSymbol)
 
     // A double-click takes the rule to the form on the Code Table.
     issues->itemDoubleClicked(issues->topLevelItem(1), 0);
+    katana::qt::test::processEvents();
     EXPECT_EQ(dialog.currentRule(), std::optional<std::size_t>(9));
     auto* tabs = child<QTabWidget>(dialog, "codeManagerTabs");
     ASSERT_NE(tabs, nullptr);
@@ -658,4 +659,23 @@ TEST(SurveyCodeManager, EnterInAFieldPressesNoButton)
     EXPECT_TRUE(f.logged.empty()) << f.logged.front().first.toStdString();
     EXPECT_TRUE(dialog.isVisible());
     EXPECT_EQ(dialog.buffer().size(), 11u);
+}
+
+TEST(SurveyCodeManager, DoubleClickingAnExplainedFieldOpensTheRuleThatSetIt)
+{
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    child<QLineEdit>(dialog, "testCode")->setText(QStringLiteral("AC01"));
+    auto* fields = child<QTreeWidget>(dialog, "explainFields");
+    ASSERT_NE(fields, nullptr);
+    // AC01's symbol comes from #7, AC* vertex_symbol_data.
+    const QTreeWidgetItem* symbol = rowWithText(*fields, 0, QStringLiteral("symbol"));
+    ASSERT_NE(symbol, nullptr);
+    EXPECT_EQ(symbol->text(2), QStringLiteral("#7 AC* (vertex_symbol_data)"));
+    fields->itemDoubleClicked(const_cast<QTreeWidgetItem*>(symbol), 0);
+    // The jump waits for the click to return (it rebuilds this list).
+    EXPECT_FALSE(dialog.currentRule().has_value());
+    katana::qt::test::processEvents();
+    EXPECT_EQ(dialog.currentRule(), std::optional<std::size_t>(7));
+    EXPECT_EQ(child<QLineEdit>(dialog, "ruleSymbolSize")->text(), QStringLiteral("1.5"));
 }
