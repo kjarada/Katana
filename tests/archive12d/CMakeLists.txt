@@ -1,3 +1,7 @@
+# Tests written alongside the customisation managers, globbed so that several
+# authors can add a file at once without editing this list.
+file(GLOB _archive12d_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
+
 katana_add_test_suite(archive12d
     LIBS katana_archive12d
     SOURCES
@@ -15,6 +19,7 @@ katana_add_test_suite(archive12d
         test_style_library.cpp
         test_map_file.cpp
         test_customisation.cpp
+        ${_archive12d_customisation_tests}
 )
 # The fixtures are small hand-written archives; the multi-megabyte exports the
 # format was learned from are real project data and are not in the repository.
