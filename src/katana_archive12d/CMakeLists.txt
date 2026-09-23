@@ -21,8 +21,11 @@ add_library(katana_archive12d STATIC
     domain_import.cpp
     domain_export.cpp
     style_library.cpp
+    style_library_writer.cpp
     map_file.cpp
+    map_file_writer.cpp
     customisation.cpp
+    customisation_merge.cpp
 )
 # The customisation compiled into the build: its linestyles, symbols and
 # survey codes become part of the program rather than something it is given.

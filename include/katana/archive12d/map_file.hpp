@@ -56,4 +56,37 @@ struct MapFileRead {
 [[nodiscard]] katana::core::Result<MapFileRead> readMapFileInto(katana::entity::SurveyMap map,
                                                                 std::string_view text);
 
+// ---- writing ----------------------------------------------------------------------------------
+
+struct MapFileWriteOptions {
+    // `<map_file><version>`. 11.0 is what the reference mapfiles say.
+    std::string version = "11.0";
+    // `<map_file><comments>`, one `<item>` each - where 12d's mapfiles
+    // describe themselves, and where readMapFile finds them again.
+    std::vector<std::string> comments{};
+};
+
+// A survey map -> 12d mapfile text: XML, as UTF-8. 12d itself writes mapfiles
+// as UTF-16LE with a byte order mark; core::encodeUtf16LittleEndian turns
+// this text into exactly that, and readMapFile reads either.
+//
+// Sections are written in 12d's order - map_data, vertex_symbol_data,
+// tinable_data, vertex_textstyle_data, the three pipe sections, then the two
+// attribute sections - and within a section the rules keep the order they
+// have in the map, which among rules of one key is the order that decides
+// which wins. Grouping by section is the only reordering, and it moves rules
+// only relative to rules of OTHER sections. A value the map does not have is
+// written as no element at all, never as a 0: an empty `<rotation/>` and a
+// rotation of 0 read the same, but a size of 0 and no size do not mean the
+// same thing to a person reading the file.
+//
+// Fails, naming the rule, rather than writing a file that would not read back
+// as the map it was given: a rule holding a field its section cannot carry
+// (a map_data rule with a symbol), a pipe with nothing but `active`, an
+// attribute that is neither text nor integer or has no name, a value
+// beginning or ending in white space (XML text is trimmed on reading) or
+// holding a character XML 1.0 cannot carry at all.
+[[nodiscard]] katana::core::Result<std::string>
+writeMapFile(const katana::entity::SurveyMap& map, const MapFileWriteOptions& options = {});
+
 } // namespace katana::archive12d
