@@ -290,6 +290,15 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
     connect(revertButton_, &QPushButton::clicked, this, [this] { revert(); });
     connect(closeButton, &QPushButton::clicked, this, [this] { reject(); });
 
+    // No button is a default: QDialog makes the first auto-default button
+    // its default when shown, and Enter in any field - a typed code, a layer
+    // name - would press it (Import Mapfile, or Delete). Buttons here are
+    // pressed, never defaulted to.
+    for (QPushButton* button : findChildren<QPushButton*>()) {
+        button->setAutoDefault(false);
+        button->setDefault(false);
+    }
+
     resize(1280, 780);
 
     if (context_.document != nullptr) {
@@ -301,6 +310,11 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
     rebuildIssues();
     refreshCensus();
     loadLineworkCodes();
+    if (context_.document != nullptr) {
+        const QString count = QString::number(context_.document->selection().size());
+        applySelection_->setText(tr("Selection (%1)").arg(count));
+        lineworkSelection_->setText(tr("Selection (%1)").arg(count));
+    }
     loadForm(SurveyRule{}, std::nullopt);
     updateDirty();
 }
