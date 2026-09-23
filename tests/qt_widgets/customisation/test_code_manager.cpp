@@ -639,3 +639,23 @@ TEST(SurveyCodeManager, ATypedColourNameIsKeptAsWrittenListedInAnotherCaseOrNotA
         EXPECT_EQ(rule->colour, typed.toStdString());
     }
 }
+
+TEST(SurveyCodeManager, EnterInAFieldPressesNoButton)
+{
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    ASSERT_TRUE(katana::qt::test::showActive(dialog));
+    // Every field a person types a name into and confirms with Enter: none
+    // may reach a dialog default button - the first button, Import Mapfile,
+    // would open a file dialog, and Delete or Apply would edit.
+    for (const char* name : {"testCode", "ruleModel", "ruleKey", "lineworkStart"}) {
+        auto* field = child<QLineEdit>(dialog, name);
+        ASSERT_NE(field, nullptr);
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(field, &enter);
+    }
+    katana::qt::test::processEvents();
+    EXPECT_TRUE(f.logged.empty()) << f.logged.front().first.toStdString();
+    EXPECT_TRUE(dialog.isVisible());
+    EXPECT_EQ(dialog.buffer().size(), 11u);
+}
