@@ -24,12 +24,16 @@
 //   Elevation  RenderViewWidget    - the same, locked orthographic
 //   Section    SectionViewWidget   - station against elevation
 //
-// Only Plan views edit; the others are views. The window's tool, grid and snap
+// Only Plan views edit; the others are views. The window's grid and snap
 // settings apply to EVERY plan view - a setting is not a property of whichever
 // view was clicked last - and are remembered so a view opened later matches.
+// A TOOL is different: it holds picks made in one view, so it runs in the
+// active plan view alone (startTool), and starting one stops any other.
 
 #include <functional>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <QDockWidget>
@@ -165,15 +169,32 @@ class ViewWorkspace final : public QMainWindow {
     // beside the active view when none is open. Never replaces another view.
     bool showSection(katana::cad::Section section);
 
-    // ---- settings every plan view shares -------------------------------------
+    // ---- the tools (include/katana/cad/interactive_tool.hpp) ------------------
+    // Starts catalogue tool `id` in the active plan view, first stopping, as
+    // Esc stops it, a tool running in any other plan view. NotFound for an id
+    // the catalogue does not have; InvalidState when no plan view is open.
+    [[nodiscard]] katana::core::Status startTool(std::string_view id);
+    // The running tool's id in whichever plan view runs one, "" when none.
+    [[nodiscard]] std::string activeToolId() const;
+    // Hands a whole typed line to the running tool - the command line's
+    // Enter while a tool runs. False, and nothing done, when no tool runs:
+    // the line is then a command.
+    bool typeIntoTool(const QString& text);
+    // Legacy, while the window's toolbar names the first eight tools by the
+    // enum: Select stops every plan view's tool, the others startTool.
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
+
+    // ---- settings every plan view shares -------------------------------------
     void setGridVisible(bool visible);
     [[nodiscard]] bool gridVisible() const { return gridVisible_; }
     void setSnapEnabled(bool enabled);
     [[nodiscard]] bool snapEnabled() const { return snapEnabled_; }
     void setSnapModes(katana::cad::SnapModes modes);
     [[nodiscard]] katana::cad::SnapModes snapModes() const { return snapModes_; }
+    // Esc: the plan views running a tool (or holding typed input for one)
+    // cancel it; when none is, every plan view cancels (clears its box and
+    // the selection).
     void cancel();
     // Every plan view, floating and minimised ones included: the clicks
     // collected anywhere belong to the drawing that is going away.
@@ -221,6 +242,11 @@ class ViewWorkspace final : public QMainWindow {
                        const std::optional<katana::cad::SnapResult>&)>
         onCursorMoved;
     std::function<void(Tool)> onToolChanged;
+    // A tool started (its catalogue id) or ended ("") in any plan view.
+    std::function<void(const std::string& toolId)> onActiveToolChanged;
+    // What a running tool reports that is not an error ("3 lines", a
+    // measurement). Unset, it goes to onStatus, so it is never lost.
+    std::function<void(const QString&)> onToolMessage;
 
   private:
     struct View {
@@ -259,6 +285,9 @@ class ViewWorkspace final : public QMainWindow {
     void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
+    // Forwards a plan view's tool hooks to this workspace's, and sends the
+    // view's Enter-repeat (onRepeatTool) through startTool as view `id`.
+    void wireTools(ViewportWidget& plan, katana::cad::ViewId id);
 
     katana::cad::Document& document_;
     // Owned by the main window, which deletes its children in the order it
@@ -274,6 +303,9 @@ class ViewWorkspace final : public QMainWindow {
     katana::cad::SceneOptions options_{};
 
     Tool tool_ = Tool::Select;
+    // The last tool started in any plan view, which Enter at no prompt in any
+    // of them repeats; "" until one has run.
+    std::string lastToolId_;
     bool gridVisible_ = true;
     bool snapEnabled_ = true;
     katana::cad::SnapModes snapModes_ = katana::cad::kDefaultSnapModes;
