@@ -121,6 +121,22 @@ using PropertyMap = std::map<std::string, PropertyValue, std::less<>>;
 // `PROP SET ... <type>` name the four kinds.
 [[nodiscard]] std::string_view typeName(const PropertyValue& value);
 
+// Property keys that more than one part of the application agrees on.
+//
+// A 2D drawing has no Z of its own, so a point's height lives in a property.
+// Three separate places need to say which property: the 12d import and export
+// that write it, the surface builder in the application that reads it to
+// triangulate a drawing, and the survey import that writes it from field data.
+// They were a constant in archive12d and two string literals in the Qt layer,
+// which is two chances to disagree about a name silently - and the symptom
+// would be a surface built flat on the datum with no error anywhere.
+//
+// `kElevationProperty` is one height, for a point. `kElevationsProperty` is the
+// per-vertex list for a 3D string, where a NULL entry means "not surveyed" and
+// is not the same as zero.
+inline constexpr std::string_view kElevationProperty = "elevation";
+inline constexpr std::string_view kElevationsProperty = "elevations";
+
 struct Entity {
     EntityId id = kInvalidEntityId;
     Geometry geometry{};

@@ -731,7 +731,8 @@ class Importer {
             point.properties.erase("elevations");
             if (i < heights.size() && heights[i] != "null" && !heights[i].empty()) {
                 if (const auto value = parseReal(heights[i])) {
-                    point.properties.insert_or_assign("elevation", PropertyValue(*value));
+                    point.properties.insert_or_assign(std::string(kElevationProperty),
+                                                      PropertyValue(*value));
                 }
             }
             // Which vertex of the string this was, so the points can be told
