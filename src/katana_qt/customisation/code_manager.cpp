@@ -26,6 +26,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -962,7 +963,19 @@ QWidget* SurveyCodeManagerDialog::buildDetailPane()
     explainFields_->setRootIsDecorated(false);
     explainFields_->setUniformRowHeights(true);
     explainFields_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    explainFields_->setToolTip(tr("Double-click a field to edit the rule that set it"));
     layout->addWidget(explainFields_, 1);
+    // From "set by #7" to rule #7 in the form - after the click has
+    // returned: selecting the rule explains it again, which rebuilds this
+    // very list, and a view is never rebuilt inside its own signal.
+    connect(explainFields_, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem* item, int) {
+                const QVariant rule = item->data(0, kRuleRole);
+                if (rule.isValid()) {
+                    const std::size_t index = rule.toULongLong();
+                    QTimer::singleShot(0, this, [this, index] { selectRule(index); });
+                }
+            });
 
     explainDefinitions_ = new QLabel(pane);
     explainDefinitions_->setObjectName(QStringLiteral("explainDefinitions"));
