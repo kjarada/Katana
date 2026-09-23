@@ -586,10 +586,15 @@ class RectangleTool final : public InteractiveTool {
 // radius point is ON the polygon either way - the first vertex, or the middle
 // of the first side - so it can be snapped to something that the polygon
 // must touch. A typed radius draws the bottom side level, as AutoCAD does.
+//
+// Unlike POLYGON, the number of sides has no <4> default taken by Enter. The
+// tool restarts after each polygon, as the other tools here do, so its first
+// prompt is where a user lands when done; Enter there has to end the tool,
+// as it does in Point, Line, Polyline and Rectangle, or a right-click to
+// leave would arm the next two clicks to draw a square.
 
 constexpr int kMinimumSides = 3;
 constexpr int kMaximumSides = 1024;
-constexpr int kDefaultSides = 4;
 
 // The vertices, counter-clockwise, of the regular `sides`-gon about `centre`
 // whose first vertex is at centre + toFirst. Each is the first rotated about
@@ -641,7 +646,7 @@ class PolygonTool final : public InteractiveTool {
     {
         switch (step_) {
         case Step::Sides:
-            return "Enter number of sides <" + std::to_string(kDefaultSides) + ">";
+            return "Enter number of sides";
         case Step::Centre:
             return "Specify centre of polygon or [Edge/Undo]";
         case Step::Radius:
@@ -744,12 +749,8 @@ class PolygonTool final : public InteractiveTool {
 
     ToolStep enter() override
     {
-        if (step_ == Step::Sides) {
-            // Enter takes the default the prompt shows.
-            sides_ = kDefaultSides;
-            step_ = Step::Centre;
-            return ToolStep::next();
-        }
+        // At the sides prompt nothing is in progress, so this ends the tool
+        // (see above); anywhere else it abandons the polygon, as Esc does.
         return ToolStep::done(nullptr);
     }
 
@@ -848,7 +849,7 @@ class PolygonTool final : public InteractiveTool {
 
     cmd::EntityAttributes attributes_;
     Step step_ = Step::Sides;
-    int sides_ = kDefaultSides;
+    int sides_ = kMinimumSides; // always typed before a step that uses it
     bool inscribed_ = true;
     // The mode before each Inscribed or Circumscribed typed at the radius
     // prompt, latest last; Undo pops them before it gives up the centre.
