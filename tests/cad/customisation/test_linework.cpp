@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -120,6 +121,19 @@ bool hasNote(const katana::cad::LineworkReport& report, LineworkNoteKind kind,
         }
     }
     return false;
+}
+
+// The notes of one kind, in the order made.
+std::vector<katana::cad::LineworkNote> notesOf(const katana::cad::LineworkReport& report,
+                                               LineworkNoteKind kind)
+{
+    std::vector<katana::cad::LineworkNote> found;
+    for (const auto& note : report.notes) {
+        if (note.kind == kind) {
+            found.push_back(note);
+        }
+    }
+    return found;
 }
 
 } // namespace
@@ -645,6 +659,24 @@ TEST(Linework, AJoinDrawsALineToTheNumberedPointAndPlacesIt)
     }
 }
 
+TEST(Linework, AJoinWithNoPointNumberIsReportedAndThePointStillPlaced)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    const EntityId forgot = addPoint(document, Point2(0, 0), "KB1 JPN", "1");
+    addPoint(document, Point2(10, 0), "KB1", "2");
+
+    const auto report = run(document).report;
+    // KB1 1-2 is the one line; the join has no target, so no second line.
+    ASSERT_EQ(report.strings.size(), 1u);
+    EXPECT_FALSE(report.strings[0].join);
+    EXPECT_EQ(report.strings[0].points.front(), forgot);
+    const auto notes = notesOf(report, LineworkNoteKind::JoinWithoutTarget);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_EQ(notes[0].id, forgot);
+    EXPECT_EQ(notes[0].pointNumber, "1");
+}
+
 TEST(Linework, WithKeepPointsOffAJoinTargetNoRunPlacedIsKept)
 {
     Document document;
@@ -675,6 +707,237 @@ TEST(Linework, WithKeepPointsOffAJoinTargetNoRunPlacedIsKept)
     EXPECT_NE(document.model().entities.find(uncoded), nullptr);
     // Two points and three lines.
     EXPECT_EQ(document.model().entities.size(), 5u);
+}
+
+// ---- what could not be drawn as coded ----------------------------------------------
+
+TEST(Linework, ClosingAStringOfTwoPointsDrawsItOpenAndSaysSo)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    addPoint(document, Point2(0, 0), "KB1", "1");
+    const EntityId closer = addPoint(document, Point2(10, 0), "KB1 CL", "2");
+
+    const auto report = run(document).report;
+    ASSERT_EQ(report.strings.size(), 1u);
+    // Closed, 1-2-1 would run back over itself and enclose nothing.
+    EXPECT_FALSE(report.strings[0].closed);
+    EXPECT_EQ(report.strings[0].vertices, 2u);
+    const auto lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_FALSE(shapeOf(*lines[0]).closed);
+    const auto notes = notesOf(report, LineworkNoteKind::CloseTooShort);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_EQ(notes[0].id, closer) << "on the point that asked to close";
+}
+
+TEST(Linework, ACurveThroughPointsInAStraightLineIsDrawnStraightAndNotCountedAsACurve)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    const EntityId begin = addPoint(document, Point2(0, 0), "KB1 BC", "1");
+    addPoint(document, Point2(5, 0), "KB1", "2");
+    addPoint(document, Point2(10, 0), "KB1 EC", "3");
+
+    const auto report = run(document).report;
+    ASSERT_EQ(report.strings.size(), 1u);
+    // (0,0), (5,0), (10,0) are on no circle: the three points are joined
+    // straight and nothing is chorded, so there is no curve to count.
+    EXPECT_EQ(report.strings[0].curves, 0u);
+    const auto lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(shapeOf(*lines[0]).vertices,
+              (std::vector<Point2>{Point2(0, 0), Point2(5, 0), Point2(10, 0)}));
+    const auto notes = notesOf(report, LineworkNoteKind::CurveCollinear);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_EQ(notes[0].id, begin);
+}
+
+TEST(Linework, ACurveEndWithNoCurveBegunIsReportedAndTheLineDrawnStraight)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    const EntityId ender = addPoint(document, Point2(0, 0), "KB1 EC", "1");
+    addPoint(document, Point2(10, 0), "KB1", "2");
+    addPoint(document, Point2(10, 10), "KB1", "3");
+
+    const auto report = run(document).report;
+    ASSERT_EQ(report.strings.size(), 1u);
+    EXPECT_EQ(report.strings[0].curves, 0u);
+    const auto lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(shapeOf(*lines[0]).vertices,
+              (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(10, 10)}));
+    const auto notes = notesOf(report, LineworkNoteKind::CurveEndWithoutStart);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_EQ(notes[0].id, ender);
+}
+
+TEST(Linework, ACurveNeverEndedIsCurvedToTheLastPointAndTheNoteSaysWhatWasDone)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    // The half circle of radius 10 of the chording test, with its EC forgotten.
+    const EntityId begin = addPoint(document, Point2(10, 0), "KB1 BC", "1");
+    addPoint(document, Point2(0, 10), "KB1", "2");
+    addPoint(document, Point2(-10, 0), "KB1", "3");
+    // And a curve begun on a string's last point: there is nothing after it
+    // to curve through.
+    addPoint(document, Point2(0, 20), "KB2", "4");
+    const EntityId late = addPoint(document, Point2(10, 20), "KB2 BC", "5");
+
+    LineworkOptions options;
+    options.chordTolerance = 0.35; // 30 degree chords, as worked in that test
+    const auto report = run(document, options).report;
+    ASSERT_EQ(report.strings.size(), 2u);
+    // KB1: curved to its last point as if EC were on it - 1 + 3 + 3 vertices.
+    EXPECT_EQ(report.strings[0].curves, 1u);
+    EXPECT_EQ(report.strings[0].vertices, 7u);
+    // KB2: 4-5 straight, no curve.
+    EXPECT_EQ(report.strings[1].curves, 0u);
+    EXPECT_EQ(report.strings[1].vertices, 2u);
+
+    const auto notes = notesOf(report, LineworkNoteKind::CurveUnterminated);
+    ASSERT_EQ(notes.size(), 2u);
+    EXPECT_EQ(notes[0].id, begin);
+    EXPECT_EQ(notes[0].detail, "taken to end at the string's last point");
+    EXPECT_EQ(notes[1].id, late);
+    EXPECT_EQ(notes[1].detail, "begun on the string's last point: nothing curved");
+}
+
+TEST(Linework, RectangleOnOtherThanThreePointsWithWidthSaysHowThePointsWereDrawnInstead)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    // KB1: four points - no rectangle to construct, drawn closed through them.
+    addPoint(document, Point2(0, 0), "KB1", "1");
+    addPoint(document, Point2(10, 0), "KB1", "2");
+    addPoint(document, Point2(10, 5), "KB1", "3");
+    const EntityId four = addPoint(document, Point2(0, 5), "KB1 RECT", "4");
+    // KB2: two points - drawn open, since two points close on nothing.
+    addPoint(document, Point2(0, 20), "KB2", "5");
+    const EntityId two = addPoint(document, Point2(10, 20), "KB2 RECT", "6");
+    // KB3: three points, the third on the first side's line - no width, so
+    // drawn open. Side (0,40)-(10,40) has unit normal (0,1), and (5,40) is
+    // (0,1).(5,0) = 0 from it.
+    addPoint(document, Point2(0, 40), "KB3", "7");
+    addPoint(document, Point2(10, 40), "KB3", "8");
+    const EntityId flat = addPoint(document, Point2(5, 40), "KB3 RECT", "9");
+
+    const auto report = run(document).report;
+    ASSERT_EQ(report.strings.size(), 3u);
+    for (const auto& built : report.strings) {
+        EXPECT_FALSE(built.rectangle) << built.name;
+    }
+    EXPECT_TRUE(report.strings[0].closed);
+    EXPECT_EQ(report.strings[0].vertices, 4u);
+    EXPECT_FALSE(report.strings[1].closed);
+    EXPECT_EQ(report.strings[1].vertices, 2u);
+    EXPECT_FALSE(report.strings[2].closed);
+    EXPECT_EQ(report.strings[2].vertices, 3u);
+    const auto lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 3u);
+    EXPECT_TRUE(shapeOf(*lines[0]).closed) << "the note must say what was drawn";
+    EXPECT_FALSE(shapeOf(*lines[1]).closed);
+    EXPECT_FALSE(shapeOf(*lines[2]).closed);
+
+    const auto notes = notesOf(report, LineworkNoteKind::RectangleShape);
+    ASSERT_EQ(notes.size(), 3u);
+    EXPECT_EQ(notes[0].id, four);
+    EXPECT_EQ(notes[0].detail, "4 points: drawn closed through them");
+    EXPECT_EQ(notes[1].id, two);
+    EXPECT_EQ(notes[1].detail, "2 points: drawn open");
+    EXPECT_EQ(notes[2].id, flat);
+    EXPECT_EQ(notes[2].detail, "no width: drawn open");
+    EXPECT_FALSE(hasNote(report, LineworkNoteKind::CloseTooShort))
+        << "RECT on two points was never asked to close";
+}
+
+TEST(Linework, TwoPointsOfOneStringWithOneNumberAreBothPlacedAndReported)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    addPoint(document, Point2(0, 0), "KB1", "1");
+    const EntityId again = addPoint(document, Point2(5, 0), "KB1", "1");
+    addPoint(document, Point2(10, 0), "KB1", "2");
+
+    const auto report = run(document).report;
+    ASSERT_EQ(report.strings.size(), 1u);
+    // Equal numbers keep entity order: (0,0), (5,0), then 2 at (10,0).
+    const auto lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(shapeOf(*lines[0]).vertices,
+              (std::vector<Point2>{Point2(0, 0), Point2(5, 0), Point2(10, 0)}));
+    const auto notes = notesOf(report, LineworkNoteKind::DuplicatePointNumber);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_EQ(notes[0].id, again) << "on the second of the two";
+    EXPECT_EQ(notes[0].detail, "1");
+}
+
+TEST(Linework, EntitiesAskedAboutThatAreNotPointsAreCountedNotProcessed)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    const EntityId a = addPoint(document, Point2(0, 0), "KB1", "1");
+    const EntityId b = addPoint(document, Point2(10, 0), "KB1", "2");
+    Entity other;
+    other.geometry = Polyline2{{Point2(0, 50), Point2(10, 50)}, false};
+    other.properties.insert_or_assign("code", katana::entity::PropertyValue("KB9"));
+    ASSERT_TRUE(document.execute(cmd::createEntities({other})).ok());
+    const EntityId line = document.lastCreatedEntities().front();
+
+    LineworkOptions options;
+    options.ids = {a, line, b};
+    const auto report = run(document, options).report;
+    EXPECT_EQ(report.considered, 2u) << "the two points";
+    EXPECT_EQ(report.notPoints, 1u) << "the polyline";
+    ASSERT_EQ(report.strings.size(), 1u);
+    EXPECT_EQ(report.strings[0].name, "KB1");
+    EXPECT_TRUE(report.unplaced.empty()) << "a polyline is not an unplaced point";
+    const Entity* untouched = document.model().entities.find(line);
+    ASSERT_NE(untouched, nullptr);
+    EXPECT_EQ(untouched->layer, "0") << "not a point, so not styled as a line here";
+}
+
+// ---- refusals -----------------------------------------------------------------------
+
+TEST(Linework, AChordToleranceThatIsNotAPositiveFiniteDistanceIsRefused)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    addPoint(document, Point2(0, 0), "KB1", "1");
+    addPoint(document, Point2(10, 0), "KB1", "2");
+
+    // Zero would make the chord step zero and the chord count infinite; a
+    // negative or NaN one measures nothing; an infinite one allows no chords.
+    for (const double tolerance :
+         {0.0, -1.0, std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity()}) {
+        LineworkOptions options;
+        options.chordTolerance = tolerance;
+        const auto planned = katana::cad::processLinework(document, options);
+        ASSERT_FALSE(planned.ok()) << "tolerance " << tolerance;
+        EXPECT_EQ(planned.error().code, katana::core::ErrorCode::InvalidArgument);
+    }
+    EXPECT_TRUE(polylinesOf(document).empty());
+}
+
+TEST(Linework, ARuleModelThatIsNotALayerNameIsRefusedNotDrawnOnAnotherLayer)
+{
+    Document document;
+    katana::entity::SurveyMap map;
+    SurveyRule kerb;
+    kerb.key = "KB*";
+    kerb.model = "a//b"; // an empty level: validateLayerPath refuses it
+    kerb.breakline = SurveyBreakline::Line;
+    ASSERT_TRUE(map.add(kerb).ok());
+    document.setSurveyMap(std::move(map));
+    addPoint(document, Point2(0, 0), "KB1", "1");
+    addPoint(document, Point2(10, 0), "KB1", "2");
+
+    const auto planned = katana::cad::processLinework(document, {});
+    ASSERT_FALSE(planned.ok());
+    EXPECT_EQ(planned.error().code, katana::core::ErrorCode::InvalidArgument);
 }
 
 // ---- one command --------------------------------------------------------------------
