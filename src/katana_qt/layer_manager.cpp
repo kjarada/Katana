@@ -1,5 +1,6 @@
 #include "layer_manager.hpp"
 
+#include <optional>
 #include <vector>
 
 #include <QCheckBox>
@@ -16,9 +17,12 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include "customisation/customisation_context.hpp"
+#include "customisation/name_picker.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/layer_path.hpp"
+#include "kept_name_combo.hpp"
 
 namespace cmd = katana::commands;
 
@@ -41,8 +45,14 @@ struct LayerManagerDialog::Impl {
     katana::cad::Document& document;
     LayerManagerDialog::Log log;
 
+    // The pickers read the Document through this; it has no thumbnails, so
+    // the linetype list has no pictures here.
+    CustomisationContext context{};
     QTableWidget* table = nullptr;
-    QComboBox* linetypeBox = nullptr;
+    // A NamePicker, not a plain combo: a layer may name a 12d linestyle no
+    // loaded library defines, and a combo that cannot show it wrote the
+    // previous row's name back on Save (audit QT-02's twin).
+    NamePicker* linetypeBox = nullptr;
     QDoubleSpinBox* weightBox = nullptr;
     QPushButton* colourButton = nullptr;
     QComboBox* hatchBox = nullptr;
@@ -50,8 +60,18 @@ struct LayerManagerDialog::Impl {
     QCheckBox* visibleBox = nullptr;
     QCheckBox* lockedBox = nullptr;
     katana::entity::Color pickedColour{};
+    // What a person changed since the form was loaded: a spin box shows a
+    // weight rounded to its decimals, and writing that back unasked would
+    // change a layer nobody edited.
+    bool weightEdited = false;
+    bool colourEdited = false;
+    bool loading = false;
 
-    Impl(katana::cad::Document& d, LayerManagerDialog::Log l) : document(d), log(std::move(l)) {}
+    Impl(katana::cad::Document& d, LayerManagerDialog::Log l) : document(d), log(std::move(l))
+    {
+        context.document = &document;
+        context.log = log;
+    }
 
     bool run(katana::commands::CommandPtr command, const QString& done)
     {
@@ -73,6 +93,7 @@ LayerManagerDialog::LayerManagerDialog(katana::cad::Document& document, Log log,
 
     auto* layout = new QVBoxLayout(this);
     impl_->table = new QTableWidget(this);
+    impl_->table->setObjectName(QStringLiteral("layerTable"));
     impl_->table->setColumnCount(8);
     impl_->table->setHorizontalHeaderLabels(
         {"Layer", "On", "Locked", "Colour", "Linetype", "Weight", "Hatch", "Entities"});
@@ -88,25 +109,33 @@ LayerManagerDialog::LayerManagerDialog(katana::cad::Document& document, Log log,
     auto* editor = new QGroupBox("Definition", this);
     editor->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     auto* form = new QFormLayout(editor);
-    impl_->linetypeBox = new QComboBox(editor);
+    impl_->linetypeBox =
+        new NamePicker(impl_->context, katana::cad::NameRole::Linetype, false, editor);
+    impl_->linetypeBox->setObjectName(QStringLiteral("layerLinetype"));
     form->addRow("Linetype", impl_->linetypeBox);
     impl_->weightBox = new QDoubleSpinBox(editor);
     impl_->weightBox->setRange(0.0, 10.0);
     impl_->weightBox->setDecimals(2);
     impl_->weightBox->setSingleStep(0.05);
     impl_->weightBox->setSuffix(" mm on paper");
+    impl_->weightBox->setObjectName(QStringLiteral("layerWeight"));
     form->addRow("Line weight", impl_->weightBox);
     impl_->colourButton = new QPushButton("Choose...", editor);
+    impl_->colourButton->setObjectName(QStringLiteral("layerColour"));
     form->addRow("Colour", impl_->colourButton);
     impl_->hatchBox = new QComboBox(editor);
+    impl_->hatchBox->setObjectName(QStringLiteral("layerHatch"));
     form->addRow("Hatch", impl_->hatchBox);
     impl_->dimensionBox = new QComboBox(editor);
+    impl_->dimensionBox->setObjectName(QStringLiteral("layerDimensionStyle"));
     form->addRow("Dimension style", impl_->dimensionBox);
     auto* flags = new QWidget(editor);
     auto* flagLayout = new QHBoxLayout(flags);
     flagLayout->setContentsMargins(0, 0, 0, 0);
     impl_->visibleBox = new QCheckBox("Visible", flags);
+    impl_->visibleBox->setObjectName(QStringLiteral("layerVisible"));
     impl_->lockedBox = new QCheckBox("Locked", flags);
+    impl_->lockedBox->setObjectName(QStringLiteral("layerLocked"));
     flagLayout->addWidget(impl_->visibleBox);
     flagLayout->addWidget(impl_->lockedBox);
     flagLayout->addStretch(1);
@@ -119,6 +148,7 @@ LayerManagerDialog::LayerManagerDialog(katana::cad::Document& document, Log log,
     auto* add = new QPushButton("New...", buttons);
     auto* child = new QPushButton("New Child...", buttons);
     auto* save = new QPushButton("Save Changes", buttons);
+    save->setObjectName(QStringLiteral("layerSave"));
     auto* move = new QPushButton("Rename or Move...", buttons);
     auto* remove = new QPushButton("Delete", buttons);
     auto* assign = new QPushButton("Put Selection Here", buttons);
@@ -152,7 +182,13 @@ LayerManagerDialog::LayerManagerDialog(katana::cad::Document& document, Log log,
                 static_cast<std::uint8_t>(picked.red()), static_cast<std::uint8_t>(picked.green()),
                 static_cast<std::uint8_t>(picked.blue()),
                 static_cast<std::uint8_t>(picked.alpha())};
+            impl_->colourEdited = true;
             impl_->colourButton->setText(QString::fromStdString(impl_->pickedColour.toHex()));
+        }
+    });
+    connect(impl_->weightBox, &QDoubleSpinBox::valueChanged, this, [this] {
+        if (!impl_->loading) {
+            impl_->weightEdited = true;
         }
     });
 
@@ -197,15 +233,27 @@ LayerManagerDialog::LayerManagerDialog(katana::cad::Document& document, Log log,
             return;
         }
         Layer changed = *stored;
-        changed.linetype = impl_->linetypeBox->currentText().toStdString();
-        changed.lineWeight = impl_->weightBox->value();
-        changed.color = impl_->pickedColour;
-        changed.hatchPattern = impl_->hatchBox->currentText().toStdString();
-        const QString dimension = impl_->dimensionBox->currentText();
+        // Every name exactly as shown, which for a name no list holds is the
+        // stored name itself, kept by its picker; numbers only when edited.
+        changed.linetype = impl_->linetypeBox->currentName();
+        if (impl_->weightEdited) {
+            changed.lineWeight = impl_->weightBox->value();
+        }
+        if (impl_->colourEdited) {
+            changed.color = impl_->pickedColour;
+        }
+        changed.hatchPattern = kept::current(impl_->hatchBox).value_or(stored->hatchPattern);
         changed.dimensionStyle =
-            dimension == kDefaultDimensionStyle ? std::string() : dimension.toStdString();
+            kept::current(impl_->dimensionBox).value_or(stored->dimensionStyle);
         changed.visible = impl_->visibleBox->isChecked();
         changed.locked = impl_->lockedBox->isChecked();
+        if (changed == *stored) {
+            // Not an edit, and so not an undo step (audit QT-01's shape).
+            impl_->log("Nothing changed: layer " + QString::fromStdString(name) +
+                           " is as it was.",
+                       false);
+            return;
+        }
         if (impl_->run(cmd::updateLayer(std::move(changed)),
                        "Layer " + QString::fromStdString(name) + " updated.")) {
             reload();
@@ -307,19 +355,22 @@ void LayerManagerDialog::reloadTable()
         }
     }
 
+    // Each list is rebuilt from the model and then shows what it showed,
+    // kept if the model no longer lists it.
     const auto fill = [](QComboBox* box, const std::vector<std::string>& names,
                          const char* extra) {
-        const QString was = box->currentText();
-        box->clear();
+        const std::optional<std::string> was = kept::current(box);
+        std::vector<kept::Choice> choices;
         if (extra != nullptr) {
-            box->addItem(extra);
+            choices.push_back({QString::fromLatin1(extra), std::string()});
         }
         for (const std::string& name : names) {
-            box->addItem(QString::fromStdString(name));
+            choices.push_back({QString::fromStdString(name), name});
         }
-        box->setCurrentText(was);
+        kept::fill(box, choices);
+        kept::show(box, was.value_or(std::string()));
     };
-    fill(impl_->linetypeBox, model.linetypes.names(), nullptr);
+    impl_->linetypeBox->refresh();
     fill(impl_->hatchBox, model.hatchPatterns.names(), nullptr);
     fill(impl_->dimensionBox, model.dimensionStyles.names(), kDefaultDimensionStyle);
 }
@@ -330,16 +381,18 @@ void LayerManagerDialog::loadSelectedLayer()
     if (layer == nullptr) {
         return;
     }
-    impl_->linetypeBox->setCurrentText(QString::fromStdString(layer->linetype));
+    impl_->loading = true;
+    impl_->linetypeBox->setCurrentName(layer->linetype);
     impl_->weightBox->setValue(layer->lineWeight);
     impl_->pickedColour = layer->color;
     impl_->colourButton->setText(QString::fromStdString(layer->color.toHex()));
-    impl_->hatchBox->setCurrentText(QString::fromStdString(layer->hatchPattern));
-    impl_->dimensionBox->setCurrentText(layer->dimensionStyle.empty()
-                                            ? QString(kDefaultDimensionStyle)
-                                            : QString::fromStdString(layer->dimensionStyle));
+    kept::show(impl_->hatchBox, layer->hatchPattern);
+    kept::show(impl_->dimensionBox, layer->dimensionStyle);
     impl_->visibleBox->setChecked(layer->visible);
     impl_->lockedBox->setChecked(layer->locked);
+    impl_->weightEdited = false;
+    impl_->colourEdited = false;
+    impl_->loading = false;
 }
 
 std::string LayerManagerDialog::selectedLayer() const

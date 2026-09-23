@@ -484,6 +484,8 @@ struct StyleManagerDialog::Impl {
     QComboBox* promptChoice = nullptr;
     QPushButton* promptOk = nullptr;
     std::function<void(const std::string&)> promptAccept{};
+    // The prompt asks for a choice from promptChoice rather than a typed name.
+    bool promptIsChoice = false;
     QFrame* purgePanel = nullptr;
     QLabel* purgeLabel = nullptr;
     QListWidget* purgeList = nullptr;
@@ -1252,6 +1254,7 @@ struct StyleManagerDialog::Impl {
         promptName->show();
         promptName->setText(suggestion);
         promptName->selectAll();
+        promptIsChoice = false;
         promptAccept = std::move(accept);
         prompt->show();
         promptName->setFocus();
@@ -1268,6 +1271,7 @@ struct StyleManagerDialog::Impl {
             promptChoice->addItem(fromName(choice), kept::bytes(choice));
         }
         promptChoice->show();
+        promptIsChoice = true;
         promptAccept = std::move(accept);
         prompt->show();
         promptChoice->setFocus();
@@ -1276,7 +1280,7 @@ struct StyleManagerDialog::Impl {
     void acceptPrompt()
     {
         std::string answer;
-        if (promptChoice->isVisible() || promptName->isHidden()) {
+        if (promptIsChoice) {
             const QByteArray chosen = promptChoice->currentData().toByteArray();
             answer.assign(chosen.constData(), static_cast<std::size_t>(chosen.size()));
         } else {
@@ -1413,8 +1417,10 @@ struct StyleManagerDialog::Impl {
                                       ? QStringLiteral("Apply to Selection (%1)").arg(picked)
                                       : QStringLiteral("Apply to Selection"));
         applyToSelection->setEnabled(styles == 1 && picked > 0);
+        // Save is offered whenever there is a style to save: saving one
+        // nobody edited is allowed, and is no command at all (QT-02).
         const bool dirty = !edited.empty();
-        saveStyle->setEnabled(styles >= 1 && dirty);
+        saveStyle->setEnabled(styles >= 1);
         revertStyle->setEnabled(styles >= 1 && dirty);
 
         const auto rows = selectedLinetypeRows();
