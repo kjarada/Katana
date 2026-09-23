@@ -343,7 +343,10 @@ The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
 Section numbers are deliberately NOT renumbered — source comments cite them
 (`PLAN.MD section 32`, `Rule 4`), and renumbering would silently invalidate
-every such reference.
+every such reference. A test count in a phase's record is the count when
+that phase was delivered, not now: the suite's current total is in README.md,
+and the counts here drifted from it for months before the audit of 2026-09-23
+said so.
 
 Do not skip phases without explicit architectural justification.
 
@@ -506,7 +509,7 @@ the ambient PATH.
 
 # 7. Phase 02 — Mathematical Foundation
 
-**STATUS: DELIVERED.** `include/katana/math`, header-only, 50 tests.
+**STATUS: DELIVERED.** `include/katana/math`, header-only, 50 tests at delivery.
 
 * `numerics.hpp` - the single tolerance policy (section 35). `kAbsolute` 1e-12,
   `kRelative` 1e-9, `kAngular` 1e-10 rad, `kGeometric` 1e-7 model units,
@@ -540,7 +543,7 @@ significant digits.
 
 # 9. Phase 04 — Geometry Algorithms
 
-**STATUS: DELIVERED.** 76 tests, benchmarked in `benchmarks/bench_geometry.cpp`.
+**STATUS: DELIVERED.** 76 tests at delivery, benchmarked in `benchmarks/bench_geometry.cpp`.
 
 * `intersection.hpp` - one `IntersectionResult` for every pair: line/line,
   line/segment, segment/segment, line/circle, segment/circle, circle/circle,
@@ -558,7 +561,7 @@ Measured figures are recorded in `docs/geometry.md`.
 
 # 10. Phase 05 — Entity System
 
-**STATUS: DELIVERED.** `include/katana/entity`, 22 tests.
+**STATUS: DELIVERED.** `include/katana/entity`, 22 tests at delivery.
 
 * `entity.hpp` - `Geometry` variant ordered to match `EntityType`; `PropertyMap`
   of typed values.
@@ -775,7 +778,7 @@ tested.
 
 # 11. Phase 06 — Command System
 
-**STATUS: DELIVERED.** 31 tests.
+**STATUS: DELIVERED.** 31 tests at delivery.
 
 `ChangeSet` (add / modify / remove) validated before anything is touched, then
 applied atomically and reported through change events. `CommandStack` carries
@@ -792,7 +795,7 @@ created implicitly, and so does a Transaction's rollback (audit MOD-07, open).
 
 # 12. Phase 07 — Project Storage
 
-**STATUS: DELIVERED.** 13 tests.
+**STATUS: DELIVERED.** 13 tests at delivery.
 
 SQLite behind `sqlite_database.hpp` (RAII pimpl; `synchronous=FULL`,
 `journal_mode=DELETE`, `foreign_keys=ON`; the online backup API for snapshots).
@@ -805,7 +808,7 @@ deleting it.
 
 # 13. Phase 08 — Basic CAD Application
 
-**STATUS: DELIVERED.** 27 unit tests plus 4 end-to-end CTest cases.
+**STATUS: DELIVERED.** 27 unit tests plus 4 end-to-end CTest cases at delivery.
 
 `katana_cad` holds everything an interactive session needs that is not a widget,
 so all of it is tested without a display:
@@ -877,7 +880,7 @@ format or solver.
 
 # 16. Phase 11 — Coordinate Systems
 
-**STATUS: DELIVERED.** `src/katana_geodesy`, 66 tests.
+**STATUS: DELIVERED.** `src/katana_geodesy`, 66 tests at delivery.
 
 PROJ confined behind `proj_internal.hpp`: `CoordinateReferenceSystem`,
 `CoordinateTransformer` (reporting the operation actually selected, its accuracy
