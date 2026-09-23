@@ -153,10 +153,6 @@ symbolPrintSize(const katana::entity::LineStyle& definition, double size, double
                                                            std::string_view symbolName,
                                                            double size);
 
-// `base` when no style has that name, else "base 2", "base 3" ... the first
-// free.
-[[nodiscard]] std::string freeStyleName(const katana::entity::Model& model, std::string_view base);
-
 struct SymbolAssignment {
     // ONE undo step: the new style, when one is made, and the points moved
     // into it. Null when there is nothing to change - every point among the
