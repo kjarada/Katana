@@ -1,7 +1,9 @@
 #include "katana/cad/customisation_record.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
+#include <system_error>
 
 namespace katana::cad {
 
@@ -67,6 +69,89 @@ std::vector<std::string> customisationNotLoaded(const std::vector<std::string>& 
         }
     }
     return missing;
+}
+
+DistinctFiles distinctCustomisationFiles(const std::vector<std::filesystem::path>& named)
+{
+    DistinctFiles distinct;
+    for (const std::filesystem::path& path : named) {
+        std::error_code error;
+        std::filesystem::path file = std::filesystem::absolute(path, error).lexically_normal();
+        if (error) {
+            // Unresolvable here; the read that follows says why.
+            file = path.lexically_normal();
+        }
+        const bool repeat = std::any_of(
+            distinct.files.begin(), distinct.files.end(), [&](const std::filesystem::path& seen) {
+                if (seen == file) {
+                    return true;
+                }
+                // equivalent() reports an error, not false, for a file that
+                // does not exist; either way they are not known to be one.
+                std::error_code unknown;
+                return std::filesystem::equivalent(seen, file, unknown) && !unknown;
+            });
+        if (repeat) {
+            distinct.repeats.push_back(path);
+        } else {
+            distinct.files.push_back(std::move(file));
+        }
+    }
+    return distinct;
+}
+
+void noteCustomisationLoaded(std::vector<std::string>& missingAtOpen,
+                             const std::vector<CustomisationSource>& load)
+{
+    std::erase_if(missingAtOpen, [&](const std::string& name) {
+        return std::any_of(load.begin(), load.end(),
+                           [&](const CustomisationSource& file) { return file.name == name; });
+    });
+}
+
+std::vector<std::string> customisationRecordToSave(const std::vector<std::string>& recorded,
+                                                   const std::vector<std::string>& missingAtOpen,
+                                                   const katana::entity::StyleLibrary& library,
+                                                   const std::vector<CustomisationSource>& loaded)
+{
+    std::vector<std::string> names = customisationRecord(library, loaded);
+    for (const std::string& name : recorded) {
+        if (std::find(missingAtOpen.begin(), missingAtOpen.end(), name) != missingAtOpen.end() &&
+            std::find(names.begin(), names.end(), name) == names.end()) {
+            names.push_back(name);
+        }
+    }
+    return names;
+}
+
+bool typedSaveHasDestination(std::string_view line, bool hasProject)
+{
+    // CommandInterpreter's word rule (its tokenize), counted rather than
+    // kept: blanks split, double quotes group and "" is a word.
+    std::size_t words = 0;
+    bool inQuotes = false;
+    bool inWord = false;
+    for (const char ch : line) {
+        if (ch == '"') {
+            inQuotes = !inQuotes;
+            inWord = true;
+        } else if (!inQuotes && std::isspace(static_cast<unsigned char>(ch)) != 0) {
+            if (inWord) {
+                ++words;
+                inWord = false;
+            }
+        } else {
+            inWord = true;
+        }
+    }
+    if (inQuotes) {
+        return false; // the interpreter refuses the line
+    }
+    if (inWord) {
+        ++words;
+    }
+    // The verb is the first word.
+    return words == 2 || (words == 1 && hasProject);
 }
 
 } // namespace katana::cad
