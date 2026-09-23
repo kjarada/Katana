@@ -869,8 +869,9 @@ QStringList MainWindow::shortcutClashes(int* sequences) const
 {
     // Every key a person can press to reach something here, and what each
     // reaches: the actions' key sequences (all of them - Redo has two), any
-    // QShortcut, and the Alt letter of each top-level menu. A shared QAction
-    // is one object, so a menu and a toolbar showing it are not a clash.
+    // QShortcut, the Alt letter of each top-level menu, and each item's
+    // letter within its menu. A shared QAction is one object, so a menu and a
+    // toolbar showing it are not a clash.
     std::map<QString, QStringList> owners;
     const auto nameOf = [](const QObject& object, QString text) {
         return object.objectName().isEmpty() ? text.remove('&') : object.objectName();
