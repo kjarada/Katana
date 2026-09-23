@@ -273,6 +273,9 @@ class MainWindow final : public QMainWindow {
     katana::cad::CommandInterpreter interpreter_{document_};
 
     ViewWorkspace* views_ = nullptr;
+    // The title bars, the minimised tray and maximise, shared by the panels
+    // below and every view (dock_chrome.hpp). Owned by this window.
+    DockChrome* chrome_ = nullptr;
     std::unique_ptr<SurveyWorkbench> survey_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
@@ -301,6 +304,11 @@ class MainWindow final : public QMainWindow {
     QAction* snapAction_ = nullptr;
     QActionGroup* toolGroup_ = nullptr;
     QMenu* viewMenu_ = nullptr;
+    // The four panels, by the fixed object names a saved layout keys them on:
+    // LayersDock, PropertiesDock, CommandLineDock, ReferenceDataDock.
+    QDockWidget* layerDock_ = nullptr;
+    QDockWidget* propertyDock_ = nullptr;
+    QDockWidget* commandDock_ = nullptr;
     QDockWidget* referenceDock_ = nullptr;
     std::vector<QAction*> layoutActions_;
     std::vector<QAction*> kindActions_;
