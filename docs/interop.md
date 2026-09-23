@@ -24,9 +24,12 @@ katana_qt
 
 `katana_cad` deliberately may **not** see `katana_interop`. Keeping GDAL and
 PDAL out of the core application layer is what lets it build with
-`-DKATANA_BUILD_IO=OFF`, which the sanitizer CI job depends on — neither library
-is sanitizer-instrumented, so their allocations produce false positives that
-would drown real findings. `tools/check_layering.cmake` enforces this.
+`-DKATANA_BUILD_IO=OFF` - which also needs `-DKATANA_BUILD_QT_APP=OFF`, since
+the application links interop - and that is the configuration a sanitizer build
+wants: neither library is sanitizer-instrumented, so their allocations produce
+false positives that would drown real findings. (This said the sanitizer CI job
+depends on it; the CI workflow had been deleted, and is being restored with such
+a job - audit, BLD.) `tools/check_layering.cmake` enforces the layering.
 
 No GDAL or PDAL type appears in any public header: geometry crosses the boundary
 as plain coordinate arrays (`GeoPoint`), rasters as 8-bit RGBA, and failures as
@@ -39,11 +42,16 @@ adapter boundary and converted, so nothing throws across the interface.
 |---|---|
 | Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite |
 | Vector out | the same, driver inferred from the extension |
-| Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2, ECW — GDAL's readers |
-| Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD, E57 in; LAS/LAZ out |
+| Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2 — GDAL's readers |
+| Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out |
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
 
-Not supported: **DWG, LandXML, IFC**.
+Not supported: **DWG, IFC**, and **ECW and E57**: the extensions are routed
+to GDAL and PDAL, but the MSYS2 toolchain has no ECW SDK and no PDAL E57
+plugin, so such a file fails to open with the library's own error (this table
+listed both until the audit of 2026-09-23 checked the toolchain). LandXML
+SURVEY data - points and observations - is read by the survey data exchange
+(PLAN.MD section 45), not here.
 
 ## Two kinds of imported data
 
@@ -118,10 +126,18 @@ Every lossy step is stated rather than hidden.
 
 ### Precision at survey coordinates
 
-`originShift` subtracts a local origin on import and adds it back on export.
-Survey data often sits where a `double` has about 0.1 mm of resolution left; a
-drawing worked at a local origin keeps full precision and exports back to the
-true position unchanged.
+`originShift` subtracts a local origin on import. The reason is NOT the
+coordinates themselves - this said a double has "about 0.1 mm of resolution
+left" at survey magnitudes, and a double at 1e7 resolves about 2e-9 m. It is
+what is done WITH them: products and differences (a polygon's shoelace terms at
+1e7 are 1e14, with ulps of about 0.02 m²), and the float the 3D path and any GPU
+use, which has about a metre of resolution at 1e7. A drawing worked at a local
+origin keeps all of that small.
+
+It is not undone on export yet: the shift is not in `VectorImportResult`, and
+neither the GUI nor the CLI passes one to an export, so a drawing imported
+shifted exports shifted (audit QT-07, open). The header's "recorded in the
+result" describes the intent, not the code.
 
 ## Format limitations that are refused rather than papered over
 
@@ -522,8 +538,10 @@ The mapping is documented in full at the head of
   do not comply, and a surface built inside out fails as a whole. Katana
   writes the `tin` form (visible triangles only), which the manual
   recommends to "most software packages" and which cannot get the
-  mandatory neighbours block wrong. Per-triangle colours are kept and written
-  back but a surface here has no use for them, which is said.
+  mandatory neighbours block wrong. Per-triangle colours survive the ARCHIVE
+  round trip only: the domain import does not carry them onto the surface and
+  the domain export writes none (a tin goes out green) - which this used to
+  describe as "kept and written back".
 - **Trimeshes become meshes in the session.** A `primitive_3d` is a
   `geometry::TriangleMesh` held beside the surfaces, drawn in 3D and as its
   footprint in plan (docs/cad.md, "A mesh is not a surface"). Per-face
@@ -619,7 +637,7 @@ handling column is asserted by `tests/archive12d/test_coverage.cpp`.
 | `project_attributes` | - | read | read into the archive; a Katana project has no attributes of its own |
 | `tin` | 1.4.7.2 | import and export | a surface (terrain::TinSurface) |
 | `full_tin` | 1.4.7.1 | import | a surface of its visible, non-construction triangles; written back as a tin |
-| `super_tin` | 1.4.8 | read | reported; its member tins are what is imported |
+| `super_tin` | 1.4.8 | read | BUILT as a combined surface, with its member tins imported as surfaces of their own (see "Super tins are built"; this row said "reported" after that was no longer true) |
 | `primitive_3d` | 1.4.9 | import and export | a mesh in the session (geometry::TriangleMesh), drawn in 3D and as its footprint in plan; per-face colours kept and written back |
 | `string arc` | 1.5.1 | import | an Arc; exported arcs are written as two-vertex super strings |
 | `string circle` | 1.5.2 | import and export | a Circle |
