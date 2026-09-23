@@ -112,6 +112,9 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     menu.addSection("Coordinates");
     menu.addAction(converter);
     menu.addSection("Survey Coding");
+    if (services_.codeManager != nullptr) {
+        menu.addAction(services_.codeManager);
+    }
     if (services_.loadCustomisation != nullptr) {
         menu.addAction(services_.loadCustomisation);
     }
