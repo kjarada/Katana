@@ -22,6 +22,13 @@ add_library(katana_cad STATIC
     layer_overrides.cpp
     view_set.cpp
 )
+# The interactive tools (include/katana/cad/interactive_tool.hpp) are globbed:
+# each family is written by its own author, often at the same time as the
+# others, and a list here would make every one of them edit this file. A file
+# cannot join the build unseen and do nothing - tools/families.hpp lists every
+# family by name, and a missing one is a link error.
+file(GLOB _cad_tool_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_tool_sources} interactive_tool.cpp)
 katana_target_defaults(katana_cad)
 # katana_geodesy for the survey tools' coordinate converter (survey_tools.cpp):
 # the one survey tool whose answer is PROJ's, reached through the transformer

@@ -16,6 +16,7 @@ ViewState& ViewSet::add(ViewKind kind)
     view->kind = kind;
     view->number = lowestFreeNumber(kind, view->id);
     configureCamera(view->camera, kind);
+    view->cameraKind = kind;
     ViewState& added = *view;
     views_.push_back(std::move(view));
     // Least recent: a view nobody has clicked yet must not outrank one the
@@ -79,7 +80,16 @@ Status ViewSet::setKind(ViewId id, ViewKind kind)
     }
     view->kind = kind;
     view->number = lowestFreeNumber(kind, id);
-    configureCamera(view->camera, kind);
+    // Section does not look through the camera, so it leaves it; and arriving
+    // back at the kind the camera is already set up for leaves it too. The
+    // second half is what makes configureCamera's promise - a trip through a
+    // section restores the view - true: resetting on every change of kind
+    // lost a 3D view's orbit on the way back (ViewSet.AThreeDViewTurnedInto
+    // ASectionAndBackKeepsItsOrbit).
+    if (kind != ViewKind::Section && kind != view->cameraKind) {
+        configureCamera(view->camera, kind);
+        view->cameraKind = kind;
+    }
     return {};
 }
 
