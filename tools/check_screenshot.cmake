@@ -134,8 +134,9 @@ endif()
 # "%NAME" makes the window's own dock or toolbar NAME the target (--panel),
 # ">TEXT" runs TEXT on the command line (--command) and ">" alone is Enter on
 # an empty command line (--enter), "?WIDGET" prints what the target's WIDGET
-# shows (--report), "!BUTTON" presses a button, and anything else is a
-# FIELD=TEXT fill. '|' between steps, for FILL's reason.
+# shows (--report), "*NAME" triggers the menu item NAME in its turn
+# (--trigger), "!BUTTON" presses a button, and anything else is a FIELD=TEXT
+# fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
     foreach(_step IN LISTS _steps)
@@ -155,6 +156,8 @@ if(DEFINED DRIVE)
             list(APPEND extra --command "${_rest}")
         elseif(_sigil STREQUAL "?")
             list(APPEND extra --report "${_rest}")
+        elseif(_sigil STREQUAL "*")
+            list(APPEND extra --trigger "${_rest}")
         elseif(_sigil STREQUAL "!")
             list(APPEND extra --press "${_rest}")
         else()

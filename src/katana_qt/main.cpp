@@ -214,7 +214,7 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
 //                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
 //                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
-//                 [--command TEXT...] [--enter] --screenshot out.png
+//                 [--command TEXT...] [--enter] [--trigger NAME...] --screenshot out.png
 //   katana --check-shortcuts --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
@@ -282,6 +282,8 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // styles, entities and selection a panel then acts on - or start a tool by
 // its alias and answer its prompts; --enter is Enter on an empty command
 // line. --report WIDGET prints what the target's WIDGET shows (reportWidget).
+// --trigger NAME is --action in its turn among these steps, for a menu
+// command that acts on what the steps before it made (formatPurge).
 //
 // --check-shortcuts lists every key sequence two of the window's actions or
 // menus share, and fails the run when there is one: Qt disables an
@@ -363,7 +365,8 @@ int main(int argc, char* argv[])
         } else if (argument == "--survey-dialog" || argument == "--dialog") {
             surveySteps.emplace_back("--dialog", value());
         } else if (argument == "--survey-dock" || argument == "--fill" || argument == "--press" ||
-                   argument == "--panel" || argument == "--command" || argument == "--report") {
+                   argument == "--panel" || argument == "--command" || argument == "--report" ||
+                   argument == "--trigger") {
             surveySteps.emplace_back(argument, value());
         } else if (argument == "--enter") {
             // Enter on an empty command line, a step of its own: an empty
@@ -475,6 +478,18 @@ int main(int argc, char* argv[])
             QString targetName;
             std::vector<QDockWidget*> docks;
             for (const auto& [kind, text] : surveySteps) {
+                if (kind == "--trigger") {
+                    // --action, in its turn among the steps: a menu command
+                    // that acts on what the steps before it made.
+                    if (const auto status = window.triggerAction(text); !status) {
+                        std::fprintf(stderr, "--trigger %s failed: %s\n", qPrintable(text),
+                                     status.error().describe().c_str());
+                        return 1;
+                    }
+                    QApplication::processEvents();
+                    QApplication::processEvents();
+                    continue;
+                }
                 if (kind == "--command") {
                     window.runCommand(text);
                     // Twice: the document's listener defers the panels'
