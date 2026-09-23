@@ -160,15 +160,15 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
 // QT-21, the command line's part). REPLACE swaps out what the load brought -
 // and only that: a load with no mapfile never installs an empty map, nor one
 // with no library an empty library.
-bool runCustomise(katana::cad::Document& document, std::vector<std::string> paths)
+//
+// Whether REPLACE was given is decided by the caller, which alone knows
+// whether a word was quoted.
+bool runCustomise(katana::cad::Document& document, const std::vector<std::string>& paths,
+                  bool replace)
 {
-    const bool replace = !paths.empty() && upperVerb(paths.front()) == "REPLACE";
-    if (replace) {
-        paths.erase(paths.begin());
-        if (paths.empty()) {
-            std::cerr << "error: InvalidArgument: CUSTOMISE REPLACE needs a file\n";
-            return false;
-        }
+    if (replace && paths.empty()) {
+        std::cerr << "error: InvalidArgument: CUSTOMISE REPLACE needs a file\n";
+        return false;
     }
     if (paths.empty()) {
         const auto& library = document.styleLibrary();
@@ -802,6 +802,12 @@ bool runLine(Session& session, const std::string& line)
         // Paths may have spaces, so they are taken as quoted words where they
         // are quoted and as plain words where they are not.
         std::vector<std::string> paths;
+        // REPLACE is the keyword only as the first word, UNQUOTED and whole:
+        // a quoted "replace me.mapfile" is a file. Upper-casing the first
+        // blank-delimited word of the first path took that file for the
+        // keyword and dropped it - or, given twice, replaced the loaded map
+        // with it instead of merging.
+        bool replace = false;
         std::size_t at = line.find_first_of(" \t");
         while (at != std::string::npos && at < line.size()) {
             while (at < line.size() && (line[at] == ' ' || line[at] == '\t')) {
@@ -820,11 +826,18 @@ bool runLine(Session& session, const std::string& line)
                 at = end + 1;
             } else {
                 const std::size_t end = line.find_first_of(" \t", at);
-                paths.push_back(line.substr(at, end == std::string::npos ? end : end - at));
+                std::string word = line.substr(at, end == std::string::npos ? end : end - at);
                 at = end;
+                // An unquoted word has no blanks, so upperVerb upper-cases
+                // the whole of it.
+                if (paths.empty() && !replace && upperVerb(word) == "REPLACE") {
+                    replace = true;
+                    continue;
+                }
+                paths.push_back(std::move(word));
             }
         }
-        return runCustomise(session.document, paths);
+        return runCustomise(session.document, paths, replace);
     }
 #if defined(KATANA_WITH_INTEROP)
     // Interoperability verbs are handled before the interpreter sees the line,
