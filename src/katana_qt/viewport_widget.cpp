@@ -436,7 +436,7 @@ void ViewportWidget::resetInteraction()
     typed_.clear();
     boxStart_.reset();
     activeSnap_.reset();
-    tools_.reset();
+    tools_.abandon(); // its onFinished reports that the tool ended
     updatePrompt();
     update();
 }

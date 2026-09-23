@@ -87,10 +87,13 @@ class ToolHost {
     // the prompt whose Enter commits, because Enter at a value prompt takes
     // its default, which Esc must never do. No-op when idle.
     void cancel();
-    // Abandons the running tool WITHOUT committing anything and starts the
-    // same tool afresh: for when the document under it has been replaced, and
-    // its picks and ids belong to a drawing that is gone.
-    void reset();
+    // Ends the running tool WITHOUT committing anything (onFinished, as for
+    // Esc): for when the document under it is being replaced, and its picks
+    // and ids belong to a drawing that is going. Ended rather than restarted,
+    // because a restart reads the current layer and the selection at that
+    // moment, and a caller replacing the document may call this before the
+    // replacement (MainWindow::newDocument does). No-op when idle.
+    void abandon();
 
     // ---- hooks, all optional -------------------------------------------------
     // The prompt changed: after every input, a start, a restart, and "" when

@@ -143,11 +143,13 @@ class ViewportWidget final : public QWidget {
     // abandons a selection box, and then clears the selection.
     void cancel();
 
-    // Abandons the operation in progress WITHOUT changing the active tool.
-    // Required whenever the document under the view is replaced: the collected
-    // clicks belong to the drawing that is going away, and committing them into
-    // the new one silently produces an entity at coordinates the user never
-    // picked there.
+    // Abandons the operation in progress: ends the running tool WITHOUT
+    // committing anything (tools::ToolHost::abandon) and drops typed input
+    // and a selection box. Required whenever the document under the view is
+    // replaced: the collected clicks belong to the drawing that is going away,
+    // and committing them into the new one silently produces an entity at
+    // coordinates the user never picked there. Safe before or after the
+    // replacement, since nothing is rebuilt from the document here.
     void resetInteraction();
 
     // Notifications to the main window. All optional.
