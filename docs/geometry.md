@@ -53,8 +53,10 @@ these two modules specifically:
   `kAbsolute` times the product of the row norms (a Hadamard-style bound), so
   the test is invariant to overall scale: a well-conditioned matrix scaled by
   1e-9 is still invertible.
-* **Lengths** use `std::hypot`, which does not overflow or underflow for
-  extreme components; `Vec2(3e200, 4e200).length()` is exactly `5e200`.
+* **Lengths** of `Vec2` and `Vec3` use `std::hypot`, which does not overflow or
+  underflow for extreme components; `Vec2(3e200, 4e200).length()` is exactly
+  `5e200`. `Vec4` and `Quaternion` use the square root of the squared length
+  (this said every length used `std::hypot`).
 * **Chord accuracy** near tangency uses the factored form
   `sqrt((r - d)(r + d))` rather than `sqrt(r² - d²)`, which loses precision when
   `d ≈ r` — exactly the case that matters for a near-tangent line.
@@ -158,11 +160,14 @@ Two numbers set expectations for later phases. `triangulate` grows quadratically
 constrained Delaunay rather than this routine, which exists for drafting-scale
 polygons. And point-in-polygon is O(n) twice over (a boundary-distance pass and
 a crossing-number pass); at 11.6 µs against a 1024-vertex ring it is comfortably
-inside PLAN.MD §32's 16 ms selection budget for interactive use, but it is the
-call that a spatial index (Phase 18) should accelerate first.
+inside PLAN.MD §32's 16 ms selection budget for interactive use. (This said it
+was the call a spatial index should accelerate first; the index of Phase 18 is a
+broad phase for picking, snapping, box selection and repaint and does not touch
+`Polyline2::classify`, which is still the O(n) pair.)
 
-No further optimisation has been applied, per PLAN.MD Rules 5 and 6 — tests
-first, profile before optimising.
+`isSimple`, `clipPolygon` and `Rectangle2::closestPoint` were optimised on
+2026-09-23, measured, below; nothing else here has been, per PLAN.MD Rules 5
+and 6 — tests first, profile before optimising.
 
 ## Failure modes
 
@@ -212,13 +217,13 @@ one panel over a curve that bends both ways. The bound uses
 `max(|k0|, |k(s)|) * s`, which over-divides slightly when the curvature
 changes sign and is never too coarse.
 
-**Symmetric node pairs are evaluated together.** The ten Gauss-Legendre nodes
-come in five pairs that share a weight. Summing `cos(theta+) + cos(theta-)`
-per pair, rather than ten terms in sequence, means a spiral and its mirror
-image are evaluated in an identical order with `cos(-t) == cos(t)` and
-`sin(-t) == -sin(t)` holding exactly in IEEE arithmetic - so a right-hand
-design is the EXACT reflection of the left-hand one, not one to within
-rounding. The test asserts equality, not nearness.
+**A right-hand spiral is the EXACT reflection of the left-hand one**, not one
+to within rounding, and the test asserts equality, not nearness. What makes it
+so is that every angle of the mirror is the exact negation of the original's and
+libm's `cos` is even and `sin` odd - so each term is exactly mirrored. This used
+to credit evaluating symmetric Gauss-Legendre node pairs together; a sequential
+sum gives the same result, so the pairing is not what the test protects, and a
+libm whose `sin(-t)` is not exactly `-sin(t)` is what would break it.
 
 **`asArc()` exists so the constant-curvature case is not integrated.** A
 spiral with `k0 == k1` is a circular arc, and the section and stationing code
@@ -260,11 +265,12 @@ was re-derived two ways - directly, and by the small-angle identity
 `acos(1 - e) ~ sqrt(2e)` - and both gave 60. The test now says 60 because of
 those derivations, not because the program did (CLAUDE.md section 3).
 
-### Not done
+### Where it is used
 
-Nothing draws a spiral yet, and nothing stations along one. `Spiral2` is a
-geometry-layer primitive with no entity, no command and no renderer behind
-it; the alignment table that will hold it is the next slice of Phase 21.
+`SolvedAlignment` stations along spirals and chords them, the viewport draws
+alignments that contain them, and `ALIGN` prints setting-out tables through
+them. (This section said nothing drew or stationed along a spiral, from before
+the alignment slice of Phase 21.)
 
 ## Chording curves (`chording.hpp`)
 
@@ -273,9 +279,8 @@ stated tolerance - lived in `cad::scene` as `chordArc` and `chordCircle`.
 When `Spiral2::chordCountFor` was written it grew its own copy of the same
 arithmetic, which is the second way of doing something that CLAUDE.md section
 1 calls a defect. The rule now lives in `geometry::chording`, the lowest layer
-that can see `Arc2`, and both the scene builder and the spiral call it; the
-horizontal alignment will be the third caller when it chords itself for a
-section cut.
+that can see `Arc2`, and the scene builder, the spiral and the horizontal
+alignment all call it.
 
 **Why the `cad` names were deleted rather than kept as forwarders.** The first
 attempt kept `cad::chordArc` forwarding to `geometry::chordArc`. That does not
@@ -373,12 +378,15 @@ label at each key station; and Terrain > Cut Section Along Alignment cuts a
 section down one by name, sharing the section code with the selection path
 rather than duplicating it. Details in `docs/cad.md`.
 
-### Not done
+### Built on it since
 
-Profiles, corridors, parcels and grading - everything in Phase 21 that is
-built ON an alignment rather than being one. Nothing references an alignment
-by name yet, so `deleteAlignment` has no in-use guard; the comment in the
-command says where it belongs when profiles arrive.
+Profiles, corridor quantities and the corridor surface, and parcels are built
+(PLAN.MD section 26); grading has an engine without a GUI route. Nothing
+references an alignment BY NAME in the model, so `deleteAlignment` still has no
+in-use guard - but `ViewportCell::sectionAlignment` is declared as such a
+reference and is dead, which is either to be removed or to become the first
+thing the guard protects. (This section listed profiles, corridors and parcels
+as not done.)
 
 ## The vertical alignment (`profile.hpp`)
 
@@ -451,11 +459,11 @@ sampled at every ground station plus the profile's own key stations, so the
 section view draws design against ground and the low point of a sag lands
 where the water will. Details in `docs/cad.md`.
 
-### Not done
+### Built on it since
 
-Corridors, parcels and grading. Cut and fill *quantities* between design and
-ground along an alignment - the profile is drawn against the ground but
-nothing yet integrates the area between them; that is the corridor's job.
+Corridor cut and fill quantities between design and ground are integrated along
+the alignment (PLAN.MD section 26), which is what this section said was
+missing.
 
 ## Rejecting early without changing the answer (`polygon.hpp`, `primitives2d.hpp`)
 
@@ -470,8 +478,11 @@ fails two polygon tests, which was checked by removing it.
 `clipPolygon` swaps its two vertex buffers rather than move-assigning them, so
 Sutherland-Hodgman's per-clip-edge lists are allocated once instead of once per
 edge. `Rectangle2::closestPoint` walks a stack `std::array<Point2, 4>` instead
-of building a `std::vector` of corners on every call - it is called once per
-candidate entity on every pick and every snap, and is 2.8x faster for it.
+of building a `std::vector` of corners on every call, and is 2.8x faster for
+it. This said it is called once per candidate entity on every pick and snap; it
+is not - `Rectangle2` is not an entity geometry, and in production it is only
+built by `fromCorners()` and turned into a polyline - so the saving is real but
+lands nowhere hot.
 
 The benchmarks for all three are in `benchmarks/bench_geometry.cpp`; they did
 not exist when the changes were made, which is recorded in
