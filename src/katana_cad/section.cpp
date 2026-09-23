@@ -298,7 +298,10 @@ Result<Section> extractSection(const Polyline2& alignment,
 
         katana::geometry::IntersectionResult hit;
         model->entities.forEach([&](const Entity& entity) {
-            if (!isDrawn(*model, entity)) {
+            // The document rule: a section is cut once and shared, so it must
+            // not depend on which view was active. A view that hides a layer
+            // drops that layer's crossings when it paints them.
+            if (!isDrawn(*model, entity, kNoLayerOverrides)) {
                 return; // what the plan hides is not on the section either
             }
             for (std::size_t s = 0; s < cleaned.segmentCount(); ++s) {

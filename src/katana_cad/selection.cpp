@@ -55,21 +55,33 @@ bool SelectionSet::prune(const katana::entity::EntityDatabase& entities)
     return std::erase_if(ids_, [&](EntityId id) { return !entities.contains(id); }) > 0;
 }
 
-bool isDrawn(const Model& model, const Entity& entity)
+bool isDrawn(const Model& model, const Entity& entity, const LayerOverrides& view)
 {
-    return isDrawn(model.layers.resolve(entity.layer), entity);
+    return isDrawn(model.layers.resolve(entity.layer), entity, view);
 }
 
-bool isDrawn(const katana::entity::ResolvedLayer& layer, const Entity& entity)
+bool isDrawn(const katana::entity::ResolvedLayer& layer, const Entity& entity,
+             const LayerOverrides& view)
 {
-    return entity.visible && layer.shown;
+    return entity.visible && layer.shown && !view.hides(entity.layer);
 }
 
-bool isSelectable(const Model& model, const Entity& entity)
+bool isSelectable(const Model& model, const Entity& entity, const LayerOverrides& view)
 {
+    // The drawn test once, here, rather than repeated inline: it used to be
+    // written out a second time and the two could drift.
     const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
-    return entity.visible && layer.shown && !layer.locked;
+    return isDrawn(layer, entity, view) && !layer.locked;
 }
+
+namespace {
+
+const LayerOverrides& viewOf(const SelectionFilter& filter)
+{
+    return filter.view != nullptr ? *filter.view : kNoLayerOverrides;
+}
+
+} // namespace
 
 std::optional<EntityId> pickEntity(const Model& model, const Point2& point, double tolerance,
                                    const SelectionFilter& filter,
@@ -84,7 +96,7 @@ std::optional<EntityId> pickEntity(const Model& model, const Point2& point, doub
         // box for an arc so that snapping can reach its centre. Picking must
         // NOT be that generous - clicking an arc's centre should not select it
         // - so the true bounding box is still tested here.
-        if (!isSelectable(model, entity) || !filter.accepts(entity) ||
+        if (!isSelectable(model, entity, viewOf(filter)) || !filter.accepts(entity) ||
             !katana::entity::boundingBox(entity.geometry).intersects(reach)) {
             return;
         }
@@ -165,7 +177,7 @@ std::vector<EntityId> pickInBox(const Model& model, const Box2& box, BoxSelectio
     }
     std::vector<katana::geometry::SpatialId> scratch;
     detail::forEachCandidate(model, index, box, scratch, [&](const Entity& entity) {
-        if (!isSelectable(model, entity) || !filter.accepts(entity)) {
+        if (!isSelectable(model, entity, viewOf(filter)) || !filter.accepts(entity)) {
             return;
         }
         const Box2 extents = katana::entity::boundingBox(entity.geometry);

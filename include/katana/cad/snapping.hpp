@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/spatial_index.hpp"
 
@@ -57,6 +58,10 @@ struct SnapRequest {
     // Start of the segment being drawn; enables Perpendicular and Tangent.
     std::optional<katana::geometry::Point2> from{};
     double gridSpacing = 0.0; // model units; <= 0 disables Grid
+    // The view the cursor is in; null for the document rule alone. A layer
+    // hidden in that view is not snappable there - a snap to a line nobody can
+    // see puts a point somewhere the user cannot explain.
+    const LayerOverrides* view = nullptr;
 };
 
 struct SnapResult {

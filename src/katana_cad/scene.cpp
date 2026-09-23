@@ -367,7 +367,8 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
     document.model().entities.forEach([&](const Entity& entity) {
         // The plan view's rule, so a layer switched off disappears here too
         // (audit REN-03). It used to test the entity's own flag only.
-        if (!isDrawn(document.model(), entity)) {
+        if (!isDrawn(document.model(), entity,
+                     options.layers != nullptr ? *options.layers : kNoLayerOverrides)) {
             return;
         }
         const bool selected = selection.contains(entity.id);
@@ -534,7 +535,8 @@ AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surf
         // frame an almost empty view (audit REN-03).
         katana::geometry::Box2 plan;
         document.model().entities.forEach([&](const Entity& entity) {
-            if (isDrawn(document.model(), entity)) {
+            if (isDrawn(document.model(), entity,
+                        options.layers != nullptr ? *options.layers : kNoLayerOverrides)) {
                 plan.expand(katana::entity::boundingBox(entity.geometry));
             }
         });

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/spatial_index.hpp"
 
@@ -18,6 +19,10 @@ using katana::entity::EntityId;
 struct SelectionFilter {
     std::set<katana::entity::EntityType> types{}; // empty: all types
     std::optional<std::string> layer{};           // empty: all layers
+    // The view the pick is made in; null for the document rule alone. A layer
+    // hidden in that view cannot be picked there, or Delete would erase
+    // something the user cannot see (see LayerOverrides).
+    const LayerOverrides* view = nullptr;
 
     [[nodiscard]] bool accepts(const katana::entity::Entity& entity) const;
 };
@@ -49,17 +54,25 @@ class SelectionSet {
 // A layer counts as hidden or locked when an ANCESTOR is (PLAN.MD 5.1): turning
 // off "design" turns off "design/surface/tin1".
 //
-// Visible entity on a layer that is shown and unlocked.
+//
+// `view` is the second half: layers hidden in ONE view (LayerOverrides). It has
+// no default on purpose, so that every caller states whether it is asking for a
+// view or for the document - pass kNoLayerOverrides for the latter. A default
+// would let a new consumer silently ignore the view it is drawn in.
+//
+// Visible entity on a layer that is shown, unlocked and not hidden in `view`.
 [[nodiscard]] bool isSelectable(const katana::entity::Model& model,
-                                const katana::entity::Entity& entity);
-// Visible entity on a layer that is shown (a locked layer still draws).
+                                const katana::entity::Entity& entity,
+                                const LayerOverrides& view);
+// Visible entity on a layer that is shown and not hidden in `view` (a locked
+// layer still draws).
 [[nodiscard]] bool isDrawn(const katana::entity::Model& model,
-                           const katana::entity::Entity& entity);
+                           const katana::entity::Entity& entity, const LayerOverrides& view);
 // The same rule for a caller that has already resolved the layer. The viewport
 // draws tens of thousands of entities a frame and needs the layer for its
 // colour too, so it resolves once and asks this.
 [[nodiscard]] bool isDrawn(const katana::entity::ResolvedLayer& layer,
-                           const katana::entity::Entity& entity);
+                           const katana::entity::Entity& entity, const LayerOverrides& view);
 
 // Nearest selectable entity whose geometry lies within `tolerance` (model units)
 // of `point`. Ties go to the higher id: the entity drawn last, i.e. on top.

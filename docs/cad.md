@@ -646,6 +646,96 @@ the name that would allow it. There is no light theme. The dialogs (corridor,
 plot) are themed but plain. There are no toolbar buttons for the command-line
 only operations (rotate, scale, mirror, array, trim, extend, offset, fillet).
 
+## The workspace: every view is a dock, and each has its own layers (PLAN.MD 47)
+
+The user's request of 2026-09-23 was for panels and views that dock, move,
+minimise, close and come back from the menus, views that go out onto another
+screen, and per-view control of which layers show. Until then the views were
+tiles: `ViewportContainer` placed widgets at the rectangles of a fixed split
+(`cad::ViewportLayout`), so a view was identified by its POSITION. Every layout
+change destroyed and rebuilt every widget, which lost the plan's zoom, every
+section but the first and any half-picked clicks - and the application changed
+the layout on its own, whenever a surface was built or a section cut.
+
+**Each view is now a `QDockWidget` inside a nested `QMainWindow`**
+(`katana_qt/view_workspace.*`), which is the main window's central widget. Qt's
+dock machinery gives splitting, tabbing and floating onto any screen for free.
+A NESTED window rather than the main window's own dock areas, because an
+arrangement ("Four: Equal") must move views and never the Layers panel, and a
+panel should not be droppable between two views. Rejected alternatives:
+
+* *Keep the tiles and add pop-out windows.* Two ways of showing a view, and the
+  tiled half still rebuilds on every change.
+* *Qt Advanced Docking System* (LGPL-2.1+, packaged by MSYS2 for ucrt64 but not
+  installed). It would give auto-hide side bars and native floating frames with
+  a real minimise button off the shelf. It is a new third-party dependency, a
+  change to the bundle and a licence decision, which belong to the owner; the
+  plain-Qt design does not preclude moving to it later, because the views and
+  their state do not know what hosts them.
+
+**A `QMainWindow` makes itself a top-level window whatever parent it is given**
+(its constructor ORs in `Qt::Window`), and a window placed as another main
+window's central widget is an EMPTY layout item. The first build of the
+workspace was given no space at all and every view vanished while the panels
+filled the window. `setWindowFlags(Qt::Widget)` in the constructor is what
+makes it a child; the comment there says so.
+
+**A view's state lives in `cad::ViewSet`, not in its widget.** `ViewState`
+holds the kind, the 3D camera, the plan zoom, the layers hidden in that view,
+the reference layers hidden in it and its section. Views are identified by a
+`ViewId` that is monotonic and never reused, like entity ids, so a queued event
+for a closed view cannot find another. States are held by `unique_ptr` because
+each widget holds a reference to its state; closing a view deletes the dock
+(and so the widget) BEFORE dropping the state. Changing a view's kind replaces
+only the widget inside the dock, so a 3D view switched to plan and back keeps
+its orbit. `ViewSet::mostRecent(kind)` is what Plot, F9 and the Standard Views
+act on: the active view when it is that kind, otherwise the one of that kind
+the user touched last - so F9 still reaches the 3D view after a click in the
+plan. The layout presets survive as arrangements: `cad::dockSplits(kind)` lists
+the `splitDockWidget` steps that build each one, and a test asserts that
+applying them to rectangles reproduces `layoutRects(kind)` exactly (PLAN.MD 47
+slice 2).
+
+**Showing a view never replaces one.** Building a surface or importing meshes
+used to split the window and turn a cell into 3D; cutting a section turned the
+ACTIVE cell into a section, which was the plan view being drawn in whenever the
+user had just clicked there to select the alignment. `ensureView(kind)` raises
+the view of that kind used most recently, or opens a new one beside the active
+view.
+
+**Zoom Extents frames the active view only**; one view's zoom is not another's
+business, and the old container did one thing while its header said another.
+After New, Open and an import every view is framed (`zoomExtentsAll`), because
+all of them are looking at a drawing that has just changed under them.
+
+**Per-view layers extend THE visibility rule rather than adding a second.**
+`cad::isDrawn` and `isSelectable` take a `const LayerOverrides&` - the layers
+one view hides - with NO default argument, so every caller has to say whether
+it means a view or the document (`kNoLayerOverrides`); a default would let the
+next consumer ignore the view it draws in, which is how the 3D view once came
+to ignore layer visibility altogether (audit REN-03). The overrides are
+SUBTRACTIVE: a view can hide what the document shows, never show what it hides,
+so the rule stays a plain conjunction and a layer switched off in the Layers
+panel cannot linger in some forgotten view. Hiding a path hides everything
+beneath it, the document rule's ancestor semantics (PLAN.MD 5.1), tested by
+walking the path's ancestors as `string_view` slices - no allocation, and an
+immediate return for a view that hides nothing, since this is asked once per
+entity per frame. The overrides reach snapping (`SnapRequest::view`), picking
+and box selection (`SelectionFilter::view`) and the 3D scene
+(`SceneOptions::layers`), so a layer hidden in a view can be neither snapped to
+nor picked there - otherwise Delete would erase something the user cannot see.
+Three consumers use the document rule on purpose, because their result is
+shared and must not depend on which view was clicked last: the section cut
+(a view is to hide the crossings on its hidden layers when it paints them,
+PLAN.MD 47 slice 6), the typed SELECT, and Surface From Drawing.
+
+Per-view layers are view state: not saved in the project, not undoable, and
+not a document change - so nothing hears them through the document listener,
+and the workspace repaints the one view that changed. Document listeners carry
+no payload, so a view cannot follow a layer rename; every view's overrides are
+pruned of names that no longer exist after each change, which is what stops a
+later layer reusing the name from being born hidden.
+
 ## Point symbols (PLAN.MD 20.2, slice 2)
 
 A point is drawn with the symbol its *style* names - `Style::symbol`. Since
