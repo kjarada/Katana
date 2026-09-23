@@ -195,6 +195,38 @@ TEST(AnnotateText, ARotatedTextsNextLineIsBelowItAsItReads)
     EXPECT_NEAR(texts[1].position.y, 0.0, 1e-12);
 }
 
+TEST(AnnotateText, ATypedRotationIsInDegreesCounterClockwiseFromEast)
+{
+    ToolDriver driver;
+    driver.start("annotate.text");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.type("3");
+    (void)driver.type("90");
+    (void)driver.type("up");
+    (void)driver.type("next");
+    (void)driver.enter();
+    (void)driver.click(20.0, 0.0);
+    (void)driver.type("3");
+    (void)driver.type("-90");
+    (void)driver.type("down");
+    (void)driver.type("next");
+    (void)driver.enter();
+    // 90 degrees counter-clockwise is pi/2: the text reads up the page, so
+    // "below" is +x and its second line is one spacing (3 x 5 / 3 = 5) along
+    // +x, at (5, 0). -90 is -pi/2, clockwise: it reads down the page, "below"
+    // is -x, and the second line is at 20 - 5 = 15. 90 x (pi / 180) may land
+    // an ulp from the double nearest pi/2, hence 1e-15 on the angles; cos of
+    // either is about 6e-17 rather than 0, hence the tolerance on y.
+    const auto texts = shapesOf<TextGeometry>(driver);
+    ASSERT_EQ(texts.size(), 4u);
+    EXPECT_NEAR(texts[0].rotation, katana::math::kHalfPi, 1e-15);
+    EXPECT_NEAR(texts[1].position.x, 5.0, 1e-12);
+    EXPECT_NEAR(texts[1].position.y, 0.0, 1e-12);
+    EXPECT_NEAR(texts[2].rotation, -katana::math::kHalfPi, 1e-15);
+    EXPECT_NEAR(texts[3].position.x, 15.0, 1e-12);
+    EXPECT_NEAR(texts[3].position.y, 0.0, 1e-12);
+}
+
 TEST(AnnotateText, TheHeightOfferedIs2Point5WhenTheDrawingHasNoText)
 {
     ToolDriver driver;
@@ -457,16 +489,36 @@ TEST(AnnotateAlignedDimension, TheTextOptionReplacesTheLabelAndEnterRestoresTheM
     EXPECT_EQ(driver.tool().expects(), ToolInput::Value);
     (void)driver.type("12.50 m, approx");
     (void)driver.click(2.0, 1.0);
-    // The second dimension: T, then Enter, which keeps the measured distance.
+    // The second dimension is given a text and then, at the text prompt
+    // again, Enter - which must take that text away, not keep it.
     (void)driver.click(0.0, 0.0);
     (void)driver.click(4.0, 0.0);
+    (void)driver.type("T");
+    (void)driver.type("wrong");
     (void)driver.type("text");
-    (void)driver.enter();
+    EXPECT_EQ(driver.enter().outcome, Outcome::Continue);
     (void)driver.click(2.0, 1.0);
     const auto dimensions = shapesOf<DimensionGeometry>(driver);
     ASSERT_EQ(dimensions.size(), 2u);
     EXPECT_EQ(dimensions[0].textOverride, "12.50 m, approx");
-    EXPECT_TRUE(dimensions[1].textOverride.empty());
+    EXPECT_TRUE(dimensions[1].textOverride.empty()) << dimensions[1].textOverride;
+}
+
+TEST(AnnotateAlignedDimension, UndoAfterEnterClearedTheTextBringsTheTextBack)
+{
+    ToolDriver driver;
+    driver.start("annotate.dimaligned");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(4.0, 0.0);
+    (void)driver.type("T");
+    (void)driver.type("kept");
+    (void)driver.type("T");
+    (void)driver.enter(); // back to the measured distance...
+    EXPECT_EQ(driver.undo().outcome, Outcome::Continue); // ...and back to "kept"
+    (void)driver.click(2.0, 1.0);
+    const auto dimensions = shapesOf<DimensionGeometry>(driver);
+    ASSERT_EQ(dimensions.size(), 1u);
+    EXPECT_EQ(dimensions[0].textOverride, "kept");
 }
 
 TEST(AnnotateAlignedDimension, UndoTakesBackTheTextOptionFirstThenTheSecondOrigin)
@@ -649,12 +701,13 @@ TEST(AnnotateLinearDimension, APickedSegmentAndATypedLocationGiveTheSameProjecti
     EXPECT_EQ(dimensions[0].measurement(), 6.0);
 }
 
-TEST(AnnotateLinearDimension, EveryOriginLiesOnItsOwnExtensionLine)
+TEST(AnnotateLinearDimension, TheNearerOriginLiesOnItsExtensionLineWhenTheLevelsDifferByMoreThanDimexo)
 {
     // The dimension of the first test, drawn: the extension lines run from
-    // (0, 0) and (8, 0) up past y = 10. The second origin, (8, 6), is on its
-    // line, which carries on below it to y = 0 + DIMEXO - the price of
-    // projecting both origins onto the farther one's level.
+    // DIMEXO above (0, 0) and (8, 0) up past y = 10. The levels differ by 6,
+    // more than DIMEXO, so the second origin, (8, 6), is on its line, which
+    // carries on below it for 6 - 0.625 = 5.375 - the price of projecting
+    // both origins onto the farther one's level.
     ToolDriver driver;
     driver.start("annotate.dimlinear");
     (void)driver.click(0.0, 0.0);
@@ -669,6 +722,27 @@ TEST(AnnotateLinearDimension, EveryOriginLiesOnItsOwnExtensionLine)
     EXPECT_EQ(drawn.extensionLines[0], (Segment2{Point2(0.0, 0.625), Point2(0.0, 11.25)}));
     EXPECT_EQ(drawn.extensionLines[1], (Segment2{Point2(8.0, 0.625), Point2(8.0, 11.25)}));
     EXPECT_EQ(drawn.extensionLines[1].distanceTo(Point2(8.0, 6.0)), 0.0);
+}
+
+TEST(AnnotateLinearDimension, WhenTheLevelsDifferByLessThanDimexoTheNearerOriginIsInTheGapBelowItsLine)
+{
+    // (0, 0) and (8, 0.25) with the line at y = 10: (0, 0) is farther, so
+    // both project onto y = 0 and the second extension line starts DIMEXO
+    // up, at (8, 0.625). The origin (8, 0.25) is 0.625 - 0.25 = 0.375 short
+    // of it: in the gap every extension line leaves at its foot, as the
+    // farther origin always is, not on the line. All of it exact in binary.
+    ToolDriver driver;
+    driver.start("annotate.dimlinear");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(8.0, 0.25);
+    (void)driver.click(4.0, 10.0);
+    const auto dimensions = shapesOf<DimensionGeometry>(driver);
+    ASSERT_EQ(dimensions.size(), 1u);
+    EXPECT_EQ(dimensions[0], (DimensionGeometry{Point2(0.0, 0.0), Point2(8.0, 0.0), 10.0, ""}));
+    const auto drawn = katana::cad::buildDimension(dimensions[0], katana::entity::DimensionStyle{});
+    ASSERT_EQ(drawn.extensionLines.size(), 2u);
+    EXPECT_EQ(drawn.extensionLines[1], (Segment2{Point2(8.0, 0.625), Point2(8.0, 11.25)}));
+    EXPECT_EQ(drawn.extensionLines[1].distanceTo(Point2(8.0, 0.25)), 0.375);
 }
 
 TEST(AnnotateLinearDimension, HAndVChooseTheOrientationWhereverTheLineIsPlaced)
@@ -751,6 +825,45 @@ TEST(AnnotateLinearDimension, AnOrientationThatWouldMeasureNothingIsRefused)
     const auto dimensions = shapesOf<DimensionGeometry>(driver);
     ASSERT_EQ(dimensions.size(), 1u);
     EXPECT_EQ(dimensions[0], (DimensionGeometry{Point2(0.0, 0.0), Point2(0.0, 5.0), -3.0, ""}));
+}
+
+TEST(AnnotateLinearDimension, OffTheCornerOfLevelOriginsTheOrientationThatMeasuresSomethingIsChosen)
+{
+    ToolDriver driver;
+    driver.start("annotate.dimlinear");
+    // A level pair, as a horizontal edge gives: (15, 3) is 5 past its end
+    // and 3 above it. Farther out in x would mean vertical, which measures
+    // nothing here, but the line IS above the origins, so it is horizontal:
+    // start (0, 0), end (10, 0) (a tie of levels keeps the first), measuring
+    // 10; heading east, left is north, so y = 3 is offset +3.
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(10.0, 0.0);
+    const DimensionGeometry across{Point2(0.0, 0.0), Point2(10.0, 0.0), 3.0, ""};
+    const ToolFeedback feedback = driver.tool().preview({15.0, 3.0});
+    ASSERT_EQ(feedback.shapes.size(), 1u);
+    EXPECT_EQ(std::get<DimensionGeometry>(feedback.shapes[0]), across);
+    // Level with the origins, past the end, neither orientation measures
+    // anything from there: still refused.
+    EXPECT_EQ(driver.click(15.0, 0.0).outcome, Outcome::Rejected);
+    // A forced V is not overridden: it is what the user asked for.
+    (void)driver.type("V");
+    EXPECT_EQ(driver.click(15.0, 3.0).outcome, Outcome::Rejected);
+    (void)driver.undo();
+    const ToolStep done = driver.click(15.0, 3.0);
+    ASSERT_EQ(done.outcome, Outcome::Done) << done.message;
+    EXPECT_EQ(done.message, "linear dimension measuring 10");
+
+    // One above the other, the same the other way: (2, 9) is 4 above and 2
+    // beside, but horizontal would measure nothing, so vertical: start
+    // (0, 0), end (0, 5); heading north, left is west, so x = 2 is -2.
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(0.0, 5.0);
+    EXPECT_EQ(driver.click(2.0, 9.0).outcome, Outcome::Done);
+
+    const auto dimensions = shapesOf<DimensionGeometry>(driver);
+    ASSERT_EQ(dimensions.size(), 2u);
+    EXPECT_EQ(dimensions[0], across);
+    EXPECT_EQ(dimensions[1], (DimensionGeometry{Point2(0.0, 0.0), Point2(0.0, 5.0), -2.0, ""}));
 }
 
 TEST(AnnotateLinearDimension, ThePreviewFollowsTheOrientationTheCursorChooses)
@@ -840,6 +953,57 @@ TEST(AnnotateLeader, ANoteLeftOfTheEndIsRightAlignedToItLineByLine)
     EXPECT_DOUBLE_EQ(texts[1].position.y, 6.75 - 12.5 / 3.0);
 }
 
+TEST(AnnotateLeader, ASteepLastSegmentHeadingLeftGetsItsHookToTheLeftAndTheNoteEndsBeyondIt)
+{
+    ToolDriver driver;
+    driver.start("annotate.leader");
+    (void)driver.click(10.0, 0.0);
+    (void)driver.click(4.0, 8.0);
+    (void)driver.enter();
+    (void)driver.type("AB");
+    (void)driver.enter();
+    // The last segment is (-6, 8): atan(8 / 6) = 53.1 degrees off level,
+    // heading left, so the hook runs one arrowhead (2.5) LEFT to (1.5, 8).
+    // The note is right-aligned 0.625 short of the hook's end, at 0.875;
+    // "AB" is 2 x 0.6 x 2.5 = 3 wide, so it starts at -2.125, baseline
+    // 8 - 2.5 / 2 = 6.75.
+    const auto polylines = shapesOf<Polyline2>(driver);
+    ASSERT_EQ(polylines.size(), 2u);
+    EXPECT_EQ(polylines[0],
+              (Polyline2{{Point2(10.0, 0.0), Point2(4.0, 8.0), Point2(1.5, 8.0)}, false}));
+    const auto texts = shapesOf<TextGeometry>(driver);
+    ASSERT_EQ(texts.size(), 1u);
+    EXPECT_EQ(texts[0], (TextGeometry{Point2(-2.125, 6.75), "AB", 2.5, 0.0}));
+}
+
+TEST(AnnotateLeader, ALastSegmentTypedDueSouthAs270DegreesPutsTheNoteOnTheRight)
+{
+    ToolDriver driver;
+    driver.start("annotate.leader");
+    (void)driver.type("0,0");
+    (void)driver.type("@10<0");
+    // 270 degrees is due south, but cos(3 pi / 2) in binary is -1.8e-16, not
+    // 0, so the point is 10 x that = 1.8e-15 left of x = 10: the double just
+    // below 10. sin rounds to exactly -1, so y is -10. That is straight down
+    // within rounding, which the rule puts on the right: a hook 2.5 right to
+    // (12.5, -10) and the note 0.625 beyond it at 13.125, baseline
+    // -10 - 2.5 / 2 = -11.25. Compared to within 1e-12, far below the 12.5
+    // between the two sides.
+    (void)driver.type("@10<270");
+    (void)driver.enter();
+    (void)driver.type("NOTE");
+    (void)driver.enter();
+    const auto polylines = shapesOf<Polyline2>(driver);
+    ASSERT_EQ(polylines.size(), 2u);
+    ASSERT_EQ(polylines[0].vertices.size(), 4u);
+    EXPECT_NEAR(polylines[0].vertices[3].x, 12.5, 1e-12);
+    EXPECT_EQ(polylines[0].vertices[3].y, -10.0);
+    const auto texts = shapesOf<TextGeometry>(driver);
+    ASSERT_EQ(texts.size(), 1u);
+    EXPECT_NEAR(texts[0].position.x, 13.125, 1e-12);
+    EXPECT_EQ(texts[0].position.y, -11.25);
+}
+
 TEST(AnnotateLeader, ALastSegmentWithinFifteenDegreesOfLevelGetsNoHook)
 {
     ToolDriver driver;
@@ -908,6 +1072,80 @@ TEST(AnnotateLeader, ItsArrowAndNoteTakeTheCurrentLayersDimensionStyle)
     for (const Entity& entity : drawing(driver)) {
         EXPECT_EQ(entity.layer, "Notes");
     }
+}
+
+namespace {
+
+// A leader from (0, 0) east to (10, 0) with the note "X", drawn on a layer
+// whose dimension style has `head` 3 long - a size whose third is 1, so the
+// working below stays in small numbers. Pointing away from the line the
+// arrow runs west, along (-1, 0); its left normal is (0, -1).
+std::vector<Entity> leaderWithArrowHead(katana::entity::ArrowHead head)
+{
+    ToolDriver driver;
+    katana::entity::DimensionStyle style;
+    style.name = "Heads";
+    style.arrowHead = head;
+    style.arrowSize = 3.0;
+    EXPECT_TRUE(driver.document().execute(cmd::createDimensionStyle(style)).ok());
+    katana::entity::Layer layer;
+    layer.name = "Notes";
+    layer.dimensionStyle = "Heads";
+    EXPECT_TRUE(driver.document().execute(cmd::createLayer(layer)).ok());
+    EXPECT_TRUE(driver.document().setCurrentLayer("Notes").ok());
+    driver.start("annotate.leader");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(10.0, 0.0);
+    (void)driver.enter();
+    (void)driver.type("X");
+    (void)driver.enter();
+    return drawing(driver);
+}
+
+} // namespace
+
+TEST(AnnotateLeader, AnOpenArrowheadIsTwoStrokesMeetingAtTheTip)
+{
+    const auto entities = leaderWithArrowHead(katana::entity::ArrowHead::Open);
+    ASSERT_EQ(entities.size(), 3u) << "line, arrowhead, note";
+    // Back 3 along (1, 0) from the tip is (3, 0); a third of 3 either side
+    // along the normal gives (3, -1) and (3, 1). An OPEN polyline through the
+    // tip, so its two strokes are not joined across the back.
+    const auto& head = std::get<Polyline2>(entities[1].geometry);
+    EXPECT_FALSE(head.closed);
+    ASSERT_EQ(head.vertices.size(), 3u);
+    EXPECT_EQ(head.vertices[1], Point2(0.0, 0.0));
+    EXPECT_NEAR(head.vertices[0].x, 3.0, 1e-12);
+    EXPECT_NEAR(head.vertices[2].x, 3.0, 1e-12);
+    EXPECT_NEAR(std::abs(head.vertices[0].y), 1.0, 1e-12);
+    EXPECT_NEAR(head.vertices[0].y, -head.vertices[2].y, 1e-12) << "one either side";
+    EXPECT_TRUE(std::holds_alternative<TextGeometry>(entities[2].geometry));
+}
+
+TEST(AnnotateLeader, ATickArrowheadIsOneStrokeThroughTheTipAt45Degrees)
+{
+    const auto entities = leaderWithArrowHead(katana::entity::ArrowHead::Tick);
+    ASSERT_EQ(entities.size(), 3u) << "line, arrowhead, note";
+    // Along plus normal is (-1, -1): the stroke leans / at 45 degrees, 3 long
+    // and centred on the tip, so its ends are +-(1.5 / sqrt 2)(1, 1) =
+    // +-(1.0607, 1.0607). 1 / sqrt 2 is not exact: compared within rounding.
+    // A stroke has no direction, so either end may come first.
+    const auto& tick = std::get<Segment2>(entities[1].geometry);
+    const double reach = 1.5 / std::sqrt(2.0);
+    EXPECT_NEAR(std::abs(tick.start.x), reach, 1e-12);
+    EXPECT_NEAR(tick.start.y, tick.start.x, 1e-12) << "leans /";
+    EXPECT_NEAR(tick.end.x, -tick.start.x, 1e-12) << "centred on the tip";
+    EXPECT_NEAR(tick.end.y, -tick.start.y, 1e-12) << "centred on the tip";
+    EXPECT_TRUE(std::holds_alternative<TextGeometry>(entities[2].geometry));
+}
+
+TEST(AnnotateLeader, WithNoArrowheadALeaderIsItsLineAndNoteOnly)
+{
+    const auto entities = leaderWithArrowHead(katana::entity::ArrowHead::None);
+    ASSERT_EQ(entities.size(), 2u);
+    EXPECT_EQ(std::get<Polyline2>(entities[0].geometry),
+              (Polyline2{{Point2(0.0, 0.0), Point2(10.0, 0.0)}, false}));
+    EXPECT_TRUE(std::holds_alternative<TextGeometry>(entities[1].geometry));
 }
 
 TEST(AnnotateLeader, TypedAndPolarPointsAndTheAnnotationOption)
