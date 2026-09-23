@@ -86,7 +86,8 @@ class SurveyCodeManagerDialog : public QDialog {
 
     // ---- the buffer ------------------------------------------------------------
     [[nodiscard]] const katana::entity::SurveyMap& buffer() const { return buffer_; }
-    // The buffer differs from the map it was taken from (or last applied).
+    // The buffer differs from the drawing's map: the one it was taken from,
+    // last applied, or last seen changed elsewhere.
     [[nodiscard]] bool dirty() const;
     // The buffer onto the Document (setSurveyMap). InvalidState when the
     // Document is gone.
@@ -210,8 +211,8 @@ class SurveyCodeManagerDialog : public QDialog {
 
     CustomisationContext context_{};
     katana::entity::SurveyMap buffer_{};
-    // The map the buffer was taken from, or last applied: what dirty() is
-    // measured against.
+    // The drawing's map as the manager last saw it - taken, applied, or
+    // changed elsewhere: what dirty() is measured against.
     katana::entity::SurveyMap baseline_{};
     katana::cad::LineworkCodes localCodes_{};
     bool interactive_ = true;
