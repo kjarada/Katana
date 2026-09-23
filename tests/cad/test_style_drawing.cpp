@@ -250,6 +250,31 @@ TEST(StyleDrawing, TextTakesTheDirectionOfTheLineItSitsOn)
     EXPECT_EQ(drawing.texts.size(), 4u) << "at 0, 10, 20 and 30";
 }
 
+TEST(StyleDrawing, ASymbolsTextKeepsItsWidthFactorAndFontForThePainter)
+{
+    // 326 of the 514 reference texts are narrowed (0.8 or 0.85); the painter
+    // can only narrow what reaches it.
+    LineStyle style = definition({move(0, 0)});
+    style.atVertices = true;
+    StrokeText text;
+    text.text = "BM";
+    text.height = 2.0;
+    text.font = "Arial";
+    text.widthFactor = 0.8;
+    style.texts.push_back(text);
+    Stroke mark;
+    mark.op = StrokeOp::Text;
+    mark.text = 0;
+    style.strokes.push_back(mark);
+
+    // Size 0 is the definition's own scale, so the height stays 2.0.
+    const StyleDrawing drawing = katana::cad::symbolDrawing(style, Point2(5, 5));
+    ASSERT_EQ(drawing.texts.size(), 1u);
+    EXPECT_EQ(drawing.texts[0].widthFactor, 0.8);
+    EXPECT_EQ(drawing.texts[0].font, "Arial");
+    EXPECT_EQ(drawing.texts[0].height, 2.0);
+}
+
 TEST(StyleDrawing, ADefinitionWithNoExtentIsDrawnOnceRatherThanEndlessly)
 {
     // A single tick across the line has no length along it, so there is no
