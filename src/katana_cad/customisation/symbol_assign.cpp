@@ -159,8 +159,47 @@ std::vector<SymbolLibraryEntry> symbolLibrary(const Document& document)
     return entries;
 }
 
+katana::geometry::Box2 estimatedTextExtent(const StyleTextMark& text)
+{
+    katana::geometry::Box2 box;
+    if (text.text.empty() || !(std::isfinite(text.height) && text.height > 0.0)) {
+        return box;
+    }
+    // Characters, not bytes: "Ø" is one letter on the plot and two bytes here.
+    const auto characters = static_cast<double>(std::ranges::count_if(
+        text.text, [](char byte) { return (static_cast<unsigned char>(byte) & 0xC0U) != 0x80U; }));
+    const double factor =
+        std::isfinite(text.widthFactor) && text.widthFactor > 0.0 ? text.widthFactor : 1.0;
+    const double width = kEstimatedCharacterWidth * text.height * factor * characters;
+    const std::string& justify = text.justify;
+    // In the text's own frame: x along it from the anchor, y up from it.
+    double left = 0.0;
+    if (justify.find("centre") != std::string::npos ||
+        justify.find("center") != std::string::npos) {
+        left = -0.5 * width;
+    } else if (justify.find("right") != std::string::npos) {
+        left = -width;
+    }
+    double bottom = 0.0;
+    if (justify.find("middle") != std::string::npos) {
+        bottom = -0.5 * text.height;
+    } else if (justify.find("top") != std::string::npos) {
+        bottom = -text.height;
+    }
+    const double cosine = std::cos(text.angle);
+    const double sine = std::sin(text.angle);
+    for (const double x : {left, left + width}) {
+        for (const double y : {bottom, bottom + text.height}) {
+            box.expand(katana::geometry::Point2(text.at.x + x * cosine - y * sine,
+                                                text.at.y + x * sine + y * cosine));
+        }
+    }
+    return box;
+}
+
 std::optional<SymbolPrintSize> symbolPrintSize(const katana::entity::LineStyle& definition,
-                                               double size, double scaleDenominator)
+                                               double size, double scaleDenominator,
+                                               const TextExtent& textExtent)
 {
     if (!(scaleDenominator > 0.0) || !(std::isfinite(size) && size >= 0.0)) {
         return std::nullopt;
@@ -172,7 +211,18 @@ std::optional<SymbolPrintSize> symbolPrintSize(const katana::entity::LineStyle& 
     // and a second copy of those rules here would be a second answer.
     const StyleDrawing drawing =
         symbolDrawing(definition, katana::geometry::Point2(0.0, 0.0), size, 0.0, paperScale);
-    const katana::geometry::Box2 box = drawing.bounds();
+    // Not StyleDrawing::bounds(), which takes a text's anchor for all of it:
+    // a letter set 0.5 m high above a valve's box then printed as nothing,
+    // and a symbol that is only a letter as 0 x 0 mm.
+    katana::geometry::Box2 box;
+    for (const StyleStroke& stroke : drawing.strokes) {
+        for (const katana::geometry::Point2& point : stroke.path.vertices) {
+            box.expand(point);
+        }
+    }
+    for (const StyleTextMark& text : drawing.texts) {
+        box.expand(textExtent ? textExtent(text) : estimatedTextExtent(text));
+    }
     if (box.empty()) {
         return std::nullopt;
     }

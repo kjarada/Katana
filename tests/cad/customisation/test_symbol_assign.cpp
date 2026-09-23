@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,7 @@ using katana::entity::Stroke;
 using katana::entity::StrokeOp;
 using katana::entity::Style;
 using katana::entity::StyleUnits;
+using katana::geometry::Box2;
 using katana::geometry::Point2;
 
 namespace {
@@ -487,6 +489,133 @@ TEST(SymbolPrintSize, ASymbolDrawnAwayFromItsInsertionPointSaysSo)
     ASSERT_TRUE(printed.has_value());
     EXPECT_DOUBLE_EQ(printed->groundWidth, 1.0);
     EXPECT_FALSE(printed->insertionInside);
+}
+
+// The fixture's "TEST Valve" written out: a 0.8 m box about the insertion
+// point, then `move 0 0.6` and a 0.5 m "V", bottom-centre, 0.8 wide factor.
+LineStyle valve()
+{
+    LineStyle style;
+    style.name = "TEST Valve";
+    style.atVertices = true;
+    style.strokes = {move(-0.4, -0.4), draw(0.4, -0.4), draw(0.4, 0.4), draw(-0.4, 0.4),
+                     draw(-0.4, -0.4), move(0.0, 0.6),
+                     Stroke{.op = StrokeOp::Text, .text = 0}};
+    style.texts = {katana::entity::StrokeText{.text = "V",
+                                              .height = 0.5,
+                                              .justify = "bottom-centre",
+                                              .font = "Arial",
+                                              .widthFactor = 0.8}};
+    return style;
+}
+
+// `mode vertex; move 0 0; text "H" 0 1`: a symbol that is only a letter,
+// 1 m high, with no justification.
+LineStyle letterOnly()
+{
+    LineStyle style;
+    style.name = "letter";
+    style.atVertices = true;
+    style.strokes = {move(0.0, 0.0), Stroke{.op = StrokeOp::Text, .text = 0}};
+    style.texts = {katana::entity::StrokeText{.text = "H", .height = 1.0}};
+    return style;
+}
+
+TEST(SymbolPrintSize, AValvesLetterAboveItsBoxIsPartOfWhatPrints)
+{
+    // The box spans -0.4..0.4 each way. The V stands on (0, 0.6), 0.5 m
+    // high, so it reaches y = 1.1; it is 0.6 x 0.5 x 0.8 = 0.24 m wide,
+    // centred on x = 0 (-0.12..0.12), inside the box's width. So the valve
+    // covers 0.8 m by -0.4..1.1 = 1.5 m, which at 1:500 (0.5 m a plot
+    // millimetre) prints 1.6 x 3 mm. Measuring the V's anchor alone gave
+    // 0.8 x 1 m, 1.6 x 2 mm.
+    const auto printed = symbolPrintSize(valve(), 0.0, 500.0);
+    ASSERT_TRUE(printed.has_value());
+    EXPECT_DOUBLE_EQ(printed->groundWidth, 0.8);
+    EXPECT_DOUBLE_EQ(printed->groundHeight, 1.5);
+    EXPECT_DOUBLE_EQ(printed->paperWidth, 1.6);
+    EXPECT_DOUBLE_EQ(printed->paperHeight, 3.0);
+    EXPECT_TRUE(printed->insertionInside);
+}
+
+TEST(SymbolPrintSize, ASymbolThatIsOnlyALetterPrintsTheLettersSize)
+{
+    // "H" stands on (0, 0) from its left: 0.6 x 1 x 1 = 0.6 m wide and 1 m
+    // high, so 0.6 / 0.5 = 1.2 by 1 / 0.5 = 2 mm at 1:500 - not 0 x 0.
+    const auto own = symbolPrintSize(letterOnly(), 0.0, 500.0);
+    ASSERT_TRUE(own.has_value());
+    EXPECT_DOUBLE_EQ(own->groundWidth, 0.6);
+    EXPECT_DOUBLE_EQ(own->groundHeight, 1.0);
+    EXPECT_DOUBLE_EQ(own->paperWidth, 1.2);
+    EXPECT_DOUBLE_EQ(own->paperHeight, 2.0);
+    // A size is a width of LineStyle::bounds(), which for a lone text is its
+    // anchor: no width, so symbolDrawing keeps the definition's own scale
+    // rather than dividing by zero - and it prints the same at size 2.
+    const auto sized = symbolPrintSize(letterOnly(), 2.0, 500.0);
+    ASSERT_TRUE(sized.has_value());
+    EXPECT_DOUBLE_EQ(sized->paperWidth, 1.2);
+    EXPECT_DOUBLE_EQ(sized->paperHeight, 2.0);
+}
+
+TEST(SymbolPrintSize, AnEstimatedTextFollowsItsJustificationWidthFactorAndAngle)
+{
+    StyleTextMark mark;
+    mark.at = Point2(10.0, 20.0);
+    mark.text = "12";
+    mark.height = 0.5;
+
+    // Two characters 0.6 x 0.5 = 0.3 m each: 0.6 m, ending at the anchor
+    // ("right"), and centred on it upright ("middle"): x 9.4..10, y
+    // 19.75..20.25.
+    mark.justify = "middle-right";
+    Box2 box = estimatedTextExtent(mark);
+    EXPECT_DOUBLE_EQ(box.min.x, 9.4);
+    EXPECT_DOUBLE_EQ(box.max.x, 10.0);
+    EXPECT_DOUBLE_EQ(box.min.y, 19.75);
+    EXPECT_DOUBLE_EQ(box.max.y, 20.25);
+
+    // Half as wide (0.3 m), centred ("centre"), hanging from it ("top"):
+    // x 9.85..10.15, y 19.5..20.
+    mark.justify = "top-centre";
+    mark.widthFactor = 0.5;
+    box = estimatedTextExtent(mark);
+    EXPECT_DOUBLE_EQ(box.min.x, 9.85);
+    EXPECT_DOUBLE_EQ(box.max.x, 10.15);
+    EXPECT_DOUBLE_EQ(box.min.y, 19.5);
+    EXPECT_DOUBLE_EQ(box.max.y, 20.0);
+
+    // Unjustified and turned a quarter anticlockwise: its 0.3 m run goes
+    // up from the anchor (y 20..20.3) and its 0.5 m height leftwards (x
+    // 9.5..10).
+    mark.justify.clear();
+    mark.angle = std::numbers::pi / 2.0;
+    box = estimatedTextExtent(mark);
+    EXPECT_NEAR(box.min.x, 9.5, 1e-12);
+    EXPECT_NEAR(box.max.x, 10.0, 1e-12);
+    EXPECT_NEAR(box.min.y, 20.0, 1e-12);
+    EXPECT_NEAR(box.max.y, 20.3, 1e-12);
+
+    // Nothing to print: no box, not a point at the anchor.
+    mark.text.clear();
+    EXPECT_TRUE(estimatedTextExtent(mark).empty());
+    mark.text = "12";
+    mark.height = 0.0;
+    EXPECT_TRUE(estimatedTextExtent(mark).empty());
+}
+
+TEST(SymbolPrintSize, ATextExtentGivenByTheCallerReplacesTheEstimate)
+{
+    // A font that sets the V 0.2 m wide and 0.6 m tall above (0, 0.6) - a
+    // stand-in for a measured face - makes the valve -0.4..1.2: 1.6 m, or
+    // 3.2 mm at 1:500.
+    const TextExtent measured = [](const StyleTextMark& text) {
+        return Box2(Point2(text.at.x - 0.1, text.at.y), Point2(text.at.x + 0.1, text.at.y + 0.6));
+    };
+    const auto printed = symbolPrintSize(valve(), 0.0, 500.0, measured);
+    ASSERT_TRUE(printed.has_value());
+    EXPECT_DOUBLE_EQ(printed->groundHeight, 1.6);
+    EXPECT_DOUBLE_EQ(printed->paperHeight, 3.2);
+    EXPECT_DOUBLE_EQ(printed->paperWidth, 1.6);
 }
 
 TEST(SymbolPrintSize, NothingToMeasureOrNoScaleGivesNoSize)
