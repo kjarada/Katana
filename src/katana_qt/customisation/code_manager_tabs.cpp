@@ -23,6 +23,7 @@
 #include <QRadioButton>
 #include <QStyle>
 #include <QTabWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -158,9 +159,11 @@ QWidget* SurveyCodeManagerDialog::buildCensusTab()
     // A double-click shows what the code gets, as Test a Code would.
     connect(censusTree_, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem* item, int) {
-                const std::string code = text(item->data(0, kCodeRole).toString());
-                tabs_->setCurrentIndex(0);
-                testCode_->setText(text(code));
+                const QString code = item->data(0, kCodeRole).toString();
+                QTimer::singleShot(0, this, [this, code] {
+                    tabs_->setCurrentIndex(0);
+                    testCode_->setText(code);
+                });
             });
     return page;
 }
@@ -306,9 +309,12 @@ QWidget* SurveyCodeManagerDialog::buildIssuesTab()
     issuesFilter_->onChipChanged = [this](int) { rebuildIssues(); };
     connect(issuesTree_, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem* item, int) {
+                // Deferred, as every jump from a list is: the jump may
+                // rebuild lists, and none is rebuilt inside its own signal.
                 const QVariant rule = item->data(0, kRuleRole);
                 if (rule.isValid()) {
-                    selectRule(rule.toULongLong());
+                    const std::size_t index = rule.toULongLong();
+                    QTimer::singleShot(0, this, [this, index] { selectRule(index); });
                 }
             });
     return page;
