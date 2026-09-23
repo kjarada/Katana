@@ -96,6 +96,67 @@ endif()
 if(DEFINED IMPORT_OPTIONS)
     list(APPEND extra --import-options "${IMPORT_OPTIONS}")
 endif()
+# -DSELECT_ALL=ON selects every entity before the actions run (--select-all),
+# for a command that acts on the selection (surveyArea).
+if(SELECT_ALL)
+    list(APPEND extra --select-all)
+endif()
+# -DSURVEY_DIALOG=<action name> opens that Survey menu dialog through its
+# action and grabs IT (--survey-dialog). -DFILL=<field>=<text>[|<field>=<text>...]
+# types into its fields - '|' between them, because commas and blanks belong
+# to the values (E,N and N 45 E) and a CMake list does not survive `cmake -D`;
+# "\n" in a text is a line break, so a field book fits - and
+# -DPRESS=<button>[,<button>...] clicks its buttons, in order, after the fills.
+if(DEFINED SURVEY_DIALOG)
+    list(APPEND extra --survey-dialog "${SURVEY_DIALOG}")
+    if(DEFINED FILL)
+        string(REPLACE "|" ";" _fills "${FILL}")
+        foreach(_fill IN LISTS _fills)
+            list(APPEND extra --fill "${_fill}")
+        endforeach()
+    endif()
+    if(DEFINED PRESS)
+        string(REPLACE "," ";" _presses "${PRESS}")
+        foreach(_press IN LISTS _presses)
+            list(APPEND extra --press "${_press}")
+        endforeach()
+    endif()
+endif()
+
+# -DDRIVE=<step>[|<step>...] drives survey dialogs and docks step by step, in
+# order, for a paged dialog that has to be filled between presses (the import
+# wizard) or a run that uses several: "@NAME" opens the dialog of action NAME
+# (--survey-dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
+# "!BUTTON" presses a button, and anything else is a FIELD=TEXT fill. '|'
+# between steps, for FILL's reason.
+if(DEFINED DRIVE)
+    string(REPLACE "|" ";" _steps "${DRIVE}")
+    foreach(_step IN LISTS _steps)
+        string(SUBSTRING "${_step}" 0 1 _sigil)
+        string(SUBSTRING "${_step}" 1 -1 _rest)
+        if(_sigil STREQUAL "@")
+            list(APPEND extra --survey-dialog "${_rest}")
+        elseif(_sigil STREQUAL "#")
+            list(APPEND extra --survey-dock "${_rest}")
+        elseif(_sigil STREQUAL "!")
+            list(APPEND extra --press "${_rest}")
+        else()
+            list(APPEND extra --fill "${_step}")
+        endif()
+    endforeach()
+endif()
+# -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
+# hold exactly the reference's text, line ends aside (git may check the
+# reference out with either). The written files are removed first, so one
+# left by an earlier run cannot pass for this one.
+if(DEFINED COMPARE)
+    string(REPLACE "|" ";" _compare "${COMPARE}")
+    list(GET _compare 0 _reference)
+    list(SUBLIST _compare 1 -1 _written)
+    foreach(_file IN LISTS _written)
+        file(REMOVE "${_file}")
+    endforeach()
+endif()
 
 execute_process(
     COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
@@ -103,6 +164,24 @@ execute_process(
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err
     TIMEOUT 120)
+# -DREFUSED=<regex>: the run must be REFUSED - exit 1, which is how the
+# application turns down a step it cannot take (a --fill of a choice the
+# dialog does not offer, a --press of a disabled button); a crash is not a
+# refusal - and what it printed must match <regex>. Let the regex name what
+# came before the refusal as well as the refusal itself, so that a run
+# stopped earlier for another reason cannot pass. This is how a test shows
+# that something is NOT offered. A refused run writes no PNG, so nothing
+# below applies to it.
+if(DEFINED REFUSED)
+    if(NOT rc EQUAL 1)
+        message(FATAL_ERROR "katana --screenshot was not refused (exit ${rc}, not 1)\n${out}\n${err}")
+    endif()
+    if(NOT "${out}${err}" MATCHES "${REFUSED}")
+        message(FATAL_ERROR "the run was refused, but did not report /${REFUSED}/:\n${out}\n${err}")
+    endif()
+    message(STATUS "screenshot_headless: refused as the test requires")
+    return()
+endif()
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "katana --screenshot exited with ${rc}\n${out}\n${err}")
 endif()
@@ -117,6 +196,21 @@ if(DEFINED EXPECT AND NOT "${out}${err}" MATCHES "${EXPECT}")
     message(FATAL_ERROR "the run did not report /${EXPECT}/:\n${out}\n${err}")
 endif()
 
+if(DEFINED COMPARE)
+    file(READ "${_reference}" _expected)
+    string(REPLACE "\r\n" "\n" _expected "${_expected}")
+    foreach(_file IN LISTS _written)
+        if(NOT EXISTS "${_file}")
+            message(FATAL_ERROR "the run wrote no ${_file}\n${out}\n${err}")
+        endif()
+        file(READ "${_file}" _actual)
+        string(REPLACE "\r\n" "\n" _actual "${_actual}")
+        if(NOT _actual STREQUAL _expected)
+            message(FATAL_ERROR "${_file} differs from ${_reference}:\n${_actual}\n--- expected ---\n${_expected}")
+        endif()
+    endforeach()
+endif()
+
 # A 1360 x 860 window with a drawing in it compresses to tens of kilobytes; a
 # window that painted nothing but its background is a few. The dialog is a
 # smaller window of mostly flat panels, so it gets its own floor. Compared as
@@ -128,6 +222,10 @@ endif()
 # The GIS dialogs are small forms and a page of text: kilobytes of PNG when
 # they paint, a few hundred bytes of flat background when they do not.
 if(DEFINED DATASET_INFO OR DEFINED IMPORT_OPTIONS)
+    set(floor 4000)
+endif()
+# So are the survey dialogs: a form, a report pane and a row of buttons.
+if(DEFINED SURVEY_DIALOG OR DEFINED DRIVE)
     set(floor 4000)
 endif()
 file(SIZE "${OUTPUT}" size)
