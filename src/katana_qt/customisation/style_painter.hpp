@@ -17,6 +17,7 @@
 
 #include <string>
 
+#include <QFont>
 #include <QPen>
 
 #include "katana/cad/plot.hpp"
@@ -63,6 +64,18 @@ inline constexpr double kMinimumStyleTextPixels = 3.0;
 
 void paintStyleText(QPainter& painter, const katana::cad::StyleTextMark& text,
                     const StylePaintTarget& target);
+
+// The model-space box a style text is painted over, measured with the font
+// paintStyleText would choose (from `base`), its justification, width factor
+// and angle. cad::drawnExtent cannot know a font and over-estimates on
+// purpose, which is right for culling but shrinks a labelled symbol to a
+// third of its thumbnail; a picture fitted to what is painted uses this.
+// Ignores the pixel clamps, which depend on a view.
+[[nodiscard]] katana::geometry::Box2 styleTextExtent(const katana::cad::StyleTextMark& text,
+                                                     const QFont& base);
+// Every stroke's points and every text's styleTextExtent.
+[[nodiscard]] katana::geometry::Box2 paintedExtent(const katana::cad::StyleDrawing& drawing,
+                                                   const QFont& base);
 
 // Strokes, then texts. A one-point stroke is a 12d `dot`, painted as a round
 // dot of the pen's width whatever the pen's cap: a flat cap draws a

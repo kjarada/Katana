@@ -65,6 +65,57 @@ QPen stylePenFor(const QPen& entityPen, const std::string& pen,
     return changed;
 }
 
+namespace {
+
+// The face a style text is painted in at `pixels`: its own family when the
+// font database has it, otherwise a sans-serif of the same size.
+[[nodiscard]] QFont styleTextFont(QFont font, const katana::cad::StyleTextMark& text, int pixels)
+{
+    font.setPixelSize(std::max(1, pixels));
+    if (!text.font.empty()) {
+        const QString family = QString::fromStdString(text.font);
+        if (fontInstalled(family)) {
+            font.setFamily(family);
+        } else {
+            // Every library text names "Arial", which a Linux build does not
+            // have: a sans-serif of the same size, rather than whatever face
+            // the font matcher happens to reach first.
+            font.setStyleHint(QFont::SansSerif);
+        }
+    }
+    return font;
+}
+
+// Where the baseline starts, relative to the anchor, in unrotated pixels.
+// 12d justifies as "vertical-horizontal": "middle-centre", "top-left". A
+// spelling this does not know draws from the point, which is what an
+// unjustified text already does.
+[[nodiscard]] QPointF justifiedOrigin(const QFontMetricsF& metrics, const QString& value,
+                                      const std::string& justify)
+{
+    double dx = 0.0;
+    double dy = 0.0;
+    if (justify.find("centre") != std::string::npos ||
+        justify.find("center") != std::string::npos) {
+        dx = -0.5 * metrics.horizontalAdvance(value);
+    } else if (justify.find("right") != std::string::npos) {
+        dx = -metrics.horizontalAdvance(value);
+    }
+    if (justify.find("middle") != std::string::npos) {
+        dy = 0.5 * metrics.capHeight();
+    } else if (justify.find("top") != std::string::npos) {
+        dy = metrics.capHeight();
+    }
+    return QPointF(dx, dy);
+}
+
+[[nodiscard]] double widthFactorOf(const katana::cad::StyleTextMark& text)
+{
+    return std::isfinite(text.widthFactor) && text.widthFactor > 0.0 ? text.widthFactor : 1.0;
+}
+
+} // namespace
+
 void paintStyleText(QPainter& painter, const katana::cad::StyleTextMark& text,
                     const StylePaintTarget& target)
 {
@@ -83,43 +134,63 @@ void paintStyleText(QPainter& painter, const katana::cad::StyleTextMark& text,
     // 326 of the 514 texts in the reference libraries are drawn narrowed
     // (0.8 or 0.85). Scaling the painter rather than asking for a stretched
     // font works with every font, stretch variants or not.
-    if (std::isfinite(text.widthFactor) && text.widthFactor > 0.0 && text.widthFactor != 1.0) {
-        painter.scale(text.widthFactor, 1.0);
+    if (const double factor = widthFactorOf(text); factor != 1.0) {
+        painter.scale(factor, 1.0);
     }
-    QFont font = painter.font();
-    font.setPixelSize(static_cast<int>(std::lround(std::min(pixels, kMaximumStyleTextPixels))));
-    if (!text.font.empty()) {
-        const QString family = QString::fromStdString(text.font);
-        if (fontInstalled(family)) {
-            font.setFamily(family);
-        } else {
-            // Every library text names "Arial", which a Linux build does not
-            // have: a sans-serif of the same size, rather than whatever face
-            // the font matcher happens to reach first.
-            font.setStyleHint(QFont::SansSerif);
-        }
-    }
+    const QFont font = styleTextFont(
+        painter.font(), text,
+        static_cast<int>(std::lround(std::min(pixels, kMaximumStyleTextPixels))));
     painter.setFont(font);
     const QString value = QString::fromStdString(text.text);
-    const QFontMetricsF metrics(font);
-    // 12d justifies as "vertical-horizontal": "middle-centre", "top-left".
-    // A spelling this does not know draws from the point, which is what an
-    // unjustified text already does.
-    double dx = 0.0;
-    double dy = 0.0;
-    if (text.justify.find("centre") != std::string::npos ||
-        text.justify.find("center") != std::string::npos) {
-        dx = -0.5 * metrics.horizontalAdvance(value);
-    } else if (text.justify.find("right") != std::string::npos) {
-        dx = -metrics.horizontalAdvance(value);
-    }
-    if (text.justify.find("middle") != std::string::npos) {
-        dy = 0.5 * metrics.capHeight();
-    } else if (text.justify.find("top") != std::string::npos) {
-        dy = metrics.capHeight();
-    }
-    painter.drawText(QPointF(dx, dy), value);
+    painter.drawText(justifiedOrigin(QFontMetricsF(font), value, text.justify), value);
     painter.restore();
+}
+
+katana::geometry::Box2 styleTextExtent(const katana::cad::StyleTextMark& text, const QFont& base)
+{
+    katana::geometry::Box2 box;
+    if (text.text.empty() || !(text.height > 0.0)) {
+        return box;
+    }
+    // Measured at a reference size and scaled to the text's height: a glyph's
+    // proportions do not depend on its size, and this needs no view.
+    constexpr int kReferencePixels = 100;
+    const QFont font = styleTextFont(base, text, kReferencePixels);
+    const QFontMetricsF metrics(font);
+    const QString value = QString::fromStdString(text.text);
+    const QPointF origin = justifiedOrigin(metrics, value, text.justify);
+    // Pixels (y down) to model units (y up) about the anchor, then turned by
+    // the text's angle - the same steps paintStyleText takes, in reverse.
+    const double unit = text.height / kReferencePixels;
+    const double factor = widthFactorOf(text);
+    const double cosine = std::cos(text.angle);
+    const double sine = std::sin(text.angle);
+    const double left = origin.x() * factor;
+    const double right = (origin.x() + metrics.horizontalAdvance(value)) * factor;
+    const double top = origin.y() - metrics.ascent();
+    const double bottom = origin.y() + metrics.descent();
+    for (const QPointF corner :
+         {QPointF(left, top), QPointF(right, top), QPointF(left, bottom), QPointF(right, bottom)}) {
+        const double x = corner.x() * unit;
+        const double y = -corner.y() * unit;
+        box.expand(katana::geometry::Point2(text.at.x + x * cosine - y * sine,
+                                            text.at.y + x * sine + y * cosine));
+    }
+    return box;
+}
+
+katana::geometry::Box2 paintedExtent(const katana::cad::StyleDrawing& drawing, const QFont& base)
+{
+    katana::geometry::Box2 box;
+    for (const auto& stroke : drawing.strokes) {
+        for (const auto& vertex : stroke.path.vertices) {
+            box.expand(vertex);
+        }
+    }
+    for (const auto& text : drawing.texts) {
+        box.expand(styleTextExtent(text, base));
+    }
+    return box;
 }
 
 void paintStyleDrawing(QPainter& painter, const katana::cad::StyleDrawing& drawing,
