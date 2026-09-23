@@ -262,9 +262,12 @@ TEST(SymbolExport, APointDrawnInAStyleWithASymbolIsWrittenWithTheBlock12dDrawsIt
     const auto archive = exportOf(model);
     ASSERT_EQ(archive.elements.size(), 2u);
     const auto& manhole = std::get<a12::VertexString>(archive.elements[0]);
-    EXPECT_EQ(manhole.header.style, "Manhole");
+    // What 12d draws is the style's linetype and symbol, never the style's
+    // own name, which is Katana's (and may be renamed): a continuous line is
+    // 12d's default linestyle "1", and the symbol is the name the style gives.
+    EXPECT_EQ(manhole.header.style, "1");
     ASSERT_TRUE(manhole.symbol.has_value());
-    EXPECT_EQ(manhole.symbol->text("style"), "Manhole");
+    EXPECT_EQ(manhole.symbol->text("style"), "manhole");
     EXPECT_EQ(manhole.symbol->text("colour"), "blue") << "the point's colour is the symbol's";
     EXPECT_EQ(manhole.symbol->real("size"), 1.2);
     EXPECT_EQ(manhole.symbol->real("rotation"), 0.0);
