@@ -149,11 +149,13 @@ class MainWindow final : public QMainWindow {
     void runCommand(const QString& line);
 
     // Every key sequence the window's actions and menus answer to that two
-    // of them share, one line each ("Ctrl+L: Layers..., Line"); empty when
-    // each is unique. Qt disables an ambiguous shortcut for BOTH actions, so
-    // a clash is two keys that silently do nothing. `sequences`, when given,
-    // is set to how many distinct sequences there are. For the headless
-    // --check-shortcuts switch.
+    // of them share, one line each ("Ctrl+L: formatLayers, Line"); empty
+    // when each is unique. Qt disables an ambiguous shortcut for BOTH
+    // actions, so a clash is two keys that silently do nothing; two items of
+    // one menu with the same underlined letter make that letter cycle
+    // between them instead of choosing, so those are counted too ("Alt+O
+    // (Format) > L"). `sequences`, when given, is set to how many distinct
+    // sequences there are. For the headless --check-shortcuts switch.
     [[nodiscard]] QStringList shortcutClashes(int* sequences = nullptr) const;
 
   protected:
