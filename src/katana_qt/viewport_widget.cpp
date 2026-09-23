@@ -1075,18 +1075,22 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         // and so that a named style can finally change how an entity looks -
         // Style::color was stored and validated and read by nothing.
         const auto display = katana::entity::resolveDisplay(model, entity);
-        if (selection.contains(entity.id)) {
+        // The selection and the fading of a locked layer are screen furniture:
+        // they say what the user is working on, and a plot of a drawing
+        // printed them in orange dashes and half tone (audit QT-26).
+        const bool plotting = paperPixelsPerMillimetre_ > 0.0;
+        if (!plotting && selection.contains(entity.id)) {
             painter.setPen(QPen(kSelection, 2, Qt::DashLine));
         } else {
             QColor color = toQColor(display.color);
-            if (layer.locked) {
+            if (!plotting && layer.locked) {
                 color.setAlpha(110); // locked layers, and their children, read as background
             }
             // On screen every line is a 1.5 px hairline: a screen has no
             // paper for a line weight to be millimetres of. On a plot the
             // width is Layer::lineWeight - "millimetres on paper" - which
             // means what it says for the first time (PLAN.MD Phase 22).
-            const double penWidthPixels = paperPixelsPerMillimetre_ > 0.0
+            const double penWidthPixels = plotting
                                               ? display.lineWeight * paperPixelsPerMillimetre_
                                               : 1.5;
             QPen pen(color, penWidthPixels);
