@@ -38,6 +38,10 @@ add_executable(katana_qt_widget_tests
     ${_qt_src}/view_layers_popup.cpp
     ${_qt_src}/dock_chrome.cpp
     ${_qt_src}/icons.cpp
+    # The styles and linetypes manager and the layer manager, built on the
+    # customisation widgets (tests/qt_widgets/customisation/test_style_manager*).
+    ${_qt_src}/style_manager.cpp
+    ${_qt_src}/layer_manager.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}
