@@ -466,6 +466,9 @@ void MainWindow::buildActions()
     // ---- GIS ---------------------------------------------------------------------------
     buildGisActions(exportAction);
 
+    // ---- Survey ------------------------------------------------------------------------
+    buildSurveyActions(customiseAction, codeAction);
+
     // ---- Terrain and civil -----------------------------------------------------------
     QAction* cloudSurface = makeAction(Icon::SurfaceFromCloud, "Surface From &Point Cloud...",
                                        "Triangulate a surface from an imported point cloud's "
@@ -655,6 +658,24 @@ void MainWindow::buildGisActions(QAction* exportAction)
     gisBar->addActions({exportCloud, exportDem, copc});
     gisBar->addSeparator();
     gisBar->addAction(info);
+}
+
+void MainWindow::buildSurveyActions(QAction* customiseAction, QAction* codeAction)
+{
+    SurveyServices services;
+    services.document = &document_;
+    services.views = views_;
+    services.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                 const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    services.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    services.loadCustomisation = customiseAction;
+    services.applySurveyCodes = codeAction;
+    QMenu* surveyMenu = menuBar()->addMenu("&Survey");
+    QToolBar* surveyBar = makeToolBar("Survey", Qt::TopToolBarArea);
+    survey_ = std::make_unique<SurveyWorkbench>(*this, std::move(services), *surveyMenu,
+                                                *surveyBar);
 }
 
 katana::core::Status MainWindow::triggerAction(const QString& name)
