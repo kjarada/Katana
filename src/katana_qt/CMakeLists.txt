@@ -56,6 +56,12 @@ file(GLOB _katana_survey_ui CONFIGURE_DEPENDS
 target_sources(katana PRIVATE ${_katana_survey_ui})
 target_include_directories(katana PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(katana PRIVATE katana_survey katana_surveyio katana_geodesy)
+# The interactive tools' icons (tools/icons_<family>.cpp) and, later, the menus
+# built from the tool catalogue: globbed for the same reason, one file per tool
+# family, each written by that family's author.
+file(GLOB _katana_tool_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.hpp")
+target_sources(katana PRIVATE ${_katana_tool_ui})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
@@ -86,3 +92,11 @@ add_executable(katana_make_icons EXCLUDE_FROM_ALL make_icons.cpp icons.cpp theme
 katana_target_defaults(katana_make_icons)
 target_link_libraries(katana_make_icons PRIVATE Qt6::Widgets)
 
+# A developer tool, like katana_make_icons: every catalogue tool's icon at two
+# sizes with its name and id, so a tool's author can see the icon without
+# launching the application. Not part of `all`.
+add_executable(katana_tool_icon_sheet EXCLUDE_FROM_ALL tool_icon_sheet.cpp theme.cpp
+               ${_katana_tool_ui})
+katana_target_defaults(katana_tool_icon_sheet)
+target_include_directories(katana_tool_icon_sheet PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(katana_tool_icon_sheet PRIVATE katana_cad Qt6::Widgets)
