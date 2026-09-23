@@ -252,6 +252,8 @@ const std::vector<Icon>& allIcons()
         Icon::SurveyArea,   Icon::SurveyAngle,
         Icon::SurveyTraverse, Icon::SurveyLevelBook,
         Icon::SurveyConverter,
+        Icon::SurveyImport, Icon::SurveyExport,
+        Icon::SurveyPointManager, Icon::SurveyPointReport,
     };
     return icons;
 }
@@ -646,6 +648,51 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.stroke(polyline({{3.5, 15.5}, {5.5, 13.2}, {7.5, 15.5}}), true);
         break;
     }
+    case Icon::SurveyImport:
+        // A file's rows, and the arrow INTO the drawing to the new point it
+        // makes (the accent), beside a point already there.
+        ink.stroke(rectangle(2.5, 3, 8.5, 12, 0.8));
+        for (const double y : {6.5, 9.0, 11.5}) {
+            ink.line(4.5, y, 9, y, false, 1.1);
+        }
+        ink.line(12.5, 9, 17.6, 9, true);
+        ink.stroke(polyline({{15.3, 6.8}, {17.8, 9}, {15.3, 11.2}}), true);
+        drawMark(ink, 20.2, 9, true);
+        drawMark(ink, 15.5, 18.5, false);
+        break;
+    case Icon::SurveyExport:
+        // A point of the drawing, and the arrow OUT to the file it writes
+        // (the file's rows are the accent).
+        drawMark(ink, 3.8, 9, false);
+        drawMark(ink, 8.5, 18.5, false);
+        ink.line(6.4, 9, 11.3, 9, true);
+        ink.stroke(polyline({{9, 6.8}, {11.5, 9}, {9, 11.2}}), true);
+        ink.stroke(rectangle(13, 3, 8.5, 12, 0.8));
+        for (const double y : {6.5, 9.0, 11.5}) {
+            ink.line(15, y, 19.5, y, true, 1.1);
+        }
+        break;
+    case Icon::SurveyPointManager:
+        // A table of points: a header row, a column of marks (the accent),
+        // and rows of values.
+        ink.stroke(rectangle(2.5, 3.5, 19, 17, 0.8));
+        ink.line(2.5, 8, 21.5, 8, false, 1.1);
+        ink.line(9, 3.5, 9, 20.5, false, 1.1);
+        for (const double y : {11.2, 14.7, 18.2}) {
+            ink.dot(5.7, y, 1.1, true);
+            ink.line(11, y, 19.5, y, false, 1.1);
+        }
+        break;
+    case Icon::SurveyPointReport:
+        // A page listing points: a mark heading it, then lines of text.
+        ink.stroke(rectangle(4, 2.5, 16, 19, 0.8));
+        drawMark(ink, 8, 7, true);
+        ink.line(12, 6, 17.5, 6, false, 1.1);
+        ink.line(12, 8.5, 16, 8.5, false, 1.1);
+        for (const double y : {12.5, 15.5, 18.5}) {
+            ink.line(6.5, y, 17.5, y, false, 1.1);
+        }
+        break;
     }
     painter.restore();
 }

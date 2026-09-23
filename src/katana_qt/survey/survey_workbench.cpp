@@ -10,6 +10,8 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/survey_tools.hpp"
 #include "survey/survey_dialogs.hpp"
+#include "survey/survey_import_wizard.hpp"
+#include "survey/survey_points_ui.hpp"
 
 namespace katana::qt {
 
@@ -44,6 +46,40 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
              "Convert coordinates between coordinate systems by EPSG code, with grid factors",
              "surveyCoordinateConverter");
 
+    QAction* importPoints =
+        make(Icon::SurveyImport, "&Import Survey Points...",
+             "Read a file of surveyed points into the drawing, one undoable step",
+             "surveyImport");
+    QAction* exportPoints = make(Icon::SurveyExport, "&Export Survey Points...",
+                                 "Write the drawing's survey points to a delimited text file",
+                                 "surveyExport");
+    pointManagerAction_ =
+        make(Icon::SurveyPointManager, "Point &Manager",
+             "The drawing's survey points in a table: filter, sort, select, zoom to",
+             "surveyPointManager");
+    pointManagerAction_->setCheckable(true);
+    // The dock it shows, by object name: how --survey-dock finds it.
+    pointManagerAction_->setData(QString("SurveyPointsDock"));
+    QAction* pointReport = make(Icon::SurveyPointReport, "Point &Report...",
+                                "The survey points as a report, to copy or save as CSV",
+                                "surveyPointReport");
+
+    QObject::connect(importPoints, &QAction::triggered, &window_, [this] {
+        open(import_, [this] {
+            SurveyImportContext context{services_.document, services_.views, services_.log,
+                                        services_.applySurveyCodes};
+            return new SurveyImportWizard(std::move(context), &window_);
+        });
+    });
+    QObject::connect(exportPoints, &QAction::triggered, &window_, [this] {
+        open(export_, [this] { return new SurveyExportDialog(dialogContext(), &window_); });
+    });
+    QObject::connect(pointManagerAction_, &QAction::toggled, &window_,
+                     [this](bool show) { showPointManager(show); });
+    QObject::connect(pointReport, &QAction::triggered, &window_, [this] {
+        open(pointReport_,
+             [this] { return new SurveyPointReportDialog(dialogContext(), &window_); });
+    });
     QObject::connect(inverse, &QAction::triggered, &window_, [this] {
         open(inverse_, [this] { return new SurveyInverseDialog(dialogContext(), &window_); });
     });
@@ -66,6 +102,8 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
 
     // Sections rather than plain separators, as the GIS menu has them: a
     // style that draws their titles says what each group is for.
+    menu.addSection("Survey Points");
+    menu.addActions({importPoints, exportPoints, pointManagerAction_, pointReport});
     menu.addSection("Coordinate Geometry");
     menu.addActions({inverse, forward, area, angle});
     menu.addSection("Traverse and Levelling");
@@ -80,6 +118,8 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
         menu.addAction(services_.applySurveyCodes);
     }
 
+    toolBar.addActions({importPoints, exportPoints, pointManagerAction_});
+    toolBar.addSeparator();
     toolBar.addActions({inverse, forward, area, angle});
     toolBar.addSeparator();
     toolBar.addActions({traverse, levelBook});
@@ -94,8 +134,14 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
 SurveyWorkbench::~SurveyWorkbench()
 {
     for (QPointer<QDialog>* slot : {&inverse_, &forward_, &angle_, &traverse_, &levelBook_,
-                                    &converter_}) {
+                                    &converter_, &import_, &export_, &pointReport_}) {
         delete slot->data();
+    }
+    // The dock holds a listener on the document too, and goes for the same
+    // reason the dialogs do.
+    if (!pointManager_.isNull()) {
+        window_.removeDockWidget(pointManager_.data());
+        delete pointManager_.data();
     }
 }
 
@@ -112,6 +158,37 @@ void SurveyWorkbench::open(QPointer<QDialog>& slot, const std::function<QDialog*
     slot->show();
     slot->raise();
     slot->activateWindow();
+}
+
+void SurveyWorkbench::showPointManager(bool show)
+{
+    if (pointManager_.isNull()) {
+        if (!show) {
+            return;
+        }
+        pointManager_ = new SurveyPointsDock(*services_.document, services_.views, &window_);
+        window_.addDockWidget(Qt::RightDockWidgetArea, pointManager_.data());
+        // Wide enough for the id, code and both coordinates without scrolling.
+        window_.resizeDocks({pointManager_.data()}, {460}, Qt::Horizontal);
+        // Closing the dock by its own button unticks the menu item. Hidden,
+        // not "not visible": a dock tabbed behind another is still open.
+        // Compared first, so the action and the dock do not call each other
+        // round.
+        QObject::connect(pointManager_.data(), &QDockWidget::visibilityChanged, &window_,
+                         [this](bool) {
+                             if (pointManager_.isNull()) {
+                                 return;
+                             }
+                             const bool shown = !pointManager_->isHidden();
+                             if (pointManagerAction_->isChecked() != shown) {
+                                 pointManagerAction_->setChecked(shown);
+                             }
+                         });
+    }
+    pointManager_->setVisible(show);
+    if (show) {
+        pointManager_->raise();
+    }
 }
 
 void SurveyWorkbench::areaOfSelection()

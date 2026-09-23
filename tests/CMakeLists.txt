@@ -364,10 +364,83 @@ if(TARGET katana)
             "-DEXPECT=origin +0\\.000000000 -3\\.000000000 +-> +500000\\.000 0\\.000 +target k 0\\.99960000"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_converter_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The import wizard, the Point Manager, the export and the Point Report
+    # (PLAN.MD 45 slices 10, 11, 13), driven page by page (DRIVE, see
+    # tools/check_screenshot.cmake) on tests/surveyio/data. The fixture
+    # survey_points_pnezd.csv has a header naming its columns and 12 points,
+    # counted by hand: 1 to 12, point 4 without an elevation, point 9's
+    # description "Hydrant, fire" quoted. Its detection is never Identified
+    # (the delimited probe is weak by design), so every run chooses the format.
+    set(_survey_data "${PROJECT_SOURCE_DIR}/tests/surveyio/data")
+    set(_survey_format "format=Delimited text points (CSV, TXT)")
+    # Import all 12, then the Point Manager lists them - 12 rows - and the
+    # filter "CP" keeps the two points whose code is CP (1 and 11; no id or
+    # description holds "cp").
+    add_test(NAME qt_survey_import_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|#surveyPointManager|filter=CP"
+            "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A headerless file does not say which column is the northing: Next on the
+    # layout page is refused until the order is confirmed, and then its 3
+    # points import.
+    add_test(NAME qt_survey_import_uncertain_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless.txt|!next|${_survey_format}|!next|columns=P,N,E,Z|delimiter=whitespace|headerLines=0|!next|confirmOrder=on|!next|unit=metres|!next|!next|!import"
+            "-DEXPECT=could not tell the order of the columns.*Imported 3 point\\(s\\) from survey_points_headerless\\.txt"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_uncertain_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Round trip through files: export(import(fixture)) with the fixture's own
+    # layout and 3 decimals is the fixture, text for text; that export read
+    # back in (replacing the points of the same ids) and written again is the
+    # fixture again.
+    add_test(NAME qt_survey_export_round_trip_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|columns=P,N,E,Z,C,D|decimals=3|!export|@surveyImport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|existing=replace the drawing's point|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv|!export"
+            "-DCOMPARE=${_survey_data}/survey_points_pnezd.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv"
+            "-DEXPECT=Exported 12 point\\(s\\) to survey_round_trip_1\\.csv.*12 point\\(s\\) in the drawing are replaced.*Exported 12 point\\(s\\) to survey_round_trip_2\\.csv"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_export_round_trip_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The stated transformation: UTM zone 30N (EPSG:32630) to 30S
+    # (EPSG:32730) is the same projection with a false northing of 10 000 000 m
+    # (NGA.SIG.0012), so the export is the fixture with 10 000 000 added to
+    # every northing by hand (survey_points_pnezd_utm30s.csv) and nothing
+    # else changed - not the eastings, not the heights.
+    add_test(NAME qt_survey_import_transform_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|declared=32630|target=32730|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_transform.csv|columns=P,N,E,Z,C,D|decimals=3|!export"
+            "-DCOMPARE=${_survey_data}/survey_points_pnezd_utm30s.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_transform.csv"
+            "-DEXPECT=Transformation: from EPSG:32630 to EPSG:32730.*Imported 12 point"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_transform_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The Point Report after the import lists all 12 (nothing is selected).
+    # A layout template is saved, chosen and deleted in the same run, so the
+    # settings are left as they were found.
+    add_test(NAME qt_survey_point_report_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest survey layout|!saveTemplate|template=ctest survey layout|!deleteTemplate|!next|unit=metres|!next|!next|!import|@surveyPointReport"
+            "-DEXPECT=Saved the survey layout template \"ctest survey layout\": P,N,E,Z,C,D.delimiter=comma.header=1.quote=double.*Deleted the survey layout template.*Point Report: 12 point\\(s\\)"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_point_report_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
                          qt_survey_forward_headless qt_survey_angle_headless
                          qt_survey_traverse_headless qt_survey_level_book_headless
-                         qt_survey_converter_headless
+                         qt_survey_converter_headless qt_survey_import_headless
+                         qt_survey_import_uncertain_headless
+                         qt_survey_export_round_trip_headless
+                         qt_survey_import_transform_headless
+                         qt_survey_point_report_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

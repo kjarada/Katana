@@ -12,15 +12,20 @@
 // other work is changing that file.
 //
 // The menu, in sections:
+//   Survey Points           Import Survey Points..., Export Survey Points...,
+//                           Point Manager (a dock), Point Report...
 //   Coordinate Geometry     Inverse..., Forward Point..., Area of Selection,
 //                           Angle and Bearing Calculator...
 //   Traverse and Levelling  Traverse..., Level Book...
 //   Coordinates             Coordinate Converter...
 //   Survey Coding           the window's two customisation actions
-// Each action's object name (surveyInverse, surveyForward, surveyArea,
+// Each action's object name (surveyImport, surveyExport, surveyPointManager,
+// surveyPointReport, surveyInverse, surveyForward, surveyArea,
 // surveyAngleCalculator, surveyTraverse, surveyLevelBook,
 // surveyCoordinateConverter) is what --action and --survey-dialog know it by.
-// A dialog's object name is its action's plus "Dialog" (survey_dialogs.hpp).
+// A dialog's object name is its action's plus "Dialog" (survey_dialogs.hpp,
+// survey_import_wizard.hpp, survey_points_ui.hpp); the Point Manager is the
+// dock SurveyPointsDock, which --survey-dock knows it by.
 //
 // The computing is katana::cad's (survey_tools.hpp); this class and its
 // dialogs only gather input and show the reports.
@@ -45,6 +50,7 @@ class Document;
 
 namespace katana::qt {
 
+class SurveyPointsDock;
 class ViewWorkspace;
 struct SurveyDialogContext;
 
@@ -87,6 +93,8 @@ class SurveyWorkbench {
     void open(QPointer<QDialog>& slot, const std::function<QDialog*()>& make);
     // Survey > Area of Selection: no dialog - the report goes to the log.
     void areaOfSelection();
+    // Survey > Point Manager: made the first time it is shown.
+    void showPointManager(bool show);
 
     QMainWindow& window_;
     SurveyServices services_;
@@ -96,6 +104,11 @@ class SurveyWorkbench {
     QPointer<QDialog> traverse_;
     QPointer<QDialog> levelBook_;
     QPointer<QDialog> converter_;
+    QPointer<QDialog> import_;
+    QPointer<QDialog> export_;
+    QPointer<QDialog> pointReport_;
+    QPointer<SurveyPointsDock> pointManager_;
+    QAction* pointManagerAction_ = nullptr;
 };
 
 } // namespace katana::qt
