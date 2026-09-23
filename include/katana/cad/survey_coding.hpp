@@ -26,8 +26,12 @@
 // with whichever entity came first deciding its symbol and colour for all.
 // Instead:
 //  1. an existing style with exactly that appearance is REUSED, whatever it is
-//     called - so renaming a coded style and applying codes again does not
-//     make a second one;
+//     called or says in its description - so renaming a coded style and
+//     applying codes again does not make a second one. A colour name the
+//     callback does not know has no RGB, so any style with no colour of its
+//     own draws it; one described by that name is preferred, and one
+//     described by another such name of the map is left to that name's
+//     codes;
 //  2. otherwise a style is created, named after the linestyle, else the
 //     symbol, else "Plain"; a name another appearance already holds gets
 //     " (<colour name>)" and then " 2", " 3" - decided over the appearances
