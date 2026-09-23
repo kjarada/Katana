@@ -92,9 +92,18 @@ class DimensionTool final : public InteractiveTool {
         case Step::Second:
             return "Specify second extension line origin or [Undo]";
         case Step::Location:
-            return kind_ == Kind::Aligned
-                       ? "Specify dimension line location or its offset, or [Text/Undo]"
-                       : "Specify dimension line location or [Text/Horizontal/Vertical/Undo]";
+            if (kind_ == Kind::Aligned) {
+                return "Specify dimension line location or its offset, or [Text/Undo]";
+            }
+            // Once H or V is typed the prompt says so, since nothing else on
+            // screen shows that the cursor no longer chooses.
+            if (state_.orientation) {
+                return std::string("Specify location of the ") +
+                       (*state_.orientation == Orientation::Horizontal ? "horizontal"
+                                                                       : "vertical") +
+                       " dimension line or [Text/Horizontal/Vertical/Undo]";
+            }
+            return "Specify dimension line location or [Text/Horizontal/Vertical/Undo]";
         case Step::Text:
             return "Enter dimension text, or press Enter for the measured distance";
         }
