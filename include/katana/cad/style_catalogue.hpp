@@ -133,4 +133,10 @@ struct MissingName {
 // (D2's collisions), ascending.
 [[nodiscard]] std::vector<std::string> linetypeCollisions(const Document& document);
 
+// `base` when the style table has no such name, else "base 2", "base 3" ...
+// the first free one. For the style manager's Duplicate and "New Style Using
+// This", which then offer the name to be changed, and for the symbol
+// library's Assign, which names a new style after its symbol.
+[[nodiscard]] std::string freeStyleName(const katana::entity::Model& model, std::string_view base);
+
 } // namespace katana::cad

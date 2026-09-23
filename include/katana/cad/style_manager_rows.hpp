@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
@@ -178,12 +179,10 @@ enum class UsageTable { Style, Linetype, Symbol };
 entitiesUsing(const katana::entity::Model& model, UsageTable table,
               const std::vector<std::string>& names);
 
-// `base` when the style table has no such name, else "base 2", "base 3"...
-// the first free one. For Duplicate and "New Style Using This", which then
-// offer the name to be changed.
-[[nodiscard]] std::string freeStyleName(const katana::entity::Model& model, std::string_view base);
-// The same for a drawing linetype: free in the model's table AND in the
-// library, so a new linetype never starts life as a D2 collision.
+// `base`, else "base 2", "base 3" ... for a drawing linetype: free in the
+// model's table AND in the library, so a new linetype never starts life as a
+// D2 collision. Its twin for styles, freeStyleName, is in style_catalogue.hpp,
+// which the symbol library shares.
 [[nodiscard]] std::string freeLinetypeName(const Document& document, std::string_view base);
 
 } // namespace katana::cad
