@@ -1,73 +1,76 @@
 #pragma once
 
-// The styles and linetypes manager (PLAN.MD 20.2, slice 3).
+// The styles and linetypes manager.
 //
-// One dialog for both tables, because they are one subject: a style names a
-// linetype, and a 12d import fills both at once. Everything it does goes
-// through the ordinary commands, so every edit made here is on the same undo
-// stack as an edit made on the command line.
+// One window for what decides how a line or a point is drawn: the drawing's
+// styles, its own dash linetypes and the session's 12d linestyles, with a
+// Diagnostics tab for the names nothing defines and the names two sources
+// define (decision D2's collisions). Everything it changes goes through the
+// ordinary commands, so every edit made here is on the same undo stack as one
+// made on the command line - and its Undo and Redo buttons are that stack's.
+//
+// NON-MODAL. It may be shown beside the drawing (the workbench's show()) or
+// exec()'d (Edit > Styles and Linetypes). It hears the Document through a
+// DocumentWatcher, so an undo, an import or a library load made anywhere
+// reloads it once, from the event loop, keeping the selected rows; and every
+// button that acts on the drawing's selection reads the selection at the
+// moment it is pressed.
+//
+// THE QT-02 RULE. A form writes back only the fields a person EDITED
+// (cad::StyleFields); an unedited Save is no command at all
+// (cad::editStylesCommand, updateStyleIfChanged); and every name field keeps
+// a name it cannot list (NamePicker, kept_name_combo.hpp). Selecting several
+// styles shows <varies> for the fields they differ in, and Save leaves those
+// fields of each style alone unless they were edited.
+//
+// No modal box is ever opened by a button: names are asked for in a prompt
+// row inside the dialog and a purge is checked in a panel, so a headless
+// session and a test drive every action by objectName.
+//
+// objectNames: tabs "managerTabs" with pages "stylesPage", "linetypesPage",
+// "diagnosticsPage"; see style_manager.cpp for each field and button.
 
-#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <QDialog>
-#include <QString>
 
-#include "katana/core/error.hpp"
-#include "katana/entity/tables.hpp"
-
-namespace katana::cad {
-class Document;
-}
-
-// Qt's own, at global scope: declared inside katana::qt it would be a new
-// class of the same name, which is what the first build of this file did.
-class QTableWidget;
+#include "customisation/customisation_context.hpp"
+#include "katana/cad/style_manager_rows.hpp"
 
 namespace katana::qt {
 
-// No Q_OBJECT: it declares no signals or slots of its own and connects to
-// lambdas, which is what keeps moc out of this target (src/katana_qt/CMakeLists.txt).
+// No Q_OBJECT: no signals or slots of its own; it connects to lambdas, which
+// is what keeps moc out of this target (src/katana_qt/CMakeLists.txt).
 class StyleManagerDialog : public QDialog {
   public:
-    // `log` writes to the main window's command log: the dialog reports what
-    // each command did there rather than opening a box over a box, and the
-    // second argument marks a failure, as MainWindow::logMessage does.
-    using Log = std::function<void(const QString& message, bool isError)>;
-
-    StyleManagerDialog(katana::cad::Document& document, Log log, QWidget* parent = nullptr);
+    // `context.document` and `context.log` must be set. `thumbnails` may be
+    // null (the dialog then keeps its own cache); `selectAndShow` may be
+    // empty (Select Users then only selects). The Document may be destroyed
+    // before the dialog: the dialog then does nothing more.
+    explicit StyleManagerDialog(const CustomisationContext& context, QWidget* parent = nullptr);
     ~StyleManagerDialog() override;
 
-    // For the headless screenshot: lays the dialog out and selects the first
-    // row of each table, so a grab shows the form and the previews filled in
-    // rather than an empty dialog.
+    // For the headless screenshot: selects the first row of the styles and
+    // the linetypes tables, so a grab shows the forms and previews filled in.
     void showFirstRows();
 
-  private:
-    // Rebuilds both tables from the model. Called after every command this
-    // dialog runs - never from a table's own signal, which is how the layer
-    // panel once crashed (docs/cad.md).
-    void reloadTables();
-    void loadSelectedStyle();
-    void loadSelectedLinetype();
-    void refreshStylePreview();
-    void refreshLinetypePreview();
-    // The form's contents as a table item. The style keeps the name it is
-    // stored under: renaming is its own command, so that the entities
-    // wearing it can come too.
-    [[nodiscard]] katana::entity::Style styleFromForm(const std::string& name) const;
-    // Fails with the reason when the lengths do not parse or do not
-    // alternate; the table's own validate() has the real rules.
-    [[nodiscard]] katana::core::Result<katana::entity::Linetype>
-    linetypeFromForm(const std::string& name) const;
-    static void selectRow(QTableWidget* table, const QString& name);
+    // The styles selected in the Styles tab, by name, in table order; and
+    // replacing that selection (names the table lacks are ignored). For the
+    // workbench ("open on this style") and for tests.
+    [[nodiscard]] std::vector<std::string> selectedStyles() const;
+    void selectStyles(const std::vector<std::string>& names);
+    // The same for the Linetypes tab, where a name may be both a drawing
+    // linetype and a library linestyle (a D2 collision): `origin` says which.
+    [[nodiscard]] std::vector<std::pair<std::string, katana::cad::LinetypeOrigin>>
+    selectedLinetypes() const;
+    void selectLinetype(const std::string& name, katana::cad::LinetypeOrigin origin);
 
+  private:
     struct Impl;
-    // A pointer rather than members, so that this header stays free of the
-    // Qt widget types the dialog is built from (PLAN.MD Rule 4 keeps
-    // third-party types out of public headers; this one is internal, but the
-    // same discipline keeps its rebuild cheap).
+    // A pointer rather than members, so this header stays free of the widget
+    // types the dialog is built from and its rebuild stays cheap.
     std::unique_ptr<Impl> impl_;
 };
 
