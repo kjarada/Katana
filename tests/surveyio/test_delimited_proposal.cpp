@@ -249,10 +249,142 @@ TEST(DelimitedLayoutProposal, ValuesInAColumnTheHeaderDoesNotNameMakeItUncertain
     EXPECT_TRUE(contains(aligned.summary(), "column 5")) << aligned.summary();
 
     // Empty trailing fields are not values - "a,b,c," is how many writers end a
-    // row - so they leave the header in charge.
+    // row - so they leave the header in charge. The layout is the header's three
+    // columns and no more: see AValueAfterTheSampleInAnEmptyTrailingColumnIsAnErrorNotLost.
     const LayoutProposal trailing =
         propose("Point,Northing,Easting\n1,5000000.25,500000.5,\n2,5000010.125,500020.375,,\n");
-    EXPECT_EQ(trailing.outcome(), LayoutProposalOutcome::Decided) << trailing.summary();
+    ASSERT_EQ(trailing.outcome(), LayoutProposalOutcome::Decided) << trailing.summary();
+    EXPECT_EQ(trailing.layout()->columns, roles("PNE"));
+}
+
+TEST(DelimitedLayoutProposal, AValueUnderABlankHeaderCellMakesItUncertain)
+{
+    // A spreadsheet with one column nobody headed writes an empty header cell.
+    // Its column is not named, so a Decided layout could only read past it -
+    // here line 2's code 'KB' would be lost without a word.
+    const LayoutProposal trailingBlank = propose("Point,Northing,Easting,Elevation,\n"
+                                                 "1,5000000.25,500000.5,101.75,KB\n"
+                                                 "2,5000010.125,500020.375,99.5,FL\n");
+    ASSERT_EQ(trailingBlank.outcome(), LayoutProposalOutcome::Uncertain) << trailingBlank.summary();
+    EXPECT_TRUE(contains(trailingBlank.summary(), "line 2 has a value in column 5"))
+        << trailingBlank.summary();
+    EXPECT_TRUE(contains(trailingBlank.summary(), "'KB'")) << trailingBlank.summary();
+
+    // The blank cell in the middle: column 4 holds the elevations.
+    const LayoutProposal middleBlank = propose("Point,Northing,Easting,,Description\n"
+                                               "1,5000000.25,500000.5,101.75,Kerb\n");
+    ASSERT_EQ(middleBlank.outcome(), LayoutProposalOutcome::Uncertain) << middleBlank.summary();
+    EXPECT_TRUE(contains(middleBlank.summary(), "line 2 has a value in column 4"))
+        << middleBlank.summary();
+
+    // The same with tabs, where the blank cell is the header's last tab.
+    const LayoutProposal tabbed = propose("Point\tNorthing\tEasting\t\n"
+                                          "1\t5000000.25\t500000.5\tKB\n");
+    ASSERT_EQ(tabbed.outcome(), LayoutProposalOutcome::Uncertain) << tabbed.summary();
+    EXPECT_TRUE(contains(tabbed.summary(), "line 2 has a value in column 4")) << tabbed.summary();
+
+    // A blank header cell over a column that is empty in every row leaves the
+    // header in charge: nothing is there to lose.
+    const LayoutProposal emptyColumn = propose("Point,Northing,Easting,Elevation,\n"
+                                               "1,5000000.25,500000.5,101.75,\n"
+                                               "2,5000010.125,500020.375,99.5,\n");
+    ASSERT_EQ(emptyColumn.outcome(), LayoutProposalOutcome::Decided) << emptyColumn.summary();
+    EXPECT_EQ(emptyColumn.layout()->columns, roles("PNEZ"));
+}
+
+TEST(DelimitedLayoutProposal, AValueAfterTheSampleInAnEmptyTrailingColumnIsAnErrorNotLost)
+{
+    // Every sampled row ends with an empty fifth field, and a row after the
+    // sample has a description there. A Decided layout with an Ignore fifth
+    // column would read that description past without an error or a warning;
+    // the header names four columns, so the layout has four, and the parser's
+    // own check - text past the last column - names the line.
+    const std::size_t rows = kProposalSampleLines + 50;
+    for (const std::string_view header :
+         {"Point,Northing,Easting,Elevation\n", "Point,Northing,Easting,Elevation,\n"}) {
+        SCOPED_TRACE(header);
+        std::string text(header);
+        for (std::size_t i = 1; i < rows; ++i) {
+            text += std::to_string(i) + ",5000000.25," + std::to_string(500000 + i) + ",101.75,\n";
+        }
+        text += std::to_string(rows) + ",5000000.25,500000.5,101.75,Boundary peg - check\n";
+
+        const LayoutProposal proposal = propose(text);
+        ASSERT_EQ(proposal.outcome(), LayoutProposalOutcome::Decided) << proposal.summary();
+        EXPECT_EQ(proposal.layout()->columns, roles("PNEZ"));
+
+        DelimitedImportOptions options;
+        options.unit = LinearUnit::Metres;
+        const Result<ImportResult> result =
+            parseDelimitedPoints(text, *proposal.layout(), "points.csv", options);
+        ASSERT_FALSE(result.ok()) << result->project.points.size() << " points imported";
+        // The header is line 1 and point i is on line i + 1, so the last point,
+        // number `rows`, is on line rows + 1 = 251.
+        EXPECT_TRUE(contains(result.error().message, "line " + std::to_string(rows + 1) + ":"))
+            << result.error().message;
+        EXPECT_TRUE(contains(result.error().message, "column 5 holds 'Boundary peg - check'"))
+            << result.error().message;
+    }
+}
+
+TEST(DelimitedLayoutProposal, AHeaderNameWithABlankInItIsOneColumnOfAWhitespaceFile)
+{
+    // "Easting (m)" split on its blank is two header words, "Easting" and
+    // "(m)", and every header word after it would then sit one column to the
+    // right of its data. A word with no letters of its own - the unit - and
+    // anything inside a bracket belong to the word before them.
+    DelimitedImportOptions options;
+    options.unit = LinearUnit::Metres;
+
+    const std::string northingFirst = "Northing (m)   Easting (m)   Height (m)\n"
+                                      "5000000.25     500000.5      101.75\n";
+    const LayoutProposal proposal = propose(northingFirst);
+    ASSERT_EQ(proposal.outcome(), LayoutProposalOutcome::Decided) << proposal.summary();
+    EXPECT_EQ(proposal.layout()->delimiter, Delimiter::Whitespace);
+    EXPECT_EQ(proposal.layout()->columns, roles("NEZ"));
+    const Result<ImportResult> read =
+        parseDelimitedPoints(northingFirst, *proposal.layout(), "points.txt", options);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    // The values the fixture's second line writes under each word.
+    EXPECT_EQ(read->project.points.front().northing, 5000000.25);
+    EXPECT_EQ(read->project.points.front().easting, 500000.5);
+    ASSERT_TRUE(read->project.points.front().elevation.has_value());
+    EXPECT_EQ(*read->project.points.front().elevation, 101.75);
+
+    const LayoutProposal eastingFirst = propose("Pt   Easting (m)   Northing (m)   RL (m)\n"
+                                                "1    500000.5      5000000.25     101.75\n");
+    ASSERT_EQ(eastingFirst.outcome(), LayoutProposalOutcome::Decided) << eastingFirst.summary();
+    EXPECT_EQ(eastingFirst.layout()->columns, roles("PENZ"));
+
+    // A unit with a blank inside its bracket is still one word's unit.
+    const LayoutProposal spacedUnit = propose("Pt  Northing (US ft)  Easting [ US ft ]\n"
+                                              "1   16404199.5        1640419.75\n");
+    ASSERT_EQ(spacedUnit.outcome(), LayoutProposalOutcome::Decided) << spacedUnit.summary();
+    EXPECT_EQ(spacedUnit.layout()->columns, roles("PNE"));
+}
+
+TEST(DelimitedLayoutProposal, AHeaderWithMoreNamesThanTheRowsHaveFieldsIsUncertain)
+{
+    // "Reduced Level" is one column of a whitespace file and two header words:
+    // Point, Northing, Easting, Reduced, Level is five names over rows of four
+    // fields, so the elevation 101.75 would sit under "Reduced" (not a word
+    // this reader knows: Ignore) and "Level" would head a column no row has.
+    const LayoutProposal proposal = propose("Point  Northing     Easting     Reduced Level\n"
+                                            "1      5000000.25   500000.5    101.75\n");
+    ASSERT_EQ(proposal.outcome(), LayoutProposalOutcome::Uncertain) << proposal.summary();
+    ASSERT_EQ(proposal.candidates().size(), 1u);
+    EXPECT_TRUE(contains(proposal.summary(), "5 columns")) << proposal.summary();
+    EXPECT_TRUE(contains(proposal.summary(), "more than 4 fields")) << proposal.summary();
+    EXPECT_FALSE(proposal.layout().ok());
+
+    // The comma form of the same fault: an unquoted comma inside "Height, m"
+    // makes six header names over rows of five fields, and the code KB would
+    // sit under the unit.
+    const LayoutProposal comma = propose("Point,Northing,Easting,Height, m,Code\n"
+                                         "1,5000000.25,500000.5,101.75,KB\n");
+    ASSERT_EQ(comma.outcome(), LayoutProposalOutcome::Uncertain) << comma.summary();
+    EXPECT_TRUE(contains(comma.summary(), "6 columns")) << comma.summary();
+    EXPECT_TRUE(contains(comma.summary(), "more than 5 fields")) << comma.summary();
 }
 
 TEST(DelimitedLayoutProposal, AHashLineThatIsOtherwiseARowOfNumbersIsNotDecidedToBeAComment)

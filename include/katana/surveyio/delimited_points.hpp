@@ -172,10 +172,12 @@ enum class ColumnPreset { PNEZD, PENZD, PNEZ, PENZ, NEZ, ENZ, PNE, PEN };
 enum class LayoutProposalOutcome {
     // A header line names the northing and easting columns in words that mean
     // nothing else, names no column twice, and the sampled rows agree with it:
-    // every value where the header puts a number is one, no row has a value in
-    // a column the header does not name, and no line starting '#' is otherwise
-    // a row of numbers. Each of those would otherwise lose data without an
-    // error - read past as Ignore, or skipped as a comment.
+    // every value where the header puts a number is one, the header names no
+    // more columns than the widest row has fields, no row has a value in a
+    // column the header does not name (past its last name or under a blank
+    // cell), and no line starting '#' is otherwise a row of numbers. Each of
+    // those would otherwise lose data without an error - read into the wrong
+    // role, read past as Ignore, or skipped as a comment.
     Decided,
     // Something is not known - usually the coordinate order: no header, a header
     // that does not name the coordinates, X/Y, or rows that disagree with the
@@ -238,7 +240,17 @@ inline constexpr std::size_t kProposalSampleLines = 200;
 //     half; whitespace last because a description with a space in it would
 //     otherwise split a CSV row.
 //   * Lines above the first row of numbers are header lines, and the last of
-//     them is read as the header when there is one.
+//     them is read as the header when there is one. In a whitespace file the
+//     blank in "Easting (m)" splits it like the blanks between names, so there
+//     a word that is nothing but a bracketed unit or the punctuation below
+//     ("(m)", "#"), and every word inside a bracket, belong to the name before
+//     them. A name that is still split ("Reduced Level") leaves the header
+//     with more names than the rows have fields, which keeps the proposal
+//     Uncertain: the names no longer line up with the columns.
+//   * A layout taken from a header has the columns the header names, empty
+//     names at its end dropped. Rows whose trailing fields are empty do not add
+//     Ignore columns, so a value that appears there after the sampled lines is
+//     an error on import, naming its line, rather than read past.
 //   * '#' at the start of a line is proposed as a comment prefix when a sampled
 //     line starts with one. Nothing else is: a prefix that happened to match a
 //     point id would drop the point. '#' can match one too, so a '#' line below
@@ -264,7 +276,9 @@ inline constexpr std::size_t kProposalSampleLines = 200;
 //                reader takes grid coordinates, and degrees read as metres put
 //                the survey a few hundred metres from the grid origin, where it
 //                plots, rather than failing.
-// Any other header word makes its column Ignore, and the evidence names it.
+// Any other header word makes its column Ignore, and the evidence names it; so
+// does a blank header cell, and a value in such a column keeps the proposal
+// Uncertain.
 //
 // `bytes` may be the whole file: only the first kProbeBytes (detect.hpp) are
 // decoded, the budget a detection reads, so a proposal costs the same for a
