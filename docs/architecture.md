@@ -214,6 +214,86 @@ look: PROJ finds `proj.db` at `<its DLL>/../share/proj` by itself, and
 The bundle is 388 MB. Almost all of it is the dependency chain of GDAL and PDAL
 as MSYS2 builds them; Katana's own code is a few megabytes.
 
+### The build tree runs on its own too
+
+Until 2026-09-23 only the bundle was self-contained: `<build>/bin/katana.exe`
+found GDAL, PDAL, PROJ, Qt and the C++ runtime through `PATH`, so it ran only
+where MSYS2 was installed and on `PATH` - the libraries were borrowed from the
+toolchain at run time rather than being part of the program. Now the build
+deploys them itself. The `katana_runtime` target (in `ALL`, after `katana` and
+`katana_cli`) runs **the same `KatanaDeploy.cmake`** the bundle runs, with
+`-DKATANA_DEPLOY_PREFIX=<build>`, so `<build>/bin` holds every DLL the programs
+load and `<build>/share` holds `proj` and `gdal`. One script for both, so the
+bundle and the build cannot disagree about what a self-contained Katana needs.
+Switch it off with `-DKATANA_DEPLOY_RUNTIME=OFF`.
+
+A full deploy is too slow for every build - measured on the Release tree, 36 s
+on an idle machine and 62-85 s beside another build, most of it
+`file(GET_RUNTIME_DEPENDENCIES)` running objdump over ~200 DLLs - so the build
+run is incremental. It is skipped (0-1 s, measured) while three things hold:
+
+* **A key is unchanged**: an MD5, taken at configure time, of every module's
+  `LINK_LIBRARIES`, the toolchain and Qt plugin locations, and the deploy
+  script's own text. Which DLLs are needed changes only when a link line does,
+  and a link line changes only through CMake. The programs' import tables
+  would be the direct answer, but `objdump -p` on the 143 MB Debug `katana.exe`
+  takes 2.6 s - on every build.
+* **Every DLL the last deploy recorded is still there.**
+* **Every one is the toolchain's current copy**, by timestamp (`file(COPY)`
+  keeps the source's). MSYS2 is a rolling toolchain; an update replaces
+  `libstdc++-6.dll` under the same name, and a program relinked against the
+  new one that finds the old one beside itself does not start.
+
+Anything else is a full deploy, which first re-copies every DLL already in
+`bin/` from the toolchain - the scan cannot, because it resolves a dependency
+BESIDE the program first and so finds, and keeps, a stale copy - and writes its
+record last, so a deploy that fails part-way is retried rather than trusted.
+Verified on the Release tree: a back-dated `libgdal-39.dll` was noticed and
+replaced with the toolchain's, a deleted `libproj-25.dll` was restored, and the
+next run took 0 s. With `PATH` reduced to `C:\Windows\System32;C:\Windows`,
+`build/release/bin/katana_cli.exe` imported the sample LAS (PDAL), ASCII grid
+and GeoJSON (GDAL) and exported a DXF (GDAL's `header.dxf`, from
+`build/release/share/gdal`), and `katana.exe --screenshot` built the window.
+
+It is `katana_runtime` and not a POST_BUILD step on each program because
+`katana` and `katana_cli` link in parallel under Ninja, and two deploys writing
+one `bin/` at once would race.
+
+**PDAL needs a home directory.** Run with an EMPTY environment (`env -i`),
+PDAL refused every file: "No home directory found" - it reads `USERPROFILE`
+(or `HOME`) for its plugin configuration. Every Windows session has
+`USERPROFILE`, so this does not reach a user, but a service account or a
+container that clears the environment would meet it.
+
+### Why DLLs beside the program, and not static linking
+
+Linking GDAL and PDAL INTO the executables was considered and is not done, for
+reasons that are facts about the toolchain rather than preferences:
+
+* **MSYS2 ships PDAL and PROJ as DLLs only.** `libgdal.a` exists; there is no
+  `libpdalcpp.a` and no `libproj.a` (checked in `C:/msys64/ucrt64/lib`,
+  2026-09-23).
+* **Linking GDAL statically alone would be a defect.** `libpdalcpp-20.dll`
+  imports `libgdal-39.dll` itself, so a Katana with GDAL linked in would load
+  a SECOND GDAL through PDAL: two driver registries, two error states, two
+  `GDAL_DATA` settings in one process, and a dataset opened by one unusable by
+  the other.
+* **A static build is a build of the whole stack from source**: GDAL, PROJ
+  (with `proj.db` embedded - PROJ 9.6 can), PDAL, GEOS, SQLite, libtiff,
+  libgeotiff, curl and their dependencies, as static libraries, with a driver
+  set trimmed to what Katana reads (which would also cut most of the 388 MB).
+  PDAL's CMake is built around shared libraries and plugins, so it is the
+  hard part.
+* **Licences.** GEOS is LGPL-2.1: linking it statically obliges whoever
+  distributes Katana to let a recipient relink it against a modified GEOS
+  (object files, or the source); as a DLL it is replaceable as it stands. Qt
+  is LGPL-3 for the same reason and stays a DLL either way.
+
+So "part of the program" is delivered as: every library in `bin/` beside the
+executable, found first by Windows' DLL search order, and never the
+toolchain's at run time. A single statically linked executable remains
+possible as a packaging project of its own - see PLAN.MD section 6.
+
 ## Failure modes
 
 | Condition | Behaviour |

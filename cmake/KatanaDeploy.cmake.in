@@ -1,18 +1,133 @@
-# Run by `cmake --install` on Windows (see KatanaPackaging.cmake). Makes the
-# installed tree self-contained. Configured with @ONLY, so every ${...} here is
-# evaluated at INSTALL time and every @...@ at configure time.
+# Makes a Windows bin/ directory self-contained: Qt, GDAL, PDAL, PROJ, the C++
+# runtime and every DLL they load, beside the programs, and the data GDAL and
+# PROJ read at run time in ../share. Configured with @ONLY, so every ${...}
+# here is evaluated when the script RUNS and every @...@ at configure time.
+#
+# ONE script, run two ways, so the bundle and the build cannot disagree about
+# what a self-contained Katana needs:
+#
+#   by `cmake --install` (install(SCRIPT), and so by the `bundle` target and
+#   CPack) - into the install prefix, a fresh tree, every time;
+#
+#   by the build itself (the katana_runtime target, KatanaPackaging.cmake),
+#   with -DKATANA_DEPLOY_PREFIX=<build dir> - so that <build>/bin/katana.exe
+#   runs on its own, with no MSYS2 on PATH. That run is INCREMENTAL: a full
+#   deploy of the Release tree took 36 s on an idle machine and 62-85 s beside
+#   another build (measured 2026-09-23; the dependency scan is most of it),
+#   which no build can pay every time. The check that skips it took 0-1 s.
 
 # CMake 4.1 made file(GET_RUNTIME_DEPENDENCIES) normalise paths before matching
 # them (CMP0207). NEW is what the exclusion regexes below are written for -
-# forward slashes - and an install script starts with no policies set, so
-# without this every system DLL raises a policy warning of its own.
+# forward slashes - and a script starts with no policies set, so without this
+# every system DLL raises a policy warning of its own.
 if(POLICY CMP0207)
     cmake_policy(SET CMP0207 NEW)
 endif()
 
-set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+if(DEFINED KATANA_DEPLOY_PREFIX)
+    set(_prefix "${KATANA_DEPLOY_PREFIX}")
+    set(_build_tree TRUE)
+else()
+    set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+    set(_build_tree FALSE)
+endif()
 set(_bin "${_prefix}/bin")
 set(_toolchain_bin "@KATANA_RUNTIME_BIN@")
+set(_qt_plugins "@KATANA_QT_PLUGIN_DIR@")
+
+# DLLs under bin/ that the deploy owns. The build tree's bin/ also holds the
+# test and benchmark programs in subdirectories; they are run with the
+# toolchain on PATH (KatanaTargetDefaults.cmake) and are not shipped, so their
+# directories are left alone.
+function(_katana_deployed_dlls out)
+    file(GLOB_RECURSE _all RELATIVE "${_bin}" "${_bin}/*.dll")
+    list(FILTER _all EXCLUDE REGEX "^(tests|benchmarks)/")
+    set(${out} "${_all}" PARENT_SCOPE)
+endfunction()
+
+# Where a deployed DLL came from: a top-level one from the toolchain, one in a
+# subdirectory (a Qt plugin) from Qt's plugin directory. Empty when neither has
+# it. Asked of the file's NAME, because windeployqt, which copies most of Qt,
+# does not report its sources.
+function(_katana_source_of relative out)
+    set(${out} "" PARENT_SCOPE)
+    if(relative MATCHES "/")
+        if(NOT _qt_plugins STREQUAL "" AND EXISTS "${_qt_plugins}/${relative}")
+            set(${out} "${_qt_plugins}/${relative}" PARENT_SCOPE)
+        endif()
+    elseif(EXISTS "${_toolchain_bin}/${relative}")
+        set(${out} "${_toolchain_bin}/${relative}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# --- 0. The build tree: is the last deploy still right? ------------------------------
+# It is when three things hold, and checking them is ~200 file stats:
+#
+#  - the key is unchanged. It is a hash of every module's link libraries,
+#    computed at configure time (KatanaPackaging.cmake): which third-party
+#    DLLs are needed changes only when a link line does, and a link line
+#    changes only through CMake. The programs' own import tables would be the
+#    direct answer, but reading them costs 2.6 s for the 143 MB Debug
+#    katana.exe alone - on every build.
+#  - every DLL that deploy recorded is still there.
+#  - every one of them is the toolchain's CURRENT copy. MSYS2 is a rolling
+#    toolchain (GCC moved 15.2 -> 16.2 on 2026-09-21): an update replaces
+#    libstdc++-6.dll under the same name, and a program relinked against the
+#    new one but finding the old one beside itself fails to start with "entry
+#    point not found". file(COPY) keeps the source's timestamp, so a
+#    different timestamp is a different file.
+#
+# Anything else is a full deploy, which re-copies what changed (file(COPY)
+# skips a file whose timestamp already matches) and rescans for what is new.
+set(_stamp "${_prefix}/CMakeFiles/katana_runtime.stamp")
+set(_key "@KATANA_DEPLOY_KEY@")
+if(_build_tree AND EXISTS "${_stamp}" AND IS_DIRECTORY "${_prefix}/share/proj"
+   AND IS_DIRECTORY "${_prefix}/share/gdal")
+    file(STRINGS "${_stamp}" _recorded)
+    list(POP_FRONT _recorded _recorded_key)
+    set(_current TRUE)
+    if(NOT _recorded_key STREQUAL _key)
+        set(_current FALSE)
+        set(_reason "the link libraries or the deploy script changed")
+    endif()
+    foreach(_relative IN LISTS _recorded)
+        if(NOT _current)
+            break()
+        endif()
+        if(NOT EXISTS "${_bin}/${_relative}")
+            set(_current FALSE)
+            set(_reason "${_relative} is missing")
+            break()
+        endif()
+        _katana_source_of("${_relative}" _source)
+        if(NOT _source STREQUAL "")
+            file(TIMESTAMP "${_source}" _source_time "%s" UTC)
+            file(TIMESTAMP "${_bin}/${_relative}" _deployed_time "%s" UTC)
+            if(NOT _source_time STREQUAL _deployed_time)
+                set(_current FALSE)
+                set(_reason "${_relative} differs from ${_source}")
+            endif()
+        endif()
+    endforeach()
+    if(_current)
+        return()
+    endif()
+    message(STATUS "Katana runtime: ${_reason}; redeploying into ${_bin}")
+endif()
+
+# A full build-tree deploy first brings every DLL already there up to date with
+# the toolchain. The scan below cannot do it: it resolves a dependency BESIDE
+# the program first, so a stale copy there is found, satisfies it, and is kept.
+if(_build_tree)
+    _katana_deployed_dlls(_existing)
+    foreach(_relative IN LISTS _existing)
+        _katana_source_of("${_relative}" _source)
+        if(NOT _source STREQUAL "")
+            get_filename_component(_directory "${_bin}/${_relative}" DIRECTORY)
+            file(COPY "${_source}" DESTINATION "${_directory}")
+        endif()
+    endforeach()
+endif()
 
 # --- 1. Qt ------------------------------------------------------------------------
 # windeployqt knows what no dependency scan can: the PLUGINS. katana.exe does
@@ -38,18 +153,23 @@ endif()
 # initialized" box and waits for a click that never comes. Found by this
 # bundle's own smoke test hanging for ten minutes. Copied BEFORE the scan below
 # so that its dependencies are gathered with everyone else's.
-if(EXISTS "${_bin}/katana.exe" AND EXISTS "@KATANA_QT_PLUGIN_DIR@/platforms/qoffscreen.dll")
-    file(COPY "@KATANA_QT_PLUGIN_DIR@/platforms/qoffscreen.dll" DESTINATION "${_bin}/platforms")
+if(EXISTS "${_bin}/katana.exe" AND EXISTS "${_qt_plugins}/platforms/qoffscreen.dll")
+    file(COPY "${_qt_plugins}/platforms/qoffscreen.dll" DESTINATION "${_bin}/platforms")
 endif()
 
 # --- 2. Everything else that is loaded --------------------------------------------
 # Scanned AFTER windeployqt, and over the plugins too, because a plugin has
 # dependencies of its own that nothing else pulls in - qjpeg.dll needs
-# libjpeg, and only qjpeg.dll does.
-file(GLOB_RECURSE _executables "${_bin}/*.exe")
-file(GLOB_RECURSE _libraries "${_bin}/*.dll")
+# libjpeg, and only qjpeg.dll does. The programs are the top-level ones: in
+# the build tree, bin/tests and bin/benchmarks are not part of the product.
+file(GLOB _executables "${_bin}/*.exe")
+_katana_deployed_dlls(_library_names)
+set(_libraries "")
+foreach(_relative IN LISTS _library_names)
+    list(APPEND _libraries "${_bin}/${_relative}")
+endforeach()
 
-# Explicit, because an install script does not inherit the project's toolchain
+# Explicit, because a script does not inherit the project's toolchain
 # detection and the Windows default is dumpbin, which a MinGW machine lacks.
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "windows+pe")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
@@ -107,7 +227,9 @@ endif()
 # --- 3. Data that GDAL and PROJ read at run time ------------------------------------
 # proj.db is a DATA file, so no dependency scan finds it, and without it every
 # reprojection fails with "cannot find proj.db". PROJ looks beside its own DLL
-# at ../share/proj, which is exactly where this puts it.
+# at ../share/proj, which is exactly where this puts it; GDAL's support files
+# (header.dxf, which every DXF export is built from) are found the same way by
+# locateGdalData in src/katana_io/gdal_adapter.cpp.
 foreach(_data proj gdal)
     if(IS_DIRECTORY "${_toolchain_bin}/../share/${_data}")
         file(COPY "${_toolchain_bin}/../share/${_data}" DESTINATION "${_prefix}/share")
@@ -116,3 +238,12 @@ foreach(_data proj gdal)
                         "the bundle will lack it")
     endif()
 endforeach()
+
+# --- 4. The build tree records what it now holds --------------------------------------
+# Written LAST, so a deploy that failed part-way leaves no stamp and the next
+# build tries again rather than trusting a half-made bin/.
+if(_build_tree)
+    _katana_deployed_dlls(_now)
+    list(JOIN _now "\n" _lines)
+    file(WRITE "${_stamp}" "${_key}\n${_lines}\n")
+endif()

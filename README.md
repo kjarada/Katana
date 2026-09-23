@@ -70,7 +70,9 @@ without a display.
 Other targets: `format` and `format-check` (clang-format), `run-benchmarks`,
 `katana_make_icons` (regenerates `resources/katana.ico` and an icon contact
 sheet), `bundle` (a self-contained `<build>/dist/Katana` that runs with no
-MSYS2, Qt or GDAL installed) and `package` (that tree as `Katana-<version>-win64.zip`, plus
+MSYS2, Qt or GDAL installed; `<build>/bin` itself is made self-contained by
+every build - GDAL, PDAL, PROJ and Qt are copied beside the programs by the
+`katana_runtime` step, `-DKATANA_DEPLOY_RUNTIME=OFF` to skip it) and `package` (that tree as `Katana-<version>-win64.zip`, plus
 an installer when NSIS is present).
 
 ## Running
