@@ -141,7 +141,20 @@ class Document {
 
     [[nodiscard]] const std::string& currentLayer() const { return currentLayer_; }
     [[nodiscard]] katana::core::Status setCurrentLayer(const std::string& name);
-    // Attributes for newly drawn entities: current layer, ByLayer colour and style.
+    // The style new work is drawn in - AutoCAD's CELTYPE, or a current point
+    // style - so a symbol or a 12d linestyle can be drawn with, not only
+    // applied afterwards. Empty means ByLayer, and is the default.
+    //
+    // Refused (NotFound) for a style the model does not have; "" clears it.
+    // Kept consistent the way the current layer is: after any command, undo
+    // or redo that leaves it naming no style - a delete, a merge, a rename -
+    // it is CLEARED, not followed. Following a rename would need the command
+    // to say what it renamed to, which no command event carries, and a
+    // guess could put new work in the wrong style; ByLayer never can.
+    [[nodiscard]] const std::string& currentStyle() const { return currentStyle_; }
+    [[nodiscard]] katana::core::Status setCurrentStyle(const std::string& name);
+    // Attributes for newly drawn entities: the current layer and style, and
+    // ByLayer colour.
     [[nodiscard]] katana::commands::EntityAttributes currentAttributes() const;
 
     // ---- persistence ---------------------------------------------------------
@@ -186,6 +199,7 @@ class Document {
     katana::storage::ProjectMetadata metadata_;
     SelectionSet selection_;
     std::string currentLayer_{katana::entity::kDefaultLayerName};
+    std::string currentStyle_{};
     std::shared_ptr<ListenerHandle::Registry> listeners_;
     bool metadataModified_ = false;
 };
