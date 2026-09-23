@@ -305,7 +305,42 @@ void ViewWorkspace::installChrome(View& view)
     connect(extents, &QToolButton::clicked, this, [this, id] { (void)zoomExtents(id); });
     bar->addTool(extents);
 
+    // Pressing a view's own tools, or its Float or Maximise, is working in
+    // that view as a press on its title is (onPressed above) - but a button
+    // takes the press, so the bar never sees it. The menus act on the active
+    // view, and a view maximised while another stayed active hid the very
+    // view they act on. On `pressed`, not `clicked`, so that the view is
+    // active before the button acts. Not Minimise or Close: they put it away.
+    for (QToolButton* button :
+         {kind, layers, extents, bar->floatButton(), bar->maximiseButton()}) {
+        if (button != nullptr) {
+            connect(button, &QToolButton::pressed, this, [this, id] { activate(id); });
+        }
+    }
+    // Connected after the bar's own handler, so the dock is already hidden
+    // when this runs.
+    connect(bar->minimiseButton(), &QToolButton::clicked, this,
+            [this, id] { activateShowingInsteadOf(id); });
+
     updateLayersButton(view);
+}
+
+void ViewWorkspace::activateShowingInsteadOf(ViewId hidden)
+{
+    // Minimising the active view would leave the menus acting on a view
+    // nobody can see, and no title bar marked. A view still showing takes
+    // over: the first in the order they were opened. The most recently
+    // active would be the better choice, but ViewSet keeps that order to
+    // itself (it uses it when the active view is REMOVED).
+    if (views_.activeId() != hidden) {
+        return;
+    }
+    for (const View& view : docks_) {
+        if (view.id != hidden && !view.dock->isHidden()) {
+            activate(view.id);
+            return;
+        }
+    }
 }
 
 void ViewWorkspace::updateActiveMarks()

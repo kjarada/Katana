@@ -239,6 +239,9 @@ class ViewWorkspace final : public QMainWindow {
     void installChrome(View& view);
     // Marks the active view's title bar and unmarks the rest.
     void updateActiveMarks();
+    // After `hidden` was minimised: when it was the active view, activates a
+    // view that is still showing, if there is one.
+    void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
 
