@@ -779,12 +779,17 @@ struct StyleManagerDialog::Impl {
         styleFilter->setChipLabel(3, QStringLiteral("Missing (%1)").arg(missing));
 
         std::size_t drawing = 0;
+        std::size_t named = 0;
         for (const LinetypeRow& row : linetypeModel->rows()) {
             drawing += row.origin == LinetypeOrigin::Drawing ? 1 : 0;
+            named += row.users.used() ? 1 : 0;
         }
+        const std::size_t linetypes = linetypeModel->rows().size();
+        linetypeFilter->setChipLabel(0, QStringLiteral("All (%1)").arg(linetypes));
         linetypeFilter->setChipLabel(1, QStringLiteral("Drawing (%1)").arg(drawing));
-        linetypeFilter->setChipLabel(
-            2, QStringLiteral("Library (%1)").arg(linetypeModel->rows().size() - drawing));
+        linetypeFilter->setChipLabel(2, QStringLiteral("Library (%1)").arg(linetypes - drawing));
+        linetypeFilter->setChipLabel(3, QStringLiteral("Used (%1)").arg(named));
+        linetypeFilter->setChipLabel(4, QStringLiteral("Unused (%1)").arg(linetypes - named));
 
         std::size_t missingNames = 0;
         std::size_t collisions = 0;

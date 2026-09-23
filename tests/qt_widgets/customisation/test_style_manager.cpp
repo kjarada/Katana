@@ -20,9 +20,11 @@
 #include <QPushButton>
 #include <QTableView>
 #include <QTableWidget>
+#include <QToolButton>
 
 #include "customisation/customisation_context.hpp"
 #include "customisation/name_picker.hpp"
+#include "customisation/row_table_model.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/tables.hpp"
@@ -491,4 +493,114 @@ TEST_F(Manager, TheDialogMayOutliveItsDocumentAndThenDoesNothing)
     auto* undo = child<QPushButton>(dialog, "undoButton");
     undo->click();
     SUCCEED();
+}
+
+TEST_F(Manager, TheChipsAndTheSearchFilterTheStylesAndTheChipsCountThem)
+{
+    StyleManagerDialog dialog(context);
+    auto* page = child<QWidget>(dialog, "stylesPage");
+    auto* table = child<QTableView>(dialog, "styleTable");
+    ASSERT_EQ(table->model()->rowCount(), 3);
+    // Used: Kerb (1 point) and Fence (2); unused: Old 12d; missing: Old 12d.
+    auto* missing = child<QToolButton>(*page, "filterMissing");
+    EXPECT_EQ(missing->text(), "Missing (1)");
+    EXPECT_EQ(child<QToolButton>(*page, "filterUsed")->text(), "Used (2)");
+    missing->click();
+    ASSERT_EQ(table->model()->rowCount(), 1);
+    EXPECT_EQ(table->model()->index(0, 0).data(katana::qt::kSortRole).toString(), "Old 12d");
+
+    child<QToolButton>(*page, "filterAll")->click();
+    // The search folds case, and looks in the linetype too: "dashed" is
+    // Fence's DASHED and Kerb's TEST Dashed Kerb.
+    child<QLineEdit>(*page, "filterText")->setText("dashed");
+    EXPECT_EQ(table->model()->rowCount(), 2);
+}
+
+TEST_F(Manager, LoadingALibraryThatDefinesAMissingNameReloadsTheMarksOnce)
+{
+    StyleManagerDialog dialog(context);
+    dialog.selectStyles({"Old 12d"});
+    EXPECT_FALSE(picker(dialog, "styleLinetype")->currentIsDefined());
+
+    // A customisation load elsewhere brings "Old 12d Kerb" as a linestyle.
+    katana::entity::StyleLibrary library = document.styleLibrary();
+    katana::entity::LineStyle kerb = *library.find("TEST Dashed Kerb");
+    kerb.name = "Old 12d Kerb";
+    ASSERT_TRUE(library.add(kerb).ok());
+    document.setStyleLibrary(std::move(library));
+    katana::qt::test::processEvents();
+
+    EXPECT_EQ(dialog.selectedStyles(), std::vector<std::string>{"Old 12d"});
+    EXPECT_TRUE(picker(dialog, "styleLinetype")->currentIsDefined());
+    auto* page = child<QWidget>(dialog, "stylesPage");
+    // Its symbol is still undefined, so the style is still "missing".
+    EXPECT_EQ(child<QToolButton>(*page, "filterMissing")->text(), "Missing (1)");
+    auto* diagnostics = child<QTableView>(dialog, "diagnosticTable");
+    EXPECT_EQ(diagnostics->model()->rowCount(), 1) << "only the symbol is left";
+}
+
+TEST_F(Manager, AReloadCausedElsewhereKeepsAFormPartWayThroughAnEdit)
+{
+    StyleManagerDialog dialog(context);
+    dialog.selectStyles({"Kerb"});
+    auto* description = child<QLineEdit>(dialog, "styleDescription");
+    typeText(description, "kerb and gutter");
+
+    // Something else changes the drawing while the person is typing.
+    must(katana::commands::createStyle(style("Zzz", "DASHED")));
+    katana::qt::test::processEvents();
+    EXPECT_EQ(description->text(), "kerb and gutter") << "the edit is not thrown away";
+
+    click(dialog, "styleSave");
+    katana::qt::test::processEvents();
+    EXPECT_EQ(stored("Kerb").description, "kerb and gutter");
+    EXPECT_EQ(stored("Kerb").linetype, "TEST Dashed Kerb");
+}
+
+TEST_F(Manager, RenamingAStyleThroughThePromptTakesItsEntitiesAndKeepsItSelected)
+{
+    StyleManagerDialog dialog(context);
+    dialog.selectStyles({"Fence"});
+    click(dialog, "styleRename");
+    auto* name = child<QLineEdit>(dialog, "promptName");
+    EXPECT_EQ(name->text(), "Fence") << "offered the current name to change";
+    name->setText("  Timber Fence ");
+    click(dialog, "promptOk");
+    katana::qt::test::processEvents();
+
+    EXPECT_FALSE(document.model().styles.contains("Fence"));
+    ASSERT_TRUE(document.model().styles.contains("Timber Fence")) << "blanks either end dropped";
+    for (const auto id : fencePoints) {
+        EXPECT_EQ(document.model().entities.find(id)->style, "Timber Fence");
+    }
+    EXPECT_EQ(dialog.selectedStyles(), std::vector<std::string>{"Timber Fence"});
+    EXPECT_TRUE(child<QWidget>(dialog, "promptPanel")->isHidden());
+}
+
+TEST_F(Manager, MergingDrawingLinetypesIsOneUndoStepAndRepointsTheirStyles)
+{
+    katana::entity::Linetype hidden;
+    hidden.name = "HIDDEN";
+    hidden.pattern = {{0.5}, {-0.25}};
+    must(katana::commands::createLinetype(hidden));
+    must(katana::commands::createStyle(style("Hidden Edge", "HIDDEN")));
+    StyleManagerDialog dialog(context);
+    dialog.selectLinetype("HIDDEN", LinetypeOrigin::Drawing);
+    const std::size_t stepsBefore = steps();
+
+    click(dialog, "linetypeMerge");
+    auto* choice = child<QComboBox>(dialog, "promptChoice");
+    // Drawing linetypes only: continuous and DASHED (a library linestyle
+    // is no merge target - the commands cannot see the library).
+    ASSERT_EQ(choice->count(), 2);
+    choice->setCurrentIndex(choice->findText("DASHED"));
+    click(dialog, "promptOk");
+    katana::qt::test::processEvents();
+
+    EXPECT_EQ(steps(), stepsBefore + 1);
+    EXPECT_FALSE(document.model().linetypes.contains("HIDDEN"));
+    EXPECT_EQ(stored("Hidden Edge").linetype, "DASHED");
+    EXPECT_EQ(dialog.selectedLinetypes(),
+              (std::vector<std::pair<std::string, LinetypeOrigin>>{
+                  {"DASHED", LinetypeOrigin::Drawing}}));
 }
