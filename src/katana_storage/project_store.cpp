@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <iterator>
 #include <ctime>
 #include <set>
 #include <system_error>
@@ -285,8 +286,47 @@ Result<PropertyType> propertyTypeFromString(const std::string& text)
 
 // Shared by save() and applyToModel(): a project that fails this is never
 // written and never loaded into a model.
+// Every metadata key this build reads and writes. Any other key in a
+// project was written by a newer build, and is kept (unknownKeys).
+constexpr std::string_view kMetadataKeys[] = {
+    "name",        "description",  "linear_unit",         "coordinate_system", "created_utc",
+    "modified_utc", "application_version", "next_entity_id", "customisation",
+};
+
+[[nodiscard]] bool isMetadataKey(std::string_view key)
+{
+    return std::find(std::begin(kMetadataKeys), std::end(kMetadataKeys), key) !=
+           std::end(kMetadataKeys);
+}
+
+// The customisation names are stored one per line (see ProjectMetadata), so
+// a name that would split or vanish on the way back is refused here rather
+// than read back as a different list.
+Status validateMetadata(const ProjectMetadata& metadata)
+{
+    for (const std::string& name : metadata.customisation) {
+        if (name.empty() || name.find_first_of("\n\r/\\") != std::string::npos) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a customisation entry must be a file name: not empty, and with no "
+                             "line break or path separator",
+                             "customisation=\"" + name + "\"");
+        }
+    }
+    for (const auto& [key, value] : metadata.unknownKeys) {
+        if (isMetadataKey(key)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "an unknown metadata key names a field this build writes itself",
+                             "key=" + key);
+        }
+    }
+    return {};
+}
+
 Status validateContents(const ProjectContents& contents)
 {
+    if (auto status = validateMetadata(contents.metadata); !status) {
+        return status;
+    }
     std::set<std::string> layerNames{std::string(katana::entity::kDefaultLayerName)};
     for (const Layer& layer : contents.layers) {
         if (layer.name.empty()) {
@@ -840,12 +880,20 @@ namespace {
 
 Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
 {
-    auto insert = database.prepare("INSERT INTO metadata (key, value) VALUES (?1, ?2)");
+    // REPLACE, because save() does not empty this table: a key this build
+    // does not know stays where a newer build put it, and every key it does
+    // know is written on every save, so none can go stale.
+    auto insert =
+        database.prepare("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)");
     if (!insert) {
         return insert.error();
     }
     const ProjectMetadata& m = contents.metadata;
-    const std::pair<const char*, std::string> rows[] = {
+    std::string customisation;
+    for (const std::string& name : m.customisation) {
+        customisation += (customisation.empty() ? "" : "\n") + name;
+    }
+    const std::pair<std::string_view, std::string> rows[] = {
         {"name", m.name},
         {"description", m.description},
         {"linear_unit", m.linearUnit},
@@ -854,16 +902,28 @@ Status writeMetadata(SqliteDatabase& database, const ProjectContents& contents)
         {"modified_utc", utcTimestamp(false)},
         {"application_version", m.applicationVersion},
         {"next_entity_id", std::to_string(contents.nextEntityId)},
+        {"customisation", std::move(customisation)},
     };
-    for (const auto& [key, value] : rows) {
-        Status status = insert->bind(1, std::string_view(key));
+    // One row per key the reader knows: a key added to one list and not the
+    // other would be read back as unknown, or never written.
+    static_assert(sizeof(rows) / sizeof(rows[0]) == std::size(kMetadataKeys));
+    const auto write = [&insert](std::string_view key, std::string_view value) {
+        Status status = insert->bind(1, key);
         if (status) {
-            status = insert->bind(2, std::string_view(value));
+            status = insert->bind(2, value);
         }
         if (status) {
             status = insert->run();
         }
-        if (!status) {
+        return status;
+    };
+    for (const auto& [key, value] : rows) {
+        if (auto status = write(key, value); !status) {
+            return status;
+        }
+    }
+    for (const auto& [key, value] : m.unknownKeys) {
+        if (auto status = write(key, value); !status) {
             return status;
         }
     }
@@ -928,6 +988,10 @@ Status ProjectStore::save(const ProjectContents& contents)
     // saves once does not catch that; CadDocument.SaveReopenAndModifiedFlag
     // does, which is why it saves twice.
     //
+    // The metadata table is the one exception, and is not cleared: it holds
+    // keys a newer build wrote, which an older build's save must not strip.
+    // writeMetadata replaces every key this build knows instead.
+    //
     // linetype_elements is deleted explicitly rather than left to the ON DELETE
     // CASCADE: foreign keys are only enforced when the pragma is on, so relying
     // on the cascade would make correctness depend on a connection setting.
@@ -937,7 +1001,7 @@ Status ProjectStore::save(const ProjectContents& contents)
                                        "DELETE FROM dimension_styles;"
                                        "DELETE FROM hatch_families; DELETE FROM hatch_patterns;"
                                        "DELETE FROM alignment_pvis; DELETE FROM alignment_pis; DELETE FROM alignments;"
-                                       "DELETE FROM layers; DELETE FROM metadata;");
+                                       "DELETE FROM layers;");
         !status) {
         return status;
     }
@@ -1289,8 +1353,20 @@ Result<ProjectContents> ProjectStore::load()
             } catch (const std::exception&) {
                 return makeError(ErrorCode::DatabaseFailure, "next_entity_id is not a number", value);
             }
+        } else if (key == "customisation") {
+            m.customisation.clear();
+            std::size_t start = 0;
+            while (start < value.size()) {
+                const std::size_t end = std::min(value.find('\n', start), value.size());
+                m.customisation.push_back(value.substr(start, end - start));
+                start = end + 1;
+            }
+        } else {
+            // A key from a newer build: kept, so this build's save writes it
+            // back. Every key this build knows is handled above.
+            m.unknownKeys.emplace(key, std::move(value));
         }
-        return {}; // unknown keys come from newer minor versions; ignore them
+        return {};
     });
     if (!status) {
         return status.error();

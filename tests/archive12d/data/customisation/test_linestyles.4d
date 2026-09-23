@@ -1,0 +1,50 @@
+// test_linestyles.4d - a HAND-WRITTEN 12d linestyle library for Katana's own
+// tests; see test_symbols.4d beside it for why it exists. Every stroke was
+// drawn for this file.
+//
+// One of each kind of definition:
+//   TEST Dashed Kerb  a `paperstyle` (plot millimetres) with GAPS: two dashes
+//                     of 1.5 mm and 1 mm in a 4 mm period, so a gap of 0.5 mm
+//                     and another of 1 mm (1.5 mm of gap in each period).
+//   TEST Water Main   a `worldstyle` (metres on the ground) with a pen and a
+//                     tick across the line, 6 m period.
+//   TEST Gate         a `twoptstyle`, stretched between its two anchors, with
+//                     both stretch_mode and cycle_mode set.
+//
+// Counted by hand: 3 definitions, none `mode vertex`, 2 groups (Test/Lines,
+// Test/Services).
+
+paperstyle "TEST Dashed Kerb" {
+  group "Test/Lines"
+  length 4
+  move 0 0
+  draw 1.5 0
+  move 2 0
+  draw 3 0
+  move 4 0
+}
+
+worldstyle "TEST Water Main" {
+  group "Test/Services"
+  length 6
+  colour "blue"
+  move 0 0
+  draw 4.5 0
+  move 5 -0.25
+  draw 5 0.25
+  move 6 0
+}
+
+twoptstyle "TEST Gate" {
+  group "Test/Lines"
+  xorigin1 0
+  yorigin1 0
+  xorigin2 4
+  yorigin2 0
+  stretch_mode 2
+  cycle_mode 2
+  move 0 0
+  draw 4 0
+  move 0 0
+  arc 4 0 90
+}

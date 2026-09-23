@@ -1,0 +1,61 @@
+// test_symbols.4d - a HAND-WRITTEN 12d symbol library for Katana's own tests.
+//
+// Why it exists: unit tests and headless runs need a small customisation
+// they can load and count exactly. The reference customisation the survey
+// coding was built against is third-party material and is not in this
+// repository; nothing here is taken from it - every stroke was drawn for
+// this file. It is named the way 12d names its symbol files
+// (user_symbols_*.4d), because "symbol" in a file's name is itself one of
+// the things that makes a definition a symbol.
+//
+// What each definition is for:
+//   TEST Survey Mark  `mode vertex` - the ordinary symbol.
+//   TEST Tree         NOT `mode vertex`, yet test_survey.mapfile draws it as
+//                     a symbol (rule TR*), as it does most symbols in real
+//                     mapfiles - so "is it a symbol?" cannot be atVertices.
+//   TEST Valve        a symbol carrying a text, with the three trailing
+//                     numbers a `text` command ends with.
+//   TEST U Turn       an arc with a NEGATIVE radius.
+//
+// Counted by hand: 4 definitions, 3 of them `mode vertex`, 1 text, 2 groups
+// (Test/Marks, Test/Vegetation), 1 `colour` pen.
+
+worldstyle "TEST Survey Mark" {
+  group "Test/Marks"
+  mode vertex
+  move -0.5 0
+  draw 0.5 0
+  move 0 -0.5
+  draw 0 0.5
+  move 0 0
+  circle 0.3
+}
+
+worldstyle "TEST Tree" {
+  group "Test/Vegetation"
+  colour "green"
+  move 0 0
+  circle 1
+  move -0.7 -0.7
+  draw 0.7 0.7
+}
+
+worldstyle "TEST Valve" {
+  group "Test/Marks"
+  mode vertex
+  move -0.4 -0.4
+  draw 0.4 -0.4
+  draw 0.4 0.4
+  draw -0.4 0.4
+  draw -0.4 -0.4
+  move 0 0.6
+  text "V" 0 0.5 "bottom-centre" "Arial" 0.8 0 -0.1 0.02
+}
+
+worldstyle "TEST U Turn" {
+  group "Test/Marks"
+  mode vertex
+  move 0 0
+  draw 1 0
+  arc -0.5 -90 90
+}

@@ -18,6 +18,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/core/error.hpp"
@@ -46,6 +47,12 @@ struct Customisation {
     // Every warning from every file, each prefixed with the file it came
     // from: one list, because a person loading four files wants one report.
     std::vector<std::string> warnings{};
+    // Files that could not be read AT ALL, each prefixed with the file, and
+    // each costing only itself: what was loaded before and after it is kept.
+    // Only readEachCustomisationFile fills this - and so builtinCustomisation,
+    // which has no caller it could fail to - because readCustomisation fails
+    // whole instead, for a person who can be told and can fix the file.
+    std::vector<std::string> errors{};
 
     [[nodiscard]] bool empty() const { return library.empty() && map.empty(); }
     // The linestyle and symbol names the mapfile asks for that no loaded
@@ -62,9 +69,29 @@ struct Customisation {
 
 // Loads one file into a customisation. Later libraries win a definition,
 // earlier mapfiles win a field - see entity::addOrReplace and SurveyMap::add
-// for why they differ.
+// for why they differ. Every definition read is stamped with the file's NAME
+// (LineStyle::source), never its path.
 [[nodiscard]] katana::core::Result<Customisation>
 readCustomisationInto(Customisation into, const std::filesystem::path& path);
+
+// The same for a file already in memory: `name` is what it is reported and
+// stamped as, and `bytes` are its contents in any encoding decodeText reads.
+[[nodiscard]] katana::core::Result<Customisation>
+readCustomisationBytes(Customisation into, std::string_view name, std::string_view bytes);
+
+struct CustomisationBytes {
+    std::string name{};
+    std::string_view bytes{};
+};
+
+// Loads every file, in order, where one that cannot be read costs ONLY
+// ITSELF: it is named in `errors`, and what the files before and after it
+// brought is kept. That is what the customisation compiled into the build
+// needs - there is nobody to fail to, and an empty library because the
+// fourth file was damaged would draw every drawing wrong without a word
+// (audit A12-06). A person loading files uses readCustomisation instead, which
+// fails whole so they can be told.
+[[nodiscard]] Customisation readEachCustomisationFile(const std::vector<CustomisationBytes>& files);
 
 // THE CUSTOMISATION COMPILED INTO THIS BUILD.
 //
@@ -76,6 +103,9 @@ readCustomisationInto(Customisation into, const std::filesystem::path& path);
 // Empty when this build was made without one - it is third-party material
 // under its own licence and is not in this repository - and Katana then
 // draws plain lines, exactly as 12d does without a customisation.
+//
+// A file of it that cannot be read is named in `errors` and its warnings are
+// in `warnings`, for a front end to log: they are never dropped (A12-06).
 [[nodiscard]] const Customisation& builtinCustomisation();
 
 // Where a customisation is looked for when nobody names one, in order:
@@ -105,5 +135,73 @@ findCustomisation(const std::filesystem::path& executable);
 // worse than not drawing.
 [[nodiscard]] katana::core::Result<Customisation>
 readCustomisation(const std::vector<std::filesystem::path>& paths);
+
+// ---- loading into what is already loaded ------------------------------------------------
+//
+// A customisation is loaded ON TOP of one: Katana starts with the one compiled
+// into it, and a person loading their own symbol file wants their symbols
+// ADDED, not the other 792 definitions and 1,624 survey rules thrown away
+// (audit QT-21). So a load MERGES by default, and replacing is something asked
+// for. Either way, a load that brought no definitions leaves the library as it
+// was, and one that brought no rules leaves the map: an empty table is never
+// installed by a load that did not bring one.
+
+enum class LoadMode {
+    // What the load brings takes precedence, and nothing else is lost: a
+    // definition replaces the current one of the same name, and the rules the
+    // load gives a key in a section replace the current rules of that key in
+    // that section. Every other current definition and rule is kept - and the
+    // loaded rules of a key go AHEAD of the current rules of that key that
+    // are kept, so a field two sections fill (a comment; an attribute of one
+    // name from pipe_data and string_attribute_data, or from vertex_pipe_data
+    // and vertex_attribute_data) takes the loaded value.
+    Merge,
+    // What the load brings is ALL there is, of each kind it brought.
+    Replace,
+};
+
+[[nodiscard]] const char* toString(LoadMode mode);
+
+// What one file of a load did to what was loaded before it.
+struct FileMerge {
+    std::string name{}; // the file's name; empty for content no file claims
+    CustomisationFile kind = CustomisationFile::StyleLibrary;
+    // Definitions by name, or rules by key - a key once for each section the
+    // file gives rules for it in - that were not in the current customisation.
+    std::vector<std::string> added{};
+    // Those that were, and that the file's now take the place of.
+    std::vector<std::string> replaced{};
+};
+
+struct CustomisationMerge {
+    // What to install. Each is the CURRENT one, unchanged, when the load
+    // brought nothing of that kind - so a caller may install both
+    // unconditionally - and `libraryLoaded` / `mapLoaded` say whether it did.
+    katana::entity::StyleLibrary library{};
+    katana::entity::SurveyMap map{};
+    bool libraryLoaded = false;
+    bool mapLoaded = false;
+    std::vector<FileMerge> files{};
+    // Replace only: current definitions and rule keys the result no longer
+    // has, so a person replacing a library is told what went with it.
+    std::vector<std::string> removedDefinitions{};
+    std::vector<std::string> removedKeys{};
+    // Definitions or rules that could not be installed. None can be today -
+    // each came from a table that validated it on the way in - so this is
+    // empty; it is here so that if that ever stops being true the loss is
+    // listed rather than silent.
+    std::vector<std::string> problems{};
+};
+
+// Merges or replaces. It returns a result rather than failing, because each
+// input is already a valid library and map (see `problems`).
+//
+// Attribution to files: a definition belongs to the file its
+// LineStyle::source names, and rules to the mapfile whose share of
+// `loaded.map` they are (readCustomisationInto appends each file's rules in
+// order and records how many in LoadedFile::read).
+[[nodiscard]] CustomisationMerge mergeCustomisation(const katana::entity::StyleLibrary& currentLibrary,
+                                                    const katana::entity::SurveyMap& currentMap,
+                                                    const Customisation& loaded, LoadMode mode);
 
 } // namespace katana::archive12d
