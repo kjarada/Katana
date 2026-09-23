@@ -421,6 +421,25 @@ TEST(DrawLineTool, RefusesUndoBeforeAnyPointAndInputThatIsNeitherAPointNorAnOpti
     EXPECT_EQ(driver.tool().lastPoint(), Point2(0.0, 0.0));
 }
 
+TEST(DrawLineTool, ARefusalNamesOnlyTheInputsThePromptWouldTake)
+{
+    ToolDriver driver;
+    driver.start("draw.line");
+    // Nothing to measure from yet, so no relative input and no Close.
+    std::string why = driver.type("X").message;
+    EXPECT_NE(why.find("x,y"), std::string::npos) << why;
+    EXPECT_EQ(why.find('@'), std::string::npos) << why;
+    EXPECT_EQ(why.find("close"), std::string::npos) << why;
+    (void)driver.click(0, 0);
+    (void)driver.click(4, 0);
+    why = driver.type("X").message;
+    EXPECT_NE(why.find("@dx,dy"), std::string::npos) << why;
+    EXPECT_EQ(why.find("close"), std::string::npos) << why;
+    (void)driver.click(4, 3);
+    why = driver.type("X").message;
+    EXPECT_NE(why.find("C to close"), std::string::npos) << why;
+}
+
 TEST(DrawLineTool, EnterBeforeTheFirstLineEndsTheToolWithNothingDrawn)
 {
     ToolDriver driver;

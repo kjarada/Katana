@@ -78,6 +78,19 @@ Result<double> parseLength(std::string_view text, std::string_view what)
     return *value;
 }
 
+// Why typed text was not taken at a Line or Polyline prompt, naming what
+// would be: the relative forms only once there is a point to measure them
+// from, and Close only once the prompt offers it.
+ToolStep notAChainPoint(std::string_view text, bool started, bool canClose)
+{
+    std::string why = quoted(text) + " is not a point or an option; type ";
+    why += started ? "x,y, @dx,dy or @distance<angle" : "the point as x,y";
+    if (canClose) {
+        why += ", or C to close";
+    }
+    return ToolStep::rejected(std::move(why));
+}
+
 Entity makeEntity(katana::entity::Geometry geometry, const cmd::EntityAttributes& attributes)
 {
     Entity entity;
@@ -175,10 +188,7 @@ class LineTool final : public InteractiveTool {
         if (isOption(text, "Undo")) {
             return undo();
         }
-        return ToolStep::rejected(quoted(text) +
-                                  " is not a point or an option; type x,y, @dx,dy or "
-                                  "@distance<angle" +
-                                  (canClose() ? ", or C to close" : ""));
+        return notAChainPoint(text, !points_.empty(), canClose());
     }
 
     ToolStep enter() override
@@ -293,10 +303,7 @@ class PolylineTool final : public InteractiveTool {
         if (isOption(text, "Undo")) {
             return undo();
         }
-        return ToolStep::rejected(quoted(text) +
-                                  " is not a point or an option; type x,y, @dx,dy or "
-                                  "@distance<angle" +
-                                  (canClose() ? ", or C to close" : ""));
+        return notAChainPoint(text, !vertices_.empty(), canClose());
     }
 
     ToolStep enter() override
