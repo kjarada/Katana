@@ -337,7 +337,7 @@ The required progression is:
 | 25 | AI Agent | not started |
 | 26 | Production Hardening | not started — no section of its own yet; section 43 lists it last |
 | 45 | Survey module and instrument interoperability | in progress — model, detection and the cad bridge delivered; parsers, reduction, Survey menu, wizard and Point Manager in progress |
-| 46 | The audit of 2026-09-23 — defect register | open — 134 of 142 confirmed defects outstanding, 4 of them high |
+| 46 | The audit of 2026-09-23 — defect register | open — 133 of 142 confirmed defects outstanding, 4 of them high |
 
 The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
@@ -784,6 +784,9 @@ commands into one undo step. About 28 entity and layer commands.
 
 Undo restores **recorded before-images**, never a computed inverse: a computed
 inverse drifts in floating point and cannot represent a failed partial apply.
+CORRECTED 2026-09-23: not quite never - creating and renaming a layer are
+undone by computed inverses, which leave behind the ancestor layers the command
+created implicitly, and so does a Transaction's rollback (audit MOD-07, open).
 
 ---
 
@@ -931,11 +934,19 @@ source), with the error ellipses and the global test among what they assert.
 
 # 19. Phase 14 — Terrain Engine
 
-**STATUS: DELIVERED.** `src/katana_terrain`, 72 tests.
+**STATUS: DELIVERED.** `src/katana_terrain` (72 tests when this was written;
+see the suite for the count now).
 
 `tin_builder` (constrained Delaunay via CGAL, behind `cdt_backend.hpp`),
-`tin_surface`, `contours`, `volume`, `tiled_terrain`, `point_merge`. Breaklines,
-boundaries and holes; duplicate-point policies; bitwise-deterministic rebuilds.
+`tin_surface`, `contours`, `volume`, `tiled_terrain`, `point_merge`, and
+`super_surface` (the combined surface of 20.2 slice 8). Breaklines, boundaries
+and holes; duplicate-point policies; bitwise-deterministic rebuilds.
+
+OUTSTANDING (stated in `tiled_terrain.hpp` and missing from this record until
+the audit of 2026-09-23): the TILED terrain refuses breaklines, boundaries and
+holes - `create()` fails with Unsupported rather than building a surface that
+ignores them - and keeps every point in memory; out-of-core tiles are not
+built.
 
 ---
 
@@ -954,8 +965,11 @@ cannot include an Entity or a Document, which is Rule 3 made structural):
   CAD views, framing by bounding SPHERE so orbiting after a zoom-extents cannot
   push a corner off screen, pick rays that are the exact inverse of projection.
   Z-up world, screen +y down, NDC depth 0 at the near plane (the Vulkan range,
-  chosen because that is the eventual backend and because a float depth buffer
-  resolves far more of [0,1] than of [-1,1]).
+  chosen because that is the eventual backend). CORRECTED 2026-09-23: the
+  second reason given here - "a float depth buffer resolves far more of [0,1]
+  than of [-1,1]" - holds only with REVERSED Z (near at 1). With near at 0,
+  as built, the far scene lies just below 1.0 at a fixed 2^-24 spacing, and a
+  framed 500 m site gets depth steps of 0.8-3.75 m (audit REN-02, open).
 * `DrawList` — structure-of-arrays positions/colours with indexed triangles,
   lines and points. Lighting is BAKED by the scene builder, so the rasteriser
   interpolates and nothing else.
@@ -1000,8 +1014,10 @@ instancing, no frustum culling beyond the per-tile bin, no LOD, no streaming.
 The software renderer is interactive on the scenes it is given today but will
 not reach section 32's 10M-point target; it exists so that the clipping, the
 fill rule and the depth rules are pinned down by pixel-exact tests BEFORE a
-driver has to reproduce them. Everything above the renderer talks to `DrawList`
-and `Camera`, so the Vulkan backend does not change application code.
+driver has to reproduce them. The 3D and Elevation cells talk to `DrawList`
+and `Camera` only, so a Vulkan backend does not change them. (This said
+"everything above the renderer": the plan viewport and the section view paint
+with QPainter and never touch a DrawList, so a GPU plan view is its own work.)
 
 ---
 
@@ -1162,7 +1178,8 @@ a half-million-entity drawing went from 24 ms per mouse move - over the whole
 16 ms frame budget before anything is drawn - to 1.9 ms.
 
 Rebuilding costs 7.8 ms at 100 000 entities and 44.6 ms at 500 000, paid once
-on open (about 5% of the 891 ms load).
+on open (about 5% of the 891 ms load as it was then; opening has since become
+several times faster - section 24 - so the share is larger now).
 
 The 2D viewport's repaint goes through the same narrowing, which matters more
 than the click paths because it runs on every pan and zoom rather than on an
@@ -1464,8 +1481,10 @@ merely small - one control point, a 10 m detail inside a 2 km site - and the
 default button moved it to the drawing's corner. A far-off single point still
 reports the drawing it would hide.
 
-`IMPORT <file> LOCAL` in the CLI shifts the data so its corner meets the
-drawing's, using the `VectorImportOptions::originShift` that already existed and
+`IMPORT <file> LOCAL` in the CLI shifts the data so its corner lands at the
+ORIGIN (this said "meets the drawing's"; for rasters and point clouds the verb
+is broken outright, audit QT-13/QT-14, open), using the
+`VectorImportOptions::originShift` that already existed and
 that nothing had ever set. Verified on a 51 417-feature DXF at
 (255440, 7410850): without LOCAL the warning fires and names the separation;
 with it the data lands at 0,0 to 2272,1271 beside the existing plan.
@@ -1717,7 +1736,7 @@ member overrides an earlier one wherever it covers it; the members stay as
 surfaces of their own, because a tin and a super tin are separate objects in
 12d. `test super tin.12da` now arrives as four surfaces - NATURAL SURFACE,
 PAD A, PAD B and COMBINED SURFACE of 34 triangles, the base's 32 minus the
-18 the pads took, plus the pads' 16. A `ref_data` point cloud is looked for
+14 the pads took, plus the pads' 16 (this said 18, which does not add up). A `ref_data` point cloud is looked for
 BESIDE the archive by file name and read when it is there; when it is not,
 the warning now says so rather than implying it was never tried.
 
@@ -1964,8 +1983,10 @@ code's treatment is the UNION of the aspects that match it:
    deciding what each file is BY LOOKING INSIDE IT - `.4d` is the extension of
    both formats in the reference customisation, so the name cannot be
    trusted. `File > Load 12d Customisation...` in the application, `CUSTOMISE
-   <file>...` in `katana_cli`, and `--customise <file>...` headlessly; all
-   three take the same path and write the same report.
+   <file>...` in `katana_cli`, and `--customise <file>...` headlessly. They
+   share `readCustomisation`, but not one report: the CLI writes its own, and
+   `--customise` is ignored outside the `--screenshot` path (audit QT-04, open)
+   - this used to say all three take the same path and write the same report.
 
    The viewport draws them: a point whose style names a definition gets that
    definition's strokes, a line whose linetype names one has it laid along
@@ -3182,7 +3203,7 @@ over the bug:
 
 # 46. The audit of 2026-09-23 — the defect register
 
-**STATUS: OPEN — 134 of 142 confirmed defects outstanding.**
+**STATUS: OPEN — 133 of 142 confirmed defects outstanding.**
 
 A read-only audit of every subsystem: ten auditors, one per area, each told to
 verify the code rather than trust this plan, and every defect they reported put
@@ -3203,7 +3224,7 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 
 | Area | high | medium | low | open |
 |---|---|---|---|---|
-| MOD — entity model, commands, storage, selection | 0 | 1 | 12 | 13 |
+| MOD — entity model, commands, storage, selection | 0 | 0 | 12 | 12 |
 | QT — the desktop application | 2 | 10 | 15 | 27 |
 | IO — raster, vector and point-cloud interoperability | 1 | 6 | 9 | 16 |
 | A12 — the 12d archive and customisation | 1 | 4 | 11 | 16 |
@@ -3214,7 +3235,7 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 | SUR — survey, geodesy and survey import | 0 | 1 | 4 | 5 |
 | NET — least-squares adjustment | 0 | 1 | 2 | 3 |
 | BLD — build, tests and tooling | 0 | 3 | 9 | 12 |
-| **total** | **4** | **36** | **94** | **134** |
+| **total** | **4** | **35** | **94** | **133** |
 
 The high-severity ones, taken first:
 

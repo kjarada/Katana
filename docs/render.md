@@ -27,8 +27,11 @@ World right-handed and Z-UP (survey data is Z-up; converting at the door would
 mean converting every picked coordinate back). Eye space looks down -Z. Clip
 space keeps x, y in [-w, w] and z in [0, w]: NDC depth is 0 at the near plane
 and 1 at the far - the Vulkan range rather than OpenGL's [-1, 1], because the
-eventual backend is Vulkan and a float depth buffer resolves far more of [0, 1]
-than of [-1, 1]. Screen pixels have their origin top-left with +y down. The
+eventual backend is Vulkan. `camera.hpp` gives a second reason, that a float
+depth buffer resolves far more of [0, 1] than of [-1, 1]; that holds only with
+REVERSED Z (near at 1). With near at 0, as built, the far scene sits just below
+1.0 at a fixed 2⁻²⁴ spacing, and a framed 500 m site gets depth steps of
+0.8-3.75 m (audit REN-02, open). Screen pixels have their origin top-left with +y down. The
 camera is a value, so a viewport records its view before an orbit by copying it.
 
 ## The rasteriser, in three stages (`rasterizer.hpp`)
@@ -42,10 +45,12 @@ camera is a value, so a viewport records its view before an orbit by copying it.
 3. **Rasterise** one task per tile. A tile owns its pixels, so there is no lock,
    no atomic and no false sharing, and its colour and depth stay in cache.
 
-**Determinism (Rule 7).** The chunk count in stage 2 is a function of the
-primitive count alone, never of the core count, so a tile visits its primitives
-in the same order on every machine; with a strictly-less depth test the frame
-is reproducible bit for bit. `ThreadCountDoesNotChangeASinglePixel` renders the
+**Determinism (Rule 7).** Chunks are contiguous ranges of the primitive
+stream and a tile visits them in index order, so a tile sees its primitives in
+DrawList order whatever the chunk count - contiguity is the load-bearing
+invariant (a round-robin split would break it), and the count being a function
+of the primitive count alone, never of the cores, is belt and braces. With a
+strictly-less depth test the frame is reproducible bit for bit. `ThreadCountDoesNotChangeASinglePixel` renders the
 same scene with 0, 1, 3 and 7 workers and compares the buffers byte for byte.
 
 ### Clipping (rewritten 2026-09-23, audit REN-01)
