@@ -23,15 +23,32 @@ std::string idContext(EntityId id)
     return "id=" + std::to_string(id);
 }
 
+// Locked by itself OR by an ancestor (PLAN.MD 5.1): locking "design" protects
+// "design/surface/tin1" too. It used to test the layer's own flag only, so
+// SELECT ALL then ERASE erased what a locked parent was protecting (audit
+// MOD-03). The refusal names the layer that holds the lock, because "layer is
+// locked" about a layer whose own lock box is clear is a puzzle, not an answer.
 Status requireUnlockedLayer(const Model& model, const std::string& layerName, EntityId id)
 {
-    const katana::entity::Layer* layer = model.layers.find(layerName);
-    if (layer == nullptr) {
+    const katana::entity::ResolvedLayer layer = model.layers.resolve(layerName);
+    if (layer.layer == nullptr) {
         return makeError(ErrorCode::NotFound, "layer does not exist",
                          "layer=" + layerName + " " + idContext(id));
     }
-    if (layer->locked) {
-        return makeError(ErrorCode::CommandRejected, "layer is locked",
+    if (layer.locked) {
+        std::string holder = layerName;
+        if (!layer.layer->locked) {
+            for (const std::string& ancestor : katana::entity::layerAncestors(layerName)) {
+                if (const auto* above = model.layers.find(ancestor);
+                    above != nullptr && above->locked) {
+                    holder = ancestor;
+                    break;
+                }
+            }
+        }
+        return makeError(ErrorCode::CommandRejected,
+                         holder == layerName ? "layer is locked"
+                                             : "layer is locked by its parent '" + holder + "'",
                          "layer=" + layerName + " " + idContext(id));
     }
     return {};

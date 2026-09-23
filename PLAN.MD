@@ -337,7 +337,7 @@ The required progression is:
 | 25 | AI Agent | not started |
 | 26 | Production Hardening | not started — no section of its own yet; section 43 lists it last |
 | 45 | Survey module and instrument interoperability | in progress — model, detection and the cad bridge delivered; parsers, reduction, Survey menu, wizard and Point Manager in progress |
-| 46 | The audit of 2026-09-23 — defect register | open — 139 of 142 confirmed defects outstanding, 5 of them high |
+| 46 | The audit of 2026-09-23 — defect register | open — 134 of 142 confirmed defects outstanding, 4 of them high |
 
 The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
@@ -732,8 +732,15 @@ export and every undo record carry. If the tree were primary, renaming `design`
 would have to rewrite the node, every descendant and every entity, and any of
 those failing would leave entities pointing at a layer that no longer exists.
 Keeping the path as the identity means the tree is a view of the names, with one
-source of truth - the one already persisted. `std::map` order over full paths is
-already a pre-order walk, so a subtree is a range scan.
+source of truth - the one already persisted. `std::map` order over full paths
+puts every parent before its children and makes a layer's descendants one
+contiguous range (`name/` to `name0`), so a subtree is a range scan.
+CORRECTED 2026-09-23: this said the order was a pre-order walk, and
+`hasChildren` believed it - it tested only the key after the layer. But space,
+`-` and `.` sort below `/`, so "design 2" comes between "design" and
+"design/surface"; with both present "design" had no children and `remove`
+orphaned the branch. Found while fixing the inheritance below; regression
+tested.
 
 * Adding `design/surface/tin1` creates `design` and `design/surface` as real
   layers, each with its own colour, visibility and lock. Implicit nodes that
@@ -741,7 +748,17 @@ already a pre-order walk, so a subtree is a range scan.
   cannot switch off.
 * **Visibility and lock inherit down the tree; colour and linetype do not.**
   ByLayer already resolves colour, and a second inheritance rule on top would
-  make the resolved colour impossible to predict.
+  make the resolved colour impossible to predict. CORRECTED 2026-09-23 (audit
+  MOD-01/02/03, REN-03/04): until then only the layer panel honoured the
+  inheritance. The viewport, picking, box selection, snapping, the plot, the 3D
+  scene, sections and Surface From Drawing looked at the entity's own layer, and
+  the commands' lock check at its own lock, so a line on
+  `design/surface/tin1` stayed drawn under a hidden `design` and SELECT ALL,
+  ERASE erased it under a locked one. Now `LayerDatabase::resolve` answers
+  shown/locked with inheritance in one lookup, from state the table keeps
+  current on every change (only the changed subtree is recomputed), and
+  `cad::isDrawn` / `isSelectable` and `requireUnlockedLayer` are built on it;
+  a refusal names the ancestor holding the lock.
 * Descendant tests compare whole segments, so `designs/x` is not under
   `design`. A plain string-prefix test would hide or lock the wrong layers.
 * `remove` refuses a layer that still has children; `removeSubtree` takes the
@@ -3157,7 +3174,7 @@ over the bug:
 
 # 46. The audit of 2026-09-23 — the defect register
 
-**STATUS: OPEN — 139 of 142 confirmed defects outstanding.**
+**STATUS: OPEN — 134 of 142 confirmed defects outstanding.**
 
 A read-only audit of every subsystem: ten auditors, one per area, each told to
 verify the code rather than trust this plan, and every defect they reported put
@@ -3178,22 +3195,22 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 
 | Area | high | medium | low | open |
 |---|---|---|---|---|
-| MOD — entity model, commands, storage, selection | 1 | 3 | 12 | 16 |
+| MOD — entity model, commands, storage, selection | 0 | 1 | 12 | 13 |
 | QT — the desktop application | 2 | 10 | 15 | 27 |
 | IO — raster, vector and point-cloud interoperability | 1 | 6 | 9 | 16 |
 | A12 — the 12d archive and customisation | 1 | 4 | 11 | 16 |
 | CAD — the CAD engine | 0 | 5 | 13 | 18 |
-| REN — rendering and scene building | 0 | 4 | 5 | 9 |
+| REN — rendering and scene building | 0 | 2 | 5 | 7 |
 | GEO — core, maths and geometry | 0 | 2 | 10 | 12 |
 | TER — terrain | 0 | 1 | 4 | 5 |
 | SUR — survey, geodesy and survey import | 0 | 1 | 4 | 5 |
 | NET — least-squares adjustment | 0 | 1 | 2 | 3 |
 | BLD — build, tests and tooling | 0 | 3 | 9 | 12 |
-| **total** | **5** | **40** | **94** | **139** |
+| **total** | **4** | **36** | **94** | **134** |
 
 The high-severity ones, taken first:
 
-* **MOD-01** — hiding or locking a parent layer does not hide, protect or stop
+* ~~**MOD-01**~~ FIXED 2026-09-23 — hiding or locking a parent layer does not hide, protect or stop
   editing the entities on its children (`selection.cpp`, `change_set.cpp`).
 * **QT-01** — a 12d archive holding only tins or trimeshes cannot be imported:
   the empty import transaction is rejected and the surfaces are thrown away.

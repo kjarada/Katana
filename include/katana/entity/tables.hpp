@@ -47,6 +47,17 @@ struct Layer {
     friend bool operator==(const Layer&, const Layer&) = default;
 };
 
+// What drawing and editing need to know about a layer, found with one lookup:
+// the layer itself, and whether it is shown and locked once its ancestors are
+// counted - visible only when it and every ancestor is, locked when it or any
+// ancestor is. A layer that is not there is neither shown nor editable, so an
+// entity that points at one is not silently drawn or edited.
+struct ResolvedLayer {
+    const Layer* layer = nullptr;
+    bool shown = false;
+    bool locked = true;
+};
+
 // Always contains layer "0", which can be modified but never removed or renamed.
 //
 // Layer names are PATHS: "design/surface/tin1". See layer_path.hpp for why the
@@ -63,8 +74,9 @@ struct Layer {
 //     inherit - ByLayer already resolves those, and a second inheritance rule
 //     layered on top would make the resolved colour impossible to predict.
 //
-// Because the map is keyed by full path, its ascending order IS a pre-order
-// walk of the tree, and a subtree is a contiguous range rather than a search.
+// Because the map is keyed by full path, a parent sorts before its children and
+// a subtree's descendants are one contiguous range (layer_path.hpp says why that
+// range is "name/" to "name0" and not simply the keys after the name).
 class LayerDatabase {
   public:
     LayerDatabase();
@@ -115,14 +127,38 @@ class LayerDatabase {
     [[nodiscard]] std::vector<std::string> subtree(std::string_view name) const;
     [[nodiscard]] bool hasChildren(std::string_view name) const;
 
-    // Visible only when it and every ancestor is visible; locked when it or
-    // any ancestor is locked. False / true respectively for a missing layer,
-    // so an entity on a layer that has gone is not silently drawn or edited.
+    // The layer and its inherited state, in one lookup. What every consumer of
+    // the rule asks - the viewport, the 3D scene, selection, snapping, the
+    // commands that refuse to edit a locked layer - so that the rule is
+    // enforced everywhere and not, as until 2026-09-23, by the layer panel
+    // alone (audit MOD-01).
+    [[nodiscard]] ResolvedLayer resolve(std::string_view name) const;
+    // resolve(name).shown and .locked, for a caller with only a name to ask.
     [[nodiscard]] bool effectivelyVisible(std::string_view name) const;
     [[nodiscard]] bool effectivelyLocked(std::string_view name) const;
 
   private:
-    std::map<std::string, Layer, std::less<>> layers_;
+    // A layer with its inherited state. `shown` and `locked` are derived, and
+    // kept current by every member that changes the table, so a reader asks
+    // one lookup instead of walking the path - the viewport asks for every
+    // entity it draws, every frame, and walking allocated a vector of strings.
+    struct Node {
+        Layer layer;
+        bool shown = true;
+        bool locked = false;
+    };
+    using Nodes = std::map<std::string, Node, std::less<>>;
+
+    // Recomputes the inherited state of `name` and everything under it,
+    // parents first. A layer's state depends only on itself and its ancestors,
+    // so changing one layer can move only its own subtree, and adding one can
+    // move nothing else: every layer's ancestors already exist.
+    void refreshSubtree(std::string_view name);
+    // The descendants of `name`, not including it.
+    [[nodiscard]] std::pair<Nodes::iterator, Nodes::iterator>
+    descendantRange(std::string_view name);
+
+    Nodes layers_;
 };
 
 // ---- dimension styles -----------------------------------------------------------

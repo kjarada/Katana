@@ -7,6 +7,7 @@
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/entity/display.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -364,7 +365,9 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
     };
 
     document.model().entities.forEach([&](const Entity& entity) {
-        if (!entity.visible) {
+        // The plan view's rule, so a layer switched off disappears here too
+        // (audit REN-03). It used to test the entity's own flag only.
+        if (!isDrawn(document.model(), entity)) {
             return;
         }
         const bool selected = selection.contains(entity.id);
@@ -527,7 +530,14 @@ AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surf
         box.expand(Vec3(space.max.x, space.max.y, datum + (space.max.z - datum) * exaggeration));
     }
     if (options.drawEntities) {
-        const auto plan = document.model().entities.bounds();
+        // What is DRAWN, not every entity: a hidden stray far away used to
+        // frame an almost empty view (audit REN-03).
+        katana::geometry::Box2 plan;
+        document.model().entities.forEach([&](const Entity& entity) {
+            if (isDrawn(document.model(), entity)) {
+                plan.expand(katana::entity::boundingBox(entity.geometry));
+            }
+        });
         if (!plan.empty()) {
             const double z = std::isfinite(options.entityElevation) ? options.entityElevation : 0.0;
             box.expand(Vec3(plan.min.x, plan.min.y, z));

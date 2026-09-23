@@ -347,8 +347,9 @@ TEST(LayerTree, NamesAreOrderedSoThatListingThemIsAlreadyATreeWalk)
     const LayerDatabase layers = jobTree();
     const auto names = layers.names();
     ASSERT_TRUE(std::is_sorted(names.begin(), names.end()));
-    // A parent always immediately precedes its first child, which is what lets
-    // a tree be built in one pass instead of by repeated lookup.
+    // A parent always precedes its children, which is what lets a tree be
+    // built in one pass instead of by repeated lookup. (Not IMMEDIATELY, as
+    // this comment used to say: see the test after this one.)
     for (std::size_t i = 1; i < names.size(); ++i) {
         const auto parent = layerParent(names[i]);
         if (!parent.empty()) {
@@ -357,4 +358,71 @@ TEST(LayerTree, NamesAreOrderedSoThatListingThemIsAlreadyATreeWalk)
             EXPECT_LT(found - names.begin(), static_cast<std::ptrdiff_t>(i));
         }
     }
+}
+
+TEST(LayerTree, ASiblingThatSortsBetweenAParentAndItsChildrenIsNotMistakenForThem)
+{
+    // Space, '-' and '.' sort below '/', so "design 2" comes between "design"
+    // and "design/surface". hasChildren used to look only at the key straight
+    // after "design", find "design 2", and answer no - so remove() took
+    // "design" out from under its children.
+    LayerDatabase layers;
+    ASSERT_TRUE(layers.ensure("design/surface").ok());
+    for (const char* sibling : {"design 2", "design-old", "design.bak"}) {
+        ASSERT_TRUE(layers.ensure(sibling).ok());
+    }
+    const auto names = layers.names();
+    const auto at = [&](const char* name) {
+        return std::find(names.begin(), names.end(), std::string(name)) - names.begin();
+    };
+    ASSERT_LT(at("design"), at("design 2"));
+    ASSERT_LT(at("design 2"), at("design/surface")) << "the premise: the sibling sorts between";
+
+    EXPECT_TRUE(layers.hasChildren("design"));
+    EXPECT_FALSE(layers.hasChildren("design 2"));
+    const auto removed = layers.remove("design");
+    ASSERT_FALSE(removed.ok());
+    EXPECT_EQ(removed.error().code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(layers.contains("design"));
+
+    // And the inherited state reaches the real children, past the siblings.
+    Layer design = *layers.find("design");
+    design.visible = false;
+    ASSERT_TRUE(layers.update(design).ok());
+    EXPECT_FALSE(layers.effectivelyVisible("design/surface"));
+    EXPECT_TRUE(layers.effectivelyVisible("design 2")) << "a sibling is not a child";
+}
+
+TEST(LayerTree, InheritedStateIsKeptCurrentThroughEveryChange)
+{
+    LayerDatabase layers;
+    ASSERT_TRUE(layers.ensure("a/b/c").ok());
+    Layer a = *layers.find("a");
+    a.locked = true;
+    ASSERT_TRUE(layers.update(a).ok());
+    EXPECT_TRUE(layers.resolve("a/b/c").locked);
+
+    // A layer added under a locked parent is locked from the start.
+    ASSERT_TRUE(layers.ensure("a/b/d").ok());
+    EXPECT_TRUE(layers.resolve("a/b/d").locked);
+
+    // Moving the branch out from under it frees the whole branch.
+    ASSERT_TRUE(layers.renameSubtree("a/b", "free/b").ok());
+    EXPECT_FALSE(layers.resolve("free/b").locked);
+    EXPECT_FALSE(layers.resolve("free/b/c").locked);
+    EXPECT_FALSE(layers.resolve("free/b/d").locked);
+    EXPECT_TRUE(layers.resolve("a").locked) << "the parent keeps its own lock";
+
+    // A copy carries the state with it; reset() starts clean.
+    const LayerDatabase copy = layers;
+    EXPECT_TRUE(copy.resolve("a").locked);
+    layers.reset();
+    EXPECT_TRUE(layers.resolve("0").shown);
+    EXPECT_FALSE(layers.resolve("0").locked);
+
+    // A layer that is not there is neither shown nor editable.
+    const auto missing = layers.resolve("nowhere");
+    EXPECT_EQ(missing.layer, nullptr);
+    EXPECT_FALSE(missing.shown);
+    EXPECT_TRUE(missing.locked);
 }
