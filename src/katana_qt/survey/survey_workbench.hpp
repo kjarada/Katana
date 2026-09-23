@@ -50,6 +50,7 @@ class Document;
 
 namespace katana::qt {
 
+class DockChrome;
 class SurveyPointsDock;
 class ViewWorkspace;
 struct SurveyDialogContext;
@@ -59,6 +60,9 @@ struct SurveyServices {
     // The window's views, for framing what an operation added and for the
     // plan view a tool works in.
     ViewWorkspace* views = nullptr;
+    // The window's dock chrome, so the Point Manager gets the title bar -
+    // Minimise, Float, Close - every other panel has. May be null.
+    DockChrome* chrome = nullptr;
     // The window's action factory, so a survey action looks and reads like
     // every other: icon, status tip, and a tooltip naming its shortcut.
     std::function<QAction*(Icon icon, const QString& text, const QString& tip,
@@ -69,6 +73,7 @@ struct SurveyServices {
     // Actions the window already owns and shows under File; the Survey menu
     // shows the same objects, so the two menus cannot drift apart.
     QAction* loadCustomisation = nullptr;
+    QAction* replaceCustomisation = nullptr;
     QAction* applySurveyCodes = nullptr;
 };
 
