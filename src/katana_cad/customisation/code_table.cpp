@@ -629,7 +629,9 @@ std::string formatCodingReport(const SurveyCodingReport& report)
     for (const SurveyCodeRow& row : report.codes) {
         out << "  " << row.code << ": " << counted(row.entities, "entity", "entities") << ", "
             << katana::entity::toString(row.kind) << (row.matched ? ", matched" : ", not matched");
-        if (!row.layer.empty()) {
+        if (row.layersFrom == std::vector<std::string>{row.layer}) {
+            out << "; layer " << row.layer << " already";
+        } else if (!row.layer.empty()) {
             out << "; layer " << joined(row.layersFrom) << " -> " << row.layer;
         }
         if (row.styleOutcome != SurveyStyleOutcome::None) {
@@ -792,6 +794,17 @@ std::string formatLint(const std::vector<LintIssue>& issues, std::size_t rules)
     }
     out << counted(errors, "error", "errors") << ", "
         << counted(issues.size() - errors, "warning", "warnings") << "\n";
+    // The reference customisation gives hundreds, most of a few kinds, so the
+    // count of each kind comes before the list it summarises.
+    std::map<LintKind, std::size_t> byKind;
+    for (const LintIssue& issue : issues) {
+        ++byKind[issue.kind];
+    }
+    std::vector<std::string> kinds;
+    for (const auto& [kind, count] : byKind) {
+        kinds.push_back(std::to_string(count) + " " + toString(kind));
+    }
+    out << "  by kind: " << joined(kinds) << "\n";
     for (const LintIssue& issue : issues) {
         out << "  " << ruleRef(issue.rule, issue.key, issue.section) << ": "
             << toString(issue.severity) << ", " << toString(issue.kind) << ": " << issue.message

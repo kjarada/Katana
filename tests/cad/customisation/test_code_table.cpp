@@ -534,6 +534,7 @@ TEST(LintSurveyMap, IsPrintedAsOneTextWithTheCounts)
     const auto issues = katana::cad::lintSurveyMap(map, library(), testColour, builtIn);
     EXPECT_EQ(katana::cad::formatLint(issues, map.size()),
               "2 rules checked: 0 errors, 1 warning\n"
+              "  by kind: 1 unknown colour\n"
               "  rule #0 WM* (map_data): warning, unknown colour: colour \"sui water potable\" "
               "is not a colour name Katana knows, so the entity keeps its own\n");
     EXPECT_EQ(katana::cad::formatLint({}, 3), "3 rules checked: no problems found\n");
