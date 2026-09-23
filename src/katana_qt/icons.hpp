@@ -101,6 +101,13 @@ enum class Icon {
     SurveyTraverse,
     SurveyLevelBook,
     SurveyConverter,
+    // Survey points (PLAN.MD 45 slices 10, 11 and 13): the import wizard and
+    // the export, a page and a mark with the accent arrow running the way the
+    // points go; the Point Manager's table; the Point Report's page.
+    SurveyImport,
+    SurveyExport,
+    SurveyPointManager,
+    SurveyPointReport,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

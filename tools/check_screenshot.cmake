@@ -123,6 +123,41 @@ if(DEFINED SURVEY_DIALOG)
     endif()
 endif()
 
+# -DDRIVE=<step>[|<step>...] drives survey dialogs and docks step by step, in
+# order, for a paged dialog that has to be filled between presses (the import
+# wizard) or a run that uses several: "@NAME" opens the dialog of action NAME
+# (--survey-dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
+# "!BUTTON" presses a button, and anything else is a FIELD=TEXT fill. '|'
+# between steps, for FILL's reason.
+if(DEFINED DRIVE)
+    string(REPLACE "|" ";" _steps "${DRIVE}")
+    foreach(_step IN LISTS _steps)
+        string(SUBSTRING "${_step}" 0 1 _sigil)
+        string(SUBSTRING "${_step}" 1 -1 _rest)
+        if(_sigil STREQUAL "@")
+            list(APPEND extra --survey-dialog "${_rest}")
+        elseif(_sigil STREQUAL "#")
+            list(APPEND extra --survey-dock "${_rest}")
+        elseif(_sigil STREQUAL "!")
+            list(APPEND extra --press "${_rest}")
+        else()
+            list(APPEND extra --fill "${_step}")
+        endif()
+    endforeach()
+endif()
+# -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
+# hold exactly the reference's text, line ends aside (git may check the
+# reference out with either). The written files are removed first, so one
+# left by an earlier run cannot pass for this one.
+if(DEFINED COMPARE)
+    string(REPLACE "|" ";" _compare "${COMPARE}")
+    list(GET _compare 0 _reference)
+    list(SUBLIST _compare 1 -1 _written)
+    foreach(_file IN LISTS _written)
+        file(REMOVE "${_file}")
+    endforeach()
+endif()
+
 execute_process(
     COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
     RESULT_VARIABLE rc
@@ -143,6 +178,30 @@ if(DEFINED EXPECT AND NOT "${out}${err}" MATCHES "${EXPECT}")
     message(FATAL_ERROR "the run did not report /${EXPECT}/:\n${out}\n${err}")
 endif()
 
+if(DEFINED COMPARE)
+    file(READ "${_reference}" _expected)
+    string(REPLACE "
+" "
+" _expected "${_expected}")
+    foreach(_file IN LISTS _written)
+        if(NOT EXISTS "${_file}")
+            message(FATAL_ERROR "the run wrote no ${_file}
+${out}
+${err}")
+        endif()
+        file(READ "${_file}" _actual)
+        string(REPLACE "
+" "
+" _actual "${_actual}")
+        if(NOT _actual STREQUAL _expected)
+            message(FATAL_ERROR "${_file} differs from ${_reference}:
+${_actual}
+--- expected ---
+${_expected}")
+        endif()
+    endforeach()
+endif()
+
 # A 1360 x 860 window with a drawing in it compresses to tens of kilobytes; a
 # window that painted nothing but its background is a few. The dialog is a
 # smaller window of mostly flat panels, so it gets its own floor. Compared as
@@ -157,7 +216,7 @@ if(DEFINED DATASET_INFO OR DEFINED IMPORT_OPTIONS)
     set(floor 4000)
 endif()
 # So are the survey dialogs: a form, a report pane and a row of buttons.
-if(DEFINED SURVEY_DIALOG)
+if(DEFINED SURVEY_DIALOG OR DEFINED DRIVE)
     set(floor 4000)
 endif()
 file(SIZE "${OUTPUT}" size)
