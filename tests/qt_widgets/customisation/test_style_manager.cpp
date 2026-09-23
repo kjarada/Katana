@@ -604,3 +604,27 @@ TEST_F(Manager, MergingDrawingLinetypesIsOneUndoStepAndRepointsTheirStyles)
               (std::vector<std::pair<std::string, LinetypeOrigin>>{
                   {"DASHED", LinetypeOrigin::Drawing}}));
 }
+
+TEST_F(Manager, ChangingAnElementToADotInTheGridDisablesItsLengthAndSavesADot)
+{
+    StyleManagerDialog dialog(context);
+    dialog.selectLinetype("DASHED", LinetypeOrigin::Drawing);
+    auto* kind = child<QComboBox>(dialog, "patternKind0");
+    ASSERT_NE(kind, nullptr);
+    // As a person's choice arrives: the index, then activated - the signal
+    // the grid acts on, inside which it must not delete this very combo.
+    kind->setCurrentIndex(2);
+    Q_EMIT kind->activated(2);
+    auto* length = child<QDoubleSpinBox>(dialog, "patternLength0");
+    ASSERT_NE(length, nullptr);
+    EXPECT_FALSE(length->isEnabled()) << "a dot has no length";
+    EXPECT_EQ(length->value(), 0.0);
+
+    click(dialog, "linetypeSave");
+    katana::qt::test::processEvents();
+    // {1, -0.5} with its dash made a dot: {0, -0.5}, a dot every half metre.
+    const auto& pattern = document.model().linetypes.find("DASHED")->pattern;
+    ASSERT_EQ(pattern.size(), 2U);
+    EXPECT_EQ(pattern[0].length, 0.0);
+    EXPECT_EQ(pattern[1].length, -0.5);
+}
