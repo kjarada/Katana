@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/display.hpp"
 #include "katana/entity/tables.hpp"
 
 namespace katana::cad {
@@ -295,7 +296,9 @@ CustomisationCoverage customisationCoverage(const Document& document)
         bool katanaDrawn = false;
         for (const bool symbol : {false, true}) {
             const std::string& name = symbol ? style.symbol : style.linetype;
-            if (isPlainLinestyle(name)) {
+            // A linetype of ByLayer takes the layer's (decision D2): it names
+            // no definition, so there is nothing to find or to miss.
+            if (isPlainLinestyle(name) || (!symbol && katana::entity::isByLayer(name))) {
                 continue;
             }
             if (document.definitionFor(name) != nullptr) {

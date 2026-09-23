@@ -304,21 +304,18 @@ TEST(SurveyFeatures, WhenLayersMayNotBeCreatedAMissingOneIsRefusedAndAnExistingO
 
 TEST(SurveyFeatures, ARuleModelThatIsNotALayerNameIsRefused)
 {
-    Document document;
+    // Refused where it enters: SurveyMap::add validates the model as a layer
+    // path, so drawSurveyFeatures can never be handed a rule naming "a//b".
+    // Its own check of the rule's layer stays as a second guard.
     katana::entity::SurveyMap map;
     SurveyRule kerb;
     kerb.key = "KB*";
     kerb.model = "a//b"; // an empty level: validateLayerPath refuses it
     kerb.breakline = SurveyBreakline::Line;
-    ASSERT_TRUE(map.add(kerb).ok());
-    document.setSurveyMap(std::move(map));
-    SurveyProject project;
-    project.points = {point("1", 0.0, 0.0), point("2", 0.0, 10.0)};
-    project.features = {feature("K1", "KB", {"1", "2"})};
-
-    const auto planned = katana::cad::drawSurveyFeatures(document, project, {});
-    ASSERT_FALSE(planned.ok());
-    EXPECT_EQ(planned.error().code, katana::core::ErrorCode::InvalidArgument);
+    const auto added = map.add(kerb);
+    ASSERT_FALSE(added.ok());
+    EXPECT_EQ(added.error().code, katana::core::ErrorCode::InvalidArgument);
+    EXPECT_TRUE(map.empty());
 }
 
 TEST(SurveyFeatures, AnInconsistentProjectIsRefusedWithTheValidatorsError)

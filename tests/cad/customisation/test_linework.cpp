@@ -924,20 +924,29 @@ TEST(Linework, AChordToleranceThatIsNotAPositiveFiniteDistanceIsRefused)
 
 TEST(Linework, ARuleModelThatIsNotALayerNameIsRefusedNotDrawnOnAnotherLayer)
 {
+    // The survey map itself now refuses a rule whose model is not a layer
+    // path (SurveyMap::add validates it), so such a rule can never reach
+    // linework. processLinework's own check stays behind as a second guard;
+    // what this pins is the property: the kerb is not drawn anywhere.
     Document document;
     katana::entity::SurveyMap map;
     SurveyRule kerb;
     kerb.key = "KB*";
     kerb.model = "a//b"; // an empty level: validateLayerPath refuses it
     kerb.breakline = SurveyBreakline::Line;
-    ASSERT_TRUE(map.add(kerb).ok());
+    const auto added = map.add(kerb);
+    ASSERT_FALSE(added.ok()) << "the map takes no rule it could not draw on a layer";
+    EXPECT_EQ(added.error().code, katana::core::ErrorCode::InvalidArgument);
     document.setSurveyMap(std::move(map));
     addPoint(document, Point2(0, 0), "KB1", "1");
     addPoint(document, Point2(10, 0), "KB1", "2");
 
-    const auto planned = katana::cad::processLinework(document, {});
-    ASSERT_FALSE(planned.ok());
-    EXPECT_EQ(planned.error().code, katana::core::ErrorCode::InvalidArgument);
+    const auto result = run(document);
+    EXPECT_EQ(result.command, nullptr) << "no rule, so no line on any layer";
+    ASSERT_EQ(result.report.unplaced.size(), 2u);
+    EXPECT_EQ(result.report.unplaced[0].reason, UnplacedReason::NoRule);
+    EXPECT_EQ(result.report.unplaced[1].reason, UnplacedReason::NoRule);
+    EXPECT_TRUE(polylinesOf(document).empty());
 }
 
 // ---- one command --------------------------------------------------------------------
