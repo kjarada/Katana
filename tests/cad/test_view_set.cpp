@@ -370,6 +370,37 @@ TEST(ViewSet, AThreeDViewTurnedIntoASectionAndBackKeepsItsOrbit)
     expectSameCamera(side.camera, turned);
 }
 
+TEST(ViewSet, ACameraPointedAfreshIsNoLongerFramedAndOneLeftAloneStillIs)
+{
+    // ViewState::cameraFramed: "setKind clears it whenever it points the
+    // camera afresh". The 3D widget is rebuilt on every change of kind and
+    // frames at its first paint unless this is set, so it must survive
+    // exactly the changes that leave the camera alone - a trip through a
+    // section, choosing the same kind - and no other.
+    ViewSet set;
+    ViewState& view = set.add(ViewKind::Model3D);
+    EXPECT_FALSE(view.cameraFramed); // a new view has framed nothing yet
+
+    view.cameraFramed = true; // what RenderViewWidget::zoomExtents records
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Model3D).ok());
+    EXPECT_TRUE(view.cameraFramed);
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Section).ok());
+    EXPECT_TRUE(view.cameraFramed);
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Model3D).ok());
+    EXPECT_TRUE(view.cameraFramed);
+
+    // 3D -> Elevation points the camera at the front: a frame from the 3D
+    // orbit says nothing about what the elevation shows.
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Elevation).ok());
+    EXPECT_FALSE(view.cameraFramed);
+
+    // Through a section to a DIFFERENT model kind: configured, so cleared.
+    view.cameraFramed = true;
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Section).ok());
+    ASSERT_TRUE(set.setKind(view.id, ViewKind::Model3D).ok());
+    EXPECT_FALSE(view.cameraFramed);
+}
+
 TEST(ViewSet, ASectionTurnedIntoAModelViewStartsFromThatKindsView)
 {
     // Opened as a section, the camera was never pointed anywhere, so arriving

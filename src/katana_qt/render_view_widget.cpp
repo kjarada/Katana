@@ -39,6 +39,12 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& 
     // not clear it first: that is a full-window fill saved per frame.
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setMinimumSize(40, 40);
+    // A widget rebuilt over a camera that is already framed - the view went
+    // to a section and came back - must not frame it again at its first
+    // paint: that reset the target and the distance the user had zoomed to.
+    // cameraKind is checked as well so that a state whose flag outlived a
+    // reconfiguration still frames.
+    framed_ = state_.cameraFramed && state_.cameraKind == state_.kind;
     listenTo(context_.document);
     activateOnFocus(*this, [this] {
         if (onActivated) {
@@ -154,6 +160,9 @@ void RenderViewWidget::zoomExtents()
     }
     camera().frame(box);
     framed_ = true;
+    // Only a frame of something drawn is worth keeping for the next widget:
+    // one of the empty ground is replaced by the first real frame anyway.
+    state_.cameraFramed = !framedEmpty_;
     update();
 }
 
