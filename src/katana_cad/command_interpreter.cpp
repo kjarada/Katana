@@ -1,6 +1,10 @@
 #include "katana/cad/command_interpreter.hpp"
 
 #include "katana/cad/parcel.hpp"
+#include "katana/cad/purge.hpp"
+#include "katana/cad/style_catalogue.hpp"
+#include "katana/entity/display.hpp"
+#include "katana/entity/table_usage.hpp"
 
 #include "katana/entity/dimension_text.hpp"
 
@@ -289,12 +293,15 @@ Select    SELECT ALL | NONE | id... | LAYER name | TYPE name
 Layers    LAYER LIST | NEW name [#RRGGBB] | SET name | DELETE name
           LAYER SHOW|HIDE|LOCK|UNLOCK name | LAYER LTYPE layer linetype
 Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name
+          LINETYPE MERGE from into   (repoints every layer and style, then deletes from)
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
           angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
-Style     STYLE LIST | SYMBOLS | NEW name | SET name field value | RENAME old new
-          STYLE DELETE name | APPLY name
+Style     STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new
+          STYLE DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]
           fields: linetype weight colour hatch symbol symbolsize description; APPLY - = ByLayer
+          linetype takes a model linetype, a loaded 12d linestyle or ByLayer (the layer's)
+Purge     PURGE [STYLES|LINETYPES|HATCHES|ALL]   deletes what nothing uses, as one undo step
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
           SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
           DELETE name.  PI indices count from 0; radius 0 is a kink; spirals in MODEL units
@@ -369,6 +376,108 @@ CommandInterpreter::Reply CommandInterpreter::finish(Status status, std::string 
     return message;
 }
 
+namespace {
+
+// ---- the table managers' verbs ------------------------------------------------------
+
+std::string restOfLine(const std::vector<std::string>& args, std::size_t from)
+{
+    std::string text;
+    for (std::size_t i = from; i < args.size(); ++i) {
+        text += (i > from ? " " : "") + args[i];
+    }
+    return text;
+}
+
+// The one answer to "may a style or a layer be given this linetype name":
+// a model linetype, or a loaded library definition drawn along a line - the
+// same two places the viewport resolves it in (D2). A 12d linestyle used to
+// be refused here although the model and the viewport both take one (audit
+// CAD-06). A vertex symbol is refused BY NAME, because it is never drawn as
+// a line pattern (D8) and "does not exist" would be untrue.
+katana::core::Status checkLinetypeName(const Document& document, const std::string& name)
+{
+    if (document.model().linetypes.contains(name)) {
+        return {};
+    }
+    if (const katana::entity::LineStyle* definition = document.definitionFor(name);
+        definition != nullptr) {
+        if (definition->atVertices) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "that is a vertex symbol, not a linestyle: give it as the symbol",
+                             name);
+        }
+        return {};
+    }
+    return makeError(ErrorCode::NotFound,
+                     "no linetype of that name is in the drawing or the loaded library", name);
+}
+
+std::string countedNoun(std::size_t count, const char* one, const char* many)
+{
+    return std::to_string(count) + " " + (count == 1 ? one : many);
+}
+
+std::string listed(const std::vector<std::string>& names)
+{
+    std::string text;
+    for (const std::string& name : names) {
+        text += (text.empty() ? "" : ", ") + name;
+    }
+    return text;
+}
+
+// PURGE [STYLES|LINETYPES|HATCHES|ALL]. The current style is kept although
+// nothing wears it yet: it is what the next thing drawn will be.
+katana::core::Result<std::string> purgeTables(Document& document,
+                                              const std::vector<std::string>& args)
+{
+    static constexpr const char* kPurgeUsage = "PURGE [STYLES|LINETYPES|HATCHES|ALL]";
+    if (args.size() > 1) {
+        return usage(kPurgeUsage);
+    }
+    const std::string what = args.empty() ? "ALL" : upper(args[0]);
+    PurgeOptions options;
+    if (what == "STYLES") {
+        options.linetypes = options.hatches = false;
+    } else if (what == "LINETYPES") {
+        options.styles = options.hatches = false;
+    } else if (what == "HATCHES") {
+        options.styles = options.linetypes = false;
+    } else if (what != "ALL") {
+        return usage(kPurgeUsage);
+    }
+    if (!document.currentStyle().empty()) {
+        options.keepStyles.push_back(document.currentStyle());
+    }
+    const katana::commands::TableItems plan = planPurge(document.model(), options);
+    auto command = purgeCommand(document.model(), options);
+    if (!command) {
+        return command.error();
+    }
+    if (*command == nullptr) {
+        return std::string("nothing to purge: everything is used");
+    }
+    if (auto status = document.execute(std::move(*command)); !status) {
+        return status.error();
+    }
+    std::string reply = "purged " + countedNoun(plan.styles.size(), "style", "styles") + ", " +
+                        countedNoun(plan.linetypes.size(), "linetype", "linetypes") + " and " +
+                        countedNoun(plan.hatchPatterns.size(), "hatch pattern", "hatch patterns") +
+                        " (one UNDO restores them)";
+    const auto append = [&reply](const char* label, const std::vector<std::string>& names) {
+        if (!names.empty()) {
+            reply += std::string("\n  ") + label + ": " + listed(names);
+        }
+    };
+    append("styles", plan.styles);
+    append("linetypes", plan.linetypes);
+    append("hatch patterns", plan.hatchPatterns);
+    return reply;
+}
+
+} // namespace
+
 CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
 {
     auto tokens = tokenize(line);
@@ -427,6 +536,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (verb == "STYLE") {
         return style(args);
     }
+    if (verb == "PURGE") {
+        return purgeTables(document_, args);
+    }
     if (verb == "ALIGN") {
         return alignment(args);
     }
@@ -482,17 +594,72 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
         return text.empty() ? "no styles" : text;
     }
     if (action == "SYMBOLS") {
-        std::string names;
-        for (const std::string_view symbol : katana::entity::symbolNames()) {
-            names += (names.empty() ? "" : " ") + std::string(symbol);
+        // The catalogue's list, the one a symbol picker offers: the built-in
+        // shapes and every library definition D3 calls a symbol - not only
+        // the `mode vertex` ones, which are the minority of those in use.
+        // Filtered by the rest of the line, case folded.
+        const std::vector<CatalogueEntry> symbols =
+            filterChoices(symbolChoices(document_), restOfLine(args, 1));
+        std::ostringstream out;
+        for (const CatalogueEntry& entry : symbols) {
+            out << "  " << entry.name << "  (" << toString(entry.source);
+            if (!entry.group.empty()) {
+                out << ", " << entry.group;
+            }
+            out << ")";
+            if (entry.users.used()) {
+                out << "  " << entry.users.describe();
+            }
+            out << "\n";
         }
-        return names;
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text.empty() ? "no symbol matches" : text;
+    }
+    if (action == "USAGE") {
+        const katana::entity::TableUsage usage = katana::entity::tableUsage(model);
+        if (args.size() >= 2) {
+            const std::string wanted = restOfLine(args, 1);
+            const katana::entity::Users& users =
+                katana::entity::TableUsage::of(usage.styles, wanted);
+            if (!model.styles.contains(wanted) && !users.used()) {
+                return makeError(ErrorCode::NotFound, "style does not exist", wanted);
+            }
+            return "style " + wanted + ": " + (users.used() ? users.describe() : "unused") +
+                   (model.styles.contains(wanted) ? "" : " (not in the style table)");
+        }
+        std::ostringstream out;
+        for (const auto& [name, users] : usage.styles) {
+            out << "  " << name << "  " << countedNoun(users.entities, "entity", "entities")
+                << (model.styles.contains(name) ? "" : "  (not in the style table)") << "\n";
+        }
+        std::string text = out.str();
+        if (!text.empty()) {
+            text.pop_back();
+        }
+        return text.empty() ? "no styles" : text;
+    }
+    if (action == "CURRENT") {
+        if (args.size() >= 2) {
+            const std::string wanted = restOfLine(args, 1);
+            const bool byLayer = wanted == "-" || katana::entity::isByLayer(wanted);
+            if (auto status = document_.setCurrentStyle(byLayer ? std::string() : wanted);
+                !status) {
+                return status.error();
+            }
+        }
+        return "current style is " +
+               (document_.currentStyle().empty() ? std::string("ByLayer")
+                                                 : document_.currentStyle());
     }
 
     static constexpr const char* kUsage =
-        "STYLE LIST | SYMBOLS | NEW name | SET name field value | RENAME old new | DELETE name |"
-        " APPLY name\n"
-        "  fields: linetype, weight (mm), colour (#RRGGBB or bylayer), hatch, symbol,\n"
+        "STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new |"
+        " DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]\n"
+        "  fields: linetype (a model linetype, a 12d linestyle or ByLayer), weight (mm),\n"
+        "  colour (#RRGGBB or bylayer), hatch, symbol,\n"
         "  symbolsize (model units, 0 for the default mark), description\n"
         "  APPLY sets the style of the selection; APPLY - clears it (ByLayer)";
     if (args.size() < 2) {
@@ -538,6 +705,19 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
                       "style " + name + " renamed to " + args[2] +
                           " (every entity wearing it came too)");
     }
+    if (action == "MERGE") {
+        if (args.size() < 3) {
+            return usage("STYLE MERGE from into");
+        }
+        if (const auto wrong = wants(3)) {
+            return *wrong;
+        }
+        const std::size_t moved =
+            katana::entity::TableUsage::of(katana::entity::tableUsage(model).styles, name).entities;
+        return finish(document_.execute(cmd::mergeStyle(name, args[2])),
+                      "style " + name + " merged into " + args[2] + " (" +
+                          countedNoun(moved, "entity", "entities") + " moved)");
+    }
     if (action == "APPLY") {
         if (const auto wrong = wants(2)) {
             return *wrong;
@@ -566,10 +746,17 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
         const std::string field = upper(args[2]);
         const std::string& value = args[3];
         if (field == "LINETYPE") {
-            if (!model.linetypes.contains(value)) {
-                return makeError(ErrorCode::NotFound, "linetype does not exist", value);
+            // The rest of the line, as SYMBOL takes it: "WATR Main" unquoted
+            // used to become "WATR" with "Main" dropped.
+            const std::string linetypeName = restOfLine(args, 3);
+            if (katana::entity::isByLayer(linetypeName)) {
+                changed.linetype = std::string(katana::entity::kByLayerLinetype);
+            } else {
+                if (auto status = checkLinetypeName(document_, linetypeName); !status) {
+                    return status.error();
+                }
+                changed.linetype = linetypeName;
             }
-            changed.linetype = value;
         } else if (field == "WEIGHT") {
             const auto weight = parseNumber(value);
             if (!weight) {
@@ -628,8 +815,12 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
         } else {
             return usage(kUsage);
         }
-        return finish(document_.execute(cmd::updateStyle(std::move(changed))),
-                      "style " + name + " updated");
+        // Setting what is already there is not an edit: no undo step.
+        auto command = cmd::updateStyleIfChanged(model, std::move(changed));
+        if (command == nullptr) {
+            return "style " + name + " unchanged";
+        }
+        return finish(document_.execute(std::move(command)), "style " + name + " updated");
     }
     return usage(kUsage);
 }
@@ -1631,7 +1822,8 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
 {
     static constexpr const char* kLinetypeUsage =
-        "LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name";
+        "LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name |"
+        " MERGE from into";
     const auto& model = document_.model();
     const std::string action = args.empty() ? "LIST" : upper(args[0]);
 
@@ -1703,6 +1895,14 @@ CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
                       "linetype " + name + " renamed to " + args[2] +
                           " (every layer and style naming it came too)");
     }
+    if (action == "MERGE") {
+        if (args.size() != 3) {
+            return usage("LINETYPE MERGE from into   (put a name with spaces in double quotes)");
+        }
+        return finish(document_.execute(cmd::mergeLinetype(name, args[2])),
+                      "linetype " + name + " merged into " + args[2] +
+                          " (every layer and style naming it now names " + args[2] + ")");
+    }
     return usage(kLinetypeUsage);
 }
 
@@ -1758,13 +1958,21 @@ CommandInterpreter::Reply CommandInterpreter::layer(const Tokens& args)
         if (existing == nullptr) {
             return makeError(ErrorCode::NotFound, "layer does not exist", name);
         }
-        if (!model.linetypes.contains(args[2])) {
-            return makeError(ErrorCode::NotFound, "linetype does not exist", args[2]);
+        // The same names STYLE SET linetype takes, bar ByLayer: a layer is
+        // what ByLayer inherits FROM.
+        const std::string linetypeName = restOfLine(args, 2);
+        if (katana::entity::isByLayer(linetypeName)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a layer cannot be ByLayer: it is what ByLayer inherits from",
+                             linetypeName);
+        }
+        if (auto status = checkLinetypeName(document_, linetypeName); !status) {
+            return status.error();
         }
         katana::entity::Layer changed = *existing;
-        changed.linetype = args[2];
+        changed.linetype = linetypeName;
         return finish(document_.execute(cmd::updateLayer(std::move(changed))),
-                      "layer " + name + " uses linetype " + args[2]);
+                      "layer " + name + " uses linetype " + linetypeName);
     }
     if (action == "HATCH") {
         if (args.size() < 3) {
