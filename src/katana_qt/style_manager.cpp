@@ -5,6 +5,7 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <type_traits>
 #include <utility>
 
 #include <QAbstractItemView>
@@ -23,6 +24,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QPainter>
+#include <QPointer>
 #include <QPixmap>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -497,6 +499,9 @@ struct StyleManagerDialog::Impl {
     // Set while the dialog changes its own tables and form, when Qt's signals
     // are not a person's doing.
     bool loading = false;
+    // Set once the dialog has found its Document gone and shut itself down
+    // (orphaned).
+    bool orphan = false;
     // What the next reload selects, after a command this dialog ran.
     std::optional<std::vector<std::string>> selectStylesAfterReload{};
     std::optional<std::pair<std::string, LinetypeOrigin>> selectLinetypeAfterReload{};
@@ -511,6 +516,43 @@ struct StyleManagerDialog::Impl {
     // ---------------------------------------------------------------------------------
 
     [[nodiscard]] bool alive() const { return watcher == nullptr || watcher->documentAlive(); }
+
+    // alive(), and when the Document has gone, the dialog shut down as well.
+    // What a person can still reach asks this before it reads the Document.
+    [[nodiscard]] bool live()
+    {
+        if (alive()) {
+            return true;
+        }
+        orphaned();
+        return false;
+    }
+
+    // The Document has gone: the dialog may outlive it (style_manager.hpp),
+    // and no delivery tells it so - the watcher simply stops - so the first
+    // thing a person does afterwards finds out. Once: every control but
+    // Close is disabled, the panels close and the previews let go, so
+    // nothing left on screen can reach the Document; the status line says
+    // why. Not through log(): its hook belongs to whoever owned the
+    // Document, and may have gone with it.
+    void orphaned()
+    {
+        if (orphan) {
+            return;
+        }
+        orphan = true;
+        prompt->hide();
+        promptAccept = nullptr;
+        purgePanel->hide();
+        tabs->setEnabled(false);
+        for (QPushButton* each : dialog->findChildren<QPushButton*>()) {
+            each->setEnabled(each->objectName() == QStringLiteral("closeButton"));
+        }
+        stylePreview->clear();
+        linetypePreview->clear();
+        statusLine->setText("The drawing this dialog edited has closed: nothing here acts on "
+                            "anything any more.");
+    }
     [[nodiscard]] katana::cad::Document& document() const { return *context.document; }
     [[nodiscard]] const katana::entity::Model& model() const { return document().model(); }
 
@@ -561,9 +603,30 @@ struct StyleManagerDialog::Impl {
         return transaction;
     }
 
-    void connectGuarded(auto* sender, auto signal, auto&& slot)
+    // Every connection to a child widget but Close's goes through here. Its
+    // receiver is `guard` (see guard). And its slot runs only while the
+    // Document lives: nearly every slot reads it - a row's selection loads
+    // the form from the model, New asks the model for a free name - and the
+    // dialog may outlive it. Checking once here rather than in each slot is
+    // what keeps a slot added later from forgetting. A slot may take the
+    // signal's arguments or none; the explicit void return keeps Qt, which
+    // tries the wrapper with the signal's arguments to count them, from
+    // instantiating its body to find out.
+    void connectGuarded(auto* sender, auto signal, auto slot)
     {
-        QObject::connect(sender, signal, guard.get(), std::forward<decltype(slot)>(slot));
+        using Slot = decltype(slot);
+        QObject::connect(sender, signal, guard.get(),
+                         [this, slot = std::move(slot)](const auto&... args) -> void {
+                             if (!live()) {
+                                 return;
+                             }
+                             if constexpr (std::is_invocable_v<const Slot&,
+                                                               decltype(args)...>) {
+                                 slot(args...);
+                             } else {
+                                 slot();
+                             }
+                         });
     }
 
     // ---- selection ----------------------------------------------------------------------
@@ -657,11 +720,13 @@ struct StyleManagerDialog::Impl {
         });
     }
 
-    void selectLinetypeRow(const std::string& name, LinetypeOrigin origin)
+    void selectLinetypeRows(const std::vector<std::pair<std::string, LinetypeOrigin>>& wanted)
     {
         selectWhere<LinetypeRow>(linetypeTable, linetypeProxy, *linetypeModel,
                                  [&](const LinetypeRow& row) {
-                                     return row.name == name && row.origin == origin;
+                                     return std::ranges::find(wanted, std::make_pair(
+                                                                          row.name, row.origin)) !=
+                                            wanted.end();
                                  });
     }
 
@@ -683,12 +748,15 @@ struct StyleManagerDialog::Impl {
     {
         const std::vector<std::string> styles =
             selectStylesAfterReload.value_or(selectedStyleNames());
-        std::optional<std::pair<std::string, LinetypeOrigin>> linetype =
-            selectLinetypeAfterReload;
-        if (!linetype) {
-            const auto rows = selectedLinetypeRows();
-            if (rows.size() == 1) {
-                linetype = std::make_pair(rows.front()->name, rows.front()->origin);
+        // Every selected row, by name and source, as the Styles tab keeps its
+        // own: a merge or delete being gathered is not dropped because
+        // something elsewhere changed the drawing.
+        std::vector<std::pair<std::string, LinetypeOrigin>> linetypes;
+        if (selectLinetypeAfterReload) {
+            linetypes.push_back(*selectLinetypeAfterReload);
+        } else {
+            for (const LinetypeRow* row : selectedLinetypeRows()) {
+                linetypes.emplace_back(row->name, row->origin);
             }
         }
         std::vector<std::pair<katana::cad::StyleDiagnosticKind, std::string>> diagnostics;
@@ -725,9 +793,7 @@ struct StyleManagerDialog::Impl {
             }
         }
         selectStyleNames(styles);
-        if (linetype) {
-            selectLinetypeRow(linetype->first, linetype->second);
-        }
+        selectLinetypeRows(linetypes);
         if (!diagnostics.empty()) {
             QItemSelection selection;
             for (std::size_t i = 0; i < diagnosticModel->rows().size(); ++i) {
@@ -820,14 +886,33 @@ struct StyleManagerDialog::Impl {
     void fillGroups()
     {
         const QString was = groupBox->currentData().toString();
-        const QSignalBlocker quiet(groupBox);
-        groupBox->clear();
-        groupBox->addItem(QStringLiteral("All groups"), QString());
-        for (const std::string& group : katana::entity::styleGroups(document().styleLibrary())) {
-            groupBox->addItem(fromName(group), fromName(group));
+        {
+            const QSignalBlocker quiet(groupBox);
+            groupBox->clear();
+            groupBox->addItem(QStringLiteral("All groups"), QString());
+            for (const std::string& group :
+                 katana::entity::styleGroups(document().styleLibrary())) {
+                groupBox->addItem(fromName(group), fromName(group));
+            }
+            const int row = groupBox->findData(was);
+            groupBox->setCurrentIndex(row >= 0 ? row : 0);
         }
-        const int row = groupBox->findData(was);
-        groupBox->setCurrentIndex(row >= 0 ? row : 0);
+        // Refilled with its signals blocked, the combo's fall back to All
+        // groups - when a library replaced the group it showed - goes
+        // unheard: told here, or the table stays filtered by a group the
+        // combo no longer shows, often down to nothing.
+        if (groupBox->currentData().toString() != was) {
+            refilterLinetypes();
+        }
+    }
+
+    // The Linetypes tab's filter, from what its chips, search box and group
+    // combo show.
+    void refilterLinetypes()
+    {
+        linetypeProxy->setFilter(static_cast<LinetypeChip>(linetypeFilter->chip()),
+                                 toName(linetypeFilter->text()),
+                                 toName(groupBox->currentData().toString()));
     }
 
     void fillHatches()
@@ -884,6 +969,9 @@ struct StyleManagerDialog::Impl {
 
     void loadStyleForm()
     {
+        if (!live()) {
+            return;
+        }
         formStyles = selectedStyleNames();
         edited = {};
         const std::vector<Style> styles = stylesNamed(formStyles);
@@ -1009,6 +1097,9 @@ struct StyleManagerDialog::Impl {
 
     void loadLinetypeForm()
     {
+        if (!live()) {
+            return;
+        }
         patternEdited = false;
         descriptionEdited = false;
         patternFor.clear();
@@ -1158,14 +1249,26 @@ struct StyleManagerDialog::Impl {
                 }
                 changeElement(row, static_cast<Element>(choice));
             });
-            connectGuarded(size, &QDoubleSpinBox::valueChanged, [this, row](double value) {
-                if (loading) {
-                    return;
-                }
-                double& element = workingPattern[static_cast<std::size_t>(row)];
-                element = element < 0.0 ? -value : value;
-                patternChanged();
-            });
+            connectGuarded(size, &QDoubleSpinBox::valueChanged,
+                           [this, row, kind = QPointer<QComboBox>(kind)](double value) {
+                               if (loading) {
+                                   return;
+                               }
+                               // The sign comes from the kind the row's combo
+                               // shows, never from the length stored: typing
+                               // 0.25 over a gap's 0.5 passes through "0",
+                               // stored for that moment as -0.0, which is not
+                               // below zero and so says nothing of the gap
+                               // the row still is.
+                               double& element = workingPattern[static_cast<std::size_t>(row)];
+                               const Element shown =
+                                   kind != nullptr ? static_cast<Element>(kind->currentIndex())
+                                                   : elementOf(element);
+                               element = shown == Element::Gap   ? -value
+                                         : shown == Element::Dot ? 0.0
+                                                                 : value;
+                               patternChanged();
+                           });
             patternGrid->setCellWidget(row, 0, kind);
             patternGrid->setCellWidget(row, 1, size);
         }
@@ -1404,11 +1507,7 @@ struct StyleManagerDialog::Impl {
 
     void updateButtons()
     {
-        if (!alive()) {
-            // Everything but Close: with no drawing there is nothing to act on.
-            for (QPushButton* each : dialog->findChildren<QPushButton*>()) {
-                each->setEnabled(each->objectName() == QStringLiteral("closeButton"));
-            }
+        if (!live()) {
             return;
         }
         const std::size_t styles = selectedStyleNames().size();
@@ -1857,15 +1956,16 @@ void StyleManagerDialog::Impl::connectStyleForm()
                        loadStyleForm();
                    });
 
+    // The pickers' hooks are no Qt connections, so they ask live() here.
     linetypePicker->onNameChosen = [this](const std::string& name) {
-        if (loading) {
+        if (loading || !live()) {
             return;
         }
         edited.linetype = name;
         afterEdit();
     };
     symbolPicker->onNameChosen = [this](const std::string& name) {
-        if (loading) {
+        if (loading || !live()) {
             return;
         }
         edited.symbol = name;
@@ -2370,14 +2470,10 @@ QWidget* StyleManagerDialog::Impl::buildLinetypesPage()
 
 void StyleManagerDialog::Impl::connectLinetypePage()
 {
-    const auto refilter = [this] {
-        linetypeProxy->setFilter(static_cast<LinetypeChip>(linetypeFilter->chip()),
-                                 toName(linetypeFilter->text()),
-                                 toName(groupBox->currentData().toString()));
-    };
-    linetypeFilter->onTextChanged = [refilter](const QString&) { refilter(); };
-    linetypeFilter->onChipChanged = [refilter](int) { refilter(); };
-    connectGuarded(groupBox, &QComboBox::currentIndexChanged, [refilter](int) { refilter(); });
+    linetypeFilter->onTextChanged = [this](const QString&) { refilterLinetypes(); };
+    linetypeFilter->onChipChanged = [this](int) { refilterLinetypes(); };
+    connectGuarded(groupBox, &QComboBox::currentIndexChanged,
+                   [this](int) { refilterLinetypes(); });
     connectGuarded(linetypeTable->selectionModel(), &QItemSelectionModel::selectionChanged,
                    [this](const QItemSelection&, const QItemSelection&) {
                        if (loading) {
@@ -2766,7 +2862,9 @@ StyleManagerDialog::StyleManagerDialog(const CustomisationContext& context, QWid
     impl.connectStyleForm();
     impl.connectStyleButtons();
     impl.connectLinetypePage();
-    impl.connectGuarded(close, &QPushButton::clicked, [this] { reject(); });
+    // Close alone is not held back by a Document that has gone: it is how a
+    // person dismisses a dialog that has nothing left to edit.
+    QObject::connect(close, &QPushButton::clicked, impl.guard.get(), [this] { reject(); });
     impl.connectGuarded(impl.undoButton, &QPushButton::clicked, [&impl] {
         if (!impl.alive()) {
             return;
@@ -2842,7 +2940,7 @@ StyleManagerDialog::selectedLinetypes() const
 void StyleManagerDialog::selectLinetype(const std::string& name,
                                         katana::cad::LinetypeOrigin origin)
 {
-    impl_->selectLinetypeRow(name, origin);
+    impl_->selectLinetypeRows({{name, origin}});
 }
 
 } // namespace katana::qt

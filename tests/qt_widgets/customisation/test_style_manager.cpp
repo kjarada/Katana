@@ -6,7 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <QCheckBox>
@@ -27,6 +29,7 @@
 #include "customisation/row_table_model.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/style_library.hpp"
 #include "katana/entity/tables.hpp"
 #include "style_manager.hpp"
 #include "widget_harness.hpp"
@@ -481,18 +484,44 @@ TEST_F(Manager, DiagnosticsListTheUndefinedNamesAndSelectTheirUsers)
     EXPECT_EQ(document.selection().ids(), std::vector<katana::entity::EntityId>{kerbPoint});
 }
 
-TEST_F(Manager, TheDialogMayOutliveItsDocumentAndThenDoesNothing)
+TEST_F(Manager, TheDialogMayOutliveItsDocumentAndThenNeitherReadsNorChangesIt)
 {
-    auto doomed = std::make_unique<Document>();
+    // The dialog's Document dies and a stranger is built in the very same
+    // storage. A dialog still reading through its pointer would read the
+    // stranger - well defined, since the stranger transparently replaces the
+    // first ([basic.life]) - so a read shows up as the stranger's data on the
+    // form, rather than as a crash that may or may not happen.
+    std::optional<Document> slot(std::in_place);
+    const auto createProbe = [&slot](const char* description) {
+        Style probe = style("Probe", "continuous");
+        probe.description = description;
+        ASSERT_TRUE(slot->execute(katana::commands::createStyle(probe)).ok());
+    };
+    createProbe("first");
     CustomisationContext own = context;
-    own.document = doomed.get();
+    own.document = &*slot;
     StyleManagerDialog dialog(own);
-    doomed.reset();
+    slot.reset();
+    slot.emplace();
+    createProbe("stranger");
     katana::qt::test::processEvents();
-    // Pressing Undo on a dead Document must neither crash nor act.
-    auto* undo = child<QPushButton>(dialog, "undoButton");
-    undo->click();
-    SUCCEED();
+    const std::size_t strangerSteps = slot->history().undoCount();
+
+    // Selecting the row, as a click does, loads no form from it...
+    dialog.selectStyles({"Probe"});
+    EXPECT_EQ(child<QLineEdit>(dialog, "styleDescription")->text().toStdString(), "");
+    // ...and from then on every control but Close is off...
+    EXPECT_FALSE(child<QWidget>(dialog, "managerTabs")->isEnabled());
+    EXPECT_FALSE(child<QPushButton>(dialog, "undoButton")->isEnabled());
+    EXPECT_FALSE(child<QPushButton>(dialog, "redoButton")->isEnabled());
+    EXPECT_TRUE(child<QPushButton>(dialog, "closeButton")->isEnabled());
+    // ...and a handler reached all the same acts on nothing: New asks for no
+    // name, Undo undoes nothing.
+    Q_EMIT child<QPushButton>(dialog, "styleNew")->clicked();
+    EXPECT_TRUE(child<QWidget>(dialog, "promptPanel")->isHidden());
+    Q_EMIT child<QPushButton>(dialog, "undoButton")->clicked();
+    EXPECT_EQ(slot->history().undoCount(), strangerSteps);
+    EXPECT_EQ(slot->model().styles.find("Probe")->description, "stranger");
 }
 
 TEST_F(Manager, TheChipsAndTheSearchFilterTheStylesAndTheChipsCountThem)
@@ -627,4 +656,83 @@ TEST_F(Manager, ChangingAnElementToADotInTheGridDisablesItsLengthAndSavesADot)
     ASSERT_EQ(pattern.size(), 2U);
     EXPECT_EQ(pattern[0].length, 0.0);
     EXPECT_EQ(pattern[1].length, -0.5);
+}
+
+TEST_F(Manager, AGapLengthTypedThroughZeroOnTheWayIsStillSavedAsAGap)
+{
+    StyleManagerDialog dialog(context);
+    dialog.selectLinetype("DASHED", LinetypeOrigin::Drawing);
+    auto* gap = child<QDoubleSpinBox>(dialog, "patternLength1");
+    ASSERT_NE(gap, nullptr);
+    // As a person types 0.25 over the 0.5 shown: every keystroke is a value,
+    // and the first, "0", is a length of nothing on the way to 0.25.
+    gap->selectAll();
+    typeText(gap, "0.25");
+    ASSERT_EQ(gap->value(), 0.25) << "the typing reached the box";
+    EXPECT_EQ(child<QComboBox>(dialog, "patternKind1")->currentText(), "Gap");
+    const QString status = child<QLabel>(dialog, "patternStatus")->text();
+    EXPECT_TRUE(status.startsWith("Valid")) << status.toStdString();
+
+    const std::size_t stepsBefore = steps();
+    click(dialog, "linetypeSave");
+    katana::qt::test::processEvents();
+    EXPECT_EQ(steps(), stepsBefore + 1);
+    // {1, -0.5} with the gap row's length typed as 0.25: {1, -0.25}, the row
+    // still the gap its combo says it is.
+    const auto& pattern = document.model().linetypes.find("DASHED")->pattern;
+    ASSERT_EQ(pattern.size(), 2U);
+    EXPECT_EQ(pattern[0].length, 1.0);
+    EXPECT_EQ(pattern[1].length, -0.25);
+}
+
+TEST_F(Manager, AGroupFilterWhoseGroupAReplacedLibraryDropsFiltersNothingAnyMore)
+{
+    katana::entity::StyleLibrary roads = testLibrary();
+    katana::entity::LineStyle kerb = *roads.find("TEST Dashed Kerb");
+    kerb.group = "Roads";
+    ASSERT_TRUE(katana::entity::addOrReplace(roads, kerb).ok());
+    document.setStyleLibrary(std::move(roads));
+    StyleManagerDialog dialog(context);
+    auto* group = child<QComboBox>(dialog, "linetypeGroup");
+    auto* table = child<QTableView>(dialog, "linetypeTable");
+    group->setCurrentIndex(group->findText("Roads"));
+    ASSERT_EQ(table->model()->rowCount(), 1) << "TEST Dashed Kerb alone";
+
+    // A customisation Replace elsewhere: the library no longer has "Roads".
+    document.setStyleLibrary(testLibrary());
+    katana::qt::test::processEvents();
+    EXPECT_EQ(group->currentText(), "All groups");
+    // What the combo says is what filters: every linetype again. By hand:
+    // continuous and DASHED from the drawing, TEST Dashed Kerb from the
+    // library (TEST Manhole is drawn at vertices: a symbol, not a linetype).
+    EXPECT_EQ(table->model()->rowCount(), 3);
+}
+
+TEST_F(Manager, SeveralSelectedLinetypesStaySelectedThroughAReloadCausedElsewhere)
+{
+    katana::entity::Linetype hidden;
+    hidden.name = "HIDDEN";
+    hidden.pattern = {{0.5}, {-0.25}};
+    must(katana::commands::createLinetype(hidden));
+    StyleManagerDialog dialog(context);
+    auto* table = child<QTableView>(dialog, "linetypeTable");
+    // DASHED clicked, then HIDDEN ctrl-clicked.
+    dialog.selectLinetype("DASHED", LinetypeOrigin::Drawing);
+    for (int row = 0; row < table->model()->rowCount(); ++row) {
+        const QModelIndex index = table->model()->index(row, 0);
+        if (index.data(katana::qt::kSortRole).toString() == "HIDDEN") {
+            table->selectionModel()->select(index, QItemSelectionModel::Select |
+                                                       QItemSelectionModel::Rows);
+        }
+    }
+    const std::vector<std::pair<std::string, LinetypeOrigin>> both{
+        {"DASHED", LinetypeOrigin::Drawing}, {"HIDDEN", LinetypeOrigin::Drawing}};
+    ASSERT_EQ(dialog.selectedLinetypes(), both);
+    ASSERT_TRUE(child<QPushButton>(dialog, "linetypeMerge")->isEnabled());
+
+    // Only the current style changes, elsewhere; the dialog reloads for it.
+    ASSERT_TRUE(document.setCurrentStyle("Kerb").ok());
+    katana::qt::test::processEvents();
+    EXPECT_EQ(dialog.selectedLinetypes(), both);
+    EXPECT_TRUE(child<QPushButton>(dialog, "linetypeMerge")->isEnabled());
 }
