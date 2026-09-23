@@ -104,6 +104,11 @@ Result<ImportResult> parseDelimitedPoints(std::string_view bytes, const Delimite
     // explicitly unknown, is the truth. The unit is the caller's statement.
     project.units.linear = options.unit;
     project.metadata.emplace("text encoding", katana::core::toString(decoded->encoding));
+    // format.hpp wants the parser version on every import, so a file that reads
+    // differently after an upgrade can be told apart. SourceRecord::formatVersion
+    // already holds the variant - this file's layout, as data_model.hpp defines
+    // that field - so the version of the code goes here.
+    project.metadata.emplace("parser version", descriptor.parserVersion);
 
     const bool idColumn = hasRole(layout, ColumnRole::PointId);
     std::map<std::string, std::size_t, std::less<>> lineOfId;

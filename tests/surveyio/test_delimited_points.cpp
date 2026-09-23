@@ -318,6 +318,11 @@ TEST(DelimitedPointsImport, APointFileReadsIntoTheModelWithItsProvenance)
     EXPECT_EQ(second.source.manufacturer, "Generic");
     EXPECT_EQ(project.source.fileName, "site survey.csv");
     EXPECT_EQ(project.source.recordNumber, 0u);
+    // formatVersion holds the layout, so the version of the code that read the
+    // file - which format.hpp requires an import to record - is in metadata.
+    // "1.0" is the version delimited_points.hpp states for this parser.
+    ASSERT_TRUE(project.metadata.contains("parser version"));
+    EXPECT_EQ(project.metadata.at("parser version"), "1.0");
 
     // Transforms nothing, declares nothing it was not told (PLAN.MD 45.2).
     EXPECT_TRUE(project.coordinateSystem.unknown);
