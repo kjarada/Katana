@@ -21,19 +21,26 @@
 // as start (x1, yb), end (x2, yb) - so it measures |x2 - x1| - with yb the
 // level of whichever origin is FARTHER from the dimension line. That choice
 // decides the extension lines, because the model draws both from its start
-// and end towards the dimension line:
+// and end towards the dimension line, each starting DIMEXO (extensionOffset)
+// clear of its point:
 //
-//   * the farther origin's extension line is exactly AutoCAD's;
-//   * the nearer origin's starts at the farther one's level, so it runs
-//     THROUGH its origin and on past it, away from the dimension line, by the
-//     difference in the two levels.
+//   * the farther origin's extension line is exactly AutoCAD's, with the
+//     origin in the DIMEXO gap at its foot;
+//   * the nearer origin's starts DIMEXO beyond the farther one's level. When
+//     the two levels differ by more than DIMEXO it runs THROUGH its origin
+//     and on past it, away from the dimension line, by the difference less
+//     DIMEXO; when they differ by less, it starts beyond its origin, which
+//     sits in a gap of DIMEXO less the difference - a smaller gap than the
+//     farther origin's.
 //
-// Every origin therefore lies on its own extension line, which is how a
-// reader sees what was measured; projecting onto the nearer level instead
-// would leave the farther origin short of its line, pointing at nothing. The
-// one placement the model cannot draw at all is a dimension line BETWEEN the
-// two levels, whose extension lines would have to leave in opposite
-// directions: that is refused with a sentence rather than drawn wrongly.
+// Every origin therefore lies on the line of its own extension line, either
+// on the stroke or in the gap at its foot, which is how a reader sees what
+// was measured; projecting onto the nearer level instead would leave the
+// farther origin short of its line by the whole difference and DIMEXO,
+// pointing at nothing. The one placement the model cannot draw at all is a
+// dimension line BETWEEN the two levels, whose extension lines would have to
+// leave in opposite directions: that is refused with a sentence rather than
+// drawn wrongly.
 //
 // Radius, diameter and angular dimensions are not here: see annotate.cpp.
 
@@ -374,6 +381,11 @@ class DimensionTool final : public InteractiveTool {
 
     [[nodiscard]] Result<DimensionGeometry> placeLinear(const Point2& location) const
     {
+        // Whether each orientation measures anything: level origins have no
+        // vertical distance, one above the other no horizontal one.
+        const bool measuresAcross = std::abs(second_.x - first_.x) > tol::kGeometric;
+        const bool measuresUp = std::abs(second_.y - first_.y) > tol::kGeometric;
+
         Orientation orientation = Orientation::Horizontal;
         if (state_.orientation) {
             orientation = *state_.orientation;
@@ -394,15 +406,27 @@ class DimensionTool final : public InteractiveTool {
                                  "below or beside them, or type H or V");
             }
             orientation = outY >= outX ? Orientation::Horizontal : Orientation::Vertical;
+            // Off the corner of a level pair - past the end of a horizontal
+            // edge, the commonest thing dimensioned - "farther out" can pick
+            // the orientation that measures nothing although the line is
+            // also above or below the pair. Unless the user forced one, the
+            // orientation that does measure wins wherever the line is
+            // outside the origins on its side; with neither, the refusal
+            // below says why.
+            if (orientation == Orientation::Vertical && !measuresUp && measuresAcross &&
+                outY > 0.0) {
+                orientation = Orientation::Horizontal;
+            } else if (orientation == Orientation::Horizontal && !measuresAcross && measuresUp &&
+                       outX > 0.0) {
+                orientation = Orientation::Vertical;
+            }
         }
         const bool horizontal = orientation == Orientation::Horizontal;
 
-        // `across` is the coordinate the dimension line is placed at, `along`
-        // the one it measures.
+        // `across` is the coordinate the dimension line is placed at.
         const auto across = [&](const Point2& p) { return horizontal ? p.y : p.x; };
-        const auto along = [&](const Point2& p) { return horizontal ? p.x : p.y; };
 
-        if (!(std::abs(along(second_) - along(first_)) > tol::kGeometric)) {
+        if (!(horizontal ? measuresAcross : measuresUp)) {
             return makeError(ErrorCode::InvalidArgument,
                              horizontal ? "the two origins are one above the other, so a "
                                           "horizontal dimension would measure nothing; place the "
