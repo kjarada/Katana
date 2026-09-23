@@ -488,13 +488,52 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_merge_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
 
+    # A file named twice in one CUSTOMISE is read once, as katana_cli reads it
+    # (cad::distinctCustomisationFiles): the second naming is the same file
+    # by another spelling. By hand: the mapfile REPLACES the map, read once,
+    # so the map holds its 11 rules (the fixture's head comment); read twice
+    # it held 22.
+    add_test(NAME qt_a_file_named_twice_in_one_load_is_read_once_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE REPLACE ${_fixture}/test_survey.mapfile ${_fixture}/../customisation/test_survey.mapfile"
+            "-DEXPECT=test_survey\\.mapfile is named twice in this load; it is read once\\..*Customisation now: [0-9,]+ definitions \\([0-9,]+ symbols\\) and 11 survey code rules"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_named_twice_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+    # A typed SAVE that cannot save - an untitled drawing, no directory given
+    # - leaves a drawing nobody touched unmodified, so a NEW after it asks
+    # nothing and goes ahead. Writing the record before the failed save
+    # marked it modified.
+    add_test(NAME qt_a_save_that_cannot_go_ahead_leaves_the_drawing_unmodified_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SAVE|>NEW"
+            "-DEXPECT=the drawing has not been saved to a project yet.*new drawing"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/failed_save_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A headless run has nobody to answer "save the changes first?": a NEW
+    # after an edit is refused and said, and the edit stays - LIST still
+    # counts the one line - rather than waiting on a box no one can see.
+    add_test(NAME qt_a_headless_new_after_an_edit_is_refused_rather_than_asked_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE 0,0 10,0|>NEW|>LIST"
+            "-DEXPECT=Unsaved Changes: the drawing has unsaved changes.*1 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless_new_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
     # The project records its customisation (ProjectMetadata::customisation):
     # the site plan saved with the symbol fixture loaded, then opened by a
     # second run that never loads it, which must say which file is missing -
     # a warning in the log, the project opened all the same.
     set(_recorded "${CMAKE_CURRENT_BINARY_DIR}/customisation_recorded.katana")
+    set(_resaved "${CMAKE_CURRENT_BINARY_DIR}/customisation_resaved.katana")
     add_test(NAME qt_customisation_recorded_cleanup
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}")
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}" "${_resaved}")
     add_test(NAME qt_a_project_records_its_customisation_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -511,12 +550,25 @@ if(TARGET katana)
             "-DEXPECT=opened .*Warning: this project was drawn with customisation files that are not loaded: \"test_symbols\\.4d\""
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_missing_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Saved where the file is missing, the project still records it: the
+    # open warns, the save (to a copy, so the test above reads its own
+    # project) writes the record, and opening the copy warns again. By hand:
+    # this run never loads test_symbols.4d, so nothing it does can judge it.
+    add_test(NAME qt_saving_where_a_file_is_missing_keeps_it_recorded_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>OPEN ${_recorded}|>SAVE ${_resaved}|>NEW|>OPEN ${_resaved}"
+            "-DEXPECT=not loaded: \"test_symbols\\.4d\".*saved to .*new drawing.*opened .*not loaded: \"test_symbols\\.4d\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_resaved_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_customisation_recorded_cleanup PROPERTIES
         FIXTURES_SETUP qt_recorded_clean)
     set_tests_properties(qt_a_project_records_its_customisation_headless PROPERTIES
         FIXTURES_REQUIRED qt_recorded_clean FIXTURES_SETUP qt_recorded)
-    set_tests_properties(qt_opening_names_the_customisation_not_loaded_headless PROPERTIES
-        FIXTURES_REQUIRED qt_recorded)
+    set_tests_properties(qt_opening_names_the_customisation_not_loaded_headless
+                         qt_saving_where_a_file_is_missing_keeps_it_recorded_headless
+        PROPERTIES FIXTURES_REQUIRED qt_recorded)
 
     # The current style (decision D9) and the Properties panel's Style row,
     # driven through their widgets. By hand: Kerb made current, a line is
@@ -537,6 +589,10 @@ if(TARGET katana)
                          qt_a_project_records_its_customisation_headless
                          qt_opening_names_the_customisation_not_loaded_headless
                          qt_current_style_and_the_style_row_headless
+                         qt_a_file_named_twice_in_one_load_is_read_once_headless
+                         qt_a_save_that_cannot_go_ahead_leaves_the_drawing_unmodified_headless
+                         qt_a_headless_new_after_an_edit_is_refused_rather_than_asked_headless
+                         qt_saving_where_a_file_is_missing_keeps_it_recorded_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

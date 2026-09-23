@@ -336,6 +336,10 @@ class MainWindow final : public QMainWindow {
     // The 12d customisation files loaded this session, in load order: what a
     // save records in the project (cad/customisation_record.hpp).
     std::vector<katana::cad::CustomisationSource> customisation_;
+    // The files the last open found the project recorded but not loaded, less
+    // those loaded since: a save keeps them in the record, since this session
+    // cannot judge a file it never had.
+    std::vector<std::string> customisationMissingAtOpen_;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
     QAction* gridAction_ = nullptr;

@@ -1313,6 +1313,15 @@ bool MainWindow::confirmDiscard()
     if (!document_.isModified()) {
         return true;
     }
+    // A headless run has nobody to answer the box, which would wait for ever
+    // (a scripted NEW after an edit hung to the test's timeout). Refused and
+    // said, never discarded unasked: the script can SAVE or UNDO first.
+    if (headless_) {
+        logMessage("Unsaved Changes: the drawing has unsaved changes, and a headless run has "
+                   "nobody to ask whether to discard them; SAVE or UNDO first.",
+                   true);
+        return false;
+    }
     const auto choice = QMessageBox::warning(
         this, "Unsaved Changes", "The drawing has unsaved changes. Save them first?",
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
@@ -1626,8 +1635,13 @@ void MainWindow::runCommandLine()
     if (replacesDocument && !confirmDiscard()) {
         return;
     }
-    if (verb == "SAVE") {
-        recordCustomisation(); // as File > Save does
+    // As File > Save does - but only for a SAVE that has somewhere to go:
+    // writing the record marks the drawing modified, and an untitled SAVE
+    // with no directory fails, which left a drawing nobody touched asking to
+    // be saved.
+    if (verb == "SAVE" &&
+        katana::cad::typedSaveHasDestination(line.toStdString(), document_.hasProject())) {
+        recordCustomisation();
     }
     const auto reply = interpreter_.run(line.toStdString());
     if (!reply) {
@@ -1978,8 +1992,9 @@ void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
 void MainWindow::recordCustomisation()
 {
     katana::storage::ProjectMetadata metadata = document_.metadata();
-    metadata.customisation = katana::cad::customisationRecord(document_.styleLibrary(),
-                                                              customisation_);
+    metadata.customisation = katana::cad::customisationRecordToSave(
+        metadata.customisation, customisationMissingAtOpen_, document_.styleLibrary(),
+        customisation_);
     document_.setMetadata(std::move(metadata));
 }
 
@@ -1987,6 +2002,8 @@ void MainWindow::reportMissingCustomisation()
 {
     const std::vector<std::string> missing = katana::cad::customisationNotLoaded(
         document_.metadata().customisation, document_.styleLibrary(), customisation_);
+    // Kept until loaded: saving this drawing must not forget them.
+    customisationMissingAtOpen_ = missing;
     if (missing.empty()) {
         return;
     }
@@ -2048,7 +2065,13 @@ void MainWindow::applySurveyCodes()
 void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& paths,
                                     katana::archive12d::LoadMode mode)
 {
-    auto loaded = katana::archive12d::readCustomisation(paths);
+    // Each file once, by the command line's rule: read twice, every rule of
+    // a file named twice would sit in the map twice.
+    const katana::cad::DistinctFiles distinct = katana::cad::distinctCustomisationFiles(paths);
+    for (const std::filesystem::path& repeat : distinct.repeats) {
+        logMessage(fromPath(repeat) + " is named twice in this load; it is read once.");
+    }
+    auto loaded = katana::archive12d::readCustomisation(distinct.files);
     if (!loaded) {
         warnUser("Customisation failed", QString::fromStdString(loaded.error().describe()));
         return;
@@ -2095,9 +2118,11 @@ void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& pa
     // map.
     document_.setStyleLibrary(std::move(merged.library));
     document_.setSurveyMap(std::move(merged.map));
-    katana::cad::recordCustomisationLoad(customisation_, sourcesOf(*loaded),
+    const std::vector<katana::cad::CustomisationSource> sources = sourcesOf(*loaded);
+    katana::cad::recordCustomisationLoad(customisation_, sources,
                                          replace && merged.libraryLoaded,
                                          replace && merged.mapLoaded);
+    katana::cad::noteCustomisationLoaded(customisationMissingAtOpen_, sources);
     logMessage("Customisation now: " + grouped(document_.styleLibrary().size()) + " definitions (" +
                grouped(katana::entity::vertexStyleNames(document_.styleLibrary()).size()) +
                " symbols) and " + grouped(document_.surveyMap().size()) +
