@@ -317,9 +317,10 @@ struct DelimitedImportOptions {
 // each ending one; a record whose quoted field spans lines is numbered by the
 // line it starts on. Only the file NAME of `fileName` is kept (45.2). Every
 // point carries a SourceRecord whose formatVersion is the layout template it was
-// read with, so an import can be repeated exactly. The project's coordinate
-// system is unknown, its units are options.unit, and it passes
-// survey::validateProject.
+// read with, so an import can be repeated exactly; the project's metadata holds
+// "parser version" (delimitedPointsFormat().parserVersion) and "text encoding"
+// (the encoding the bytes were decoded as). The project's coordinate system is
+// unknown, its units are options.unit, and it passes survey::validateProject.
 [[nodiscard]] katana::core::Result<ImportResult>
 parseDelimitedPoints(std::string_view bytes, const DelimitedLayout& layout,
                      std::string_view fileName, const DelimitedImportOptions& options);
