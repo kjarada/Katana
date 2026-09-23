@@ -180,10 +180,15 @@ class ViewWorkspace final : public QMainWindow {
     // Enter while a tool runs. False, and nothing done, when no tool runs:
     // the line is then a command.
     bool typeIntoTool(const QString& text);
-    // Legacy, while the window's toolbar names the first eight tools by the
-    // enum: Select stops every plan view's tool, the others startTool.
-    void setTool(Tool tool);
-    [[nodiscard]] Tool tool() const { return tool_; }
+    // Select: stops the tool running in any plan view, as Esc stops it (a
+    // Line chain keeps its finished segments), so the view selects again.
+    void stopTool();
+    // Enter pressed on an empty command line is Enter pressed in the
+    // drawing, as in AutoCAD: it goes to the plan view running a tool (ends
+    // a polyline, takes a prompt's default), or with none running to the
+    // active plan view, which starts the last tool again. False when no plan
+    // view is open.
+    bool pressEnter();
 
     // ---- settings every plan view shares -------------------------------------
     void setGridVisible(bool visible);
@@ -241,12 +246,16 @@ class ViewWorkspace final : public QMainWindow {
     std::function<void(const katana::geometry::Point2&,
                        const std::optional<katana::cad::SnapResult>&)>
         onCursorMoved;
-    std::function<void(Tool)> onToolChanged;
     // A tool started (its catalogue id) or ended ("") in any plan view.
     std::function<void(const std::string& toolId)> onActiveToolChanged;
     // What a running tool reports that is not an error ("3 lines", a
     // measurement). Unset, it goes to onStatus, so it is never lost.
     std::function<void(const QString&)> onToolMessage;
+    // Printable text typed into a plan view with no tool running ("type
+    // anywhere": LINE typed over the drawing starts it), for the window's
+    // command line. What is typed while a tool runs is the tool's and never
+    // comes here (ViewportWidget::onTextTyped).
+    std::function<void(const QString&)> onTextTyped;
 
   private:
     struct View {
@@ -287,6 +296,7 @@ class ViewWorkspace final : public QMainWindow {
     void updateLayersButton(const View& view);
     // Forwards a plan view's tool hooks to this workspace's, and sends the
     // view's Enter-repeat (onRepeatTool) through startTool as view `id`.
+    // Its typed text too (onTextTyped).
     void wireTools(ViewportWidget& plan, katana::cad::ViewId id);
 
     katana::cad::Document& document_;
@@ -302,7 +312,6 @@ class ViewWorkspace final : public QMainWindow {
     const std::vector<katana::cad::SceneMesh>* meshes_ = nullptr;
     katana::cad::SceneOptions options_{};
 
-    Tool tool_ = Tool::Select;
     // The last tool started in any plan view, which Enter at no prompt in any
     // of them repeats; "" until one has run.
     std::string lastToolId_;

@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <QMainWindow>
+#include <QStringList>
 
 #include <filesystem>
 #include <memory>
@@ -28,7 +29,9 @@
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
+#include "customisation/customisation_workbench.hpp"
 #include "survey/survey_workbench.hpp"
+#include "tools/tool_menus.hpp"
 #include "view_workspace.hpp"
 
 class QAction;
@@ -112,9 +115,10 @@ class MainWindow final : public QMainWindow {
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
 
-    // The styles and linetypes manager, built but not shown. The menu shows
-    // it modally; the headless --style-manager switch grabs it instead, so
-    // that the dialog is built and painted by a test.
+    // A styles and linetypes manager of its own, built but not shown, from
+    // the Format menu's context (CustomisationWorkbench). For the headless
+    // --style-manager switch, which grabs it; Format > Styles and Linetypes
+    // shows the workbench's one, non-modally.
     [[nodiscard]] std::unique_ptr<StyleManagerDialog> makeStyleManager();
     // The attribute manager, built but not shown - as makeStyleManager.
     [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
@@ -139,8 +143,18 @@ class MainWindow final : public QMainWindow {
     void selectOnly(katana::entity::EntityId id);
     // Runs `line` as if it were typed on the command line and Enter pressed.
     // For the headless --command switch, so a test can set up a drawing -
-    // styles, entities, a selection - through the verbs a person types.
+    // styles, entities, a selection - through the verbs a person types. An
+    // empty line is Enter on an empty command line: the running tool's
+    // Enter, or the last tool again.
     void runCommand(const QString& line);
+
+    // Every key sequence the window's actions and menus answer to that two
+    // of them share, one line each ("Ctrl+L: Layers..., Line"); empty when
+    // each is unique. Qt disables an ambiguous shortcut for BOTH actions, so
+    // a clash is two keys that silently do nothing. `sequences`, when given,
+    // is set to how many distinct sequences there are. For the headless
+    // --check-shortcuts switch.
+    [[nodiscard]] QStringList shortcutClashes(int* sequences = nullptr) const;
 
   protected:
     void closeEvent(QCloseEvent* event) override;
@@ -152,10 +166,19 @@ class MainWindow final : public QMainWindow {
     // The GIS menu and toolbar: GDAL vector and raster, PDAL point clouds.
     // `exportAction` is File's Export Vector, shared so the two menus cannot
     // drift.
-    void buildGisActions(QAction* exportAction);
+    void buildGisActions(QMenu& gisMenu, QAction* exportAction);
     // The Survey menu and toolbar; the workbench fills both (PLAN.MD 45).
-    void buildSurveyActions(QAction* customiseAction, QAction* replaceCustomisationAction,
-                            QAction* codeAction);
+    void buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
+                            QAction* replaceCustomisationAction, QAction* codeAction);
+    // The Format menu and toolbar; the customisation workbench fills both.
+    void buildFormatActions(QMenu& formatMenu, QAction* layersAction, QAction* customiseAction,
+                            QAction* replaceCustomisationAction);
+    // Draw, Modify and Annotate, menus and toolbars, generated from the tool
+    // catalogue (tools/tool_menus.hpp), with Select heading the Draw toolbar.
+    void buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu);
+    // Starts catalogue tool `id` in the active plan view and gives that view
+    // the keyboard, or says why it cannot.
+    void startTool(const std::string& id);
     void buildViewMenu(QMenu* viewMenu);
     // `name`, when given, becomes the action's object name: what --action and
     // QMainWindow::saveState know it by.
@@ -281,6 +304,10 @@ class MainWindow final : public QMainWindow {
     bool saveDocumentAs();
 
     void runCommandLine();
+    // The part of the command line that is the CommandInterpreter's, for a
+    // line no tool and no view verb took; `verb` is its first word, upper
+    // case.
+    void runInterpreterLine(const QString& line, const QString& verb);
     void logMessage(const QString& text, bool isError = false);
     void addLayer();
     void addChildLayer();
@@ -303,6 +330,9 @@ class MainWindow final : public QMainWindow {
     // below and every view (dock_chrome.hpp). Owned by this window.
     DockChrome* chrome_ = nullptr;
     std::unique_ptr<SurveyWorkbench> survey_;
+    // The Format menu's managers and what they share. Declared after the
+    // Document, so it - and the dialogs it deletes - go first.
+    std::unique_ptr<CustomisationWorkbench> format_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
@@ -344,7 +374,10 @@ class MainWindow final : public QMainWindow {
     QAction* redoAction_ = nullptr;
     QAction* gridAction_ = nullptr;
     QAction* snapAction_ = nullptr;
-    QActionGroup* toolGroup_ = nullptr;
+    // The catalogue's tools, one action each, by id; and Select, checked
+    // while no tool runs.
+    tools::ToolActions toolActions_;
+    QAction* selectAction_ = nullptr;
     QMenu* viewMenu_ = nullptr;
     // The four panels, by the fixed object names a saved layout keys them on:
     // LayersDock, PropertiesDock, CommandLineDock, ReferenceDataDock.

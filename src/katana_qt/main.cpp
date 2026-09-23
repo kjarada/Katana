@@ -1,4 +1,5 @@
 #include <QAbstractButton>
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -8,8 +9,11 @@
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QSpinBox>
+#include <QTextDocumentFragment>
+#include <QTextEdit>
 #include <QToolBar>
 
 #include <cstdio>
@@ -26,23 +30,73 @@
 
 namespace {
 
-// --survey-dialog: the dialog NAME's action opens, found by the object name
-// the workbench gives it (the action's plus "Dialog"). nullptr, said on
-// stderr, for an unknown action or one that opens no dialog.
-QDialog* openSurveyDialog(katana::qt::MainWindow& window, const QString& name)
+// --dialog (and --survey-dialog, its first name): the dialog action NAME
+// opens, triggered as a click does. The dialog is found by the object name
+// the action carries as its data - how the Format menu's managers name theirs
+// (CustomisationWorkbench) - or else the action's own plus "Dialog", as the
+// Survey workbench names them. What opened is said on stderr, which is where
+// a test reads it. nullptr, said, for an unknown action or one that opens no
+// dialog.
+QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 {
     if (const auto status = window.triggerAction(name); !status) {
-        std::fprintf(stderr, "--survey-dialog %s failed: %s\n", qPrintable(name),
+        std::fprintf(stderr, "--dialog %s failed: %s\n", qPrintable(name),
                      status.error().describe().c_str());
         return nullptr;
     }
     QApplication::processEvents();
-    auto* dialog = window.findChild<QDialog*>(name + "Dialog");
+    const auto* action = window.findChild<QAction*>(name);
+    const QString named = action != nullptr && !action->data().toString().isEmpty()
+                              ? action->data().toString()
+                              : name + "Dialog";
+    auto* dialog = window.findChild<QDialog*>(named);
     if (dialog == nullptr) {
-        std::fprintf(stderr, "--survey-dialog: %s opened no dialog named %sDialog\n",
-                     qPrintable(name), qPrintable(name));
+        std::fprintf(stderr, "--dialog: %s opened no dialog named %s\n", qPrintable(name),
+                     qPrintable(named));
+        return nullptr;
     }
+    std::fprintf(stderr, "--dialog %s opened %s \"%s\"%s\n", qPrintable(name), qPrintable(named),
+                 qPrintable(dialog->windowTitle()), dialog->isModal() ? " (modal)" : "");
     return dialog;
+}
+
+// --report NAME: what the widget NAME in the current target shows, on
+// stderr as "NAME: text", so a test can see what a dialog SAYS - an
+// explanation, a count - and not only that it painted. A label's text
+// without its markup, a field's or a text box's text, a list's or a tree's
+// rows (their columns joined by " | ", the rows by " ; "). False, said, for
+// a widget the target does not have.
+bool reportWidget(const QWidget& target, const QString& name)
+{
+    const auto* widget = target.findChild<QWidget*>(name);
+    QString text;
+    if (const auto* label = qobject_cast<const QLabel*>(widget)) {
+        text = QTextDocumentFragment::fromHtml(label->text()).toPlainText();
+    } else if (const auto* line = qobject_cast<const QLineEdit*>(widget)) {
+        text = line->text();
+    } else if (const auto* box = qobject_cast<const QPlainTextEdit*>(widget)) {
+        text = box->toPlainText();
+    } else if (const auto* rich = qobject_cast<const QTextEdit*>(widget)) {
+        text = rich->toPlainText();
+    } else if (const auto* view = qobject_cast<const QAbstractItemView*>(widget);
+               view != nullptr && view->model() != nullptr) {
+        const QAbstractItemModel& model = *view->model();
+        QStringList rows;
+        for (int row = 0; row < model.rowCount(); ++row) {
+            QStringList cells;
+            for (int column = 0; column < model.columnCount(); ++column) {
+                cells << model.index(row, column).data().toString();
+            }
+            rows << cells.join(" | ");
+        }
+        text = rows.join(" ; ");
+    } else {
+        std::fprintf(stderr, "--report: there is no label, field, text or list %s\n",
+                     qPrintable(name));
+        return false;
+    }
+    std::fprintf(stderr, "%s: %s\n", qPrintable(name), qPrintable(text.simplified()));
+    return true;
 }
 
 // --survey-dock ACTION: the action that shows a survey dock is triggered
@@ -122,6 +176,21 @@ bool fillField(QWidget& dialog, const QString& assignment)
         check->setChecked(text == "on");
         return true;
     }
+    // A list, a grid or a tree: the row whose text is TEXT made current and
+    // selected, as a click on it does (the symbol library's grid).
+    if (auto* view = qobject_cast<QAbstractItemView*>(widget);
+        view != nullptr && view->model() != nullptr) {
+        const QModelIndexList found = view->model()->match(
+            view->model()->index(0, 0), Qt::DisplayRole, text, 1,
+            Qt::MatchExactly | Qt::MatchCaseSensitive | Qt::MatchRecursive);
+        if (found.isEmpty()) {
+            std::fprintf(stderr, "--fill: %s lists no '%s'\n", qPrintable(name), qPrintable(text));
+            return false;
+        }
+        view->selectionModel()->setCurrentIndex(found.front(),
+                                                QItemSelectionModel::ClearAndSelect);
+        return true;
+    }
     std::fprintf(stderr, "--fill: the dialog has no field %s that takes '%s'\n",
                  qPrintable(name), qPrintable(text));
     return false;
@@ -143,9 +212,10 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] --dataset-info FILE --screenshot out.png
 //   katana [project-directory] --import-options FILE --screenshot out.png
 //   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
-//                 --survey-dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
-//                 [--survey-dialog NAME ...] [--survey-dock ACTION ...]
-//                 --screenshot out.png
+//                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
+//                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
+//                 [--command TEXT...] [--enter] --screenshot out.png
+//   katana --check-shortcuts --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -188,9 +258,10 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // All does, before the actions run - for a command that acts on the selection
 // (surveyArea).
 //
-// --survey-dialog opens a Survey menu dialog THROUGH ITS ACTION (surveyInverse,
-// surveyTraverse, ...), as a click does, and grabs that dialog instead of the
-// window. --fill types TEXT into the dialog's field with object name FIELD - a
+// --dialog opens a dialog THROUGH ITS ACTION (surveyInverse, surveyTraverse,
+// formatStyles, formatSymbols, formatSurveyCodes, ...), as a click does, says
+// on stderr what opened, and grabs that dialog instead of the window.
+// --survey-dialog is its first name and does the same. --fill types TEXT into the dialog's field with object name FIELD - a
 // line, a text box (where "\n" is a line break, so a field book fits on a
 // command line), a choice by its item text, or a check box by on/off - and
 // --press clicks the button with object name BUTTON. Fills and presses run in
@@ -208,7 +279,13 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // (PropertiesDock, PropertiesToolBar) what the fills and presses after it go
 // to, and what --screenshot grabs. --command TEXT runs TEXT as if typed on the
 // command line, wherever it comes among the steps, so a test can make the
-// styles, entities and selection a panel then acts on.
+// styles, entities and selection a panel then acts on - or start a tool by
+// its alias and answer its prompts; --enter is Enter on an empty command
+// line. --report WIDGET prints what the target's WIDGET shows (reportWidget).
+//
+// --check-shortcuts lists every key sequence two of the window's actions or
+// menus share, and fails the run when there is one: Qt disables an
+// ambiguous shortcut for both, so a clash is keys that silently do nothing.
 //
 // --survey-dialog may be given again: the next dialog opens and the fills and
 // presses after it go to it, so one run can import a file and export it again.
@@ -245,8 +322,10 @@ int main(int argc, char* argv[])
     std::optional<QString> datasetInfo;
     std::optional<QString> importOptions;
     bool selectEverything = false;
-    // --survey-dialog, --survey-dock, --fill and --press, in the order given.
+    // --dialog, --survey-dock, --fill, --press, --panel, --command, --enter
+    // and --report, in the order given.
     std::vector<std::pair<QString, QString>> surveySteps;
+    bool checkShortcuts = false;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -281,10 +360,17 @@ int main(int argc, char* argv[])
             importOptions = value();
         } else if (argument == "--select-all") {
             selectEverything = true;
-        } else if (argument == "--survey-dialog" || argument == "--survey-dock" ||
-                   argument == "--fill" || argument == "--press" || argument == "--panel" ||
-                   argument == "--command") {
+        } else if (argument == "--survey-dialog" || argument == "--dialog") {
+            surveySteps.emplace_back("--dialog", value());
+        } else if (argument == "--survey-dock" || argument == "--fill" || argument == "--press" ||
+                   argument == "--panel" || argument == "--command" || argument == "--report") {
             surveySteps.emplace_back(argument, value());
+        } else if (argument == "--enter") {
+            // Enter on an empty command line, a step of its own: an empty
+            // --command cannot come through a CMake list.
+            surveySteps.emplace_back("--command", QString());
+        } else if (argument == "--check-shortcuts") {
+            checkShortcuts = true;
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -360,6 +446,18 @@ int main(int argc, char* argv[])
         window.show();
         QApplication::processEvents();
         QApplication::processEvents();
+        if (checkShortcuts) {
+            int sequences = 0;
+            const QStringList clashes = window.shortcutClashes(&sequences);
+            for (const QString& clash : clashes) {
+                std::fprintf(stderr, "shortcut clash: %s\n", qPrintable(clash));
+            }
+            if (!clashes.isEmpty()) {
+                return 1;
+            }
+            std::fprintf(stderr, "shortcuts: %d key sequences, each reaching one thing\n",
+                         sequences);
+        }
         if (selectEverything) {
             window.selectAll();
         }
@@ -387,10 +485,16 @@ int main(int argc, char* argv[])
                 }
                 if (kind == "--panel") {
                     auto* panel = window.findChild<QWidget*>(text);
-                    if (panel == nullptr ||
-                        (qobject_cast<QDockWidget*>(panel) == nullptr &&
-                         qobject_cast<QToolBar*>(panel) == nullptr)) {
-                        std::fprintf(stderr, "--panel: the window has no dock or toolbar %s\n",
+                    // A menu is opened under its title, as a click on the
+                    // menu bar opens it, so a grab shows what it offers.
+                    if (auto* menu = qobject_cast<QMenu*>(panel)) {
+                        menu->popup(window.mapToGlobal(QPoint(0, 0)));
+                        QApplication::processEvents();
+                        QApplication::processEvents();
+                    } else if (panel == nullptr || (qobject_cast<QDockWidget*>(panel) == nullptr &&
+                                                    qobject_cast<QToolBar*>(panel) == nullptr)) {
+                        std::fprintf(stderr,
+                                     "--panel: the window has no dock, toolbar or menu %s\n",
                                      qPrintable(text));
                         return 1;
                     }
@@ -398,10 +502,10 @@ int main(int argc, char* argv[])
                     targetName = text;
                     continue;
                 }
-                if (kind == "--survey-dialog" || kind == "--survey-dock") {
+                if (kind == "--dialog" || kind == "--survey-dock") {
                     QWidget* opened = nullptr;
-                    if (kind == "--survey-dialog") {
-                        opened = openSurveyDialog(window, text);
+                    if (kind == "--dialog") {
+                        opened = openDialog(window, text);
                     } else if (QDockWidget* dock = openSurveyDock(window, text)) {
                         docks.push_back(dock);
                         opened = dock;
@@ -414,9 +518,15 @@ int main(int argc, char* argv[])
                     continue;
                 }
                 if (target == nullptr) {
-                    std::fprintf(stderr, "%s %s comes before any --survey-dialog\n",
-                                 qPrintable(kind), qPrintable(text));
+                    std::fprintf(stderr, "%s %s comes before any --dialog\n", qPrintable(kind),
+                                 qPrintable(text));
                     return 1;
+                }
+                if (kind == "--report") {
+                    if (!reportWidget(*target, text)) {
+                        return 1;
+                    }
+                    continue;
                 }
                 if (kind == "--fill") {
                     if (!fillField(*target, text)) {
