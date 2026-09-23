@@ -391,6 +391,9 @@ TEST(Linework, ALonePointMakesNoLineAndIsReported)
     EXPECT_EQ(planned->report.unplaced[0].reason, UnplacedReason::LonePoint);
     EXPECT_EQ(planned->report.unplaced[0].pointNumber, "7");
     EXPECT_EQ(planned->report.unplaced[0].code, "WM03");
+    // WM* names model SURVEY SERVICES, which the drawing lacks - but no line
+    // goes on it, so no command creates it, and the report must not say one does.
+    EXPECT_TRUE(planned->report.layersCreated.empty());
 }
 
 TEST(Linework, PointCodesAreLeftAloneAndEachIsReportedWithWhy)

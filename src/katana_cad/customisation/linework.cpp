@@ -90,6 +90,7 @@ struct Candidate {
     Point2 at{};
     std::optional<double> height{};
     std::string number{};
+    std::string codeText{}; // the code as the point carries it
     FieldCode code{};
     std::string layer{};
 };
@@ -401,6 +402,148 @@ class StyleLinesCommand final : public cmd::Command {
     return codePropertyCandidates().front();
 }
 
+// The point as a candidate for a line: where it is, how high, its number.
+[[nodiscard]] Candidate candidateOf(const Entity& entity, const std::string& numberProperty)
+{
+    Candidate candidate;
+    candidate.id = entity.id;
+    candidate.at = std::get<katana::entity::PointGeometry>(entity.geometry).position;
+    candidate.height = katana::entity::heightsOf(entity.properties, 1).front();
+    candidate.number = pointNumberOf(entity, numberProperty);
+    candidate.layer = entity.layer;
+    return candidate;
+}
+
+// Every point in the drawing by its number. Several under one number are kept
+// as several, so that a caller can refuse to guess between them.
+[[nodiscard]] std::map<std::string, std::vector<const Entity*>>
+pointsByNumber(const katana::entity::Model& model, const std::string& numberProperty)
+{
+    std::map<std::string, std::vector<const Entity*>> byNumber;
+    model.entities.forEach([&](const Entity& entity) {
+        if (std::holds_alternative<katana::entity::PointGeometry>(entity.geometry)) {
+            const std::string number = pointNumberOf(entity, numberProperty);
+            if (!number.empty()) {
+                byNumber[number].push_back(&entity);
+            }
+        }
+    });
+    return byNumber;
+}
+
+// What joining coded points and drawing survey features share: the layer a
+// line goes on, the line itself and its entry in the report, and the ONE
+// command that builds them all.
+class LineBuilder {
+  public:
+    LineBuilder(const Document& document, std::string property, bool createLayers,
+                LineworkReport& report)
+        : document_(document), property_(std::move(property)), createLayers_(createLayers),
+          report_(report)
+    {
+    }
+
+    // 12d's model is Katana's layer. With none - or one that is missing and
+    // may not be created - the line stays with its points, on `fallback`.
+    // Deciding is not creating: a layer is created only if a line goes on it.
+    [[nodiscard]] katana::core::Result<std::string>
+    layerFor(const katana::entity::SurveyMatch& match, const std::string& code,
+             const std::string& fallback) const
+    {
+        const std::string& model = match.resolved.model;
+        if (model.empty()) {
+            return fallback;
+        }
+        if (auto status = katana::entity::validateLayerPath(model); !status) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the survey map gives a code a model that is not a valid layer name",
+                             "code=" + code + " model=" + model + " " + status.error().context);
+        }
+        if (!document_.model().layers.contains(model) && !createLayers_) {
+            return fallback;
+        }
+        return model;
+    }
+
+    // `code` is what the line carries in the code property, so that
+    // applySurveyCodes - now, and whenever it is applied again - codes the
+    // line as its points were coded.
+    void emit(LineworkString built, const std::string& code, const Shape& shape,
+              const std::vector<const Candidate*>& members)
+    {
+        Entity entity;
+        entity.geometry = katana::geometry::Polyline2{shape.vertices, shape.closed};
+        entity.layer = built.layer;
+        entity.properties.insert_or_assign(property_, PropertyValue(code));
+        katana::entity::setHeights(entity.properties, shape.heights);
+        lines_.push_back(std::move(entity));
+        if (!document_.model().layers.contains(built.layer)) {
+            layersNeeded_.insert(built.layer);
+        }
+
+        built.closed = shape.closed;
+        built.rectangle = shape.rectangle;
+        built.curves = shape.curves;
+        built.vertices = shape.vertices.size();
+        for (const Candidate* member : members) {
+            built.points.push_back(member->id);
+            built.pointNumbers.push_back(member->number);
+            placed_.insert(member->id);
+        }
+        report_.strings.push_back(std::move(built));
+    }
+
+    [[nodiscard]] const std::set<EntityId>& placed() const { return placed_; }
+
+    // Layers, lines, their styling and the removal of `remove`, as one
+    // command; nullptr when no line was built.
+    [[nodiscard]] cmd::CommandPtr finish(std::string name, SurveyCodingOptions coding,
+                                         std::vector<EntityId> remove)
+    {
+        // A point a line reached is in a line, whatever its own run made of
+        // it: a lone point, or a point code, that a join reached.
+        std::erase_if(report_.unplaced,
+                      [&](const UnplacedPoint& point) { return placed_.contains(point.id); });
+        std::stable_sort(report_.unplaced.begin(), report_.unplaced.end(),
+                         [](const UnplacedPoint& a, const UnplacedPoint& b) { return a.id < b.id; });
+        if (lines_.empty()) {
+            return {};
+        }
+        report_.layersCreated.assign(layersNeeded_.begin(), layersNeeded_.end());
+
+        auto transaction = std::make_unique<cmd::Transaction>(std::move(name));
+        for (const std::string& layerName : report_.layersCreated) {
+            katana::entity::Layer layer;
+            layer.name = layerName;
+            transaction->add(cmd::createLayer(std::move(layer)));
+        }
+        cmd::CommandPtr create = cmd::createEntities(std::move(lines_));
+        const cmd::Command& created = *create;
+        transaction->add(std::move(create));
+
+        auto styling = std::make_shared<SurveyCodingReport>();
+        report_.styling = styling;
+        coding.property = property_;
+        transaction->add(std::make_unique<StyleLinesCommand>(document_, created,
+                                                             std::move(coding), std::move(styling)));
+
+        report_.pointsRemoved = remove.size();
+        if (!remove.empty()) {
+            transaction->add(cmd::deleteEntities(std::move(remove)));
+        }
+        return transaction;
+    }
+
+  private:
+    const Document& document_;
+    std::string property_;
+    bool createLayers_ = true;
+    LineworkReport& report_;
+    std::vector<Entity> lines_{};
+    std::set<EntityId> placed_{};
+    std::set<std::string> layersNeeded_{};
+};
+
 } // namespace
 
 // ---- string names ------------------------------------------------------------------
@@ -655,18 +798,13 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
     std::map<std::string, std::vector<Candidate>> strings; // by name
     for (const Entity* entity : points) {
         ++report.considered;
-        Candidate candidate;
-        candidate.id = entity->id;
-        candidate.at = std::get<katana::entity::PointGeometry>(entity->geometry).position;
-        candidate.height = katana::entity::heightsOf(entity->properties, 1).front();
-        candidate.number = pointNumberOf(*entity, options.pointNumberProperty);
-        candidate.layer = entity->layer;
-
+        Candidate candidate = candidateOf(*entity, options.pointNumberProperty);
         const std::string* code = codeOf(*entity, property);
-        candidate.code = code != nullptr ? parseFieldCode(*code, options.codes) : FieldCode{};
-        const std::string codeText = code != nullptr ? *code : std::string{};
+        candidate.codeText = code != nullptr ? *code : std::string{};
+        candidate.code = parseFieldCode(candidate.codeText, options.codes);
         auto unplace = [&](UnplacedReason reason) {
-            report.unplaced.push_back(UnplacedPoint{entity->id, candidate.number, codeText, reason});
+            report.unplaced.push_back(
+                UnplacedPoint{entity->id, candidate.number, candidate.codeText, reason});
         };
         if (candidate.code.name.empty()) {
             unplace(UnplacedReason::NoCode);
@@ -695,28 +833,17 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
 
     // Every point in the drawing by number, for joins: a join may reach a
     // point outside the selection, because the code says so.
-    std::map<std::string, std::vector<const Entity*>> byNumber;
     const bool anyJoin = std::any_of(strings.begin(), strings.end(), [](const auto& entry) {
         return std::any_of(entry.second.begin(), entry.second.end(),
                            [](const Candidate& c) { return !c.code.joinTo.empty(); });
     });
-    if (anyJoin) {
-        model.entities.forEach([&](const Entity& entity) {
-            if (std::holds_alternative<katana::entity::PointGeometry>(entity.geometry)) {
-                const std::string number = pointNumberOf(entity, options.pointNumberProperty);
-                if (!number.empty()) {
-                    byNumber[number].push_back(&entity);
-                }
-            }
-        });
-    }
+    const auto byNumber = anyJoin ? pointsByNumber(model, options.pointNumberProperty)
+                                  : std::map<std::string, std::vector<const Entity*>>{};
 
-    std::vector<Entity> lines;
-    std::set<EntityId> placed;
-    std::set<std::string> layersNeeded;
-    // Points whose runs made no line, with why. A later placing wins: a lone
-    // point that a join reached IS in a line.
-    std::map<EntityId, UnplacedPoint> lonely;
+    LineBuilder builder(document, property, options.coding.createLayers, report);
+    auto unplace = [&](const Candidate& point, UnplacedReason reason) {
+        report.unplaced.push_back(UnplacedPoint{point.id, point.number, point.codeText, reason});
+    };
 
     for (auto& [name, candidates] : strings) {
         if (options.order == LineworkOrder::PointNumber) {
@@ -739,81 +866,30 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
         } else if (split.fallbackOnly) {
             note(candidates.front(), LineworkNoteKind::FallbackOnlyName, name);
         }
-
-        // 12d's model is Katana's layer; with none, the line stays with its
-        // points.
-        std::string layer = resolve(name).resolved.model;
-        if (!layer.empty()) {
-            if (auto status = katana::entity::validateLayerPath(layer); !status) {
-                return makeError(ErrorCode::InvalidArgument,
-                                 "the survey map gives a code a model that is not a valid "
-                                 "layer name",
-                                 "code=" + name + " model=" + layer + " " +
-                                     status.error().context);
-            }
-            if (!model.layers.contains(layer)) {
-                if (options.coding.createLayers) {
-                    layersNeeded.insert(layer);
-                } else {
-                    layer.clear();
-                }
-            }
+        auto layer = builder.layerFor(resolve(name), name, candidates.front().layer);
+        if (!layer) {
+            return layer.error();
         }
-        if (layer.empty()) {
-            layer = candidates.front().layer;
-        }
-
-        auto emit = [&](const Shape& shape, const std::vector<const Candidate*>& members,
-                        bool join) {
-            Entity entity;
-            entity.geometry = katana::geometry::Polyline2{shape.vertices, shape.closed};
-            entity.layer = layer;
-            // The line carries the name, so applySurveyCodes - now, and any
-            // time it is applied again - codes it as its points were coded.
-            entity.properties.insert_or_assign(property, PropertyValue(name));
-            katana::entity::setHeights(entity.properties, shape.heights);
-            lines.push_back(std::move(entity));
-
-            LineworkString built;
-            built.name = name;
-            built.key = split.key;
-            built.number = split.number;
-            built.closed = shape.closed;
-            built.rectangle = shape.rectangle;
-            built.join = join;
-            built.curves = shape.curves;
-            built.vertices = shape.vertices.size();
-            built.layer = layer;
-            for (const Candidate* member : members) {
-                built.points.push_back(member->id);
-                built.pointNumbers.push_back(member->number);
-                placed.insert(member->id);
-                lonely.erase(member->id);
-            }
-            report.strings.push_back(std::move(built));
-        };
+        LineworkString header;
+        header.name = name;
+        header.key = split.key;
+        header.number = split.number;
+        header.layer = *layer;
 
         for (const Run& run : runsOf(candidates)) {
             if (run.points.size() < 2) {
-                const Candidate& only = *run.points.front();
-                if (!placed.contains(only.id)) {
-                    lonely[only.id] =
-                        UnplacedPoint{only.id, only.number, "", UnplacedReason::LonePoint};
-                }
+                unplace(*run.points.front(), UnplacedReason::LonePoint);
                 continue;
             }
             const Shape shape = shapeOf(run, options.chordTolerance, note);
-            const katana::geometry::Polyline2 polyline{shape.vertices, shape.closed};
-            if (!(polyline.length() > tol::kGeometric)) {
+            if (!(katana::geometry::Polyline2{shape.vertices, shape.closed}.length() >
+                  tol::kGeometric)) {
                 for (const Candidate* member : run.points) {
-                    if (!placed.contains(member->id)) {
-                        lonely[member->id] = UnplacedPoint{member->id, member->number, "",
-                                                           UnplacedReason::Coincident};
-                    }
+                    unplace(*member, UnplacedReason::Coincident);
                 }
                 continue;
             }
-            emit(shape, run.points, false);
+            builder.emit(header, name, shape, run.points);
         }
 
         for (const Candidate& from : candidates) {
@@ -826,12 +902,8 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
                 note(from, LineworkNoteKind::JoinTargetMissing, from.code.joinTo);
                 continue;
             }
-            const Entity& target = *targets->second.front();
-            Candidate to;
-            to.id = target.id;
-            to.at = std::get<katana::entity::PointGeometry>(target.geometry).position;
-            to.height = katana::entity::heightsOf(target.properties, 1).front();
-            to.number = from.code.joinTo;
+            const Candidate to =
+                candidateOf(*targets->second.front(), options.pointNumberProperty);
             if (!(from.at.distanceTo(to.at) > tol::kGeometric)) {
                 note(from, LineworkNoteKind::JoinTargetMissing,
                      from.code.joinTo + " is in the same place");
@@ -840,61 +912,24 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
             Shape shape;
             shape.add(from.at, from.height);
             shape.add(to.at, to.height);
-            emit(shape, {&from, &to}, true);
+            LineworkString joined = header;
+            joined.join = true;
+            builder.emit(std::move(joined), name, shape, {&from, &to});
         }
     }
 
-    // The code each lonely point carried, for the report.
-    for (auto& [id, entry] : lonely) {
-        const Entity* entity = model.entities.find(id);
-        const std::string* code = entity != nullptr ? codeOf(*entity, property) : nullptr;
-        entry.code = code != nullptr ? *code : std::string{};
-        report.unplaced.push_back(std::move(entry));
-    }
-    // A point code that a join reached is at the end of a line after all.
-    std::erase_if(report.unplaced,
-                  [&](const UnplacedPoint& point) { return placed.contains(point.id); });
-    std::stable_sort(report.unplaced.begin(), report.unplaced.end(),
-                     [](const UnplacedPoint& a, const UnplacedPoint& b) { return a.id < b.id; });
-    report.layersCreated.assign(layersNeeded.begin(), layersNeeded.end());
-
-    if (lines.empty()) {
-        return result; // nothing to build, and no error
-    }
-
-    auto transaction = std::make_unique<cmd::Transaction>("PROCESS_LINEWORK");
-    for (const std::string& name : report.layersCreated) {
-        katana::entity::Layer layer;
-        layer.name = name;
-        transaction->add(cmd::createLayer(std::move(layer)));
-    }
-    cmd::CommandPtr create = cmd::createEntities(std::move(lines));
-    const cmd::Command& created = *create;
-    transaction->add(std::move(create));
-
-    auto styling = std::make_shared<SurveyCodingReport>();
-    report.styling = styling;
-    SurveyCodingOptions coding = options.coding;
-    coding.property = property;
-    transaction->add(std::make_unique<StyleLinesCommand>(document, created, std::move(coding),
-                                                         std::move(styling)));
-
+    std::vector<EntityId> remove;
     if (!options.keepPoints) {
         // Only what was asked about: a join may reach a point outside the
         // selection, and that point is not this command's to delete.
-        std::vector<EntityId> remove;
-        for (const EntityId id : placed) {
+        for (const EntityId id : builder.placed()) {
             if (std::binary_search(subject.begin(), subject.end(), id)) {
                 remove.push_back(id);
             }
         }
-        report.pointsRemoved = remove.size();
-        if (!remove.empty()) {
-            transaction->add(cmd::deleteEntities(std::move(remove)));
-        }
     }
-
-    result.command = std::move(transaction);
+    // nullptr when there is nothing to build, and no error.
+    result.command = builder.finish("PROCESS_LINEWORK", options.coding, std::move(remove));
     return result;
 }
 
