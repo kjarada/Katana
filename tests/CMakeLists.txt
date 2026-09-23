@@ -667,6 +667,19 @@ if(TARGET katana)
             "-DEXPECT=Purge Unused: purged 1 style, 0 linetypes and 0 hatch patterns \\(one Undo restores them\\)\\. Styles: Spare\\.[\r\n]+! [^\r\n]*Spare[^\r\n]*[\r\n]+1 undone[\r\n]+style Spare: unused"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/purge_unused_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Format > Layers opens the Layers dialog BESIDE the drawing, not modal
+    # (the opening line would end "(modal)"), and it follows the drawing: a
+    # layer made on the command line while it is open appears in its table
+    # after the one reload the DocumentWatcher makes. By hand: a new drawing
+    # has the one layer "0"; LAYER NEW survey adds "survey", after it by name.
+    add_test(NAME qt_format_layers_opens_beside_the_drawing_and_follows_it_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatLayers|?layerTable|>LAYER NEW survey|?layerTable"
+            "-DEXPECT=--dialog formatLayers opened formatLayersDialog \"Layers\"[\r\n]+layerTable: 0 \\|[^;\r\n]*[\r\n].*layerTable: 0 \\|[^;\r\n]* ; survey \\|"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_layers_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A tool started by its alias on the command line and answered there: by
     # hand, LINE, 0,0 and 10,0, then Enter - one segment, so ONE line, which
     # the tool reports ("1 line") before starting again for the next chain;
@@ -724,6 +737,7 @@ if(TARGET katana)
                          qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
                          qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
                          qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
+                         qt_format_layers_opens_beside_the_drawing_and_follows_it_headless
                          qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
                          qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
                          qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
