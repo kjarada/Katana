@@ -16,6 +16,7 @@
 #include <optional>
 
 #include <QPoint>
+#include <QSize>
 #include <QWidget>
 
 #include "katana/cad/section.hpp"
@@ -115,8 +116,14 @@ class SectionViewWidget final : public QWidget {
     double originStation_ = 0.0;  // station at the left edge of the plot area
     double originElevation_ = 0.0; // elevation at the bottom edge
     // False until the section has been framed once at a real size. The first
-    // paint frames it; a resize after that keeps what the user was looking at.
+    // paint frames it. After that a resize frames it again at the new size
+    // until the user pans or zooms (userMoved_), and from then on keeps their
+    // scale and the middle of what they were looking at.
     bool framed_ = false;
+    bool userMoved_ = false;
+    // The size the last resize left this widget at, which a resize delivered
+    // with no old size (one made while the widget was hidden) measures from.
+    QSize lastSize_;
     mutable std::size_t lastDrawnCrossings_ = 0;
     mutable std::size_t lastHiddenCrossings_ = 0;
 
