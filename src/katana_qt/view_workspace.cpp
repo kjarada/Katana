@@ -146,15 +146,17 @@ const ViewWorkspace::View* ViewWorkspace::find(ViewId id) const
     return nullptr;
 }
 
-void ViewWorkspace::buildContent(View& view, ViewState& state)
+void ViewWorkspace::stopToolIn(const View& view)
 {
-    // A tool running in a plan view that is about to be deleted is stopped
-    // first, as Esc stops it: deleted with its widget it would never report
-    // that it ended, and the menu and toolbar would go on showing it
-    // checked with nothing running.
     if (view.plan != nullptr && view.plan->toolActive()) {
         view.plan->setTool(Tool::Select);
     }
+}
+
+void ViewWorkspace::buildContent(View& view, ViewState& state)
+{
+    // The plan view about to be deleted says its tool ended while it still can.
+    stopToolIn(view);
     QWidget* old = view.widget();
     view.plan = nullptr;
     view.render = nullptr;
@@ -529,6 +531,14 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
 
 Status ViewWorkspace::closeView(ViewId id)
 {
+    // Before the dock - and the plan view in it - is deleted: a tool left
+    // running there would never report its end, so the window would keep
+    // its action checked and its prompt in the command line. Stopped before
+    // the view is looked up for erasing, so nothing the window does on
+    // hearing the tool end can leave that iterator stale.
+    if (const View* closing = find(id)) {
+        stopToolIn(*closing);
+    }
     const auto at = std::ranges::find_if(docks_, [&](const View& view) { return view.id == id; });
     if (at == docks_.end()) {
         return makeError(ErrorCode::NotFound, "no such view", std::to_string(id));
