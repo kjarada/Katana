@@ -461,6 +461,74 @@ TEST_F(CommandLayers, LayersInUseAndTheDefaultLayerCannotBeDeleted)
     EXPECT_TRUE(deleteLayer("Busy")->isDestructive());
 }
 
+TEST_F(CommandLayers, DeletingABranchIsAsDestructiveAsDeletingALeaf)
+{
+    // Audit MOD-08: the confirmation gate (command.hpp) asked before DELETE_LAYER
+    // of one empty leaf and not before a whole branch.
+    EXPECT_TRUE(deleteLayerTree("design")->isDestructive());
+    EXPECT_FALSE(createLayer(Layer{"design"})->isDestructive());
+    EXPECT_FALSE(renameLayer("design", "plan")->isDestructive()) << "nothing is lost";
+}
+
+TEST_F(CommandLayers, ALayerCommandsValidateRefusesExactlyWhatItsExecuteWould)
+{
+    // Audit MOD-09: a caller that validates first was told these were fine,
+    // and execute() then refused them. Each refusal below is the table's own
+    // (LayerDatabase::checkAdd / checkUpdate / checkRemove), so validate()
+    // and execute() give the SAME error code.
+    // execute() called directly, not through the stack, which validates
+    // first and would report validate()'s answer twice.
+    CommandContext context{model};
+    const auto sameRefusal = [&](CommandPtr command, ErrorCode code, const char* why) {
+        const auto validated = command->validate(context);
+        ASSERT_FALSE(validated.ok()) << why;
+        EXPECT_EQ(validated.error().code, code) << why;
+        const auto executed = command->execute(context);
+        ASSERT_FALSE(executed.ok()) << why;
+        EXPECT_EQ(executed.error().code, code) << why;
+    };
+    sameRefusal(createLayer(Layer{"a//b"}), ErrorCode::InvalidArgument, "an empty level");
+    sameRefusal(createLayer(Layer{"a/ b"}), ErrorCode::InvalidArgument, "a leading blank");
+    Layer heavy{"heavy"};
+    heavy.lineWeight = -0.25;
+    sameRefusal(createLayer(heavy), ErrorCode::InvalidArgument, "a negative weight");
+    sameRefusal(createLayer(Layer{"0"}), ErrorCode::AlreadyExists, "the default layer");
+
+    // A weight made negative by an update, and a layer with a nested one.
+    ASSERT_TRUE(stack.execute(createLayer(Layer{"design/surface"})).ok());
+    Layer design = *model.layers.find("design");
+    design.lineWeight = -1.0;
+    sameRefusal(updateLayer(design), ErrorCode::InvalidArgument, "a negative weight");
+    sameRefusal(deleteLayer("design"), ErrorCode::InvalidArgument, "nested layers");
+    // The branch itself can go, as the refusal says.
+    ASSERT_TRUE(deleteLayerTree("design")->validate(context).ok());
+    EXPECT_EQ(model.layers.names(), std::vector<std::string>({"0", "design", "design/surface"}))
+        << "no refusal changed anything";
+}
+
+TEST_F(CommandLayers, ALayerNameOrReferenceThatIsNotUtf8IsRefusedBeforeItReachesTheModel)
+{
+    // Audit MOD-12: "Caf\xE9" is what LAYER NEW Café typed on a CP1252
+    // console gives - 0xE9 alone is not UTF-8 - and it was accepted, after
+    // which no entity on it could be written as JSON.
+    const std::string latin1 = "Caf\xE9";
+    EXPECT_EQ(stack.execute(createLayer(Layer{latin1})).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(stack.execute(createLayer(Layer{"survey/" + latin1})).error().code,
+              ErrorCode::InvalidArgument);
+    EXPECT_EQ(stack.execute(renameLayer("0", latin1)).error().code, ErrorCode::CommandRejected)
+        << "the default layer is refused first";
+    ASSERT_TRUE(stack.execute(createLayer(Layer{"Cafe"})).ok());
+    EXPECT_EQ(stack.execute(renameLayer("Cafe", latin1)).error().code,
+              ErrorCode::InvalidArgument);
+    // The names a layer references are held to the same rule.
+    Layer cafe = *model.layers.find("Cafe");
+    cafe.linetype = latin1;
+    EXPECT_EQ(stack.execute(updateLayer(cafe)).error().code, ErrorCode::InvalidArgument);
+    EXPECT_FALSE(model.layers.contains(latin1));
+    // UTF-8 itself is a name like any other: "Café" as two bytes, C3 A9.
+    EXPECT_TRUE(stack.execute(createLayer(Layer{"Caf\xC3\xA9"})).ok());
+}
+
 // ---- stack state ----------------------------------------------------------------------
 
 TEST_F(CommandStackState, SavePointTracksModificationThroughUndoAndRedo)
