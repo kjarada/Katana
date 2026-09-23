@@ -18,6 +18,8 @@ add_library(katana_cad STATIC
     dimension_draw.cpp
     scene.cpp
     viewport_layout.cpp
+    layer_overrides.cpp
+    view_set.cpp
 )
 katana_target_defaults(katana_cad)
 target_link_libraries(katana_cad PUBLIC katana_commands katana_storage katana_terrain katana_render katana_survey)

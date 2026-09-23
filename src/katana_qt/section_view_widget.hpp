@@ -19,12 +19,16 @@
 #include <QWidget>
 
 #include "katana/cad/section.hpp"
+#include "katana/cad/view_set.hpp"
 
 namespace katana::qt {
 
 class SectionViewWidget final : public QWidget {
   public:
-    explicit SectionViewWidget(QWidget* parent = nullptr);
+    // `state` belongs to the workspace's ViewSet and outlives this widget.
+    explicit SectionViewWidget(katana::cad::ViewState& state, QWidget* parent = nullptr);
+
+    [[nodiscard]] katana::cad::ViewState& state() const { return state_; }
 
     // Replaces what is shown. An empty section draws the "no section" message
     // rather than an empty grid, so it is obvious nothing has been cut yet.
@@ -68,6 +72,7 @@ class SectionViewWidget final : public QWidget {
     void drawCrossings(QPainter& painter) const;
     void drawLegend(QPainter& painter) const;
 
+    katana::cad::ViewState& state_;
     std::optional<katana::cad::Section> section_;
     double exaggeration_ = 10.0;
 

@@ -96,8 +96,8 @@ const char* toString(Tool tool)
     return "Unknown";
 }
 
-ViewportWidget::ViewportWidget(cad::Document& document, QWidget* parent)
-    : QWidget(parent), document_(document)
+ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, QWidget* parent)
+    : QWidget(parent), document_(document), state_(state)
 {
     setMinimumSize(480, 320);
     setMouseTracking(true);
@@ -292,6 +292,7 @@ void ViewportWidget::updateCursor(const QPointF& screen)
             request.from = points_.back();
         }
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(view_.scale) : 0.0;
+        request.view = &state_.layers;
         // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
         // Release on 100 000 entities: 4404 us per mouse move scanning,
         // 88 us indexed. The answer is identical either way - asserted by
@@ -389,8 +390,10 @@ void ViewportWidget::finishOperation(bool close)
 
 void ViewportWidget::selectAt(const QPointF& screen, Qt::KeyboardModifiers modifiers)
 {
+    cad::SelectionFilter filter;
+    filter.view = &state_.layers;
     const auto picked = cad::pickEntity(document_.model(), toWorld(screen),
-                                        view_.pixelsToWorld(kPickAperturePixels), {},
+                                        view_.pixelsToWorld(kPickAperturePixels), filter,
                                         &document_.spatialIndex());
     cad::SelectionSet& selection = document_.selection();
     if (modifiers & Qt::ControlModifier) {
@@ -420,7 +423,9 @@ void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
     // takes whatever the box touches.
     const auto mode = to.x() >= from.x() ? cad::BoxSelectionMode::Window
                                          : cad::BoxSelectionMode::Crossing;
-    const auto picked = cad::pickInBox(document_.model(), box, mode, {},
+    cad::SelectionFilter filter;
+    filter.view = &state_.layers;
+    const auto picked = cad::pickInBox(document_.model(), box, mode, filter,
                                        &document_.spatialIndex());
     cad::SelectionSet& selection = document_.selection();
     if (!(modifiers & (Qt::ShiftModifier | Qt::ControlModifier))) {
@@ -434,6 +439,9 @@ void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
 
 void ViewportWidget::mousePressEvent(QMouseEvent* event)
 {
+    if (onActivated) {
+        onActivated();
+    }
     setFocus();
     lastMouse_ = event->position();
     if (event->button() == Qt::MiddleButton) {
@@ -793,6 +801,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
     // VIEW SCALE. The scale is fixed for a frame and changes between them,
     // so the cache lives exactly one frame.
     dashCache_.clear();
+    lastDrawnEntities_ = 0;
     std::vector<katana::geometry::SpatialId> scratch;
     cad::detail::forEachCandidate(
         model, &document_.spatialIndex(), visible, scratch, [&](const Entity& entity) {
@@ -803,10 +812,11 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         // queryExtents is deliberately wider than the geometry (an arc offers
         // its centre for snapping), so this is the tighter, drawing-specific
         // filter and removing it would paint entities that are off screen.
-        if (!cad::isDrawn(layer, entity) ||
+        if (!cad::isDrawn(layer, entity, state_.layers) ||
             !katana::entity::boundingBox(entity.geometry).intersects(visible)) {
             return;
         }
+        ++lastDrawnEntities_;
         // Through the one resolution chain, so this agrees with the 3D view
         // and so that a named style can finally change how an entity looks -
         // Style::color was stored and validated and read by nothing.

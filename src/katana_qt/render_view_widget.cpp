@@ -22,10 +22,11 @@ constexpr double kZoomPerNotch = 1.15;
 
 } // namespace
 
-RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewportCell* cell,
+RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& state,
                                    QWidget* parent)
-    : QWidget(parent), context_(context), cell_(cell)
+    : QWidget(parent), context_(context), state_(state)
 {
+    context_.options.layers = &state_.layers;
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     // The whole widget is painted from the framebuffer every time, so Qt need
@@ -37,20 +38,8 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewportCel
 void RenderViewWidget::setContext(const ViewContext& context)
 {
     context_ = context;
+    context_.options.layers = &state_.layers;
     invalidateScene();
-}
-
-void RenderViewWidget::setCell(katana::cad::ViewportCell* cell)
-{
-    cell_ = cell;
-    framed_ = false;
-    invalidateScene();
-}
-
-katana::render::Camera& RenderViewWidget::camera()
-{
-    static katana::render::Camera fallback; // only reached with no cell attached
-    return cell_ != nullptr ? cell_->camera : fallback;
 }
 
 void RenderViewWidget::invalidateScene()
@@ -132,10 +121,6 @@ void RenderViewWidget::resizeEvent(QResizeEvent* event)
         return;
     }
     camera().setViewportSize(w, h);
-    if (cell_ != nullptr) {
-        cell_->pixelWidth = w;
-        cell_->pixelHeight = h;
-    }
 }
 
 void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
@@ -176,8 +161,7 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
 
     if (onStatus) {
         onStatus(QString("%1  %2 tri  %3 ms")
-                     .arg(QString::fromLatin1(katana::cad::toString(
-                         cell_ != nullptr ? cell_->kind : katana::cad::ViewKind::Model3D)))
+                     .arg(QString::fromLatin1(katana::cad::toString(state_.kind)))
                      .arg(stats_.trianglesRasterised)
                      .arg(lastFrameMs_, 0, 'f', 1));
     }
@@ -197,9 +181,7 @@ void RenderViewWidget::mousePressEvent(QMouseEvent* event)
     } else if (event->button() == Qt::LeftButton) {
         // An orthographic elevation view is a measured drawing; orbiting it
         // would quietly turn it into something you cannot scale off. Pan only.
-        drag_ = (cell_ != nullptr && cell_->kind == katana::cad::ViewKind::Elevation)
-                    ? Drag::Pan
-                    : Drag::Orbit;
+        drag_ = state_.kind == katana::cad::ViewKind::Elevation ? Drag::Pan : Drag::Orbit;
     } else {
         drag_ = Drag::None;
     }

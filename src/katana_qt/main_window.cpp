@@ -186,7 +186,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     logger_.addSink(katana::core::makeStderrSink());
 
     resize(1360, 860);
-    views_ = new ViewportContainer(document_, this);
+    views_ = new ViewWorkspace(document_, this);
     setCentralWidget(views_);
 
     buildActions();
@@ -893,6 +893,10 @@ katana::core::Status MainWindow::toggleLayerThroughPanel(const QString& layer)
 void MainWindow::refreshAll()
 {
     refreshTitle();
+    // Before the panels: a view's hidden layers that name no layer any more (a
+    // rename, a delete, a New) would otherwise hide a later layer reusing the
+    // name, and the listener cannot say which layer changed.
+    views_->pruneViewLayers();
     refreshLayers();
     refreshProperties();
     refreshReferences();
@@ -1064,7 +1068,7 @@ void MainWindow::newDocument()
         interpreter_.resetPointState();
         document_.newDocument();
         clearReferenceData();
-        views_->zoomExtents();
+        views_->zoomExtentsAll();
         logMessage("New drawing.");
     }
 }
@@ -1141,7 +1145,7 @@ void MainWindow::openProject(const QString& directory)
     views_->resetInteraction();
     interpreter_.resetPointState();
     clearReferenceData();
-    views_->zoomExtents();
+    views_->zoomExtentsAll();
     logMessage("Opened " + directory + " (" +
                QString::number(document_.model().entities.size()) + " entities).");
 }
@@ -1294,7 +1298,9 @@ void MainWindow::runCommandLine()
         };
         if (const auto tool = tools.find(verb); tool != tools.end()) {
             views_->setTool(tool->second);
-            views_->setFocus();
+            if (ViewportWidget* plan = views_->activePlanView()) {
+                plan->setFocus();
+            }
             return;
         }
     }
@@ -1312,7 +1318,7 @@ void MainWindow::runCommandLine()
     if (replacesDocument) {
         // The same as File > New and Open: the backdrop went with the drawing.
         clearReferenceData();
-        views_->zoomExtents();
+        views_->zoomExtentsAll();
     }
     historyCursor_ = static_cast<int>(interpreter_.history().size());
 }
@@ -1842,7 +1848,7 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
     if (!imported->projectionWkt.empty()) {
         logMessage("  coordinates were imported unchanged; the file declares its own CRS");
     }
-    views_->zoomExtents();
+    views_->zoomExtentsAll();
 }
 
 void MainWindow::importArchive12dFile(const std::filesystem::path& path)
@@ -1990,10 +1996,8 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
     // import that brings one opens the 3D view, exactly as a surface does.
     // Once, after the loop - not once per mesh, and a real archive brings
     // 1 453 of them.
-    if (!imported->meshes.empty() && views_->activeRenderView() == nullptr) {
-        views_->setLayoutKind(cad::LayoutKind::SplitVertical);
-        views_->layout().setActiveIndex(1);
-        views_->setActiveViewKind(cad::ViewKind::Model3D);
+    if (!imported->meshes.empty()) {
+        views_->ensureView(cad::ViewKind::Model3D);
         refreshViewMenu();
     }
     if (!imported->clouds.empty()) {
@@ -2004,7 +2008,7 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
         refreshReferences();
     }
     views_->refreshAll();
-    views_->zoomExtents();
+    views_->zoomExtentsAll();
 }
 
 void MainWindow::importRasterFile(const std::filesystem::path& path,
@@ -2036,7 +2040,7 @@ void MainWindow::importRasterFile(const std::filesystem::path& path,
                    "one model unit per pixel",
                    true);
     }
-    views_->zoomExtents();
+    views_->zoomExtentsAll();
 }
 
 void MainWindow::importPointCloudFile(const std::filesystem::path& path,
@@ -2066,7 +2070,7 @@ void MainWindow::importPointCloudFile(const std::filesystem::path& path,
         message += " sampled from " + grouped(total);
     }
     logMessage(message + ")");
-    views_->zoomExtents();
+    views_->zoomExtentsAll();
 }
 
 void MainWindow::exportVectorFile()
@@ -2222,7 +2226,7 @@ void MainWindow::refreshReferences()
             if (auto* target = reference_.findRaster(id)) {
                 static constexpr double kValues[] = {1.0, 0.75, 0.5, 0.25};
                 target->opacity = kValues[std::clamp(chosen, 0, 3)];
-                views_->update();
+                views_->repaintViews();
             }
         });
         referenceTable_->setCellWidget(row, kRefDisplay, opacity);
@@ -2273,7 +2277,7 @@ void MainWindow::onReferenceCellChanged(int row, int column)
     } else if (auto* cloud = reference_.findPointCloud(id)) {
         cloud->visible = visible;
     }
-    views_->update();
+    views_->repaintViews();
 }
 
 void MainWindow::removeSelectedReference()
@@ -2687,10 +2691,9 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
           cad::LayoutKind::SplitHorizontal, cad::LayoutKind::ThreeLeft, cad::LayoutKind::ThreeTop,
           cad::LayoutKind::Quad}) {
         QAction* action = layoutMenu->addAction(cad::toString(kind));
-        action->setCheckable(true);
         action->setData(static_cast<int>(kind));
         connect(action, &QAction::triggered, this, [this, kind] {
-            views_->setLayoutKind(kind);
+            views_->arrange(kind);
             refreshViewMenu();
         });
         layoutActions_.push_back(action);
@@ -2703,7 +2706,9 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         action->setCheckable(true);
         action->setData(static_cast<int>(kind));
         connect(action, &QAction::triggered, this, [this, kind] {
-            views_->setActiveViewKind(kind);
+            if (auto status = views_->setViewKind(views_->viewSet().activeId(), kind); !status) {
+                logMessage(QString::fromStdString(status.error().describe()), true);
+            }
             refreshViewMenu();
         });
         kindActions_.push_back(action);
@@ -2730,7 +2735,7 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
             return;
         }
         const bool wasPerspective =
-            renderView->cell()->camera.projection() == render::Projection::Perspective;
+            renderView->camera().projection() == render::Projection::Perspective;
         renderView->setProjection(wasPerspective ? render::Projection::Orthographic
                                                  : render::Projection::Perspective);
         logMessage(wasPerspective ? "Orthographic projection." : "Perspective projection.");
@@ -2741,9 +2746,6 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
 
 void MainWindow::refreshViewMenu()
 {
-    for (QAction* action : layoutActions_) {
-        action->setChecked(action->data().toInt() == static_cast<int>(views_->layoutKind()));
-    }
     for (QAction* action : kindActions_) {
         action->setChecked(action->data().toInt() == static_cast<int>(views_->activeViewKind()));
     }
@@ -2821,12 +2823,8 @@ void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surfac
                    .arg(item.surface->maxElevation(), 0, 'f', 3));
 
     // Show it. A surface the user cannot see is not obviously a success.
-    if (views_->activeRenderView() == nullptr) {
-        views_->setLayoutKind(cad::LayoutKind::SplitVertical);
-        views_->layout().setActiveIndex(1);
-        views_->setActiveViewKind(cad::ViewKind::Model3D);
-        refreshViewMenu();
-    }
+    views_->ensureView(cad::ViewKind::Model3D);
+    refreshViewMenu();
     if (RenderViewWidget* renderView = views_->activeRenderView()) {
         renderView->invalidateScene();
         renderView->zoomExtents();
@@ -2955,7 +2953,9 @@ void MainWindow::buildSurfaceFromDrawing()
     document_.model().entities.forEach([&](const Entity& entity) {
         // What the drawing SHOWS is what is triangulated: a layer switched off
         // is left out, as it is out of every view (audit REN-04).
-        if (!katana::cad::isDrawn(document_.model(), entity)) {
+        // The document rule, not the active view's: a surface is shared by
+        // every view and must not depend on which one was clicked last.
+        if (!katana::cad::isDrawn(document_.model(), entity, katana::cad::kNoLayerOverrides)) {
             return;
         }
         const bool carriesHeights =

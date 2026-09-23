@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/render/camera.hpp"
@@ -119,6 +120,11 @@ struct SceneOptions {
     // cannot ask for a million lines.
     double gridSpacing = 10.0;
     int gridLines = 40;
+
+    // Layers hidden in the view being built for; null for the document rule
+    // alone. A POINTER into that view's state, which outlives the build, so a
+    // copy of the options made for one view never carries another's hides.
+    const LayerOverrides* layers = nullptr;
 };
 
 // Builds draw lists. Held across frames so its buffers are reused rather than

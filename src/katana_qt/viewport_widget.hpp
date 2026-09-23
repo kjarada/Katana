@@ -28,6 +28,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/cad/style_drawing.hpp"
+#include "katana/cad/view_set.hpp"
 #include "katana/cad/view_transform.hpp"
 #include "katana/interop/reference_data.hpp"
 
@@ -54,7 +55,19 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] katana::core::Status plotToPdf(const QString& path,
                                                  const katana::cad::PlotSettings& settings);
 
-    explicit ViewportWidget(katana::cad::Document& document, QWidget* parent = nullptr);
+    // `state` belongs to the workspace's ViewSet and outlives this widget: it
+    // is what survives when the view changes kind or its dock floats, so the
+    // layers hidden in this view, and its pan and zoom, live there.
+    ViewportWidget(katana::cad::Document& document, katana::cad::ViewState& state,
+                   QWidget* parent = nullptr);
+
+    [[nodiscard]] katana::cad::ViewState& state() const { return state_; }
+
+    // How many entities the last paint (or plot) drew: those that passed the
+    // visibility rule for this view and lay in the visible area. For the
+    // headless checks, which cannot look at pixels, to prove that a layer
+    // hidden in one view is gone from that view and from no other.
+    [[nodiscard]] std::size_t lastDrawnEntityCount() const { return lastDrawnEntities_; }
 
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
@@ -98,6 +111,9 @@ class ViewportWidget final : public QWidget {
                        const std::optional<katana::cad::SnapResult>& snap)>
         onCursorMoved;
     std::function<void(Tool tool)> onToolChanged;
+    // Raised when the user clicks into this view, so the workspace can make it
+    // the active one.
+    std::function<void()> onActivated;
 
   protected:
     void paintEvent(QPaintEvent* event) override;
@@ -169,6 +185,8 @@ class ViewportWidget final : public QWidget {
     void drawSnapMarker(QPainter& painter) const;
 
     katana::cad::Document& document_;
+    katana::cad::ViewState& state_;
+    mutable std::size_t lastDrawnEntities_ = 0;
     // Declared after document_ and destroyed before anything else here: the
     // listener it owns captures this widget.
     katana::cad::Document::ListenerHandle documentListener_;

@@ -1027,7 +1027,9 @@ cannot include an Entity or a Document, which is Rule 3 made structural):
   viewports (1, 2, 3 or 4 cells), each with its own camera and kind (Plan, 3D,
   Section, Elevation). The tiling arithmetic is headless and unit tested: every
   point belongs to exactly one cell, and pixel rectangles tile any window size
-  with no seam and no overlap.
+  with no seam and no overlap. SUPERSEDED on 2026-09-23 by section 47: the
+  views are now docks, their state is `cad::ViewSet`, and the tiles survive as
+  arrangement presets (`cad::dockSplits`).
 
 **OUTSTANDING: the GPU.** No Vulkan device, no GPU buffers, no GPU picking, no
 instancing, no frustum culling beyond the per-tile bin, no LOD, no streaming.
@@ -3304,3 +3306,27 @@ is fixed when it is small and adjacent and recorded otherwise - this register
 is that record. CLAUDE.md 5.3 lets a wave of defect fixes run BESIDE the work
 the order puts first when their file sets are disjoint, which is how they are
 being taken; where the two compete for the same files, the order in 5.2 decides.
+
+# 47. The workspace: dockable panels and views, per-view layers
+
+**STATUS: PARTIALLY DELIVERED.**
+
+The user's request of 2026-09-23: make the Layers, Properties, Reference Data
+and Command Line panels dockable, movable and minimisable, closable and
+brought back from the menus; make the drawing views the same, and able to go
+out of the main window onto another screen; give each view its own control of
+which layers it shows; and improve the desktop experience as a whole. It was
+taken ahead of section 20.3 because the owner asked for it directly. The
+decisions and the alternatives rejected are in `docs/cad.md`, "The workspace".
+
+| # | Slice | Status |
+|---|---|---|
+| 1 | Per-view layers in THE visibility rule: `cad::LayerOverrides`, `isDrawn`/`isSelectable` with no default view, carried by `SnapRequest`, `SelectionFilter` and `SceneOptions` | **DELIVERED** (tests in slice 2) |
+| 2 | `cad::ViewSet` - the open views and their state, replacing the tiled cells; `cad::dockSplits` - the presets as dock arrangements; their tests | partly: code delivered, tests pending |
+| 3 | Views as docks in a nested window (`ViewWorkspace`), replacing `ViewportContainer`: open, close, change kind, arrange, float onto any screen; showing a view never replaces one | partly: the workspace, without its chrome |
+| 4 | Dock chrome for panels and views: a title bar with minimise, float, maximise and close; a minimised tray; a Window menu listing every panel, toolbar and view; the layout saved between sessions and never in a headless run; Reset Layout | pending |
+| 5 | Per-view layer controls: a Layers button on each view's title bar | pending |
+| 6 | The view widgets on their state: plan zoom and section kept across a change of kind, the 3D view following edits (audit QT-05), a section keeping its zoom on a resize, the plan view's minimum size | pending |
+| 7 | The wider improvements from the UX audit of 2026-09-23 | pending |
+
+**OUTSTANDING:** slices 2 (tests) to 7.

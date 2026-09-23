@@ -77,8 +77,8 @@ TEST(CadLayerInheritance, TheChildsOwnFlagsAreClearSoOnlyTheParentCanBeResponsib
     ASSERT_NE(layers.find("design/surface"), nullptr);
     EXPECT_TRUE(layers.find(kChild)->visible);
     EXPECT_FALSE(layers.find(kChild)->locked);
-    EXPECT_TRUE(katana::cad::isDrawn(drawing.document.model(), lineOf(drawing)));
-    EXPECT_TRUE(katana::cad::isSelectable(drawing.document.model(), lineOf(drawing)));
+    EXPECT_TRUE(katana::cad::isDrawn(drawing.document.model(), lineOf(drawing), katana::cad::kNoLayerOverrides));
+    EXPECT_TRUE(katana::cad::isSelectable(drawing.document.model(), lineOf(drawing), katana::cad::kNoLayerOverrides));
 }
 
 TEST(CadLayerInheritance, HidingTheParentHidesTheGrandchildFromDrawingPickingAndSnapping)
@@ -87,8 +87,8 @@ TEST(CadLayerInheritance, HidingTheParentHidesTheGrandchildFromDrawingPickingAnd
     setParent(drawing.document, false, false);
     const auto& model = drawing.document.model();
 
-    EXPECT_FALSE(katana::cad::isDrawn(model, lineOf(drawing)));
-    EXPECT_FALSE(katana::cad::isSelectable(model, lineOf(drawing)));
+    EXPECT_FALSE(katana::cad::isDrawn(model, lineOf(drawing), katana::cad::kNoLayerOverrides));
+    EXPECT_FALSE(katana::cad::isSelectable(model, lineOf(drawing), katana::cad::kNoLayerOverrides));
     EXPECT_FALSE(katana::cad::pickEntity(model, Point2(5.0, 0.0), 1.0).has_value());
     EXPECT_TRUE(katana::cad::pickInBox(model, Box2(Point2(-1, -1), Point2(11, 1)),
                                        katana::cad::BoxSelectionMode::Window)
@@ -102,7 +102,7 @@ TEST(CadLayerInheritance, HidingTheParentHidesTheGrandchildFromDrawingPickingAnd
     // And switching the parent back on restores all of it: the inherited
     // state is recomputed when the parent changes, not frozen at creation.
     setParent(drawing.document, true, false);
-    EXPECT_TRUE(katana::cad::isDrawn(drawing.document.model(), lineOf(drawing)));
+    EXPECT_TRUE(katana::cad::isDrawn(drawing.document.model(), lineOf(drawing), katana::cad::kNoLayerOverrides));
     EXPECT_TRUE(
         katana::cad::pickEntity(drawing.document.model(), Point2(5.0, 0.0), 1.0).has_value());
 }
@@ -116,8 +116,8 @@ TEST(CadLayerInheritance, LockingTheParentProtectsTheGrandchildFromEveryEdit)
 
     // Still drawn - a locked layer reads as background, it does not vanish -
     // but not selectable.
-    EXPECT_TRUE(katana::cad::isDrawn(drawing.document.model(), lineOf(drawing)));
-    EXPECT_FALSE(katana::cad::isSelectable(drawing.document.model(), lineOf(drawing)));
+    EXPECT_TRUE(katana::cad::isDrawn(drawing.document.model(), lineOf(drawing), katana::cad::kNoLayerOverrides));
+    EXPECT_FALSE(katana::cad::isSelectable(drawing.document.model(), lineOf(drawing), katana::cad::kNoLayerOverrides));
 
     // Every edit is refused by the model, whatever path asked for it, and the
     // refusal says which layer holds the lock.

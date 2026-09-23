@@ -275,7 +275,8 @@ std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapReq
     // The extent test is detail::queryExtents, which is deliberately wider
     // than the bounding box for an arc so that its centre stays snappable.
     detail::forEachCandidate(model, index, reach, scratch, [&](const Entity& entity) {
-        if (isDrawn(model, entity)) {
+        if (isDrawn(model, entity,
+                    request.view != nullptr ? *request.view : kNoLayerOverrides)) {
             nearby.push_back(&entity);
         }
     });

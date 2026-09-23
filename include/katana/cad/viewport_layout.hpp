@@ -144,4 +144,32 @@ class ViewportLayout {
 // Exposed so the layout can be checked without building a ViewportLayout.
 [[nodiscard]] std::vector<CellRect> layoutRects(LayoutKind kind);
 
+// The kind a view gets when an arrangement needs one more than are open:
+// plan, 3D, section, elevation - the four-up arrangement a civil engineer
+// expects. Slots past the fourth repeat the last.
+[[nodiscard]] ViewKind defaultViewKind(std::size_t slot);
+
+// Points a camera the way a fresh view of `kind` looks: a 3D view in
+// perspective from the south-west, an elevation orthographic from the front,
+// a plan orthographic from the top. A Section leaves the camera alone, so
+// switching back to a model view restores what it had.
+void configureCamera(katana::render::Camera& camera, ViewKind kind);
+
+// How an arrangement is built out of docked views (the dock workspace of
+// 2026-09-23). View 0 is placed first; each step then splits a view already
+// placed in two, putting the next view to the right of it or below it, each
+// half the size. Applying the steps to rectangles reproduces layoutRects(kind)
+// exactly - a test asserts it - and the Qt workspace applies the same steps
+// with QMainWindow::splitDockWidget, so the menu's picture of "Three: Left"
+// and the docks it produces cannot drift apart.
+struct DockSplit {
+    std::size_t existing = 0; // index of a view already placed
+    std::size_t added = 0;    // index of the view this step places
+    bool sideBySide = true;   // true: `added` to the right; false: below
+    friend bool operator==(const DockSplit&, const DockSplit&) = default;
+};
+
+// Steps for every view after the first, in order; empty for Single.
+[[nodiscard]] std::vector<DockSplit> dockSplits(LayoutKind kind);
+
 } // namespace katana::cad

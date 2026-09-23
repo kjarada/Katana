@@ -26,7 +26,7 @@
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
-#include "viewport_container.hpp"
+#include "view_workspace.hpp"
 
 class QAction;
 class QActionGroup;
@@ -269,7 +269,7 @@ class MainWindow final : public QMainWindow {
     katana::cad::Document::ListenerHandle documentListener_;
     katana::cad::CommandInterpreter interpreter_{document_};
 
-    ViewportContainer* views_ = nullptr;
+    ViewWorkspace* views_ = nullptr;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
