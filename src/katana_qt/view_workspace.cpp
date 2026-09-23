@@ -320,27 +320,58 @@ void ViewWorkspace::installChrome(View& view)
             connect(button, &QToolButton::pressed, this, [this, id] { activate(id); });
         }
     }
-    // Connected after the bar's own handler, so the dock is already hidden
-    // when this runs.
-    connect(bar->minimiseButton(), &QToolButton::clicked, this,
-            [this, id] { activateShowingInsteadOf(id); });
+    // From the chrome rather than the Minimise button's click, so that a view
+    // minimised any other way (by name, after a saved layout) hands on too.
+    // The dock is already hidden when this runs.
+    bar->onMinimised = [this, id] { activateShowingInsteadOf(id); };
+    // Back from the tray while the active view is still hidden - every view
+    // was minimised, the active one among them: the view the user has just
+    // brought back is the one the menus should act on.
+    bar->onRestored = [this, id] {
+        const View* active = find(views_.activeId());
+        if (active == nullptr || active->dock->isHidden()) {
+            activate(id);
+        }
+    };
 
     updateLayersButton(view);
 }
 
+bool ViewWorkspace::onScreen(const View& view) const
+{
+    // A tab page behind the current one is not hidden: Qt moves it off the
+    // window instead (DockChrome::snapshot relies on the same). So "not
+    // hidden" is not "showing", and only a docked view within this window's
+    // rectangle, or a floating one, is where the user can see it.
+    return !view.dock->isHidden() &&
+           (view.dock->isFloating() || rect().intersects(view.dock->geometry()));
+}
+
 void ViewWorkspace::activateShowingInsteadOf(ViewId hidden)
 {
-    // Minimising the active view would leave the menus acting on a view
-    // nobody can see, and no title bar marked. A view still showing takes
-    // over: the first in the order they were opened. The most recently
-    // active would be the better choice, but ViewSet keeps that order to
-    // itself (it uses it when the active view is REMOVED).
+    // Leaving the active view hidden would leave the menus acting on a view
+    // nobody can see, and no title bar marked on screen. A view the user can
+    // see takes over: the first in the order they were opened. The most
+    // recently active would be the better choice, but ViewSet keeps that
+    // order to itself (it uses it when the active view is REMOVED).
     if (views_.activeId() != hidden) {
         return;
     }
     for (const View& view : docks_) {
+        if (view.id != hidden && onScreen(view)) {
+            activate(view.id);
+            return;
+        }
+    }
+    // None on screen yet. The hidden view was the current page of a tab
+    // group whose other pages are all still parked off the window: Qt lays
+    // the group out again only after a posted event, and picks its new
+    // current page then. Raising a page makes it the current one now, so the
+    // view made active is the one that shows.
+    for (const View& view : docks_) {
         if (view.id != hidden && !view.dock->isHidden()) {
             activate(view.id);
+            view.dock->raise();
             return;
         }
     }
@@ -468,7 +499,11 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
         addDockWidget(kViewArea, added.dock);
     }
 
-    if (activateIt) {
+    // Opened while the active view is hidden - every view was minimised - the
+    // new view is the one the user can see, so the menus act on it even when
+    // the caller (ensureView, arrange) did not ask for it.
+    const bool activeHidden = beside != nullptr && beside->dock->isHidden();
+    if (activateIt || activeHidden) {
         activate(state.id);
     }
     updateActiveMarks();
@@ -497,6 +532,19 @@ Status ViewWorkspace::closeView(ViewId id)
     removeDockWidget(dock);
     delete dock;
     (void)views_.remove(id);
+    if (wasActive == id) {
+        // ViewSet hands on to the view used most recently, which knows
+        // nothing of docks: it may be minimised, or a tab page parked behind
+        // another. A minimised one hands on again to a view that shows; a tab
+        // page is raised, which makes it the current page of its group.
+        if (const View* now = find(views_.activeId())) {
+            if (now->dock->isHidden()) {
+                activateShowingInsteadOf(now->id);
+            } else if (!now->dock->isFloating()) {
+                now->dock->raise();
+            }
+        }
+    }
     updateActiveMarks();
     if (wasActive == id && onActiveChanged) {
         onActiveChanged();

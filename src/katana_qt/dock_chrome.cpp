@@ -523,6 +523,11 @@ void DockChrome::minimise(QDockWidget* dock)
     dock->hide();
     tray_->show();
     notify();
+    // The bar, not `entry`: the hook may open a view, and installing its dock
+    // moves installed_.
+    if (DockTitleBar* bar = titleBar(dock); bar != nullptr && bar->onMinimised) {
+        bar->onMinimised();
+    }
 }
 
 bool DockChrome::restore(QDockWidget* dock)
@@ -548,14 +553,27 @@ bool DockChrome::restore(QDockWidget* dock)
         dock->raise();
         dock->activateWindow();
     } else {
+        QMainWindow* host = hostOf(dock);
+        // Before it is shown: a view maximised in the same window since this
+        // one was minimised would otherwise stay maximised beside it - its
+        // button still Restore, and that Restore would give back sizes taken
+        // without this dock in the row. Undone first, it puts the others back
+        // as they were; this dock's own sizes, applied below, are the ones
+        // from before that maximise.
+        if (host != nullptr) {
+            unmaximiseDocked(*host);
+        }
         dock->show();
         // For a tab page, raise() is what makes it the current tab again.
         dock->raise();
-        if (QMainWindow* host = hostOf(dock)) {
+        if (host != nullptr) {
             applySizes(*host, record.sizes);
         }
     }
     notify();
+    if (DockTitleBar* bar = titleBar(dock); bar != nullptr && bar->onRestored) {
+        bar->onRestored();
+    }
     return true;
 }
 
