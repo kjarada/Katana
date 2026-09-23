@@ -55,12 +55,60 @@ struct StyleLibraryRead {
 // Fails only when the text cannot be read at all - an unterminated quote, a
 // block that never closes. A definition with something wrong in it is skipped
 // with a warning, so one bad block does not cost the other 791.
-[[nodiscard]] katana::core::Result<StyleLibraryRead> readStyleLibrary(std::string_view text);
+//
+// `sourceName` is the name of the file the text came from, and is stamped on
+// every definition read as LineStyle::source - it is how a browser says where
+// a definition came from, and part of how a symbol is told from a linestyle
+// (most symbols the reference mapfiles use are not `mode vertex`; they are
+// symbols because they live in the symbol file). Only the NAME is kept: if a
+// path is passed, everything up to its last separator is dropped, so a
+// library never carries where on someone's disk it was loaded from. Empty for
+// text that came from no file, and the definitions then say so by carrying
+// none.
+[[nodiscard]] katana::core::Result<StyleLibraryRead> readStyleLibrary(std::string_view text,
+                                                                      std::string_view sourceName = {});
 
 // Reads into an existing library, so a customisation made of several files
 // loads as one and the later file wins. The tally and warnings describe THIS
-// text only.
+// text only, and only the definitions of this text are stamped with
+// `sourceName`: the ones already in `library` keep the file they came from.
 [[nodiscard]] katana::core::Result<StyleLibraryRead>
-readStyleLibraryInto(katana::entity::StyleLibrary library, std::string_view text);
+readStyleLibraryInto(katana::entity::StyleLibrary library, std::string_view text,
+                     std::string_view sourceName = {});
+
+// The file name part of `source`: what follows its last `/` or `\`. What
+// readStyleLibrary stamps, exposed so a caller comparing against a stamp
+// computes it the same way.
+[[nodiscard]] std::string sourceFileName(std::string_view source);
+
+// ---- writing ----------------------------------------------------------------------------------
+
+struct StyleLibraryWriteOptions {
+    // The definitions to write, by name; empty means every one. A name the
+    // library does not hold fails the write and is named, rather than being
+    // left out of a file the person believes holds it.
+    std::vector<std::string> names{};
+    // `//` lines at the head of the file, which is where 12d's own libraries
+    // carry their licence and where readStyleLibrary finds them again
+    // (StyleLibraryRead::comments). A line may not hold a line break: the
+    // rest of it would be read as definitions.
+    std::vector<std::string> comments{};
+};
+
+// A library -> `.4d` text, UTF-8, in name order, one command per line as 12d
+// writes it. Every field of a definition is written - all three kinds, `mode
+// vertex`, group, length, factor, origins, anchors, stretch and cycle mode,
+// pens and every stroke, a text with the three numbers kept but not
+// understood - so that readStyleLibrary(writeStyleLibrary(l)) gives back `l`.
+// The one thing a file does not hold is LineStyle::source, which is the name
+// of the file itself and is stamped again by the reader.
+//
+// Numbers are written as the shortest plain decimal that reads back exactly:
+// never an exponent, because 12d's own files never use one and nothing here
+// says 12d reads one. Fails, naming the definition, for a definition
+// validate() refuses - the reader would skip it, so writing it would lose it.
+[[nodiscard]] katana::core::Result<std::string>
+writeStyleLibrary(const katana::entity::StyleLibrary& library,
+                  const StyleLibraryWriteOptions& options = {});
 
 } // namespace katana::archive12d
