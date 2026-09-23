@@ -19,6 +19,10 @@
 #include "katana/math/numerics.hpp"
 #include "tool_driver.hpp"
 
+// The family's own session, tested directly below (ModifyEditSession): it is
+// internal to src/katana_cad/tools/, which is on no include path of the tests.
+#include "../../../src/katana_cad/tools/modify_edit_support.hpp"
+
 namespace {
 
 namespace cmd = katana::commands;
@@ -102,6 +106,19 @@ EntityId with3DHeights(ToolDriver& driver, Geometry geometry,
     entity.geometry = std::move(geometry);
     katana::entity::setHeights(entity.properties, vertexHeights);
     return driver.add(cmd::createEntities({entity}));
+}
+
+// Moves `ids` onto a new layer `name` and locks it. The layer is made
+// unlocked and locked afterwards: nothing can be moved onto a layer that is
+// already locked.
+void lockOnNewLayer(ToolDriver& driver, std::vector<EntityId> ids, const std::string& name)
+{
+    katana::entity::Layer layer;
+    layer.name = name;
+    ASSERT_TRUE(driver.document().execute(cmd::createLayer(layer)).ok());
+    ASSERT_TRUE(driver.document().execute(cmd::setEntityLayer(std::move(ids), name)).ok());
+    layer.locked = true;
+    ASSERT_TRUE(driver.document().execute(cmd::updateLayer(layer)).ok());
 }
 
 // ============================================================================
@@ -393,20 +410,30 @@ TEST(ModifyEditTrim, AnObjectOnALockedLayerIsRefusedByName)
 {
     TrimScene scene;
     ToolDriver& d = scene.driver;
-    // Made unlocked and locked afterwards: nothing can be moved onto a layer
-    // that is already locked.
-    katana::entity::Layer kerbs;
-    kerbs.name = "kerbs";
-    ASSERT_TRUE(d.document().execute(cmd::createLayer(kerbs)).ok());
-    ASSERT_TRUE(d.document().execute(cmd::setEntityLayer({scene.target}, "kerbs")).ok());
-    kerbs.locked = true;
-    ASSERT_TRUE(d.document().execute(cmd::updateLayer(kerbs)).ok());
+    lockOnNewLayer(d, {scene.target}, "kerbs");
     d.start("modify.trim");
     ASSERT_EQ(d.enter().outcome, kContinue);
     const ToolStep refused = d.pick(scene.target, 4, 0);
     EXPECT_EQ(refused.outcome, kRejected);
     EXPECT_EQ(refused.message,
               "That line is on the locked layer 'kerbs'; unlock the layer to edit it.");
+}
+
+TEST(ModifyEditTrim, AClosedPolylineCrossedOnceIsRefused)
+{
+    // The edge runs from (4,4), inside the square, down to (4,-4): it crosses
+    // the square's outline once, at (4,0), which leaves no span to remove.
+    ToolDriver d;
+    const EntityId square = polyline(d, {{0, 0}, {8, 0}, {8, 8}, {0, 8}}, true);
+    const EntityId edge = line(d, {4, 4}, {4, -4});
+    d.start("modify.trim");
+    ASSERT_EQ(d.pick(edge, 4, -2).outcome, kContinue);
+    ASSERT_EQ(d.enter().outcome, kContinue);
+    const ToolStep refused = d.pick(square, 2, 0);
+    EXPECT_EQ(refused.outcome, kRejected);
+    EXPECT_EQ(refused.message,
+              "A closed polyline needs two crossings with the cutting edges to be trimmed.");
+    EXPECT_EQ(d.tool().expects(), ToolInput::Entity);
 }
 
 TEST(ModifyEditTrim, EnterWithNothingTrimmedFinishesWithoutACommand)
@@ -549,6 +576,22 @@ TEST(ModifyEditExtend, AnEndWithNoBoundaryAheadIsRefused)
     const ToolStep refused = d.pick(target, 3, 0);
     EXPECT_EQ(refused.outcome, kRejected);
     EXPECT_EQ(refused.message, "No boundary lies ahead of that end of the line.");
+}
+
+TEST(ModifyEditExtend, AnOpenPolylineWhoseEndSideHasNoLengthIsRefused)
+{
+    // (0,0)-(4,0)-(4,0): the last vertex repeats the one before, so the end
+    // side has no direction to extend along.
+    ToolDriver d;
+    const EntityId string = polyline(d, {{0, 0}, {4, 0}, {4, 0}});
+    const EntityId boundary = line(d, {8, -2}, {8, 2});
+    d.start("modify.extend");
+    ASSERT_EQ(d.pick(boundary, 8, 0).outcome, kContinue);
+    ASSERT_EQ(d.enter().outcome, kContinue);
+    const ToolStep refused = d.pick(string, 3.5, 0);
+    EXPECT_EQ(refused.outcome, kRejected);
+    EXPECT_EQ(refused.message, "The end segment of that polyline has no length.");
+    EXPECT_EQ(d.tool().expects(), ToolInput::Entity);
 }
 
 TEST(ModifyEditExtend, ThePreviewShowsTheNewLength)
@@ -764,6 +807,110 @@ TEST(ModifyEditOffset, AnInwardOffsetNoSmallerThanTheRadiusIsRefused)
               "The distance is not smaller than the radius, so there is no circle on that side.");
 }
 
+TEST(ModifyEditOffset, AnOffsetTooLargeForAClosedPolylineIsRefusedAndTheToolStaysPut)
+{
+    // The counter-clockwise 8x8 square (0,0)-(8,0)-(8,8)-(0,8), offset inward
+    // (the click (4,1) is left of the bottom side's direction). Each side moves
+    // in by the distance and the mitres are where the moved sides meet:
+    //   by 3: (3,3), (5,3), (5,5), (3,5) - the 2x2 square inside, a true offset;
+    //   by 4: every vertex at (4,4) - nothing left;
+    //   by 5: (5,5), (3,5), (3,3), (5,3) - the sides have passed each other,
+    //         so the bottom side now runs from x = 5 back to x = 3, against its
+    //         source's direction: a square drawn the other way round, which is
+    //         no offset of this one.
+    for (const char* distance : {"4", "5"}) {
+        ToolDriver d;
+        const EntityId square = polyline(d, {{0, 0}, {8, 0}, {8, 8}, {0, 8}}, true);
+        d.start("modify.offset");
+        ASSERT_EQ(d.type(distance).outcome, kContinue);
+        ASSERT_EQ(d.pick(square, 4, 0).outcome, kContinue);
+        EXPECT_TRUE(d.tool().preview({4, 1}).shapes.empty()) << distance;
+        const ToolStep refused = d.click(4, 1);
+        EXPECT_EQ(refused.outcome, kRejected) << distance;
+        EXPECT_EQ(refused.message, std::string("An offset of ") + distance +
+                                       " is too large for that closed polyline: a side of the "
+                                       "copy would turn back on itself or shrink to nothing.")
+            << distance;
+        EXPECT_EQ(d.tool().prompt(), "Specify point on side to offset or [Multiple/Undo]");
+        EXPECT_EQ(d.enter().outcome, kDone);
+        EXPECT_EQ(d.executed(), 0) << distance;
+    }
+    ToolDriver d;
+    const EntityId square = polyline(d, {{0, 0}, {8, 0}, {8, 8}, {0, 8}}, true);
+    d.start("modify.offset");
+    ASSERT_EQ(d.type("3").outcome, kContinue);
+    ASSERT_EQ(d.pick(square, 4, 0).outcome, kContinue);
+    ASSERT_EQ(d.click(4, 1).outcome, kContinue);
+    ASSERT_EQ(d.enter().outcome, kDone);
+    EXPECT_EQ(geometryOf<Polyline2>(d, created(d)),
+              (Polyline2{{{3, 3}, {5, 3}, {5, 5}, {3, 5}}, true}));
+}
+
+TEST(ModifyEditOffset, AnOffsetThatWouldTurnAShortEndSideBackIsRefused)
+{
+    // (0,0)-(8,0)-(8,1) offset to the left of its direction (above the first
+    // side). By 2 the first side moves to y = 2 and the second, 1 long and
+    // running up, to x = 6: the mitre is (6,2) and the copy ends at (6,1), so
+    // its last side runs DOWN where the source's runs up. By 0.5 the copy is
+    // (0,0.5)-(7.5,0.5)-(7.5,1), whose last side still runs up: a true offset.
+    ToolDriver d;
+    const EntityId hook = polyline(d, {{0, 0}, {8, 0}, {8, 1}});
+    d.start("modify.offset");
+    ASSERT_EQ(d.type("2").outcome, kContinue);
+    ASSERT_EQ(d.pick(hook, 4, 0).outcome, kContinue);
+    const ToolStep refused = d.click(4, 0.5);
+    EXPECT_EQ(refused.outcome, kRejected);
+    EXPECT_EQ(refused.message, "An offset of 2 is too large for that polyline: a side of the copy "
+                               "would turn back on itself or shrink to nothing.");
+    ASSERT_EQ(d.undo().outcome, kContinue); // back to choosing the object
+    ASSERT_EQ(d.undo().outcome, kContinue); // and to the distance
+    ASSERT_EQ(d.type("0.5").outcome, kContinue);
+    ASSERT_EQ(d.pick(hook, 4, 0).outcome, kContinue);
+    ASSERT_EQ(d.click(4, 0.25).outcome, kContinue);
+    ASSERT_EQ(d.enter().outcome, kDone);
+    EXPECT_EQ(geometryOf<Polyline2>(d, created(d)),
+              (Polyline2{{{0, 0.5}, {7.5, 0.5}, {7.5, 1}}, false}));
+}
+
+TEST(ModifyEditOffset, ARefusedPickLosesNoneOfTheOffsetsAlreadyMade)
+{
+    // Through: the line (0,20)-(8,20) through (4,22) makes (0,22)-(8,22).
+    // Then the 8x8 square through its centre (4,4): every side 4 in, every
+    // vertex at (4,4) - a polyline of no length, which the drawing would
+    // refuse. The whole session is one command, so had that pick been taken
+    // the drawing would have refused the command at Enter and the line's
+    // offset would have been lost with it.
+    ToolDriver d;
+    const EntityId rule = line(d, {0, 20}, {8, 20});
+    const EntityId square = polyline(d, {{0, 0}, {8, 0}, {8, 8}, {0, 8}}, true);
+    d.start("modify.offset");
+    ASSERT_EQ(d.type("T").outcome, kContinue);
+    ASSERT_EQ(d.pick(rule, 4, 20).outcome, kContinue);
+    ASSERT_EQ(d.click(4, 22).outcome, kContinue);
+    ASSERT_EQ(d.pick(square, 4, 0).outcome, kContinue);
+    EXPECT_EQ(d.click(4, 4).outcome, kRejected);
+    const ToolStep finished = d.enter();
+    ASSERT_EQ(finished.outcome, kDone);
+    EXPECT_EQ(finished.message, "Made 1 offset.");
+    EXPECT_EQ(d.executed(), 1);
+    EXPECT_EQ(entityCount(d), 3u);
+    EXPECT_EQ(geometryOf<Segment2>(d, created(d)), (Segment2{{0, 22}, {8, 22}}));
+}
+
+TEST(ModifyEditOffset, AnObjectOnALockedLayerIsRefusedAsTheCopyWouldLandThere)
+{
+    ToolDriver d;
+    const EntityId source = line(d, {0, 0}, {8, 0});
+    lockOnNewLayer(d, {source}, "kerbs");
+    d.start("modify.offset");
+    ASSERT_EQ(d.type("2").outcome, kContinue);
+    const ToolStep refused = d.pick(source, 4, 0);
+    EXPECT_EQ(refused.outcome, kRejected);
+    EXPECT_EQ(refused.message,
+              "That line is on the locked layer 'kerbs'; unlock the layer to edit it.");
+    EXPECT_EQ(d.tool().prompt(), "Select object to offset or [Exit/Undo]");
+}
+
 TEST(ModifyEditOffset, TextIsRefusedAsASource)
 {
     ToolDriver d;
@@ -864,20 +1011,33 @@ TEST(ModifyEditFillet, RadiusZeroExtendsBothLinesToASharpCorner)
 
 TEST(ModifyEditFillet, CrossingLinesKeepTheSidesThatWerePicked)
 {
-    // (0,4)-(8,4) and (4,0)-(4,8) cross at (4,4). Picked east of the crossing
-    // and south of it, radius 0 keeps (4,4)-(8,4) and (4,0)-(4,4). Taking the
-    // end farther from the corner cannot decide this - both halves are 4 long
-    // - so this is the pick at work (the geometry alone keeps the west and
-    // north halves).
-    ToolDriver d;
-    const EntityId across = line(d, {0, 4}, {8, 4});
-    const EntityId down = line(d, {4, 0}, {4, 8});
-    d.start("modify.fillet");
-    ASSERT_EQ(d.type("0").outcome, kContinue);
-    ASSERT_EQ(d.pick(across, 7, 4).outcome, kContinue);
-    ASSERT_EQ(d.pick(down, 4, 1).outcome, kDone);
-    EXPECT_EQ(geometryOf<Segment2>(d, across), (Segment2{{4, 4}, {8, 4}}));
-    EXPECT_EQ(geometryOf<Segment2>(d, down), (Segment2{{4, 0}, {4, 4}}));
+    // (0,4)-(8,4) and (4,0)-(4,8) cross at (4,4), each 4 long either side of
+    // it, so "the end farther from the corner" cannot say which half to keep:
+    // geometry::fillet alone keeps the west and south halves, (0,4)-(4,4) and
+    // (4,0)-(4,4). Radius 0 then runs the kept halves to the corner.
+    //   Picked east and north: (4,4)-(8,4) and (4,4)-(4,8) - neither is the
+    //   geometry's half, so both picks are seen to count.
+    //   Picked west and north: (0,4)-(4,4) and (4,4)-(4,8) - the first line
+    //   agrees with the geometry, the second still must not.
+    struct Case {
+        Point2 pickAcross, pickDown;
+        Segment2 across, down;
+    };
+    const Case cases[] = {
+        {{7, 4}, {4, 7}, {{4, 4}, {8, 4}}, {{4, 4}, {4, 8}}},
+        {{1, 4}, {4, 7}, {{0, 4}, {4, 4}}, {{4, 4}, {4, 8}}},
+    };
+    for (const Case& c : cases) {
+        ToolDriver d;
+        const EntityId across = line(d, {0, 4}, {8, 4});
+        const EntityId down = line(d, {4, 0}, {4, 8});
+        d.start("modify.fillet");
+        ASSERT_EQ(d.type("0").outcome, kContinue);
+        ASSERT_EQ(d.pick(across, c.pickAcross.x, c.pickAcross.y).outcome, kContinue);
+        ASSERT_EQ(d.pick(down, c.pickDown.x, c.pickDown.y).outcome, kDone);
+        EXPECT_EQ(geometryOf<Segment2>(d, across), c.across) << c.pickAcross.x;
+        EXPECT_EQ(geometryOf<Segment2>(d, down), c.down) << c.pickAcross.x;
+    }
 }
 
 TEST(ModifyEditFillet, ParallelLinesAreRefusedAsHavingNoCorner)
@@ -939,6 +1099,29 @@ TEST(ModifyEditFillet, ANegativeRadiusIsRefusedAndTheRadiusIsStillAsked)
     EXPECT_EQ(refused.outcome, kRejected);
     EXPECT_EQ(refused.message, "The fillet radius cannot be negative.");
     EXPECT_EQ(d.tool().expects(), ToolInput::Value);
+}
+
+TEST(ModifyEditFillet, ALineOnALockedLayerIsRefusedAsEitherLine)
+{
+    // Fillet refuses it as the first line, Chamfer as the second: the two
+    // picks go through the same check.
+    CornerScene scene;
+    ToolDriver& d = scene.driver;
+    lockOnNewLayer(d, {scene.up}, "kerbs");
+    const std::string sentence =
+        "That line is on the locked layer 'kerbs'; unlock the layer to edit it.";
+    d.start("modify.fillet");
+    const ToolStep asFirst = d.pick(scene.up, 8, 4);
+    EXPECT_EQ(asFirst.outcome, kRejected);
+    EXPECT_EQ(asFirst.message, sentence);
+    EXPECT_EQ(d.tool().prompt().rfind("Select first line", 0), 0u);
+    d.start("modify.chamfer");
+    ASSERT_EQ(d.pick(scene.along, 4, 0).outcome, kContinue);
+    const ToolStep asSecond = d.pick(scene.up, 8, 4);
+    EXPECT_EQ(asSecond.outcome, kRejected);
+    EXPECT_EQ(asSecond.message, sentence);
+    EXPECT_EQ(d.tool().prompt().rfind("Select second line", 0), 0u);
+    EXPECT_EQ(geometryOf<Segment2>(d, scene.up), (Segment2{{8, 0}, {8, 8}}));
 }
 
 TEST(ModifyEditFillet, UndoAtTheSecondLineGoesBackToTheFirst)
@@ -1083,7 +1266,38 @@ TEST(ModifyEditChamfer, ParallelLinesAndDistancesTooLargeAreRefused)
     const ToolStep large = d.pick(scene.up, 8, 4);
     EXPECT_EQ(large.outcome, kRejected);
     EXPECT_EQ(large.message, "The chamfer distances are too large for these lines.");
-    EXPECT_EQ(d.type("-1").outcome, kRejected);
+    // A number at the second line is no distance: that prompt takes a line.
+    const ToolStep typed = d.type("5");
+    EXPECT_EQ(typed.outcome, kRejected);
+    EXPECT_EQ(typed.message, "Pick the second line, or type U to pick the first again.");
+}
+
+TEST(ModifyEditChamfer, ANegativeDistanceIsRefusedWhereverItIsTyped)
+{
+    // At the first line (where a number is the first distance), and at both
+    // distance prompts; each time the tool stays where it was.
+    ToolDriver d;
+    const std::string sentence = "A chamfer distance cannot be negative.";
+    d.start("modify.chamfer");
+    const std::string atFirstLine = d.tool().prompt();
+    const ToolStep asFirstLine = d.type("-1");
+    EXPECT_EQ(asFirstLine.outcome, kRejected);
+    EXPECT_EQ(asFirstLine.message, sentence);
+    EXPECT_EQ(d.tool().prompt(), atFirstLine);
+    EXPECT_EQ(d.tool().expects(), ToolInput::Entity);
+    ASSERT_EQ(d.type("D").outcome, kContinue);
+    const std::string atFirstDistance = d.tool().prompt();
+    EXPECT_EQ(atFirstDistance.rfind("Specify first chamfer distance", 0), 0u);
+    const ToolStep asFirstDistance = d.type("-1");
+    EXPECT_EQ(asFirstDistance.outcome, kRejected);
+    EXPECT_EQ(asFirstDistance.message, sentence);
+    EXPECT_EQ(d.tool().prompt(), atFirstDistance);
+    ASSERT_EQ(d.type("2").outcome, kContinue);
+    const ToolStep asSecondDistance = d.type("-1");
+    EXPECT_EQ(asSecondDistance.outcome, kRejected);
+    EXPECT_EQ(asSecondDistance.message, sentence);
+    EXPECT_EQ(d.tool().prompt(), "Specify second chamfer distance <2>");
+    EXPECT_EQ(d.tool().expects(), ToolInput::Value);
 }
 
 // ============================================================================
@@ -1249,6 +1463,22 @@ TEST(ModifyEditBreak, BreaksThatWouldDoNothingOrEverythingAreRefused)
     EXPECT_EQ(d.executed(), 0);
 }
 
+TEST(ModifyEditBreak, AnObjectOnALockedLayerIsRefusedByName)
+{
+    ToolDriver d;
+    const EntityId target = line(d, {0, 0}, {8, 0});
+    lockOnNewLayer(d, {target}, "kerbs");
+    for (const char* tool : {"modify.break", "modify.break_at_point"}) {
+        d.start(tool);
+        const ToolStep refused = d.pick(target, 2, 0);
+        EXPECT_EQ(refused.outcome, kRejected) << tool;
+        EXPECT_EQ(refused.message,
+                  "That line is on the locked layer 'kerbs'; unlock the layer to edit it.")
+            << tool;
+        EXPECT_EQ(d.tool().prompt(), "Select object to break") << tool;
+    }
+}
+
 TEST(ModifyEditBreak, ThePreviewShowsWhatTheCursorWouldRemove)
 {
     ToolDriver d;
@@ -1311,18 +1541,31 @@ TEST(ModifyEditBreakAtPoint, AnOpenPolylineIsSplitAtAVertex)
     EXPECT_EQ(geometryOf<Polyline2>(d, created(d)), (Polyline2{{{8, 0}, {8, 8}}, false}));
 }
 
-TEST(ModifyEditBreakAtPoint, AClosedShapeOrAnEndIsRefused)
+TEST(ModifyEditBreakAtPoint, ACircleOrAClosedPolylineIsRefusedWhenPicked)
+{
+    // Neither has ends, so one point cannot split either into two; Break,
+    // with two points, is the tool that opens them.
+    ToolDriver d;
+    const EntityId ring = d.add(cmd::createCircle({0, 0}, 4, d.document().currentAttributes()));
+    const EntityId triangle = polyline(d, {{0, 10}, {4, 10}, {4, 14}}, true);
+    d.start("modify.break_at_point");
+    const ToolStep circle = d.pick(ring, 4, 0);
+    EXPECT_EQ(circle.outcome, kRejected);
+    EXPECT_EQ(circle.message,
+              "A circle has no ends, so one point cannot split it; use Break with two points.");
+    const ToolStep closed = d.pick(triangle, 2, 10);
+    EXPECT_EQ(closed.outcome, kRejected);
+    EXPECT_EQ(closed.message, "A closed polyline has no ends, so one point cannot split it; use "
+                              "Break with two points.");
+    EXPECT_EQ(d.tool().prompt(), "Select object to break");
+    EXPECT_EQ(d.tool().expects(), ToolInput::Entity);
+}
+
+TEST(ModifyEditBreakAtPoint, ABreakPointAtAnEndIsRefused)
 {
     ToolDriver d;
     const EntityId target = line(d, {0, 0}, {8, 0});
-    const EntityId square = polyline(d, {{0, 10}, {4, 10}, {4, 14}}, true);
     d.start("modify.break_at_point");
-    ASSERT_EQ(d.pick(square, 2, 10).outcome, kContinue);
-    const ToolStep closed = d.click(2, 10);
-    EXPECT_EQ(closed.outcome, kRejected);
-    EXPECT_EQ(closed.message,
-              "A closed polyline cannot be broken at a single point; pick two points.");
-    ASSERT_EQ(d.undo().outcome, kContinue);
     ASSERT_EQ(d.pick(target, 4, 0).outcome, kContinue);
     const ToolStep end = d.click(8, 0);
     EXPECT_EQ(end.outcome, kRejected);
@@ -1453,6 +1696,45 @@ TEST(ModifyEditJoin, ALineJoinsOntoTheStartOfAPolylineWithItsHeights)
     EXPECT_EQ(heights(d, string, 4), (std::vector<std::optional<double>>{0.0, 4.0, 8.0, 12.0}));
 }
 
+TEST(ModifyEditJoin, ALineOnALockedLayerIsLeftOutAndTheRestJoin)
+{
+    // (0,0)-(4,0), (4,0)-(4,4) and (4,4)-(8,4) meet end to end, but the third
+    // is on a locked layer: the first two join and the third stays a line.
+    ToolDriver d;
+    const EntityId a = line(d, {0, 0}, {4, 0});
+    const EntityId b = line(d, {4, 0}, {4, 4});
+    const EntityId c = line(d, {4, 4}, {8, 4});
+    lockOnNewLayer(d, {c}, "kerbs");
+    d.document().selection().set({a, b, c});
+    d.start("modify.join");
+    const ToolStep finished = d.enter();
+    ASSERT_EQ(finished.outcome, kDone);
+    EXPECT_EQ(finished.message,
+              "Joined 2 objects into 1 polyline. 1 object on a locked layer was left out.");
+    EXPECT_EQ(geometryOf<Polyline2>(d, a), (Polyline2{{{0, 0}, {4, 0}, {4, 4}}, false}));
+    EXPECT_EQ(geometryOf<Segment2>(d, c), (Segment2{{4, 4}, {8, 4}}));
+}
+
+TEST(ModifyEditJoin, UndoTakesBackTheLastObjectPicked)
+{
+    ToolDriver d;
+    const EntityId a = line(d, {0, 0}, {4, 0});
+    const EntityId b = line(d, {4, 0}, {4, 4});
+    d.start("modify.join");
+    ASSERT_EQ(d.pick(a, 2, 0).outcome, kContinue);
+    ASSERT_EQ(d.pick(b, 4, 2).outcome, kContinue);
+    EXPECT_EQ(d.tool().prompt(),
+              "Select lines and polylines to join or [Tolerance] (2 selected, ends within 0.001)");
+    EXPECT_EQ(d.undo().outcome, kContinue);
+    EXPECT_EQ(d.tool().prompt(),
+              "Select lines and polylines to join or [Tolerance] (1 selected, ends within 0.001)");
+    // With b taken back there is only one line, and nothing to join it to.
+    EXPECT_EQ(d.enter().outcome, kRejected);
+    EXPECT_EQ(d.undo().outcome, kContinue);
+    EXPECT_EQ(d.undo().outcome, kRejected);
+    EXPECT_EQ(d.executed(), 0);
+}
+
 TEST(ModifyEditJoin, EnterWithNothingSelectedIsRefused)
 {
     ToolDriver d;
@@ -1540,6 +1822,74 @@ TEST(ModifyEditExplode, ASelectionWithNoPolylineIsRefusedAndOthersAreLeftAlone)
               "Exploded 1 polyline into 2 lines. 1 object that is not a polyline was left as it "
               "was.");
     EXPECT_TRUE(d.document().model().entities.contains(single));
+}
+
+TEST(ModifyEditExplode, APolylineOnALockedLayerIsLeftAsItWas)
+{
+    ToolDriver d;
+    const EntityId open = polyline(d, {{0, 0}, {4, 0}, {4, 4}});
+    const EntityId locked = polyline(d, {{0, 8}, {4, 8}, {4, 12}});
+    lockOnNewLayer(d, {locked}, "kerbs");
+    d.document().selection().set({open, locked});
+    d.start("modify.explode");
+    const ToolStep finished = d.enter();
+    ASSERT_EQ(finished.outcome, kDone);
+    EXPECT_EQ(finished.message,
+              "Exploded 1 polyline into 2 lines. 1 polyline on a locked layer was left as it was.");
+    EXPECT_EQ(geometryOf<Polyline2>(d, locked), (Polyline2{{{0, 8}, {4, 8}, {4, 12}}, false}));
+    EXPECT_FALSE(d.document().model().entities.contains(open));
+}
+
+TEST(ModifyEditExplode, UndoTakesBackTheLastPolylinePicked)
+{
+    ToolDriver d;
+    const EntityId string = polyline(d, {{0, 0}, {4, 0}, {4, 4}});
+    d.start("modify.explode");
+    ASSERT_EQ(d.pick(string, 2, 0).outcome, kContinue);
+    EXPECT_EQ(d.tool().prompt(), "Select polylines to explode (1 selected)");
+    EXPECT_EQ(d.undo().outcome, kContinue);
+    EXPECT_EQ(d.tool().prompt(), "Select polylines to explode (0 selected)");
+    EXPECT_EQ(d.undo().outcome, kRejected);
+    const ToolStep empty = d.enter();
+    EXPECT_EQ(empty.outcome, kRejected);
+    EXPECT_EQ(empty.message, "Select the polylines to explode first.");
+    EXPECT_TRUE(d.document().model().entities.contains(string));
+}
+
+// ============================================================================
+// The edit session
+// ============================================================================
+
+TEST(ModifyEditSession, AnOperationWithAPieceTheDrawingWouldRefuseIsNotTakenAtAll)
+{
+    // The line is shortened to (0,0)-(4,0) and, in the same operation, a
+    // zero-length line (4,0)-(4,0) is added. The drawing refuses a line of no
+    // length, and a session becomes ONE command, so taking the piece would
+    // lose every edit of the session at Enter: the add is refused, and the
+    // shortening made since begin() goes with it.
+    namespace edit = katana::cad::tools::modify_edit;
+    ToolDriver d;
+    const EntityId target = line(d, {0, 0}, {8, 0});
+    edit::EditSession session(&d.document());
+    Entity shorter = entityOf(d, target);
+    shorter.geometry = Segment2{{0, 0}, {4, 0}};
+    session.begin();
+    ASSERT_TRUE(session.replace(target, {shorter}).ok());
+    Entity nothing = shorter;
+    nothing.geometry = Segment2{{4, 0}, {4, 0}};
+    const auto refused = session.add(nothing);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().message,
+              "That would make a line the drawing cannot hold: line has zero length.");
+    EXPECT_EQ(session.operations(), 0u);
+    EXPECT_FALSE(session.edited(target));
+    EXPECT_TRUE(session.added().empty());
+    // A replacement the drawing would refuse is refused the same way.
+    session.begin();
+    const auto alsoRefused = session.replace(target, {nothing});
+    ASSERT_FALSE(alsoRefused.ok());
+    EXPECT_FALSE(session.edited(target));
+    EXPECT_EQ(session.operations(), 0u);
 }
 
 // ============================================================================

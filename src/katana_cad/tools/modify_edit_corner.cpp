@@ -118,10 +118,15 @@ class CornerTool final : public InteractiveTool {
             return ToolStep::rejected(corner.error().message);
         }
         session_.begin();
-        session_.replace(first_, {corner->first});
-        session_.replace(id, {corner->second});
-        if (corner->joiner) {
-            session_.add(std::move(*corner->joiner));
+        katana::core::Status taken = session_.replace(first_, {corner->first});
+        if (taken) {
+            taken = session_.replace(id, {corner->second});
+        }
+        if (taken && corner->joiner) {
+            taken = session_.add(std::move(*corner->joiner));
+        }
+        if (!taken) {
+            return ToolStep::rejected(taken.error().message);
         }
         step_ = Step::First;
         if (multiple_) {

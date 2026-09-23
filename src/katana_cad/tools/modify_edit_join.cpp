@@ -299,10 +299,13 @@ class JoinTool final : public InteractiveTool {
             Entity kept = *session_.original(keep);
             kept.geometry = chain.polyline;
             katana::entity::setHeights(kept.properties, chain.heights);
-            session_.replace(keep, {kept});
+            if (auto status = session_.replace(keep, {kept}); !status) {
+                return ToolStep::rejected(status.error().message);
+            }
             for (const EntityId id : chain.ids) {
+                // Removing an entity adds no piece, so this cannot fail.
                 if (id != keep) {
-                    session_.replace(id, {});
+                    (void)session_.replace(id, {});
                 }
             }
             joined += chain.ids.size();
@@ -437,9 +440,11 @@ class ExplodeTool final : public InteractiveTool {
         }
         session_.begin();
         for (auto& [id, pieces] : exploded) {
-            session_.replace(id, {});
+            (void)session_.replace(id, {}); // a removal adds no piece: it cannot fail
             for (Entity& piece : pieces) {
-                session_.add(std::move(piece));
+                if (auto status = session_.add(std::move(piece)); !status) {
+                    return ToolStep::rejected(status.error().message);
+                }
             }
         }
         return ToolStep::done(session_.commit("EXPLODE"),

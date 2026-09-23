@@ -110,6 +110,18 @@ std::optional<std::string> refusalToEdit(const Document& document, EntityId id)
     return std::nullopt;
 }
 
+katana::core::Status drawable(const Geometry& geometry)
+{
+    if (auto status = katana::entity::validate(geometry); !status) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidGeometry,
+                                       asSentence("that would make " +
+                                                  withArticle(kindName(geometry)) +
+                                                  " the drawing cannot hold: " +
+                                                  status.error().message));
+    }
+    return {};
+}
+
 std::vector<EntityId> selectionNow(const ToolContext& context, const std::vector<EntityId>& picked)
 {
     std::vector<EntityId> ids = picked;
@@ -417,15 +429,27 @@ std::vector<Geometry> EditSession::shapes() const
 
 void EditSession::begin() { history_.push_back(state_); }
 
-void EditSession::replace(EntityId id, std::vector<Entity> pieces)
+katana::core::Status EditSession::replace(EntityId id, std::vector<Entity> pieces)
 {
+    for (const Entity& piece : pieces) {
+        if (auto status = drawable(piece.geometry); !status) {
+            (void)undo(); // abandon the operation begun: all of it or none
+            return status;
+        }
+    }
     state_.edited[id] = std::move(pieces);
+    return {};
 }
 
-void EditSession::add(Entity entity)
+katana::core::Status EditSession::add(Entity entity)
 {
+    if (auto status = drawable(entity.geometry); !status) {
+        (void)undo();
+        return status;
+    }
     entity.id = katana::entity::kInvalidEntityId;
     state_.added.push_back(std::move(entity));
+    return {};
 }
 
 bool EditSession::undo()

@@ -58,6 +58,31 @@ std::optional<double> throughDistance(const Geometry& source, const Point2& side
     return std::nullopt;
 }
 
+// True when every side of `moved` still runs the way its side of `source`
+// does. geometry::offset mitres each vertex and is only right while the
+// distance is below the polyline's local feature size (editing.hpp): beyond
+// it the moved sides pass each other, and a mitre lands past the far end of a
+// short side, which then runs backwards - an inward offset of an 8x8 square by
+// 5 comes out as a 2x2 square drawn the other way round, when no such offset
+// exists. Each side of the result lies on its source side's line moved
+// sideways, so it can only run the same way, shrink to nothing or run back.
+// geometry::offset works from the polyline without repeated vertices, so its
+// sides are compared with those.
+bool keepsItsSides(const Polyline2& source, const Polyline2& moved)
+{
+    const Polyline2 clean = source.withoutDuplicateVertices();
+    if (clean.segmentCount() != moved.segmentCount()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < clean.segmentCount(); ++i) {
+        const Segment2 side = moved.segment(i);
+        if (side.isDegenerate() || side.delta().dot(clean.segment(i).delta()) <= 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The offset of `source` by `distance` towards `side`. A polyline takes the
 // side of its segment nearest the point, as offsetEntity decides it.
 Result<Geometry> offsetGeometry(const Geometry& source, double distance, const Point2& side)
@@ -72,6 +97,13 @@ Result<Geometry> offsetGeometry(const Geometry& source, double distance, const P
         auto moved = katana::geometry::offset(*polyline, sign * distance);
         if (!moved) {
             return makeError(ErrorCode::InvalidGeometry, asSentence(moved.error().message));
+        }
+        if (!keepsItsSides(*polyline, *moved)) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "An offset of " + formatNumber(distance) + " is too large for that " +
+                                 kindName(source) +
+                                 ": a side of the copy would turn back on itself or shrink to "
+                                 "nothing.");
         }
         return Geometry{std::move(*moved)};
     }
@@ -335,6 +367,11 @@ class OffsetTool final : public InteractiveTool {
         if (!moved) {
             return moved.error();
         }
+        // Refused here rather than at Enter, where the drawing would refuse
+        // the session's one command and every offset made in it with this.
+        if (auto status = drawable(*moved); !status) {
+            return status.error();
+        }
         return offsetCopy(source, std::move(*moved));
     }
 
@@ -345,7 +382,9 @@ class OffsetTool final : public InteractiveTool {
             return ToolStep::rejected(made.error().message);
         }
         session_.begin();
-        session_.add(*made);
+        if (auto status = session_.add(*made); !status) {
+            return ToolStep::rejected(status.error().message);
+        }
         if (multiple_) {
             chain_.push_back(std::move(*made));
             return ToolStep::next();
