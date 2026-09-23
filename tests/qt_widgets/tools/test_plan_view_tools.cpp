@@ -431,6 +431,63 @@ TEST(PlanViewTools, EscAfterATrimKeepsTheCutAsOneUndoStep)
     expectSegment(kept, Point2(0, 0), Point2(10, 0));
 }
 
+TEST(PlanViewTools, EscAtTheRadiusPromptKeepsTheCornersAMultipleFilletMade)
+{
+    // Enter at Fillet's radius prompt only returns to the lines, so an Esc
+    // that sent Enter there and then dropped the tool lost the corners the
+    // Multiple session had made. Line a (0, 0)-(12, 0) and line b (10, -2)-
+    // (10, 10) meet at (10, 0). Picking a at (5, 0) - pixel (250, 150) - and b
+    // at (10, 5) - pixel (300, 100) - keeps the picked sides, and radius 0
+    // makes a sharp corner: a becomes (0, 0)-(10, 0), b (10, 0)-(10, 10).
+    PlanFixture plan;
+    const EntityId a = addLine(plan.document, Point2(0, 0), Point2(12, 0));
+    const EntityId b = addLine(plan.document, Point2(10, -2), Point2(10, 10));
+    ASSERT_TRUE(plan.view.startTool("modify.fillet").ok());
+    plan.type("R"); // the radius is remembered for the program: set it here
+    plan.enter();
+    plan.type("0");
+    plan.enter();
+    plan.type("M");
+    plan.enter();
+    plan.press(250, 150);
+    plan.press(300, 100);
+    ASSERT_EQ(plan.undoSteps(), 2u) << "the corner is the tool's until Enter or Esc";
+    plan.type("R");
+    plan.enter();
+    ASSERT_NE(plan.view.toolHost().prompt().find("radius <"), std::string::npos)
+        << plan.view.toolHost().prompt();
+    plan.escape();
+
+    EXPECT_FALSE(plan.view.toolActive());
+    EXPECT_EQ(plan.undoSteps(), 3u) << "the two lines, then one FILLET";
+    expectSegment(plan.document.model().entities.find(a), Point2(0, 0), Point2(10, 0));
+    expectSegment(plan.document.model().entities.find(b), Point2(10, 0), Point2(10, 10));
+}
+
+TEST(PlanViewTools, EscAtTheSecondChamferDistanceLeavesTheRememberedDistancesAlone)
+{
+    // Enter at the second distance takes the first as the second and stores
+    // both for every later Chamfer; Esc must never apply a default. The
+    // distances are remembered for the program, so the test compares the
+    // prompt before with the prompt after rather than assuming what it says.
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("modify.chamfer").ok());
+    const std::string before = plan.view.toolHost().prompt();
+    plan.type("D");
+    plan.enter();
+    plan.type("3.25");
+    plan.enter();
+    ASSERT_NE(plan.view.toolHost().prompt().find("second chamfer distance <3.25>"),
+              std::string::npos)
+        << plan.view.toolHost().prompt();
+    plan.escape();
+    EXPECT_FALSE(plan.view.toolActive());
+
+    ASSERT_TRUE(plan.view.startTool("modify.chamfer").ok());
+    EXPECT_EQ(plan.view.toolHost().prompt(), before);
+    EXPECT_EQ(plan.undoSteps(), 0u);
+}
+
 TEST(PlanViewTools, EscFromAMoveAtItsSecondPointMovesNothing)
 {
     // Move's Enter at the second point moves by the base point as a

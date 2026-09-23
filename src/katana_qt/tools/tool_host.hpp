@@ -82,7 +82,10 @@ class ToolHost {
     // Esc: ends the tool. A tool whose Enter commits work it holds - a chain
     // of lines, the parts a Trim has cut - is sent Enter first, so Esc keeps
     // that work, as AutoCAD keeps the segments of a LINE; every other tool is
-    // dropped with nothing done (see escapeKeepsWork). No-op when idle.
+    // dropped with nothing done (see escapeKeepsWork). Such a tool at a value
+    // prompt (Fillet's radius, Chamfer's distances) is first stepped back to
+    // the prompt whose Enter commits, because Enter at a value prompt takes
+    // its default, which Esc must never do. No-op when idle.
     void cancel();
     // Abandons the running tool WITHOUT committing anything and starts the
     // same tool afresh: for when the document under it has been replaced, and
