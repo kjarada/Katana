@@ -21,3 +21,7 @@ samples/*/backups/
 # (tools/embed_customisation.py) and never in the repository; everything that
 # reads it skips when it is absent. See PLAN.MD 20.3.
 docs/12d Refrence Files/
+
+# Git worktrees created for parallel agents (CLAUDE.md section 5.3). Each is a
+# checkout of its own; tracking one would embed a repository in this one.
+.claude/worktrees/
