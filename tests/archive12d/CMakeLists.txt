@@ -1,7 +1,6 @@
 katana_add_test_suite(archive12d
     LIBS katana_archive12d
     SOURCES
-        test_text_encoding.cpp
         test_reader.cpp
         test_elements.cpp
         test_writer.cpp

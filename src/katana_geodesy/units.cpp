@@ -7,53 +7,52 @@
 #include <string>
 
 #include "katana/math/numerics.hpp"
+#include "katana/math/unit_ratio.hpp"
 
 namespace katana::geodesy {
 
 namespace {
 
-// Exact size of a length unit: numerator / denominator metres.
-struct Ratio {
-    std::int64_t numerator;
-    std::int64_t denominator;
-};
+using Ratio = katana::math::UnitRatio;
 
-// The defining constants. International units derive from the 1959 yard
-// (0.9144 m exactly); US survey units from the 1893 Mendenhall order
-// (1 m = 39.37 in, hence 1 ft = 1200/3937 m exactly).
+// The defining constants are katana::math::units (math/unit_ratio.hpp), where
+// every layer can see them; this maps the catalogue onto them. The switch has
+// no default so that an enumerator added without a definition is a warning, and
+// under -Werror a build failure.
 constexpr Ratio lengthRatio(LengthUnit unit)
 {
+    namespace units = katana::math::units;
     switch (unit) {
     case LengthUnit::Millimetre:
-        return {1, 1000};
+        return units::kMillimetre;
     case LengthUnit::Centimetre:
-        return {1, 100};
+        return units::kCentimetre;
     case LengthUnit::Metre:
-        return {1, 1};
+        return units::kMetre;
     case LengthUnit::Kilometre:
-        return {1000, 1};
+        return units::kKilometre;
     case LengthUnit::InternationalInch:
-        return {127, 5000};
+        return units::kInternationalInch;
     case LengthUnit::InternationalFoot:
-        return {381, 1250};
+        return units::kInternationalFoot;
     case LengthUnit::InternationalYard:
-        return {1143, 1250};
+        return units::kInternationalYard;
     case LengthUnit::InternationalChain:
-        return {12573, 625}; // 66 * 381/1250
+        return units::kInternationalChain;
     case LengthUnit::InternationalLink:
-        return {12573, 62500};
+        return units::kInternationalLink;
     case LengthUnit::InternationalMile:
-        return {201168, 125}; // 5280 * 381/1250
+        return units::kInternationalMile;
     case LengthUnit::NauticalMile:
-        return {1852, 1};
+        return units::kNauticalMile;
     case LengthUnit::UsSurveyFoot:
-        return {1200, 3937};
+        return units::kUsSurveyFoot;
     case LengthUnit::UsSurveyChain:
-        return {79200, 3937};
+        return units::kUsSurveyChain;
     case LengthUnit::UsSurveyLink:
-        return {792, 3937};
+        return units::kUsSurveyLink;
     case LengthUnit::UsSurveyMile:
-        return {6336000, 3937};
+        return units::kUsSurveyMile;
     }
     throw std::logic_error("katana::geodesy: LengthUnit value outside the enumeration");
 }
@@ -74,17 +73,6 @@ constexpr std::int64_t unitsPerTurn(AngleUnit unit)
         return 1296000;
     }
     throw std::logic_error("katana::geodesy: AngleUnit value outside the enumeration");
-}
-
-// value * numerator / denominator with the fraction reduced first. All unit
-// constants are small enough that the products stay far below 2^53, so both
-// integers convert to double exactly.
-double scaleByRatio(double value, std::int64_t numerator, std::int64_t denominator)
-{
-    const std::int64_t divisor = std::gcd(numerator, denominator);
-    const auto p = static_cast<double>(numerator / divisor);
-    const auto q = static_cast<double>(denominator / divisor);
-    return (value * p) / q;
 }
 
 // Lower-cases ASCII and drops spaces, '-' and '_' so that spelling variants of
@@ -218,8 +206,7 @@ core::Result<Unit> parseUnit(std::string_view text, const std::array<Alias<Unit>
 
 double metresPerUnit(LengthUnit unit)
 {
-    const Ratio ratio = lengthRatio(unit);
-    return static_cast<double>(ratio.numerator) / static_cast<double>(ratio.denominator);
+    return katana::math::ratioValue(lengthRatio(unit));
 }
 
 double radiansPerUnit(AngleUnit unit)
@@ -257,7 +244,7 @@ double convertLength(double value, LengthUnit from, LengthUnit to)
     }
     const Ratio source = lengthRatio(from);
     const Ratio target = lengthRatio(to);
-    return scaleByRatio(value, source.numerator * target.denominator,
+    return katana::math::scaleByRatio(value, source.numerator * target.denominator,
                         source.denominator * target.numerator);
 }
 
@@ -276,7 +263,7 @@ double convertAngle(double value, AngleUnit from, AngleUnit to)
     if (toPerTurn == 0) {
         return value * (katana::math::kTwoPi / static_cast<double>(fromPerTurn));
     }
-    return scaleByRatio(value, toPerTurn, fromPerTurn);
+    return katana::math::scaleByRatio(value, toPerTurn, fromPerTurn);
 }
 
 std::string_view toString(LengthUnit unit)

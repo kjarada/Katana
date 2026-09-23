@@ -14,6 +14,7 @@
 #include <variant>
 
 #include "katana/core/error.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
 namespace katana::entity {
@@ -27,15 +28,16 @@ enum class EntityType { Point, Line, Arc, Polyline, Circle, Text, Dimension };
 [[nodiscard]] std::string_view toString(EntityType type);
 [[nodiscard]] katana::core::Result<EntityType> entityTypeFromString(std::string_view name);
 
-// True when `text` is well-formed UTF-8, rejecting overlong encodings and
-// surrogate halves as the standard requires.
+// True when `text` is well-formed UTF-8. Defined in core (text_encoding.hpp),
+// which the text decoder needs it in, and named here as well because the model
+// is where it is enforced.
 //
 // Every string that reaches the model is checked, because the JSON writer used
 // by project storage THROWS on invalid UTF-8 - and it is reached from a path
 // that returns Status and promises not to throw. Text typed on a CP1252 console
 // or read from an ANSI file is the ordinary way to produce such bytes, so this
 // is a routine input to reject, not a hypothetical one.
-[[nodiscard]] bool isValidUtf8(std::string_view text);
+using katana::core::isValidUtf8;
 
 struct PointGeometry {
     katana::geometry::Point2 position;

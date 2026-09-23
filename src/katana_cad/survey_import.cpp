@@ -75,6 +75,16 @@ katana::core::Result<CommandPtr> importSurveyProject(const Document& document,
     SurveyImportReport& out = report != nullptr ? *report : discarded;
     out = {};
 
+    // Said before the empty check, because a raw observation file whose every
+    // target is unreduced imports NOTHING, and "nothing" needs its reason.
+    out.pointsWithoutPosition = project.unpositionedPoints.size();
+    if (out.pointsWithoutPosition != 0) {
+        out.warnings.push_back(std::to_string(out.pointsWithoutPosition) +
+                               " point(s) are named in the source with no coordinates - the "
+                               "targets of raw observations - and are not drawn; reducing the "
+                               "observations is what gives them a position");
+    }
+
     // Nothing to do, and NOT an error: a caller has to be able to tell those
     // apart, the same contract applySurveyCodes() follows.
     if (project.points.empty()) {
@@ -87,6 +97,7 @@ katana::core::Result<CommandPtr> importSurveyProject(const Document& document,
     // clashes on every one of ten thousand points, and ten thousand identical
     // warnings is the same as none.
     std::map<std::string, std::size_t> metadataClashes;
+    std::size_t withoutElevation = 0;
 
     std::vector<Entity> entities;
     entities.reserve(project.points.size());
@@ -134,14 +145,16 @@ katana::core::Result<CommandPtr> importSurveyProject(const Document& document,
                                         PropertyValue(point.description));
         }
         // A 2D drawing has no Z, so the height is a property - the same one the
-        // 12d import writes and the surface builder reads.
-        //
-        // KNOWN GAP, recorded in PLAN.MD 45: survey::SurveyPoint::elevation is a
-        // plain double with no "unset", so a file with no height column gives
-        // 0.0 and is written here as a real height at the datum. A parser warns
-        // about a missing Z; this cannot tell one from a surveyed 0.0.
-        properties.insert_or_assign(std::string(katana::entity::kElevationProperty),
-                                    PropertyValue(point.elevation));
+        // 12d import writes and the surface builder reads. A point the source
+        // gave no height for gets NO property rather than 0.0: the surface
+        // builder leaves a point without one out, where a zero would be a real
+        // height at the datum and pull the surface down to it (PLAN.MD 45.3b).
+        if (point.elevation) {
+            properties.insert_or_assign(std::string(katana::entity::kElevationProperty),
+                                        PropertyValue(*point.elevation));
+        } else {
+            ++withoutElevation;
+        }
         if (point.coordinateSource != katana::survey::CoordinateSource::Unknown) {
             properties.insert_or_assign(
                 std::string(kCoordinateSourceProperty),
@@ -189,6 +202,12 @@ katana::core::Result<CommandPtr> importSurveyProject(const Document& document,
     }
 
     out.points = entities.size();
+    out.pointsWithoutElevation = withoutElevation;
+    if (withoutElevation != 0) {
+        out.warnings.push_back(std::to_string(withoutElevation) +
+                               " point(s) have no height in the source; they are drawn "
+                               "without an elevation and a surface will leave them out");
+    }
     for (const auto& [key, count] : metadataClashes) {
         out.warnings.push_back("metadata field \"" + key + "\" was not imported on " +
                                std::to_string(count) +

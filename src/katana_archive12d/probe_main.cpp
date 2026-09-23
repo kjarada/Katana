@@ -35,7 +35,7 @@
 
 #include "katana/archive12d/domain.hpp"
 #include "katana/archive12d/reader.hpp"
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/archive12d/writer.hpp"
 
 namespace a12 = katana::archive12d;
@@ -79,13 +79,13 @@ int main(int argc, char* argv[])
     const std::string bytes = buffer.str();
 
     auto start = std::chrono::steady_clock::now();
-    const auto decoded = a12::decodeText(bytes);
+    const auto decoded = katana::core::decodeText(bytes);
     if (!decoded) {
         std::fprintf(stderr, "%s\n", decoded.error().describe().c_str());
         return 1;
     }
     std::printf("%s\n  %zu bytes, %s%s, decoded in %.2f s\n", path.c_str(), bytes.size(),
-                a12::toString(decoded->encoding), decoded->guessed ? " (inferred)" : "",
+                katana::core::toString(decoded->encoding), decoded->guessed ? " (inferred)" : "",
                 secondsSince(start));
 
     start = std::chrono::steady_clock::now();

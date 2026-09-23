@@ -682,7 +682,9 @@ std::vector<Equation> levelEquations(const LevelModel& model, const std::vector<
         equation.index = c;
         equation.component = ResidualComponent::Elevation;
         equation.sigma = control[c].elevation.sigma;
-        equation.misclosure = network.points()[point].elevation - elevations[point];
+        // adjustLevel has refused a weighted benchmark with no height, so the
+        // published value is there to be compared with.
+        equation.misclosure = *network.points()[point].elevation - elevations[point];
         equation.add(model.parameter[point], 1.0);
         equations.push_back(equation);
     }
@@ -706,10 +708,30 @@ Result<LevelAdjustmentResult> adjustLevel(const SurveyNetwork& network,
                          "the network has no free elevations: every levelled point is fixed");
     }
 
+    // A held or weighted benchmark IS the datum the run hangs on, so one with no
+    // published height cannot be adjusted against - refusing it is the answer,
+    // since starting it at zero would level the whole run onto the wrong datum
+    // and report a perfect fit. A free point with no height starts at zero,
+    // which costs nothing: the model is linear (see below), so the solve is
+    // exact from any starting value.
     std::vector<double> elevations;
     elevations.reserve(network.points().size());
-    for (const SurveyPoint& point : network.points()) {
-        elevations.push_back(point.elevation);
+    for (std::size_t p = 0; p < network.points().size(); ++p) {
+        const SurveyPoint& point = network.points()[p];
+        if (point.elevation) {
+            elevations.push_back(*point.elevation);
+            continue;
+        }
+        if (model.involved[p]) {
+            const auto control = network.controlFor(point.id);
+            if (control && control->elevation.constraint != ControlConstraint::Free) {
+                return makeError(ErrorCode::AdjustmentFailure,
+                                 "benchmark '" + point.id +
+                                     "' is held in height but has no published elevation",
+                                 describeSource(point.source));
+            }
+        }
+        elevations.push_back(0.0);
     }
 
     // The model is linear, so one solve for corrections to the stored elevations

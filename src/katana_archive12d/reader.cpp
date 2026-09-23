@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <utility>
 
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/entity/entity.hpp"
 #include "lexer.hpp"
 #include "text_utilities.hpp"
@@ -2578,7 +2578,7 @@ katana::core::Result<Archive> readArchive(std::string_view text, const ReadOptio
 
 katana::core::Result<Archive> readArchiveBytes(std::string_view bytes, const ReadOptions& options)
 {
-    auto decoded = decodeText(bytes);
+    auto decoded = katana::core::decodeText(bytes);
     if (!decoded) {
         return decoded.error();
     }
