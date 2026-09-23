@@ -179,10 +179,16 @@ struct CustomisationCoverage {
     std::size_t named = 0;    // ... that name a linestyle or a symbol
     std::size_t resolved = 0; // ... that the loaded library defines
     // ... whose only name is a symbol Katana draws itself ("cross",
-    // "manhole") and no library defines: drawn correctly, so neither missing
-    // nor counted as named (audit CAD-17).
+    // "manhole") or a linetype of the drawing's own, and no library defines:
+    // drawn correctly, so neither missing nor counted as named (audit CAD-17).
     std::size_t builtIn = 0;
-    // The names that resolve to nothing, distinct and in name order.
+    // The names the styles give whose drawing is a fallback, distinct and in
+    // name order: by cad::linetypeStatus and cad::symbolStatus, the rule
+    // cad::missingNames reports by (style_catalogue.hpp). So never a built-in
+    // symbol, ByLayer, a plain line or a style's own symbol as its linetype
+    // (D8); and a linetype naming only a `mode vertex` symbol IS listed, as
+    // the viewport draws it solid (D2). The styles' names only - a layer's
+    // missing linetype is in missingNames, not here.
     std::vector<std::string> unresolved{};
 };
 
