@@ -70,12 +70,6 @@ class FilterBar;
 class NamePicker;
 class StylePreview;
 
-// The 12d colour names the colour field offers, each one archive12d's
-// standardColour knows (a name it stops knowing is left out). A person may
-// still type any other name: 12d defines colours per project, and a map's
-// "sui water potable" is kept as written.
-[[nodiscard]] std::vector<std::string> standardColourNames();
-
 class SurveyCodeManagerDialog : public QDialog {
   public:
     explicit SurveyCodeManagerDialog(CustomisationContext context, QWidget* parent = nullptr);
