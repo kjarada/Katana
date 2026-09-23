@@ -68,8 +68,12 @@ class RenderViewWidget final : public QWidget {
     // hidden in this view left it, and that an edit reached this view.
     [[nodiscard]] std::size_t lastSceneLineCount() const { return list_.lines.size(); }
     // True when the last scene built had nothing to show - no drawn entity,
-    // surface or mesh, only the grid. The view then says so on screen.
+    // surface or mesh, only the grid. What the framing goes by.
     [[nodiscard]] bool sceneEmpty() const { return sceneEmpty_; }
+    // True when the last paint told the user there is nothing to show and
+    // what would put something there: only for an empty scene of a drawing
+    // with nothing in it, and only where the view had room to say it.
+    [[nodiscard]] bool emptyMessageShown() const { return emptyMessageShown_; }
 
     // Rebuilds the draw list on the next paint. The view calls it itself on
     // every document change (it listens to the document it is given); call it
@@ -118,7 +122,12 @@ class RenderViewWidget final : public QWidget {
     // Registers with the context's document, or ends the registration when
     // there is none; a no-op when it is the document already listened to.
     void listenTo(katana::cad::Document* document);
-    void drawEmptyMessage(QPainter& painter) const;
+    // True when the document has no entity or alignment and the view has no
+    // surface or mesh: nothing that any layer could be hiding.
+    [[nodiscard]] bool drawingIsEmpty() const;
+    // False when the view is too small to hold the message, which is then
+    // left out.
+    bool drawEmptyMessage(QPainter& painter) const;
 
     ViewContext context_;
     katana::cad::ViewState& state_;
@@ -134,6 +143,7 @@ class RenderViewWidget final : public QWidget {
     double lastFrameMs_ = 0.0;
     bool sceneDirty_ = true;
     bool sceneEmpty_ = true;
+    bool emptyMessageShown_ = false;
     // The first paint frames the scene unless the camera was framed already
     // (ViewState::cameraFramed): the constructor sets this from the state.
     bool framed_ = false;

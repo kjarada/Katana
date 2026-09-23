@@ -13,6 +13,7 @@
 
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/tables.hpp"
 #include "widget_harness.hpp"
 
 using katana::cad::Document;
@@ -109,4 +110,72 @@ TEST(RenderView, AViewWhoseCameraWasPointedAfreshFramesTheDrawingAgain)
     ASSERT_TRUE(scene.views.setKind(state.id, ViewKind::Elevation).ok());
     const auto elevation = scene.show(state);
     expectTarget(state, 50.0, 25.0, 0.0);
+}
+
+TEST(RenderView, AnEditReachesAThreeDViewAlreadyOpen)
+{
+    // Audit QT-05: the 3D view was rebuilt only when something else happened
+    // to invalidate it, so a line drawn in plan never appeared in it and an
+    // undone one stayed. A second line inside the first one's box leaves the
+    // grid as it was, so the open view must now build what a view opened
+    // afresh on the same drawing builds, and after an undo what it built
+    // before.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    const auto open = scene.show(state);
+    const std::size_t before = open->lastSceneLineCount();
+
+    ASSERT_TRUE(scene.document
+                    .execute(katana::commands::createLine(Point2(0.0, 50.0), Point2(100.0, 0.0)))
+                    .ok());
+    paint(*open);
+    ViewState& other = scene.views.add(ViewKind::Model3D);
+    const auto fresh = scene.show(other);
+    EXPECT_GT(fresh->lastSceneLineCount(), before) << "the second line added nothing to draw";
+    EXPECT_EQ(open->lastSceneLineCount(), fresh->lastSceneLineCount());
+
+    ASSERT_TRUE(scene.document.undo().ok());
+    paint(*open);
+    EXPECT_EQ(open->lastSceneLineCount(), before);
+}
+
+TEST(RenderView, AnEmptyDrawingSaysThereIsNothingToShow)
+{
+    Document document;
+    ViewSet views;
+    ViewState& state = views.add(ViewKind::Model3D);
+    ViewContext context;
+    context.document = &document;
+    RenderViewWidget view(context, state);
+    view.resize(400, 300);
+    paint(view);
+    EXPECT_TRUE(view.sceneEmpty());
+    EXPECT_TRUE(view.emptyMessageShown());
+}
+
+TEST(RenderView, ADrawingWhoseLayersAreAllHiddenIsNotCalledEmpty)
+{
+    // The one line is on layer "0". Hidden in this view, or in the document,
+    // the scene is the grid alone - but the drawing is not empty, and telling
+    // the user to draw or import something would be wrong.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    const auto view = scene.show(state);
+    ASSERT_FALSE(view->sceneEmpty());
+    EXPECT_FALSE(view->emptyMessageShown());
+
+    ASSERT_TRUE(state.layers.hide("0"));
+    view->invalidateScene(); // the view's own layers are not the document's to announce
+    paint(*view);
+    ASSERT_TRUE(view->sceneEmpty());
+    EXPECT_FALSE(view->emptyMessageShown());
+
+    ASSERT_TRUE(state.layers.show("0"));
+    katana::entity::Layer hidden;
+    hidden.name = "0";
+    hidden.visible = false;
+    ASSERT_TRUE(scene.document.execute(katana::commands::updateLayer(hidden)).ok());
+    paint(*view);
+    ASSERT_TRUE(view->sceneEmpty());
+    EXPECT_FALSE(view->emptyMessageShown());
 }

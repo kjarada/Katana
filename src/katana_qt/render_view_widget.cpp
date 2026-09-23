@@ -183,6 +183,7 @@ void RenderViewWidget::resizeEvent(QResizeEvent* event)
 void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
 {
     QPainter painter(this);
+    emptyMessageShown_ = false;
     if (framebuffer_.empty()) {
         painter.fillRect(rect(), kBackground);
         return;
@@ -216,8 +217,13 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
                        framebuffer_.width() * static_cast<int>(sizeof(katana::render::Rgba)),
                        QImage::Format_ARGB32);
     painter.drawImage(0, 0, image);
-    if (sceneEmpty_) {
-        drawEmptyMessage(painter);
+    // Only for a drawing with nothing in it. A scene of the grid alone is
+    // also what a drawing whose every layer is hidden - in the document or in
+    // this view - builds, and telling that user to draw or import something
+    // would be wrong; the plan view says nothing then either
+    // (ViewportWidget::drawEmptyHint).
+    if (sceneEmpty_ && drawingIsEmpty()) {
+        emptyMessageShown_ = drawEmptyMessage(painter);
     }
 
     if (onFrameStats) {
@@ -228,9 +234,19 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
     }
 }
 
+bool RenderViewWidget::drawingIsEmpty() const
+{
+    if (context_.document == nullptr) {
+        return true;
+    }
+    const auto& model = context_.document->model();
+    return model.entities.empty() && model.alignments.empty() && surfaces().empty() &&
+           meshes().empty();
+}
+
 // An empty 3D view looked broken: a grid and nothing on it, with no word of
 // why. It says what would put something there.
-void RenderViewWidget::drawEmptyMessage(QPainter& painter) const
+bool RenderViewWidget::drawEmptyMessage(QPainter& painter) const
 {
     const QString message = QStringLiteral("Nothing to show in 3D yet.\n"
                                            "Draw or import something, or build a surface "
@@ -239,7 +255,7 @@ void RenderViewWidget::drawEmptyMessage(QPainter& painter) const
     const int flags = Qt::AlignCenter | Qt::TextWordWrap;
     const QRect text = painter.fontMetrics().boundingRect(area, flags, message);
     if (text.height() > area.height()) {
-        return; // too small a view to say it in; the grid alone says less wrongly
+        return false; // too small a view to say it in; the grid alone says less wrongly
     }
     painter.save();
     // A backing of the view's own ground so the grid does not strike through
@@ -253,6 +269,7 @@ void RenderViewWidget::drawEmptyMessage(QPainter& painter) const
     painter.setPen(theme::textMuted());
     painter.drawText(area, flags, message);
     painter.restore();
+    return true;
 }
 
 void RenderViewWidget::mousePressEvent(QMouseEvent* event)
