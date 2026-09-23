@@ -158,8 +158,10 @@ TEST(CustomisationMerge, ALoadedKeyReplacesThatKeysRulesInOneSectionAndNoOther)
     // A key the load does not mention is untouched.
     EXPECT_EQ(merged.map.lookup("ZZ1").resolved.model, "KEPT");
 
-    // The replacing rules stand where the replaced ones stood; the rest keep
-    // their order, and what is new follows in the order it was loaded.
+    // The loaded WM* rule stands where the key's first current rule stood -
+    // here the one it replaces - ahead of the WM* symbol rule it leaves; the
+    // rest keep their order, and keys that are new follow in the order they
+    // were loaded.
     const auto& rules = merged.map.rules();
     EXPECT_EQ(rules[0].key, "WM*");
     EXPECT_EQ(rules[0].model, "TEST SERVICES");
