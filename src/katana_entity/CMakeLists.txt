@@ -7,6 +7,7 @@ add_library(katana_entity STATIC
     layer_path.cpp
     geometry_blob.cpp
     display.cpp
+    table_usage.cpp
     dimension_text.cpp
     serialization.cpp
     style_library.cpp
