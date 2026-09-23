@@ -18,6 +18,15 @@ set(KATANA_ALLOWED_math "core")
 set(KATANA_ALLOWED_geometry "core;math")
 set(KATANA_ALLOWED_geodesy "core;math")
 set(KATANA_ALLOWED_survey "core;math")
+# surveyio reads manufacturer field data - Leica, Trimble, Topcon, LandXML, a
+# coordinate CSV - and produces katana::survey values, nothing else.
+#
+# geodesy is deliberately ABSENT, and that is the module's whole discipline:
+# surveyio records the coordinate system a file DECLARES and never transforms
+# anything. A transformation needs both of its ends, and an importer knows only
+# one of them, so transforming on import moves the survey silently. See
+# survey::DeclaredCoordinateSystem for the argument in full.
+set(KATANA_ALLOWED_surveyio "core;math;geometry;survey")
 set(KATANA_ALLOWED_terrain "core;math;geometry")
 set(KATANA_ALLOWED_entity "core;math;geometry")
 set(KATANA_ALLOWED_commands "core;math;geometry;entity")
@@ -39,12 +48,18 @@ set(KATANA_ALLOWED_render "core;math;geometry")
 # cad deliberately may NOT see interop: keeping GDAL and PDAL out of the core
 # application layer is what lets it build with -DKATANA_BUILD_IO=OFF, which the
 # sanitizer job depends on. Reference data is owned by app/qt instead.
+#
+# cad deliberately may NOT see surveyio either, for the same shape of reason: the
+# CAD core must not depend on manufacturer structures. app/qt own the parsers, and
+# what reaches cad is katana::survey values - points, observations, stations - so
+# that adding a fifth instrument vendor cannot change anything cad compiles
+# against, and removing one cannot break it.
 set(KATANA_ALLOWED_cad
     "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage")
 set(KATANA_ALLOWED_app
-    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop")
 set(KATANA_ALLOWED_qt
-    "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop;app")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop;app")
 
 # src/<directory> -> layer
 set(KATANA_SRC_LAYER_katana_core core)
@@ -52,6 +67,7 @@ set(KATANA_SRC_LAYER_katana_math math)
 set(KATANA_SRC_LAYER_katana_geometry geometry)
 set(KATANA_SRC_LAYER_katana_geodesy geodesy)
 set(KATANA_SRC_LAYER_katana_survey survey)
+set(KATANA_SRC_LAYER_katana_surveyio surveyio)
 set(KATANA_SRC_LAYER_katana_terrain terrain)
 set(KATANA_SRC_LAYER_katana_render render)
 set(KATANA_SRC_LAYER_katana_entity entity)

@@ -138,19 +138,24 @@ TEST(SurveyNetworkPoints, RemoveRebuildsTheIndexAndRefusesReferencedPoints)
 }
 
 // ---- observations ----------------------------------------------------------
+//
+// The trailing `{}` in the brace initialisations below is the SourceRecord: these
+// observations were written here, not imported from anything, so they have no
+// provenance. -Wmissing-field-initializers is on, and GCC applies it to
+// designated initialisers too, so every field has to appear.
 
 TEST(SurveyNetworkObservations, AddReturnsIndexAndStoresEveryKind)
 {
     SurveyNetwork network = triangleNetwork();
     const std::vector<Observation> observations = {
         distance("A", "B", 100.0, 0.003),
-        HorizontalAngleObservation{"A", "B", "C", kHalfPi, 1e-5},
-        VerticalAngleObservation{"A", "B", 0.1, 1e-5, 1.5, 1.8},
-        ZenithAngleObservation{"A", "B", 1.5, 1e-5, 1.5, 1.8},
-        AzimuthObservation{"A", "C", kHalfPi, 2e-5},
-        GnssBaselineObservation{"A", "B", 100.0, 0.0, 1.0, 0.005, 0.005, 0.01},
-        GnssPositionObservation{"C", 0.0, 100.0, 5.0, 0.01, 0.01, 0.02},
-        LevelDifferenceObservation{"A", "B", 1.234, 0.001, 250.0},
+        HorizontalAngleObservation{"A", "B", "C", kHalfPi, 1e-5, {}},
+        VerticalAngleObservation{"A", "B", 0.1, 1e-5, 1.5, 1.8, {}},
+        ZenithAngleObservation{"A", "B", 1.5, 1e-5, 1.5, 1.8, {}},
+        AzimuthObservation{"A", "C", kHalfPi, 2e-5, {}},
+        GnssBaselineObservation{"A", "B", 100.0, 0.0, 1.0, 0.005, 0.005, 0.01, {}},
+        GnssPositionObservation{"C", 0.0, 100.0, 5.0, 0.01, 0.01, 0.02, {}},
+        LevelDifferenceObservation{"A", "B", 1.234, 0.001, 250.0, {}},
     };
     for (std::size_t i = 0; i < observations.size(); ++i) {
         const auto index = network.addObservation(observations[i]);
@@ -174,7 +179,7 @@ TEST(SurveyNetworkObservations, RejectsUnknownStations)
     EXPECT_EQ(result.error().code, ErrorCode::NotFound);
     EXPECT_NE(result.error().context.find("NOPE"), std::string::npos); // names the culprit
 
-    EXPECT_EQ(network.addObservation(HorizontalAngleObservation{"A", "B", "X", 1.0, 1e-5})
+    EXPECT_EQ(network.addObservation(HorizontalAngleObservation{"A", "B", "X", 1.0, 1e-5, {}})
                   .error()
                   .code,
               ErrorCode::NotFound);
@@ -191,9 +196,9 @@ TEST(SurveyNetworkObservations, RejectsNonPositiveAndNonFiniteSigma)
     }
     // Each of the three GNSS sigmas is checked on its own.
     EXPECT_FALSE(
-        validateObservation(GnssBaselineObservation{"A", "B", 1, 1, 1, 0.01, 0.0, 0.01}).ok());
+        validateObservation(GnssBaselineObservation{"A", "B", 1, 1, 1, 0.01, 0.0, 0.01, {}}).ok());
     EXPECT_FALSE(
-        validateObservation(GnssPositionObservation{"A", 1, 1, 1, 0.01, 0.01, -1.0}).ok());
+        validateObservation(GnssPositionObservation{"A", 1, 1, 1, 0.01, 0.01, -1.0, {}}).ok());
     EXPECT_TRUE(network.observations().empty());
 }
 
@@ -212,32 +217,32 @@ TEST(SurveyNetworkObservations, RejectsBadValues)
     EXPECT_EQ(code(distance("A", "A", 5.0, 0.01)), invalid); // observes itself
     EXPECT_EQ(code(distance("", "B", 5.0, 0.01)), invalid);  // empty id
 
-    EXPECT_EQ(code(HorizontalAngleObservation{"A", "B", "B", 1.0, 1e-5}), invalid);
-    EXPECT_EQ(code(HorizontalAngleObservation{"A", "A", "B", 1.0, 1e-5}), invalid);
-    EXPECT_EQ(code(HorizontalAngleObservation{"A", "B", "C", kNaN, 1e-5}), invalid);
+    EXPECT_EQ(code(HorizontalAngleObservation{"A", "B", "B", 1.0, 1e-5, {}}), invalid);
+    EXPECT_EQ(code(HorizontalAngleObservation{"A", "A", "B", 1.0, 1e-5, {}}), invalid);
+    EXPECT_EQ(code(HorizontalAngleObservation{"A", "B", "C", kNaN, 1e-5, {}}), invalid);
 
-    EXPECT_EQ(code(ZenithAngleObservation{"A", "B", -0.1, 1e-5, 0, 0}), invalid);
-    EXPECT_EQ(code(ZenithAngleObservation{"A", "B", kPi + 0.1, 1e-5, 0, 0}), invalid);
-    EXPECT_EQ(code(ZenithAngleObservation{"A", "B", kHalfPi, 1e-5, 0, 0}), std::nullopt);
+    EXPECT_EQ(code(ZenithAngleObservation{"A", "B", -0.1, 1e-5, 0, 0, {}}), invalid);
+    EXPECT_EQ(code(ZenithAngleObservation{"A", "B", kPi + 0.1, 1e-5, 0, 0, {}}), invalid);
+    EXPECT_EQ(code(ZenithAngleObservation{"A", "B", kHalfPi, 1e-5, 0, 0, {}}), std::nullopt);
 
-    EXPECT_EQ(code(VerticalAngleObservation{"A", "B", kHalfPi + 0.1, 1e-5, 0, 0}), invalid);
-    EXPECT_EQ(code(VerticalAngleObservation{"A", "B", -kHalfPi, 1e-5, 0, 0}), std::nullopt);
-    EXPECT_EQ(code(VerticalAngleObservation{"A", "B", 0.1, 1e-5, kNaN, 0}), invalid);
+    EXPECT_EQ(code(VerticalAngleObservation{"A", "B", kHalfPi + 0.1, 1e-5, 0, 0, {}}), invalid);
+    EXPECT_EQ(code(VerticalAngleObservation{"A", "B", -kHalfPi, 1e-5, 0, 0, {}}), std::nullopt);
+    EXPECT_EQ(code(VerticalAngleObservation{"A", "B", 0.1, 1e-5, kNaN, 0, {}}), invalid);
 
-    EXPECT_EQ(code(AzimuthObservation{"A", "B", kInf, 1e-5}), invalid);
-    EXPECT_EQ(code(LevelDifferenceObservation{"A", "B", 1.0, 0.001, -1.0}), invalid);
-    EXPECT_EQ(code(LevelDifferenceObservation{"A", "B", kNaN, 0.001, 0.0}), invalid);
-    EXPECT_EQ(code(LevelDifferenceObservation{"A", "B", -1.0, 0.001, 0.0}), std::nullopt);
+    EXPECT_EQ(code(AzimuthObservation{"A", "B", kInf, 1e-5, {}}), invalid);
+    EXPECT_EQ(code(LevelDifferenceObservation{"A", "B", 1.0, 0.001, -1.0, {}}), invalid);
+    EXPECT_EQ(code(LevelDifferenceObservation{"A", "B", kNaN, 0.001, 0.0, {}}), invalid);
+    EXPECT_EQ(code(LevelDifferenceObservation{"A", "B", -1.0, 0.001, 0.0, {}}), std::nullopt);
 }
 
 TEST(SurveyNetworkObservations, NormalisesAzimuthsAndAnglesOnInsertion)
 {
     SurveyNetwork network = triangleNetwork();
-    ASSERT_TRUE(network.addObservation(AzimuthObservation{"A", "B", -kHalfPi, 1e-5}).ok());
+    ASSERT_TRUE(network.addObservation(AzimuthObservation{"A", "B", -kHalfPi, 1e-5, {}}).ok());
     ASSERT_TRUE(
-        network.addObservation(HorizontalAngleObservation{"A", "B", "C", kTwoPi, 1e-5}).ok());
+        network.addObservation(HorizontalAngleObservation{"A", "B", "C", kTwoPi, 1e-5, {}}).ok());
     ASSERT_TRUE(
-        network.addObservation(HorizontalAngleObservation{"A", "B", "C", 5.0 * kPi, 1e-5}).ok());
+        network.addObservation(HorizontalAngleObservation{"A", "B", "C", 5.0 * kPi, 1e-5, {}}).ok());
 
     // -90° is 270°; a full turn is 0; 900° is 180°.
     EXPECT_NEAR(std::get<AzimuthObservation>(network.observations()[0]).azimuth, 1.5 * kPi, 1e-15);
@@ -342,4 +347,287 @@ TEST(SurveyNetworkValues, CopiesAreIndependent)
     EXPECT_TRUE(original.containsPoint("A"));
     EXPECT_FALSE(original.containsPoint("D"));
     EXPECT_EQ(copy.pointIndex("D"), std::optional<std::size_t>(2));
+}
+
+// ---- provenance --------------------------------------------------------------
+
+TEST(SurveyProvenance, ASuppliedPathIsReducedToItsNameSoAFileCannotChooseWhatIsRead)
+{
+    // The property under test is the security rule stated at sourceFileName():
+    // whatever a file says, what comes back is a NAME and can never be walked.
+    EXPECT_EQ(sourceFileName("job.gsi"), "job.gsi");
+    EXPECT_EQ(sourceFileName("..\\..\\..\\Windows\\win.ini"), "win.ini");
+    EXPECT_EQ(sourceFileName("../../etc/passwd"), "passwd");
+    EXPECT_EQ(sourceFileName("/etc/passwd"), "passwd");
+    EXPECT_EQ(sourceFileName("C:job.gsi"), "job.gsi");
+    // An NTFS alternate data stream: the suffix is a plain name, and the part
+    // that made it a path is gone.
+    EXPECT_EQ(sourceFileName("job.gsi:hidden"), "hidden");
+
+    // Nothing that is not a name comes back as one.
+    EXPECT_EQ(sourceFileName(""), "");
+    EXPECT_EQ(sourceFileName("."), "");
+    EXPECT_EQ(sourceFileName(".."), "");
+    EXPECT_EQ(sourceFileName("scans/"), "");
+    EXPECT_EQ(sourceFileName("C:\\"), "");
+}
+
+TEST(SurveyProvenance, ASourceRecordNamesTheFileAndTheRecordWithinIt)
+{
+    SourceRecord source;
+    source.manufacturer = "Leica";
+    source.format = "GSI-16";
+    source.fileName = "job.gsi";
+    source.recordNumber = 412;
+
+    EXPECT_TRUE(source.known());
+    EXPECT_EQ(describeSource(source), "job.gsi record 412 (Leica GSI-16)");
+
+    source.formatVersion = "16 byte words";
+    EXPECT_EQ(describeSource(source), "job.gsi record 412 (Leica GSI-16 16 byte words)");
+}
+
+TEST(SurveyProvenance, ADefaultSourceRecordSaysTheValueWasNotImportedRatherThanNamingNothing)
+{
+    const SourceRecord none;
+    EXPECT_FALSE(none.known());
+    EXPECT_EQ(describeSource(none), "unknown source");
+
+    SourceRecord recordOnly;
+    recordOnly.recordNumber = 7; // a record number alone identifies nothing
+    EXPECT_FALSE(recordOnly.known());
+}
+
+TEST(SurveyProvenance, ACalculatedCoordinateIsDistinguishableFromAnObservedOneWithoutMetadata)
+{
+    SurveyPoint observed = makePoint("STN-1", 100.0, 200.0, 10.0);
+    observed.coordinateSource = CoordinateSource::FieldObserved;
+    SurveyPoint calculated = observed;
+    calculated.coordinateSource = CoordinateSource::Calculated;
+
+    // Same coordinates, different fact about them - and the difference survives
+    // value comparison, which a metadata convention would not guarantee.
+    EXPECT_DOUBLE_EQ(observed.northing, calculated.northing);
+    EXPECT_NE(observed, calculated);
+    EXPECT_STRNE(toString(observed.coordinateSource), toString(calculated.coordinateSource));
+    EXPECT_EQ(std::string(toString(CoordinateSource::Unknown)), "unknown");
+    EXPECT_EQ(makePoint("P", 0.0, 0.0).coordinateSource, CoordinateSource::Unknown);
+}
+
+TEST(SurveyProvenance, AnObservationCarriesItsSourceWhicheverKindItIs)
+{
+    SourceRecord source;
+    source.format = "GSI-16";
+    source.fileName = "job.gsi";
+    source.recordNumber = 12;
+
+    Observation distanceObservation = distance("A", "B", 100.0, 0.005);
+    setObservationSource(distanceObservation, source);
+    EXPECT_EQ(observationSource(distanceObservation), source);
+
+    GnssPositionObservation position;
+    position.point = "A";
+    position.sigmaNorthing = 0.01;
+    position.sigmaEasting = 0.01;
+    position.sigmaElevation = 0.02;
+    Observation gnss = position;
+    EXPECT_FALSE(observationSource(gnss).known());
+    setObservationSource(gnss, source);
+    EXPECT_EQ(observationSource(gnss).recordNumber, 12u);
+
+    // Provenance is not part of what makes an observation valid: an observation
+    // this program computed has none, and must still validate.
+    EXPECT_TRUE(validateObservation(distanceObservation).ok());
+}
+
+// ---- declared coordinate system and units --------------------------------------
+
+TEST(SurveyDeclaredCoordinateSystem, ASystemThatTheSourceDidNotStateStaysUnknown)
+{
+    const DeclaredCoordinateSystem nothingSaid;
+    EXPECT_TRUE(nothingSaid.unknown);
+    EXPECT_TRUE(nothingSaid.name.empty());
+    EXPECT_EQ(nothingSaid.epsgCode, 0);
+
+    // A blank declaration declares nothing, and a code of 0 is the field's own
+    // "none given" marker rather than an EPSG code.
+    EXPECT_TRUE(DeclaredCoordinateSystem::named("").unknown);
+    EXPECT_TRUE(DeclaredCoordinateSystem::epsg(0).unknown);
+    EXPECT_TRUE(DeclaredCoordinateSystem::epsg(-1).unknown);
+}
+
+TEST(SurveyDeclaredCoordinateSystem, WhatTheSourceDeclaredIsRecordedAndNotResolved)
+{
+    const DeclaredCoordinateSystem byName = DeclaredCoordinateSystem::named("MGA Zone 56");
+    EXPECT_FALSE(byName.unknown);
+    EXPECT_EQ(byName.name, "MGA Zone 56");
+    EXPECT_EQ(byName.epsgCode, 0); // no code was stated, and none is invented
+
+    const DeclaredCoordinateSystem byCode = DeclaredCoordinateSystem::epsg(28356, "MGA Zone 56");
+    EXPECT_FALSE(byCode.unknown);
+    EXPECT_EQ(byCode.epsgCode, 28356);
+    EXPECT_EQ(byCode.name, "MGA Zone 56");
+}
+
+TEST(SurveyDeclaredUnits, UnitsAreRecordedAsDeclaredWhileTheModelStaysMetresAndRadians)
+{
+    const DeclaredUnits nothingSaid;
+    EXPECT_EQ(nothingSaid.linear, LinearUnit::Unknown);
+    EXPECT_EQ(nothingSaid.angular, AngularUnit::Unknown);
+
+    EXPECT_EQ(std::string(toString(LinearUnit::UsSurveyFeet)), "US survey feet");
+    EXPECT_EQ(std::string(toString(AngularUnit::Gons)), "gons");
+    EXPECT_EQ(std::string(toString(AngularUnit::DegreesMinutesSeconds)),
+              "degrees, minutes and seconds");
+}
+
+// ---- stations, features and projects -------------------------------------------
+
+TEST(SurveyStations, ASetupWithNoRecordedOrientationIsNotASetupOrientedOnZero)
+{
+    SurveyStation unrecorded;
+    unrecorded.setup = Station{"setup-1", "A", 1.532};
+    SurveyStation orientedOnZero = unrecorded;
+    orientedOnZero.backsightAzimuth = 0.0;
+
+    EXPECT_FALSE(unrecorded.backsightAzimuth.has_value());
+    EXPECT_NE(unrecorded, orientedOnZero);
+}
+
+namespace {
+
+// Two points and one setup over the first of them, backsighting the second.
+SurveyProject twoPointProject()
+{
+    SurveyProject project;
+    project.points.push_back(makePoint("A", 0.0, 0.0, 10.0));
+    project.points.push_back(makePoint("B", 100.0, 0.0, 12.0));
+
+    SurveyStation station;
+    station.setup = Station{"setup-1", "A", 1.532};
+    station.backsightPointId = "B";
+    station.backsightAzimuth = 0.0;
+    station.observations.push_back(distance("A", "B", 100.0, 0.005));
+    project.stations.push_back(std::move(station));
+    return project;
+}
+
+} // namespace
+
+TEST(SurveyProjects, AProjectWhoseReferencesAllResolveValidates)
+{
+    SurveyProject project = twoPointProject();
+    SurveyFeature kerb;
+    kerb.code = "KB";
+    kerb.pointIds = {"A", "B"};
+    project.features.push_back(kerb);
+    project.observations.push_back(distance("B", "A", 100.0, 0.005));
+
+    EXPECT_TRUE(validateProject(project).ok());
+}
+
+TEST(SurveyProjects, APointWithNoIdOrADuplicateOneIsRejected)
+{
+    SurveyProject empty;
+    empty.points.push_back(makePoint("", 0.0, 0.0));
+    EXPECT_EQ(validateProject(empty).error().code, ErrorCode::InvalidArgument);
+
+    SurveyProject twice;
+    twice.points.push_back(makePoint("A", 0.0, 0.0));
+    twice.points.push_back(makePoint("A", 1.0, 1.0));
+    EXPECT_EQ(validateProject(twice).error().code, ErrorCode::AlreadyExists);
+}
+
+TEST(SurveyProjects, APointWithANonFiniteCoordinateIsRejected)
+{
+    SurveyProject project;
+    project.points.push_back(makePoint("A", kNaN, 0.0));
+    EXPECT_EQ(validateProject(project).error().code, ErrorCode::InvalidArgument);
+
+    SurveyProject infinite;
+    infinite.points.push_back(makePoint("A", 0.0, 0.0, kInf));
+    EXPECT_EQ(validateProject(infinite).error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(SurveyProjects, ASetupOverAPointThatIsNotInTheProjectIsRejected)
+{
+    SurveyProject project = twoPointProject();
+    project.stations.front().setup.pointId = "Z";
+    const katana::core::Status status = validateProject(project);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::NotFound);
+    EXPECT_NE(status.error().message.find("'Z'"), std::string::npos);
+}
+
+TEST(SurveyProjects, ABacksightPointThatIsNotInTheProjectIsRejected)
+{
+    SurveyProject project = twoPointProject();
+    project.stations.front().backsightPointId = "Z";
+    EXPECT_EQ(validateProject(project).error().code, ErrorCode::NotFound);
+
+    // No backsight at all is not an error: a free setup records none.
+    project.stations.front().backsightPointId.clear();
+    EXPECT_TRUE(validateProject(project).ok());
+}
+
+TEST(SurveyProjects, DuplicateOrUnnamedSetupsAreRejected)
+{
+    SurveyProject project = twoPointProject();
+    project.stations.push_back(project.stations.front());
+    EXPECT_EQ(validateProject(project).error().code, ErrorCode::AlreadyExists);
+
+    project.stations.back().setup.id.clear();
+    EXPECT_EQ(validateProject(project).error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(SurveyProjects, AnObservationTakenFromASetupIsValidatedLikeAnyOther)
+{
+    SurveyProject badValue = twoPointProject();
+    badValue.stations.front().observations.push_back(distance("A", "B", 100.0, 0.0));
+    EXPECT_EQ(validateProject(badValue).error().code, ErrorCode::InvalidSurveyObservation);
+
+    SurveyProject unknownPoint = twoPointProject();
+    unknownPoint.stations.front().observations.push_back(distance("A", "Z", 100.0, 0.005));
+    EXPECT_EQ(validateProject(unknownPoint).error().code, ErrorCode::NotFound);
+
+    SurveyProject loose = twoPointProject();
+    loose.observations.push_back(distance("A", "Z", 100.0, 0.005));
+    EXPECT_EQ(validateProject(loose).error().code, ErrorCode::NotFound);
+}
+
+TEST(SurveyProjects, AFeatureMustNameAtLeastOnePointAndOnlyPointsThatExist)
+{
+    SurveyProject noPoints = twoPointProject();
+    SurveyFeature empty;
+    empty.code = "KB";
+    noPoints.features.push_back(empty);
+    EXPECT_EQ(validateProject(noPoints).error().code, ErrorCode::InvalidArgument);
+
+    SurveyProject dangling = twoPointProject();
+    SurveyFeature kerb;
+    kerb.name = "KB1";
+    kerb.code = "KB";
+    kerb.pointIds = {"A", "Z"};
+    dangling.features.push_back(kerb);
+    const katana::core::Status status = validateProject(dangling);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::NotFound);
+    EXPECT_NE(status.error().context.find("KB1"), std::string::npos);
+}
+
+TEST(SurveyProjects, ATraverseIsNotCheckedAgainstTheProjectPointsBecauseItIsSelfContained)
+{
+    // A Traverse carries its own start and end coordinates, so its station ids
+    // are names of its own. Requiring them to be project points would reject a
+    // perfectly good traverse read from a file that lists no coordinates.
+    SurveyProject project = twoPointProject();
+    Traverse traverse;
+    traverse.name = "TR1";
+    traverse.kind = TraverseKind::Open;
+    traverse.startAzimuth = 0.0;
+    traverse.setups.push_back(TraverseSetup{"not-a-project-point", 0.0, 50.0});
+    traverse.endStationId = "also-not-one";
+    project.traverses.push_back(std::move(traverse));
+
+    EXPECT_TRUE(validateProject(project).ok());
 }
