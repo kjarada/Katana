@@ -1,8 +1,9 @@
 #pragma once
 
 // The chrome every dock wears - the four panels and every drawing view
-// (PLAN.MD 47 slice 4; the user's request of 2026-09-23 for panels and views
-// that minimise, float, maximise and close, and come back where they were).
+// (the user's request of 2026-09-23 for panels and views that minimise,
+// float, maximise and close, and come back where they were; docs/cad.md,
+// "The workspace", for the views as docks).
 //
 // WHY A TITLE BAR OF OUR OWN. QDockWidget's title bar has two buttons, Float
 // and Close, drawn by the style - and Fusion drew them light on the dark
