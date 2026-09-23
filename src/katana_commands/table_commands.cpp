@@ -17,17 +17,22 @@
 // The guard and the repoint are two readings of the same references, so a
 // rename ENDS by asking the guard whether anything still names the old item:
 // if the two ever disagree it fails loudly instead of leaving an entity
-// pointing at a style that no longer exists.
+// pointing at a style that no longer exists. The guard itself reads
+// entity::tableUsage - the one pass the managers' "Used" column and purge
+// read too - so a refusal says how many hold the item and names the first,
+// and no manager can call an item unused that a delete would then refuse.
 //
 // Command names ("CreateLinetype", "DeleteStyle" ...) are unchanged, since a
 // history shows them.
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/table_usage.hpp"
 
 namespace katana::commands {
 
@@ -95,6 +100,47 @@ Status repointEntityStyles(katana::entity::Model& model, std::string_view from,
     return {};
 }
 
+// The refusal every guard gives: how many hold the item and the first of
+// them, so "used by 418 entities, e.g. id=12" can be acted on where "an
+// entity still uses that style" could not.
+Status refuseIfUsed(const katana::entity::Users& users, std::string_view noun)
+{
+    if (!users.used()) {
+        return {};
+    }
+    return makeError(ErrorCode::CommandRejected, "that " + std::string(noun) + " is still used",
+                     users.describe());
+}
+
+// Before-images of everything a merge repoints, so its undo puts back
+// exactly the holders it moved - and not the ones that already named the
+// target before it ran.
+struct HolderImages {
+    std::vector<katana::entity::Layer> layers;
+    std::vector<katana::entity::Style> styles;
+    std::vector<katana::entity::Entity> entities;
+};
+
+Status restoreHolders(katana::entity::Model& model, const HolderImages& images)
+{
+    for (const katana::entity::Layer& layer : images.layers) {
+        if (auto status = model.layers.update(layer); !status) {
+            return status;
+        }
+    }
+    for (const katana::entity::Style& style : images.styles) {
+        if (auto status = model.styles.update(style); !status) {
+            return status;
+        }
+    }
+    for (const katana::entity::Entity& entity : images.entities) {
+        if (auto status = model.entities.replace(entity); !status) {
+            return status;
+        }
+    }
+    return {};
+}
+
 template <typename T> struct TablePolicy;
 
 template <> struct TablePolicy<katana::entity::Linetype> {
@@ -109,23 +155,37 @@ template <> struct TablePolicy<katana::entity::Linetype> {
         }
         return {};
     }
-    static Status updatable(const katana::entity::Linetype&) { return {}; }
+    // The table's own rule, asked rather than restated: validate() said a
+    // pattern on "continuous" was fine and execute() then refused it
+    // (audit MOD-09).
+    static Status updatable(const katana::entity::Linetype& after)
+    {
+        return katana::entity::LinetypePolicy::checkUpdate(after);
+    }
+    // Held by the layers and styles naming it; the entities reaching it
+    // through them are counted too, since that is what a person weighs.
     static Status inUse(const katana::entity::Model& model, std::string_view name)
     {
-        for (const std::string& layer : model.layers.names()) {
-            const katana::entity::Layer* definition = model.layers.find(layer);
-            if (definition != nullptr && definition->linetype == name) {
-                return makeError(ErrorCode::CommandRejected, "a layer still uses that linetype",
-                                 "layer=" + layer);
+        return refuseIfUsed(
+            katana::entity::TableUsage::of(katana::entity::tableUsage(model).linetypes, name),
+            kNoun);
+    }
+    static HolderImages holders(const katana::entity::Model& model, std::string_view name)
+    {
+        const katana::entity::TableUsage usage = katana::entity::tableUsage(model);
+        const katana::entity::Users& users = katana::entity::TableUsage::of(usage.linetypes, name);
+        HolderImages images;
+        for (const std::string& layer : users.layers) {
+            if (const katana::entity::Layer* found = model.layers.find(layer); found != nullptr) {
+                images.layers.push_back(*found);
             }
         }
-        for (const katana::entity::Style& style : model.styles.all()) {
-            if (style.linetype == name) {
-                return makeError(ErrorCode::CommandRejected, "a style still uses that linetype",
-                                 "style=" + style.name);
+        for (const std::string& style : users.styles) {
+            if (const katana::entity::Style* found = model.styles.find(style); found != nullptr) {
+                images.styles.push_back(*found);
             }
         }
-        return {};
+        return images;
     }
     static Status repoint(katana::entity::Model& model, std::string_view from,
                           const std::string& to)
@@ -190,20 +250,9 @@ template <> struct TablePolicy<katana::entity::HatchPattern> {
     }
     static Status inUse(const katana::entity::Model& model, std::string_view name)
     {
-        for (const std::string& layer : model.layers.names()) {
-            const katana::entity::Layer* definition = model.layers.find(layer);
-            if (definition != nullptr && definition->hatchPattern == name) {
-                return makeError(ErrorCode::CommandRejected,
-                                 "a layer still uses that hatch pattern", "layer=" + layer);
-            }
-        }
-        for (const katana::entity::Style& style : model.styles.all()) {
-            if (style.hatchPattern == name) {
-                return makeError(ErrorCode::CommandRejected,
-                                 "a style still uses that hatch pattern", "style=" + style.name);
-            }
-        }
-        return {};
+        return refuseIfUsed(
+            katana::entity::TableUsage::of(katana::entity::tableUsage(model).hatchPatterns, name),
+            kNoun);
     }
 };
 
@@ -230,18 +279,23 @@ template <> struct TablePolicy<katana::entity::Style> {
     static Status inUse(const katana::entity::Model& model, std::string_view name)
     {
         // An entity left naming a deleted style would draw ByLayer with
-        // nothing to say why; the first holder is named so it can be found.
-        katana::entity::EntityId holder = katana::entity::kInvalidEntityId;
-        model.entities.forEach([&](const katana::entity::Entity& entity) {
-            if (holder == katana::entity::kInvalidEntityId && entity.style == name) {
-                holder = entity.id;
+        // nothing to say why; the count and the first holder are given so
+        // they can be found.
+        return refuseIfUsed(
+            katana::entity::TableUsage::of(katana::entity::tableUsage(model).styles, name), kNoun);
+    }
+    static HolderImages holders(const katana::entity::Model& model, std::string_view name)
+    {
+        const katana::entity::TableUsage usage =
+            katana::entity::tableUsage(model, katana::entity::UsageOptions{.entityIds = true});
+        HolderImages images;
+        for (const katana::entity::EntityId id :
+             katana::entity::TableUsage::of(usage.styles, name).entityIds) {
+            if (const katana::entity::Entity* found = model.entities.find(id); found != nullptr) {
+                images.entities.push_back(*found);
             }
-        });
-        if (holder != katana::entity::kInvalidEntityId) {
-            return makeError(ErrorCode::CommandRejected, "an entity still uses that style",
-                             "id=" + std::to_string(holder));
         }
-        return {};
+        return images;
     }
     static Status repoint(katana::entity::Model& model, std::string_view from,
                           const std::string& to)
@@ -330,6 +384,10 @@ template <typename T> class DeleteItemCommand final : public Command {
     {
     }
     [[nodiscard]] std::string_view name() const override { return name_; }
+    // A deletion discards the definition - a dash pattern, an alignment's PI
+    // and PVI design - so it asks for the same confirmation DELETE_LAYER does
+    // (audit MOD-08).
+    [[nodiscard]] bool isDestructive() const override { return true; }
     [[nodiscard]] Status validate(const CommandContext& context) const override
     {
         if (auto status = TablePolicy<T>::deletable(itemName_); !status) {
@@ -428,6 +486,292 @@ template <typename T> class RenameItemCommand final : public Command {
     std::string name_;
 };
 
+// Repoint every holder of `from` to `into`, then delete `from`: what a rename
+// onto an existing name has to be, and why RenameItemCommand refuses one.
+// One command, so one undo puts back the item AND every holder it moved.
+template <typename T> class MergeItemCommand final : public Command {
+  public:
+    MergeItemCommand(std::string from, std::string into)
+        : from_(std::move(from)), into_(std::move(into)), name_(commandName<T>("Merge"))
+    {
+    }
+    [[nodiscard]] std::string_view name() const override { return name_; }
+    // The merged item's own definition is discarded.
+    [[nodiscard]] bool isDestructive() const override { return true; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        const std::string noun(TablePolicy<T>::kNoun);
+        if (from_ == into_) {
+            return makeError(ErrorCode::InvalidArgument, "a " + noun + " cannot be merged into itself",
+                             from_);
+        }
+        // Protected for the reason a rename is: everything that resolves to
+        // it by name would silently change what it draws.
+        if (auto status = TablePolicy<T>::deletable(from_); !status) {
+            return status;
+        }
+        if (!TablePolicy<T>::table(context.model).contains(from_)) {
+            return makeError(ErrorCode::NotFound, noun + " does not exist", from_);
+        }
+        if (!TablePolicy<T>::table(context.model).contains(into_)) {
+            return makeError(ErrorCode::NotFound, "the " + noun + " to merge into does not exist",
+                             into_);
+        }
+        return {};
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        katana::entity::Model& model = context.model;
+        holders_ = TablePolicy<T>::holders(model, from_);
+        auto removed = TablePolicy<T>::table(model).remove(from_);
+        if (!removed) {
+            return removed.error();
+        }
+        removed_ = std::move(*removed);
+        Status status = TablePolicy<T>::repoint(model, from_, into_);
+        if (status) {
+            // The rename's own check: the guard and the repoint read the
+            // same references, so anything still naming `from` is a bug to
+            // report, not an entity to leave pointing at nothing.
+            status = TablePolicy<T>::inUse(model, from_);
+        }
+        if (!status) {
+            (void)rollBack(model); // execute() leaves the model as it found it
+            return status;
+        }
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override { return rollBack(context.model); }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    Status rollBack(katana::entity::Model& model)
+    {
+        if (auto status = restoreHolders(model, holders_); !status) {
+            return status;
+        }
+        return TablePolicy<T>::table(model).add(removed_);
+    }
+
+    std::string from_;
+    std::string into_;
+    std::string name_;
+    HolderImages holders_{};
+    T removed_{};
+};
+
+// A copy under a new name: the start of "a style like that one, but red".
+template <typename T> class DuplicateItemCommand final : public Command {
+  public:
+    DuplicateItemCommand(std::string from, std::string to)
+        : from_(std::move(from)), to_(std::move(to)), name_(commandName<T>("Duplicate"))
+    {
+    }
+    [[nodiscard]] std::string_view name() const override { return name_; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        const T* source = TablePolicy<T>::table(context.model).find(from_);
+        if (source == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             std::string(TablePolicy<T>::kNoun) + " does not exist", from_);
+        }
+        if (TablePolicy<T>::table(context.model).contains(to_)) {
+            return makeError(ErrorCode::AlreadyExists,
+                             std::string(TablePolicy<T>::kNoun) + " already exists", to_);
+        }
+        T copy = *source;
+        copy.name = to_;
+        return katana::entity::validate(copy);
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        const T* source = TablePolicy<T>::table(context.model).find(from_);
+        if (source == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             std::string(TablePolicy<T>::kNoun) + " does not exist", from_);
+        }
+        copy_ = *source;
+        copy_.name = to_;
+        return TablePolicy<T>::table(context.model).add(copy_);
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        auto removed = TablePolicy<T>::table(context.model).remove(to_);
+        return removed ? Status{} : removed.error();
+    }
+    // The copy taken at execute(), not a fresh one: redo reproduces what
+    // execute did even if `from` has been edited in between by a command
+    // that has since been undone.
+    [[nodiscard]] Status redo(CommandContext& context) override
+    {
+        return TablePolicy<T>::table(context.model).add(copy_);
+    }
+
+  private:
+    std::string from_;
+    std::string to_;
+    std::string name_;
+    T copy_{};
+};
+
+template <typename T> CommandPtr updateIfChanged(const katana::entity::Model& model, T item)
+{
+    // Saving a form nobody edited is not an edit: no undo step, and the
+    // project is not marked modified by it.
+    if (const T* current = TablePolicy<T>::table(model).find(item.name);
+        current != nullptr && *current == item) {
+        return nullptr;
+    }
+    return std::make_unique<UpdateItemCommand<T>>(std::move(item));
+}
+
+// A purge: many unused items as ONE step. Its guard is one usage pass for
+// the whole set - one DeleteItemCommand per item would be one pass over the
+// entities per item - and it is judged as the set: a linetype named only
+// by styles this purge also removes is free.
+class PurgeItemsCommand final : public Command {
+  public:
+    explicit PurgeItemsCommand(TableItems items) : items_(std::move(items)) {}
+    [[nodiscard]] std::string_view name() const override { return "PurgeTables"; }
+    [[nodiscard]] bool isDestructive() const override { return true; }
+    [[nodiscard]] Status validate(const CommandContext& context) const override
+    {
+        const katana::entity::Model& model = context.model;
+        if (items_.empty()) {
+            // Never an empty undo step (the shape of audit QT-01).
+            return makeError(ErrorCode::InvalidArgument, "there is nothing to purge");
+        }
+        if (auto status = allPresent<katana::entity::Style>(model, items_.styles); !status) {
+            return status;
+        }
+        if (auto status = allPresent<katana::entity::Linetype>(model, items_.linetypes); !status) {
+            return status;
+        }
+        if (auto status = allPresent<katana::entity::HatchPattern>(model, items_.hatchPatterns);
+            !status) {
+            return status;
+        }
+        const katana::entity::TableUsage usage = katana::entity::tableUsage(model);
+        for (const std::string& name : items_.styles) {
+            if (auto status = refuseIfUsed(katana::entity::TableUsage::of(usage.styles, name),
+                                           "style");
+                !status) {
+                return withName(status, name);
+            }
+        }
+        // An entity reaches a linetype or hatch only through a layer or a
+        // style, and the styles going have no entities (checked above), so
+        // what holds one is a layer, or a style that is staying.
+        const auto heldByWhatStays = [&](const katana::entity::Users& users) {
+            if (!users.layers.empty()) {
+                return true;
+            }
+            return std::ranges::any_of(users.styles, [&](const std::string& style) {
+                return std::ranges::find(items_.styles, style) == items_.styles.end();
+            });
+        };
+        for (const std::string& name : items_.linetypes) {
+            const auto& users = katana::entity::TableUsage::of(usage.linetypes, name);
+            if (heldByWhatStays(users)) {
+                return withName(refuseIfUsed(users, "linetype"), name);
+            }
+        }
+        for (const std::string& name : items_.hatchPatterns) {
+            const auto& users = katana::entity::TableUsage::of(usage.hatchPatterns, name);
+            if (heldByWhatStays(users)) {
+                return withName(refuseIfUsed(users, "hatch pattern"), name);
+            }
+        }
+        return {};
+    }
+    [[nodiscard]] Status execute(CommandContext& context) override
+    {
+        katana::entity::Model& model = context.model;
+        removed_ = {};
+        Status status = removeAll(model.styles, items_.styles, removed_.styles);
+        if (status) {
+            status = removeAll(model.linetypes, items_.linetypes, removed_.linetypes);
+        }
+        if (status) {
+            status = removeAll(model.hatchPatterns, items_.hatchPatterns, removed_.hatchPatterns);
+        }
+        if (!status) {
+            (void)undo(context);
+            return status;
+        }
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override
+    {
+        katana::entity::Model& model = context.model;
+        for (const auto& pattern : removed_.hatchPatterns) {
+            if (auto status = model.hatchPatterns.add(pattern); !status) {
+                return status;
+            }
+        }
+        for (const auto& linetype : removed_.linetypes) {
+            if (auto status = model.linetypes.add(linetype); !status) {
+                return status;
+            }
+        }
+        for (const auto& style : removed_.styles) {
+            if (auto status = model.styles.add(style); !status) {
+                return status;
+            }
+        }
+        removed_ = {};
+        return {};
+    }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    struct Removed {
+        std::vector<katana::entity::Style> styles;
+        std::vector<katana::entity::Linetype> linetypes;
+        std::vector<katana::entity::HatchPattern> hatchPatterns;
+    };
+
+    template <typename T>
+    static Status allPresent(const katana::entity::Model& model,
+                             const std::vector<std::string>& names)
+    {
+        for (const std::string& name : names) {
+            if (auto status = TablePolicy<T>::deletable(name); !status) {
+                return status;
+            }
+            if (!TablePolicy<T>::table(model).contains(name)) {
+                return makeError(ErrorCode::NotFound,
+                                 std::string(TablePolicy<T>::kNoun) + " does not exist", name);
+            }
+        }
+        return {};
+    }
+    static Status withName(const Status& status, const std::string& name)
+    {
+        if (status) {
+            return status;
+        }
+        return makeError(status.error().code, status.error().message,
+                         name + ": " + status.error().context);
+    }
+    template <typename Table, typename T>
+    static Status removeAll(Table& table, const std::vector<std::string>& names,
+                            std::vector<T>& removed)
+    {
+        for (const std::string& name : names) {
+            auto item = table.remove(name);
+            if (!item) {
+                return item.error();
+            }
+            removed.push_back(std::move(*item));
+        }
+        return {};
+    }
+
+    TableItems items_;
+    Removed removed_{};
+};
+
 } // namespace
 
 CommandPtr createLinetype(katana::entity::Linetype linetype)
@@ -446,6 +790,21 @@ CommandPtr renameLinetype(std::string from, std::string to)
 {
     return std::make_unique<RenameItemCommand<katana::entity::Linetype>>(std::move(from),
                                                                         std::move(to));
+}
+CommandPtr mergeLinetype(std::string from, std::string into)
+{
+    return std::make_unique<MergeItemCommand<katana::entity::Linetype>>(std::move(from),
+                                                                       std::move(into));
+}
+CommandPtr duplicateLinetype(std::string from, std::string to)
+{
+    return std::make_unique<DuplicateItemCommand<katana::entity::Linetype>>(std::move(from),
+                                                                           std::move(to));
+}
+CommandPtr updateLinetypeIfChanged(const katana::entity::Model& model,
+                                   katana::entity::Linetype linetype)
+{
+    return updateIfChanged(model, std::move(linetype));
 }
 
 CommandPtr createDimensionStyle(katana::entity::DimensionStyle style)
@@ -503,6 +862,25 @@ CommandPtr renameStyle(std::string from, std::string to)
 {
     return std::make_unique<RenameItemCommand<katana::entity::Style>>(std::move(from),
                                                                      std::move(to));
+}
+CommandPtr mergeStyle(std::string from, std::string into)
+{
+    return std::make_unique<MergeItemCommand<katana::entity::Style>>(std::move(from),
+                                                                    std::move(into));
+}
+CommandPtr duplicateStyle(std::string from, std::string to)
+{
+    return std::make_unique<DuplicateItemCommand<katana::entity::Style>>(std::move(from),
+                                                                        std::move(to));
+}
+CommandPtr updateStyleIfChanged(const katana::entity::Model& model, katana::entity::Style style)
+{
+    return updateIfChanged(model, std::move(style));
+}
+
+CommandPtr purgeTableItems(TableItems items)
+{
+    return std::make_unique<PurgeItemsCommand>(std::move(items));
 }
 
 } // namespace katana::commands
