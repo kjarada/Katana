@@ -133,6 +133,13 @@ struct LineStyle {
     int cycleMode = 0;
     std::vector<Stroke> strokes{};
     std::vector<StrokeText> texts{};
+    // The file this definition was read from - its NAME only, never a path, so
+    // a library carries no trace of where on someone's disk it came from.
+    // Empty for a definition made in code or in a session. A browser groups
+    // and filters by it, and it is part of what says a definition is a symbol:
+    // most symbols the reference mapfiles use are not `mode vertex`, but they
+    // all come from the symbol file (docs/survey_coding.md).
+    std::string source{};
 
     // The box the Move and Draw strokes cover, with `factor` applied. Text,
     // arcs and circles are included by their point; a text's extent needs a
