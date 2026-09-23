@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "katana/archive12d/customisation.hpp"
+#include "katana/archive12d/map_file.hpp"
 
 namespace a12 = katana::archive12d;
 using katana::entity::SurveySection;
@@ -408,4 +409,30 @@ TEST(CustomisationMerge, ALoadedGroupReplacingOneInPlaceStillGoesAheadOfItsKeysO
               (std::vector<std::string>{"string_attribute_data", "pipe_data"}));
     EXPECT_EQ(shown(merged.map.lookup("ANY").resolved.attributes),
               (std::vector<std::string>{"text DepthLocation=Invert"}));
+}
+
+TEST(CustomisationMerge, WhatAMergedLoadBroughtStillWinsAfterTheMapIsExportedAndReadBack)
+{
+    // D1: map edits persist only by export, so a merge is only as good as
+    // its export. The merged map holds `*` string_attribute_data (loaded)
+    // ahead of `*` pipe_data (current) - the reverse of 12d's section order -
+    // and the exported file must keep the loaded DepthLocation winning.
+    const a12::Customisation now = mapOnly("builtin.mapfile", kPipeMap);
+    const a12::Customisation loaded = mapOnly("mine.mapfile", R"(<xml12d><map_file>
+<string_attribute_data>
+  <item><key>*</key>
+    <map_attributes><text><name>DepthLocation</name><value>Invert</value></text></map_attributes></item>
+</string_attribute_data>
+</map_file></xml12d>)");
+    const auto merged = a12::mergeCustomisation(now.library, now.map, loaded, a12::LoadMode::Merge);
+    const auto written = a12::writeMapFile(merged.map);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    const auto again = a12::readMapFile(*written);
+    ASSERT_TRUE(again.ok()) << again.error().describe();
+
+    // By hand, as in ALoadedAttributeWinsOverTheSameAttributeFromTheOther-
+    // SectionThatSetsIt: DepthLocation from the loaded rule, Material from
+    // the current pipe_data rule.
+    EXPECT_EQ(shown(again->map.lookup("SW1").resolved.attributes),
+              (std::vector<std::string>{"text DepthLocation=Invert", "text Material=PVC"}));
 }
