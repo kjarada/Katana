@@ -7,12 +7,15 @@
 
 #include "katana/cad/style_drawing.hpp"
 
+using katana::cad::LinestyleLayout;
+using katana::cad::LinestyleOptions;
 using katana::cad::StyleDrawing;
 using katana::entity::LineStyle;
 using katana::entity::Stroke;
 using katana::entity::StrokeOp;
 using katana::entity::StrokeText;
 using katana::entity::StyleUnits;
+using katana::geometry::Box2;
 using katana::geometry::Point2;
 using katana::geometry::Polyline2;
 
@@ -247,6 +250,31 @@ TEST(StyleDrawing, TextTakesTheDirectionOfTheLineItSitsOn)
     EXPECT_EQ(drawing.texts.size(), 4u) << "at 0, 10, 20 and 30";
 }
 
+TEST(StyleDrawing, ASymbolsTextKeepsItsWidthFactorAndFontForThePainter)
+{
+    // 326 of the 514 reference texts are narrowed (0.8 or 0.85); the painter
+    // can only narrow what reaches it.
+    LineStyle style = definition({move(0, 0)});
+    style.atVertices = true;
+    StrokeText text;
+    text.text = "BM";
+    text.height = 2.0;
+    text.font = "Arial";
+    text.widthFactor = 0.8;
+    style.texts.push_back(text);
+    Stroke mark;
+    mark.op = StrokeOp::Text;
+    mark.text = 0;
+    style.strokes.push_back(mark);
+
+    // Size 0 is the definition's own scale, so the height stays 2.0.
+    const StyleDrawing drawing = katana::cad::symbolDrawing(style, Point2(5, 5));
+    ASSERT_EQ(drawing.texts.size(), 1u);
+    EXPECT_EQ(drawing.texts[0].widthFactor, 0.8);
+    EXPECT_EQ(drawing.texts[0].font, "Arial");
+    EXPECT_EQ(drawing.texts[0].height, 2.0);
+}
+
 TEST(StyleDrawing, ADefinitionWithNoExtentIsDrawnOnceRatherThanEndlessly)
 {
     // A single tick across the line has no length along it, so there is no
@@ -257,15 +285,145 @@ TEST(StyleDrawing, ADefinitionWithNoExtentIsDrawnOnceRatherThanEndlessly)
     EXPECT_EQ(drawing.strokes.size(), 1u);
 }
 
-TEST(StyleDrawing, AVeryShortPeriodOnAVeryLongLineIsTruncatedRatherThanRunningAway)
+TEST(StyleDrawing, AVeryShortPeriodOnAVeryLongLineLaysNothingRatherThanATruncatedPattern)
 {
     LineStyle style = definition({move(0, 0), draw(0.001, 0)});
     style.length = 0.001;
     // 30 km of traverse at a millimetre a time would be thirty million
-    // instances. It is capped, and what comes back is still a drawing.
-    const StyleDrawing drawing = katana::cad::linestyleDrawing(
-        style, Polyline2{{Point2(0, 0), Point2(30000, 0)}, false});
-    EXPECT_EQ(drawing.strokes.size(), 20000u);
+    // instances. It used to be cut off at twenty thousand - 20 m of a 30 km
+    // line, the rest silently missing (audit CAD-04). Now nothing is laid and
+    // the caller is told, so it draws the plain line instead.
+    const Polyline2 line{{Point2(0, 0), Point2(30000, 0)}, false};
+    EXPECT_TRUE(katana::cad::linestyleDrawing(style, line).empty());
+    const auto laid =
+        katana::cad::layLinestyle(katana::cad::flattenDefinition(style), line, {});
+    EXPECT_EQ(laid.outcome, LinestyleLayout::Outcome::OverBudget);
+    EXPECT_TRUE(laid.drawing.empty());
+    EXPECT_EQ(laid.instances, 0u);
+}
+
+TEST(StyleDrawing, OnlyTheRepeatsThatCanReachTheViewAreLaidEachWhereItFallsOnTheWholeLine)
+{
+    // A 1-long dash every 10 along a 1000-long line: unclipped, repeats
+    // 0, 10, ..., 1000 - floor(1000 / 10) + 1 = 101 of them.
+    LineStyle style = definition({move(0, 0), draw(1, 0)});
+    style.length = 10.0;
+    const Polyline2 line{{Point2(0, 0), Point2(1000, 0)}, false};
+    const auto flat = katana::cad::flattenDefinition(style);
+    EXPECT_EQ(katana::cad::layLinestyle(flat, line, {}).instances, 101u);
+
+    // The view spans x 93..207. Grown by one period (10) and by the pattern's
+    // reach across the line (0: every point is ON it) it is 83..217, and
+    // repeat k covers [10k, 10k + 1], so it can reach that stretch for
+    // k from ceil((83 - 1) / 10) = 9 to floor(217 / 10) = 21: thirteen
+    // repeats, at 90, 100, ..., 210 - multiples of the period from the
+    // line's own start, so the pattern does not crawl as the view pans.
+    LinestyleOptions options;
+    options.visible = Box2{Point2(93, -5), Point2(207, 5)};
+    const auto laid = katana::cad::layLinestyle(flat, line, options);
+    EXPECT_EQ(laid.outcome, LinestyleLayout::Outcome::Laid);
+    EXPECT_EQ(laid.instances, 13u);
+    ASSERT_EQ(laid.drawing.strokes.size(), 13u);
+    EXPECT_EQ(laid.drawing.strokes.front().path.vertices[0], Point2(90, 0));
+    EXPECT_EQ(laid.drawing.strokes.back().path.vertices[0], Point2(210, 0));
+
+    // And the budget is counted on what is laid: 101 is over a budget of 50,
+    // 13 is not.
+    LinestyleOptions tight = options;
+    tight.maximumInstances = 50;
+    EXPECT_EQ(katana::cad::layLinestyle(flat, line, tight).outcome,
+              LinestyleLayout::Outcome::Laid);
+    tight.visible.reset();
+    EXPECT_EQ(katana::cad::layLinestyle(flat, line, tight).outcome,
+              LinestyleLayout::Outcome::OverBudget);
+}
+
+TEST(StyleDrawing, AMarkBesideALineOutsideTheViewIsStillLaidWhenItReachesIntoIt)
+{
+    // A tick 3 to the left of the line, every 10. The line runs along y = 0,
+    // below the view (y 1..5, x 43..57), and its ticks reach up into it.
+    // Grown by the reach across (3) and one period (10), the view is
+    // x 30..70, y -12..18, which the line crosses from 30 to 70; a tick
+    // covers only its own chainage, so repeats k = ceil(30 / 10) = 3 to
+    // floor(70 / 10) = 7: five of them, at 30, 40, 50, 60 and 70.
+    LineStyle style = definition({move(0, 0), draw(0, 3)});
+    style.length = 10.0;
+    LinestyleOptions options;
+    options.visible = Box2{Point2(43, 1), Point2(57, 5)};
+    const auto laid = katana::cad::layLinestyle(
+        katana::cad::flattenDefinition(style), Polyline2{{Point2(0, 0), Point2(100, 0)}, false},
+        options);
+    EXPECT_EQ(laid.outcome, LinestyleLayout::Outcome::Laid);
+    ASSERT_EQ(laid.drawing.strokes.size(), 5u);
+    EXPECT_EQ(laid.drawing.strokes.front().path.vertices[0], Point2(30, 0));
+    EXPECT_EQ(laid.drawing.strokes.back().path.vertices[1], Point2(70, 3));
+}
+
+TEST(StyleDrawing, AWholeLineInViewLaysExactlyWhatTheUnclippedLayingDoesWhenAnArcOverhangsThePen)
+{
+    // A scallop written the way 12d writes arcs - move to the centre, then
+    // arc - so the pen only ever stands at x = 0.5 while the half-circle
+    // below it runs from x = 0 (180 deg) round to x = 1 (360 deg).
+    //   length 1 / move 0.5 0 / arc 0.5 180 360
+    // Along a 10.4-long line, unclipped: repeats k = 0 .. floor(10.4 / 1) =
+    // 10, eleven of them, and repeat 10's arc covers 10 .. 11, so it starts
+    // ON the line at (10, 0) and is drawn, cut off at the end.
+    // With the whole line in view the visible stretch is all of 0 .. 10.4,
+    // and repeat k reaches it while k + 0 <= 10.4 - the arc's own low x,
+    // not the pen's 0.5, which gave floor((10.4 - 0.5) / 1) = 9 and left
+    // the last 0.4 of the line blank on screen and on the plot while the
+    // preview drew it.
+    Stroke arc;
+    arc.op = StrokeOp::Arc;
+    arc.radius = 0.5;
+    arc.startAngle = 180.0;
+    arc.endAngle = 360.0;
+    LineStyle scallop = definition({move(0.5, 0), arc});
+    scallop.length = 1.0;
+    // The same hole, from the other side: a Draw from the pen's starting
+    // place, which no Move ever stood on. "length 1 / draw 0.5 0" draws
+    // 0 .. 0.5 in every period; repeat 10 draws 10 .. 10.4.
+    LineStyle unmoved = definition({draw(0.5, 0)});
+    unmoved.length = 1.0;
+
+    const Polyline2 line{{Point2(0, 0), Point2(10.4, 0)}, false};
+    LinestyleOptions wholeLine;
+    wholeLine.visible = Box2{Point2(-5, -5), Point2(15, 5)};
+    for (const LineStyle* style : {&scallop, &unmoved}) {
+        const auto flat = katana::cad::flattenDefinition(*style);
+        const auto unclipped = katana::cad::layLinestyle(flat, line, {});
+        const auto clipped = katana::cad::layLinestyle(flat, line, wholeLine);
+        ASSERT_EQ(clipped.outcome, LinestyleLayout::Outcome::Laid);
+        EXPECT_EQ(unclipped.instances, 11u);
+        EXPECT_EQ(clipped.instances, 11u);
+        ASSERT_EQ(unclipped.drawing.strokes.size(), 11u);
+        ASSERT_EQ(clipped.drawing.strokes.size(), 11u);
+        for (std::size_t i = 0; i < clipped.drawing.strokes.size(); ++i) {
+            EXPECT_EQ(clipped.drawing.strokes[i].path.vertices,
+                      unclipped.drawing.strokes[i].path.vertices)
+                << "repeat " << i;
+        }
+        const Point2 lastStart = clipped.drawing.strokes.back().path.vertices.front();
+        EXPECT_NEAR(lastStart.x, 10.0, 1e-9);
+        EXPECT_NEAR(lastStart.y, 0.0, 1e-9);
+    }
+}
+
+TEST(StyleDrawing, APatternUnderTwoPixelsIsNotLaidSoTheCallerDrawsThePlainLine)
+{
+    // A period of 10 model units: at 0.15 px a unit it is 1.5 px on screen,
+    // under the two-pixel floor; at 0.25 px it is 2.5 px and is laid.
+    LineStyle style = definition({move(0, 0), draw(1, 0)});
+    style.length = 10.0;
+    const auto flat = katana::cad::flattenDefinition(style);
+    const Polyline2 line{{Point2(0, 0), Point2(100, 0)}, false};
+    LinestyleOptions options;
+    options.viewScale = 0.15;
+    EXPECT_EQ(katana::cad::layLinestyle(flat, line, options).outcome,
+              LinestyleLayout::Outcome::TooFine);
+    options.viewScale = 0.25;
+    EXPECT_EQ(katana::cad::layLinestyle(flat, line, options).outcome,
+              LinestyleLayout::Outcome::Laid);
 }
 
 TEST(StyleDrawing, DegenerateInputGivesNothingRatherThanNonsense)
@@ -331,6 +489,45 @@ TEST(StyleDrawing, APatternIsClippedToTheLineRatherThanRunningOffTheEndOfIt)
         beyond, Polyline2{{Point2(0, 0), Point2(10, 0)}, false});
     ASSERT_EQ(clipped.strokes.size(), 1u) << "only the run that is on the line";
     EXPECT_EQ(clipped.strokes[0].path.vertices.back(), Point2(1, 0));
+}
+
+TEST(StyleDrawing, ANegativeArcRadiusIsALengthNotASideSoTheArcIsNotMirroredThroughItsCentre)
+{
+    // Cut from 12d's own U_TURN road marking (user_symbols_TfNSWv15.4d),
+    // which brackets each arc with moves to where it starts and ends:
+    //   move 1.127 -0.5348 / move 1.1379 0.0095 /
+    //   arc -0.5444 -91.0850 -62.5336 / move 1.3859 -0.4751
+    // Worked by hand with |r| = 0.5444 about (1.1379, 0.0095):
+    //   start -91.0850 deg: cos = -sin(1.0850 deg) = -0.018936,
+    //                       sin = -cos(1.0850 deg) = -0.999821
+    //     x = 1.1379 + 0.5444 * -0.018936 = 1.127591
+    //     y = 0.0095 + 0.5444 * -0.999821 = -0.534803
+    //   end -62.5336 deg:   cos = 0.461228, sin = -0.887281
+    //     x = 1.1379 + 0.5444 * 0.461228 = 1.388993
+    //     y = 0.0095 + 0.5444 * -0.887281 = -0.473536
+    // which the file's breadcrumbs (1.127, -0.5348) and (1.3859, -0.4751)
+    // confirm to within 4 mm of symbol unit. The signed radius put the arc at
+    // (1.1482, 0.5538) -> (0.8868, 0.4925): the same arc turned half a turn
+    // about its centre, so every U-turn arrow was drawn broken.
+    Stroke arc;
+    arc.op = StrokeOp::Arc;
+    arc.radius = -0.5444;
+    arc.startAngle = -91.0850;
+    arc.endAngle = -62.5336;
+    LineStyle style = definition({move(1.127, -0.5348), move(1.1379, 0.0095), arc,
+                                  move(1.3859, -0.4751)});
+    style.atVertices = true;
+    const StyleDrawing drawing = katana::cad::symbolDrawing(style, Point2(0, 0));
+    ASSERT_EQ(drawing.strokes.size(), 1u);
+    const auto& points = drawing.strokes[0].path.vertices;
+    ASSERT_GE(points.size(), 2u);
+    EXPECT_NEAR(points.front().x, 1.127591, 1e-5);
+    EXPECT_NEAR(points.front().y, -0.534803, 1e-5);
+    EXPECT_NEAR(points.back().x, 1.388993, 1e-5);
+    EXPECT_NEAR(points.back().y, -0.473536, 1e-5);
+    // And against the file's own breadcrumbs, independently of the arithmetic.
+    EXPECT_NEAR(points.front().distanceTo(Point2(1.127, -0.5348)), 0.0, 0.004);
+    EXPECT_NEAR(points.back().distanceTo(Point2(1.3859, -0.4751)), 0.0, 0.004);
 }
 
 TEST(StyleDrawing, ATextThatWouldSitOffTheEndOfTheLineIsNotDrawn)
