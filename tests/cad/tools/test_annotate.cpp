@@ -431,6 +431,21 @@ TEST(AnnotateAlignedDimension, TypedOriginsAndATypedOffsetPlaceItExactly)
     EXPECT_EQ(dimensions[0], (DimensionGeometry{Point2(0.0, 0.0), Point2(10.0, 0.0), 2.5, ""}));
 }
 
+TEST(AnnotateAlignedDimension, PolarAndRelativeInputMeasureFromTheLastOrigin)
+{
+    ToolDriver driver;
+    driver.start("annotate.dimaligned");
+    (void)driver.type("2,2");
+    // @5<0 is 5 east of (2, 2): cos 0 and sin 0 are exact, so (7, 2).
+    (void)driver.type("@5<0");
+    // @0,3 from the second origin is (7, 5); heading east, left is north,
+    // so the offset is 5 - 2 = 3.
+    (void)driver.type("@0,3");
+    const auto dimensions = shapesOf<DimensionGeometry>(driver);
+    ASSERT_EQ(dimensions.size(), 1u);
+    EXPECT_EQ(dimensions[0], (DimensionGeometry{Point2(2.0, 2.0), Point2(7.0, 2.0), 3.0, ""}));
+}
+
 TEST(AnnotateAlignedDimension, TheTextOptionReplacesTheLabelAndEnterRestoresTheMeasurement)
 {
     ToolDriver driver;
@@ -516,6 +531,31 @@ TEST(AnnotateAlignedDimension, EnterPicksALineOrThePolylineSegmentNearestThePick
     EXPECT_EQ(dimensions[1], (DimensionGeometry{Point2(14.0, 0.0), Point2(14.0, 3.0), -1.0, ""}));
 }
 
+TEST(AnnotateAlignedDimension, EnterWhilePickingGoesBackToPickingOrigins)
+{
+    ToolDriver driver;
+    driver.start("annotate.dimaligned");
+    (void)driver.enter();
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Entity);
+    EXPECT_EQ(driver.type("0,0").outcome, Outcome::Rejected) << "a pick is wanted";
+    EXPECT_EQ(driver.enter().outcome, Outcome::Continue);
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
+    EXPECT_TRUE(contains(driver.tool().prompt(), "first extension line")) << driver.tool().prompt();
+}
+
+TEST(AnnotateAlignedDimension, TextThatIsNotUtf8IsRefusedAtTheTextPrompt)
+{
+    ToolDriver driver;
+    driver.start("annotate.dimaligned");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(4.0, 0.0);
+    (void)driver.type("T");
+    // A lone 0xFF byte: never valid anywhere in UTF-8.
+    const ToolStep step = driver.type("\xff");
+    EXPECT_EQ(step.outcome, Outcome::Rejected);
+    EXPECT_EQ(driver.tool().expects(), ToolInput::Value) << "still at the text prompt";
+}
+
 TEST(AnnotateAlignedDimension, UndoAfterPickingALineGoesBackToPicking)
 {
     ToolDriver driver;
@@ -589,6 +629,22 @@ TEST(AnnotateLinearDimension, ALineBesideTheOriginsMeasuresTheirVerticalDistance
     const auto dimensions = shapesOf<DimensionGeometry>(driver);
     ASSERT_EQ(dimensions.size(), 1u);
     EXPECT_EQ(dimensions[0], (DimensionGeometry{Point2(0.0, 0.0), Point2(0.0, 6.0), -12.0, ""}));
+    EXPECT_EQ(dimensions[0].measurement(), 6.0);
+}
+
+TEST(AnnotateLinearDimension, APickedSegmentAndATypedLocationGiveTheSameProjection)
+{
+    ToolDriver driver;
+    const auto line = driver.add(cmd::createLine(Point2(0.0, 0.0), Point2(6.0, 4.0)));
+    driver.start("annotate.dimlinear");
+    (void)driver.enter();
+    (void)driver.pick(line, 3.0, 2.0);
+    // (3, 9) is above both ends: horizontal. (0, 0) is 9 from y = 9 and
+    // (6, 4) only 5, so both project onto y = 0: (0, 0) to (6, 0), offset 9.
+    (void)driver.type("3,9");
+    const auto dimensions = shapesOf<DimensionGeometry>(driver);
+    ASSERT_EQ(dimensions.size(), 1u);
+    EXPECT_EQ(dimensions[0], (DimensionGeometry{Point2(0.0, 0.0), Point2(6.0, 0.0), 9.0, ""}));
     EXPECT_EQ(dimensions[0].measurement(), 6.0);
 }
 
