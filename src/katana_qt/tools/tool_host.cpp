@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <utility>
 
 namespace katana::qt::tools {
@@ -122,6 +123,7 @@ void ToolHost::make()
     context.selection = document_.selection().ids();
     context.pickTolerance = pickTolerance_;
     tool_ = info_->make(context);
+    ++generation_;
 }
 
 ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
@@ -129,11 +131,13 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
     const Outcome outcome = step.outcome;
     // The tool this step came from. A hook raised below may stop it or start
     // another; what follows a hook applies only while it is still this one.
-    const cad::InteractiveTool* const from = tool_.get();
+    // Counted, not compared by address: a tool started in a hook can be
+    // allocated where the one it replaced was, and was, under ctest.
+    const std::uint64_t from = generation_;
     switch (outcome) {
     case Outcome::Continue:
         report(onMessage, step.message);
-        if (tool_.get() == from) {
+        if (generation_ == from) {
             report(onPrompt, prompt());
         }
         break;
@@ -152,7 +156,7 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
         if (executed) {
             report(onMessage, step.message);
         }
-        if (tool_.get() != from) {
+        if (generation_ != from) {
             break;
         }
         if (step.restart) {
@@ -174,6 +178,7 @@ void ToolHost::end()
     // this one gone rather than cancelling it a second time.
     tool_.reset();
     info_ = nullptr;
+    ++generation_;
     if (onFinished) {
         onFinished(id);
     }

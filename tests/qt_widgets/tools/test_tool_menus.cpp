@@ -231,3 +231,20 @@ TEST(ToolMenus, EscInTheWorkspaceEndsTheToolBeforeItClearsTheSelection)
     views->cancel();
     EXPECT_TRUE(document.selection().empty());
 }
+
+TEST(ToolMenus, AToolbarWithNoMenuStillOwnsItsFamilyDropDowns)
+{
+    // A window may give Draw a toolbar and no menu. The Circle family's
+    // drop-down then belongs to the toolbar, so it is deleted with it rather
+    // than left with no parent.
+    QMainWindow window;
+    ToolMenuTargets targets;
+    auto* bar = new QToolBar("Draw", &window);
+    targets.toolBars["Draw"] = bar;
+    const ToolActions actions = fillToolMenus(toolCatalog(), targets, &window, {});
+    auto* button = bar->findChild<QToolButton*>("toolFamilyButton.Draw.Circle");
+    ASSERT_NE(button, nullptr);
+    ASSERT_NE(button->menu(), nullptr);
+    EXPECT_EQ(button->menu()->parent(), bar);
+    EXPECT_NE(std::ranges::find(actions.unplaced(), std::string("Draw")), actions.unplaced().end());
+}

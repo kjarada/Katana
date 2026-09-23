@@ -14,6 +14,7 @@
 // No Qt here on purpose: everything below is testable by calling it, and the
 // view's part is only turning events into these calls and drawing feedback().
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -115,6 +116,9 @@ class ToolHost {
     katana::cad::Document& document_;
     const katana::cad::ToolInfo* info_ = nullptr;
     std::unique_ptr<katana::cad::InteractiveTool> tool_;
+    // Bumped whenever tool_ is made or dropped, so apply() can tell that a
+    // hook replaced the tool it was dealing with (see apply).
+    std::uint64_t generation_ = 0;
     double pickTolerance_ = 0.0;
 };
 
