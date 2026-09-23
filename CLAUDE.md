@@ -318,7 +318,9 @@ to add features. On every session, actively look for and act on:
 When you find a real defect outside the task you were given: fix it if it is
 small and adjacent, otherwise record it in `PLAN.MD` under the phase it belongs
 to. Never leave it only in the conversation — the conversation is lost and the
-repository is not.
+repository is not. The audit of 2026-09-23 is registered in `PLAN.MD`
+§46 with an ID per defect and the detail in `docs/audit/`: cite the ID in the
+commit that fixes one and mark it FIXED there in the same commit.
 
 **Report honestly.** If tests fail, say so and show the output. If you skipped
 part of the scope, say which part and why. A green summary over a red build
