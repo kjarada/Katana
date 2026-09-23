@@ -386,3 +386,111 @@ TEST(DomainExport, AnEmptyModelIsAnEmptyArchiveAndBadOptionsAreRefused)
     options.curveTolerance = -1.0;
     EXPECT_FALSE(a12::fromDomain(model, {}, options).ok());
 }
+
+namespace {
+
+// An import, installed as the application installs it, with every style
+// renamed on the way in - which is what renaming a style in Katana does: the
+// style takes the new name and every entity drawn with it follows.
+katana::entity::Model importedWithStylesRenamed(const std::string& text)
+{
+    auto archive = a12::readArchive(text);
+    EXPECT_TRUE(archive.ok()) << (archive.ok() ? "" : archive.error().describe());
+    auto domain = a12::toDomain(archive.ok() ? *archive : a12::Archive{});
+    EXPECT_TRUE(domain.ok()) << (domain.ok() ? "" : domain.error().describe());
+    const auto renamed = [](const std::string& name) {
+        return name.empty() ? name : "Katana " + name;
+    };
+    katana::entity::Model model;
+    for (const auto& layer : domain->layersNeeded) {
+        EXPECT_TRUE(model.layers.add(layer).ok());
+    }
+    for (auto style : domain->stylesNeeded) {
+        style.name = renamed(style.name);
+        EXPECT_TRUE(model.styles.add(style).ok());
+    }
+    for (auto entity : domain->entities) {
+        entity.style = renamed(entity.style);
+        add(model, std::move(entity));
+    }
+    return model;
+}
+
+} // namespace
+
+TEST(DomainExport, RenamingAStyleInKatanaDoesNotRenameThe12dLinestyleOrSymbolItWrites)
+{
+    // Three strings, one of each way a 12d name reaches a style:
+    //   main  - a line in linestyle "WATR Main";
+    //   mh    - a point on linestyle "0" drawn with symbol "SEWR Manhole
+    //           Cover", so its style is the symbol's and "0" is kept aside;
+    //   tree  - a point whose linestyle and symbol are both "TREE Canopy",
+    //           so nothing is kept aside and the style is all there is.
+    const auto model = importedWithStylesRenamed(R"(breakline line
+string super { name "main" colour blue style "WATR Main" data_3d { 0 0 0  5 0 0 } }
+string super { name "mh" breakline point colour yellow style "0" data_3d { 100 200 5.5 }
+  symbol_value { style "SEWR Manhole Cover" colour yellow size 1 rotation 0 offset 0 raise 0 } }
+string super { name "tree" breakline point colour green style "TREE Canopy" data_3d { 7 7 0 }
+  symbol_value { style "TREE Canopy" colour green size 2 rotation 0 offset 0 raise 0 } })");
+    ASSERT_NE(model.styles.find("Katana WATR Main"), nullptr) << "the rename took";
+    ASSERT_EQ(model.styles.find("WATR Main"), nullptr);
+
+    auto out = a12::fromDomain(model, {});
+    ASSERT_TRUE(out.ok()) << out.error().describe();
+    ASSERT_EQ(out->archive.elements.size(), 3u);
+    const auto& main = std::get<a12::VertexString>(out->archive.elements[0]);
+    const auto& manhole = std::get<a12::VertexString>(out->archive.elements[1]);
+    const auto& tree = std::get<a12::VertexString>(out->archive.elements[2]);
+
+    EXPECT_EQ(main.header.style, "WATR Main");
+    EXPECT_FALSE(main.symbol.has_value());
+    EXPECT_EQ(manhole.header.style, "0");
+    ASSERT_TRUE(manhole.symbol.has_value());
+    EXPECT_EQ(manhole.symbol->text("style"), "SEWR Manhole Cover");
+    EXPECT_EQ(tree.header.style, "TREE Canopy");
+    ASSERT_TRUE(tree.symbol.has_value());
+    EXPECT_EQ(tree.symbol->text("style"), "TREE Canopy");
+}
+
+TEST(DomainExport, AKatanaStyleWritesItsLinetypeAndContinuousIs12dsDefaultLinestyle)
+{
+    katana::entity::Model model;
+    katana::entity::Layer kerbs;
+    kerbs.name = "KERBS";
+    kerbs.linetype = "KERB Barrier";
+    ASSERT_TRUE(model.layers.add(kerbs).ok());
+    const auto style = [&](const std::string& name, const std::string& linetype) {
+        katana::entity::Style made;
+        made.name = name;
+        made.linetype = linetype;
+        EXPECT_TRUE(model.styles.add(made).ok());
+    };
+    style("Fence", "FENC Post and Wire");
+    style("Plain", "Continuous"); // any case: Katana's own solid line
+    style("Inherit", "ByLayer");
+    const Polyline2 line{{Point2(0.0, 0.0), Point2(1.0, 0.0)}, false};
+    const auto drawn = [&](const std::string& styleName, const std::string& layer) {
+        Entity entity = make(line, layer);
+        entity.style = styleName;
+        add(model, entity);
+    };
+    drawn("Fence", "0");
+    drawn("Plain", "0");
+    drawn("Inherit", "KERBS");
+    drawn("", "KERBS");         // ByLayer
+    drawn("", "0");             // ByLayer, on a continuous layer
+    drawn("Not In Model", "0"); // the name is all there is
+
+    auto out = a12::fromDomain(model, {});
+    ASSERT_TRUE(out.ok()) << out.error().describe();
+    ASSERT_EQ(out->archive.elements.size(), 6u);
+    const auto styleOf = [&](std::size_t i) {
+        return std::get<a12::VertexString>(out->archive.elements[i]).header.style;
+    };
+    EXPECT_EQ(styleOf(0), "FENC Post and Wire");
+    EXPECT_EQ(styleOf(1), "1") << "12d has no \"continuous\"; its solid default is \"1\"";
+    EXPECT_EQ(styleOf(2), "KERB Barrier") << "ByLayer on the style is the layer's linetype";
+    EXPECT_EQ(styleOf(3), "KERB Barrier");
+    EXPECT_EQ(styleOf(4), "1");
+    EXPECT_EQ(styleOf(5), "Not In Model");
+}

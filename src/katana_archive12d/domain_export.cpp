@@ -6,6 +6,7 @@
 
 #include "katana/archive12d/domain.hpp"
 #include "katana/archive12d/reader.hpp"
+#include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/profile.hpp"
 #include "text_utilities.hpp"
@@ -151,6 +152,41 @@ class Exporter {
         return Vertex{point.x + shift.x, point.y + shift.y, z};
     }
 
+    // The 12d linestyle a string is drawn with: the LINETYPE of its Katana
+    // style, not the style's name. Import names a style after the 12d
+    // linestyle and gives it that linestyle as its linetype, so the two are
+    // the same until someone renames the style - and a style renamed in
+    // Katana must not rename the linestyle 12d draws, which no 12d library
+    // would then define. The name is written only for a style the model does
+    // not hold, where it is the only information there is.
+    //
+    // ByLayer (no style, or a style whose linetype is "ByLayer") is the
+    // layer's linetype. Katana's "continuous" is 12d's "1", its default solid
+    // linestyle (manual 1.4.3): 12d has no linestyle called "continuous" to
+    // draw it with.
+    [[nodiscard]] std::string linestyleOf(const Entity& entity) const
+    {
+        std::string_view linetype = katana::entity::kContinuousLinetype;
+        const katana::entity::Style* style =
+            entity.style.empty() ? nullptr : model_.styles.find(entity.style);
+        if (!entity.style.empty() && style == nullptr) {
+            return entity.style;
+        }
+        if (style != nullptr) {
+            linetype = style->linetype;
+        }
+        if (style == nullptr || katana::core::equalsIgnoringCase(linetype, "ByLayer")) {
+            const katana::entity::Layer* layer = model_.layers.find(entity.layer);
+            linetype = layer != nullptr ? std::string_view(layer->linetype)
+                                        : katana::entity::kContinuousLinetype;
+        }
+        if (linetype.empty() ||
+            katana::core::equalsIgnoringCase(linetype, katana::entity::kContinuousLinetype)) {
+            return "1";
+        }
+        return std::string(linetype);
+    }
+
     // The header 12d needs, from what import left in the metadata where there
     // is any, and from the entity itself where there is not.
     [[nodiscard]] StringHeader headerFor(const Entity& entity, Breakline fallback) const
@@ -160,13 +196,12 @@ class Exporter {
         if (const auto* name = textOf(entity.metadata, kMetaName)) {
             header.name = *name;
         }
-        // The entity's own style is the 12d linestyle; ByLayer has no name in
-        // 12d, and "1" is its default linestyle (manual 1.4.3). A point that
-        // took its symbol's style still writes the linestyle it came with.
+        // A point that took its symbol's style still writes the linestyle it
+        // came with; anything else writes the linestyle its style draws with.
         if (const auto* stringStyle = textOf(entity.metadata, kMetaStringStyle)) {
             header.style = *stringStyle;
         } else {
-            header.style = entity.style.empty() ? "1" : entity.style;
+            header.style = linestyleOf(entity);
         }
         header.chainage = realOf(entity.metadata, kMetaChainage).value_or(0.0);
         const auto* breakline = textOf(entity.metadata, kMetaBreakline);
@@ -309,7 +344,9 @@ class Exporter {
             return;
         }
         FieldList symbol;
-        symbol.setText("style", style->name);
+        // The symbol's 12d name, which the style carries; the style's own
+        // name is Katana's, and may have been changed since import.
+        symbol.setText("style", style->symbol);
         const auto* colour = textOf(entity.metadata, std::string(kMetaSymbolPrefix) + "colour");
         symbol.setText("colour", colour != nullptr ? *colour : string.header.colour);
         // The block's fields are kept as the text they were, so a size that
