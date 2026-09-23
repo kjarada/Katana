@@ -42,6 +42,23 @@ struct RasterInfo {
     // geotransform above is GDAL's default and places the image at the origin
     // one world unit per pixel. Callers that need real coordinates must check.
     bool hasGeotransform = false;
+    // Band 1's no-data value, when the file declares one. Absent is not a
+    // value: a DEM without one has every pixel meaningful.
+    std::optional<double> noDataValue;
+};
+
+// One band at full precision on a regular sub-grid: sample (i, j) is SOURCE
+// pixel (i * stride, j * stride), exactly as the file holds it - no
+// resampling, so an elevation is a surveyed post and not an average of
+// neighbours, some of which may be no-data sentinels. Row major, top row first.
+struct RasterSamples {
+    int columns = 0;
+    int rows = 0;
+    int stride = 1;
+    std::vector<double> values; // columns * rows
+    // The band's own no-data value, when it declares one. The caller decides
+    // what a no-data sample means; this layer only reports it.
+    std::optional<double> noDataValue;
 };
 
 // A decimated 8-bit RGBA copy of a raster, ready to hand to a painter. Decimated
@@ -104,6 +121,10 @@ struct VectorLayerInfo {
 struct RasterExportOptions {
     int width = 0;
     int height = 0;
+    // Any driver GDAL can write, including those that can only COPY a
+    // finished dataset rather than create one (AAIGrid): writeRaster builds
+    // those in memory first and copies, so the caller need not know which
+    // kind a format is.
     std::string driver = "GTiff";
     std::string projectionWkt;
     std::array<double, 6> geotransform{0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
@@ -139,9 +160,20 @@ class GdalDataset {
 
     [[nodiscard]] katana::core::Result<RasterInfo> rasterInfo() const;
 
+    // The short name of the driver that opened the dataset: "GTiff",
+    // "ESRI Shapefile", "GPKG". For display and for bug reports.
+    [[nodiscard]] std::string driverName() const;
+
     // Band values as doubles, for analysis (elevation, for instance). The whole
     // band is materialised, so prefer readImage() for display.
     [[nodiscard]] katana::core::Result<std::vector<double>> readBand(int bandIndex) const;
+
+    // Band values on every `stride`-th pixel of every `stride`-th row, read
+    // one source row at a time so a 2 GB DEM never needs to be resident: the
+    // memory is one row plus the samples kept. InvalidArgument for a band out
+    // of range or a stride below 1.
+    [[nodiscard]] katana::core::Result<RasterSamples> readBandSampled(int bandIndex,
+                                                                      int stride) const;
 
     // A display copy, decimated so neither dimension exceeds maxPixels. Uses
     // the band colour interpretation: RGB(A) where present, a grey ramp
@@ -173,6 +205,12 @@ class GdalDataset {
     [[nodiscard]] static katana::core::Result<std::string>
     vectorDriverForPath(const std::filesystem::path& path);
 
+    // The same for a raster written by writeRaster: .tif/.tiff -> GTiff,
+    // .asc -> AAIGrid, .img -> HFA. Unsupported, naming the extension, for
+    // anything else.
+    [[nodiscard]] static katana::core::Result<std::string>
+    rasterDriverForPath(const std::filesystem::path& path);
+
   private:
     GdalDataset() = default;
 
@@ -185,15 +223,24 @@ class GdalDataset {
 // first feature of a different type - by which point a partial file exists.
 [[nodiscard]] bool driverHoldsOneGeometryType(const std::string& driver);
 
-// True for formats whose specification fixes the coordinate reference system, so
-// any coordinates written are reinterpreted as that CRS regardless of what the
-// data actually is. RFC 7946 pins GeoJSON to WGS 84 longitude/latitude.
 // True for a format whose layers have a fixed set of fields and accept no
 // others (DXF). writeVector still writes such a file - geometry, and any
 // attribute the format already has a field for - but everything else is
 // dropped, and a caller should say so rather than let it pass unremarked.
 [[nodiscard]] bool driverHasFixedFields(const std::string& driver);
+
+// True for formats whose specification fixes the coordinate reference system, so
+// any coordinates written are reinterpreted as that CRS regardless of what the
+// data actually is. RFC 7946 pins GeoJSON to WGS 84 longitude/latitude.
 [[nodiscard]] bool driverAssumesWgs84(const std::string& driver);
+
+// A coordinate system for a person to read: its name, and its authority code
+// where GDAL can identify one - "GDA94 / MGA zone 56 (EPSG:28356)". Parsed by
+// GDAL's own OGRSpatialReference, which reads WKT1, WKT2 and PROJJSON alike,
+// rather than by picking at the text. Empty for an empty WKT; a WKT GDAL
+// cannot parse is described as such, never as blank, because "no CRS" and "a
+// CRS we could not read" are different things to the person importing it.
+[[nodiscard]] std::string describeCrs(const std::string& wkt);
 
 // The GDAL version string, for the about box and for bug reports.
 [[nodiscard]] std::string gdalVersion();

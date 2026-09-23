@@ -7,9 +7,14 @@ add_library(katana_interop STATIC
     import.cpp
     export.cpp
     archive12d.cpp
+    dataset_info.cpp
+    terrain_io.cpp
 )
 katana_target_defaults(katana_interop)
+# katana_terrain is PUBLIC and named although katana_archive12d brings it too:
+# terrain_io.hpp includes tin_surface.hpp, and a dependency a public header
+# has should not rest on another library happening to have it.
 target_link_libraries(katana_interop
-    PUBLIC katana_core katana_geometry katana_entity katana_archive12d katana_io
+    PUBLIC katana_core katana_geometry katana_terrain katana_entity katana_archive12d katana_io
     PRIVATE katana_commands
 )

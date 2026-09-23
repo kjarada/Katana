@@ -22,10 +22,10 @@ this is a summary of it.
 | 14 | Terrain engine | done |
 | 15 | 3D rendering | partial — tiled multithreaded software renderer, orbit camera, tiled viewports, 3D and cross-section views; Vulkan backend outstanding |
 | 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons in the plan; civil solids on the TIN instead |
-| 17 | Point clouds | partial — LAS/LAZ read and write, budgeted decimation, 2D display, COPC in the engine; out-of-core level of detail outstanding |
+| 17 | Point clouds | partial — LAS/LAZ read and write, budgeted decimation, 2D display, COPC conversion and resolution reads from the GIS menu and the CLI; view-driven level of detail outstanding |
 | 18 | Spatial indexing | partial — sparse hash grid behind snapping, picking, box selection and repaint (50×–310× measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance architecture | partial — deterministic `TaskPool` drives the renderer; task graph and work stealing rejected with reasons |
-| 20 | File interoperability | partial — vector (with heights), raster and point-cloud import and 12d Archive (.12da/.12daz) import/export in the GUI and CLI; vector export too; raster and point-cloud export only in the library; no DWG or IFC |
+| 20 | File interoperability | partial — vector (with heights), raster and point-cloud import and 12d Archive (.12da/.12daz) import/export in the GUI and CLI; vector, point-cloud (LAS/LAZ) and surface-as-DEM export; a GIS menu and toolbar reach every GDAL and PDAL capability, with Dataset Information; no DWG or IFC |
 | 21 | Civil engineering | partial — sections, clothoids, alignments and profiles, corridor quantities and surface, parcels; grading without a GUI route; richer assemblies outstanding |
 | 22 | Drawing and plotting | partial — Plot to PDF at ISO sizes and standard scales; layouts and title blocks outstanding |
 | 23 | Application API | reshaped — expose the existing command interpreter rather than write a second one |
@@ -33,7 +33,7 @@ this is a summary of it.
 | 45 | Survey data exchange: Leica, Trimble, Topcon, LandXML, CSV | in progress — model, detection and the drawing bridge done; parsers, reduction and the Survey menu being merged |
 | 46 | The audit of 2026-09-23 | [142 confirmed defects](docs/audit/2026-09-23-defects.md), being fixed area by area |
 
-1353 tests pass in Debug and Release, including the architectural layering check, a headless plot to PDF, a headless build of the main window, a headless click on a layer's visibility box and a headless import of surveyed points drawn with their symbols.
+1404 tests pass in Debug and Release, including the architectural layering check, a headless plot to PDF, a headless build of the main window, a headless click on a layer's visibility box, a headless import of surveyed points drawn with their symbols, and the GIS menu's surface commands run headlessly through their menu items against values worked out outside Katana.
 
 ## Building
 
@@ -87,9 +87,10 @@ katana_cli -c "RECT 0,0 30,20" -c "SAVE site.katana"
 ```
 
 Both run the same command interpreter — `HELP` lists its verbs — and each adds a
-few of its own: the command line adds `IMPORT`, `EXPORT`, `REFS`, `CODE` and
-`CUSTOMISE`, the desktop application's command line adds `ZOOM`, `GRID` and
-`SNAP` (and reaches the others through its menus). Points may be absolute
+few of its own: the command line adds `IMPORT`, `EXPORT`, `REFS`, `INFO`,
+`COPC`, `CODE` and `CUSTOMISE`, the desktop application's command line adds
+`ZOOM`, `GRID`, `SNAP`, `IMPORT`, `EXPORT`, `INFO` and `REFS` (and reaches the
+others through its menus). Points may be absolute
 (`12.5,40`), relative (`@3,4`) or polar (`@5<30`).
 
 ## Architecture

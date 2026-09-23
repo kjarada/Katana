@@ -23,12 +23,15 @@
 #include "katana/cad/document.hpp"
 #include "katana/core/log.hpp"
 #include "katana/terrain/tin_builder.hpp"
+#include "katana/interop/export.hpp"
+#include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "viewport_container.hpp"
 
 class QAction;
 class QActionGroup;
 class QCloseEvent;
+class QDialog;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -45,6 +48,7 @@ namespace katana::qt {
 class StyleManagerDialog;
 class AttributeManagerDialog;
 class LayerManagerDialog;
+class DatasetInfoDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -106,6 +110,19 @@ class MainWindow final : public QMainWindow {
     // The attribute manager, built but not shown - as makeStyleManager.
     [[nodiscard]] std::unique_ptr<AttributeManagerDialog> makeAttributeManager();
     [[nodiscard]] std::unique_ptr<LayerManagerDialog> makeLayerManager();
+    // GIS > Dataset Information for `path`, built but not shown, as the
+    // managers above; nullptr when the file cannot be described, which has
+    // been logged. For the headless --dataset-info switch.
+    [[nodiscard]] std::unique_ptr<DatasetInfoDialog> makeDatasetInfo(const QString& path);
+    // The GIS menu's import dialog for `path`'s kind of data - vector, raster
+    // or point cloud - built but not shown. nullptr, logged, for a file that
+    // cannot be described or has no such dialog. For --import-options.
+    [[nodiscard]] std::unique_ptr<QDialog> makeImportOptions(const QString& path);
+    // Triggers the menu item whose object name is `name`, exactly as a click
+    // does. For the headless --action switch, so that a menu command is run
+    // by a test through the same QAction a person clicks. NotFound for an
+    // unknown name, InvalidState for a disabled item.
+    [[nodiscard]] katana::core::Status triggerAction(const QString& name);
     // Selects every entity on an unlocked layer, as Edit > Select All does,
     // or just the one with this id. For the headless --attributes switch,
     // whose dialog acts on a selection.
@@ -119,9 +136,16 @@ class MainWindow final : public QMainWindow {
 
   private:
     void buildActions();
+    // The GIS menu and toolbar: GDAL vector and raster, PDAL point clouds.
+    // `exportAction` is File's Export Vector, shared so the two menus cannot
+    // drift.
+    void buildGisActions(QAction* exportAction);
     void buildViewMenu(QMenu* viewMenu);
+    // `name`, when given, becomes the action's object name: what --action and
+    // QMainWindow::saveState know it by.
     [[nodiscard]] QAction* makeAction(Icon icon, const QString& text, const QString& tip,
-                                      const QKeySequence& shortcut = {});
+                                      const QKeySequence& shortcut = {},
+                                      const QString& name = {});
     [[nodiscard]] QToolBar* makeToolBar(const QString& title, Qt::ToolBarArea area);
     void refreshViewMenu();
 
@@ -179,11 +203,43 @@ class MainWindow final : public QMainWindow {
     void loadCustomisation();
     void applySurveyCodes();
     void reportCustomisationCoverage();
-    void importVectorFile(const std::filesystem::path& path);
+    // The options are the GIS menu's dialogs' choices; File > Import and a
+    // path on the command line take the defaults.
+    void importVectorFile(const std::filesystem::path& path,
+                          katana::interop::VectorImportOptions options = {});
     void importArchive12dFile(const std::filesystem::path& path);
-    void importRasterFile(const std::filesystem::path& path);
-    void importPointCloudFile(const std::filesystem::path& path);
+    void importRasterFile(const std::filesystem::path& path,
+                          katana::interop::RasterImportOptions options = {});
+    void importPointCloudFile(const std::filesystem::path& path,
+                              katana::interop::PointCloudImportOptions options = {});
     void exportVectorFile();
+    // Writes the drawing, or `options.entities` of it, to `path`: a vector
+    // format by extension, or a 12d archive. Reports into the log; false when
+    // it failed, which has been reported too.
+    bool exportDrawingTo(const std::filesystem::path& path,
+                         katana::interop::VectorExportOptions options);
+
+    // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ---------------
+    // The imports ask for a file of their kind, describe it, and offer its
+    // options before anything is read.
+    void importVectorWithOptions();
+    void importRasterWithOptions();
+    void importPointCloudWithOptions();
+    // What the three share once a file is chosen: describe it, offer the
+    // dialog for its kind, import with the choices.
+    void importWithOptions(const QString& path);
+    void exportPointCloud();
+    void exportSurfaceAsDem();
+    void convertPointCloudToCopc();
+    void showDatasetInformation();
+    // The reference layer selected in the panel, or the only one of its kind
+    // when the panel has no selection; nullptr, having said why, otherwise.
+    [[nodiscard]] const katana::interop::PointCloudLayer* chooseReferenceCloud(const QString& title);
+    [[nodiscard]] const katana::interop::RasterOverlay* chooseReferenceRaster(const QString& title);
+    // Drops the rasters and point clouds, with the drawing they were loaded
+    // beside (audit QT-17): File > New and Open must not leave the previous
+    // drawing's orthophoto behind the next one.
+    void clearReferenceData();
     void removeSelectedReference();
     void zoomToSelectedReference();
     void onReferenceCellChanged(int row, int column);

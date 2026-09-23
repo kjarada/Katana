@@ -37,6 +37,9 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     attribute_manager.hpp
     layer_manager.cpp
     layer_manager.hpp
+    gis_dialogs.cpp
+    gis_dialogs.hpp
+    format.hpp
     icons.cpp
     icons.hpp
     theme.cpp

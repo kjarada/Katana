@@ -76,6 +76,16 @@ enum class Icon {
     SectionAlignment,
     CorridorQuantities,
     CorridorSurface,
+    // GIS: GDAL and PDAL data. One glyph per kind of data - a polygon with
+    // its vertices, a grid of cells, a scatter of points - with the accent
+    // arrow of Import and Export, so the family reads as one.
+    ImportVector,
+    ImportRaster,
+    ImportPointCloud,
+    ExportPointCloud,
+    ExportDem,
+    ConvertCopc,
+    DatasetInfo,
     // Help
     Help,
     About,

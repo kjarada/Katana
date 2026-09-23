@@ -25,3 +25,9 @@ docs/12d Refrence Files/
 # Git worktrees created for parallel agents (CLAUDE.md section 5.3). Each is a
 # checkout of its own; tracking one would embed a repository in this one.
 .claude/worktrees/
+
+# GDAL's persistent auxiliary metadata: statistics it caches beside a raster
+# it has read. A by-product, and a stale one - samples/gis/terrain.asc.aux.xml
+# was committed by accident and held approximate statistics the DEM does not
+# have (audit IO-13). Katana no longer asks GDAL to write them.
+samples/**/*.aux.xml

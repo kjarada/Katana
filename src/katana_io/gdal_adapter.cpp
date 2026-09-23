@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <system_error>
 #include <vector>
@@ -25,7 +26,10 @@
 #include <cpl_error.h>
 #include <cpl_string.h>
 #include <gdal_priv.h>
+#include <ogr_spatialref.h>
 #include <ogrsf_frmts.h>
+
+#include "katana/core/text.hpp"
 
 namespace katana::gis {
 namespace {
@@ -155,9 +159,8 @@ std::string lowerExtension(const std::filesystem::path& path)
     if (!extension.empty() && extension.front() == '.') {
         extension.erase(extension.begin());
     }
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return extension;
+    // ASCII only, whatever locale the GUI toolkit has set (core/text.hpp).
+    return katana::core::lowered(extension);
 }
 
 struct DriverForExtension {
@@ -174,6 +177,47 @@ constexpr DriverForExtension kVectorDrivers[] = {
     {"dxf", "DXF"},            {"csv", "CSV"},         {"sqlite", "SQLite"},
     {"tab", "MapInfo File"},
 };
+
+// The raster formats a DEM is written in: the three every GIS and every
+// survey package reads. AAIGrid can only COPY a finished dataset, which is
+// what writeRaster's in-memory build is for.
+constexpr DriverForExtension kRasterDrivers[] = {
+    {"tif", "GTiff"},
+    {"tiff", "GTiff"},
+    {"asc", "AAIGrid"},
+    {"img", "HFA"},
+};
+
+// A failed write must not leave a file behind that looks like a finished one:
+// the driver is asked to delete it (it knows a format's sidecars), and when it
+// cannot - its generic Delete OPENS the file to list them, which a truncated
+// file may not survive - the file itself is removed. Quietly, because this runs
+// only on a path that is already reporting a failure, whose message matters
+// more than GDAL's complaint about the clean-up.
+void discardOutput(GDALDriver& driver, const std::filesystem::path& path)
+{
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    const CPLErr deleted = driver.Delete(path.string().c_str());
+    CPLPopErrorHandler();
+    if (deleted != CE_None) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+    }
+}
+
+// Parses a coordinate system the way GDAL's own SetProjection would - WKT1,
+// WKT2, PROJJSON - but refuses to fetch anything: a string read from a file is
+// not permission to open another file or a URL.
+bool parseCrs(const std::string& text, OGRSpatialReference& reference)
+{
+    reference.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    if (reference.importFromWkt(text.c_str()) == OGRERR_NONE) {
+        return true;
+    }
+    return reference.SetFromUserInput(
+               text.c_str(), OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get()) ==
+           OGRERR_NONE;
+}
 
 // ---- OGR geometry -> VectorGeometry ---------------------------------------
 
@@ -468,7 +512,19 @@ Result<RasterInfo> GdalDataset::rasterInfo() const
         info.geotransform = geotransform;
         info.hasGeotransform = true;
     }
+    int hasNoData = 0;
+    const double noData = dataset->GetRasterBand(1)->GetNoDataValue(&hasNoData);
+    if (hasNoData != 0) {
+        info.noDataValue = noData;
+    }
     return info;
+}
+
+std::string GdalDataset::driverName() const
+{
+    const GDALDriver* driver = asDataset(dataset_)->GetDriver();
+    // GDAL keeps a driver's short name in its description.
+    return driver != nullptr ? std::string(driver->GetDescription()) : std::string();
 }
 
 Result<std::vector<double>> GdalDataset::readBand(int bandIndex) const
@@ -490,6 +546,61 @@ Result<std::vector<double>> GdalDataset::readBand(int bandIndex) const
                          lastGdalError());
     }
     return values;
+}
+
+Result<RasterSamples> GdalDataset::readBandSampled(int bandIndex, int stride) const
+{
+    GDALDataset* dataset = asDataset(dataset_);
+    if (bandIndex < 1 || bandIndex > dataset->GetRasterCount()) {
+        return makeError(ErrorCode::InvalidArgument, "raster band index is out of range",
+                         "requested " + std::to_string(bandIndex) + " of " +
+                             std::to_string(dataset->GetRasterCount()));
+    }
+    if (stride < 1) {
+        return makeError(ErrorCode::InvalidArgument, "the sampling stride must be at least 1",
+                         "stride " + std::to_string(stride));
+    }
+
+    const int width = dataset->GetRasterXSize();
+    const int height = dataset->GetRasterYSize();
+    // In 64 bits: width + stride - 1 overflows an int for a stride near
+    // INT_MAX, which strideForCap can legitimately return for a one-sample cap.
+    const auto samplesAlong = [stride](int extent) {
+        return static_cast<int>((static_cast<std::int64_t>(extent) + stride - 1) / stride);
+    };
+
+    RasterSamples samples;
+    samples.stride = stride;
+    samples.columns = samplesAlong(width);
+    samples.rows = samplesAlong(height);
+    GDALRasterBand* band = dataset->GetRasterBand(bandIndex);
+    int hasNoData = 0;
+    const double noData = band->GetNoDataValue(&hasNoData);
+    if (hasNoData != 0) {
+        samples.noDataValue = noData;
+    }
+
+    // One whole source row per kept row, and the kept pixels picked out of it.
+    // Asking RasterIO for a smaller buffer instead would make GDAL RESAMPLE -
+    // nearest neighbour at pixel (i + 0.5) * step, not i * step - which moves
+    // every sample off the pixel the caller will georeference it to.
+    samples.values.reserve(static_cast<std::size_t>(samples.columns) *
+                           static_cast<std::size_t>(samples.rows));
+    std::vector<double> row(static_cast<std::size_t>(width));
+    for (int j = 0; j < samples.rows; ++j) {
+        // (rows - 1) * stride < height, so this stays within an int.
+        const int sourceRow = j * stride;
+        if (band->RasterIO(GF_Read, 0, sourceRow, width, 1, row.data(), width, 1, GDT_Float64, 0,
+                           0, nullptr) != CE_None) {
+            return makeError(ErrorCode::FileImportFailure, "GDAL failed to read raster band",
+                             "row " + std::to_string(sourceRow) + ": " + lastGdalError());
+        }
+        const auto step = static_cast<std::size_t>(stride);
+        for (std::size_t i = 0; i < static_cast<std::size_t>(samples.columns); ++i) {
+            samples.values.push_back(row[i * step]);
+        }
+    }
+    return samples;
 }
 
 Result<RasterImage> GdalDataset::readImage(int maxPixels) const
@@ -607,27 +718,24 @@ Result<RasterImage> GdalDataset::readImage(int maxPixels) const
     int hasNoData = 0;
     const double noData = roles.grey->GetNoDataValue(&hasNoData);
 
-    double minimum = 0.0;
-    double maximum = 0.0;
-    double mean = 0.0;
-    double deviation = 0.0;
-    bool haveRange = roles.grey->GetStatistics(TRUE, TRUE, &minimum, &maximum, &mean,
-                                               &deviation) == CE_None &&
-                     maximum > minimum;
-    if (!haveRange) {
-        // Statistics can be unavailable (no overviews, approximate scan
-        // refused). Derive the range from what was actually read.
-        minimum = std::numeric_limits<double>::max();
-        maximum = std::numeric_limits<double>::lowest();
-        for (const double value : values) {
-            if (!std::isfinite(value) || (hasNoData != 0 && value == noData)) {
-                continue;
-            }
-            minimum = std::min(minimum, value);
-            maximum = std::max(maximum, value);
+    // The stretch is the range of the values just read, never GDAL's band
+    // statistics (audit IO-13). Forcing those (GetStatistics with bForce) makes
+    // GDAL's persistent auxiliary metadata write <file>.aux.xml beside the
+    // user's file - into their data folder, even on a read-only open - and on
+    // the next open GDAL trusts that cache without checking it against the
+    // file, so a DEM replaced under the same name was stretched by the OLD
+    // DEM's range and clamped to white. The decimated copy is the image being
+    // drawn, so its own range is the right one to stretch over anyway.
+    double minimum = std::numeric_limits<double>::max();
+    double maximum = std::numeric_limits<double>::lowest();
+    for (const double value : values) {
+        if (!std::isfinite(value) || (hasNoData != 0 && value == noData)) {
+            continue;
         }
-        haveRange = maximum > minimum;
+        minimum = std::min(minimum, value);
+        maximum = std::max(maximum, value);
     }
+    const bool haveRange = maximum > minimum;
 
     const double span = haveRange ? (maximum - minimum) : 1.0;
     for (std::size_t i = 0; i < pixels; ++i) {
@@ -746,11 +854,38 @@ Result<std::string> GdalDataset::vectorDriverForPath(const std::filesystem::path
                      path.string());
 }
 
+Result<std::string> GdalDataset::rasterDriverForPath(const std::filesystem::path& path)
+{
+    ensureRegistered();
+    const std::string extension = lowerExtension(path);
+    for (const DriverForExtension& entry : kRasterDrivers) {
+        if (extension == entry.extension) {
+            if (GetGDALDriverManager()->GetDriverByName(entry.driver) == nullptr) {
+                return makeError(ErrorCode::Unsupported,
+                                 std::string("this GDAL build has no '") + entry.driver +
+                                     "' driver",
+                                 path.string());
+            }
+            return std::string(entry.driver);
+        }
+    }
+    if (extension.empty()) {
+        return makeError(ErrorCode::Unsupported,
+                         "cannot choose a raster driver: the path has no extension",
+                         path.string());
+    }
+    return makeError(ErrorCode::Unsupported,
+                     "no raster driver is registered for '." + extension + "'", path.string());
+}
+
 Status GdalDataset::writeRaster(const std::filesystem::path& path,
                                 const RasterExportOptions& options,
                                 const std::vector<double>& values)
 {
     ensureRegistered();
+    // A message GDAL left from an earlier call must not become this call's
+    // explanation of a failure GDAL did not describe.
+    CPLErrorReset();
 
     if (options.width <= 0 || options.height <= 0) {
         return makeError(ErrorCode::InvalidArgument, "raster export dimensions must be positive");
@@ -770,31 +905,92 @@ Status GdalDataset::writeRaster(const std::filesystem::path& path,
         return makeError(ErrorCode::Unsupported, "raster driver is unavailable", options.driver);
     }
 
-    GDALDataset* dataset =
-        driver->Create(path.string().c_str(), options.width, options.height, 1, GDT_Float64,
-                       nullptr);
+    // Two kinds of driver. GTiff and HFA CREATE a dataset and take its pixels
+    // afterwards; AAIGrid (and PNG, JPEG...) can only COPY a dataset that is
+    // already complete, because they write the file in one pass. For the
+    // second kind the dataset is built in GDAL's in-memory driver and copied,
+    // so a caller names the format it wants without knowing which kind it is.
+    const CSLConstList capabilities = driver->GetMetadata();
+    const bool canCreate = CPLFetchBool(capabilities, GDAL_DCAP_CREATE, false);
+    const bool canCopy = CPLFetchBool(capabilities, GDAL_DCAP_CREATECOPY, false);
+    if (!canCreate && !canCopy) {
+        return makeError(ErrorCode::Unsupported, "GDAL cannot write this raster format",
+                         options.driver);
+    }
+    GDALDriver* builder = canCreate ? driver : GetGDALDriverManager()->GetDriverByName("MEM");
+    if (builder == nullptr) {
+        return makeError(ErrorCode::Unsupported,
+                         "this GDAL build has no in-memory driver to build the raster in",
+                         options.driver);
+    }
+
+    GDALDataset* dataset = builder->Create(canCreate ? path.string().c_str() : "", options.width,
+                                           options.height, 1, GDT_Float64, nullptr);
     if (dataset == nullptr) {
         return makeError(ErrorCode::FileExportFailure,
                          "GDAL could not create '" + path.string() + "'", lastGdalError());
     }
 
+    // Every failure from here unwinds through this: close, then delete what
+    // the driver created, so a raster without its georeferencing - pixels
+    // that read back at the origin, one unit each - is never left looking
+    // like a finished export (audit IO-14). Setters used to be called and
+    // their answers ignored.
+    const auto abandon = [&](GDALDataset* handle, const char* what) -> Error {
+        const std::string message = lastGdalError();
+        GDALClose(handle); // already failing: the first error is the one to report
+        if (canCreate) {
+            discardOutput(*driver, path);
+        }
+        return makeError(ErrorCode::FileExportFailure, what, message);
+    };
+
     std::array<double, 6> geotransform = options.geotransform;
-    dataset->SetGeoTransform(geotransform.data());
+    if (dataset->SetGeoTransform(geotransform.data()) != CE_None) {
+        return abandon(dataset, "GDAL could not set the raster's georeferencing");
+    }
     if (!options.projectionWkt.empty()) {
-        dataset->SetProjection(options.projectionWkt.c_str());
+        OGRSpatialReference reference;
+        if (!parseCrs(options.projectionWkt, reference)) {
+            return abandon(dataset, "GDAL could not read the coordinate system to write");
+        }
+        if (dataset->SetSpatialRef(&reference) != CE_None) {
+            return abandon(dataset, "GDAL could not set the raster's coordinate system");
+        }
     }
     GDALRasterBand* band = dataset->GetRasterBand(1);
-    if (options.noDataValue.has_value()) {
-        band->SetNoDataValue(*options.noDataValue);
+    if (options.noDataValue.has_value() && band->SetNoDataValue(*options.noDataValue) != CE_None) {
+        return abandon(dataset, "GDAL could not set the raster's no-data value");
     }
-    const CPLErr status =
-        band->RasterIO(GF_Write, 0, 0, options.width, options.height,
+    if (band->RasterIO(GF_Write, 0, 0, options.width, options.height,
                        const_cast<double*>(values.data()), options.width, options.height,
-                       GDT_Float64, 0, 0, nullptr);
-    const std::string message = status != CE_None ? lastGdalError() : std::string();
-    GDALClose(dataset);
-    if (status != CE_None) {
-        return makeError(ErrorCode::FileExportFailure, "GDAL failed to write raster", message);
+                       GDT_Float64, 0, 0, nullptr) != CE_None) {
+        return abandon(dataset, "GDAL failed to write raster");
+    }
+
+    if (!canCreate) {
+        GDALDataset* copy =
+            driver->CreateCopy(path.string().c_str(), dataset, FALSE, nullptr, nullptr, nullptr);
+        if (copy == nullptr) {
+            const std::string message = lastGdalError();
+            GDALClose(dataset);
+            discardOutput(*driver, path);
+            return makeError(ErrorCode::FileExportFailure,
+                             "GDAL could not write '" + path.string() + "'", message);
+        }
+        // Closing an in-memory dataset only frees it; there is nothing it
+        // could fail to write.
+        GDALClose(dataset);
+        dataset = copy;
+    }
+
+    // GDAL (3.7 on) reports here what it could only find out while flushing
+    // the last blocks and the header: a full disk, a network share gone.
+    if (GDALClose(dataset) != CE_None) {
+        const std::string message = lastGdalError();
+        discardOutput(*driver, path);
+        return makeError(ErrorCode::FileExportFailure,
+                         "GDAL could not finish writing '" + path.string() + "'", message);
     }
     return {};
 }
@@ -804,6 +1000,7 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
                                 const VectorExportOptions& options)
 {
     ensureRegistered();
+    CPLErrorReset(); // see writeRaster
 
     std::string driverName = options.driver;
     if (driverName.empty()) {
@@ -816,6 +1013,22 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
     GDALDriver* driver = GetGDALDriverManager()->GetDriverByName(driverName.c_str());
     if (driver == nullptr) {
         return makeError(ErrorCode::Unsupported, "vector driver is unavailable", driverName);
+    }
+
+    // A coordinate system that cannot be read is refused before anything is
+    // written. It used to be dropped: the file was written with no CRS at all
+    // and the export reported success, which is the silent failure PLAN.MD
+    // section 36 forbids - the layer then reads back as "no coordinate
+    // system", indistinguishable from data that never had one.
+    OGRSpatialReference reference;
+    OGRSpatialReference* referencePtr = nullptr;
+    if (!options.projectionWkt.empty()) {
+        if (!parseCrs(options.projectionWkt, reference)) {
+            return makeError(ErrorCode::InvalidCRS,
+                             "GDAL could not read the coordinate system to write",
+                             lastGdalError());
+        }
+        referencePtr = &reference;
     }
 
     // Most drivers refuse to overwrite. Remove an existing file first so that
@@ -836,18 +1049,9 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
     // sidecar files, std::filesystem::remove would only take the .shp.
     const auto abandon = [&driver, &path](GDALDataset* handle, Error error) {
         GDALClose(handle);
-        CPLPushErrorHandler(CPLQuietErrorHandler);
-        driver->Delete(path.string().c_str());
-        CPLPopErrorHandler();
+        discardOutput(*driver, path);
         return error;
     };
-
-    OGRSpatialReference reference;
-    OGRSpatialReference* referencePtr = nullptr;
-    if (!options.projectionWkt.empty() &&
-        reference.importFromWkt(options.projectionWkt.c_str()) == OGRERR_NONE) {
-        referencePtr = &reference;
-    }
 
     // A shapefile holds exactly one geometry type per layer, so pick the single
     // kind when the data has one and fall back to wkbUnknown otherwise (which
@@ -937,7 +1141,16 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         }
     }
 
-    GDALClose(dataset);
+    // A GeoPackage commits its transaction and a shapefile flushes its .dbf
+    // here, so this is where a full disk shows (audit IO-14). GDAL reports it
+    // through the return value since 3.7; it used to be ignored and the
+    // export reported success over a truncated file.
+    if (GDALClose(dataset) != CE_None) {
+        const std::string message = lastGdalError();
+        discardOutput(*driver, path);
+        return makeError(ErrorCode::FileExportFailure,
+                         "GDAL could not finish writing '" + path.string() + "'", message);
+    }
     return {};
 }
 
@@ -954,6 +1167,70 @@ bool driverHasFixedFields(const std::string& driver)
 bool driverAssumesWgs84(const std::string& driver)
 {
     return driver == "GeoJSON";
+}
+
+std::string describeCrs(const std::string& wkt)
+{
+    if (wkt.empty()) {
+        return {};
+    }
+    ensureRegistered();
+    OGRSpatialReference reference;
+    if (!parseCrs(wkt, reference)) {
+        // Never "": that would read as "no coordinate system", and a file that
+        // declares one we cannot read is a different problem for its owner.
+        return "unrecognised coordinate system";
+    }
+    const char* name = reference.GetName();
+    std::string text = name != nullptr && *name != '\0' ? name : "unnamed coordinate system";
+
+    const auto authorityCode = [](const OGRSpatialReference& crs) -> std::string {
+        const char* authority = crs.GetAuthorityName(nullptr);
+        const char* code = crs.GetAuthorityCode(nullptr);
+        if (authority == nullptr || code == nullptr || *authority == '\0' || *code == '\0') {
+            return {};
+        }
+        return std::string(authority) + ":" + code;
+    };
+    std::string identified = authorityCode(reference);
+
+    // A WKT written without AUTHORITY nodes - every Esri .prj beside a
+    // shapefile - is usually still an EPSG system, recognisable by its
+    // parameters. When nothing can be recognised the name alone is the honest
+    // answer, so a failure below is not an error.
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    if (identified.empty()) {
+        (void)reference.AutoIdentifyEPSG();
+        identified = authorityCode(reference);
+    }
+    if (identified.empty()) {
+        // AutoIdentifyEPSG knows a handful of datums by name, and in GDAL
+        // 3.13.2 identified none of WGS 84, WGS 84 / UTM 56S or an Esri .prj of
+        // GDA94 / MGA 56 (measured 2026-09-23; it returned
+        // OGRERR_UNSUPPORTED_SRS for each). FindMatches asks PROJ's database,
+        // which named all three at confidence 100 - it is what
+        // `gdalsrsinfo -e` reports. PROJ's scale (proj_identify): 100 and 90
+        // are the same CRS with matching or similar names, 70 the same CRS by
+        // another name, below that only a similarity. A code is shown only
+        // for one candidate that is the same CRS; two at the top would make
+        // the choice a guess.
+        int entries = 0;
+        int* confidence = nullptr;
+        OGRSpatialReferenceH* matches = reference.FindMatches(nullptr, &entries, &confidence);
+        constexpr int kSameCrs = 70;
+        if (matches != nullptr && confidence != nullptr && entries >= 1 &&
+            confidence[0] >= kSameCrs && (entries == 1 || confidence[1] < confidence[0])) {
+            identified = authorityCode(*OGRSpatialReference::FromHandle(matches[0]));
+        }
+        OSRFreeSRSArray(matches);
+        CPLFree(confidence);
+    }
+    CPLPopErrorHandler();
+
+    if (!identified.empty()) {
+        text += " (" + identified + ")";
+    }
+    return text;
 }
 
 std::string gdalVersion()

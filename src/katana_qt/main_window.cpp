@@ -4,6 +4,8 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "format.hpp"
+#include "gis_dialogs.hpp"
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
 
@@ -19,6 +21,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <array>
+#include <functional>
 #include <optional>
 
 #include <QDialog>
@@ -45,6 +48,7 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 
+#include <cstdio>
 #include <map>
 #include <set>
 
@@ -55,9 +59,13 @@
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/archive12d/domain.hpp"
+#include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/archive12d.hpp"
+#include "katana/interop/dataset_info.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
+#include "katana/interop/terrain_io.hpp"
+#include "katana/pointcloud/point_cloud_engine.hpp"
 #include "katana/storage/project_store.hpp"
 
 namespace katana::qt {
@@ -77,6 +85,10 @@ namespace {
 // walking parent items would be a second, divergent definition of it.
 enum LayerColumn { kName = 0, kVisible, kLocked, kColor, kCount, kLayerColumns };
 constexpr int kLayerPathRole = Qt::UserRole + 1;
+
+// The reference data panel's columns. The Name cell carries the layer's
+// ReferenceId as user data.
+enum ReferenceColumn { kRefName = 0, kRefType, kRefDetail, kRefDisplay, kRefColumns };
 
 QString fromPath(const std::filesystem::path& path)
 {
@@ -223,9 +235,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 // the sentence shown in the status bar and, with the shortcut appended, in the
 // toolbar tooltip - an icon-only button owes the user its name.
 QAction* MainWindow::makeAction(Icon icon, const QString& text, const QString& tip,
-                                const QKeySequence& shortcut)
+                                const QKeySequence& shortcut, const QString& name)
 {
     auto* action = new QAction(katana::qt::icon(icon), text, this);
+    if (!name.isEmpty()) {
+        action->setObjectName(name);
+    }
     if (!shortcut.isEmpty()) {
         action->setShortcut(shortcut);
     }
@@ -257,7 +272,8 @@ QToolBar* MainWindow::makeToolBar(const QString& title, Qt::ToolBarArea area)
 void MainWindow::buildActions()
 {
     // ---- File ------------------------------------------------------------------------
-    QAction* newAction = makeAction(Icon::New, "&New", "Start a new, empty drawing", QKeySequence::New);
+    QAction* newAction = makeAction(Icon::New, "&New", "Start a new, empty drawing",
+                                    QKeySequence::New, "fileNew");
     QAction* openAction = makeAction(Icon::Open, "&Open Project...", "Open a Katana project directory",
                                      QKeySequence::Open);
     QAction* saveAction =
@@ -410,13 +426,21 @@ void MainWindow::buildActions()
     viewBar->addSeparator();
     viewBar->addActions({gridAction_, snapAction_});
 
+    // ---- GIS ---------------------------------------------------------------------------
+    buildGisActions(exportAction);
+
     // ---- Terrain and civil -----------------------------------------------------------
     QAction* cloudSurface = makeAction(Icon::SurfaceFromCloud, "Surface From &Point Cloud...",
-                                       "Triangulate a surface from an imported point cloud");
+                                       "Triangulate a surface from an imported point cloud's "
+                                       "ground returns",
+                                       {}, "surfaceFromPointCloud");
     QAction* rasterSurface = makeAction(Icon::SurfaceFromRaster, "Surface From &Raster...",
-                                        "Triangulate a surface from an elevation raster");
+                                        "Triangulate a surface from an elevation raster's true "
+                                        "values, read through GDAL",
+                                        {}, "surfaceFromRaster");
     QAction* drawingSurface = makeAction(Icon::SurfaceFromDrawing, "Surface From &Drawing",
-                                         "Triangulate a surface from the drawing's points and lines");
+                                         "Triangulate a surface from the drawing's points and lines",
+                                         {}, "surfaceFromDrawing");
     QAction* quantities = makeAction(Icon::CorridorQuantities, "Corridor &Quantities...",
                                      "Cut and fill along an alignment, by average end area",
                                      QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q));
@@ -514,13 +538,101 @@ void MainWindow::buildActions()
         box.setIconPixmap(QPixmap::fromImage(applicationIconImage(96)));
         box.setText(QString("<h3>Katana %1</h3>"
                             "<p>High-performance survey and CAD platform.</p>"
-                            "<p style='color:%2'>Deterministic C++23 engineering core, "
+                            "<p style='color:%2'>Deterministic C++ engineering core, "
                             "Qt %3 desktop shell.</p>")
-                        .arg(KATANA_VERSION, theme::textMuted().name(), qVersion()));
+                        .arg(KATANA_VERSION, theme::textMuted().name(), qVersion()) +
+                    // The two libraries every GIS import and export goes
+                    // through, named with their versions: what a bug report
+                    // about a file that will not open needs first.
+                    QString("<p style='color:%1'>GDAL %2, PDAL %3.</p>")
+                        .arg(theme::textMuted().name(),
+                             QString::fromStdString(katana::gis::gdalVersion()),
+                             QString::fromStdString(katana::pointcloud::pdalVersion())));
         box.exec();
     });
     QMenu* helpMenu = menuBar()->addMenu("&Help");
     helpMenu->addActions({reference, about});
+}
+
+// Every GDAL and PDAL capability the program has, in one menu, grouped by the
+// library and the kind of data it is for. File > Import stays the quick way
+// in - any file, default options, no questions; the imports here are the
+// considered way, and describe the file and offer its options first.
+void MainWindow::buildGisActions(QAction* exportAction)
+{
+    QAction* importVector = makeAction(
+        Icon::ImportVector, "Import &Vector Data...",
+        "Import a Shapefile, GeoPackage, GeoJSON, KML, GML, DXF or MapInfo file through GDAL, "
+        "choosing its layers and where they go",
+        {}, "importVectorData");
+    QAction* importRaster = makeAction(
+        Icon::ImportRaster, "Import &Raster...",
+        "Import a GeoTIFF, ASCII grid, IMG or image through GDAL, as a backdrop",
+        {}, "importRaster");
+    QAction* importCloud = makeAction(
+        Icon::ImportPointCloud, "Import &Point Cloud...",
+        "Import a LAS, LAZ or COPC point cloud through PDAL, choosing how many points and "
+        "which classes",
+        {}, "importPointCloud");
+    QAction* exportCloud = makeAction(Icon::ExportPointCloud, "Export Point &Cloud...",
+                                      "Write an imported point cloud to LAS or LAZ through PDAL",
+                                      {}, "exportPointCloud");
+    QAction* exportDem = makeAction(
+        Icon::ExportDem, "Export Surface as &DEM...",
+        "Write a surface to a GeoTIFF, ASCII grid or IMG elevation raster through GDAL",
+        {}, "exportSurfaceDem");
+    QAction* copc = makeAction(
+        Icon::ConvertCopc, "Convert Point Cloud to C&OPC...",
+        "Rewrite a LAS or LAZ as a Cloud Optimised Point Cloud, which can be read at any level "
+        "of detail",
+        {}, "convertCopc");
+    QAction* info = makeAction(
+        Icon::DatasetInfo, "Dataset &Information...",
+        "What a GIS file or point cloud holds - layers, size, extent, coordinate system - "
+        "without importing it",
+        {}, "datasetInformation");
+    connect(importVector, &QAction::triggered, this, [this] { importVectorWithOptions(); });
+    connect(importRaster, &QAction::triggered, this, [this] { importRasterWithOptions(); });
+    connect(importCloud, &QAction::triggered, this, [this] { importPointCloudWithOptions(); });
+    connect(exportCloud, &QAction::triggered, this, [this] { exportPointCloud(); });
+    connect(exportDem, &QAction::triggered, this, [this] { exportSurfaceAsDem(); });
+    connect(copc, &QAction::triggered, this, [this] { convertPointCloudToCopc(); });
+    connect(info, &QAction::triggered, this, [this] { showDatasetInformation(); });
+
+    // Sections rather than plain separators: a style that draws their titles
+    // says which library each group goes through, and one that does not draws
+    // the separator it would have had anyway.
+    QMenu* gisMenu = menuBar()->addMenu("&GIS");
+    gisMenu->addSection("Vector - GDAL");
+    gisMenu->addActions({importVector, exportAction});
+    gisMenu->addSection("Raster - GDAL");
+    gisMenu->addActions({importRaster, exportDem});
+    gisMenu->addSection("Point Cloud - PDAL");
+    gisMenu->addActions({importCloud, exportCloud, copc});
+    gisMenu->addSeparator();
+    gisMenu->addAction(info);
+
+    QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
+    gisBar->addActions({importVector, importRaster, importCloud});
+    gisBar->addSeparator();
+    gisBar->addActions({exportCloud, exportDem, copc});
+    gisBar->addSeparator();
+    gisBar->addAction(info);
+}
+
+katana::core::Status MainWindow::triggerAction(const QString& name)
+{
+    auto* action = findChild<QAction*>(name);
+    if (action == nullptr) {
+        return katana::core::makeError(katana::core::ErrorCode::NotFound, "no such menu item",
+                                       name.toStdString());
+    }
+    if (!action->isEnabled()) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidState,
+                                       "that menu item is disabled", name.toStdString());
+    }
+    action->trigger();
+    return {};
 }
 
 void MainWindow::buildDocks()
@@ -640,9 +752,11 @@ void MainWindow::buildReferenceDock()
     auto* buttons = new QHBoxLayout();
     auto* importButton = new QPushButton("Import...", panel);
     auto* zoomButton = new QPushButton("Zoom To", panel);
+    auto* infoButton = new QPushButton("Info", panel);
     auto* removeButton = new QPushButton("Remove", panel);
     buttons->addWidget(importButton);
     buttons->addWidget(zoomButton);
+    buttons->addWidget(infoButton);
     buttons->addWidget(removeButton);
     buttons->addStretch();
     layout->addLayout(buttons);
@@ -653,6 +767,27 @@ void MainWindow::buildReferenceDock()
     connect(importButton, &QPushButton::clicked, this, [this] { importFile(); });
     connect(zoomButton, &QPushButton::clicked, this, [this] { zoomToSelectedReference(); });
     connect(removeButton, &QPushButton::clicked, this, [this] { removeSelectedReference(); });
+    // What the selected layer's SOURCE holds - which, for a cloud, is the
+    // whole file and not the sample the panel shows.
+    connect(infoButton, &QPushButton::clicked, this, [this] {
+        const int row = referenceTable_->currentRow();
+        const QTableWidgetItem* item = row < 0 ? nullptr : referenceTable_->item(row, kRefName);
+        if (item == nullptr) {
+            logMessage("Select a reference layer first.", true);
+            return;
+        }
+        const auto id =
+            static_cast<katana::interop::ReferenceId>(item->data(Qt::UserRole).toULongLong());
+        std::filesystem::path source;
+        if (const auto* raster = reference_.findRaster(id)) {
+            source = raster->source;
+        } else if (const auto* cloud = reference_.findPointCloud(id)) {
+            source = cloud->source;
+        }
+        if (auto dialog = makeDatasetInfo(fromPath(source))) {
+            dialog->exec();
+        }
+    });
     connect(referenceTable_, &QTableWidget::cellChanged, this,
             [this](int row, int column) { onReferenceCellChanged(row, column); });
     connect(referenceTable_, &QTableWidget::cellDoubleClicked, this,
@@ -928,6 +1063,7 @@ void MainWindow::newDocument()
         views_->resetInteraction();
         interpreter_.resetPointState();
         document_.newDocument();
+        clearReferenceData();
         views_->zoomExtents();
         logMessage("New drawing.");
     }
@@ -1004,6 +1140,7 @@ void MainWindow::openProject(const QString& directory)
     }
     views_->resetInteraction();
     interpreter_.resetPointState();
+    clearReferenceData();
     views_->zoomExtents();
     logMessage("Opened " + directory + " (" +
                QString::number(document_.model().entities.size()) + " entities).");
@@ -1058,9 +1195,15 @@ void MainWindow::logMessage(const QString& text, bool isError)
     if (text.isEmpty()) {
         return;
     }
-    commandLog_->appendPlainText(isError ? "! " + text : text);
+    const QString line = isError ? "! " + text : text;
+    commandLog_->appendPlainText(line);
     if (isError) {
         statusBar()->showMessage(text, 6000);
+    }
+    // A headless run has no window to read the log in. Echoed, it is what a
+    // script - or a ctest check - can see of what a command reported.
+    if (headless_) {
+        std::fprintf(stderr, "%s\n", line.toUtf8().constData());
     }
 }
 
@@ -1095,6 +1238,50 @@ void MainWindow::runCommandLine()
         close();
         return;
     }
+    // The interoperability verbs, as katana_cli has them. They live in the
+    // front ends, not the CommandInterpreter, because katana_cad may not see
+    // GDAL or PDAL (tools/check_layering.cmake). The argument is the rest of
+    // the line, one layer of quotes removed, so a path may hold spaces.
+    if (verb == "IMPORT" || verb == "EXPORT" || verb == "INFO") {
+        QString path = line.mid(words.front().size()).trimmed();
+        if (path.size() >= 2 && path.startsWith('"') && path.endsWith('"')) {
+            path = path.mid(1, path.size() - 2);
+        }
+        if (path.isEmpty()) {
+            logMessage("usage: " + verb + " <file>", true);
+            return;
+        }
+        if (verb == "IMPORT") {
+            importPath(path);
+        } else if (verb == "EXPORT") {
+            (void)exportDrawingTo(toPath(path), {});
+        } else if (auto description = interop::describeSource(toPath(path))) {
+            logMessage(QString::fromStdString(interop::formatDescription(*description)).trimmed());
+        } else {
+            logMessage(QString::fromStdString(description.error().describe()), true);
+        }
+        return;
+    }
+    if (verb == "REFS") {
+        if (reference_.empty()) {
+            logMessage("No reference layers.");
+        }
+        for (const auto& raster : reference_.rasters()) {
+            logMessage(QString("%1  Raster  %2  %3 x %4 px")
+                           .arg(raster.id)
+                           .arg(QString::fromStdString(raster.name))
+                           .arg(raster.width)
+                           .arg(raster.height));
+        }
+        for (const auto& cloud : reference_.pointClouds()) {
+            logMessage(QString("%1  Point cloud  %2  %3 of %4 points")
+                           .arg(cloud.id)
+                           .arg(QString::fromStdString(cloud.name))
+                           .arg(grouped(cloud.points.size()))
+                           .arg(grouped(cloud.sourcePointCount)));
+        }
+        return;
+    }
     // A bare drawing verb starts the interactive tool, as in any CAD package.
     if (words.size() == 1) {
         static const std::map<QString, Tool> tools = {
@@ -1123,6 +1310,8 @@ void MainWindow::runCommandLine()
     }
     logMessage(QString::fromStdString(*reply));
     if (replacesDocument) {
+        // The same as File > New and Open: the backdrop went with the drawing.
+        clearReferenceData();
         views_->zoomExtents();
     }
     historyCursor_ = static_cast<int>(interpreter_.history().size());
@@ -1341,13 +1530,6 @@ QString importFilter()
            ");;" + "Point cloud (" + cloud + ");;" + "All files (*)";
 }
 
-QString grouped(std::uint64_t value)
-{
-    return QLocale().toString(static_cast<qulonglong>(value));
-}
-
-enum ReferenceColumn { kRefName = 0, kRefType, kRefDetail, kRefDisplay, kRefColumns };
-
 } // namespace
 
 void MainWindow::importPath(const QString& path)
@@ -1556,10 +1738,11 @@ void MainWindow::importFile()
                              patternsFor(interop::pointCloudExtensions()));
 }
 
-void MainWindow::importVectorFile(const std::filesystem::path& path)
+void MainWindow::importVectorFile(const std::filesystem::path& path,
+                                  interop::VectorImportOptions options)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto imported = interop::importVector(path);
+    auto imported = interop::importVector(path, options);
     QApplication::restoreOverrideCursor();
 
     if (!imported.ok()) {
@@ -1602,7 +1785,8 @@ void MainWindow::importVectorFile(const std::filesystem::path& path)
             return;
         }
         if (box.clickedButton() == shift) {
-            interop::VectorImportOptions options;
+            // The same choices again - the layers, the target, the
+            // attributes - with the shift added; only where it lands changes.
             options.originShift = advice.suggestedShift;
             QApplication::setOverrideCursor(Qt::WaitCursor);
             auto shifted = interop::importVector(path, options);
@@ -1823,10 +2007,11 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
     views_->zoomExtents();
 }
 
-void MainWindow::importRasterFile(const std::filesystem::path& path)
+void MainWindow::importRasterFile(const std::filesystem::path& path,
+                                  interop::RasterImportOptions options)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto raster = interop::importRaster(path);
+    auto raster = interop::importRaster(path, options);
     QApplication::restoreOverrideCursor();
 
     if (!raster.ok()) {
@@ -1854,10 +2039,11 @@ void MainWindow::importRasterFile(const std::filesystem::path& path)
     views_->zoomExtents();
 }
 
-void MainWindow::importPointCloudFile(const std::filesystem::path& path)
+void MainWindow::importPointCloudFile(const std::filesystem::path& path,
+                                      interop::PointCloudImportOptions options)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto cloud = interop::importPointCloud(path);
+    auto cloud = interop::importPointCloud(path, options);
     QApplication::restoreOverrideCursor();
 
     if (!cloud.ok()) {
@@ -1904,22 +2090,41 @@ void MainWindow::exportVectorFile()
         return;
     }
 
+    const std::filesystem::path path = toPath(selected);
     interop::VectorExportOptions options;
-    if (!document_.selection().empty()) {
-        const auto answer = QMessageBox::question(
-            this, "Export",
-            "Export only the " + QString::number(document_.selection().size()) +
-                " selected entities?\n\nNo exports the whole drawing.",
-            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-        if (answer == QMessageBox::Cancel) {
+    if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
+        // A 12d archive has none of the GDAL formats' choices - it keeps arcs
+        // as arcs and every property - so the only question is how much.
+        if (!document_.selection().empty()) {
+            const auto answer = QMessageBox::question(
+                this, "Export",
+                "Export only the " + QString::number(document_.selection().size()) +
+                    " selected entities?\n\nNo exports the whole drawing.",
+                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+            if (answer == QMessageBox::Cancel) {
+                return;
+            }
+            if (answer == QMessageBox::Yes) {
+                options.entities = document_.selection().ids();
+            }
+        }
+    } else {
+        VectorExportDialog dialog(chosenFilter, document_.selection().size(), this);
+        if (dialog.exec() != QDialog::Accepted) {
+            logMessage("Export cancelled.");
             return;
         }
-        if (answer == QMessageBox::Yes) {
+        dialog.apply(options);
+        if (dialog.selectedOnly()) {
             options.entities = document_.selection().ids();
         }
     }
+    (void)exportDrawingTo(path, std::move(options));
+}
 
-    const std::filesystem::path path = toPath(selected);
+bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
+                                 interop::VectorExportOptions options)
+{
     if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
         // A 12d archive carries what the other formats cannot: the alignments
         // and the surfaces of the session go with the drawing.
@@ -1936,9 +2141,8 @@ void MainWindow::exportVectorFile()
         QApplication::restoreOverrideCursor();
         if (!archive.ok()) {
             logMessage(QString::fromStdString(archive.error().describe()), true);
-            warnUser( "Export failed",
-                                 QString::fromStdString(archive.error().describe()));
-            return;
+            warnUser("Export failed", QString::fromStdString(archive.error().describe()));
+            return false;
         }
         logMessage(QString("Exported %1 entities, %2 alignments and %3 surfaces to %4 (12d archive)")
                        .arg(grouped(archive->entitiesWritten))
@@ -1948,7 +2152,7 @@ void MainWindow::exportVectorFile()
         for (const std::string& warning : archive->warnings) {
             logMessage("  " + QString::fromStdString(warning));
         }
-        return;
+        return true;
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto result = interop::exportVector(document_.model(), path, options);
@@ -1956,9 +2160,8 @@ void MainWindow::exportVectorFile()
 
     if (!result.ok()) {
         logMessage(QString::fromStdString(result.error().describe()), true);
-        warnUser( "Export failed",
-                             QString::fromStdString(result.error().describe()));
-        return;
+        warnUser("Export failed", QString::fromStdString(result.error().describe()));
+        return false;
     }
 
     logMessage("Exported " + grouped(result->featuresWritten) + " features to " +
@@ -1966,6 +2169,7 @@ void MainWindow::exportVectorFile()
     for (const std::string& warning : result->warnings) {
         logMessage("  " + QString::fromStdString(warning));
     }
+    return true;
 }
 
 void MainWindow::refreshReferences()
@@ -2112,6 +2316,342 @@ void MainWindow::zoomToSelectedReference()
         return;
     }
     views_->zoomTo(bounds);
+}
+
+void MainWindow::clearReferenceData()
+{
+    if (reference_.empty()) {
+        return;
+    }
+    reference_.clear();
+    views_->invalidateReferenceCache();
+    refreshReferences();
+}
+
+// ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ------------------------------------
+
+namespace {
+
+// A reference layer to act on: the one selected in the panel if it is of the
+// wanted kind, else the only one there is, else one the person picks. Written
+// once for rasters and clouds so the two commands cannot choose differently.
+template <typename Layer>
+const Layer* chooseLayer(const std::vector<Layer>& layers,
+                         std::optional<katana::interop::ReferenceId> selected,
+                         const QString& title, const QString& kind, bool headless,
+                         QWidget* parent, const std::function<void(const QString&)>& refuse)
+{
+    if (layers.empty()) {
+        refuse("No " + kind + " is loaded. Use GIS > Import first.");
+        return nullptr;
+    }
+    if (selected) {
+        for (const Layer& layer : layers) {
+            if (layer.id == *selected) {
+                return &layer;
+            }
+        }
+    }
+    if (layers.size() == 1) {
+        return &layers.front();
+    }
+    if (headless) {
+        refuse("Several " + kind + "s are loaded and nobody can be asked which; select one "
+               "in the Reference Data panel.");
+        return nullptr;
+    }
+    // Labelled with the id as well as the name: two imports of one file have
+    // the same name, and the list must still say which is which.
+    QStringList labels;
+    for (const Layer& layer : layers) {
+        labels << QString("%1  (#%2)").arg(QString::fromStdString(layer.name)).arg(layer.id);
+    }
+    bool accepted = false;
+    const QString chosen =
+        QInputDialog::getItem(parent, title, kind.left(1).toUpper() + kind.mid(1) + ":", labels,
+                              0, false, &accepted);
+    if (!accepted) {
+        return nullptr;
+    }
+    return &layers[static_cast<std::size_t>(labels.indexOf(chosen))];
+}
+
+} // namespace
+
+const interop::PointCloudLayer* MainWindow::chooseReferenceCloud(const QString& title)
+{
+    std::optional<katana::interop::ReferenceId> selected;
+    if (const int row = referenceTable_->currentRow(); row >= 0) {
+        if (const QTableWidgetItem* item = referenceTable_->item(row, kRefName)) {
+            selected = static_cast<katana::interop::ReferenceId>(
+                item->data(Qt::UserRole).toULongLong());
+        }
+    }
+    return chooseLayer(reference_.pointClouds(), selected, title, "point cloud", headless_, this,
+                       [this](const QString& why) { logMessage(why, true); });
+}
+
+const interop::RasterOverlay* MainWindow::chooseReferenceRaster(const QString& title)
+{
+    std::optional<katana::interop::ReferenceId> selected;
+    if (const int row = referenceTable_->currentRow(); row >= 0) {
+        if (const QTableWidgetItem* item = referenceTable_->item(row, kRefName)) {
+            selected = static_cast<katana::interop::ReferenceId>(
+                item->data(Qt::UserRole).toULongLong());
+        }
+    }
+    return chooseLayer(reference_.rasters(), selected, title, "raster", headless_, this,
+                       [this](const QString& why) { logMessage(why, true); });
+}
+
+std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& path)
+{
+    auto description = interop::describeSource(toPath(path));
+    if (!description) {
+        logMessage(QString::fromStdString(description.error().describe()), true);
+        warnUser("Dataset Information", QString::fromStdString(description.error().describe()));
+        return nullptr;
+    }
+    const QString text = QString::fromStdString(interop::formatDescription(*description));
+    return std::make_unique<DatasetInfoDialog>(
+        "Dataset Information - " + fromPath(description->path.filename()), text, this);
+}
+
+std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
+{
+    auto description = interop::describeSource(toPath(path));
+    if (!description) {
+        logMessage(QString::fromStdString(description.error().describe()), true);
+        warnUser("Import", QString::fromStdString(description.error().describe()));
+        return nullptr;
+    }
+    switch (description->kind) {
+    case interop::SourceKind::Vector:
+        return std::make_unique<VectorImportDialog>(*description, this);
+    case interop::SourceKind::Raster:
+        return std::make_unique<RasterImportDialog>(*description, this);
+    case interop::SourceKind::PointCloud:
+        return std::make_unique<PointCloudImportDialog>(*description, this);
+    case interop::SourceKind::Archive12d:
+    case interop::SourceKind::Unknown:
+        break;
+    }
+    warnUser("Import", "Katana has no import options for " + path);
+    return nullptr;
+}
+
+void MainWindow::importWithOptions(const QString& path)
+{
+    auto dialog = makeImportOptions(path);
+    if (dialog == nullptr) {
+        return; // reported
+    }
+    if (dialog->exec() != QDialog::Accepted) {
+        logMessage("Import cancelled.");
+        return;
+    }
+    // Routed by the dialog the file got, which was routed by what the file
+    // IS - a .las chosen through Import Vector's "All files" still arrives
+    // as a point cloud.
+    const std::filesystem::path file = toPath(path);
+    if (const auto* vector = dynamic_cast<const VectorImportDialog*>(dialog.get())) {
+        importVectorFile(file, vector->options());
+    } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(dialog.get())) {
+        importRasterFile(file, raster->options());
+    } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(dialog.get())) {
+        importPointCloudFile(file, cloud->options());
+    }
+}
+
+void MainWindow::importVectorWithOptions()
+{
+    const QString chosen = QFileDialog::getOpenFileName(
+        this, "Import Vector Data", QString(),
+        "Vector data (" + patternsFor(interop::vectorExtensions()) + ");;All files (*)");
+    if (!chosen.isEmpty()) {
+        importWithOptions(chosen);
+    }
+}
+
+void MainWindow::importRasterWithOptions()
+{
+    const QString chosen = QFileDialog::getOpenFileName(
+        this, "Import Raster", QString(),
+        "Raster (" + patternsFor(interop::rasterExtensions()) + ");;All files (*)");
+    if (!chosen.isEmpty()) {
+        importWithOptions(chosen);
+    }
+}
+
+void MainWindow::importPointCloudWithOptions()
+{
+    const QString chosen = QFileDialog::getOpenFileName(
+        this, "Import Point Cloud", QString(),
+        "Point cloud (" + patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
+    if (!chosen.isEmpty()) {
+        importWithOptions(chosen);
+    }
+}
+
+void MainWindow::showDatasetInformation()
+{
+    const QString chosen = QFileDialog::getOpenFileName(
+        this, "Dataset Information", QString(),
+        "GIS data and point clouds (" + patternsFor(interop::vectorExtensions()) + ' ' +
+            patternsFor(interop::rasterExtensions()) + ' ' +
+            patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
+    if (chosen.isEmpty()) {
+        return;
+    }
+    if (auto dialog = makeDatasetInfo(chosen)) {
+        dialog->exec();
+    }
+}
+
+void MainWindow::exportPointCloud()
+{
+    const interop::PointCloudLayer* cloud = chooseReferenceCloud("Export Point Cloud");
+    if (cloud == nullptr) {
+        return; // reported, or the choice was cancelled
+    }
+    // What is held is a SAMPLE when the import was budgeted, and writing it
+    // out as if it were the survey would be a quiet loss of most of the data.
+    if (cloud->isDecimated() && !headless_) {
+        const auto answer = QMessageBox::question(
+            this, "Export Point Cloud",
+            QString("'%1' holds %2 of the file's %3 points - the sample imported for display.\n\n"
+                    "Export the sample? To rewrite the whole file, use Convert Point Cloud to "
+                    "COPC instead.")
+                .arg(QString::fromStdString(cloud->name))
+                .arg(grouped(cloud->points.size()))
+                .arg(grouped(cloud->sourcePointCount)),
+            QMessageBox::Yes | QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+    }
+    QStringList filters;
+    for (const interop::FormatChoice& format : interop::pointCloudExportFormats()) {
+        filters << (QString::fromStdString(format.description) + " (*." +
+                    QString::fromStdString(format.extension) + ")");
+    }
+    const QString chosen =
+        QFileDialog::getSaveFileName(this, "Export Point Cloud",
+                                     QString::fromStdString(cloud->name) + ".laz",
+                                     filters.join(";;"));
+    if (chosen.isEmpty()) {
+        return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto status = interop::exportPointCloud(*cloud, toPath(chosen));
+    QApplication::restoreOverrideCursor();
+    if (!status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        warnUser("Export failed", QString::fromStdString(status.error().describe()));
+        return;
+    }
+    logMessage(QString("Exported %1 points of '%2' to %3%4")
+                   .arg(grouped(cloud->points.size()))
+                   .arg(QString::fromStdString(cloud->name))
+                   .arg(fromPath(toPath(chosen).filename()))
+                   .arg(cloud->isDecimated() ? QString(" (a sample of %1)")
+                                                   .arg(grouped(cloud->sourcePointCount))
+                                             : QString()));
+}
+
+void MainWindow::exportSurfaceAsDem()
+{
+    if (sceneSurfaces_.empty()) {
+        logMessage("There is no surface to export. Build one from the Terrain menu, or import "
+                   "a 12d archive that holds a tin.",
+                   true);
+        return;
+    }
+    std::vector<SurfaceChoice> choices;
+    choices.reserve(sceneSurfaces_.size());
+    for (const cad::SceneSurface& item : sceneSurfaces_) {
+        choices.push_back({QString::fromStdString(item.name), item.surface->bounds()});
+    }
+    SurfaceRasterDialog dialog(std::move(choices), this);
+    if (dialog.exec() != QDialog::Accepted || dialog.surfaceIndex() < 0) {
+        return;
+    }
+    const cad::SceneSurface& chosenSurface =
+        sceneSurfaces_[static_cast<std::size_t>(dialog.surfaceIndex())];
+
+    QStringList filters;
+    for (const interop::FormatChoice& format : interop::rasterExportFormats()) {
+        filters << (QString::fromStdString(format.description) + " (*." +
+                    QString::fromStdString(format.extension) + ")");
+    }
+    const QString chosen = QFileDialog::getSaveFileName(
+        this, "Export Surface as DEM", QString::fromStdString(chosenSurface.name) + ".tif",
+        filters.join(";;"));
+    if (chosen.isEmpty()) {
+        return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto written = interop::exportSurfaceRaster(*chosenSurface.surface, toPath(chosen),
+                                                dialog.options());
+    QApplication::restoreOverrideCursor();
+    if (!written) {
+        logMessage(QString::fromStdString(written.error().describe()), true);
+        warnUser("Export failed", QString::fromStdString(written.error().describe()));
+        return;
+    }
+    logMessage(QString("Wrote '%1' as a %2 x %3 DEM (%4 cells on the surface) to %5 (%6).")
+                   .arg(QString::fromStdString(chosenSurface.name))
+                   .arg(written->columns)
+                   .arg(written->rows)
+                   .arg(grouped(written->cellsWithData))
+                   .arg(fromPath(toPath(chosen).filename()))
+                   .arg(QString::fromStdString(written->driver)));
+    // Said, because a DEM with no coordinate system is placed by whatever
+    // reads it: a Katana surface does not record the one it was built in.
+    logMessage("  the DEM declares no coordinate system; its coordinates are the drawing's");
+}
+
+void MainWindow::convertPointCloudToCopc()
+{
+    const QString source = QFileDialog::getOpenFileName(
+        this, "Convert Point Cloud to COPC", QString(),
+        "Point cloud (" + patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
+    if (source.isEmpty()) {
+        return;
+    }
+    const katana::pointcloud::PointCloudEngine engine;
+    if (const auto copc = engine.isCopc(toPath(source)); copc && *copc) {
+        logMessage(fromPath(toPath(source).filename()) +
+                   " is already a Cloud Optimised Point Cloud; import it with GIS > Import "
+                   "Point Cloud to read it at a level of detail.");
+        return;
+    }
+    // The extension is what makes every later read use readers.copc, so it is
+    // enforced here rather than left to be discovered as a refusal.
+    std::filesystem::path suggested = toPath(source);
+    suggested.replace_extension(".copc.laz");
+    QString destination = QFileDialog::getSaveFileName(this, "Save COPC As", fromPath(suggested),
+                                                       "Cloud Optimised Point Cloud (*.copc.laz)");
+    if (destination.isEmpty()) {
+        return;
+    }
+    if (!destination.endsWith(".copc.laz", Qt::CaseInsensitive)) {
+        destination += ".copc.laz";
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto status = engine.convertToCopc(toPath(source), toPath(destination));
+    QApplication::restoreOverrideCursor();
+    if (!status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        warnUser("Conversion failed", QString::fromStdString(status.error().describe()));
+        return;
+    }
+    logMessage("Converted " + fromPath(toPath(source).filename()) + " to " +
+               fromPath(toPath(destination).filename()) + ", every point kept.");
+    if (!headless_ && QMessageBox::question(this, "Convert Point Cloud to COPC",
+                                            "Import the COPC file now?") == QMessageBox::Yes) {
+        importWithOptions(destination);
+    }
 }
 
 
@@ -2295,38 +2835,35 @@ void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surfac
 
 void MainWindow::buildSurfaceFromPointCloud()
 {
-    if (reference_.pointClouds().empty()) {
-        logMessage("No point cloud is loaded. Use File > Import first.", true);
-        return;
+    const interop::PointCloudLayer* cloud = chooseReferenceCloud("Surface From Point Cloud");
+    if (cloud == nullptr) {
+        return; // reported, or the choice was cancelled
     }
-    QStringList names;
-    for (const auto& cloud : reference_.pointClouds()) {
-        names << QString::fromStdString(cloud.name);
-    }
-    bool accepted = false;
-    const QString chosen = QInputDialog::getItem(this, "Surface From Point Cloud",
-                                                 "Point cloud:", names, 0, false, &accepted);
-    if (!accepted) {
-        return;
-    }
-    const auto it = std::find_if(reference_.pointClouds().begin(), reference_.pointClouds().end(),
-                                 [&chosen](const katana::interop::PointCloudLayer& cloud) {
-                                     return QString::fromStdString(cloud.name) == chosen;
-                                 });
-    if (it == reference_.pointClouds().end()) {
-        return;
+
+    // The ground returns when the cloud is classified, every return when it
+    // is not - one policy, interop::surfacePoints, and SAID either way: a
+    // surface over trees and roofs presented as ground is the silent failure
+    // audit QT-10 found.
+    interop::CloudSurfacePoints source = interop::surfacePoints(*cloud);
+    if (source.groundOnly) {
+        logMessage(QString("Using the %1 ground points (ASPRS class 2); %2 other returns left out.")
+                       .arg(grouped(source.points.size()))
+                       .arg(grouped(source.excluded)));
+    } else {
+        logMessage("This cloud has no points classified as ground (ASPRS class 2), so every "
+                   "return is triangulated: vegetation and buildings are part of the surface.",
+                   true);
     }
 
     katana::terrain::TinInput input;
-    const std::uint32_t step = thinningFor(it->points.size());
-    input.points.reserve(it->points.size() / step + 1);
-    for (std::size_t i = 0; i < it->points.size(); i += step) {
-        const auto& point = it->points[i];
-        input.points.push_back(katana::geometry::Point3(point.x, point.y, point.z));
+    const std::uint32_t step = thinningFor(source.points.size());
+    input.points.reserve(source.points.size() / step + 1);
+    for (std::size_t i = 0; i < source.points.size(); i += step) {
+        input.points.push_back(source.points[i]);
     }
     if (step > 1) {
         logMessage(QString("Thinning %1 points to every %2 for triangulation.")
-                       .arg(it->points.size())
+                       .arg(grouped(source.points.size()))
                        .arg(step));
     }
 
@@ -2346,105 +2883,58 @@ void MainWindow::buildSurfaceFromPointCloud()
         logMessage(QString("%1 coincident points merged by averaging their elevations.")
                        .arg(built->report.duplicatePointCount));
     }
-    addSurface(chosen.toStdString(), std::move(built->surface));
+    addSurface(cloud->name, std::move(built->surface));
 }
 
 void MainWindow::buildSurfaceFromRaster()
 {
-    if (reference_.rasters().empty()) {
-        logMessage("No raster is loaded. Use File > Import first.", true);
+    const interop::RasterOverlay* raster = chooseReferenceRaster("Surface From Raster");
+    if (raster == nullptr) {
+        return; // reported, or the choice was cancelled
+    }
+
+    // The band's TRUE values, read again from the source through GDAL. The
+    // overlay holds only the 8-bit display copy - a grey ramp stretched over
+    // the band's range - and heights rebuilt from that were 256 terraces
+    // between two numbers the user had to type (audit QT-23). The source is
+    // sampled on a stride that keeps the whole extent under the triangulation
+    // cap (audit QT-24: the old stride could exceed it threefold).
+    interop::RasterElevationOptions options;
+    options.maxPoints = kMaximumTinPoints;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto elevations = interop::readRasterElevations(raster->source, options);
+    QApplication::restoreOverrideCursor();
+    if (!elevations) {
+        logMessage(QString::fromStdString(elevations.error().describe()), true);
         return;
     }
-    QStringList names;
-    for (const auto& raster : reference_.rasters()) {
-        names << QString::fromStdString(raster.name);
+    if (elevations->stride > 1) {
+        logMessage(QString("Sampling one pixel in %1 along each row and column of %2: %3 points.")
+                       .arg(elevations->stride)
+                       .arg(QString::fromStdString(raster->name))
+                       .arg(grouped(elevations->points.size())));
     }
-    bool accepted = false;
-    const QString chosen = QInputDialog::getItem(this, "Surface From Raster",
-                                                 "Elevation raster:", names, 0, false, &accepted);
-    if (!accepted) {
-        return;
+    if (elevations->noData != 0) {
+        logMessage(QString("%1 no-data pixels left out.").arg(grouped(elevations->noData)));
     }
-    const auto it = std::find_if(reference_.rasters().begin(), reference_.rasters().end(),
-                                 [&chosen](const katana::interop::RasterOverlay& raster) {
-                                     return QString::fromStdString(raster.name) == chosen;
-                                 });
-    if (it == reference_.rasters().end()) {
-        return;
-    }
-    if (!it->hasGeotransform) {
-        logMessage("That raster has no geotransform, so its pixels have no ground position.",
+    if (elevations->points.size() < 3) {
+        logMessage("That raster has fewer than three pixels with an elevation to triangulate.",
                    true);
         return;
     }
 
-    // IMPORTANT, and worth being explicit about: RasterOverlay holds the
-    // DISPLAY rgba, which for a DEM is a grey ramp stretched over the band's
-    // range - not the elevations themselves. Reconstructing heights from it
-    // would be inventing data. Elevation is therefore taken as the grey level
-    // scaled between a minimum and a maximum the USER states, which is honest
-    // about being an approximation. The real fix - reading the band as doubles
-    // through the GDAL adapter - is recorded in PLAN.MD Phase 20.
-    bool lowAccepted = false;
-    const double low = QInputDialog::getDouble(this, "Surface From Raster",
-                                               "Elevation of the darkest pixel:", 0.0, -1e6, 1e6,
-                                               3, &lowAccepted);
-    if (!lowAccepted) {
-        return;
-    }
-    bool highAccepted = false;
-    const double high = QInputDialog::getDouble(this, "Surface From Raster",
-                                                "Elevation of the brightest pixel:", 100.0, -1e6,
-                                                1e6, 3, &highAccepted);
-    if (!highAccepted || high <= low) {
-        logMessage("The brightest elevation must be above the darkest.", true);
-        return;
-    }
-
-    const std::size_t pixels =
-        static_cast<std::size_t>(it->width) * static_cast<std::size_t>(it->height);
-    const auto stride = static_cast<int>(std::max<std::uint32_t>(
-        1, static_cast<std::uint32_t>(
-               std::sqrt(static_cast<double>(thinningFor(pixels))))));
-
     katana::terrain::TinInput input;
-    input.points.reserve(pixels / static_cast<std::size_t>(stride * stride) + 1);
-    for (int y = 0; y < it->height; y += stride) {
-        for (int x = 0; x < it->width; x += stride) {
-            const std::size_t index =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(it->width) +
-                 static_cast<std::size_t>(x)) *
-                4;
-            if (index + 3 >= it->rgba.size() || it->rgba[index + 3] == 0) {
-                continue; // transparent: no data
-            }
-            const double grey = (static_cast<double>(it->rgba[index]) +
-                                 static_cast<double>(it->rgba[index + 1]) +
-                                 static_cast<double>(it->rgba[index + 2])) /
-                                (3.0 * 255.0);
-            const auto world = it->pixelToWorld(x + 0.5, y + 0.5);
-            input.points.push_back(
-                katana::geometry::Point3(world.x, world.y, low + grey * (high - low)));
-        }
-    }
-    if (input.points.size() < 3) {
-        logMessage("That raster has too few opaque pixels to triangulate.", true);
-        return;
-    }
-
-    katana::terrain::TinBuildOptions options;
-    options.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
+    input.points = std::move(elevations->points);
+    katana::terrain::TinBuildOptions buildOptions;
+    buildOptions.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    auto built = katana::terrain::buildTin(input, options);
+    auto built = katana::terrain::buildTin(input, buildOptions);
     QApplication::restoreOverrideCursor();
     if (!built) {
         logMessage(QString::fromStdString(built.error().describe()), true);
         return;
     }
-    logMessage(QString("Elevations approximated from the displayed grey levels between %1 and %2.")
-                   .arg(low, 0, 'f', 3)
-                   .arg(high, 0, 'f', 3));
-    addSurface(chosen.toStdString(), std::move(built->surface));
+    addSurface(raster->name, std::move(built->surface));
 }
 
 void MainWindow::buildSurfaceFromDrawing()

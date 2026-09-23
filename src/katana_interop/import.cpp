@@ -487,11 +487,20 @@ Result<PointCloudLayer> importPointCloud(const std::filesystem::path& path,
     katana::pointcloud::PointCloudReadOptions readOptions;
     readOptions.classification = options.classification;
     readOptions.clip = options.clip;
-    readOptions.decimationStep = katana::pointcloud::PointCloudEngine::decimationForBudget(
-        header->pointCount, options.budget);
+    if (options.resolution.has_value()) {
+        // The COPC octree is the level of detail: decimating its answer as
+        // well would thin a sample that is already even, by a step sized for
+        // the WHOLE file. A plain LAS is refused by the engine, not quietly
+        // read whole (PointCloudReadOptions::resolution).
+        readOptions.resolution = options.resolution;
+        readOptions.decimationStep = 1;
+    } else {
+        readOptions.decimationStep = katana::pointcloud::PointCloudEngine::decimationForBudget(
+            header->pointCount, options.budget);
+    }
     // A ceiling as well as a step: a file whose header understates its count
-    // (or a classification filter that changes the density) must still not blow
-    // the budget.
+    // (or a classification filter that changes the density, or a resolution
+    // finer than the budget allows) must still not blow the budget.
     readOptions.maxPoints = options.budget;
 
     auto cloud = engine.read(path, readOptions);
@@ -514,25 +523,6 @@ Result<PointCloudLayer> importPointCloud(const std::filesystem::path& path,
     layer.decimationStep = readOptions.decimationStep;
     return layer;
 }
-
-Result<std::vector<Point2>> groundPointsXY(const PointCloudLayer& cloud)
-{
-    constexpr std::uint8_t kAsprsGround = 2;
-    std::vector<Point2> points;
-    points.reserve(cloud.points.size() / 2 + 1);
-    for (const auto& point : cloud.points) {
-        if (point.classification == kAsprsGround) {
-            points.emplace_back(point.x, point.y);
-        }
-    }
-    if (points.empty()) {
-        return makeError(ErrorCode::InvalidArgument,
-                         "this cloud carries no points classified as ground (ASPRS class 2)",
-                         cloud.name);
-    }
-    return points;
-}
-
 
 PlacementAdvice advisePlacement(const katana::geometry::Box2& existing,
                                 const katana::geometry::Box2& incoming)

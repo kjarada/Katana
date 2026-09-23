@@ -165,6 +165,75 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
+    # ---- the GIS menu: GDAL and PDAL through the QActions a person clicks ----
+    #
+    # Surface From Raster on the sample DEM. The expected range is the
+    # minimum and maximum of the values in samples/gis/terrain.asc, read
+    # straight from the text grid (10 800 values, no no-data), not from
+    # Katana: 24.892 to 38.819. Every pixel is a TIN vertex at this size (under
+    # the 400 000-point cap), and linear interpolation cannot leave the range
+    # of its vertices, so the surface's range is exactly the grid's. The old
+    # command rebuilt heights from 8-bit display greys between two numbers it
+    # asked for - a question that hangs a headless run (audit QT-23).
+    set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
+    set(_qt_env "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen")
+    add_test(NAME qt_surface_from_raster_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DIMPORT=${_gis}/terrain.asc"
+            "-DACTIONS=surfaceFromRaster"
+            "-DEXPECT=elevation 24\\.892 to 38\\.819"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_from_raster_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Surface From Point Cloud on the sample scan, which is classified: `pdal
+    # info --stats --enumerate Classification` lists classes 2, 3, 5 and 6,
+    # and filters.range on Classification[2:2] keeps 29 512 of its 40 000
+    # points. The surface must be built from those ground returns and say so
+    # (audit QT-10) - any grouping separator, since the log is localised.
+    add_test(NAME qt_surface_from_cloud_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DIMPORT=${_gis}/survey_scan.las"
+            "-DACTIONS=surfaceFromPointCloud"
+            "-DEXPECT=Using the 29[^0-9]?512 ground points \\(ASPRS class 2\\); 10[^0-9]?488 other"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/surface_from_cloud_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # File > New takes the imported raster with the drawing (audit QT-17):
+    # afterwards there is no raster for Surface From Raster to use. Before
+    # the fix the orthophoto of the discarded drawing stayed behind the new
+    # one, and this built a surface from it.
+    add_test(NAME qt_new_drops_reference_data_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DIMPORT=${_gis}/terrain.asc"
+            "-DACTIONS=fileNew,surfaceFromRaster"
+            "-DEXPECT=No raster is loaded"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/new_drops_reference_data_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # GIS > Dataset Information and the import dialog, described by GDAL and
+    # PDAL from the file and painted.
+    add_test(NAME qt_dataset_info_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDATASET_INFO=${_gis}/terrain.asc"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dataset_info_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_import_options_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT_OPTIONS=${_gis}/survey_scan.las"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_options_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_surface_from_raster_headless qt_surface_from_cloud_headless
+                         qt_new_drops_reference_data_headless
+                         qt_dataset_info_headless qt_import_options_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION "${_qt_env}" TIMEOUT 180)
+
     # The layer manager (PLAN.MD 20.2 slice 6) over the sample project, whose
     # layers have colours, linetypes and entities to count.
     add_test(NAME qt_layer_manager_headless
