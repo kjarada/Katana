@@ -12,6 +12,7 @@ add_library(katana_cad STATIC
     symbols.cpp
     style_drawing.cpp
     survey_coding.cpp
+    survey_import.cpp
     parcel.cpp
     plot.cpp
     dimension_draw.cpp
