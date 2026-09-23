@@ -42,7 +42,8 @@ enum class DefinitionState {
 [[nodiscard]] QIcon colourSwatch(const katana::entity::Color& colour, int size);
 
 // Makes `box` the 12d colour-name field: editable, listing
-// standardColourNames() with swatches, and taking any typed name as it is.
+// archive12d::standardColourNames() with swatches, and taking any typed name
+// as it is.
 void makeColourField(QComboBox* box);
 // Shows `name` in such a field, listed or not, without changing its case.
 void setColourField(QComboBox* box, const std::string& name);

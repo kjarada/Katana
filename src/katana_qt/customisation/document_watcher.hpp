@@ -17,18 +17,11 @@
 //     differ from the last delivery. They only ever count up.
 //   * selection: the selected ids differ from the last delivery.
 //   * current: the current layer or current style differs.
-//   * model: the Document has no model revision, so the watcher keeps one of
-//     its own. At EVERY notification it compares the command history's
-//     undo and redo counts, the size of each model table and the project
-//     directory with what it saw at the notification before. Every execute,
-//     undo and redo moves the undo count by one, so no single step goes
-//     unseen; comparing per notification rather than per turn is what
-//     catches "undo, then a new command" in one turn, which leaves both
-//     counts where they started. A new or opened drawing rebuilds the
-//     history, and is seen by its tables' sizes or its project.
-//     Known blind spot: opening a project whose tables are all the same size
-//     as the drawing it replaces, from a drawing with no history and the same
-//     project directory - that is, reopening an unchanged project.
+//   * model: Document::modelRevision differs from the last delivery. It
+//     counts every execute, undo and redo and every new or opened drawing,
+//     and only ever counts up, so "undo, then a new command" in one turn -
+//     which leaves the history's counts where they began - and a reopened
+//     project that looks exactly like the drawing it replaced are both seen.
 //
 // Safe if the Document dies first: the registration is a ListenerHandle,
 // which holds the Document's registry weakly, and a delivery already queued
@@ -38,12 +31,9 @@
 //
 // GUI thread only, as the Document is.
 
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -92,16 +82,9 @@ class DocumentWatcher {
     [[nodiscard]] bool pending() const { return queued_; }
 
   private:
-    // What the model looked like at a notification: see the header comment.
-    struct ModelMark {
-        std::size_t undo = 0, redo = 0;
-        std::size_t entities = 0, layers = 0, styles = 0, linetypes = 0, hatches = 0,
-                    dimensionStyles = 0, alignments = 0;
-        std::optional<std::filesystem::path> project{};
-        friend bool operator==(const ModelMark&, const ModelMark&) = default;
-    };
     // What a delivery compares with the delivery before.
     struct Baseline {
+        std::uint64_t model = 0;
         std::uint64_t library = 0;
         std::uint64_t surveyMap = 0;
         std::vector<katana::entity::EntityId> selection{};
@@ -109,16 +92,13 @@ class DocumentWatcher {
         std::string currentStyle{};
     };
 
-    [[nodiscard]] ModelMark markModel() const;
     [[nodiscard]] Baseline takeBaseline() const;
     void notified();
     void deliver();
 
     katana::cad::Document* document_ = nullptr;
     Callback onChanged_{};
-    ModelMark lastMark_{};
     Baseline baseline_{};
-    bool modelMoved_ = false;
     bool queued_ = false;
     // The receiver of the queued delivery: deleting it with the watcher is
     // what makes Qt drop a delivery the watcher can no longer make.
