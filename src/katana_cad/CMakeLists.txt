@@ -29,6 +29,10 @@ add_library(katana_cad STATIC
 # family by name, and a missing one is a link error.
 file(GLOB _cad_tool_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
 target_sources(katana_cad PRIVATE ${_cad_tool_sources} interactive_tool.cpp)
+# The customisation managers' logic (style and symbol catalogues, usage, purge,
+# the code table): globbed for the same reason, several authors at once.
+file(GLOB _cad_customisation_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_customisation_sources})
 katana_target_defaults(katana_cad)
 # katana_geodesy for the survey tools' coordinate converter (survey_tools.cpp):
 # the one survey tool whose answer is PROJ's, reached through the transformer
