@@ -160,8 +160,9 @@ TEST(AnnotateText, RelativeAndPolarInputMeasureFromTheStartPoint)
     // @0,3 is (10, 23): a height of 3.
     (void)driver.type("@0,3");
     // @4<90 is straight up from the start: a rotation of 90 degrees. The
-    // polar point's x is 10 + 4 cos(pi/2), a few ulps off 10, so the angle
-    // is compared to within that.
+    // polar point's x is 10 + 4 cos(pi/2), and 4 cos(pi/2) is 2.4e-16 rather
+    // than 0 - below half an ulp of 10 today, but the test should not rest on
+    // that rounding, so the angle is compared to within 1e-15.
     (void)driver.type("@4<90");
     (void)driver.type("north");
     (void)driver.enter();
@@ -721,13 +722,16 @@ TEST(AnnotateLinearDimension, PlacementsThisModelCannotDrawAreRefusedWithAReason
     const ToolStep inside = driver.click(4.0, 3.0);
     EXPECT_EQ(inside.outcome, Outcome::Rejected);
     EXPECT_TRUE(contains(inside.message, "H or V")) << inside.message;
+    EXPECT_EQ(driver.tool().prompt(), location);
     // Horizontal, but at y = 3, between the levels 0 and 6.
     (void)driver.type("H");
+    const std::string horizontal = driver.tool().prompt();
+    EXPECT_TRUE(contains(horizontal, "horizontal")) << horizontal;
     const ToolStep between = driver.click(12.0, 3.0);
     EXPECT_EQ(between.outcome, Outcome::Rejected);
     EXPECT_TRUE(contains(between.message, "between")) << between.message;
     EXPECT_EQ(driver.type("2.5").outcome, Outcome::Rejected) << "no typed offset for linear";
-    EXPECT_EQ(driver.tool().prompt(), location);
+    EXPECT_EQ(driver.tool().prompt(), horizontal);
     EXPECT_EQ(driver.executed(), 0);
 }
 
