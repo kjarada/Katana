@@ -116,16 +116,35 @@ struct EntityAttributes {
 // to match. One command, so undo puts back both the tree and the entities.
 [[nodiscard]] CommandPtr renameLayer(std::string from, std::string to);
 
+// ---- the table managers -------------------------------------------------------------
+//
+// Delete, merge and purge discard definitions and say so (isDestructive).
+// Every in-use refusal reads entity::tableUsage and gives a count and the
+// first holder: "used by 1 layer, 2 styles and 418 entities, e.g.
+// layer=survey".
+
 // ---- linetypes -------------------------------------------------------------------
 [[nodiscard]] CommandPtr createLinetype(katana::entity::Linetype linetype);
 [[nodiscard]] CommandPtr updateLinetype(katana::entity::Linetype linetype);
+// nullptr when `linetype` equals the stored one - saving an unedited form is
+// not an edit and must push no undo step. A missing name still gets a
+// command, whose validate() says NotFound.
+[[nodiscard]] CommandPtr updateLinetypeIfChanged(const katana::entity::Model& model,
+                                                 katana::entity::Linetype linetype);
 // Refuses while any layer or style still names it, and refuses "continuous".
 [[nodiscard]] CommandPtr deleteLinetype(std::string name);
 // Renames it and repoints every layer and style that named it, as one undo
 // step. Refuses an existing target name - two linetypes of the same name
 // would have to be merged, and picking one definition would change how
-// everything wearing the other draws.
+// everything wearing the other draws. mergeLinetype is that, said on purpose.
 [[nodiscard]] CommandPtr renameLinetype(std::string from, std::string to);
+// Repoints every layer and style naming `from` to `into`, then deletes
+// `from`: one undo step restores both. Refuses "continuous" as `from`, and
+// an `into` that is not a linetype in the model (a library linestyle is not
+// one: the commands cannot see the library).
+[[nodiscard]] CommandPtr mergeLinetype(std::string from, std::string into);
+// A copy of `from` named `to`.
+[[nodiscard]] CommandPtr duplicateLinetype(std::string from, std::string to);
 
 // ---- dimension styles ------------------------------------------------------------
 [[nodiscard]] CommandPtr createDimensionStyle(katana::entity::DimensionStyle style);
@@ -145,11 +164,44 @@ struct EntityAttributes {
 // entity still names it. Names are what a 12d linestyle arrives as.
 [[nodiscard]] CommandPtr createStyle(katana::entity::Style style);
 [[nodiscard]] CommandPtr updateStyle(katana::entity::Style style);
+// nullptr when `style` equals the stored one; see updateLinetypeIfChanged.
+[[nodiscard]] CommandPtr updateStyleIfChanged(const katana::entity::Model& model,
+                                              katana::entity::Style style);
 [[nodiscard]] CommandPtr deleteStyle(std::string name);
 // Renames it and repoints every entity that wore it, as one undo step.
 // A 12d import names a style after a linestyle ("TOPO Natural Surface
 // Point"), which is the first thing a user wants to shorten.
 [[nodiscard]] CommandPtr renameStyle(std::string from, std::string to);
+// Moves every entity wearing `from` onto `into`, then deletes `from`, as one
+// undo step - two styles that should have been one. Refuses a missing
+// `from` or `into`, and `from == into`.
+[[nodiscard]] CommandPtr mergeStyle(std::string from, std::string into);
+// A copy of `from` named `to`.
+[[nodiscard]] CommandPtr duplicateStyle(std::string from, std::string to);
+
+// ---- purge -----------------------------------------------------------------------
+// Items to delete together. Judged as a set: a linetype named only by styles
+// in the same set is free.
+struct TableItems {
+    std::vector<std::string> styles{};
+    std::vector<std::string> linetypes{};
+    std::vector<std::string> hatchPatterns{};
+
+    [[nodiscard]] bool empty() const
+    {
+        return styles.empty() && linetypes.empty() && hatchPatterns.empty();
+    }
+    [[nodiscard]] std::size_t size() const
+    {
+        return styles.size() + linetypes.size() + hatchPatterns.size();
+    }
+    friend bool operator==(const TableItems&, const TableItems&) = default;
+};
+// Deletes them all as ONE undo step ("PurgeTables"). Refuses an empty set -
+// an empty undo step is a defect (audit QT-01's shape) - a protected or
+// missing name, and anything still used once the set is gone, naming it and
+// its first holder. cad::purgeCommand is what finds the set.
+[[nodiscard]] CommandPtr purgeTableItems(TableItems items);
 
 // ---- alignments ------------------------------------------------------------------
 // Create and update validate the definition by solving it, so an alignment
