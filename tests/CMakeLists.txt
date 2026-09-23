@@ -671,13 +671,15 @@ if(TARGET katana)
     # hand, LINE, 0,0 and 10,0, then Enter - one segment, so ONE line, which
     # the tool reports ("1 line") before starting again for the next chain;
     # Enter at its first prompt ends it, so LIST reaches the interpreter and
-    # finds the one entity. ">" alone is Enter on an empty command line.
+    # finds the one entity. ">" alone is Enter on an empty command line. The
+    # menus and toolbars show it: Line's action checked while it runs, and
+    # Select again once it has ended.
     add_test(NAME qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>LINE|>0,0|>10,0|>|>|>LIST"
-            "-DEXPECT=[\r\n]1 line[\r\n]+1 entities[\r\n]+1  Line  layer=0  0,0 -> 10,0  length=10"
+            "-DDRIVE=>LINE|?draw.line|?toolSelect|>0,0|>10,0|>|>|?draw.line|?toolSelect|>LIST"
+            "-DEXPECT=draw.line: Line, checked[\r\n]+toolSelect: Select, unchecked[\r\n]+1 line[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked[\r\n]+1 entities[\r\n]+1  Line  layer=0  0,0 -> 10,0  length=10"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tool_by_alias_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt

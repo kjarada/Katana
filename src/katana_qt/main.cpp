@@ -64,13 +64,20 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // stderr as "NAME: text", so a test can see what a dialog SAYS - an
 // explanation, a count - and not only that it painted. A label's text
 // without its markup, a field's or a text box's text, a list's or a tree's
-// rows (their columns joined by " | ", the rows by " ; "). False, said, for
-// a widget the target does not have.
-bool reportWidget(const QWidget& target, const QString& name)
+// rows (their columns joined by " | ", the rows by " ; "). A NAME that is no
+// widget there may be one of the window's actions - a menu item or a tool -
+// reported as its text and whether it is checked, so a test can see which
+// tool the menus and toolbars show running. False, said, for neither.
+bool reportWidget(const QWidget& target, const QWidget& window, const QString& name)
 {
     const auto* widget = target.findChild<QWidget*>(name);
     QString text;
-    if (const auto* label = qobject_cast<const QLabel*>(widget)) {
+    const auto* action = widget == nullptr ? window.findChild<QAction*>(name) : nullptr;
+    if (action != nullptr) {
+        text = QString(action->text()).remove('&') +
+               (action->isCheckable() ? (action->isChecked() ? ", checked" : ", unchecked")
+                                      : QString());
+    } else if (const auto* label = qobject_cast<const QLabel*>(widget)) {
         text = QTextDocumentFragment::fromHtml(label->text()).toPlainText();
     } else if (const auto* line = qobject_cast<const QLineEdit*>(widget)) {
         text = line->text();
@@ -91,7 +98,7 @@ bool reportWidget(const QWidget& target, const QString& name)
         }
         text = rows.join(" ; ");
     } else {
-        std::fprintf(stderr, "--report: there is no label, field, text or list %s\n",
+        std::fprintf(stderr, "--report: there is no label, field, text, list or action %s\n",
                      qPrintable(name));
         return false;
     }
@@ -532,16 +539,18 @@ int main(int argc, char* argv[])
                     targetName = text;
                     continue;
                 }
+                if (kind == "--report") {
+                    // The window's own widgets and actions before any
+                    // dialog: what a command line step changed there.
+                    if (!reportWidget(target != nullptr ? *target : window, window, text)) {
+                        return 1;
+                    }
+                    continue;
+                }
                 if (target == nullptr) {
                     std::fprintf(stderr, "%s %s comes before any --dialog\n", qPrintable(kind),
                                  qPrintable(text));
                     return 1;
-                }
-                if (kind == "--report") {
-                    if (!reportWidget(*target, text)) {
-                        return 1;
-                    }
-                    continue;
                 }
                 if (kind == "--fill") {
                     if (!fillField(*target, text)) {
