@@ -502,6 +502,54 @@ TEST(SurveyTools, SkippedEntitiesAreCountedByReasonAndTheirIdsListedUpToADozen)
     EXPECT_FALSE(contains(report, std::to_string(ids[12]) + ",")) << report;
 }
 
+TEST(SurveyTools, AnIdListedTwiceIsMeasuredOnceAndTheRepeatIsReported)
+{
+    // The rectangle and circle above with the rectangle listed again, as AREA
+    // passes typed ids through. The total is still 5000 + 100 pi = 5314.159 m^2
+    // (0.5314 ha) and 300 + 20 pi = 300 + 62.832 = 362.832 m round; counting
+    // the rectangle twice would give 10314.159 m^2 and 662.832 m.
+    Document document;
+    const EntityId rectangle = addEntity(
+        document, cmd::createPolyline(katana::geometry::Polyline2{
+                                          {Point2(0, 0), Point2(100, 0), Point2(100, 50),
+                                           Point2(0, 50)},
+                                          true}));
+    const EntityId circle = addEntity(document, cmd::createCircle(Point2(500, 500), 10.0));
+    const auto result = computeArea(document, {rectangle, circle, rectangle});
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->items.size(), 2u);
+    EXPECT_EQ(result->items[0].id, rectangle);
+    EXPECT_EQ(result->items[1].id, circle);
+    EXPECT_NEAR(result->totalArea, 5000.0 + 100.0 * kPi, 1e-9);
+    EXPECT_NEAR(result->totalPerimeter, 300.0 + 20.0 * kPi, 1e-9);
+    const std::string report = formatAreaReport(*result);
+    EXPECT_TRUE(contains(report, "Total  area 5314.159 m\xC2\xB2 (0.5314 ha)   perimeter 362.832 m"))
+        << report;
+    EXPECT_TRUE(contains(report, "Skipped 1: listed more than once - " + std::to_string(rectangle)))
+        << report;
+}
+
+TEST(SurveyTools, NothingWithAnAreaAmongManyPointsIsOneShortErrorNotAnEntryPerPoint)
+{
+    // Fifteen points and nothing else, as Area of Selection after Select All
+    // on a drawing of points: the error groups them as the report does - one
+    // reason, its count of 15, the first 12 ids and "and 3 more" (15 - 12).
+    Document document;
+    std::vector<EntityId> ids;
+    for (int i = 0; i < 15; ++i) {
+        ids.push_back(addPoint(document, Point2(i, i), {}));
+    }
+    const auto result = computeArea(document, ids);
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidGeometry);
+    std::string expected = "skipped 15: a point has no area - " + std::to_string(ids[0]);
+    for (std::size_t i = 1; i < 12; ++i) {
+        expected += ", " + std::to_string(ids[i]);
+    }
+    expected += " and 3 more";
+    EXPECT_EQ(result.error().context, expected);
+}
+
 TEST(SurveyTools, NothingWithAnAreaIsAnErrorThatSaysWhy)
 {
     Document document;
@@ -922,9 +970,26 @@ TEST(SurveyTools, AMisbookedLevelBookIsRefusedAtTheLineThatIsWrong)
     EXPECT_EQ(refuse("A 1.0 - -\nB - 1.0 - 50\nC - - 1.0\n"), "line 2 (B)")
         << "a distance on an intersight";
 
-    EXPECT_EQ(parseLevelBook("A - - -\n").error().code, ErrorCode::ParseFailure);
-    EXPECT_EQ(parseLevelBook("A 1.0 -\n").error().code, ErrorCode::ParseFailure);
-    EXPECT_EQ(parseLevelBook("A 1.0 - - -5\n").error().code, ErrorCode::ParseFailure);
+    // What cannot be read is refused by the parser, naming the line: in a
+    // forty-line book "the backsight must be a number" alone says nothing.
+    const auto parseRefusal = [](const char* text) {
+        const auto book = parseLevelBook(text);
+        EXPECT_FALSE(book.ok()) << text;
+        if (book.ok()) {
+            return std::string{};
+        }
+        EXPECT_EQ(book.error().code, ErrorCode::ParseFailure) << text;
+        return book.error().context;
+    };
+    const std::string noReading = parseRefusal("A - - -\n");
+    EXPECT_TRUE(contains(noReading, "line 1")) << "no reading: " << noReading;
+    const std::string tooFew = parseRefusal("A 1.0 -\n");
+    EXPECT_TRUE(contains(tooFew, "line 1")) << "too few columns: " << tooFew;
+    const std::string negative = parseRefusal("A 1.0 - - -5\n");
+    EXPECT_TRUE(contains(negative, "line 1")) << "a negative distance: " << negative;
+    // A reading that is not a number, on a line that is not the first.
+    const std::string unreadable = parseRefusal("A 1.0 - -\nB x - 1.0\n");
+    EXPECT_TRUE(contains(unreadable, "line 2")) << "an unreadable reading: " << unreadable;
 }
 
 // ---- angle calculator ----------------------------------------------------------------------
@@ -1000,6 +1065,34 @@ TEST(SurveyTools, AGeographicPointMayBeTypedInDegreesMinutesAndSeconds)
     EXPECT_NEAR(conversion->rows[0].outFirst, 500000.0, 1e-6);
 }
 
+TEST(SurveyTools, AnAngleWithBlanksInsideItIsRefusedRatherThanReadAsTheLastTwoFields)
+{
+    // -33°51'24.5" 151°12'55" typed with blanks. Blanks also separate the
+    // label from the two coordinates, so read as written this is the label
+    // "CP1 -33 51 24.5 151" at latitude 12, longitude 55 - a point on another
+    // continent, reported without complaint. Two numbers in the label are the
+    // mark of it, and of a third coordinate (E N height) typed after a name.
+    const auto blanks = convertCoordinates("4326", "32756", "CP1 -33 51 24.5 151 12 55\n");
+    ASSERT_FALSE(blanks.ok()) << "read as " << formatCoordinateConversion(*blanks);
+    EXPECT_EQ(blanks.error().code, ErrorCode::ParseFailure);
+    EXPECT_TRUE(contains(blanks.error().context, "line 1")) << blanks.error().context;
+    // The latitude without blanks and the longitude with them: the label
+    // "CP1 -33:51:24.5 151" holds two angles.
+    EXPECT_EQ(convertCoordinates("4326", "32756", "CP1 -33:51:24.5 151 12 55").error().code,
+              ErrorCode::ParseFailure);
+    // Easting, northing and a height after a numeric point name: read as
+    // written, the label "102 500000" at E 5000, N 25.
+    const auto height = convertCoordinates("32630", "4326", "500000 0\n102 500000 5000 25\n");
+    ASSERT_FALSE(height.ok());
+    EXPECT_TRUE(contains(height.error().context, "line 2")) << height.error().context;
+
+    // One number in a label is a point name: "102" and "CP 1" still work.
+    const auto named = convertCoordinates("32630", "4326", "102 500000 0\nCP 1 500000 0\n");
+    ASSERT_TRUE(named.ok()) << named.error().describe();
+    EXPECT_EQ(named->rows[0].label, "102");
+    EXPECT_EQ(named->rows[1].label, "CP 1");
+}
+
 TEST(SurveyTools, TheConverterRefusesWhatItCannotDoProperly)
 {
     EXPECT_FALSE(convertCoordinates("999999", "4326", "0 0").ok()) << "no such EPSG code";
@@ -1030,6 +1123,22 @@ TEST(SurveyTools, SelectedPointsBecomeConverterLinesOnlyForAProjectedSource)
     document.selection().clear();
     EXPECT_EQ(conversionLinesForSelection(document, "32630").error().code,
               ErrorCode::InvalidState);
+}
+
+TEST(SurveyTools, APointNamedWithTwoNumbersIsJoinedSoUseSelectionDoesNotMakeALineItRefuses)
+{
+    // "STN 3 4" written out as it is would be a label with two numbers in it,
+    // which convertCoordinates refuses as an angle typed with blanks. The
+    // blanks become '_', as '#' and ',' already do.
+    Document document;
+    const EntityId p = addPoint(document, Point2(500000.25, 12.5), "STN 3 4");
+    document.selection().set({p});
+    const auto lines = conversionLinesForSelection(document, "32630");
+    ASSERT_TRUE(lines.ok()) << lines.error().describe();
+    EXPECT_EQ(*lines, "STN_3_4 500000.25 12.5\n");
+    const auto conversion = convertCoordinates("32630", "4326", *lines);
+    ASSERT_TRUE(conversion.ok()) << conversion.error().describe();
+    EXPECT_EQ(conversion->rows[0].label, "STN_3_4");
 }
 
 // ---- the command line ----------------------------------------------------------------------
@@ -1117,6 +1226,21 @@ TEST(SurveyToolsInterpreter, AreaMeasuresTheSelectionOrTheIdsGiven)
     ASSERT_TRUE(byId.ok());
     EXPECT_EQ(*byId, *selected);
     EXPECT_FALSE(interpreter.run("AREA x").ok());
+}
+
+TEST(SurveyToolsInterpreter, AreaCountsAnIdTypedTwiceOnce)
+{
+    // A 100 x 50 rectangle is 5000 m^2 (0.5 ha) and 300 m round, however many
+    // times its id is typed.
+    Document document;
+    CommandInterpreter interpreter(document);
+    ASSERT_TRUE(interpreter.run("RECT 0,0 100,50").ok());
+    const std::string id = std::to_string(document.lastCreatedEntities().front());
+    const auto reply = interpreter.run("AREA " + id + " " + id);
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_TRUE(contains(*reply, "Total  area 5000.000 m\xC2\xB2 (0.5000 ha)   perimeter 300.000 m"))
+        << *reply;
+    EXPECT_TRUE(contains(*reply, "Skipped 1: listed more than once - " + id)) << *reply;
 }
 
 TEST(SurveyToolsInterpreter, HelpDocumentsTheSurveyVerbs)
