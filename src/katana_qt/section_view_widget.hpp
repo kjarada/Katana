@@ -25,7 +25,10 @@ namespace katana::qt {
 
 class SectionViewWidget final : public QWidget {
   public:
-    // `state` belongs to the workspace's ViewSet and outlives this widget.
+    // `state` belongs to the workspace's ViewSet and outlives this widget. The
+    // section and its exaggeration live there (ViewState::section and
+    // sectionExaggeration), so changing the view to another kind and back
+    // shows the same section again.
     explicit SectionViewWidget(katana::cad::ViewState& state, QWidget* parent = nullptr);
 
     [[nodiscard]] katana::cad::ViewState& state() const { return state_; }
@@ -34,18 +37,44 @@ class SectionViewWidget final : public QWidget {
     // rather than an empty grid, so it is obvious nothing has been cut yet.
     void setSection(katana::cad::Section section);
     void clearSection();
-    [[nodiscard]] bool hasSection() const { return section_.has_value(); }
-    [[nodiscard]] const std::optional<katana::cad::Section>& section() const { return section_; }
+    [[nodiscard]] bool hasSection() const { return state_.section.has_value(); }
+    [[nodiscard]] const std::optional<katana::cad::Section>& section() const
+    {
+        return state_.section;
+    }
 
     // Vertical exaggeration. A profile at 1:1 over a kilometre is a flat line,
     // so 10 is the usual default for a long section.
     void setVerticalExaggeration(double factor);
-    [[nodiscard]] double verticalExaggeration() const { return exaggeration_; }
+    [[nodiscard]] double verticalExaggeration() const { return state_.sectionExaggeration; }
 
     void zoomExtents();
 
+    // Station and elevation under a point of this widget, in its own pixels:
+    // the live readout, and what a headless check asks to prove that a resize
+    // kept the drawing where the user had put it.
+    [[nodiscard]] QPointF stationElevationAt(const QPointF& pixel) const;
+    // The middle of the plot area - the part inside the axes - in pixels.
+    [[nodiscard]] QPointF plotCentre() const;
+
+    // Crossings the last paint drew: those whose layer this view does not
+    // hide and whose station was in view. For the headless checks, as
+    // ViewportWidget::lastDrawnEntityCount is.
+    [[nodiscard]] std::size_t lastDrawnCrossingCount() const { return lastDrawnCrossings_; }
+    // Crossings the last paint left out because this view hides their layer.
+    [[nodiscard]] std::size_t lastHiddenCrossingCount() const { return lastHiddenCrossings_; }
+
+    // Raised when this view is clicked or the keyboard focus moves into it.
     std::function<void()> onActivated;
+    // Messages the user must see. Nothing here raises it today; it stays for
+    // the window's wiring and for a failure this view may one day report.
     std::function<void(const QString&)> onStatus;
+    // What the view shows now: after every paint the length and the crossings
+    // ("Section  length 120.00  7 crossings, 2 hidden in this view"), and on a
+    // mouse move the station and elevation under the cursor. Transient text,
+    // kept apart from onStatus so that it never writes over a prompt or an
+    // error in the status bar.
+    std::function<void(const QString&)> onFrameStats;
 
   protected:
     void paintEvent(QPaintEvent* event) override;
@@ -55,10 +84,11 @@ class SectionViewWidget final : public QWidget {
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
 
   private:
     // Station/elevation -> pixels. `scale_` is pixels per model unit
-    // horizontally; vertically it is scale_ * exaggeration_.
+    // horizontally; vertically it is scale_ times the exaggeration.
     [[nodiscard]] QPointF toScreen(double station, double elevation) const;
     [[nodiscard]] double stationAt(double x) const;
     [[nodiscard]] double elevationAt(double y) const;
@@ -67,19 +97,28 @@ class SectionViewWidget final : public QWidget {
     // would actually write down.
     [[nodiscard]] double niceStep(double minimumPixels, bool vertical) const;
 
+    [[nodiscard]] double exaggeration() const { return state_.sectionExaggeration; }
+    // zoomExtents without asking for a repaint, for the paint that frames.
+    void frameExtents();
+
     void drawGrid(QPainter& painter) const;
     void drawSurfaces(QPainter& painter) const;
     void drawCrossings(QPainter& painter) const;
     void drawLegend(QPainter& painter) const;
 
     katana::cad::ViewState& state_;
-    std::optional<katana::cad::Section> section_;
-    double exaggeration_ = 10.0;
 
+    // The pan and zoom. Widget state, not view state: ViewState has no place
+    // for them yet, so a change of kind and back frames the section afresh.
+    // Moving these four into the state is what would keep them.
     double scale_ = 1.0;          // pixels per model unit, horizontally
     double originStation_ = 0.0;  // station at the left edge of the plot area
     double originElevation_ = 0.0; // elevation at the bottom edge
+    // False until the section has been framed once at a real size. The first
+    // paint frames it; a resize after that keeps what the user was looking at.
     bool framed_ = false;
+    mutable std::size_t lastDrawnCrossings_ = 0;
+    mutable std::size_t lastHiddenCrossings_ = 0;
 
     bool panning_ = false;
     QPoint lastMouse_;
