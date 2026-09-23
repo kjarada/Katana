@@ -66,6 +66,8 @@ struct EditDefaults {
 
 // "line", "arc", "circle", "polyline", "point", "text", "dimension".
 [[nodiscard]] std::string kindName(const Geometry& geometry);
+// "a line", "an arc".
+[[nodiscard]] std::string withArticle(const std::string& noun);
 // Why `id` cannot be edited - it is not in the drawing, or its layer is
 // locked - or nullopt when it can. A tool refuses the pick up front with this
 // rather than returning a command the document would refuse.
