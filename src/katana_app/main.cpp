@@ -27,6 +27,7 @@
 #include "katana/cad/code_table.hpp"
 #include "katana/cad/customisation_record.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/entity/tables.hpp"
 
@@ -226,9 +227,21 @@ bool runCustomise(katana::cad::Document& document,
                          "(.4d) and mapfiles\n";
             return true;
         }
+        // Counted as the pickers offer them (decision D3, cad::symbolChoices
+        // and cad::linetypeChoices), library definitions only. This line once
+        // said "157 of them symbols", counting `mode vertex` alone - one of
+        // D3's four reasons, and a minority of the symbols the reference
+        // mapfiles use - so here one definition can be counted in both.
+        const auto fromLibrary = [](const std::vector<katana::cad::CatalogueEntry>& entries) {
+            return std::ranges::count(entries, katana::cad::DefinitionSource::Library,
+                                      &katana::cad::CatalogueEntry::source);
+        };
         std::cout << library.size() << " linestyle and symbol definitions in "
-                  << katana::entity::styleGroups(library).size() << " groups, "
-                  << katana::entity::vertexStyleNames(library).size() << " of them symbols\n"
+                  << katana::entity::styleGroups(library).size() << " groups: "
+                  << fromLibrary(katana::cad::symbolChoices(document))
+                  << " offered as symbols, "
+                  << fromLibrary(katana::cad::linetypeChoices(document, false))
+                  << " as linestyles (one definition can be both)\n"
                   << map.size() << " survey code rules over " << map.keys().size()
                   << " distinct codes\n";
         reportCoverage(document);

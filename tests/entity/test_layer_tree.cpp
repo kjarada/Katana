@@ -88,6 +88,11 @@ TEST(LayerPath, RejectsNamesThatWouldBreakTheTreeOrAFileName)
     EXPECT_FALSE(validateLayerPath("design/../etc").ok());
     EXPECT_FALSE(validateLayerPath(".").ok());
     EXPECT_FALSE(validateLayerPath(std::string("a\nb")).ok()) << "control characters";
+    // Audit MOD-12: every other name in the model is UTF-8; 0xE9 alone (a
+    // CP1252 e-acute) and a lone continuation byte are not.
+    EXPECT_FALSE(validateLayerPath("Caf\xE9").ok()) << "not UTF-8";
+    EXPECT_FALSE(validateLayerPath("design/\x80").ok()) << "not UTF-8";
+    EXPECT_TRUE(validateLayerPath("design/Caf\xC3\xA9").ok()) << "UTF-8 e-acute";
 
     std::string tooDeep = "a";
     for (int i = 0; i < 20; ++i) {

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/commands/entity_commands.hpp"
 
@@ -900,4 +901,77 @@ TEST(CustomisationCoverage, AStyleThatTakesItsLinetypeFromItsLayerNamesNoDefinit
     EXPECT_EQ(coverage.styles, 1u);
     EXPECT_TRUE(coverage.unresolved.empty());
     EXPECT_EQ(coverage.named, 0u) << "it names nothing to resolve";
+}
+
+TEST(CustomisationCoverage, ItsMissingNamesAreTheStylesNamesMissingNamesReportsEachUnderItsReason)
+{
+    // One rule, not two (audit CAD-17): customisationCoverage and
+    // cad::missingNames read linetypeStatus and symbolStatus. Its two lists
+    // are that rule's two reasons, kept apart because CUSTOMISE and the
+    // window print `unresolved` as "in no loaded library".
+    //
+    //   library  CULT Bollard  `mode vertex`: a symbol, not a linestyle
+    //            SEWR Pit      not `mode vertex`: a linestyle, and a symbol
+    //   styles   a  linetype CULT Bollard            -> drawn solid: not a
+    //               linestyle, though the library defines it
+    //            b  linetype = symbol = CULT Bollard -> the importer's own
+    //               pattern: a plain line under a defined symbol (D8)
+    //            c  linetype = symbol = SEWR Pit     -> the same
+    //            d  symbol cross                     -> a built-in shape
+    //            e  linetype ByLayer                 -> names nothing
+    //            f  linetype WATR Main               -> defined nowhere
+    //
+    // By hand: 6 styles; named a, b, c, f (4); resolved b, c (2); built in d
+    // (1); notLinestyles {"CULT Bollard"}, which a alone names as a
+    // linetype; unresolved {"WATR Main"}, from f.
+    katana::entity::StyleLibrary library;
+    for (const auto& [name, atVertices] :
+         {std::pair{"CULT Bollard", true}, std::pair{"SEWR Pit", false}}) {
+        katana::entity::LineStyle definition;
+        definition.name = name;
+        definition.atVertices = atVertices;
+        definition.strokes.push_back(
+            {katana::entity::StrokeOp::Draw, katana::geometry::Point2(1.0, 0.0)});
+        ASSERT_TRUE(library.add(std::move(definition)).ok());
+    }
+    Document document;
+    document.setStyleLibrary(std::move(library));
+    const auto addStyle = [&](const char* name, const char* linetype, const char* symbol) {
+        katana::entity::Style style;
+        style.name = name;
+        style.linetype = linetype;
+        style.symbol = symbol;
+        ASSERT_TRUE(document.execute(cmd::createStyle(style)).ok()) << name;
+    };
+    addStyle("a", "CULT Bollard", "");
+    addStyle("b", "CULT Bollard", "CULT Bollard");
+    addStyle("c", "SEWR Pit", "SEWR Pit");
+    addStyle("d", "continuous", "cross");
+    addStyle("e", "ByLayer", "");
+    addStyle("f", "WATR Main", "");
+
+    const auto coverage = katana::cad::customisationCoverage(document);
+    EXPECT_EQ(coverage.styles, 6u);
+    EXPECT_EQ(coverage.named, 4u);
+    EXPECT_EQ(coverage.resolved, 2u);
+    EXPECT_EQ(coverage.builtIn, 1u);
+    EXPECT_EQ(coverage.unresolved, (std::vector<std::string>{"WATR Main"}));
+    EXPECT_EQ(coverage.notLinestyles, (std::vector<std::string>{"CULT Bollard"}));
+
+    // And missingNames says the same of the styles, and why.
+    std::vector<std::string> undefined;
+    std::vector<std::string> notLinestyles;
+    for (const katana::cad::MissingName& missing : katana::cad::missingNames(document)) {
+        if (missing.users.styles.empty()) {
+            continue;
+        }
+        (missing.status == katana::cad::NameStatus::NotALinestyle ? notLinestyles : undefined)
+            .push_back(missing.name);
+        if (missing.name == "CULT Bollard") {
+            EXPECT_EQ(missing.users.styles, std::vector<std::string>{"a"})
+                << "b draws its own symbol's name plain";
+        }
+    }
+    EXPECT_EQ(undefined, coverage.unresolved);
+    EXPECT_EQ(notLinestyles, coverage.notLinestyles);
 }

@@ -64,6 +64,16 @@ std::string_view symbolForLinestyle(std::string_view name)
     return katana::entity::builtInSymbolFor(name);
 }
 
+std::vector<std::string> standardColourNames()
+{
+    std::vector<std::string> names;
+    names.reserve(kStandardColours.size());
+    for (const NamedColour& entry : kStandardColours) {
+        names.emplace_back(entry.name);
+    }
+    return names;
+}
+
 std::optional<Color> standardColour(std::string_view name)
 {
     std::string key = detail::lowered(detail::trimmed(name));

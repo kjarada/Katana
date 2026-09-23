@@ -31,6 +31,23 @@ Status validateLineWeight(double lineWeight)
     return {};
 }
 
+// A layer's own fields, its name apart (validateLayerPath). Its linetype,
+// hatch pattern and dimension style are references by name, and a name that
+// is not UTF-8 cannot be written to JSON or read back (audit MOD-12).
+Status validateLayerFields(const Layer& layer)
+{
+    if (auto status = validateLineWeight(layer.lineWeight); !status) {
+        return status;
+    }
+    if (!isValidUtf8(layer.linetype) || !isValidUtf8(layer.hatchPattern) ||
+        !isValidUtf8(layer.dimensionStyle)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a layer's linetype, hatch pattern or dimension style is not UTF-8",
+                         layer.name);
+    }
+    return {};
+}
+
 template <typename Table> auto collect(const Table& table)
 {
     std::vector<typename Table::mapped_type> values;
@@ -110,16 +127,50 @@ ResolvedLayer LayerDatabase::resolve(std::string_view name) const
     return {&found->second.layer, found->second.shown, found->second.locked};
 }
 
-Status LayerDatabase::add(Layer layer)
+Status LayerDatabase::checkAdd(const Layer& layer) const
 {
     if (auto status = validateLayerPath(layer.name); !status) {
         return status;
     }
-    if (auto status = validateLineWeight(layer.lineWeight); !status) {
+    if (auto status = validateLayerFields(layer); !status) {
         return status;
     }
     if (contains(layer.name)) {
         return makeError(ErrorCode::AlreadyExists, "layer already exists", layer.name);
+    }
+    return {};
+}
+
+Status LayerDatabase::checkUpdate(const Layer& layer) const
+{
+    if (!contains(layer.name)) {
+        return makeError(ErrorCode::NotFound, "layer does not exist", layer.name);
+    }
+    return validateLayerFields(layer);
+}
+
+Status LayerDatabase::checkRemove(std::string_view name) const
+{
+    if (name == kDefaultLayerName) {
+        return makeError(ErrorCode::InvalidArgument, "the default layer cannot be removed");
+    }
+    if (!contains(name)) {
+        return makeError(ErrorCode::NotFound, "layer does not exist", std::string(name));
+    }
+    if (hasChildren(name)) {
+        // Deleting the branch silently, or leaving its children pointing at a
+        // parent that is gone, are both worse than saying so.
+        return makeError(ErrorCode::InvalidArgument,
+                         "layer still has nested layers; remove the subtree instead",
+                         std::string(name));
+    }
+    return {};
+}
+
+Status LayerDatabase::add(Layer layer)
+{
+    if (auto status = checkAdd(layer); !status) {
+        return status;
     }
     // Every ancestor is created as a real layer, so each node in the tree has
     // its own colour, visibility and lock. The alternative - implicit nodes
@@ -144,13 +195,10 @@ Status LayerDatabase::add(Layer layer)
 
 Status LayerDatabase::update(const Layer& layer)
 {
-    const auto found = layers_.find(layer.name);
-    if (found == layers_.end()) {
-        return makeError(ErrorCode::NotFound, "layer does not exist", layer.name);
-    }
-    if (auto status = validateLineWeight(layer.lineWeight); !status) {
+    if (auto status = checkUpdate(layer); !status) {
         return status;
     }
+    const auto found = layers_.find(layer.name);
     found->second.layer = layer;
     refreshSubtree(layer.name);
     return {};
@@ -158,20 +206,10 @@ Status LayerDatabase::update(const Layer& layer)
 
 Result<Layer> LayerDatabase::remove(std::string_view name)
 {
-    if (name == kDefaultLayerName) {
-        return makeError(ErrorCode::InvalidArgument, "the default layer cannot be removed");
+    if (auto status = checkRemove(name); !status) {
+        return status.error();
     }
     const auto found = layers_.find(name);
-    if (found == layers_.end()) {
-        return makeError(ErrorCode::NotFound, "layer does not exist", std::string(name));
-    }
-    if (hasChildren(name)) {
-        // Deleting the branch silently, or leaving its children pointing at a
-        // parent that is gone, are both worse than saying so.
-        return makeError(ErrorCode::InvalidArgument,
-                         "layer still has nested layers; remove the subtree instead",
-                         std::string(name));
-    }
     Layer removed = std::move(found->second.layer);
     layers_.erase(found);
     return removed; // a leaf: nothing inherited from it
@@ -623,6 +661,11 @@ Status validate(const HatchPattern& pattern)
     if (auto status = validateName(pattern.name, "hatch pattern"); !status) {
         return status;
     }
+    // Saved as JSON like the name (audit MOD-12).
+    if (!isValidUtf8(pattern.description)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "hatch pattern description is not valid UTF-8", pattern.name);
+    }
     if (pattern.solid && !pattern.families.empty()) {
         return makeError(ErrorCode::InvalidArgument,
                          "a solid hatch pattern cannot also carry line families", pattern.name);
@@ -683,6 +726,10 @@ Status validate(const Alignment& alignment)
 {
     if (auto status = validateName(alignment.name, "alignment"); !status) {
         return status;
+    }
+    if (!isValidUtf8(alignment.description)) {
+        return makeError(ErrorCode::InvalidArgument, "alignment description is not valid UTF-8",
+                         alignment.name);
     }
     // An alignment with no PIs is a name with nothing behind it. Two is the
     // least that has a direction; solveAlignment says so itself, and its
@@ -819,6 +866,10 @@ Status PropertyDatabase::define(PropertyDefinition definition)
 {
     if (auto status = validateName(definition.name, "property"); !status) {
         return status;
+    }
+    if (!isValidUtf8(definition.description)) {
+        return makeError(ErrorCode::InvalidArgument, "property description is not valid UTF-8",
+                         definition.name);
     }
     if (find(definition.name) != nullptr) {
         return makeError(ErrorCode::AlreadyExists, "property is already defined", definition.name);
