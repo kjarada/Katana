@@ -1238,6 +1238,30 @@ TEST(CadInterpreter, AStyleCanNameASymbolFromTheLoadedLibraryButNotOneFromNowher
     EXPECT_EQ(session.document.model().styles.find("s")->symbol, "circle");
 }
 
+TEST(CadDocument, ReplacingTheLibraryOrTheMapMovesItsOwnGenerationOnly)
+{
+    // A cache of thumbnails keyed on the library must go stale when the
+    // library is replaced, and must NOT when only the map is - or an edit to
+    // a code would repaint eight hundred symbols.
+    katana::cad::Document document;
+    const std::uint64_t library = document.libraryGeneration();
+    const std::uint64_t map = document.surveyMapGeneration();
+
+    document.setStyleLibrary(katana::entity::StyleLibrary{});
+    EXPECT_EQ(document.libraryGeneration(), library + 1);
+    EXPECT_EQ(document.surveyMapGeneration(), map);
+
+    document.setSurveyMap(katana::entity::SurveyMap{});
+    EXPECT_EQ(document.libraryGeneration(), library + 1);
+    EXPECT_EQ(document.surveyMapGeneration(), map + 1);
+
+    // An edit to the drawing is neither.
+    Session session;
+    const std::uint64_t before = session.document.libraryGeneration();
+    session.ok("STYLE NEW s");
+    EXPECT_EQ(session.document.libraryGeneration(), before);
+}
+
 TEST(CadInterpreter, DeletingAStyleAnEntityStillUsesIsRefusedAndNamesTheEntity)
 {
     // An entity left naming a deleted style would draw ByLayer with nothing
