@@ -46,6 +46,16 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     theme.hpp
 )
 katana_target_defaults(katana)
+# The Survey workbench (PLAN.MD 45 slice 9) is globbed, for the reason
+# src/katana_surveyio is: its dialogs, wizard and panels are written by several
+# authors at once, and an explicit list here would make each of them edit this
+# one shared file. The directory is on the include path so that a file there
+# includes the window's headers ("icons.hpp") the way the files beside them do.
+file(GLOB _katana_survey_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/survey/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/survey/*.hpp")
+target_sources(katana PRIVATE ${_katana_survey_ui})
+target_include_directories(katana PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(katana PRIVATE katana_survey katana_surveyio katana_geodesy)
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
