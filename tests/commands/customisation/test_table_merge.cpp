@@ -74,6 +74,7 @@ struct TableFixture : ::testing::Test {
 };
 
 using TableMerge = TableFixture;
+using TableRename = TableFixture;
 using TableDuplicate = TableFixture;
 using TableGuards = TableFixture;
 using TablePurge = TableFixture;
@@ -167,6 +168,76 @@ TEST_F(TableMerge, MergeDeleteAndPurgeAreDestructiveAndDuplicateIsNot)
     EXPECT_TRUE(purgeTableItems(TableItems{{"a"}, {}, {}})->isDestructive());
     EXPECT_FALSE(duplicateStyle("a", "b")->isDestructive());
     EXPECT_FALSE(updateStyle(style("a"))->isDestructive());
+}
+
+// ---- rename ------------------------------------------------------------------------------
+
+TEST_F(TableRename, UndoingALinetypeRenameOntoANameAlreadyHeldPutsBackOnlyWhatTheRenameMoved)
+{
+    // The commands layer does not see the 12d library, so a style or layer
+    // may name a linetype the model lacks - a library linestyle (D2), which
+    // STYLE SET now accepts. The rename's validate asks only the model
+    // table, so a model linetype can be renamed onto that name. Its undo
+    // used to repoint EVERYTHING naming the new name back to the old one,
+    // rewriting s and survey, which the rename never touched, to fence.
+    must(createLinetype(dashed("fence")));
+    must(createStyle(style("s", "COMM Telephone Pole")));
+    must(createStyle(style("t", "fence")));
+    Layer survey;
+    survey.name = "survey";
+    survey.linetype = "COMM Telephone Pole";
+    must(createLayer(survey));
+    Layer kerbs;
+    kerbs.name = "kerbs";
+    kerbs.linetype = "fence";
+    must(createLayer(kerbs));
+
+    must(renameLinetype("fence", "COMM Telephone Pole"));
+    EXPECT_EQ(model.styles.find("t")->linetype, "COMM Telephone Pole");
+    EXPECT_EQ(model.layers.find("kerbs")->linetype, "COMM Telephone Pole");
+
+    ASSERT_TRUE(stack.undo().ok());
+    EXPECT_TRUE(model.linetypes.contains("fence"));
+    EXPECT_FALSE(model.linetypes.contains("COMM Telephone Pole"));
+    // Moved by the rename, so moved back:
+    EXPECT_EQ(model.styles.find("t")->linetype, "fence");
+    EXPECT_EQ(model.layers.find("kerbs")->linetype, "fence");
+    // Named the new name before the rename ran, so left alone:
+    EXPECT_EQ(model.styles.find("s")->linetype, "COMM Telephone Pole");
+    EXPECT_EQ(model.layers.find("survey")->linetype, "COMM Telephone Pole");
+
+    // Redo moves the same holders again; a second undo is as exact.
+    ASSERT_TRUE(stack.redo().ok());
+    EXPECT_EQ(model.styles.find("t")->linetype, "COMM Telephone Pole");
+    ASSERT_TRUE(stack.undo().ok());
+    EXPECT_EQ(model.styles.find("t")->linetype, "fence");
+    EXPECT_EQ(model.styles.find("s")->linetype, "COMM Telephone Pole");
+}
+
+TEST_F(TableRename, UndoingAStyleRenameOntoANameEntitiesAlreadyWorePutsBackOnlyItsOwnWearers)
+{
+    // An entity can wear a style the table lacks - a project saved before
+    // its style was removed outside Katana; STYLE USAGE lists it as "not in
+    // the style table". Added straight to the database, since every command
+    // refuses to create one.
+    must(createStyle(style("Kerb")));
+    const EntityId moved = point("Kerb");
+    Entity orphan;
+    orphan.layer = "0";
+    orphan.style = "Ghost";
+    orphan.geometry = katana::entity::PointGeometry{katana::geometry::Point2(1.0, 1.0)};
+    const auto added = model.entities.add(orphan);
+    ASSERT_TRUE(added.ok());
+    const EntityId stranded = *added;
+
+    must(renameStyle("Kerb", "Ghost"));
+    EXPECT_EQ(entity(moved).style, "Ghost");
+
+    ASSERT_TRUE(stack.undo().ok());
+    EXPECT_TRUE(model.styles.contains("Kerb"));
+    EXPECT_FALSE(model.styles.contains("Ghost"));
+    EXPECT_EQ(entity(moved).style, "Kerb");
+    EXPECT_EQ(entity(stranded).style, "Ghost") << "it wore Ghost before the rename ran";
 }
 
 // ---- duplicate ---------------------------------------------------------------------------
