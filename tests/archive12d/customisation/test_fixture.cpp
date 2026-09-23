@@ -179,3 +179,31 @@ TEST(CustomisationFixture, TheMapfileIsUtf16WithAByteOrderMarkAs12dWritesThem)
     EXPECT_EQ(static_cast<unsigned char>(raw[0]), 0xFFu);
     EXPECT_EQ(static_cast<unsigned char>(raw[1]), 0xFEu);
 }
+
+TEST(CustomisationFixture, TheDashedKerbHasTheDashesAndGapsItsHeadCommentStates)
+{
+    // Later tests take their expected dash and gap lengths from the head
+    // comment of test_linestyles.4d, so the comment is checked against the
+    // strokes here. Worked out by hand from `move 0 0, draw 1.5 0, move 2 0,
+    // draw 3 0, move 4 0`: dashes 0 to 1.5 and 2 to 3, so 1.5 mm and 1 mm;
+    // gaps 1.5 to 2 and 3 to 4, so 0.5 mm and 1 mm - 1.5 mm of gap in the
+    // 4 mm period. (The first move, 0 to 0, lifts the pen over nothing.)
+    const a12::Customisation fixture = loadFixture();
+    const LineStyle* kerb = fixture.library.find("TEST Dashed Kerb");
+    ASSERT_NE(kerb, nullptr);
+    std::vector<double> dashes;
+    std::vector<double> gaps;
+    double x = 0.0;
+    for (const katana::entity::Stroke& stroke : kerb->strokes) {
+        ASSERT_TRUE(stroke.op == StrokeOp::Move || stroke.op == StrokeOp::Draw);
+        EXPECT_EQ(stroke.point.y, 0.0) << "every stroke is along the line";
+        const double run = stroke.point.x - x;
+        x = stroke.point.x;
+        if (run != 0.0) {
+            (stroke.op == StrokeOp::Draw ? dashes : gaps).push_back(run);
+        }
+    }
+    EXPECT_EQ(dashes, (std::vector<double>{1.5, 1.0}));
+    EXPECT_EQ(gaps, (std::vector<double>{0.5, 1.0}));
+    EXPECT_EQ(x, kerb->length) << "the strokes end where the period does";
+}
