@@ -46,6 +46,7 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QToolBar>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <cstdio>
@@ -178,6 +179,37 @@ QString describeProperty(const katana::entity::PropertyValue& value)
     return QString::fromStdString(katana::entity::toString(value));
 }
 
+// A panel's own tool: an icon, with its name in the tooltip. The text buttons
+// these replaced were at least 64 px each (theme.cpp's QPushButton rule) plus
+// padding, so four of them held the Layers column at 402 px; four of these
+// fit in 120 and the column can be as narrow as its tree is useful.
+QToolButton* panelTool(QWidget* parent, Icon which, const QString& objectName,
+                       const QString& name, const QString& tip)
+{
+    auto* button = new QToolButton(parent);
+    button->setObjectName(objectName);
+    button->setIcon(katana::qt::icon(which));
+    button->setIconSize(QSize(18, 18));
+    button->setAutoRaise(true);
+    button->setToolTip(QString("<b>%1</b><br>%2").arg(name, tip));
+    button->setAccessibleName(name);
+    button->setAccessibleDescription(tip);
+    return button;
+}
+
+// A row of panel tools above the list they act on, where a toolbar is looked
+// for.
+QHBoxLayout* toolRow(std::initializer_list<QToolButton*> tools)
+{
+    auto* row = new QHBoxLayout();
+    row->setSpacing(1);
+    for (QToolButton* tool : tools) {
+        row->addWidget(tool);
+    }
+    row->addStretch();
+    return row;
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
@@ -188,6 +220,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     resize(1360, 860);
     views_ = new ViewWorkspace(document_, this);
     setCentralWidget(views_);
+    // After the workspace: Qt deletes a window's children in the order they
+    // were made, so the workspace's views go while the chrome that keeps
+    // their records is still there to drop them.
+    chrome_ = new DockChrome(*this);
+    views_->setChrome(chrome_);
 
     buildActions();
     buildDocks();
@@ -637,11 +674,40 @@ katana::core::Status MainWindow::triggerAction(const QString& name)
 
 void MainWindow::buildDocks()
 {
+    // The side columns run the full height of the window and the command
+    // line sits under the drawing only, between them - the arrangement CAD
+    // programs share (AutoCAD's command line docks under the drawing between
+    // its palettes). The panels at the sides are trees and tables that read
+    // downwards and use the height; the command line drives the drawing and
+    // reads with it. Qt's default gives both bottom corners to the bottom
+    // area, which ran the command line under both columns and cut them short.
+    setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    // Nested, so two panels can stand side by side within one column; tabbed,
+    // so they can share one place. Not GroupedDragging, for the reason
+    // ViewWorkspace gives: a panel dragged out must stay a dock with its own
+    // title bar, not become a tab in a window of Qt's.
+    setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks |
+                   QMainWindow::AllowTabbedDocks);
+    setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
+
     // ---- layers ----
-    auto* layerDock = new QDockWidget("Layers", this);
+    layerDock_ = new QDockWidget("Layers", this);
+    QDockWidget* layerDock = layerDock_;
     auto* layerPanel = new QWidget(layerDock);
     auto* layerLayout = new QVBoxLayout(layerPanel);
     layerLayout->setContentsMargins(4, 4, 4, 4);
+    layerLayout->setSpacing(4);
+    auto* addButton = panelTool(layerPanel, Icon::LayerNew, "LayerNewButton", "New Layer",
+                                "Add a layer at the top of the tree.");
+    auto* childButton =
+        panelTool(layerPanel, Icon::LayerNewChild, "LayerNewChildButton", "New Child Layer",
+                  "Add a layer beneath the selected one.");
+    auto* renameButton = panelTool(layerPanel, Icon::Rename, "LayerRenameButton", "Rename Layer",
+                                   "Rename the selected layer and everything beneath it.");
+    auto* deleteButton = panelTool(layerPanel, Icon::Erase, "LayerDeleteButton", "Delete Layer",
+                                   "Delete the selected layer.");
+    layerLayout->addLayout(toolRow({addButton, childButton, renameButton, deleteButton}));
     layerTree_ = new QTreeWidget(layerPanel);
     layerTree_->setColumnCount(kLayerColumns);
     layerTree_->setHeaderLabels({"Layer", "On", "Lock", "Colour", "N"});
@@ -653,31 +719,21 @@ void MainWindow::buildDocks()
         layerTree_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
     }
     layerLayout->addWidget(layerTree_);
-
-    auto* buttons = new QHBoxLayout();
-    auto* addButton = new QPushButton("New", layerPanel);
-    auto* childButton = new QPushButton("New Child", layerPanel);
-    auto* renameButton = new QPushButton("Rename", layerPanel);
-    auto* deleteButton = new QPushButton("Delete", layerPanel);
-    buttons->addWidget(addButton);
-    buttons->addWidget(childButton);
-    buttons->addWidget(renameButton);
-    buttons->addWidget(deleteButton);
-    layerLayout->addLayout(buttons);
     layerDock->setWidget(layerPanel);
     addDockWidget(Qt::LeftDockWidgetArea, layerDock);
 
-    connect(addButton, &QPushButton::clicked, this, [this] { addLayer(); });
-    connect(childButton, &QPushButton::clicked, this, [this] { addChildLayer(); });
-    connect(renameButton, &QPushButton::clicked, this, [this] { renameSelectedLayer(); });
-    connect(deleteButton, &QPushButton::clicked, this, [this] { deleteCurrentLayer(); });
+    connect(addButton, &QToolButton::clicked, this, [this] { addLayer(); });
+    connect(childButton, &QToolButton::clicked, this, [this] { addChildLayer(); });
+    connect(renameButton, &QToolButton::clicked, this, [this] { renameSelectedLayer(); });
+    connect(deleteButton, &QToolButton::clicked, this, [this] { deleteCurrentLayer(); });
     connect(layerTree_, &QTreeWidget::itemChanged, this,
             [this](QTreeWidgetItem* item, int column) { onLayerItemChanged(item, column); });
     connect(layerTree_, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem* item, int column) { onLayerItemDoubleClicked(item, column); });
 
     // ---- properties ----
-    auto* propertyDock = new QDockWidget("Properties", this);
+    propertyDock_ = new QDockWidget("Properties", this);
+    QDockWidget* propertyDock = propertyDock_;
     propertyTable_ = new QTableWidget(0, 2, propertyDock);
     propertyTable_->setHorizontalHeaderLabels({"Property", "Value"});
     propertyTable_->verticalHeader()->setVisible(false);
@@ -688,7 +744,8 @@ void MainWindow::buildDocks()
     addDockWidget(Qt::RightDockWidgetArea, propertyDock);
 
     // ---- command line ----
-    auto* commandDock = new QDockWidget("Command Line", this);
+    commandDock_ = new QDockWidget("Command Line", this);
+    QDockWidget* commandDock = commandDock_;
     auto* commandPanel = new QWidget(commandDock);
     auto* commandLayout = new QVBoxLayout(commandPanel);
     commandLayout->setContentsMargins(4, 4, 4, 4);
@@ -709,20 +766,29 @@ void MainWindow::buildDocks()
 
     buildReferenceDock();
 
+    // Literal object names, not built from the titles: a saved layout finds a
+    // dock by this name, and a title is prose that may be reworded or
+    // translated ("Command LineDock", with its space, was what building them
+    // gave).
+    layerDock->setObjectName("LayersDock");
+    propertyDock->setObjectName("PropertiesDock");
+    commandDock->setObjectName("CommandLineDock");
+    // The same title bar as every view, with Minimise, Float and Close.
+    chrome_->install(layerDock, Icon::Layers, DockRole::Panel);
+    chrome_->install(propertyDock, Icon::Properties, DockRole::Panel);
+    chrome_->install(commandDock, Icon::CommandLine, DockRole::Panel);
+    chrome_->install(referenceDock_, Icon::ReferenceData, DockRole::Panel);
+
     // Every panel can be closed, so every panel needs a way back. Qt makes the
     // toggle action; it only has to be put somewhere the user will look.
-    for (QDockWidget* dock : {layerDock, propertyDock, commandDock}) {
-        dock->setObjectName(dock->windowTitle() + "Dock"); // for saveState, as the toolbars
-    }
     layerDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::Layers));
     propertyDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::Properties));
+    commandDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::CommandLine));
+    referenceDock_->toggleViewAction()->setIcon(katana::qt::icon(Icon::ReferenceData));
     viewMenu_->addSeparator();
     QMenu* panels = viewMenu_->addMenu("&Panels");
     panels->addActions({layerDock->toggleViewAction(), propertyDock->toggleViewAction(),
-                        commandDock->toggleViewAction()});
-    if (referenceDock_ != nullptr) {
-        panels->addAction(referenceDock_->toggleViewAction());
-    }
+                        commandDock->toggleViewAction(), referenceDock_->toggleViewAction()});
 
     // Opening sizes. Left to itself Qt gives each dock its size hint, which
     // for a text log is a third of the window - so the drawing, which is the
@@ -740,6 +806,17 @@ void MainWindow::buildReferenceDock()
     auto* panel = new QWidget(dock);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(4, 4, 4, 4);
+    layout->setSpacing(4);
+    auto* importButton =
+        panelTool(panel, Icon::Import, "ReferenceImportButton", "Import",
+                  "Import a drawing, an image or a point cloud, as File > Import does.");
+    auto* zoomButton = panelTool(panel, Icon::ZoomTo, "ReferenceZoomButton", "Zoom To",
+                                 "Frame the selected reference layer in every plan view.");
+    auto* infoButton = panelTool(panel, Icon::DatasetInfo, "ReferenceInfoButton", "Information",
+                                 "What the selected layer's file holds, as GDAL or PDAL reads it.");
+    auto* removeButton = panelTool(panel, Icon::Erase, "ReferenceRemoveButton", "Remove",
+                                   "Remove the selected reference layer. The file is not touched.");
+    layout->addLayout(toolRow({importButton, zoomButton, infoButton, removeButton}));
 
     referenceTable_ = new QTableWidget(0, 4, panel);
     referenceTable_->setHorizontalHeaderLabels({"Name", "Type", "Detail", "Display"});
@@ -749,27 +826,15 @@ void MainWindow::buildReferenceDock()
     referenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     layout->addWidget(referenceTable_);
 
-    auto* buttons = new QHBoxLayout();
-    auto* importButton = new QPushButton("Import...", panel);
-    auto* zoomButton = new QPushButton("Zoom To", panel);
-    auto* infoButton = new QPushButton("Info", panel);
-    auto* removeButton = new QPushButton("Remove", panel);
-    buttons->addWidget(importButton);
-    buttons->addWidget(zoomButton);
-    buttons->addWidget(infoButton);
-    buttons->addWidget(removeButton);
-    buttons->addStretch();
-    layout->addLayout(buttons);
-
     dock->setWidget(panel);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 
-    connect(importButton, &QPushButton::clicked, this, [this] { importFile(); });
-    connect(zoomButton, &QPushButton::clicked, this, [this] { zoomToSelectedReference(); });
-    connect(removeButton, &QPushButton::clicked, this, [this] { removeSelectedReference(); });
+    connect(importButton, &QToolButton::clicked, this, [this] { importFile(); });
+    connect(zoomButton, &QToolButton::clicked, this, [this] { zoomToSelectedReference(); });
+    connect(removeButton, &QToolButton::clicked, this, [this] { removeSelectedReference(); });
     // What the selected layer's SOURCE holds - which, for a cloud, is the
     // whole file and not the sample the panel shows.
-    connect(infoButton, &QPushButton::clicked, this, [this] {
+    connect(infoButton, &QToolButton::clicked, this, [this] {
         const int row = referenceTable_->currentRow();
         const QTableWidgetItem* item = row < 0 ? nullptr : referenceTable_->item(row, kRefName);
         if (item == nullptr) {

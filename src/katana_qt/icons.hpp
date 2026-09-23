@@ -86,6 +86,33 @@ enum class Icon {
     ExportDem,
     ConvertCopc,
     DatasetInfo,
+    // The workspace (PLAN.MD 47). The window buttons on every panel's and
+    // view's title bar are drawn in neutral only: they act on the window, not
+    // on the drawing, and an accent there would compete with the active view's
+    // accent marker for the eye.
+    Minimise,
+    Float,
+    Dock,
+    Maximise,
+    Restore,
+    Close,
+    // The panels without an icon of their own until now.
+    CommandLine,
+    ReferenceData,
+    // What a view shows: the kind switcher on its title bar.
+    ViewPlan,
+    View3D,
+    ViewSection,
+    ViewElevation,
+    // A view's Layers button when that view hides something: the Layers
+    // glyph beside the accent funnel of a filter, so a filtered view is never
+    // mistaken for missing data.
+    ViewLayersFiltered,
+    // The compact tool buttons of the Layers and Reference Data panels.
+    LayerNew,
+    LayerNewChild,
+    Rename,
+    ZoomTo,
     // Help
     Help,
     About,

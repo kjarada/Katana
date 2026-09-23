@@ -1,9 +1,16 @@
 #include "view_workspace.hpp"
 
 #include <algorithm>
+#include <array>
 
+#include <QActionGroup>
 #include <QCloseEvent>
+#include <QMenu>
+#include <QStyle>
 #include <QTimer>
+#include <QToolButton>
+
+#include "view_layers_popup.hpp"
 
 namespace katana::qt {
 
@@ -26,6 +33,24 @@ bool isRenderKind(ViewKind kind)
 {
     return kind == ViewKind::Model3D || kind == ViewKind::Elevation;
 }
+
+Icon kindIcon(ViewKind kind)
+{
+    switch (kind) {
+    case ViewKind::Plan:
+        return Icon::ViewPlan;
+    case ViewKind::Model3D:
+        return Icon::View3D;
+    case ViewKind::Section:
+        return Icon::ViewSection;
+    case ViewKind::Elevation:
+        return Icon::ViewElevation;
+    }
+    return Icon::ViewPlan;
+}
+
+constexpr std::array kKinds{ViewKind::Plan, ViewKind::Model3D, ViewKind::Section,
+                            ViewKind::Elevation};
 
 } // namespace
 
@@ -68,8 +93,16 @@ ViewWorkspace::ViewWorkspace(katana::cad::Document& document, QWidget* parent)
     setWindowFlags(Qt::Widget);
     // No central widget: the docks are the whole of this window.
     setDockNestingEnabled(true);
+    // NOT GroupedDragging. With it, dragging a tabbed view drags its whole
+    // tab group out into a QDockWidgetGroupWindow - a window of Qt's with a
+    // native frame and none of the chrome - and a view in it can no longer be
+    // floated or docked on its own. Without it every floating view is a
+    // QDockWidget wearing its own title bar, whatever was dragged.
     setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks |
-                   QMainWindow::AllowTabbedDocks | QMainWindow::GroupedDragging);
+                   QMainWindow::AllowTabbedDocks);
+    // Tabs above the views they switch between, where the eye is looking
+    // for a title, rather than under the drawing.
+    setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
     openView(ViewKind::Plan);
 }
 
@@ -194,13 +227,170 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
 
 void ViewWorkspace::updateTitle(const View& view)
 {
-    if (const ViewState* state = views_.find(view.id)) {
-        view.dock->setWindowTitle(QString::fromStdString(katana::cad::ViewSet::title(*state)));
+    const ViewState* state = views_.find(view.id);
+    if (state == nullptr) {
+        return;
     }
+    view.dock->setWindowTitle(QString::fromStdString(katana::cad::ViewSet::title(*state)));
+    if (view.titleBar != nullptr) {
+        view.titleBar->setIcon(kindIcon(state->kind));
+    }
+    if (view.kindButton != nullptr) {
+        view.kindButton->setIcon(icon(kindIcon(state->kind)));
+    }
+}
+
+void ViewWorkspace::setChrome(DockChrome* chrome)
+{
+    chrome_ = chrome;
+    for (View& view : docks_) {
+        installChrome(view);
+    }
+    updateActiveMarks();
+}
+
+void ViewWorkspace::installChrome(View& view)
+{
+    const ViewState* state = views_.find(view.id);
+    if (chrome_ == nullptr || state == nullptr || view.titleBar != nullptr) {
+        return;
+    }
+    const ViewId id = view.id;
+    DockTitleBar* bar = chrome_->install(view.dock, kindIcon(state->kind), DockRole::View);
+    view.titleBar = bar;
+    bar->onPressed = [this, id] { activate(id); };
+
+    // The kind switcher stands where the icon was: what a view shows is the
+    // first thing about it, and the icon already said it.
+    QToolButton* kind = makeTitleBarButton(
+        bar, kindIcon(state->kind), "ViewKindButton", "What This View Shows",
+        "Plan, 3D, section or elevation. The view keeps its zoom and the layers it hides for "
+        "when it comes back.");
+    kind->setPopupMode(QToolButton::InstantPopup);
+    // Room for the menu arrow beside the icon, which says this one opens a
+    // menu where its neighbours act at once.
+    kind->setFixedWidth(34);
+    auto* menu = new QMenu(kind);
+    auto* group = new QActionGroup(menu);
+    for (const ViewKind choice : kKinds) {
+        QAction* action = menu->addAction(icon(kindIcon(choice)), katana::cad::toString(choice));
+        action->setCheckable(true);
+        action->setData(static_cast<int>(choice));
+        group->addAction(action);
+        connect(action, &QAction::triggered, this, [this, id, choice] {
+            (void)setViewKind(id, choice);
+            activate(id);
+        });
+    }
+    connect(menu, &QMenu::aboutToShow, this, [this, id, menu] {
+        const ViewState* current = views_.find(id);
+        for (QAction* action : menu->actions()) {
+            action->setChecked(current != nullptr &&
+                               action->data().toInt() == static_cast<int>(current->kind));
+        }
+    });
+    kind->setMenu(menu);
+    bar->setLeadingWidget(kind);
+    view.kindButton = kind;
+
+    QToolButton* layers = makeTitleBarButton(bar, Icon::Layers, "ViewLayersButton", "Layers", {});
+    connect(layers, &QToolButton::clicked, this, [this, id] { (void)showLayersPopup(id); });
+    bar->addTool(layers);
+    view.layersButton = layers;
+
+    QToolButton* extents = makeTitleBarButton(
+        bar, Icon::ZoomExtents, "ViewZoomExtentsButton", "Zoom Extents",
+        "Frame everything this view shows. View > Zoom Extents does the same for the active "
+        "view.");
+    connect(extents, &QToolButton::clicked, this, [this, id] { (void)zoomExtents(id); });
+    bar->addTool(extents);
+
+    updateLayersButton(view);
+}
+
+void ViewWorkspace::updateActiveMarks()
+{
+    const ViewId active = views_.activeId();
+    for (const View& view : docks_) {
+        if (view.titleBar != nullptr) {
+            view.titleBar->setActive(view.id == active);
+        }
+    }
+}
+
+std::size_t ViewWorkspace::hiddenCount(ViewId id) const
+{
+    const ViewState* state = views_.find(id);
+    if (state == nullptr) {
+        return 0;
+    }
+    std::size_t references = 0;
+    if (reference_ != nullptr) {
+        // Only ids that still name a layer: a removed image's id stays in the
+        // view's set (ids are never reused, so it is harmless there) and must
+        // not make the view look filtered.
+        for (const auto& raster : reference_->rasters()) {
+            references += state->hiddenReferences.contains(raster.id) ? 1 : 0;
+        }
+        for (const auto& cloud : reference_->pointClouds()) {
+            references += state->hiddenReferences.contains(cloud.id) ? 1 : 0;
+        }
+    }
+    return state->layers.size() + references;
+}
+
+void ViewWorkspace::updateLayersButton(const View& view)
+{
+    if (view.layersButton == nullptr) {
+        return;
+    }
+    const ViewState* state = views_.find(view.id);
+    const std::size_t hidden = hiddenCount(view.id);
+    const QString title =
+        state != nullptr ? QString::fromStdString(katana::cad::ViewSet::title(*state)) : "this view";
+    // A filtered view must never be mistaken for missing data, so the button
+    // changes its glyph and its frame, not only its tooltip.
+    view.layersButton->setIcon(icon(hidden > 0 ? Icon::ViewLayersFiltered : Icon::Layers));
+    view.layersButton->setProperty("filtered", hidden > 0);
+    view.layersButton->style()->unpolish(view.layersButton);
+    view.layersButton->style()->polish(view.layersButton);
+    // "Of its own": the count is the view's own entries, and hiding a parent
+    // is one entry however many layers lie beneath it.
+    const QString tip =
+        hidden > 0
+            ? QString("%1 hides %2 layer(s) or reference layer(s) of its own, with what lies "
+                      "beneath them. Choose which layers it shows; the Layers panel hides a "
+                      "layer in every view.")
+                  .arg(title)
+                  .arg(hidden)
+            : QString("Choose which layers %1 shows. It shows everything the drawing shows; the "
+                      "Layers panel hides a layer in every view.")
+                  .arg(title);
+    view.layersButton->setToolTip(QString("<b>Layers in this view</b><br>%1").arg(tip));
+    view.layersButton->setAccessibleName("Layers in this view");
+    view.layersButton->setAccessibleDescription(tip);
+}
+
+ViewLayersPopup* ViewWorkspace::showLayersPopup(ViewId id)
+{
+    View* view = find(id);
+    if (view == nullptr) {
+        return nullptr;
+    }
+    auto* popup = new ViewLayersPopup(*this, id, view->dock);
+    popup->setAttribute(Qt::WA_DeleteOnClose);
+    popup->popup(view->layersButton != nullptr ? static_cast<QWidget*>(view->layersButton)
+                                               : static_cast<QWidget*>(view->dock));
+    return popup;
 }
 
 ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
 {
+    if (chrome_ != nullptr) {
+        // A split made while the other views were hidden would be made
+        // against the wrong neighbours.
+        chrome_->unmaximiseDocked(*this);
+    }
     ViewState& state = views_.add(kind);
     const ViewId previous = views_.activeId();
 
@@ -211,12 +401,31 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
     docks_.push_back(view);
     View& added = docks_.back();
     buildContent(added, state);
+    installChrome(added);
 
-    // Beside the active view when it is docked here, so a new view shares the
-    // space the user was looking at rather than squeezing in at an edge.
+    // Splitting the active view when it is docked here, so a new view shares
+    // the space the user was looking at rather than squeezing in at an edge.
+    // !isHidden rather than isVisible: before the window is first shown no
+    // dock is visible, and a headless import that opens a 3D view must still
+    // split the plan rather than stack beside it.
     const View* beside = previous != state.id ? find(previous) : nullptr;
-    if (beside != nullptr && !beside->dock->isFloating() && beside->dock->isVisible()) {
-        splitDockWidget(beside->dock, added.dock, Qt::Horizontal);
+    if (beside != nullptr && !beside->dock->isFloating() && !beside->dock->isHidden()) {
+        // Along the longer side, so that both halves keep a usable shape.
+        // Before the first layout a dock's size means nothing: side by side.
+        const QSize size = beside->dock->size();
+        const Qt::Orientation direction =
+            !beside->dock->isVisible() || size.width() >= size.height() ? Qt::Horizontal
+                                                                        : Qt::Vertical;
+        splitDockWidget(beside->dock, added.dock, direction);
+        // Equal halves of the space the active view had. Qt gives the new
+        // dock its size hint otherwise, and what the user sees is a sliver.
+        // Sizes in pixels, not a ratio: the other docks of the same row keep
+        // theirs only if the two here add up to exactly what `beside` had.
+        const int separator = style()->pixelMetric(QStyle::PM_DockWidgetSeparatorExtent, nullptr, this);
+        const int extent = direction == Qt::Horizontal ? size.width() : size.height();
+        const int first = std::max(1, (extent - separator) / 2);
+        const int second = std::max(1, extent - separator - first);
+        resizeDocks({beside->dock, added.dock}, {first, second}, direction);
     } else {
         addDockWidget(kViewArea, added.dock);
     }
@@ -224,6 +433,7 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
     if (activateIt) {
         activate(state.id);
     }
+    updateActiveMarks();
     if (onViewsChanged) {
         onViewsChanged();
     }
@@ -239,11 +449,17 @@ Status ViewWorkspace::closeView(ViewId id)
     ViewDock* dock = at->dock;
     docks_.erase(at);
     const ViewId wasActive = views_.activeId();
+    // Before it goes: closing the maximised view brings back the views it
+    // hid, and a minimised one's tray button goes with it.
+    if (chrome_ != nullptr) {
+        chrome_->forget(dock);
+    }
     // The dock and its widget go first: the widget holds a reference to the
     // state, which must outlive it.
     removeDockWidget(dock);
     delete dock;
     (void)views_.remove(id);
+    updateActiveMarks();
     if (wasActive == id && onActiveChanged) {
         onActiveChanged();
     }
@@ -293,6 +509,7 @@ void ViewWorkspace::activate(ViewId id)
     if (!views_.activate(id)) {
         return;
     }
+    updateActiveMarks();
     if (onActiveChanged) {
         onActiveChanged();
     }
@@ -302,8 +519,12 @@ ViewState& ViewWorkspace::ensureView(ViewKind kind)
 {
     if (ViewState* state = views_.mostRecent(kind)) {
         if (const View* view = find(state->id)) {
-            view->dock->show();
-            view->dock->raise();
+            // Through the tray when it is there, so that it comes back at the
+            // size it had and its button goes.
+            if (chrome_ == nullptr || !chrome_->restore(view->dock)) {
+                view->dock->show();
+                view->dock->raise();
+            }
         }
         return *state;
     }
@@ -312,6 +533,9 @@ ViewState& ViewWorkspace::ensureView(ViewKind kind)
 
 void ViewWorkspace::arrange(katana::cad::LayoutKind kind)
 {
+    if (chrome_ != nullptr) {
+        chrome_->unmaximiseDocked(*this);
+    }
     const std::size_t places = katana::cad::cellCount(kind);
     std::vector<ViewId> ids;
     for (const View& view : docks_) {
@@ -441,6 +665,9 @@ void ViewWorkspace::setReferenceData(katana::interop::ReferenceData* reference)
     for (ViewportWidget* plan : planViews()) {
         plan->setReferenceData(reference);
     }
+    for (const View& view : docks_) {
+        updateLayersButton(view);
+    }
 }
 
 void ViewWorkspace::setSurfaces(const std::vector<katana::cad::SceneSurface>* surfaces)
@@ -544,10 +771,16 @@ void ViewWorkspace::resetInteraction()
 
 void ViewWorkspace::zoomExtents()
 {
-    const ViewState* state = views_.active();
-    const View* view = state != nullptr ? find(state->id) : nullptr;
+    if (const ViewState* state = views_.active()) {
+        (void)zoomExtents(state->id);
+    }
+}
+
+Status ViewWorkspace::zoomExtents(ViewId id)
+{
+    const View* view = find(id);
     if (view == nullptr) {
-        return;
+        return makeError(ErrorCode::NotFound, "no such view", std::to_string(id));
     }
     if (view->plan != nullptr) {
         view->plan->zoomExtents();
@@ -556,18 +789,13 @@ void ViewWorkspace::zoomExtents()
     } else if (view->section != nullptr) {
         view->section->zoomExtents();
     }
+    return {};
 }
 
 void ViewWorkspace::zoomExtentsAll()
 {
-    for (View& view : docks_) {
-        if (view.plan != nullptr) {
-            view.plan->zoomExtents();
-        } else if (view.render != nullptr) {
-            view.render->zoomExtents();
-        } else if (view.section != nullptr) {
-            view.section->zoomExtents();
-        }
+    for (const View& view : docks_) {
+        (void)zoomExtents(view.id);
     }
 }
 
@@ -587,6 +815,9 @@ void ViewWorkspace::invalidateReferenceCache()
         if (view.render != nullptr) {
             view.render->invalidateScene();
         }
+        // Called whenever a reference layer is added or removed, which is
+        // what changes how many of a view's hidden references still exist.
+        updateLayersButton(view);
     }
 }
 
@@ -624,6 +855,7 @@ void ViewWorkspace::viewLayersChanged(ViewId id)
     } else if (view->section != nullptr) {
         view->section->update();
     }
+    updateLayersButton(*view);
 }
 
 void ViewWorkspace::pruneViewLayers()

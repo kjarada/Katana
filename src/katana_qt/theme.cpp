@@ -31,7 +31,11 @@ QString styleSheet()
     const auto c = [](const QColor& color) { return color.name(); };
     QString css = R"css(
         QMainWindow, QDialog { background: %window%; }
-        QMainWindow::separator { background: %border%; width: 1px; height: 1px; }
+        /* The splitter between docks. Five pixels because the old 1 px line
+           had to be hit to the pixel to be dragged; lit in the accent under
+           the pointer so that it is plain it can be. */
+        QMainWindow::separator { background: %window%; width: 5px; height: 5px; }
+        QMainWindow::separator:hover { background: %accent%; }
 
         QMenuBar { background: %window%; color: %text%; border-bottom: 1px solid %border%; }
         QMenuBar::item { padding: 5px 10px; background: transparent; }
@@ -55,9 +59,33 @@ QString styleSheet()
         QToolButton:checked { background: %raised%; border: 1px solid %accent%; }
         QToolButton:disabled { color: %textDisabled%; }
 
-        QDockWidget { color: %textMuted%; titlebar-close-icon: none; titlebar-normal-icon: none; }
+        /* Every dock wears a DockTitleBar (dock_chrome.hpp), which draws its
+           own buttons; the ::title rule is for a dock made without one.
+           The border is the frame of a FLOATING dock, which has no native
+           one: Qt takes its width as PM_DockWidgetFrameWidth, insets the
+           title bar and contents by it, and resizes the window from it.
+           Fusion's own is 1 px - an edge nobody can find with the mouse.
+           4 px is the reach of Qt's resize handler (measured offscreen: a
+           press 1 to 4 px in from the edge resizes, 5 px does not). Docked,
+           a dock has no frame, and with a title bar widget QDockWidget draws
+           none at all: DockChrome paints the floating one. */
+        QDockWidget { color: %textMuted%; border: 4px solid %border%; }
         QDockWidget::title { background: %window%; padding: 6px 10px; text-align: left;
                              border-bottom: 1px solid %border%; }
+        QToolButton[chrome="button"], QToolButton[chrome="close"] {
+            padding: 2px; border: 1px solid transparent; border-radius: 4px; }
+        QToolButton[chrome="button"]:hover { background: %hover%; }
+        QToolButton[chrome="close"]:hover { background: %error%; }
+        QToolButton[chrome="button"]:focus, QToolButton[chrome="close"]:focus {
+            border: 1px solid %accent%; }
+        QToolButton[chrome="button"]::menu-indicator { subcontrol-position: right center;
+                                                       subcontrol-origin: padding; }
+        QToolButton[filtered="true"] { border: 1px solid %accent%; }
+        QToolBar#MinimisedToolBar { border: none; border-top: 1px solid %border%;
+                                    padding: 2px 6px; }
+        QToolBar#MinimisedToolBar QToolButton { padding: 3px 8px; }
+        QLabel#MinimisedLabel, QLabel#ViewLayersNote { color: %textMuted%; }
+        QFrame#ViewLayersPopup { background: %panel%; border: 1px solid %border%; }
 
         QTreeView, QListView, QTableView, QPlainTextEdit, QTextEdit {
             background: %panel%; color: %text%; border: none; outline: 0;
@@ -102,6 +130,7 @@ QString styleSheet()
         QTabBar::tab { background: %window%; color: %textMuted%; padding: 6px 12px;
                        border: none; }
         QTabBar::tab:selected { color: %text%; border-bottom: 2px solid %accent%; }
+        QTabBar::tab:hover { color: %text%; }
         QCheckBox, QRadioButton, QLabel, QGroupBox { color: %text%; }
     )css";
     css.replace("%window%", c(window()));
@@ -113,6 +142,7 @@ QString styleSheet()
     css.replace("%textMuted%", c(textMuted()));
     css.replace("%accentText%", c(accentText()));
     css.replace("%accent%", c(accent()));
+    css.replace("%error%", c(error()));
     css.replace("%text%", c(text()));
     return css;
 }
