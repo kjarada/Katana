@@ -34,6 +34,11 @@ void Document::rebuildStack()
         if (!model_.layers.contains(currentLayer_)) {
             currentLayer_ = std::string(katana::entity::kDefaultLayerName);
         }
+        // And the current style: a delete, merge or rename of it - or the
+        // undo of its creation - must not leave new work naming nothing.
+        if (!currentStyle_.empty() && !model_.styles.contains(currentStyle_)) {
+            currentStyle_.clear();
+        }
         notify();
     });
 }
@@ -122,10 +127,23 @@ Status Document::setCurrentLayer(const std::string& name)
     return {};
 }
 
+Status Document::setCurrentStyle(const std::string& name)
+{
+    if (!name.empty() && !model_.styles.contains(name)) {
+        return makeError(ErrorCode::NotFound, "style does not exist", name);
+    }
+    if (name != currentStyle_) {
+        currentStyle_ = name;
+        notify();
+    }
+    return {};
+}
+
 katana::commands::EntityAttributes Document::currentAttributes() const
 {
     katana::commands::EntityAttributes attributes;
     attributes.layer = currentLayer_;
+    attributes.style = currentStyle_;
     return attributes;
 }
 
@@ -139,6 +157,7 @@ void Document::newDocument()
     metadataModified_ = false;
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
+    currentStyle_.clear();
     notify();
 }
 
@@ -172,6 +191,7 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     rebuildSpatialIndex();
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
+    currentStyle_.clear();
     if (logger_ != nullptr) {
         logger_->info("storage", "project opened",
                       {{"entities", std::to_string(model_.entities.size())}});
