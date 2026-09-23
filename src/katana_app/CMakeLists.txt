@@ -144,6 +144,34 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "opened "
         FAIL_REGULAR_EXPRESSION "not loaded")
 
+    # Three sessions on one project of their own. The first saves it with the
+    # symbol fixture loaded; the second opens it without the fixture (warned)
+    # and saves it unedited; the third, again without it, must still be told:
+    # a session that never had the file cannot judge it, so its save keeps
+    # the name. The second session rewrote the record from what it had
+    # loaded, and the third opened in silence.
+    set(_resaved "${CMAKE_CURRENT_BINARY_DIR}/cli-resaved.katana")
+    add_test(NAME cli.resaved_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_resaved}")
+    add_test(NAME cli.a_project_is_saved_with_a_symbol_file_loaded
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_fixture}/test_symbols.4d\""
+                -c "LINE 0,0 10,0" -c "SAVE \"${_resaved}\"")
+    add_test(NAME cli.an_unedited_save_where_a_file_is_missing_succeeds
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "OPEN \"${_resaved}\"" -c "SAVE")
+    add_test(NAME cli.a_file_missing_when_the_project_was_saved_is_still_named_on_opening
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "OPEN \"${_resaved}\"")
+    set_tests_properties(cli.resaved_cleanup PROPERTIES FIXTURES_SETUP cli_resaved_clean)
+    set_tests_properties(cli.a_project_is_saved_with_a_symbol_file_loaded PROPERTIES
+        FIXTURES_REQUIRED cli_resaved_clean FIXTURES_SETUP cli_resaved_first)
+    set_tests_properties(cli.an_unedited_save_where_a_file_is_missing_succeeds PROPERTIES
+        FIXTURES_REQUIRED cli_resaved_first FIXTURES_SETUP cli_resaved_second
+        PASS_REGULAR_EXPRESSION "saved[\r\n]")
+    set_tests_properties(cli.a_file_missing_when_the_project_was_saved_is_still_named_on_opening
+        PROPERTIES FIXTURES_REQUIRED cli_resaved_second
+        PASS_REGULAR_EXPRESSION "not loaded: \"test_symbols\\.4d\"[\r\n]")
+
     # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
     set(_eol "[\r\n]+")
     set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION

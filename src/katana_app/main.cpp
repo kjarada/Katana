@@ -210,7 +210,8 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
 // whether a word was quoted.
 bool runCustomise(katana::cad::Document& document,
                   std::vector<katana::cad::CustomisationSource>& record,
-                  const std::vector<std::string>& paths, bool replace)
+                  std::vector<std::string>& missingAtOpen, const std::vector<std::string>& paths,
+                  bool replace)
 {
     if (replace && paths.empty()) {
         std::cerr << "error: InvalidArgument: CUSTOMISE REPLACE needs a file\n";
@@ -235,18 +236,14 @@ bool runCustomise(katana::cad::Document& document,
     }
 
     // A file named twice in one load is read once: read twice, each of its
-    // rules would be in the map twice.
-    std::vector<std::filesystem::path> files;
-    files.reserve(paths.size());
-    for (const std::string& path : paths) {
-        const std::filesystem::path file = std::filesystem::absolute(path).lexically_normal();
-        if (std::find(files.begin(), files.end(), file) != files.end()) {
-            std::cout << "  " << path << " is named twice in this load; it is read once\n";
-            continue;
-        }
-        files.push_back(file);
+    // rules would be in the map twice. The window's CUSTOMISE and File > Load
+    // go through the same rule.
+    const katana::cad::DistinctFiles distinct = katana::cad::distinctCustomisationFiles(
+        std::vector<std::filesystem::path>(paths.begin(), paths.end()));
+    for (const std::filesystem::path& repeat : distinct.repeats) {
+        std::cout << "  " << repeat.string() << " is named twice in this load; it is read once\n";
     }
-    auto loaded = katana::archive12d::readCustomisation(files);
+    auto loaded = katana::archive12d::readCustomisation(distinct.files);
     if (!loaded) {
         std::cerr << "error: " << loaded.error().describe() << "\n";
         return false;
@@ -286,9 +283,10 @@ bool runCustomise(katana::cad::Document& document,
     }
     document.setStyleLibrary(std::move(merged.library));
     document.setSurveyMap(std::move(merged.map));
-    katana::cad::recordCustomisationLoad(record, sourcesOf(*loaded),
-                                         replace && merged.libraryLoaded,
+    const std::vector<katana::cad::CustomisationSource> sources = sourcesOf(*loaded);
+    katana::cad::recordCustomisationLoad(record, sources, replace && merged.libraryLoaded,
                                          replace && merged.mapLoaded);
+    katana::cad::noteCustomisationLoaded(missingAtOpen, sources);
     std::cout << "Loaded now: " << document.styleLibrary().size() << " definitions, "
               << document.surveyMap().size() << " survey code rules\n";
 
@@ -810,6 +808,10 @@ struct Session {
     // The 12d customisation files loaded, in load order: what a SAVE records
     // in the project, and what an OPEN compares the project's record with.
     std::vector<katana::cad::CustomisationSource> customisation{};
+    // What the last OPEN found the project recorded but not loaded, less
+    // what was loaded since: a SAVE keeps them in the record, since this
+    // session cannot judge a file it never had.
+    std::vector<std::string> customisationMissingAtOpen{};
 #if defined(KATANA_WITH_INTEROP)
     InteropState interop;
 #endif
@@ -867,7 +869,8 @@ bool runLine(Session& session, const std::string& line)
                 paths.push_back(std::move(word));
             }
         }
-        return runCustomise(session.document, session.customisation, paths, replace);
+        return runCustomise(session.document, session.customisation,
+                            session.customisationMissingAtOpen, paths, replace);
     }
 #if defined(KATANA_WITH_INTEROP)
     // Interoperability verbs are handled before the interpreter sees the line,
@@ -879,11 +882,15 @@ bool runLine(Session& session, const std::string& line)
 #endif
     // The project records the customisation it was drawn with - the files'
     // names, never their definitions, which are session data (D1) - so that
-    // opening it where they are not loaded can say so.
+    // opening it where they are not loaded can say so. Only for a SAVE that
+    // has somewhere to go, as in the window: writing the record marks the
+    // drawing modified whether or not the save then happens.
     const std::string verb = upperVerb(line);
-    if (verb == "SAVE") {
+    if (verb == "SAVE" &&
+        katana::cad::typedSaveHasDestination(line, session.document.hasProject())) {
         katana::storage::ProjectMetadata metadata = session.document.metadata();
-        metadata.customisation = katana::cad::customisationRecord(
+        metadata.customisation = katana::cad::customisationRecordToSave(
+            metadata.customisation, session.customisationMissingAtOpen,
             session.document.styleLibrary(), session.customisation);
         session.document.setMetadata(std::move(metadata));
     }
@@ -901,6 +908,7 @@ bool runLine(Session& session, const std::string& line)
         const std::vector<std::string> missing = katana::cad::customisationNotLoaded(
             session.document.metadata().customisation, session.document.styleLibrary(),
             session.customisation);
+        session.customisationMissingAtOpen = missing;
         if (!missing.empty()) {
             std::cerr << "warning: this project was drawn with customisation files that are not "
                          "loaded: "
@@ -930,9 +938,9 @@ int main(int argc, char* argv[])
     katana::cad::Document document;
     katana::cad::CommandInterpreter interpreter(document);
 #if defined(KATANA_WITH_INTEROP)
-    Session session{document, interpreter, {}, {}};
+    Session session{document, interpreter, {}, {}, {}};
 #else
-    Session session{document, interpreter, {}};
+    Session session{document, interpreter, {}, {}};
 #endif
 
     if (argc > 0) {
