@@ -50,6 +50,16 @@ struct CodeFieldSource {
     std::size_t rule = 0; // its index in SurveyMap::rules()
     std::string key{};
     katana::entity::SurveySection section = katana::entity::SurveySection::Map;
+    // Later matching rules that set this field to something ELSE and lose -
+    // most often the second of two loaded mapfiles disagreeing (the built-in
+    // pair differ on `hide` for 190 keys). Most specific first.
+    struct Overruled {
+        std::size_t rule = 0;
+        std::string key{};
+        katana::entity::SurveySection section = katana::entity::SurveySection::Map;
+        std::string value{};
+    };
+    std::vector<Overruled> overruled{};
 };
 
 // What a linestyle or symbol name resolves to.
