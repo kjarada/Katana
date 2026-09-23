@@ -206,6 +206,11 @@ class ViewWorkspace final : public QMainWindow {
 
     // Forwarded from whichever view raised it, so the window wires them once.
     std::function<void(const QString&)> onStatus;
+    // A view's own running readout (RenderViewWidget and SectionViewWidget
+    // onFrameStats): a 3D view's frame time, a section's station and
+    // elevation under the cursor. Kept apart from onStatus, which is for
+    // messages, so the window can show it where it never hides one.
+    std::function<void(const QString&)> onFrameStats;
     std::function<void()> onActiveChanged;
     // Raised when a view opens, closes or changes kind: the Window menu lists
     // them.

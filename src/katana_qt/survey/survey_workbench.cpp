@@ -7,6 +7,7 @@
 #include <QMenu>
 #include <QToolBar>
 
+#include "dock_chrome.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/survey_tools.hpp"
 #include "survey/survey_dialogs.hpp"
@@ -114,6 +115,9 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     if (services_.loadCustomisation != nullptr) {
         menu.addAction(services_.loadCustomisation);
     }
+    if (services_.replaceCustomisation != nullptr) {
+        menu.addAction(services_.replaceCustomisation);
+    }
     if (services_.applySurveyCodes != nullptr) {
         menu.addAction(services_.applySurveyCodes);
     }
@@ -140,6 +144,11 @@ SurveyWorkbench::~SurveyWorkbench()
     // The dock holds a listener on the document too, and goes for the same
     // reason the dialogs do.
     if (!pointManager_.isNull()) {
+        // The chrome drops its record of the dock first, as a workspace does
+        // before deleting a view's dock (DockChrome::forget).
+        if (services_.chrome != nullptr) {
+            services_.chrome->forget(pointManager_.data());
+        }
         window_.removeDockWidget(pointManager_.data());
         delete pointManager_.data();
     }
@@ -168,6 +177,10 @@ void SurveyWorkbench::showPointManager(bool show)
         }
         pointManager_ = new SurveyPointsDock(*services_.document, services_.views, &window_);
         window_.addDockWidget(Qt::RightDockWidgetArea, pointManager_.data());
+        if (services_.chrome != nullptr) {
+            services_.chrome->install(pointManager_.data(), Icon::SurveyPointManager,
+                                      DockRole::Panel);
+        }
         // Wide enough for the id, code and both coordinates without scrolling.
         window_.resizeDocks({pointManager_.data()}, {460}, Qt::Horizontal);
         // Closing the dock by its own button unticks the menu item. Hidden,
