@@ -244,7 +244,8 @@ bool ViewportWidget::typeIntoTool(const QString& text)
         return false;
     }
     typed_.clear();
-    (void)tools_.typed(text.toStdString());
+    sendTyped(text.toStdString());
+    updatePrompt();
     update();
     return true;
 }
@@ -536,12 +537,63 @@ void ViewportWidget::toolEnter()
     if (!typed_.isEmpty()) {
         const std::string text = typed_.toStdString();
         typed_.clear();
-        (void)tools_.typed(text);
+        sendTyped(text);
     } else {
         (void)tools_.enter();
     }
     updatePrompt();
     update();
+}
+
+void ViewportWidget::sendTyped(const std::string& text)
+{
+    const bool selecting = tools_.expects() == cad::ToolInput::Selection;
+    const QString word = QString::fromStdString(text).trimmed();
+    if (selecting && (word.compare("U", Qt::CaseInsensitive) == 0 ||
+                      word.compare("Undo", Qt::CaseInsensitive) == 0)) {
+        stepBack(); // the tool's own U would skip the clicks it never saw
+        return;
+    }
+    const auto outcome = tools_.typed(text);
+    if (selecting && outcome == tools::ToolHost::Outcome::Continue &&
+        tools_.expects() == cad::ToolInput::Selection) {
+        // Taken by the tool at its selection step (All): the tool holds it,
+        // so Ctrl+Z hands it back to the tool, in its turn.
+        selectionSteps().emplace_back(std::nullopt);
+    }
+}
+
+void ViewportWidget::stepBack()
+{
+    auto& steps = selectionSteps();
+    if (tools_.expects() == cad::ToolInput::Selection && !steps.empty()) {
+        std::optional<std::vector<katana::entity::EntityId>> step = std::move(steps.back());
+        steps.pop_back();
+        if (step) {
+            cad::SelectionSet& selection = document_.selection();
+            selection.set(std::move(*step));
+            // An entity deleted since (by a panel, not this tool) stays gone.
+            (void)selection.prune(document_.model().entities);
+            document_.notifySelectionChanged();
+            updatePrompt();
+            update();
+            return;
+        }
+    }
+    // A tool with nothing to step back says so (onRejected, then onError).
+    (void)tools_.undo();
+    updatePrompt();
+    update();
+}
+
+std::vector<std::optional<std::vector<katana::entity::EntityId>>>&
+ViewportWidget::selectionSteps()
+{
+    if (selectionStepsOf_ != tools_.generation()) {
+        selectionSteps_.clear();
+        selectionStepsOf_ = tools_.generation();
+    }
+    return selectionSteps_;
 }
 
 void ViewportWidget::selectAt(const QPointF& screen, Qt::KeyboardModifiers modifiers)
@@ -608,7 +660,7 @@ void ViewportWidget::gatherForTool(const QPointF& from, const QPointF& to, bool 
         picked.push_back(*id);
     }
     cad::SelectionSet& selection = document_.selection();
-    const std::size_t before = selection.size();
+    std::vector<katana::entity::EntityId> before = selection.ids();
     for (const auto id : picked) {
         if (takeOut) {
             selection.remove(id);
@@ -617,9 +669,14 @@ void ViewportWidget::gatherForTool(const QPointF& from, const QPointF& to, bool 
         }
     }
     // All adds or all removes, so the count says whether anything changed.
-    if (selection.size() != before) {
-        document_.notifySelectionChanged();
+    if (selection.size() == before.size()) {
+        return;
     }
+    selectionSteps().emplace_back(std::move(before));
+    document_.notifySelectionChanged();
+    // The prompt counts what is picked (Trim's "<use 2 edges>"), and the
+    // command line hears it only through onPrompt.
+    updatePrompt();
 }
 
 void ViewportWidget::mousePressEvent(QMouseEvent* event)
@@ -800,11 +857,8 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
             break;
         case Qt::Key_Z:
             if (event->matches(QKeySequence::Undo)) {
-                // A tool with nothing to step back says so (onError); the
-                // drawing's Undo is Esc and then Ctrl+Z.
-                (void)tools_.undo();
-                updatePrompt();
-                update();
+                // The drawing's Undo is Esc and then Ctrl+Z.
+                stepBack();
                 return;
             }
             break;
