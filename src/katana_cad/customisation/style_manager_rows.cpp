@@ -328,6 +328,11 @@ std::vector<StyleDiagnostic> styleDiagnostics(const Document& document)
         if (missing.role == NameRole::Linetype) {
             diagnostic.kind = StyleDiagnosticKind::MissingLinetype;
             diagnostic.drawnAs = "a solid line (" + missing.fallback + ")";
+            // Defined, but as a symbol: say so, or a person looks for a
+            // library to load when the fix is to pick a linestyle.
+            if (missing.status == NameStatus::NotALinestyle) {
+                diagnostic.drawnAs += ": a `mode vertex` symbol, not a linestyle";
+            }
         } else {
             diagnostic.kind = StyleDiagnosticKind::MissingSymbol;
             diagnostic.drawnAs = "the built-in " + missing.fallback;
