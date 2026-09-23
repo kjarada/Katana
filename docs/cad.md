@@ -1453,14 +1453,18 @@ pictures - and each item here is one of those, in the layer that can test it.
   fix is to pick a linestyle, not to load a library. `missingNames` gives
   every Style or Layer linetype and Style symbol that is missing, with its
   users, what is drawn instead and `MissingName::status`, linetypes first.
-  Never a built-in symbol name (CAD-17), ByLayer, a plain line, or a style's
-  linetype that is its own symbol's name - what the 12da import writes for
-  every symbol string, a plain line under the symbol (D8). Every list of
-  "missing" reads this rule: the style manager's Missing chip and
-  Diagnostics, the symbol library, `customisationCoverage` (which keeps its
-  two reasons apart; `docs/survey_coding.md`, "Saying whether it is
-  working") and so CUSTOMISE and the window's customisation log. Each once
-  had a rule of its own, and they disagreed. `NamePicker` marks the same
+  Never a built-in symbol name (audit CAD-17, whose fix this rule
+  finishes), ByLayer, a plain line, or a style's linetype that is its own
+  symbol's name - what the 12da import writes for every symbol string, a
+  plain line under the symbol (D8). Every list of the DRAWING's missing
+  names reads this rule: the style manager's Missing chip and Diagnostics,
+  the symbol library, `customisationCoverage` (which keeps its two reasons
+  apart; `docs/survey_coding.md`, "Saying whether it is working") and so
+  CUSTOMISE and the window's customisation log. Each once had a rule of its
+  own, and they disagreed. The names a MAPFILE's rules give are judged apart
+  - by the lint (`UnresolvedLinestyle`, `LinestyleIsVertex`) and by the
+  load's "names the mapfile asks for" line - since a rule is not a style and
+  has no style's own symbol. `NamePicker` marks the same
   names, with one exception: an own-symbol linetype is marked "(not
   defined)" there although `missingNames` leaves it out.
   `linetypeCollisions` gives the names both a model Linetype and a
@@ -1725,8 +1729,9 @@ they are easiest to break:
   Format workbench, "The Format menu" above; the Survey workbench's dialogs),
   so it stays open beside the drawing and a buffer of unapplied edits
   survives hiding it.
-- **A headless session never opens a modal box**, and every field, button and
-  tab has an object name, so tests and the headless driver can find it.
+- **A headless session never opens a modal box**, and every action, menu,
+  field, button and tab has an object name, so tests and the headless driver
+  can find it.
 - **A dialog holding `Document&` must be deletable before the Document**, and
   a registration is owned by a `ListenerHandle` (above).
 - **Logic that can be tested below Qt lives in `katana_cad`** -
