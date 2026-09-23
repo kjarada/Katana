@@ -656,6 +656,53 @@ TEST(SurveyCodeManager, TheDialogOutlivesItsDocumentAndThenRefusesToApply)
     katana::qt::test::paint(dialog);
 }
 
+TEST(SurveyCodeManager, OnceItsDocumentHasGoneTheFormSavesEachRuleWithItsOwnNames)
+{
+    auto document = std::make_unique<Document>();
+    katana::archive12d::Customisation fixture = loadFixture();
+    document->setStyleLibrary(std::move(fixture.library));
+    document->setSurveyMap(std::move(fixture.map));
+    CustomisationContext context;
+    context.document = document.get();
+    context.log = [](const QString&, bool) {};
+    SurveyCodeManagerDialog dialog(context);
+    const SurveyMap original = dialog.buffer();
+    // While the drawing is open the pickers are loaded last with #7's symbol
+    // ("TEST Survey Mark") and then #0's linestyle ("TEST Water Main"). Once
+    // it has gone they can no longer be loaded (they read its library).
+    dialog.selectRule(7);
+    dialog.selectRule(0);
+    document.reset();
+    katana::qt::test::processEvents();
+
+    // Saved with no edit, a rule is itself: #4 (1* map_data) keeps linestyle
+    // "0" and #8 (TR* vertex_symbol_data) symbol "TEST Tree" - from the
+    // fixture's text - not the names the pickers were last loaded with.
+    for (const std::size_t index : {std::size_t{4}, std::size_t{8}}) {
+        dialog.selectRule(index);
+        auto* save = child<QPushButton>(dialog, "ruleUpdate");
+        ASSERT_TRUE(save->isEnabled());
+        save->click();
+        EXPECT_TRUE(dialog.buffer() == original) << "after saving #" << index;
+    }
+    EXPECT_EQ(dialog.buffer().at(4)->linestyle, "0");
+    EXPECT_EQ(dialog.buffer().at(8)->symbol.value_or(katana::entity::SurveySymbol{}).style,
+              "TEST Tree");
+    EXPECT_FALSE(dialog.dirty());
+
+    // What a picker shows is what Save writes, and it cannot be changed:
+    // #8 was loaded last, so the symbol picker shows "TEST Tree".
+    auto* symbol = child<QComboBox>(dialog, "ruleSymbol");
+    EXPECT_FALSE(symbol->isEnabled());
+    EXPECT_EQ(symbol->currentText(), QStringLiteral("TEST Tree"));
+
+    // A new rule has no linestyle, whatever the picker was last loaded with.
+    child<QPushButton>(dialog, "ruleNew")->click();
+    const auto fresh = dialog.formRule();
+    ASSERT_TRUE(fresh.ok()) << fresh.error().describe();
+    EXPECT_EQ(fresh->linestyle, "");
+}
+
 TEST(SurveyCodeManager, ATypedColourNameIsKeptAsWrittenListedInAnotherCaseOrNotAtAll)
 {
     ManagerFixture f;

@@ -423,19 +423,30 @@ void SurveyCodeManagerDialog::loadForm(const SurveyRule& rule, std::optional<std
     ruleBreakline_->setCurrentIndex(!rule.breakline ? 0
                                     : *rule.breakline == SurveyBreakline::Line ? 1
                                                                                 : 2);
-    // The pickers read the Document's library for what they list and draw:
-    // once the drawing has closed they are left as they were.
+    // The pickers read the Document's library for what they list and draw,
+    // so once the drawing has closed they cannot be loaded. Then each shows
+    // the rule's name as plain text and is disabled - what it shows is what
+    // formRule() writes, from formLinestyle_ and formSymbol_, and a name
+    // typed there could be neither checked nor kept.
     const bool open = document() != nullptr;
-    if (open) {
-        ruleLinestyle_->setCurrentName(rule.linestyle);
+    pickersLoaded_ = open;
+    const SurveySymbol symbol = rule.symbol.value_or(SurveySymbol{});
+    formLinestyle_ = rule.linestyle;
+    formSymbol_ = symbol.style;
+    for (const auto& [picker, name] :
+         {std::pair{ruleLinestyle_, &rule.linestyle}, std::pair{ruleSymbol_, &symbol.style}}) {
+        if (open) {
+            picker->setCurrentName(*name);
+        } else {
+            picker->setEditText(text(*name));
+            picker->setToolTip(tr("The drawing is closed, so its library cannot be listed: "
+                                  "the rule keeps this name."));
+        }
+        picker->setEnabled(open);
     }
     ruleWeight_->setText(text(rule.weight));
     ruleGroup_->setText(text(rule.group));
 
-    const SurveySymbol symbol = rule.symbol.value_or(SurveySymbol{});
-    if (open) {
-        ruleSymbol_->setCurrentName(symbol.style);
-    }
     setColourField(ruleSymbolColour_, symbol.colour);
     ruleSymbolSize_->setText(numberText(symbol.size));
     ruleSymbolRotation_->setText(numberText(symbol.rotation));
@@ -506,14 +517,14 @@ katana::core::Result<SurveyRule> SurveyCodeManagerDialog::formRule() const
         rule.breakline = breakline == 1   ? std::optional(SurveyBreakline::Line)
                          : breakline == 2 ? std::optional(SurveyBreakline::Point)
                                           : std::nullopt;
-        rule.linestyle = ruleLinestyle_->currentName();
+        rule.linestyle = pickersLoaded_ ? ruleLinestyle_->currentName() : formLinestyle_;
         rule.weight = text(ruleWeight_->text());
         rule.group = text(ruleGroup_->text());
         break;
     }
     case SymbolPage: {
         SurveySymbol symbol = rule.symbol.value_or(SurveySymbol{});
-        symbol.style = ruleSymbol_->currentName();
+        symbol.style = pickersLoaded_ ? ruleSymbol_->currentName() : formSymbol_;
         symbol.colour = text(ruleSymbolColour_->currentText());
         for (const auto& [field, target, what] :
              {std::tuple{ruleSymbolSize_, &symbol.size, "the size"},
