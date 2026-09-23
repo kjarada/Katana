@@ -228,6 +228,28 @@ SurveyCodeManagerDialog& CustomisationWorkbench::showCodeManager()
     return *codes_;
 }
 
+bool CustomisationWorkbench::confirmClose()
+{
+    if (codes_.isNull() || !codes_->dirty()) {
+        return true;
+    }
+    // The manager's own headless close would say its edits are kept in it,
+    // which is untrue when the window goes; and a quit must not take them
+    // unasked. A script can press Apply (applyMap) or Revert (revertMap).
+    if (headless()) {
+        log("Unapplied Edits: the Survey Code Manager has rule edits that are not on the "
+            "drawing, and a headless run has nobody to ask whether to discard them; Apply or "
+            "Revert them first.",
+            true);
+        return false;
+    }
+    // Shown and raised first, so the question comes over the rules it is
+    // about - the manager may have been closed with its edits kept.
+    // Closing a visible dialog runs its reject(), which asks.
+    showCodeManager().close();
+    return codes_.isNull() || !(codes_->isVisible() && codes_->dirty());
+}
+
 bool CustomisationWorkbench::purgeUnused()
 {
     katana::cad::Document& document = *services_.document;
