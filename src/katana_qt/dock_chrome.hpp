@@ -116,6 +116,16 @@ class DockTitleBar final : public QWidget {
     // Raised by a press anywhere on the bar that is not a button, before Qt
     // starts a drag: clicking a view's title makes it the active view.
     std::function<void()> onPressed;
+    // Raised by DockChrome once minimise() has hidden this dock in the tray,
+    // and once restore() has brought it back, whoever called them - its own
+    // Minimise button, minimiseNamed for a saved layout, the tray button,
+    // ViewWorkspace::ensureView. Not when something else shows a minimised
+    // dock (View > Panels, ViewWorkspace::arrange): that only drops its tray
+    // button. On the bar rather than on DockChrome because each dock has one
+    // owner (the window for a panel, the workspace for a view) and a single
+    // hook on the shared chrome would be one owner's to overwrite.
+    std::function<void()> onMinimised;
+    std::function<void()> onRestored;
 
   protected:
     void paintEvent(QPaintEvent* event) override;
@@ -173,7 +183,9 @@ class DockChrome final : public QObject {
     // geometry Qt still holds. Does nothing for a dock not installed here.
     void minimise(QDockWidget* dock);
     // Puts a minimised dock back where it was, raised to the front of its
-    // tab group; false when it is not minimised.
+    // tab group; false when it is not minimised. A docked view maximised in
+    // the same window meanwhile is restored first: the dock comes back beside
+    // it, so the maximise is over.
     bool restore(QDockWidget* dock);
     [[nodiscard]] bool isMinimised(const QDockWidget* dock) const;
     // In the order they were minimised, which is the tray's order.
