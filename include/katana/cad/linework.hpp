@@ -53,6 +53,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/cad/survey_import.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
@@ -217,6 +218,11 @@ enum class LineworkNoteKind {
     DuplicatePointNumber, // two points of one string share a number
     NoRuleForName,      // a line by control code alone: nothing styles it
     FallbackOnlyName,   // a line only because the bare "*" rule says so
+    // drawSurveyFeatures only: a feature names a point the file gives no
+    // coordinates for (survey::UnpositionedPoint). Left out of the line - it
+    // has nowhere to be - and said so, because the line then runs straight
+    // past a point the surveyor strung into it.
+    UnpositionedPoint,
 };
 
 [[nodiscard]] std::string_view toString(LineworkNoteKind kind);
@@ -293,5 +299,80 @@ struct LineworkResult {
 // The two constructed corners have no height: they were not surveyed.
 [[nodiscard]] katana::core::Result<LineworkResult>
 processLinework(const Document& document, const LineworkOptions& options);
+
+// ---- survey features --------------------------------------------------------------
+
+// Some field files string their points themselves - a LandXML PlanFeature, a
+// controller's line record - and those arrive as survey::SurveyFeature: a
+// code, the point ids in observation order, and whether it closes. There the
+// FILE has said which points are one line, so this draws exactly that, and
+// the code table decides only where each line goes and how it looks, as it
+// does for processLinework's lines (the same layer choice, the same styling
+// by applySurveyCodes when the command runs).
+//
+// Use this OR processLinework on one set of points, not both: a kerb the file
+// strung and whose points are also coded KB1 would be drawn twice.
+struct SurveyFeatureOptions {
+    // How the project was imported: the code and description properties the
+    // lines carry (import.codeProperty, import.descriptionProperty), and the
+    // layer its points went on (layerForPoint), which is where a line goes
+    // when its code names no model - with its points, as processLinework's
+    // does. Pass the options the import was given. import.createLayers is NOT
+    // read: coding.createLayers governs every layer here, as it does there.
+    SurveyImportOptions import{};
+    // As LineworkOptions::coding: how the lines are styled, and whether a
+    // missing layer may be created.
+    SurveyCodingOptions coding{};
+};
+
+// Why a feature is not drawn.
+enum class UnplacedFeatureReason {
+    TooFewPoints, // fewer than two of its points have a position: no line
+    Coincident,   // its positioned points are all in one place: no length to draw
+};
+
+[[nodiscard]] std::string_view toString(UnplacedFeatureReason reason);
+
+struct UnplacedFeature {
+    std::size_t index = 0; // in SurveyProject::features
+    std::string name{};
+    std::string code{};
+    UnplacedFeatureReason reason = UnplacedFeatureReason::TooFewPoints;
+};
+
+struct SurveyFeatureResult {
+    // ONE undoable command: the layers and the lines, with their styling;
+    // nullptr when no feature makes a line.
+    katana::commands::CommandPtr command{};
+    // One LineworkString per feature drawn, in the project's order: `name` is
+    // the feature's name, or its code when it has none; `key` and `number`
+    // split its CODE (the code is what the rules are keyed on and what the
+    // line carries); `points` is EMPTY, because the points are the project's
+    // and need not be in the drawing, and `pointNumbers` holds the project's
+    // point ids in the order joined. Also the notes (a point without a
+    // position, a close on two points, a code no rule knows), layersCreated
+    // and styling. `considered`, `notPoints`, `unplaced` and `pointsRemoved`
+    // are about point entities and stay empty.
+    LineworkReport report{};
+    std::vector<UnplacedFeature> unplaced{}; // in the project's order
+};
+
+// Plans the lines of `project`'s features on `document`, from the project's
+// own coordinates (a SurveyPoint is (easting, northing) in the drawing, as
+// importSurveyProject puts it, and its height is kept per vertex, absent
+// staying absent). Straight segments only: a feature carries no curve, so the
+// control codes processLinework reads are not looked for here.
+//
+// Fails with survey::validateProject's error for an inconsistent project, as
+// importSurveyProject does; with InvalidArgument for a rule model that is not a
+// valid layer name, or with NotFound for a layer the drawing lacks when
+// coding.createLayers is off and neither the rule's model nor the points'
+// layer exists (a line put on some other layer would look right and be wrong).
+// Never fails on a feature it cannot draw: that is in `unplaced`.
+//
+// The command must be executed on THIS document, as processLinework's.
+[[nodiscard]] katana::core::Result<SurveyFeatureResult>
+drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject& project,
+                   const SurveyFeatureOptions& options);
 
 } // namespace katana::cad
