@@ -682,6 +682,18 @@ if(TARGET katana)
             "-DEXPECT=draw.line: Line, checked[\r\n]+toolSelect: Select, unchecked[\r\n]+1 line[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked[\r\n]+1 entities[\r\n]+1  Line  layer=0  0,0 -> 10,0  length=10"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tool_by_alias_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A tool that cannot start - the only view shows a section, so there is
+    # no plan view to draw in - is left unchecked, with Select checked: the
+    # click checks a tool's action before the start is refused, and a
+    # refusal changes no tool, so nothing else would put the marks right.
+    add_test(NAME qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*viewShowsSection|*draw.line|?draw.line|?toolSelect"
+            "-DEXPECT=there is no plan view to draw in[^\r\n]*[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/refused_tool_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
     # keys that silently do nothing; and within each menu every underlined
@@ -700,6 +712,7 @@ if(TARGET katana)
                          qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
                          qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
                          qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
+                         qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"

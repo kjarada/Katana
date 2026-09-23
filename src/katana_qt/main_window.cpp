@@ -279,14 +279,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     views_->onActiveChanged = [this] { refreshViewMenu(); };
     // The running tool's action checked, and Select while none runs, in the
     // menus and on the toolbars alike: one action per tool, so they agree.
-    views_->onActiveToolChanged = [this](const std::string& id) {
-        toolActions_.setActive(id);
-        selectAction_->setChecked(id.empty());
-        // The prompt belongs in the command line, where the answer is typed.
-        if (id.empty()) {
-            commandInput_->setPlaceholderText(kCommandPlaceholder);
-        }
-    };
+    views_->onActiveToolChanged = [this](const std::string& id) { showRunningTool(id); };
     // "1 line", "3 lines trimmed": what a tool did goes in the log with
     // everything else the drawing was told.
     views_->onToolMessage = [this](const QString& message) { logMessage(message); };
@@ -842,11 +835,28 @@ void MainWindow::startTool(const std::string& id)
 {
     if (const auto started = views_->startTool(id); !started) {
         logMessage(QString::fromStdString(started.error().describe()), true);
+        // A click on a tool's action checks it before this runs (a checkable
+        // action in an exclusive group), and a refusal changes no tool, so
+        // no onActiveToolChanged follows to put the marks right: without
+        // this the refused tool stays checked beside Select, a tool shown
+        // running that does not exist.
+        showRunningTool(views_->activeToolId());
         return;
     }
     // The picks and the typed values go to the drawing from here on.
     if (ViewportWidget* plan = views_->activePlanView()) {
         plan->setFocus(Qt::OtherFocusReason);
+    }
+}
+
+void MainWindow::showRunningTool(const std::string& id)
+{
+    toolActions_.setActive(id);
+    selectAction_->setChecked(id.empty());
+    // The prompt belongs in the command line, where the answer is typed;
+    // with no tool running the line is the command line's own again.
+    if (id.empty()) {
+        commandInput_->setPlaceholderText(kCommandPlaceholder);
     }
 }
 
@@ -3355,6 +3365,9 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
     for (const cad::ViewKind kind : {cad::ViewKind::Plan, cad::ViewKind::Model3D,
                                      cad::ViewKind::Section, cad::ViewKind::Elevation}) {
         QAction* action = kindMenu->addAction(cad::toString(kind));
+        // viewShowsPlan, viewShows3D, ...: what --trigger and DRIVE's '*'
+        // reach it by.
+        action->setObjectName(QString("viewShows") + cad::toString(kind));
         action->setCheckable(true);
         action->setData(static_cast<int>(kind));
         connect(action, &QAction::triggered, this, [this, kind] {

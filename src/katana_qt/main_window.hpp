@@ -181,6 +181,10 @@ class MainWindow final : public QMainWindow {
     // Starts catalogue tool `id` in the active plan view and gives that view
     // the keyboard, or says why it cannot.
     void startTool(const std::string& id);
+    // Checks the action of tool `id` in the menus and toolbars, and Select
+    // when `id` is "" (nothing runs); the command line's placeholder goes
+    // back to its own when nothing runs.
+    void showRunningTool(const std::string& id);
     void buildViewMenu(QMenu* viewMenu);
     // `name`, when given, becomes the action's object name: what --action and
     // QMainWindow::saveState know it by.
