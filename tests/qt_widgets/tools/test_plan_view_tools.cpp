@@ -402,3 +402,46 @@ TEST(PlanViewTools, EnterAtNoPromptRepeatsTheLastTool)
     EXPECT_EQ(plan.view.activeToolId(), "draw.line");
     EXPECT_EQ(plan.entities().size(), 1u) << "repeating a tool draws nothing by itself";
 }
+
+TEST(PlanViewTools, EscAfterATrimKeepsTheCutAsOneUndoStep)
+{
+    // The Modify Edit report's case: Trim holds its cuts in a session that
+    // only Enter commits, so an Esc that dropped the tool would lose them.
+    // The horizontal line (0, 0)-(20, 0) is crossed by the vertical one at
+    // x = 10; picking it at (15, 0) - pixel (350, 150) - takes away the part
+    // beyond the crossing, leaving (0, 0)-(10, 0).
+    PlanFixture plan;
+    addLine(plan.document, Point2(0, 0), Point2(20, 0));
+    addLine(plan.document, Point2(10, -5), Point2(10, 5));
+    ASSERT_TRUE(plan.view.startTool("modify.trim").ok());
+    plan.enter();         // every object is a cutting edge
+    plan.press(350, 150); // the part to take away
+    ASSERT_EQ(plan.undoSteps(), 2u) << "the cut is the tool's until Enter or Esc";
+    plan.escape();
+
+    EXPECT_FALSE(plan.view.toolActive());
+    EXPECT_EQ(plan.undoSteps(), 3u);
+    const katana::entity::Entity* kept = nullptr;
+    for (const auto* entity : plan.entities()) {
+        const auto* segment = std::get_if<Segment2>(&entity->geometry);
+        if (segment != nullptr && segment->start.y == 0.0 && segment->end.y == 0.0) {
+            kept = entity;
+        }
+    }
+    expectSegment(kept, Point2(0, 0), Point2(10, 0));
+}
+
+TEST(PlanViewTools, EscFromAMoveAtItsSecondPointMovesNothing)
+{
+    // Move's Enter at the second point moves by the base point as a
+    // displacement (AutoCAD's default); Esc must never apply it.
+    PlanFixture plan;
+    const EntityId id = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    plan.document.selection().add(id);
+    ASSERT_TRUE(plan.view.startTool("modify.move").ok());
+    plan.press(250, 100); // base (5, 5)
+    plan.escape();
+
+    expectSegment(plan.document.model().entities.find(id), Point2(0, 0), Point2(10, 0));
+    EXPECT_EQ(plan.undoSteps(), 1u);
+}
