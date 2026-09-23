@@ -478,6 +478,23 @@ gtest_discover_tests needs 3.29 and preset schema 6 needs 3.25.) `-Wall -Wextra 
   `qoffscreen.dll`, which windeployqt omits, because `--plot` is a headless
   feature and without that plugin Qt does not fail - it opens a modal box and
   waits for ever. Record in `docs/architecture.md`.
+* **The build tree is self-contained too (2026-09-23, at the owner's
+  request that GDAL and PDAL be part of the program rather than borrowed from
+  MSYS2).** The `katana_runtime` target runs the bundle's own deploy script
+  into `<build>/bin` and `<build>/share` after `katana` and `katana_cli` link,
+  so `build/release/bin/katana.exe` runs with no MSYS2 on `PATH` - verified
+  with `PATH` reduced to the Windows directories: the CLI imported LAS,
+  ASCII-grid and GeoJSON data and exported DXF, and the GUI built its window.
+  Incremental: a full deploy (36 s idle, 62-85 s under load, Release) runs
+  once per configuration or toolchain update, and every other build checks
+  timestamps in 0-1 s. `-DKATANA_DEPLOY_RUNTIME=OFF` turns it off.
+  **Static linking was examined and NOT done**: MSYS2 has no static PDAL or
+  PROJ, and `libpdalcpp` itself imports the GDAL DLL, so GDAL linked in
+  statically would put two GDALs in one process. A fully static Katana means
+  building GDAL, PROJ, PDAL and their dependencies from source - with a
+  trimmed driver set, which would also answer the 388 MB below - and GEOS's
+  LGPL then asks for relinkable objects. That is OUTSTANDING as a packaging
+  project of its own; the reasoning is in `docs/architecture.md`.
 
 * **The executable is branded.** `katana.rc.in` embeds the application icon
   and a `VERSIONINFO` block (version from `project(... VERSION ...)`, written
