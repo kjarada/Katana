@@ -141,9 +141,12 @@ class SymbolLibraryDialog : public QDialog {
     void onDocumentChanged(const DocumentChanges& changes);
     void rebuildTree();
     void rebuildStyles();
+    // Refilters, keeping the grid's selection (by name: rows mean nothing
+    // across a reset) and the current symbol where they are still shown.
     void applyFilter();
+    void applyFilter(const std::vector<std::string>& selected);
     void updateChipCounts();
-    void restoreCurrent();
+    void restoreCurrent(const std::vector<std::string>& selected);
     void currentChanged();
     void showDetails();
     void updatePrintSize();

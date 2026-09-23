@@ -429,6 +429,35 @@ TEST(SymbolLibrary, ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest
         QStringLiteral("Not exported, as no library defines them: cross")));
 }
 
+TEST(SymbolLibrary, TheGridsSelectionAndCurrentSymbolSurviveAReloadAndAFilter)
+{
+    // Two selected for an export, the mark current; then a command reloads
+    // the grid and a search narrows it. What is still shown stays selected.
+    LibraryFixture fixture;
+    SymbolLibraryDialog dialog(fixture.context);
+    ASSERT_TRUE(dialog.selectSymbol("TEST Survey Mark"));
+    QListView* grid = child<QListView>(dialog, "symbolGrid");
+    grid->selectionModel()->select(
+        grid->model()->index(dialog.gridModel().rowOf("TEST Valve"), 0), QItemSelectionModel::Select);
+    ASSERT_EQ(dialog.selectedNames(),
+              (std::vector<std::string>{"TEST Survey Mark", "TEST Valve"}));
+
+    fixture.point(0.0, 0.0);
+    katana::qt::test::processEvents();
+    EXPECT_EQ(dialog.selectedNames(),
+              (std::vector<std::string>{"TEST Survey Mark", "TEST Valve"}));
+    EXPECT_EQ(dialog.currentSymbol(), "TEST Survey Mark");
+
+    // "survey" keeps only the mark: the valve is hidden, the mark stays.
+    plainChild<katana::qt::FilterBar>(dialog, "symbolFilter")->setText(QStringLiteral("survey"));
+    EXPECT_EQ(dialog.selectedNames(), std::vector<std::string>{"TEST Survey Mark"});
+    EXPECT_EQ(dialog.currentSymbol(), "TEST Survey Mark");
+    // And a search that hides it leaves nothing current for an action to reach.
+    plainChild<katana::qt::FilterBar>(dialog, "symbolFilter")->setText(QStringLiteral("valve"));
+    EXPECT_EQ(dialog.currentSymbol(), "");
+    EXPECT_FALSE(child<QDoubleSpinBox>(dialog, "assignSize")->isEnabled());
+}
+
 TEST(SymbolLibrary, ReplaceInStylesSwapsAMissingSymbolForALibraryOneInOneUndoStep)
 {
     LibraryFixture fixture;
