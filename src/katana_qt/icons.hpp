@@ -86,7 +86,7 @@ enum class Icon {
     ExportDem,
     ConvertCopc,
     DatasetInfo,
-    // The workspace (PLAN.MD 47). The window buttons on every panel's and
+    // The workspace (docs/cad.md). The window buttons on every panel's and
     // view's title bar are drawn in neutral only: they act on the window, not
     // on the drawing, and an accent there would compete with the active view's
     // accent marker for the eye.

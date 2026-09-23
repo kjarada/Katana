@@ -1,7 +1,8 @@
 #pragma once
 
-// The layers ONE view shows (PLAN.MD 47 slice 5; the user's request of
-// 2026-09-23 for "per view controls to add and remove layers").
+// The layers ONE view shows (the user's request of 2026-09-23 for "per view
+// controls to add and remove layers"; docs/cad.md, "The workspace", for the
+// rule a view's hidden layers take part in).
 //
 // Opened from the Layers button on a view's title bar. It edits that view's
 // cad::ViewState - its LayerOverrides and hiddenReferences - and nothing

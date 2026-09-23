@@ -78,7 +78,7 @@ class ViewWorkspace final : public QMainWindow {
     ViewWorkspace(const ViewWorkspace&) = delete;
     ViewWorkspace& operator=(const ViewWorkspace&) = delete;
 
-    // ---- chrome (PLAN.MD 47 slices 4 and 5) ------------------------------------
+    // ---- chrome: title bars, the tray, maximise, per-view layers --------------
     // Gives every open and future view the main window's title bar: its kind
     // switcher, its Layers button, Zoom Extents and the window buttons, with
     // the active view's bar marked. The chrome belongs to the main window,
