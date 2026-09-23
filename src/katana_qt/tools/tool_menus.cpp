@@ -175,6 +175,9 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
         QToolBar* bar = barAt != targets.toolBars.end() ? barAt->second : nullptr;
         if (menu == nullptr) {
             result.unplaced_.push_back(category);
+            if (bar == nullptr) {
+                continue; // nowhere to put them; the actions exist all the same
+            }
         }
 
         bool firstGroup = true;
@@ -212,9 +215,11 @@ ToolActions fillToolMenus(const cad::ToolCatalog& catalog, const ToolMenuTargets
                 }
                 QMenu*& family = familyMenus[parts->first];
                 if (family == nullptr) {
-                    // The submenu is owned by the category's menu when there
-                    // is one, so it goes when the menu does.
-                    family = new QMenu(qs(parts->first), menu);
+                    // Owned by the category's menu, or by its toolbar when
+                    // it has no menu, so it goes when they do.
+                    QWidget* const parent = menu != nullptr ? static_cast<QWidget*>(menu)
+                                                            : static_cast<QWidget*>(bar);
+                    family = new QMenu(qs(parts->first), parent);
                     family->setObjectName(qs("toolFamily." + category + "." + parts->first));
                     family->setIcon(toolIcon(info->id));
                     if (menu != nullptr) {

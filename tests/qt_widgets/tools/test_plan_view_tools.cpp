@@ -445,3 +445,21 @@ TEST(PlanViewTools, EscFromAMoveAtItsSecondPointMovesNothing)
     expectSegment(plan.document.model().entities.find(id), Point2(0, 0), Point2(10, 0));
     EXPECT_EQ(plan.undoSteps(), 1u);
 }
+
+TEST(PlanViewTools, SelectIsReportedToTheWindowEvenWithNothingRunning)
+{
+    // The window checks its Select button from onToolChanged at start-up,
+    // when no tool has run yet.
+    PlanFixture plan;
+    std::vector<Tool> reported;
+    plan.view.onToolChanged = [&](Tool tool) { reported.push_back(tool); };
+    plan.view.setTool(Tool::Select);
+    ASSERT_EQ(reported.size(), 1u);
+    EXPECT_EQ(reported.front(), Tool::Select);
+
+    plan.view.setTool(Tool::Line);
+    plan.view.setTool(Tool::Select);
+    ASSERT_EQ(reported.size(), 3u);
+    EXPECT_EQ(reported[1], Tool::Line);
+    EXPECT_EQ(reported[2], Tool::Select);
+}

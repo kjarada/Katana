@@ -208,8 +208,14 @@ void ViewportWidget::setTool(Tool tool)
 {
     if (tool == Tool::Select) {
         typed_.clear();
-        tools_.cancel();
         boxStart_.reset();
+        if (tools_.active()) {
+            tools_.cancel(); // its onFinished reports the change
+        } else if (onToolChanged) {
+            // Reported even when nothing was running, as it always was: the
+            // window checks its Select button from this at start-up.
+            onToolChanged(Tool::Select);
+        }
         updatePrompt();
         update();
         return;
