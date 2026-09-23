@@ -174,15 +174,15 @@ class ViewportWidget final : public QWidget {
     // Printable text typed into this view that the view has no use for
     // itself: "type anywhere", as in AutoCAD, where typing LINE over the
     // drawing starts the command. The window forwards it to the command line.
-    // Never raised for a key the view handles (Esc, Enter, Delete, and C while
-    // a polyline is being drawn) or for a Ctrl or Alt chord - those are
-    // shortcuts, not text.
+    // Never raised for a key the view handles (Esc, Enter, Space, Delete), for
+    // anything typed while a tool runs (that is the tool's input, kept in
+    // typedInput()), or for a Ctrl or Alt chord - those are shortcuts, not
+    // text.
     std::function<void(const QString& text)> onTextTyped;
-    // A right-click with the Select tool and nothing half-picked, at the
-    // screen position the menu should open at; and the keyboard's menu key
-    // under the same conditions. While a drawing tool is working, a
-    // right-click still finishes or cancels it, and with no handler set it
-    // cancels as it always has.
+    // A right-click with no tool running and no selection box being dragged,
+    // at the screen position the menu should open at; and the keyboard's
+    // menu key under the same conditions. While a tool runs, a right-click
+    // is Enter instead, and with no handler set a right-click cancels (Esc).
     std::function<void(const QPoint& globalPos)> onContextMenu;
 
   protected:
@@ -303,6 +303,8 @@ class ViewportWidget final : public QWidget {
     // it holds a reference to.
     tools::ToolHost tools_;
     QString typed_;
+    // The tool Enter at no prompt runs again; "" until one has run.
+    std::string lastToolId_;
     mutable std::size_t lastPreviewCount_ = 0;
     Point2 cursorWorld_; // after snapping
     std::optional<katana::cad::SnapResult> activeSnap_;
