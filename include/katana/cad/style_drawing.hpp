@@ -107,6 +107,18 @@ struct FlatDefinition {
     double lowestX = 0.0;
     double highestX = 0.0;
     bool anyPoint = false;
+    // How far along x the MARKS reach: every point of every run - an arc's
+    // chords, a circle's points, a dot - and every text's anchor.
+    //
+    // Not the pen's travel above, and not a period: an arc is written as a
+    // move to its CENTRE, so a scallop's pen stands only at the middle of a
+    // half-circle whose ends are a radius either side of it, and a Draw can
+    // start from where the pen began, which no Move stood on. Laying only the
+    // repeats that can reach a view needs where the marks are; measured by
+    // the pen, the last repeat at the end of a line was left out.
+    double drawnLowX = 0.0;
+    double drawnHighX = 0.0;
+    bool anyDrawn = false;
     // The furthest any mark sits across the line (|y|), a text's height times
     // its length included: how far a pattern can reach into a view from a line
     // that is itself just outside it.

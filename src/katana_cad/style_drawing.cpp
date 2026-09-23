@@ -337,6 +337,22 @@ FlatDefinition flattenDefinition(const LineStyle& style)
             break;
         }
     }
+    // Measured from what was made rather than kept up in each case above, so
+    // a mark added to the flattening later is counted without anyone having
+    // to remember to.
+    const auto drawn = [&flat](double x) {
+        flat.drawnLowX = flat.anyDrawn ? std::min(flat.drawnLowX, x) : x;
+        flat.drawnHighX = flat.anyDrawn ? std::max(flat.drawnHighX, x) : x;
+        flat.anyDrawn = true;
+    };
+    for (const FlatDefinition::Run& one : flat.runs) {
+        for (const Point2& point : one.points) {
+            drawn(point.x);
+        }
+    }
+    for (const FlatDefinition::Text& text : flat.texts) {
+        drawn(text.at.x);
+    }
     return flat;
 }
 
@@ -444,12 +460,24 @@ LinestyleLayout layLinestyle(const FlatDefinition& flat, const Polyline2& line,
     const double last = std::floor(path.length() / period);
     std::vector<std::pair<double, double>> repeatsLaid; // first and last repeat, inclusive
     if (options.visible) {
-        // Repeat k covers [k p + lowestX s, k p + highestX s] along the line,
-        // so it can reach the stretch [a, b] only for k in
-        // [ceil((a - highestX s) / p), floor((b - lowestX s) / p)].
+        // Repeat k covers [k p + low, k p + high] along the line, so it can
+        // reach the stretch [a, b] only for k in
+        // [ceil((a - high) / p), floor((b - low) / p)].
+        //
+        // low and high take in the MARKS as well as the pen: an arc reaches a
+        // radius past the move to its centre. The margin's extra period does
+        // not cover that at the end of the line, where b is the line's end
+        // and not the view's, so a pen-only range dropped the last repeat of
+        // a scallop that the unclipped laying (the previews) drew.
         const double margin = flat.reachAcross * scale + (repeats ? period : 0.0);
-        const double low = flat.lowestX * scale;
-        const double high = flat.highestX * scale;
+        double low = flat.lowestX;
+        double high = flat.highestX;
+        if (flat.anyDrawn) {
+            low = flat.anyPoint ? std::min(low, flat.drawnLowX) : flat.drawnLowX;
+            high = flat.anyPoint ? std::max(high, flat.drawnHighX) : flat.drawnHighX;
+        }
+        low *= scale;
+        high *= scale;
         for (const auto& [a, b] : path.inside(options.visible->inflated(margin))) {
             double first = std::max(0.0, std::ceil((a - high) / period));
             const double lastHere = std::min(last, std::floor((b - low) / period));
