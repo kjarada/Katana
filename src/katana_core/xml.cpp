@@ -1,23 +1,13 @@
-#include "xml.hpp"
+#include "katana/core/xml.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 
-#include "text_utilities.hpp"
-
-namespace katana::archive12d::detail {
+namespace katana::core {
 
 namespace {
-
-using katana::core::ErrorCode;
-using katana::core::makeError;
-
-// A mapfile is four elements deep. The cap is here because this reads
-// untrusted text and the reader is recursive: without it a file made of
-// 100,000 open tags would end the process by exhausting the stack rather than
-// by reporting anything. 64 is far past any real document of this kind.
-constexpr std::size_t kMaxDepth = 64;
 
 [[nodiscard]] bool isNameStart(char c)
 {
@@ -34,11 +24,29 @@ constexpr std::size_t kMaxDepth = 64;
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
 
+// Trimming an element's text is the reader's only need for a string helper and
+// core has no string-utility header; one function local to its single caller
+// is a smaller defect than a new public one for it (CLAUDE.md section 1). The
+// wider `std::isspace` set rather than the four XML white-space characters
+// above, because that is what this trimmed before it moved here and a move
+// must not change what a document says.
+[[nodiscard]] std::string_view trimmed(std::string_view text)
+{
+    const auto isBlank = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    while (!text.empty() && isBlank(static_cast<unsigned char>(text.front()))) {
+        text.remove_prefix(1);
+    }
+    while (!text.empty() && isBlank(static_cast<unsigned char>(text.back()))) {
+        text.remove_suffix(1);
+    }
+    return text;
+}
+
 class Parser {
   public:
     explicit Parser(std::string_view text) : text_(text) {}
 
-    katana::core::Result<XmlNode> run()
+    Result<XmlNode> run()
     {
         skipProlog();
         if (failed_) {
@@ -55,7 +63,7 @@ class Parser {
     }
 
   private:
-    [[nodiscard]] katana::core::Error fail(std::string what)
+    [[nodiscard]] Error fail(std::string what)
     {
         failed_ = true;
         error_ = makeError(ErrorCode::InvalidArgument, std::move(what),
@@ -251,8 +259,8 @@ class Parser {
 
     bool readElement(XmlNode& node, std::size_t depth)
     {
-        if (depth > kMaxDepth) {
-            (void)fail("elements are nested more than " + std::to_string(kMaxDepth) + " deep");
+        if (depth > kXmlMaxDepth) {
+            (void)fail("elements are nested more than " + std::to_string(kXmlMaxDepth) + " deep");
             return false;
         }
         ++at_; // the '<'
@@ -330,7 +338,7 @@ class Parser {
     std::string_view text_;
     std::size_t at_ = 0;
     bool failed_ = false;
-    katana::core::Error error_{};
+    Error error_{};
 };
 
 } // namespace
@@ -359,10 +367,10 @@ std::vector<const XmlNode*> XmlNode::childrenNamed(std::string_view childName) c
     return found;
 }
 
-katana::core::Result<XmlNode> readXml(std::string_view text)
+Result<XmlNode> readXml(std::string_view text)
 {
     Parser parser(text);
     return parser.run();
 }
 
-} // namespace katana::archive12d::detail
+} // namespace katana::core
