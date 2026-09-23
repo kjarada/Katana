@@ -39,7 +39,10 @@
 // what survey::parseDms and survey::parseBearing accept. D M S with a mark
 // after each field - 36°52'11.63", 36d52m11.63s, 36:52:11.63, 36-52-11.63, or
 // blank separated 36 52 11.63 - or decimal degrees 36.8699; only the last
-// field may carry a fraction. A direction may also be a quadrant bearing,
+// field may carry a fraction. The blank separated form is for a box that holds
+// one angle: in a line of several fields (a traverse leg, a converter point)
+// blanks separate the fields, so an angle there has none inside it.
+// A direction may also be a quadrant bearing,
 // N 36d52m11.63s E. There is no DDD.MMSS "calculator" notation, because
 // 36.5211 would then mean two different angles depending on who typed it.
 
@@ -208,8 +211,12 @@ struct AreaResult {
 // Closed polylines (survey::polygonArea and polygonPerimeter, which work
 // relative to the first vertex so UTM-sized coordinates keep their precision)
 // and circles. Everything else, and a degenerate polygon, is skipped with the
-// reason. InvalidArgument for an empty list; NotFound for an unknown id;
-// InvalidGeometry when nothing in the list has an area - with the reasons.
+// reason; an id listed more than once is measured once and each repeat is
+// skipped as "listed more than once", so no outline is added to the total
+// twice. InvalidArgument for an empty list; NotFound for an unknown id;
+// InvalidGeometry when nothing in the list has an area - with the reasons,
+// grouped and shortened as formatAreaReport lists them (a count per reason and
+// at most a dozen ids), so a selection of thousands of points is one short line.
 // Self-intersecting outlines are not detected: the signed areas of their lobes
 // cancel (survey/cogo.hpp), which the report states.
 [[nodiscard]] core::Result<AreaResult> computeArea(const Document& document,
@@ -454,15 +461,23 @@ struct CoordinateConversion {
 // "EPSG:4326") or anything PROJ accepts. `points` is one point per line,
 // "[label] first second", where first/second are easting and northing for a
 // projected system and LATITUDE and LONGITUDE for a geographic one (decimal
-// degrees or any parseSurveyAngle format; negative is south and west). Heights
-// are not converted. Errors: InvalidCRS / NotFound / Unsupported from geodesy,
-// ParseFailure naming the line, InvalidArgument for no points.
+// degrees or any parseSurveyAngle format WITHOUT BLANKS INSIDE IT - -33:51:24.5,
+// -33d51m24.5s - since blanks separate the label and the two coordinates;
+// negative is south and west). The label is everything before the last two
+// fields and may hold blanks and one number ("102", "CP 1"); a label holding
+// two or more numbers (angles, for a geographic source) is refused as an angle
+// typed with blanks or a third coordinate, rather than read as a point that was
+// never meant. Heights are not converted. Errors: InvalidCRS / NotFound /
+// Unsupported from geodesy, ParseFailure naming the line, InvalidArgument for
+// no points.
 [[nodiscard]] core::Result<CoordinateConversion>
 convertCoordinates(std::string_view source, std::string_view target, std::string_view points);
 [[nodiscard]] std::string formatCoordinateConversion(const CoordinateConversion& conversion);
 
 // The selected point entities as convertCoordinates lines for `source`:
-// "name easting northing". The drawing's own x and y are easting and northing,
+// "name easting northing", with '#', ',' - and the blanks of a name holding two
+// numbers, "STN 3 4" - turned into '_' so the name reads back as one label.
+// The drawing's own x and y are easting and northing,
 // so a geographic source system is refused (InvalidArgument) rather than having
 // its latitude filled with an easting. NotFound / InvalidCRS from geodesy.
 [[nodiscard]] core::Result<std::string> conversionLinesForSelection(const Document& document,
