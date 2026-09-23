@@ -1,8 +1,11 @@
 #include "modify_edit_support.hpp"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <limits>
+#include <system_error>
 #include <utility>
 
 #include "katana/commands/change_set.hpp"
@@ -31,7 +34,23 @@ std::optional<double> parseNumber(std::string_view text)
     return katana::core::parseFiniteDouble(katana::core::trimmed(text));
 }
 
-std::string formatNumber(double value) { return katana::core::formatExactReal(value); }
+std::string formatNumber(double value)
+{
+    // The shortest text that reads back exactly, as formatExactReal writes -
+    // but never in exponent form, which a person reading "within 1e-04" in a
+    // prompt should not have to decode. Beyond 1e15 a fixed figure is a wall
+    // of digits, and no drawing value is that large, so the exact form stays.
+    if (!std::isfinite(value) || std::abs(value) >= 1e15) {
+        return katana::core::formatExactReal(value);
+    }
+    std::array<char, 64> buffer{};
+    const auto written =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::fixed);
+    if (written.ec != std::errc{}) {
+        return katana::core::formatExactReal(value);
+    }
+    return std::string(buffer.data(), written.ptr);
+}
 
 std::string asSentence(std::string_view text)
 {
@@ -69,6 +88,13 @@ std::string kindName(const Geometry& geometry)
         return "dimension";
     }
     return "object";
+}
+
+std::string withArticle(const std::string& noun)
+{
+    const bool vowel = !noun.empty() && std::string_view("aeiou").find(noun.front()) !=
+                                            std::string_view::npos;
+    return (vowel ? "an " : "a ") + noun;
 }
 
 std::optional<std::string> refusalToEdit(const Document& document, EntityId id)
