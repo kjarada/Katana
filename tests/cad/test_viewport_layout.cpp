@@ -1,20 +1,66 @@
-// Tiled viewports (PLAN.MD Phase 08).
+// The layout presets and how they become docked views (PLAN.MD Phase 08, 47).
 //
-// The arithmetic tested here decides which viewport a click lands in and how
-// big each one's framebuffer is. Getting it a pixel wrong shows up as a seam or
-// as clicks activating the neighbouring view, both of which are much easier to
-// pin down here than in a running window.
+// Since the dock workspace of 2026-09-23 a preset is no longer a tiling that
+// Katana computes pixels for - Qt's QMainWindow owns the pixels - but an
+// ARRANGEMENT: layoutRects says what "Three: Left" looks like, and dockSplits
+// says how to build it out of docks by halving one view at a time. The test
+// that matters is that the two agree exactly, so the picture in the menu and
+// the docks it produces cannot drift apart. It simulates each split on
+// rectangles the way QMainWindow::splitDockWidget splits a dock: the existing
+// view keeps the left or top half, the added view gets the right or bottom.
+//
+// The ViewportLayout class and its ViewportCell were retired with their last
+// user, the tiled ViewportContainer. Where each of their tests went:
+//
+//   StartsAsASinglePlanView
+//       ViewSet.TheFirstViewAddedBecomesActiveAndLaterOnesDoNot, and slot 0 of
+//       AnArrangementOpensPlanThreeDSectionAndElevationInThatOrder below.
+//       Opening the first view is now the workspace's act, not the model's.
+//   EveryLayoutTilesTheAreaExactlyOnce                  kept below.
+//   EveryPointBelongsToExactlyOneCell
+//       EveryPointOfTheAreaBelongsToExactlyOneRect below, on layoutRects.
+//       Its cellAt half went with the class: Qt hit-tests the docks.
+//   PointsOutsideTheAreaHitNothing
+//       PointsOnTheFarEdgeOrOutsideTheAreaBelongToNoRect below.
+//   QuadPutsPlanThreeDSectionAndElevationInThatOrder
+//       AnArrangementOpensPlanThreeDSectionAndElevationInThatOrder below.
+//   GrowingTheLayoutKeepsTheViewTheUserAlreadyHad
+//       ViewSet.ChangingKindKeepsThePlanZoomTheLayersAndTheSection and
+//       ViewSet.AViewsStateStaysAtOneAddressWhateverElseOpensOrCloses: a view
+//       now lives until it is closed, whatever arrangement it is in.
+//   ShrinkingMovesTheActiveCellInsteadOfLeavingItDangling
+//       ViewSet.RemovingTheActiveViewActivatesTheMostRecentlyActiveOfTheRest.
+//   ActivatingAnIndexOutsideTheLayoutDoesNothing
+//       ViewSet.ActivatingAnUnknownViewIsNotFoundAndChangesNothing.
+//   SettingTheKindOfAMissingCellIsReportedNotIgnored
+//       ViewSet.SettingTheKindOfAnUnknownViewIsNotFoundAndChangesNothing.
+//   ChangingAKindGivesTheCellAnAppropriateProjection
+//       ViewSet.ChangingKindGivesTheCameraThatKindsStartingView, which checks
+//       the direction as well as the projection.
+//   EveryLayoutAndViewKindHasAName
+//       EveryLayoutAndViewKindHasADistinctName below.
+//   PixelRectanglesTileTheWindowWithNoSeamAndNoOverlap,
+//   CellsNeverReportAZeroSizedFramebuffer,
+//   ResizingUpdatesEveryCellsCameraViewport
+//       No longer cad's to test. QMainWindow gives each dock its pixels, and
+//       each view widget sizes its own framebuffer and camera, never below
+//       1 x 1, in its own resizeEvent (RenderViewWidget::resizeEvent).
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <cstddef>
+#include <limits>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "katana/cad/viewport_layout.hpp"
 
 using katana::cad::CellRect;
+using katana::cad::DockSplit;
 using katana::cad::LayoutKind;
 using katana::cad::ViewKind;
-using katana::cad::ViewportLayout;
 
 namespace {
 
@@ -22,15 +68,71 @@ constexpr LayoutKind kAllLayouts[] = {LayoutKind::Single,     LayoutKind::SplitV
                                       LayoutKind::SplitHorizontal, LayoutKind::ThreeLeft,
                                       LayoutKind::ThreeTop,   LayoutKind::Quad};
 
+// What each preset's name promises, counted independently of layoutRects.
+std::size_t viewsPromised(LayoutKind kind)
+{
+    switch (kind) {
+    case LayoutKind::Single:
+        return 1;
+    case LayoutKind::SplitVertical:
+    case LayoutKind::SplitHorizontal:
+        return 2;
+    case LayoutKind::ThreeLeft:
+    case LayoutKind::ThreeTop:
+        return 3;
+    case LayoutKind::Quad:
+        return 4;
+    }
+    return 0;
+}
+
+// Applies the steps to rectangles. Every value involved is a sum of powers of
+// two (1, 1/2, 1/4), so the halving is exact and the comparison below can be
+// ==, not "near".
+std::vector<CellRect> simulateDocking(const std::vector<DockSplit>& steps, std::size_t views)
+{
+    std::vector<CellRect> placed(views);
+    std::vector<bool> isPlaced(views, false);
+    placed[0] = CellRect{0.0, 0.0, 1.0, 1.0};
+    isPlaced[0] = true;
+    for (const DockSplit& step : steps) {
+        EXPECT_LT(step.existing, views);
+        EXPECT_LT(step.added, views);
+        if (step.existing >= views || step.added >= views) {
+            return {};
+        }
+        EXPECT_TRUE(isPlaced[step.existing]) << "a split can only halve a view already placed";
+        EXPECT_FALSE(isPlaced[step.added]) << "each view is placed exactly once";
+        CellRect& existing = placed[step.existing];
+        CellRect added = existing;
+        if (step.sideBySide) {
+            existing.width /= 2.0;
+            added.x = existing.x + existing.width;
+            added.width = existing.width;
+        } else {
+            existing.height /= 2.0;
+            added.y = existing.y + existing.height;
+            added.height = existing.height;
+        }
+        placed[step.added] = added;
+        isPlaced[step.added] = true;
+    }
+    for (std::size_t i = 0; i < views; ++i) {
+        EXPECT_TRUE(isPlaced[i]) << "view " << i << " was never placed";
+    }
+    return placed;
+}
+
 } // namespace
 
-TEST(ViewportLayout, StartsAsASinglePlanView)
+// ---- the presets ----------------------------------------------------------------------------
+
+TEST(ViewportLayout, EachPresetHasAsManyViewsAsItsNameSays)
 {
-    const ViewportLayout layout;
-    ASSERT_EQ(layout.size(), 1u);
-    EXPECT_EQ(layout.layout(), LayoutKind::Single);
-    EXPECT_EQ(layout.cell(0).kind, ViewKind::Plan);
-    EXPECT_EQ(layout.activeIndex(), 0u);
+    for (LayoutKind kind : kAllLayouts) {
+        EXPECT_EQ(katana::cad::cellCount(kind), viewsPromised(kind)) << katana::cad::toString(kind);
+        EXPECT_EQ(katana::cad::layoutRects(kind).size(), viewsPromised(kind));
+    }
 }
 
 TEST(ViewportLayout, EveryLayoutTilesTheAreaExactlyOnce)
@@ -55,192 +157,48 @@ TEST(ViewportLayout, EveryLayoutTilesTheAreaExactlyOnce)
     }
 }
 
-TEST(ViewportLayout, EveryPointBelongsToExactlyOneCell)
+TEST(ViewportLayout, EveryPointOfTheAreaBelongsToExactlyOneRect)
 {
+    // A fine sweep including the shared borders at 0.5, where a closed
+    // rectangle test would match two. Asked of layoutRects directly: the menu
+    // draws its pictures from them.
     for (LayoutKind kind : kAllLayouts) {
-        ViewportLayout layout;
-        layout.setLayout(kind);
-
-        // A fine sweep including the shared borders at 0.5, where a closed
-        // rectangle test would match two cells.
+        const auto rects = katana::cad::layoutRects(kind);
         for (int i = 0; i < 40; ++i) {
             for (int j = 0; j < 40; ++j) {
                 const double u = static_cast<double>(i) / 40.0;
                 const double v = static_cast<double>(j) / 40.0;
                 int matches = 0;
-                for (std::size_t c = 0; c < layout.size(); ++c) {
-                    if (layout.cell(c).rect.contains(u, v)) {
+                for (const CellRect& rect : rects) {
+                    if (rect.contains(u, v)) {
                         ++matches;
                     }
                 }
                 ASSERT_EQ(matches, 1) << katana::cad::toString(kind) << " at " << u << "," << v;
-                EXPECT_TRUE(layout.cellAt(u, v).has_value());
             }
         }
     }
 }
 
-TEST(ViewportLayout, PointsOutsideTheAreaHitNothing)
+TEST(ViewportLayout, PointsOnTheFarEdgeOrOutsideTheAreaBelongToNoRect)
 {
-    ViewportLayout layout;
-    layout.setLayout(LayoutKind::Quad);
-    EXPECT_FALSE(layout.cellAt(-0.01, 0.5).has_value());
-    EXPECT_FALSE(layout.cellAt(0.5, 1.0).has_value()) << "the far edge is exclusive";
-    EXPECT_FALSE(layout.cellAt(1.0, 0.5).has_value());
-    EXPECT_FALSE(layout.cellAt(std::nan(""), 0.5).has_value());
-}
-
-TEST(ViewportLayout, QuadPutsPlanThreeDSectionAndElevationInThatOrder)
-{
-    ViewportLayout layout;
-    layout.setLayout(LayoutKind::Quad);
-    ASSERT_EQ(layout.size(), 4u);
-    EXPECT_EQ(layout.cell(0).kind, ViewKind::Plan);
-    EXPECT_EQ(layout.cell(1).kind, ViewKind::Model3D);
-    EXPECT_EQ(layout.cell(2).kind, ViewKind::Section);
-    EXPECT_EQ(layout.cell(3).kind, ViewKind::Elevation);
-}
-
-TEST(ViewportLayout, GrowingTheLayoutKeepsTheViewTheUserAlreadyHad)
-{
-    ViewportLayout layout;
-    layout.setPixelSize(800, 600);
-    ASSERT_TRUE(layout.setCellKind(0, ViewKind::Model3D).ok());
-    layout.cell(0).camera.setTarget(katana::math::Vec3(123.0, 456.0, 7.0));
-    layout.cell(0).camera.setDistance(42.0);
-
-    layout.setLayout(LayoutKind::Quad);
-
-    ASSERT_EQ(layout.size(), 4u);
-    EXPECT_EQ(layout.cell(0).kind, ViewKind::Model3D) << "cell 0 must survive the split";
-    EXPECT_EQ(layout.cell(0).camera.target().x, 123.0);
-    EXPECT_EQ(layout.cell(0).camera.distance(), 42.0);
-
-    // And shrinking back keeps it too.
-    layout.setLayout(LayoutKind::Single);
-    ASSERT_EQ(layout.size(), 1u);
-    EXPECT_EQ(layout.cell(0).camera.distance(), 42.0);
-}
-
-TEST(ViewportLayout, ShrinkingMovesTheActiveCellInsteadOfLeavingItDangling)
-{
-    ViewportLayout layout;
-    layout.setLayout(LayoutKind::Quad);
-    layout.setActiveIndex(3);
-    ASSERT_EQ(layout.activeIndex(), 3u);
-
-    layout.setLayout(LayoutKind::SplitVertical);
-    ASSERT_EQ(layout.size(), 2u);
-    EXPECT_LT(layout.activeIndex(), layout.size()) << "the active index must stay in range";
-}
-
-TEST(ViewportLayout, ActivatingAnIndexOutsideTheLayoutDoesNothing)
-{
-    ViewportLayout layout;
-    layout.setLayout(LayoutKind::SplitVertical);
-    layout.setActiveIndex(1);
-    layout.setActiveIndex(9); // nonsense
-    EXPECT_EQ(layout.activeIndex(), 1u) << "a bad index must not silently activate another view";
-}
-
-TEST(ViewportLayout, SettingTheKindOfAMissingCellIsReportedNotIgnored)
-{
-    ViewportLayout layout;
-    const auto status = layout.setCellKind(5, ViewKind::Section);
-    ASSERT_FALSE(status.ok());
-    EXPECT_EQ(status.error().code, katana::core::ErrorCode::InvalidArgument);
-}
-
-TEST(ViewportLayout, PixelRectanglesTileTheWindowWithNoSeamAndNoOverlap)
-{
-    // Odd sizes on purpose: 801 does not divide by two, which is exactly where
-    // a naive floor leaves a one-pixel gap down the middle.
-    for (const auto& size : {std::pair{800, 600}, std::pair{801, 601}, std::pair{1023, 767},
-                             std::pair{3, 5}}) {
-        for (LayoutKind kind : kAllLayouts) {
-            ViewportLayout layout;
-            layout.setLayout(kind);
-            layout.setPixelSize(size.first, size.second);
-
-            // Count how many cells claim each pixel.
-            std::vector<int> cover(static_cast<std::size_t>(size.first) *
-                                       static_cast<std::size_t>(size.second),
-                                   0);
-            for (std::size_t c = 0; c < layout.size(); ++c) {
-                const auto rect = layout.pixelRect(c);
-                ASSERT_TRUE(rect.ok());
-                for (int y = static_cast<int>(rect->y);
-                     y < static_cast<int>(rect->y + rect->height); ++y) {
-                    for (int x = static_cast<int>(rect->x);
-                         x < static_cast<int>(rect->x + rect->width); ++x) {
-                        if (x < size.first && y < size.second) {
-                            ++cover[static_cast<std::size_t>(y) *
-                                        static_cast<std::size_t>(size.first) +
-                                    static_cast<std::size_t>(x)];
-                        }
-                    }
-                }
-            }
-            for (std::size_t i = 0; i < cover.size(); ++i) {
-                ASSERT_EQ(cover[i], 1)
-                    << katana::cad::toString(kind) << " at " << size.first << "x" << size.second
-                    << " pixel " << i;
+    const auto rects = katana::cad::layoutRects(LayoutKind::Quad);
+    const auto inAny = [&](double u, double v) {
+        for (const CellRect& rect : rects) {
+            if (rect.contains(u, v)) {
+                return true;
             }
         }
-    }
+        return false;
+    };
+    EXPECT_FALSE(inAny(-0.01, 0.5));
+    EXPECT_FALSE(inAny(0.5, 1.0)) << "the far edge is exclusive";
+    EXPECT_FALSE(inAny(1.0, 0.5));
+    EXPECT_FALSE(inAny(std::numeric_limits<double>::quiet_NaN(), 0.5));
+    EXPECT_TRUE(inAny(0.0, 0.0)) << "the near edge is inclusive";
 }
 
-TEST(ViewportLayout, CellsNeverReportAZeroSizedFramebuffer)
-{
-    // A window dragged down to nothing must not ask for a 0 x 0 framebuffer,
-    // which Framebuffer::create rejects.
-    ViewportLayout layout;
-    layout.setLayout(LayoutKind::Quad);
-    for (int size : {0, 1, 2, 3}) {
-        layout.setPixelSize(size, size);
-        for (std::size_t c = 0; c < layout.size(); ++c) {
-            const auto rect = layout.pixelRect(c);
-            ASSERT_TRUE(rect.ok());
-            EXPECT_GE(rect->width, 1.0) << "size " << size << " cell " << c;
-            EXPECT_GE(rect->height, 1.0);
-        }
-    }
-}
-
-TEST(ViewportLayout, ResizingUpdatesEveryCellsCameraViewport)
-{
-    ViewportLayout layout;
-    layout.setLayout(LayoutKind::Quad);
-    layout.setPixelSize(1000, 800);
-
-    for (std::size_t c = 0; c < layout.size(); ++c) {
-        // A camera whose viewport disagreed with its framebuffer would be
-        // rejected by the rasteriser, so this has to stay in step.
-        const auto rect = layout.pixelRect(c);
-        ASSERT_TRUE(rect.ok());
-        EXPECT_EQ(layout.cell(c).camera.viewportWidth(), static_cast<int>(rect->width));
-        EXPECT_EQ(layout.cell(c).camera.viewportHeight(), static_cast<int>(rect->height));
-        EXPECT_EQ(layout.cell(c).pixelWidth, static_cast<int>(rect->width));
-    }
-}
-
-TEST(ViewportLayout, ChangingAKindGivesTheCellAnAppropriateProjection)
-{
-    ViewportLayout layout;
-    layout.setPixelSize(400, 400);
-
-    ASSERT_TRUE(layout.setCellKind(0, ViewKind::Model3D).ok());
-    EXPECT_EQ(layout.cell(0).camera.projection(), katana::render::Projection::Perspective);
-
-    ASSERT_TRUE(layout.setCellKind(0, ViewKind::Elevation).ok());
-    // A side view is measured off with a scale rule, so it must be orthographic.
-    EXPECT_EQ(layout.cell(0).camera.projection(), katana::render::Projection::Orthographic);
-
-    ASSERT_TRUE(layout.setCellKind(0, ViewKind::Plan).ok());
-    EXPECT_EQ(layout.cell(0).camera.projection(), katana::render::Projection::Orthographic);
-}
-
-TEST(ViewportLayout, EveryLayoutAndViewKindHasAName)
+TEST(ViewportLayout, EveryLayoutAndViewKindHasADistinctName)
 {
     std::set<std::string> names;
     for (LayoutKind kind : kAllLayouts) {
@@ -255,4 +213,59 @@ TEST(ViewportLayout, EveryLayoutAndViewKindHasAName)
         EXPECT_NE(name, "Unknown");
         EXPECT_TRUE(names.insert(name).second) << "duplicate view name " << name;
     }
+}
+
+// ---- the kinds a preset opens -----------------------------------------------------------------
+
+TEST(ViewportLayout, AnArrangementOpensPlanThreeDSectionAndElevationInThatOrder)
+{
+    // The four-up arrangement a civil engineer expects, and the first slot is
+    // always the plan the user was already drawing in.
+    EXPECT_EQ(katana::cad::defaultViewKind(0), ViewKind::Plan);
+    EXPECT_EQ(katana::cad::defaultViewKind(1), ViewKind::Model3D);
+    EXPECT_EQ(katana::cad::defaultViewKind(2), ViewKind::Section);
+    EXPECT_EQ(katana::cad::defaultViewKind(3), ViewKind::Elevation);
+}
+
+TEST(ViewportLayout, SlotsPastTheFourthRepeatTheLastKind)
+{
+    for (const std::size_t slot : {std::size_t{4}, std::size_t{5}, std::size_t{100},
+                                   std::numeric_limits<std::size_t>::max()}) {
+        EXPECT_EQ(katana::cad::defaultViewKind(slot), ViewKind::Elevation) << slot;
+    }
+}
+
+// ---- dockSplits -------------------------------------------------------------------------------
+
+TEST(ViewportLayout, DockingTheSplitsReproducesEveryPresetsRectanglesExactly)
+{
+    for (LayoutKind kind : kAllLayouts) {
+        const auto expected = katana::cad::layoutRects(kind);
+        const auto steps = katana::cad::dockSplits(kind);
+        EXPECT_EQ(steps.size(), expected.size() - 1) << "one split per view after the first";
+
+        const auto docked = simulateDocking(steps, expected.size());
+        ASSERT_EQ(docked.size(), expected.size()) << katana::cad::toString(kind);
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_EQ(docked[i], expected[i])
+                << katana::cad::toString(kind) << " view " << i << ": docked at (" << docked[i].x
+                << ", " << docked[i].y << ") " << docked[i].width << " x " << docked[i].height;
+        }
+    }
+}
+
+TEST(ViewportLayout, ASingleViewNeedsNoSplit)
+{
+    EXPECT_TRUE(katana::cad::dockSplits(LayoutKind::Single).empty());
+}
+
+TEST(ViewportLayout, QuadHalvesTheTopRowBeforeSplittingEachHalfDownwards)
+{
+    // Worked by hand: splitting 0 side by side gives two half-width columns;
+    // splitting each column downwards gives four quarters. Splitting 0
+    // downwards first and then 0 again side by side would leave view 1 a
+    // full-width half - the order is the contract, so it is pinned.
+    const std::vector<DockSplit> expected = {
+        {0, 1, true}, {0, 2, false}, {1, 3, false}};
+    EXPECT_EQ(katana::cad::dockSplits(LayoutKind::Quad), expected);
 }
