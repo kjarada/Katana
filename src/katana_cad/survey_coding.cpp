@@ -6,6 +6,7 @@
 #include <set>
 #include <tuple>
 
+#include "katana/cad/linework.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/tables.hpp"
@@ -21,6 +22,23 @@ using katana::entity::EntityId;
 using katana::entity::Style;
 using katana::entity::SurveyMatch;
 using katana::entity::SurveyMatchKind;
+
+// The code a rule is looked up by. A POINT's code is written on a field
+// controller, where the string name is followed by linework controls -
+// "PABB ST" starts a string of PABB - and the mapfile's key is the name
+// alone: the whole field, blank included, can never match one, because no
+// key holds a blank (SurveyMap::add refuses it). So a point is coded by its
+// string name, as processLinework reads the same field. Any other entity's
+// code is taken as it is: the lines linework makes carry the name alone.
+[[nodiscard]] std::string codeToLookUp(const Entity& entity, const std::string& code)
+{
+    if (entity.type() != katana::entity::EntityType::Point) {
+        return code;
+    }
+    FieldCode field = parseFieldCode(code, LineworkCodes{});
+    // Blanks alone have no first token; the field is then reported as it is.
+    return field.name.empty() ? code : std::move(field.name);
+}
 
 [[nodiscard]] std::string lowered(std::string_view text)
 {
@@ -347,7 +365,7 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
         }
         if (const std::string* code = surveyCodeOf(*entity, property); code != nullptr) {
             ++tally.coded;
-            entitiesByCode[*code].push_back(id);
+            entitiesByCode[codeToLookUp(*entity, *code)].push_back(id);
         }
     }
 
