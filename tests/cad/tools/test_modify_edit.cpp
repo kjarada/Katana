@@ -1054,6 +1054,20 @@ TEST(ModifyEditChamfer, EnterMakesTheSecondDistanceTheFirst)
     EXPECT_EQ(geometryOf<Segment2>(d, created(d)), (Segment2{{7, 0}, {8, 1}}));
 }
 
+TEST(ModifyEditChamfer, ThePreviewShowsTheBevelForTheLineUnderTheCursor)
+{
+    // Distances 2 and 2 at the corner (8,0): the bevel (6,0)-(8,2).
+    CornerScene scene;
+    ToolDriver& d = scene.driver;
+    d.start("modify.chamfer");
+    ASSERT_EQ(d.type("2").outcome, kContinue);
+    ASSERT_EQ(d.enter().outcome, kContinue);
+    ASSERT_EQ(d.pick(scene.along, 4, 0).outcome, kContinue);
+    EXPECT_TRUE(containsShape(d.tool().preview({8, 4}), Segment2{{6, 0}, {8, 2}}));
+    // Nowhere near a line, there is nothing to preview.
+    EXPECT_TRUE(d.tool().preview({40, 40}).shapes.empty());
+}
+
 TEST(ModifyEditChamfer, ParallelLinesAndDistancesTooLargeAreRefused)
 {
     CornerScene scene;
@@ -1117,7 +1131,9 @@ TEST(ModifyEditBreak, FirstPointGivesTheFirstBreakPointExactly)
     ASSERT_EQ(d.type("F").outcome, kContinue);
     EXPECT_EQ(d.tool().prompt(), "Specify first break point");
     ASSERT_EQ(d.click(2, 0).outcome, kContinue);
-    ASSERT_EQ(d.type("@4,0").outcome, kDone); // relative to the first break point: (6,0)
+    // Polar from the first break point: 4 at 0 degrees is (6,0) - cos 0 and
+    // sin 0 are exact, so the point is too.
+    ASSERT_EQ(d.type("@4<0").outcome, kDone);
     EXPECT_EQ(geometryOf<Segment2>(d, target), (Segment2{{0, 0}, {2, 0}}));
     EXPECT_EQ(geometryOf<Segment2>(d, created(d)), (Segment2{{6, 0}, {8, 0}}));
 }
@@ -1257,6 +1273,31 @@ TEST(ModifyEditBreakAtPoint, ALineIsSplitInTwoAtThePoint)
     EXPECT_EQ(finished.message, "Broken in two.");
     EXPECT_EQ(geometryOf<Segment2>(d, target), (Segment2{{0, 0}, {2, 0}}));
     EXPECT_EQ(geometryOf<Segment2>(d, created(d)), (Segment2{{2, 0}, {8, 0}}));
+}
+
+TEST(ModifyEditBreakAtPoint, OneUndoPutsTheLineBackWhole)
+{
+    ToolDriver d;
+    const EntityId target = line(d, {0, 0}, {8, 0});
+    d.start("modify.break_at_point");
+    ASSERT_EQ(d.pick(target, 5, 0).outcome, kContinue);
+    ASSERT_EQ(d.click(2, 0).outcome, kDone);
+    ASSERT_EQ(entityCount(d), 2u);
+    ASSERT_TRUE(d.document().undo().ok());
+    EXPECT_EQ(entityCount(d), 1u);
+    EXPECT_EQ(geometryOf<Segment2>(d, target), (Segment2{{0, 0}, {8, 0}}));
+}
+
+TEST(ModifyEditBreakAtPoint, ThePreviewMarksWhereTheCursorWouldSplit)
+{
+    // The cursor at (3,1) is 1 off the line; the split would be at (3,0).
+    ToolDriver d;
+    const EntityId target = line(d, {0, 0}, {8, 0});
+    d.start("modify.break_at_point");
+    ASSERT_EQ(d.pick(target, 5, 0).outcome, kContinue);
+    const ToolFeedback feedback = d.tool().preview({3, 1});
+    EXPECT_TRUE(feedback.shapes.empty());
+    EXPECT_EQ(feedback.markers, (std::vector<Point2>{{3, 0}}));
 }
 
 TEST(ModifyEditBreakAtPoint, AnOpenPolylineIsSplitAtAVertex)
@@ -1467,6 +1508,15 @@ TEST(ModifyEditExplode, EachLineKeepsTheHeightsOfItsTwoEnds)
     ASSERT_EQ(lines.size(), 2u);
     EXPECT_EQ(heights(d, lines[0], 2), (std::vector<std::optional<double>>{1.0, 2.0}));
     EXPECT_EQ(heights(d, lines[1], 2), (std::vector<std::optional<double>>{2.0, std::nullopt}));
+}
+
+TEST(ModifyEditExplode, ThePreviewMarksEveryVertexWhereThePolylineWillComeApart)
+{
+    ToolDriver d;
+    const EntityId string = polyline(d, {{0, 0}, {4, 0}, {4, 4}});
+    d.document().selection().set({string});
+    d.start("modify.explode");
+    EXPECT_EQ(d.tool().preview({0, 0}).markers, (std::vector<Point2>{{0, 0}, {4, 0}, {4, 4}}));
 }
 
 TEST(ModifyEditExplode, ASelectionWithNoPolylineIsRefusedAndOthersAreLeftAlone)
