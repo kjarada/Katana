@@ -8,7 +8,7 @@
 
 #include "katana/archive12d/map_file.hpp"
 #include "katana/archive12d/style_library.hpp"
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "builtin_customisation.hpp"
 
 namespace katana::archive12d {
@@ -70,7 +70,7 @@ const Customisation& builtinCustomisation()
     static const Customisation built = [] {
         Customisation customisation;
         for (const std::string_view bytes : detail::builtinCustomisationFiles()) {
-            const auto decoded = decodeText(std::string(bytes));
+            const auto decoded = katana::core::decodeText(std::string(bytes));
             if (!decoded) {
                 continue; // a file that will not decode cannot be part of a build
             }
@@ -128,7 +128,7 @@ std::vector<std::filesystem::path> findCustomisation(const std::filesystem::path
             }
             std::ostringstream buffer;
             buffer << file.rdbuf();
-            const auto decoded = decodeText(buffer.str());
+            const auto decoded = katana::core::decodeText(buffer.str());
             if (decoded && customisationKind(decoded->text)) {
                 found.push_back(entry.path());
             }
@@ -150,7 +150,7 @@ katana::core::Result<Customisation> readCustomisationInto(Customisation into,
     }
     std::ostringstream buffer;
     buffer << file.rdbuf();
-    const auto decoded = decodeText(buffer.str());
+    const auto decoded = katana::core::decodeText(buffer.str());
     if (!decoded) {
         return makeError(decoded.error().code, "cannot read " + path.filename().string() + ": " +
                                                    decoded.error().describe());

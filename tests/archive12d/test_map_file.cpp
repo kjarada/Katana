@@ -9,7 +9,7 @@
 #include <string>
 
 #include "katana/archive12d/map_file.hpp"
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 
 #include "reference_files.hpp"
 

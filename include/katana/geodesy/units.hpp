@@ -3,7 +3,10 @@
 // Centralised unit conversions (PLAN.MD Phase 11).
 //
 // Every length and angle conversion in Katana goes through this header so that
-// the definition of a unit exists exactly once.
+// the definition of a unit exists exactly once. The length DEFINITIONS
+// themselves are one layer down, in katana/math/unit_ratio.hpp, so that the
+// survey parsers - which may not see geodesy - use the same numbers rather than
+// a copy of them; this header is the catalogue built on them.
 //
 // Numerical policy
 //   * Length units are stored as EXACT rational numbers of metres

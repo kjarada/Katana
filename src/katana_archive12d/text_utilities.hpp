@@ -10,11 +10,15 @@
 #include <string>
 #include <string_view>
 
+#include "katana/core/text.hpp"
+
 namespace katana::archive12d::detail {
 
-[[nodiscard]] std::string lowered(std::string_view text);
-[[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b);
-[[nodiscard]] std::string_view trimmed(std::string_view text);
+// The locale-independent helpers every text reader shares; see
+// katana/core/text.hpp for why they must not consult the C locale.
+using katana::core::equalsIgnoringCase;
+using katana::core::lowered;
+using katana::core::trimmed;
 
 // Folds a token to lower case WITHOUT allocating, for the common case where
 // the folded text is compared and then thrown away. The reader asks this of
@@ -53,9 +57,9 @@ struct CaseFoldedEqual {
     }
 };
 
-// Decimal integers only, with an optional sign. nullopt for anything else -
+// Decimal integers only, with one optional sign. nullopt for anything else -
 // including a real, which must not be silently truncated into an index.
-[[nodiscard]] std::optional<std::int64_t> parseInteger(std::string_view token);
+using katana::core::parseInteger;
 
 // The manual's rule (1.5.8): true is 1, or a word starting with T, t, Y or y;
 // false is 0, or a word starting with F, f, N or n. 12d Model also writes 2
@@ -73,6 +77,6 @@ struct CaseFoldedEqual {
 [[nodiscard]] std::string formatHexReal(double value);
 
 // Shortest decimal text that reads back as exactly `value`.
-[[nodiscard]] std::string formatExactReal(double value);
+using katana::core::formatExactReal;
 
 } // namespace katana::archive12d::detail

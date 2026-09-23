@@ -105,7 +105,8 @@ TEST(SurveyNetworkPoints, UpdateReplacesAndValidates)
     SurveyNetwork network = triangleNetwork();
     ASSERT_TRUE(network.updatePoint(makePoint("B", 100.25, -0.5, 7.0)).ok());
     EXPECT_DOUBLE_EQ(network.point("B")->northing, 100.25);
-    EXPECT_DOUBLE_EQ(network.point("B")->elevation, 7.0);
+    ASSERT_TRUE(network.point("B")->elevation.has_value());
+    EXPECT_DOUBLE_EQ(*network.point("B")->elevation, 7.0);
     EXPECT_EQ(network.pointIndex("B"), std::optional<std::size_t>(1)); // position kept
 
     EXPECT_EQ(network.updatePoint(makePoint("Z", 0.0, 0.0)).error().code, ErrorCode::NotFound);

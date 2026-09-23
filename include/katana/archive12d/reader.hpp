@@ -40,7 +40,7 @@ struct ReadOptions {
     std::size_t maxDepth = 64;
 };
 
-// `text` is UTF-8 - see text_encoding.hpp for getting there from a file.
+// `text` is UTF-8 - see katana/core/text_encoding.hpp for getting there from a file.
 [[nodiscard]] katana::core::Result<Archive> readArchive(std::string_view text,
                                                         const ReadOptions& options = {});
 

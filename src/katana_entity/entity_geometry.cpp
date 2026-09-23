@@ -71,63 +71,6 @@ std::string_view toString(EntityType type)
     return "Unknown";
 }
 
-bool isValidUtf8(std::string_view text)
-{
-    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
-    const std::size_t size = text.size();
-    std::size_t i = 0;
-    while (i < size) {
-        const unsigned char lead = bytes[i];
-        std::size_t following = 0;
-        unsigned char lowSecond = 0x80;
-        unsigned char highSecond = 0xBF;
-
-        if (lead <= 0x7F) {
-            i += 1;
-            continue;
-        }
-        if (lead >= 0xC2 && lead <= 0xDF) {
-            following = 1;
-        } else if (lead == 0xE0) {
-            following = 2;
-            lowSecond = 0xA0; // anything lower would be an overlong encoding
-        } else if (lead >= 0xE1 && lead <= 0xEC) {
-            following = 2;
-        } else if (lead == 0xED) {
-            following = 2;
-            highSecond = 0x9F; // D800-DFFF are surrogate halves, not characters
-        } else if (lead >= 0xEE && lead <= 0xEF) {
-            following = 2;
-        } else if (lead == 0xF0) {
-            following = 3;
-            lowSecond = 0x90; // overlong
-        } else if (lead >= 0xF1 && lead <= 0xF3) {
-            following = 3;
-        } else if (lead == 0xF4) {
-            following = 3;
-            highSecond = 0x8F; // above U+10FFFF
-        } else {
-            return false; // 0x80-0xC1 and 0xF5-0xFF are never lead bytes
-        }
-
-        if (i + following >= size) {
-            return false; // truncated sequence
-        }
-        const unsigned char second = bytes[i + 1];
-        if (second < lowSecond || second > highSecond) {
-            return false;
-        }
-        for (std::size_t k = 2; k <= following; ++k) {
-            const unsigned char continuation = bytes[i + k];
-            if (continuation < 0x80 || continuation > 0xBF) {
-                return false;
-            }
-        }
-        i += following + 1;
-    }
-    return true;
-}
-
 Result<EntityType> entityTypeFromString(std::string_view name)
 {
     // Derived from the variant rather than naming the last enumerator: a kind

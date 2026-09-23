@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "katana/archive12d/customisation.hpp"
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 
 namespace katana::testing {
 
@@ -60,7 +60,7 @@ struct ReferenceCustomisation {
         }
         std::ostringstream buffer;
         buffer << file.rdbuf();
-        const auto decoded = katana::archive12d::decodeText(buffer.str());
+        const auto decoded = katana::core::decodeText(buffer.str());
         if (!decoded) {
             continue; // not text this reads; not a customisation file
         }

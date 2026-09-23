@@ -1,9 +1,10 @@
 #include "katana/core/xml.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <charconv>
 #include <cstdint>
+
+#include "katana/core/text.hpp"
 
 namespace katana::core {
 
@@ -22,24 +23,6 @@ namespace {
 [[nodiscard]] bool isSpace(char c)
 {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
-// Trimming an element's text is the reader's only need for a string helper and
-// core has no string-utility header; one function local to its single caller
-// is a smaller defect than a new public one for it (CLAUDE.md section 1). The
-// wider `std::isspace` set rather than the four XML white-space characters
-// above, because that is what this trimmed before it moved here and a move
-// must not change what a document says.
-[[nodiscard]] std::string_view trimmed(std::string_view text)
-{
-    const auto isBlank = [](unsigned char ch) { return std::isspace(ch) != 0; };
-    while (!text.empty() && isBlank(static_cast<unsigned char>(text.front()))) {
-        text.remove_prefix(1);
-    }
-    while (!text.empty() && isBlank(static_cast<unsigned char>(text.back()))) {
-        text.remove_suffix(1);
-    }
-    return text;
 }
 
 class Parser {

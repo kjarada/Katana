@@ -248,6 +248,26 @@ const char* toString(LinearUnit unit)
     return "unknown";
 }
 
+katana::core::Result<katana::math::UnitRatio> metresPer(LinearUnit unit)
+{
+    namespace units = katana::math::units;
+    switch (unit) {
+    case LinearUnit::Unknown:
+        break;
+    case LinearUnit::Metres:
+        return units::kMetre;
+    case LinearUnit::Feet:
+        return units::kInternationalFoot;
+    case LinearUnit::UsSurveyFeet:
+        return units::kUsSurveyFoot;
+    case LinearUnit::Links:
+        return units::kInternationalLink;
+    }
+    return makeError(ErrorCode::InvalidArgument,
+                     "the linear unit is unknown, so its numbers cannot be converted to metres",
+                     "a unit must be declared; none is assumed");
+}
+
 const char* toString(AngularUnit unit)
 {
     switch (unit) {
@@ -409,11 +429,24 @@ Status validateProject(const SurveyProject& project)
             return makeError(ErrorCode::AlreadyExists, "duplicate point id '" + point.id + "'",
                              describeSource(point.source));
         }
-        if (std::string reason = checkFinite({{"northing", point.northing},
-                                              {"easting", point.easting},
-                                              {"elevation", point.elevation}});
-            !reason.empty()) {
+        std::string reason = checkFinite({{"northing", point.northing}, {"easting", point.easting}});
+        if (reason.empty() && point.elevation) {
+            reason = checkFinite({{"elevation", *point.elevation}});
+        }
+        if (!reason.empty()) {
             return makeError(ErrorCode::InvalidArgument, "point '" + point.id + "': " + reason,
+                             describeSource(point.source));
+        }
+    }
+    for (const UnpositionedPoint& point : project.unpositionedPoints) {
+        if (point.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "an unpositioned point has an empty id",
+                             describeSource(point.source));
+        }
+        if (!points.insert(point.id).second) {
+            return makeError(ErrorCode::AlreadyExists,
+                             "duplicate point id '" + point.id +
+                                 "' (a point may not be both positioned and unpositioned)",
                              describeSource(point.source));
         }
     }

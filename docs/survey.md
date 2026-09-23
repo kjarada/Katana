@@ -46,6 +46,51 @@ needs no third-party library, it builds with `-DKATANA_BUILD_IO=OFF`. That puts
 a hand-written parser of untrusted field data under the sanitizer job, which is
 where a parser of untrusted input belongs.
 
+## Shared foundations, and the three things there was briefly more than one of
+
+The first round of parsers was written by five authors at once against a model
+that did not yet have what they needed, and each of them filled the gap
+privately. Three of those gaps are now closed in the layer below, so that no
+parser carries its own answer:
+
+| What | The one place | What it replaced |
+|---|---|---|
+| Bytes to UTF-8 | `katana::core::decodeText` / `decodeTextAs` (`core/text_encoding.hpp`), moved down from `archive12d` | a second decoder written into the CSV reader because surveyio may not see archive12d |
+| Trim, integers, reals, lines | `katana::core` (`core/text.hpp`) | private trims in the XML reader and the 12d reader, and a third in the Trimble parser |
+| Metres per foot and link | `katana::math::units` (`math/unit_ratio.hpp`), which `geodesy/units.cpp` is now built from; `survey::metresPer(LinearUnit)` maps a declared unit onto it | ratios repeated in the CSV template and as rounded doubles in the Topcon parser |
+
+Two properties of the text helpers are load bearing. They never consult the C
+locale: `std::isspace(0xA0)` is true in a Latin-1 locale and 0xA0 is the second
+byte of "à" in UTF-8, so a locale-dependent trim cut characters in half. And a
+number must occupy its whole token with at most one sign, so "+-1", "1,5",
+"inf" and "1e999" are refusals rather than values.
+
+**Absent is not zero.** `SurveyPoint::elevation` is `std::optional<double>`.
+A coordinate list with no height column, a GSI block with no word 83, a
+two-ordinate LandXML point: each is a mark whose height nobody measured, and 0.0
+in its place is a real height at the datum. The bridge writes no elevation
+property for such a point - the surface builder already leaves a point without
+one out of the triangulation - and reports how many there were. A level
+adjustment refuses a held or weighted benchmark that has no published height,
+because starting it at zero levels the whole run onto the wrong datum and
+reports a perfect fit; a free point may start anywhere, since the model is
+linear. The rejected alternative was a companion `hasElevation` flag: a flag
+and a value can disagree, and every reader of a bare double can forget the flag,
+where an optional has to be opened.
+
+**Named is not positioned.** A raw observation file names its targets and gives
+them no coordinates until something reduces the observations. Two of the first
+parsers improvised - one created such a point at the origin with a marker in its
+metadata, another at placeholder ordinates - and either reaches the drawing as a
+real mark at (0, 0) as soon as one consumer forgets the marker. Such a point is
+now a `survey::UnpositionedPoint` in `SurveyProject::unpositionedPoints`: it
+shares the id space with `points`, observations, stations and features may refer
+to it, and the bridge cannot draw it because it is not in the list the bridge
+draws; the report counts them and says why. Rejected: an optional northing and
+easting on `SurveyPoint`, which lets the two disagree and makes every horizontal
+consumer - the network adjustment, the COGO, the bridge - check for a case most
+of them can never meet.
+
 ## The pipeline
 
 ```

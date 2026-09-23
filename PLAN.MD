@@ -882,6 +882,18 @@ to the last place.
 deleted; that incident is why every numeric expectation in this project must be
 justified from an external definition rather than from program output.
 
+**CORRECTED (2026-09-23): the network adjustments had NO tests.**
+`adjustHorizontalNetwork`, `adjustLevelNetwork`, `adjustTraverse`,
+`buildTraverseNetwork` and both `applyAdjustment` overloads - about 900 lines
+of `network_adjustment.cpp` - were referenced by no file under `tests/`, and
+never had been (`git log` finds no deleted test). The 114 tests above cover the
+dense least-squares core, the traverse computation, levelling runs and the
+statistics, not the network solve built on them. `tests/survey/
+test_network_adjustment.cpp` now exists with a hand-worked level network.
+OUTSTANDING: the horizontal and traverse adjustments still need tests against
+published worked examples (Ghilani, *Adjustment Computations*, is the standard
+source), with the error ellipses and the global test among what they assert.
+
 ---
 
 # 19. Phase 14 — Terrain Engine
@@ -2945,6 +2957,9 @@ recorded here so that nobody builds them a second time:
   `ellipsoid.hpp`, `geodesic.hpp` and `grid_factors.hpp`, with PROJ kept behind
   `src/` (Rule 4). The brief's "Phase 11" is wiring, and the wizard's job is to
   refuse to transform rather than to implement a transformation.
+* **A text decoder, text helpers and exact unit ratios exist** in the layers
+  below surveyio - `core/text_encoding.hpp`, `core/text.hpp`,
+  `math/unit_ratio.hpp` - and a parser uses them rather than its own (45.3b).
 * **A strict XML reader exists.** It was private to `archive12d`; LandXML does
   not get a second one, so it was promoted to `core` as `katana::core::readXml`
   (`include/katana/core/xml.hpp`). It refuses a doctype, an undefined entity and
@@ -3007,19 +3022,46 @@ not see `surveyio`; a field code is sanitised before it becomes a layer name,
 because a layer name is a PATH and a code containing `/` would otherwise build a
 subtree nobody asked for.
 
-**GAP, found while building it and not yet fixed.**
-`survey::SurveyPoint::elevation` is a plain `double` with no "unset" state, so a
-file with no height column yields 0.0 and the bridge writes it as a real height
-at the datum. A surface built from such a drawing is flattened to zero under
-every one of those points, with nothing reported. A parser can warn about a
-missing Z, but the model cannot carry the distinction, so the warning is lost by
-the time the bridge sees the project.
+**GAP, found while building it - FIXED (2026-09-23).**
+`survey::SurveyPoint::elevation` was a plain `double` with no "unset" state, so a
+file with no height column yielded 0.0 and the bridge wrote it as a real height
+at the datum; a surface built from such a drawing was flattened to zero under
+every one of those points, with nothing reported. It is now
+`std::optional<double>`. The bridge writes no elevation property for a point
+without one (the surface builder already leaves such a point out), counts them
+in `SurveyImportReport::pointsWithoutElevation` and warns; the level adjustment
+refuses a held or weighted benchmark with no published height, naming it,
+rather than levelling the run onto a datum of zero. The optional was chosen
+over a companion flag because a flag and a value can disagree and a bare double
+can be read without looking at the flag. Proven: with the refusal removed,
+`SurveyLevelNetwork.AHeldBenchmarkWithNoHeightIsRefusedRatherThanTakenAsZero`
+fails. The first round of parsers had each worked round the gap with a private
+metadata key (`elevation-absent`, `landxml.elevationAbsent`, "none in source");
+those go when the parsers are finished against the fixed model.
 
-It is recorded rather than fixed because five parser agents were writing against
-that struct at the time, and changing a field they were all filling would have
-been a merge conflict in five places. The fix - an `std::optional<double>`, or a
-companion flag - belongs in one change made with every parser visible, and the
-brief's own section 17 ("Missing Z", "Invalid Z") is the acceptance test for it.
+**A second gap of the same shape, FIXED the same day: a point with no
+coordinates at all.** A raw observation file names its targets without
+positioning them, and `SurveyPoint` has no such state. The unfinished Leica
+parser created such a point AT THE ORIGIN with a metadata marker and the Topcon
+one at placeholder ordinates - either would be drawn as a real mark at (0, 0) by
+any consumer that forgot the marker. `survey::UnpositionedPoint` and
+`SurveyProject::unpositionedPoints` now carry them: same id space as `points`,
+referable by observations, stations and features, never drawn by the bridge,
+which counts them in `pointsWithoutPosition` and warns - including when that
+leaves nothing to import. Reduction of raw observations to coordinates (the
+brief's "survey calculation engine" wiring) is what will turn them into
+`CoordinateSource::Calculated` points, and is not yet built.
+
+**Three shared pieces the parsers had each written for themselves, collapsed
+(2026-09-23).** Found by reading the unfinished parsers side by side: a second
+text decoder, a third private trim/number parser, and the foot and link ratios
+repeated as doubles. The decoder moved from `archive12d` to
+`katana::core::decodeText` (with `decodeTextAs` for an encoding a person
+states), the helpers became `core/text.hpp`, and the exact length ratios moved
+to `math/unit_ratio.hpp` with `geodesy/units.cpp` built on them and
+`survey::metresPer(LinearUnit)` mapping a declared unit onto them. The 12d
+reader's and the XML reader's own helpers now delegate to core, and in doing so
+stopped consulting the C locale. Record in `docs/survey.md`.
 
 ## 45.4 The proprietary-format rule, as it will be applied
 

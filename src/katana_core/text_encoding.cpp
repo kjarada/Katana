@@ -1,22 +1,19 @@
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
-#include "katana/entity/entity.hpp"
-
-namespace katana::archive12d {
+namespace katana::core {
 
 namespace {
 
-using katana::core::ErrorCode;
-using katana::core::makeError;
 
-// Bytes examined when there is no byte order mark. A 12da begins with its
-// header comments and the first model, so 4 KB is already hundreds of ASCII
-// characters; more would only slow a wrong guess down.
+// Bytes examined when there is no byte order mark. Every format decoded here
+// begins with a header of keywords, names or numbers - a 12da its comments and
+// first model, a coordinate list its first rows - so 4 KB is already hundreds of
+// ASCII characters; more would only slow a wrong guess down.
 constexpr std::size_t kSniffBytes = 4096;
 
 // Windows-1252 differs from Latin-1 only in 0x80-0x9F. Source: the Unicode
@@ -47,7 +44,7 @@ void appendUtf8(std::string& out, std::uint32_t codePoint)
     }
 }
 
-katana::core::Result<std::string> fromUtf16(std::string_view bytes, bool littleEndian)
+Result<std::string> fromUtf16(std::string_view bytes, bool littleEndian)
 {
     if (bytes.size() % 2 != 0) {
         return makeError(ErrorCode::ParseFailure,
@@ -61,7 +58,7 @@ katana::core::Result<std::string> fromUtf16(std::string_view bytes, bool littleE
     };
 
     std::string out;
-    // A 12da is almost entirely ASCII, which halves in UTF-8.
+    // These formats are almost entirely ASCII, which halves in UTF-8.
     out.reserve(bytes.size() / 2 + 16);
     for (std::size_t i = 0; i < bytes.size(); i += 2) {
         std::uint32_t codePoint = unit(i);
@@ -107,6 +104,63 @@ std::string fromWindows1252(std::string_view bytes)
 
 } // namespace
 
+bool isValidUtf8(std::string_view text)
+{
+    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
+    const std::size_t size = text.size();
+    std::size_t i = 0;
+    while (i < size) {
+        const unsigned char lead = bytes[i];
+        std::size_t following = 0;
+        unsigned char lowSecond = 0x80;
+        unsigned char highSecond = 0xBF;
+
+        if (lead <= 0x7F) {
+            i += 1;
+            continue;
+        }
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            following = 1;
+        } else if (lead == 0xE0) {
+            following = 2;
+            lowSecond = 0xA0; // anything lower would be an overlong encoding
+        } else if (lead >= 0xE1 && lead <= 0xEC) {
+            following = 2;
+        } else if (lead == 0xED) {
+            following = 2;
+            highSecond = 0x9F; // D800-DFFF are surrogate halves, not characters
+        } else if (lead >= 0xEE && lead <= 0xEF) {
+            following = 2;
+        } else if (lead == 0xF0) {
+            following = 3;
+            lowSecond = 0x90; // overlong
+        } else if (lead >= 0xF1 && lead <= 0xF3) {
+            following = 3;
+        } else if (lead == 0xF4) {
+            following = 3;
+            highSecond = 0x8F; // above U+10FFFF
+        } else {
+            return false; // 0x80-0xC1 and 0xF5-0xFF are never lead bytes
+        }
+
+        if (i + following >= size) {
+            return false; // truncated sequence
+        }
+        const unsigned char second = bytes[i + 1];
+        if (second < lowSecond || second > highSecond) {
+            return false;
+        }
+        for (std::size_t k = 2; k <= following; ++k) {
+            const unsigned char continuation = bytes[i + k];
+            if (continuation < 0x80 || continuation > 0xBF) {
+                return false;
+            }
+        }
+        i += following + 1;
+    }
+    return true;
+}
+
 const char* toString(TextEncoding encoding)
 {
     switch (encoding) {
@@ -124,7 +178,7 @@ const char* toString(TextEncoding encoding)
     return "unknown";
 }
 
-katana::core::Result<DecodedText> decodeText(std::string_view bytes)
+Result<DecodedText> decodeText(std::string_view bytes)
 {
     const auto byteAt = [&](std::size_t index) {
         return index < bytes.size() ? static_cast<unsigned char>(bytes[index]) : 0u;
@@ -157,7 +211,7 @@ katana::core::Result<DecodedText> decodeText(std::string_view bytes)
     if (bytes.size() >= 3 && byteAt(0) == 0xEF && byteAt(1) == 0xBB && byteAt(2) == 0xBF) {
         decoded.text = std::string(bytes.substr(3));
         decoded.encoding = TextEncoding::Utf8WithBom;
-        if (!katana::entity::isValidUtf8(decoded.text)) {
+        if (!isValidUtf8(decoded.text)) {
             return makeError(ErrorCode::ParseFailure,
                              "the file is marked as UTF-8 but contains bytes that are not");
         }
@@ -165,7 +219,7 @@ katana::core::Result<DecodedText> decodeText(std::string_view bytes)
     }
 
     // No mark. ASCII as UTF-16 has a NUL in every other byte; nothing else a
-    // 12da could be has any. A quarter of the sample is far above what stray
+    // text file could be has any. A quarter of the sample is far above what stray
     // NULs in a damaged UTF-8 file would reach and far below the half that
     // real UTF-16 text shows, so the threshold is not delicate.
     const std::size_t sample = std::min(bytes.size(), kSniffBytes);
@@ -196,7 +250,7 @@ katana::core::Result<DecodedText> decodeText(std::string_view bytes)
         return decoded;
     }
 
-    if (katana::entity::isValidUtf8(bytes)) {
+    if (isValidUtf8(bytes)) {
         decoded.text = std::string(bytes);
         decoded.encoding = TextEncoding::Utf8;
         // Not a guess worth reporting. Plain ASCII is every encoding at once,
@@ -211,9 +265,73 @@ katana::core::Result<DecodedText> decodeText(std::string_view bytes)
     return decoded;
 }
 
-katana::core::Result<std::string> encodeUtf16LittleEndian(std::string_view utf8)
+Result<DecodedText> decodeTextAs(std::string_view bytes, TextEncoding encoding)
 {
-    if (!katana::entity::isValidUtf8(utf8)) {
+    const auto byteAt = [&](std::size_t index) {
+        return index < bytes.size() ? static_cast<unsigned char>(bytes[index]) : 0u;
+    };
+    const bool markLittle = bytes.size() >= 2 && byteAt(0) == 0xFF && byteAt(1) == 0xFE;
+    const bool markBig = bytes.size() >= 2 && byteAt(0) == 0xFE && byteAt(1) == 0xFF;
+    const bool markUtf8 =
+        bytes.size() >= 3 && byteAt(0) == 0xEF && byteAt(1) == 0xBB && byteAt(2) == 0xBF;
+
+    const auto contradicted = [&](const char* found) {
+        return makeError(ErrorCode::ParseFailure,
+                         std::string("the file begins with a ") + found +
+                             " byte order mark but was declared to be " + toString(encoding),
+                         "declared and marked encodings disagree");
+    };
+
+    DecodedText decoded;
+    decoded.encoding = encoding;
+    decoded.validatedUtf8 = true;
+    switch (encoding) {
+    case TextEncoding::Utf16LittleEndian:
+    case TextEncoding::Utf16BigEndian: {
+        const bool little = encoding == TextEncoding::Utf16LittleEndian;
+        if ((little && markBig) || (!little && markLittle)) {
+            return contradicted(little ? "UTF-16 big-endian" : "UTF-16 little-endian");
+        }
+        if (markUtf8) {
+            return contradicted("UTF-8");
+        }
+        const bool marked = little ? markLittle : markBig;
+        auto text = fromUtf16(marked ? bytes.substr(2) : bytes, little);
+        if (!text) {
+            return text.error();
+        }
+        decoded.text = std::move(*text);
+        return decoded;
+    }
+    case TextEncoding::Utf8:
+    case TextEncoding::Utf8WithBom:
+        if (markLittle || markBig) {
+            return contradicted(markLittle ? "UTF-16 little-endian" : "UTF-16 big-endian");
+        }
+        decoded.text = std::string(markUtf8 ? bytes.substr(3) : bytes);
+        decoded.encoding = markUtf8 ? TextEncoding::Utf8WithBom : TextEncoding::Utf8;
+        if (!isValidUtf8(decoded.text)) {
+            return makeError(ErrorCode::ParseFailure,
+                             "the file was declared to be UTF-8 but contains bytes that are not");
+        }
+        return decoded;
+    case TextEncoding::Windows1252:
+        // Every byte is a Windows-1252 character, so a mark cannot be told from
+        // text: EF BB BF is "ï»¿" there. It is refused rather than decoded as
+        // three letters nobody typed.
+        if (markLittle || markBig || markUtf8) {
+            return contradicted(markUtf8 ? "UTF-8" : markLittle ? "UTF-16 little-endian"
+                                                                : "UTF-16 big-endian");
+        }
+        decoded.text = fromWindows1252(bytes);
+        return decoded;
+    }
+    return makeError(ErrorCode::InvalidArgument, "TextEncoding value outside the enumeration");
+}
+
+Result<std::string> encodeUtf16LittleEndian(std::string_view utf8)
+{
+    if (!isValidUtf8(utf8)) {
         return makeError(ErrorCode::InvalidArgument, "the text is not valid UTF-8");
     }
     std::string out;
@@ -256,4 +374,4 @@ katana::core::Result<std::string> encodeUtf16LittleEndian(std::string_view utf8)
     return out;
 }
 
-} // namespace katana::archive12d
+} // namespace katana::core

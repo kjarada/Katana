@@ -69,6 +69,15 @@ struct SurveyImportOptions {
 
 struct SurveyImportReport {
     std::size_t points = 0;
+    // Points the source gave no height for. They are imported, WITHOUT the
+    // elevation property, so a surface built from the drawing leaves them out
+    // rather than pulling itself down to the datum under each one; a warning
+    // says how many.
+    std::size_t pointsWithoutElevation = 0;
+    // Points the source names with no coordinates at all (the targets of raw
+    // observations, survey::UnpositionedPoint). Not drawn - they have nowhere
+    // to be drawn - and a warning says how many and why.
+    std::size_t pointsWithoutPosition = 0;
     std::vector<std::string> layersCreated; // in name order
     // Things worth telling the user that are not failures - a metadata field
     // that could not be written because the import already uses that property,

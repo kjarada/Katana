@@ -10,7 +10,6 @@
 # in the codebase that most needs it. Only the zipped container (.12daz) needs
 # a library, and that stays in katana_io behind gis/zip_container.hpp.
 add_library(katana_archive12d STATIC
-    text_encoding.cpp
     text_utilities.cpp
     lexer.cpp
     archive.cpp
