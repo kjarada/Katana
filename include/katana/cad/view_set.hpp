@@ -52,6 +52,11 @@ struct ViewState {
     // Everything below survives a change of kind: switching a view to 3D and
     // back keeps its plan zoom, its hidden layers and its section.
     katana::render::Camera camera; // Model3D and Elevation
+    // The kind `camera` was last pointed for by configureCamera. A section
+    // draws through its own transform and leaves the camera alone, so a 3D
+    // view turned into a section and back finds its orbit where it left it;
+    // only arriving at a kind the camera was NOT set up for resets it.
+    ViewKind cameraKind = ViewKind::Plan;
     ViewTransform plan;            // Plan: pan and zoom
     // False until the plan view has framed the drawing once; a plan view
     // frames itself on its first resize and never again unless asked.
@@ -89,10 +94,11 @@ class ViewSet {
     // must outlive the widget, and the view must stop being findable at once.
     [[nodiscard]] std::unique_ptr<ViewState> take(ViewId id);
 
-    // Changes what a view shows. Reconfigures the camera only when the kind
-    // actually changes (a 3D view's orbit is not reset by choosing 3D again),
-    // and gives the view the lowest free number in its new kind. NotFound for
-    // an unknown id.
+    // Changes what a view shows, and gives the view the lowest free number in
+    // its new kind. Reconfigures the camera only for a model kind it was not
+    // already set up for (ViewState::cameraKind): a 3D view's orbit is not
+    // reset by choosing 3D again, nor by a trip through Section and back.
+    // NotFound for an unknown id.
     [[nodiscard]] katana::core::Status setKind(ViewId id, ViewKind kind);
 
     // NotFound, and nothing changes, for an unknown id: activating some other

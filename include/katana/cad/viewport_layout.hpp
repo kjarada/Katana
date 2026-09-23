@@ -83,7 +83,8 @@ struct CellRect {
 // Points a camera the way a fresh view of `kind` looks: a 3D view in
 // perspective from the south-west, an elevation orthographic from the front,
 // a plan orthographic from the top. A Section leaves the camera alone, so
-// switching back to a model view restores what it had.
+// switching back to the model kind the camera was set up for restores what it
+// had (ViewSet::setKind, ViewState::cameraKind).
 void configureCamera(katana::render::Camera& camera, ViewKind kind);
 
 // How an arrangement is built out of docked views (the dock workspace of
