@@ -682,6 +682,8 @@ TEST(SurveyCodingReport, WithoutCreatingLayersTheStyleAndAttributesAreStillAppli
     EXPECT_EQ(report.skippedNoLayer, 1u);
     EXPECT_TRUE(report.layersCreated.empty());
     EXPECT_EQ(report.changed, 1u) << "its style and a property changed";
+    ASSERT_EQ(report.codes.size(), 1u);
+    EXPECT_EQ(report.codes[0].layerKept, 1u) << "the row says so too";
 }
 
 TEST(SurveyCodingReport, ChangedCountsEachAlteredEntityOnceWhateverWasAltered)

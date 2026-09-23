@@ -505,6 +505,7 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
             if (!row.layer.empty() && entity.layer != row.layer) {
                 if (!layerExists && !options.createLayers) {
                     ++tally.skippedNoLayer;
+                    ++row.layerKept;
                 } else {
                     if (!layerExists) {
                         layersNeeded.insert(row.layer);
