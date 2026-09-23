@@ -175,3 +175,123 @@ documented field is worth more than a real file that happens to contain it.
 Filled in as each parser lands, and it states formats and variants rather than
 manufacturers. Anything not listed here is not supported, whatever its
 extension.
+
+| Format (id) | Import | Export | Parser | Notes |
+|---|---|---|---|---|
+| Delimited point files (`delimited-points`): CSV, TXT; comma, tab, semicolon or whitespace; any column order a layout states | yes | yes | 1.0 | declares no coordinate system; the unit is stated by the person; the column order is never guessed |
+
+That is the one reader on main as of 2026-09-24. The instrument parsers this
+file describes above (GSI, the Trimble and Topcon exports, LandXML survey
+data) are not in `src/katana_surveyio/`, and the import wizard refuses any
+other registered format by name; `chooseFormat` in the wizard is where their
+dispatch will go when they land.
+
+## The Survey menu: tools, the import wizard, and the points in the drawing
+
+The owner asked on 2026-09-23 for "survey menus and toolbars" with the
+functionality wired. The menu (`src/katana_qt/survey/survey_workbench.*`)
+has four sections - Survey Points (Import, Export, Point Manager, Point
+Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, the
+Angle and Bearing Calculator), Traverse and Levelling (Traverse, Level Book)
+and Coordinates (the Coordinate Converter) - plus the window's two
+customisation actions under Survey Coding. `MainWindow` only makes the menu
+and toolbar and hands them over through `SurveyServices`, so the survey work
+never includes `main_window.hpp`.
+
+**Nothing here is new surveying** (`include/katana/cad/survey_tools.hpp`).
+Every number comes from `katana::survey` (cogo, traverse, levelling, the
+network adjustment, angles) or `katana::geodesy`; the tools move drawing
+entities in and out of those libraries and put the answers into words. Each is
+a structured result plus ONE formatter, and the dialogs and the command line
+(`INVERSE`, `FORWARD`/`RADIATE`, `AREA`) print the same formatter's text, so a
+number cannot appear only in a dialog. The dialogs are non-modal and kept by
+the workbench between uses, so one can stay open beside the drawing; Use
+Selection reads the selected points when pressed, never before. The
+conventions are inherited, not invented: drawing x is easting and y northing,
+where `survey::Coordinate2` is (northing, easting), and the swap happens in
+`survey_tools.cpp` only; angles are radians inside, azimuths clockwise from
+grid north; heights are optional and ABSENT IS NOT ZERO, so an inverse to a
+point with no height reports no height difference; lengths are in the
+project's unit, and hectares are reported only when that is the metre; no
+scale factor, convergence or curvature is applied (the converter REPORTS the
+grid scale factor and convergence and applies neither). Angle text is what
+`survey::parseDms` and `parseBearing` accept - `36d52m11.63s`, `36:52:11.63`,
+`36-52-11.63`, `36 52 11.63` in a box of its own, decimal degrees, or a
+quadrant bearing `N 36d52m11.63s E` - and there is deliberately no DDD.MMSS
+notation, since `36.5211` would then mean two angles depending on who typed
+it. In a line of several fields (a traverse leg) blanks separate the fields,
+so an angle there has none inside it.
+
+**The points in the drawing** (`include/katana/cad/survey_points.hpp`). A
+SURVEY POINT is a point entity carrying the point-number property the import
+writes (`point` by default); a point without one is a CAD point, left out of
+every list and, where asked for by id, counted as left out. The Point Manager
+(a dock, `SurveyPointsDock`, filterable and read-only) and the Point Report
+(text, or CSV by `cad::pointReportCsv`, a small RFC 4180 writer, since the
+report carries columns a point file does not) both read them through the
+import's own keys, so a point reads back as it went in.
+
+**The import wizard** (`survey_import_wizard.*`) is a paged dialog in six
+steps - File, Format, Layout, System, Options, Report - and a `QDialog`, not a
+`QWizard`, because `QWizard`'s buttons have private names and the headless
+driver presses buttons by name. Its rules are the ones this file started
+with:
+
+- **The format is never assumed.** Step 2 lists every candidate with its
+  evidence and its `FormatDescriptor` record; a detection that is not
+  Identified - and a delimited file never is, its probe being weak by design -
+  starts on "(choose the format)", and Next refuses that.
+- **The column order is never guessed.** Step 3 shows `proposeLayout`'s
+  reading of the header, a role box per column of the list as typed (kept
+  while a change such as swapping northing and easting passes through a list
+  that does not validate yet), the delimiter, header lines, comments,
+  quoting, saved layout templates and a preview with the parser's error, line
+  and column, inline. When the proposal is Uncertain, Next needs the person to
+  tick that they have checked the order of northing and easting.
+- **The unit has no default and nothing is transformed silently.** Step 4
+  takes the unit the numbers are in, the system the file is in (unknown unless
+  stated) and, only when BOTH a source and a target EPSG code are given, a
+  horizontal transformation through `katana::geodesy`
+  (`cad::transformSurveyProject`, with the unit conversion on both sides;
+  heights pass through unchanged and the report says so). The parser still
+  transforms nothing. Step 3's preview parses in metres and labels its
+  numbers "as written in the file", since the unit comes a step later.
+- **Ids the drawing already has** (`cad::ExistingPointPolicy`): Refuse (the
+  default - a clash more often means the wrong file than a wanted update),
+  Skip, Replace (the drawing's point deleted in the same command, so one undo
+  puts it back) or Keep Both (the report says the drawing now has two).
+- **One command.** Import makes one undoable command
+  (`cad::importSurveyPoints`), frames the views and logs the report; step 5
+  can apply the loaded mapfile's codes afterwards with the window's own Apply
+  Survey Codes action. After Import the wizard hides and goes back to step 1
+  with its fields kept, as a wizard's Finish does.
+
+Saved layout templates live in the user's settings (`survey/templates`), and
+every open template list - the wizard's and the Export dialog's - is refilled
+at once when one is saved or deleted in the process
+(`keepTemplateChoiceCurrent`), and on show for one saved by another Katana.
+
+**Driven headlessly.** Every dialog, field and button has an object name
+(listed at the head of each dialog's header), and `katana` takes
+`--survey-dialog ACTION` (repeatable), `--fill field=text`, `--press button`
+and `--survey-dock ACTION`; `--fill` runs the event loop after each fill, as
+happens between two user actions, and `--press` on a disabled button fails the
+run rather than doing nothing. `tools/check_screenshot.cmake` strings these
+into `-DDRIVE=@surveyImport|file=...|!next|...|!import|#surveyPointManager|filter=CP`,
+checks the log with `-DEXPECT`, the files written with
+`-DCOMPARE=reference|file...` (the export round trip writes, re-imports with
+Replace and writes again, and both files must equal the reference), and
+requires a refusal with `-DREFUSED=<regex>` - exit 1, never a crash, with the
+regex naming what came before the refusal so a run stopped earlier cannot
+pass. Fourteen `qt_survey_*` tests run this way.
+
+Not done: Process Linework and Draw Survey Features have no menu item, and the
+wizard does not call `drawSurveyFeatures` (`docs/survey_coding.md`); the
+Point Manager is read-only; the survey tools are not in the interactive-tool
+catalogue (`docs/cad.md`); `SurveyPointsDock` does not wear the dock chrome;
+no headless test presses Use Selection; under the offscreen platform there is
+no monospace font, so report columns look misaligned in the test PNGs; two
+headless tests write a template to the user's settings and delete it in the
+same run, so a killed point-report run leaves one behind. A name holding one
+number followed by coordinates ("P1 500000 7000000 0") is still read as the
+label "P1 500000", which cannot be told apart from "CP 1 500000 7000000".
