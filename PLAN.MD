@@ -942,12 +942,28 @@ cannot include an Entity or a Document, which is Rule 3 made structural):
   lines and points. Lighting is BAKED by the scene builder, so the rasteriser
   interpolates and nothing else.
 * `Rasterizer` — three stages in the shape a tile-based GPU uses: transform
-  every vertex once in parallel; clip against the near plane, project, widen
-  lines into screen-space quads with square caps, and bin each primitive into
-  every 64x64 tile it touches; then rasterise one task per tile, each tile
-  owning its pixels exclusively so there is no lock and no false sharing.
-  Perspective-correct colour, z-buffered, depth bias for wireframe over
-  surfaces.
+  every vertex once in parallel and classify it against the clip planes; clip,
+  project, widen lines into screen-space quads with square caps, and bin each
+  primitive into every 64x64 tile it touches; then rasterise one task per
+  tile, each tile owning its pixels exclusively so there is no lock and no
+  false sharing. Perspective-correct colour, z-buffered, depth bias for
+  wireframe over surfaces.
+* **Clipping - CORRECTED 2026-09-23.** Clipping is against the true near plane
+  (clip z >= 0, i.e. w >= near) and a guard band of twice the viewport, with
+  the cut computed in double (Sutherland-Hodgman for triangles, Liang-Barsky
+  for lines), and every float-to-int conversion is clamped first. It used to
+  clip at w > 1e-6, which kept the divide finite and nothing else: the cut
+  vertex projected beyond INT_MAX, the conversion in the binning was undefined
+  (INT_MIN on x86-64), and a triangle or line crossing the eye plane was
+  dropped whole, visible part included, in any view taller than about 213 px -
+  the ground under a perspective eye went missing. Found by the audit; the
+  regression tests at 400x400 and 1920x1080 fail on the old code. The reasons
+  for the band's width and for double are recorded at `kGuardBand` in
+  `rasterizer.cpp`; the cost, none measurable, is in `docs/performance.md`.
+  No sanitizer could have caught it: GCC's `-fsanitize=undefined` leaves out
+  `float-cast-overflow`, which `cmake/KatanaSanitizers.cmake` now names - and
+  a MinGW trap-mode UBSan build of the old code dies on it with an illegal
+  instruction in the new tests.
 * **Reproducible (Rule 7).** The binning chunk count is a function of the
   primitive count alone, never of the core count, so a tile visits its
   primitives in the same order on every machine. Asserted by rendering the same

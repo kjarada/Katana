@@ -240,10 +240,50 @@ spill on every token - produces the same output again.
   deliberately wider than the geometry, so the viewport's own test is the
   tighter filter and removing it would paint entities that are off screen.
 
+### The rasteriser's clipping rewrite (2026-09-23)
+
+The software rasteriser had pixel tests and no timing. Its clipping was
+rewritten to fix a correctness defect (PLAN.MD Phase 15: primitives crossing
+the eye plane were dropped whole), and the new clipping does work on every
+triangle, so `bench_render.cpp` was written first and run on the old code.
+Ground grids at 1920x1080: `Framed` has every vertex in view (the pass-through
+path), `Within` puts the eye 2 m over the middle of the grid so triangles cross
+the near plane and the guard band (the clipping path).
+
+The machine was not quiet (the application was open), and single runs of the
+same binary varied by up to 2x - one "after" run first reported the serial
+131k-triangle case at 25.7 ms against 13.1 ms before, which re-running did not
+reproduce. So the three builds were run ALTERNATELY, six rounds of three
+repetitions each, and the table gives the minimum and the median of the 18
+samples (`python tools/compare_benchmarks.py --alternate 6 BM_RenderGround
+old=... new=...`):
+
+| ms, min / median | old (w > 1e-6) | clip test per triangle | clip codes per vertex (shipped) |
+|---|---|---|---|
+| Framed, 131k tris | 3.74 / 4.16 | 3.37 / 4.39 | 3.05 / 4.39 |
+| Framed, 1.05M tris | 14.82 / 17.35 | 14.93 / 18.12 | 14.64 / 17.94 |
+| Framed serial, 131k | 13.31 / 15.34 | 14.34 / 15.89 | 14.50 / 15.25 |
+| Framed serial, 1.05M | 59.67 / 65.42 | 60.89 / 70.81 | 57.83 / 64.21 |
+| Within, 131k | 5.88 / 7.54 | 6.27 / 8.25 | 5.87 / 7.66 |
+| Within, 1.05M | 11.62 / 13.86 | 13.05 / 16.96 | 10.39 / 13.02 |
+
+Reading it: the shipped version is within the noise of the old code
+everywhere. (In `Within` the triangles that cross the eye plane lie below the
+bottom edge of the view, so both versions write the same 1.71M fragments: the
+case measures the clipping arithmetic, not the defect, which the pixel tests
+cover.) The middle column is the
+first version of the fix, which tested each triangle's three corners against
+five planes: a TIN vertex is a corner of about six triangles, so it did the
+same test six times, in the serial-per-chunk stage, and it shows in the
+medians of the clipping case. The shipped version classifies each vertex ONCE,
+in the parallel transform, into a five-bit code; a triangle needs two ORs to
+know it can pass through and an AND to know it cannot be seen.
+
 ### Still open
 
-- No benchmark covers scene building or the per-frame draw path, so the
-  viewport work earlier in this file still quotes no figure.
+- No benchmark covers scene building or the Qt per-frame draw path, so the
+  viewport work earlier in this file still quotes no figure. The software
+  rasteriser has one now (`bench_render.cpp`, above).
 - No benchmark covers a 12da read.
 - `Importer::tallyFor` (`domain_import.cpp`) is a linear scan per element, the
   third instance of that shape. About 1% of an import, left alone.

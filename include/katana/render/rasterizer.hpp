@@ -133,6 +133,13 @@ class Rasterizer {
 
     // Stage 1 output.
     std::vector<ClipVertex> clip_;
+    // Parallel to clip_: bit p set when the vertex is outside clip plane p (the
+    // planes are described in rasterizer.cpp at kGuardBand). Worked out once per
+    // vertex, in the parallel transform, rather than once per triangle corner:
+    // a TIN vertex is a corner of about six triangles. Codes that OR to zero
+    // need no clipping; codes that AND to non-zero are outside one plane
+    // together, so the primitive cannot be seen.
+    std::vector<std::uint8_t> clipCodes_;
 
     // Stage 2 output, one bucket per primitive chunk so the bucket a primitive
     // lands in - and therefore the order a tile sees it in - depends only on

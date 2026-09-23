@@ -50,6 +50,77 @@ constexpr std::size_t kMaxChunks = 64;
            static_cast<Rgba>(mix(blueOf(a), blueOf(b)));
 }
 
+// Clipping happens in clip space, before the divide, against five planes. A
+// vertex is inside where every planeDistance() below is >= 0.
+//
+// The NEAR plane is clip z >= 0. With the Vulkan depth range camera.cpp builds
+// (z/w = 0 at the near plane), that is exactly w >= near for a perspective
+// projection and z_eye <= -near for an orthographic one, and setDepthRange()
+// refuses near <= 0, so every kept vertex has w > 0 and the divide is safe.
+// This used to clip at w > 1e-6 instead, which kept the reciprocal finite and
+// nothing else: a vertex cut there projects with 1/w = 1e6 to a screen
+// coordinate beyond INT_MAX, and the float-to-int conversion in the binning is
+// then undefined. On x86-64 it yields INT_MIN, so a triangle or line crossing
+// the eye plane lost its VISIBLE part as well, in any view taller than about
+// 213 px - the ground below a perspective eye (audit of 2026-09-23).
+//
+// The four GUARD-BAND planes |x| <= kGuardBand * w and |y| <= kGuardBand * w
+// bound every projected coordinate to within half a viewport of the image, so
+// no screen coordinate can overflow whatever the input, and the edge functions
+// keep the precision of a viewport-sized triangle. The band is wider than the
+// image (1) for two reasons: a point or a wide line centred just outside the
+// image still reaches into it and must not be rejected, and a triangle that
+// only just overhangs the image takes the pass-through path rather than being
+// cut. Wider buys nothing and costs precision: an edge function's error is
+// about the triangle's extent in pixels times 2^-24, a few ten-thousandths of a
+// pixel at this band on a 2000 px image and over a pixel at ten thousand
+// viewports.
+//
+// Where a triangle or line does cross a plane, the cut is computed in DOUBLE.
+// The inputs are floats, so every plane distance is exact in double; in float,
+// 2 + (-3.1e8) loses the 2, the parameter of the cut comes out at exactly 0.5,
+// and the cut vertex lands at the image centre instead of on the band. A cut
+// vertex is small even when its endpoints are enormous, so rounding it back to
+// float at the end costs nothing.
+//
+// The far plane is not clipped: nothing numerical goes wrong beyond it, and the
+// per-pixel depth test already rejects depth > 1.
+constexpr float kGuardBand = 2.0f;
+constexpr std::size_t kClipPlanes = 5;
+
+// Signed distance of a clip-space vertex from `plane`, >= 0 inside. Double for
+// the reason just given; the inputs are the float clip coordinates, so the
+// stage-1 classification and a stage-2 cut agree on which side a vertex is.
+[[nodiscard]] double planeDistance(float x, float y, float z, float w, std::size_t plane)
+{
+    const double band = kGuardBand * static_cast<double>(w);
+    switch (plane) {
+    case 0:
+        return static_cast<double>(z);
+    case 1:
+        return band + static_cast<double>(x);
+    case 2:
+        return band - static_cast<double>(x);
+    case 3:
+        return band + static_cast<double>(y);
+    default:
+        return band - static_cast<double>(y);
+    }
+}
+
+// Bit p set when the vertex is outside plane p. A NaN distance counts as
+// outside, so a vertex with a NaN in it is never passed through unclipped.
+[[nodiscard]] std::uint8_t clipCodeOf(float x, float y, float z, float w)
+{
+    unsigned code = 0;
+    for (std::size_t plane = 0; plane < kClipPlanes; ++plane) {
+        if (!(planeDistance(x, y, z, w, plane) >= 0.0)) {
+            code |= 1u << plane;
+        }
+    }
+    return static_cast<std::uint8_t>(code);
+}
+
 } // namespace
 
 // ---- stage 1: transform ---------------------------------------------------------
@@ -58,6 +129,7 @@ void Rasterizer::transformVertices(const DrawList& list, const Camera& camera, T
 {
     const katana::math::Mat4 mvp = camera.viewProjection();
     clip_.resize(list.positions.size());
+    clipCodes_.resize(list.positions.size());
 
     // Read straight out of the SoA position array. Nothing else is touched, so
     // this streams at memory bandwidth rather than striding over colours.
@@ -72,6 +144,7 @@ void Rasterizer::transformVertices(const DrawList& list, const Camera& camera, T
             out.z = static_cast<float>(c.z);
             out.w = static_cast<float>(c.w);
             out.color = i < list.colors.size() ? list.colors[i] : rgba(255, 255, 255);
+            clipCodes_[i] = clipCodeOf(out.x, out.y, out.z, out.w);
         }
     });
 }
@@ -95,11 +168,22 @@ struct ProjectedVertex {
     Rgba color = 0;
 };
 
-// The near plane in clip space is w > 0 combined with z >= 0; the one that
-// actually breaks the perspective divide is w, so that is what is clipped
-// against. kMinW keeps the reciprocal finite for a vertex sitting exactly on
-// the eye plane.
-constexpr float kMinW = 1.0e-6f;
+// Floor of a screen coordinate, clamped to [lo, hi] BEFORE the conversion to
+// int, because converting a float outside int's range is undefined behaviour.
+// NaN clamps to lo. After clipping every coordinate is inside the guard band,
+// so this is the last line of defence rather than the mechanism - except for
+// a point's half-size, which comes straight from the draw list.
+[[nodiscard]] int pixelFloor(float value, int lo, int hi)
+{
+    const float f = std::floor(value);
+    if (!(f >= static_cast<float>(lo))) {
+        return lo;
+    }
+    if (f >= static_cast<float>(hi)) {
+        return hi;
+    }
+    return static_cast<int>(f);
+}
 
 } // namespace
 
@@ -126,9 +210,35 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
     viewport.halfWidth = viewport.width * 0.5f;
     viewport.halfHeight = viewport.height * 0.5f;
 
+    // The clipping helpers are lambdas only because ClipVertex is private to
+    // the class; the planes, and why the arithmetic is double, are described at
+    // kGuardBand.
+    const auto distance = [](const ClipVertex& v, std::size_t plane) {
+        return planeDistance(v.x, v.y, v.z, v.w, plane);
+    };
+    const auto isFinite = [](const ClipVertex& v) {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z) &&
+               std::isfinite(v.w);
+    };
+    // Clip space is where interpolation is linear, so a cut vertex is a lerp.
+    const auto lerpClip = [](const ClipVertex& a, const ClipVertex& b, double t) {
+        const auto mix = [t](float from, float to) {
+            const double lo = static_cast<double>(from);
+            return static_cast<float>(lo + (static_cast<double>(to) - lo) * t);
+        };
+        ClipVertex out;
+        out.x = mix(a.x, b.x);
+        out.y = mix(a.y, b.y);
+        out.z = mix(a.z, b.z);
+        out.w = mix(a.w, b.w);
+        out.color = lerpColor(a.color, b.color, static_cast<float>(t));
+        return out;
+    };
+
     const auto project = [&viewport](const ClipVertex& v) {
+        // Only ever given a vertex that survived clipping, so w >= near > 0.
         ProjectedVertex out;
-        const float invW = 1.0f / std::max(v.w, kMinW);
+        const float invW = 1.0f / v.w;
         out.x = (v.x * invW * 0.5f + 0.5f) * viewport.width;
         out.y = (0.5f - v.y * invW * 0.5f) * viewport.height; // screen +y is down
         out.z = v.z * invW;
@@ -152,40 +262,14 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
             return;
         }
 
-        // Appends a screen triangle after clipping it against the near plane.
-        // A triangle crossing the plane becomes one or two; one entirely behind
-        // it disappears.
-        const auto emitTriangle = [&](const std::array<ClipVertex, 3>& v, float depthBias) {
-            std::array<ClipVertex, 4> inside{};
-            std::size_t insideCount = 0;
-            for (std::size_t i = 0; i < 3; ++i) {
-                const ClipVertex& current = v[i];
-                const ClipVertex& next = v[(i + 1) % 3];
-                const bool currentIn = current.w > kMinW;
-                const bool nextIn = next.w > kMinW;
-                if (currentIn) {
-                    inside[insideCount++] = current;
-                }
-                if (currentIn != nextIn) {
-                    // Split where w crosses kMinW. Sutherland-Hodgman against
-                    // the single plane that the divide cannot survive.
-                    const float t = (kMinW - current.w) / (next.w - current.w);
-                    ClipVertex cut;
-                    cut.x = current.x + (next.x - current.x) * t;
-                    cut.y = current.y + (next.y - current.y) * t;
-                    cut.z = current.z + (next.z - current.z) * t;
-                    cut.w = kMinW;
-                    cut.color = lerpColor(current.color, next.color, t);
-                    inside[insideCount++] = cut;
-                }
-            }
-            if (insideCount < 3) {
-                return;
-            }
-            for (std::size_t i = 1; i + 1 < insideCount; ++i) {
-                const ProjectedVertex p0 = project(inside[0]);
-                const ProjectedVertex p1 = project(inside[i]);
-                const ProjectedVertex p2 = project(inside[i + 1]);
+        // Fans a convex polygon whose every vertex is inside all five planes
+        // into screen triangles.
+        const auto emitPolygon = [&](const ClipVertex* polygon, std::size_t count,
+                                     float depthBias) {
+            for (std::size_t i = 1; i + 1 < count; ++i) {
+                const ProjectedVertex p0 = project(polygon[0]);
+                const ProjectedVertex p1 = project(polygon[i]);
+                const ProjectedVertex p2 = project(polygon[i + 1]);
 
                 const float area = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
                 if (!(std::abs(area) > 0.0f)) {
@@ -219,6 +303,50 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
             }
         };
 
+        // A triangle that crosses at least one plane: Sutherland-Hodgman, one
+        // plane at a time, into a convex polygon of up to eight vertices (each
+        // plane adds at most one), then fanned.
+        const auto emitClippedTriangle = [&](const std::array<ClipVertex, 3>& v, float depthBias) {
+            // A non-finite coordinate has no position to clip, and a cut
+            // interpolated from one is NaN: draw nothing rather than part.
+            if (!isFinite(v[0]) || !isFinite(v[1]) || !isFinite(v[2])) {
+                return;
+            }
+            std::array<ClipVertex, 3 + kClipPlanes> polygon{v[0], v[1], v[2]};
+            std::array<ClipVertex, 3 + kClipPlanes> scratch{};
+            std::size_t count = 3;
+            // NEAR FIRST: once every vertex has z >= 0 every w is positive, so
+            // each later cut interpolates between vertices the divide survives.
+            for (std::size_t plane = 0; plane < kClipPlanes && count >= 3; ++plane) {
+                std::size_t kept = 0;
+                for (std::size_t i = 0; i < count; ++i) {
+                    const ClipVertex& current = polygon[i];
+                    const ClipVertex& next = polygon[(i + 1) % count];
+                    const double dc = distance(current, plane);
+                    const double dn = distance(next, plane);
+                    const bool currentIn = dc >= 0.0;
+                    const bool nextIn = dn >= 0.0;
+                    if (currentIn) {
+                        scratch[kept++] = current;
+                    }
+                    if (currentIn != nextIn) {
+                        // dc and dn have opposite signs, so the denominator is
+                        // never zero and t is in [0, 1].
+                        ClipVertex cutVertex = lerpClip(current, next, dc / (dc - dn));
+                        if (plane == 0) {
+                            cutVertex.z = 0.0f; // on the near plane exactly: depth 0
+                        }
+                        scratch[kept++] = cutVertex;
+                    }
+                }
+                std::copy_n(scratch.begin(), kept, polygon.begin());
+                count = kept;
+            }
+            if (count >= 3) {
+                emitPolygon(polygon.data(), count, depthBias);
+            }
+        };
+
         for (std::size_t index = first; index < last; ++index) {
             if (index < list.triangles.size()) {
                 const DrawTriangle& t = list.triangles[index];
@@ -226,7 +354,18 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                     continue;
                 }
                 ++chunk.stats.trianglesSubmitted;
-                emitTriangle({clip_[t.a], clip_[t.b], clip_[t.c]}, 0.0f);
+                const unsigned ca = clipCodes_[t.a];
+                const unsigned cb = clipCodes_[t.b];
+                const unsigned cc = clipCodes_[t.c];
+                if ((ca & cb & cc) != 0u) {
+                    continue; // all three outside one plane: nothing of it can show
+                }
+                const std::array<ClipVertex, 3> v{clip_[t.a], clip_[t.b], clip_[t.c]};
+                if ((ca | cb | cc) == 0u) {
+                    emitPolygon(v.data(), 3, 0.0f); // the common case: nothing to cut
+                } else {
+                    emitClippedTriangle(v, 0.0f);
+                }
                 continue;
             }
             const std::size_t lineIndex = index - list.triangles.size();
@@ -237,25 +376,61 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 }
                 ++chunk.stats.linesSubmitted;
 
-                // Widen in SCREEN space so a line keeps its pixel thickness at
-                // any depth, then reuse the triangle path: one tested
-                // rasteriser, correct depth, correct clipping.
-                ClipVertex a = clip_[line.a];
-                ClipVertex b = clip_[line.b];
-                if (a.w <= kMinW && b.w <= kMinW) {
-                    continue;
+                // Clip the segment against the same five planes (Liang-Barsky:
+                // the kept part is the parameter interval [t0, t1] every plane
+                // agrees on), then widen in SCREEN space so a line keeps its
+                // pixel thickness at any depth, and reuse the triangle path:
+                // one tested rasteriser, correct depth, correct clipping.
+                const unsigned ca = clipCodes_[line.a];
+                const unsigned cb = clipCodes_[line.b];
+                if ((ca & cb) != 0u) {
+                    continue; // both ends outside one plane
                 }
-                if (a.w <= kMinW || b.w <= kMinW) {
-                    ClipVertex& behind = a.w <= kMinW ? a : b;
-                    const ClipVertex& front = a.w <= kMinW ? b : a;
-                    const float t = (kMinW - behind.w) / (front.w - behind.w);
-                    ClipVertex cut;
-                    cut.x = behind.x + (front.x - behind.x) * t;
-                    cut.y = behind.y + (front.y - behind.y) * t;
-                    cut.z = behind.z + (front.z - behind.z) * t;
-                    cut.w = kMinW;
-                    cut.color = lerpColor(behind.color, front.color, t);
-                    behind = cut;
+                const ClipVertex& a0 = clip_[line.a];
+                const ClipVertex& b0 = clip_[line.b];
+                ClipVertex a = a0;
+                ClipVertex b = b0;
+                if ((ca | cb) != 0u) {
+                    if (!isFinite(a0) || !isFinite(b0)) {
+                        continue;
+                    }
+                    double t0 = 0.0;
+                    double t1 = 1.0;
+                    bool visible = true;
+                    bool nearCutsA = false;
+                    bool nearCutsB = false;
+                    for (std::size_t plane = 0; plane < kClipPlanes && visible; ++plane) {
+                        const double da = distance(a0, plane);
+                        const double db = distance(b0, plane);
+                        if (da < 0.0 && db < 0.0) {
+                            visible = false;
+                        } else if (da < 0.0) {
+                            const double t = da / (da - db); // entering
+                            if (t > t0) {
+                                t0 = t;
+                                nearCutsA = plane == 0;
+                            }
+                        } else if (db < 0.0) {
+                            const double t = da / (da - db); // leaving
+                            if (t < t1) {
+                                t1 = t;
+                                nearCutsB = plane == 0;
+                            }
+                        }
+                    }
+                    if (!visible || !(t0 <= t1)) {
+                        continue;
+                    }
+                    a = lerpClip(a0, b0, t0);
+                    b = lerpClip(a0, b0, t1);
+                    // As for a triangle: an end cut by the near plane is ON it,
+                    // depth exactly 0, not a rounding error either side.
+                    if (nearCutsA) {
+                        a.z = 0.0f;
+                    }
+                    if (nearCutsB) {
+                        b.z = 0.0f;
+                    }
                 }
                 const ProjectedVertex p0 = project(a);
                 const ProjectedVertex p1 = project(b);
@@ -335,10 +510,10 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 continue;
             }
             ++chunk.stats.pointsSubmitted;
-            const ClipVertex& v = clip_[point.a];
-            if (v.w <= kMinW) {
+            if (clipCodes_[point.a] != 0u) {
                 continue;
             }
+            const ClipVertex& v = clip_[point.a];
             const ProjectedVertex p = project(v);
             ScreenPoint screen;
             screen.x = p.x;
@@ -379,12 +554,10 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
                 minY >= static_cast<float>(target.height())) {
                 return; // entirely off screen (the !(>=) form also rejects NaN)
             }
-            const int x0 = std::max(0, static_cast<int>(std::floor(minX)) / Framebuffer::kTileSize);
-            const int y0 = std::max(0, static_cast<int>(std::floor(minY)) / Framebuffer::kTileSize);
-            const int x1 = std::min(tilesAcross - 1,
-                                    static_cast<int>(std::floor(maxX)) / Framebuffer::kTileSize);
-            const int y1 = std::min(tilesDown - 1,
-                                    static_cast<int>(std::floor(maxY)) / Framebuffer::kTileSize);
+            const int x0 = pixelFloor(minX, 0, target.width() - 1) / Framebuffer::kTileSize;
+            const int y0 = pixelFloor(minY, 0, target.height() - 1) / Framebuffer::kTileSize;
+            const int x1 = pixelFloor(maxX, 0, target.width() - 1) / Framebuffer::kTileSize;
+            const int y1 = pixelFloor(maxY, 0, target.height() - 1) / Framebuffer::kTileSize;
             for (int ty = y0; ty <= y1; ++ty) {
                 for (int tx = x0; tx <= x1; ++tx) {
                     chunk.tileBins[static_cast<std::size_t>(ty) *
@@ -437,10 +610,10 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
             for (const std::uint32_t tag : chunk.tileBins[tileIndex]) {
                 if ((tag & kPointTag) != 0u) {
                     const ScreenPoint& p = chunk.points[tag & ~kPointTag];
-                    const int x0 = std::max(rect.x0, static_cast<int>(std::floor(p.x - p.half)));
-                    const int x1 = std::min(rect.x1 - 1, static_cast<int>(std::floor(p.x + p.half)));
-                    const int y0 = std::max(rect.y0, static_cast<int>(std::floor(p.y - p.half)));
-                    const int y1 = std::min(rect.y1 - 1, static_cast<int>(std::floor(p.y + p.half)));
+                    const int x0 = pixelFloor(p.x - p.half, rect.x0, rect.x1);
+                    const int x1 = pixelFloor(p.x + p.half, rect.x0 - 1, rect.x1 - 1);
+                    const int y0 = pixelFloor(p.y - p.half, rect.y0, rect.y1);
+                    const int y1 = pixelFloor(p.y + p.half, rect.y0 - 1, rect.y1 - 1);
                     for (int y = y0; y <= y1; ++y) {
                         Rgba* row = colorBase + static_cast<std::size_t>(y) *
                                                     static_cast<std::size_t>(stride);
@@ -458,14 +631,14 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
                 }
 
                 const ScreenTriangle& t = chunk.triangles[tag];
-                const int minX = std::max(rect.x0,
-                                          static_cast<int>(std::floor(std::min({t.x[0], t.x[1], t.x[2]}))));
-                const int maxX = std::min(rect.x1 - 1,
-                                          static_cast<int>(std::floor(std::max({t.x[0], t.x[1], t.x[2]}))));
-                const int minY = std::max(rect.y0,
-                                          static_cast<int>(std::floor(std::min({t.y[0], t.y[1], t.y[2]}))));
-                const int maxY = std::min(rect.y1 - 1,
-                                          static_cast<int>(std::floor(std::max({t.y[0], t.y[1], t.y[2]}))));
+                const int minX =
+                    pixelFloor(std::min({t.x[0], t.x[1], t.x[2]}), rect.x0, rect.x1);
+                const int maxX =
+                    pixelFloor(std::max({t.x[0], t.x[1], t.x[2]}), rect.x0 - 1, rect.x1 - 1);
+                const int minY =
+                    pixelFloor(std::min({t.y[0], t.y[1], t.y[2]}), rect.y0, rect.y1);
+                const int maxY =
+                    pixelFloor(std::max({t.y[0], t.y[1], t.y[2]}), rect.y0 - 1, rect.y1 - 1);
                 if (minX > maxX || minY > maxY) {
                     continue;
                 }

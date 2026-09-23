@@ -165,42 +165,234 @@ TEST(RenderRasterizer, TheNearerTriangleWinsWhicheverOrderTheyAreSubmitted)
     }
 }
 
-TEST(RenderRasterizer, GeometryBehindTheNearPlaneIsClippedNotMirrored)
-{
-    auto target = Framebuffer::create(80, 80);
-    ASSERT_TRUE(target.ok());
-    TaskPool pool(0);
+namespace {
 
+// A level eye 50 units south of the origin, looking north: the view the
+// near-plane tests below are worked out for.
+Camera levelEyeCamera(int width, int height, double nearPlane, double farPlane)
+{
     Camera camera;
-    camera.setViewportSize(80, 80);
+    camera.setViewportSize(width, height);
     camera.setProjection(Projection::Perspective);
     camera.setStandardView(StandardView::Front); // looking north from the south
     camera.setTarget(Vec3(0.0, 0.0, 0.0));
-    camera.setDistance(50.0);                    // eye at y = -50
-    camera.setDepthRange(10.0, 500.0);           // near plane at y = -40
+    camera.setDistance(50.0); // eye at y = -50
+    camera.setDepthRange(nearPlane, farPlane);
+    return camera;
+}
 
-    // A big triangle straddling the near plane: one vertex is behind the eye.
+// 80 px is the size the first test below was written at. 400 px and 1920x1080
+// are sizes at which clipping at w = 1e-6, as the rasteriser once did, put the
+// cut vertex's screen coordinate beyond INT_MAX, so the float-to-int conversion
+// in the binning was undefined and dropped the whole primitive - its visible
+// part included (audit of 2026-09-23; the threshold for that scene was about
+// 213 px).
+constexpr std::pair<int, int> kNearPlaneSizes[] = {{80, 80}, {400, 400}, {1920, 1080}};
+
+} // namespace
+
+TEST(RenderRasterizer, GeometryBehindTheNearPlaneIsClippedNotMirrored)
+{
+    for (const auto& [width, height] : kNearPlaneSizes) {
+        SCOPED_TRACE(testing::Message() << width << "x" << height);
+        auto target = Framebuffer::create(width, height);
+        ASSERT_TRUE(target.ok());
+        TaskPool pool(0);
+        const Camera camera = levelEyeCamera(width, height, 10.0, 500.0); // near at y = -40
+
+        // A big triangle straddling the near plane: one vertex is behind the eye.
+        DrawList list;
+        const auto a = list.addVertex(Vec3(-30.0, -100.0, 0.0), kRed); // behind the eye
+        const auto b = list.addVertex(Vec3(30.0, 20.0, -20.0), kRed);
+        const auto c = list.addVertex(Vec3(30.0, 20.0, 20.0), kRed);
+        list.addTriangle(a, b, c);
+
+        Rasterizer rasterizer;
+        const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
+        ASSERT_TRUE(stats.ok()) << stats.error().describe();
+        // Clipping the triangle against the near plane yields a quad, hence two
+        // screen triangles rather than one.
+        EXPECT_EQ(stats->trianglesSubmitted, 1u);
+        EXPECT_GE(stats->trianglesRasterised, 1u);
+
+        // Every written depth must be inside [0, 1]: a vertex that slipped
+        // through the divide with a negative w lands outside it.
+        std::size_t outOfRange = 0;
+        for (const float depth : target->depth()) {
+            outOfRange += (depth >= 0.0f && depth <= 1.0f) ? 0u : 1u;
+        }
+        EXPECT_EQ(outOfRange, 0u);
+        EXPECT_GT(countPixels(*target, kRed), 0u) << "the visible part must still be drawn";
+    }
+}
+
+TEST(RenderRasterizer, GroundRunningBehindTheEyeCoversTheLowerViewAndNothingAbove)
+{
+    // Flat ground 10 units below a level eye, running from 950 units behind it
+    // to 1050 ahead. Worked out without the program: the eye looks
+    // horizontally, so the horizon is the image's middle row and no ray above
+    // it meets the ground. A ray through the bottom quarter descends at least
+    // half as steeply as the frustum's lower edge, tan(22.5 deg) for the
+    // default 45 degree field of view, so it meets the ground within
+    // 10 / (0.5 * 0.414) = 48 units: inside the ground, past the near plane,
+    // within the far one, and within 1.78 * 0.414 * 48 = 36 units of the
+    // centre line across the widest image here. Both triangles cross the eye
+    // plane, which is the case clipping at w = 1e-6 lost.
+    for (const auto& [width, height] : kNearPlaneSizes) {
+        SCOPED_TRACE(testing::Message() << width << "x" << height);
+        auto target = Framebuffer::create(width, height);
+        ASSERT_TRUE(target.ok());
+        TaskPool pool(0);
+        const Camera camera = levelEyeCamera(width, height, 1.0, 5000.0);
+
+        DrawList list;
+        const auto v0 = list.addVertex(Vec3(-1000.0, -1000.0, -10.0), kRed);
+        const auto v1 = list.addVertex(Vec3(1000.0, -1000.0, -10.0), kRed);
+        const auto v2 = list.addVertex(Vec3(1000.0, 1000.0, -10.0), kRed);
+        const auto v3 = list.addVertex(Vec3(-1000.0, 1000.0, -10.0), kRed);
+        list.addTriangle(v0, v1, v2);
+        list.addTriangle(v0, v2, v3);
+
+        Rasterizer rasterizer;
+        const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
+        ASSERT_TRUE(stats.ok()) << stats.error().describe();
+
+        std::size_t skyNotBackground = 0;
+        std::size_t groundNotRed = 0;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                if (y < height / 2) {
+                    skyNotBackground += target->colorAt(x, y) == kBackground ? 0u : 1u;
+                } else if (y >= height * 3 / 4) {
+                    groundNotRed += target->colorAt(x, y) == kRed ? 0u : 1u;
+                }
+            }
+        }
+        EXPECT_EQ(skyNotBackground, 0u) << "nothing may be drawn above the horizon";
+        EXPECT_EQ(groundNotRed, 0u) << "every pixel of the bottom quarter looks at the ground";
+    }
+}
+
+TEST(RenderRasterizer, ALineRunningBehindTheEyeDrawsItsVisiblePart)
+{
+    // A centreline on the same ground, from 50 units behind the eye to 150
+    // ahead, directly below it: it projects onto the image's centre column,
+    // from the bottom edge (ground 24 units ahead) up towards the horizon.
+    for (const auto& [width, height] : kNearPlaneSizes) {
+        SCOPED_TRACE(testing::Message() << width << "x" << height);
+        auto target = Framebuffer::create(width, height);
+        ASSERT_TRUE(target.ok());
+        TaskPool pool(0);
+        const Camera camera = levelEyeCamera(width, height, 1.0, 5000.0);
+
+        DrawList list;
+        list.addSegment(Vec3(0.0, -100.0, -10.0), Vec3(0.0, 100.0, -10.0), kBlue, 3.0f);
+
+        Rasterizer rasterizer;
+        const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
+        ASSERT_TRUE(stats.ok()) << stats.error().describe();
+        // The centre column's pixel centres are half a pixel from the line,
+        // inside its 3 px width.
+        EXPECT_EQ(target->colorAt(width / 2, height - 1), kBlue) << "the part under the eye";
+        EXPECT_EQ(target->colorAt(width / 2, height * 3 / 4), kBlue);
+        EXPECT_EQ(target->colorAt(width / 2, height / 4), kBackground) << "above the horizon";
+    }
+}
+
+TEST(RenderRasterizer, ClippingAtTheGuardBandDoesNotMoveAVisibleEdge)
+{
+    // A triangle whose long edge is the line z = x / 2 through the image
+    // centre and whose other two edges are at least m / 2 units away. Inside
+    // the image it covers exactly the pixels whose centres are below that line,
+    // for any m large enough to put the other edges out of sight: clipping it
+    // must cut the triangle, not bend the edge that shows. At m = 1e10 the
+    // unclipped screen coordinates overflow an int, and a cut computed in float
+    // lands at the image centre instead of on the band (2 + -3.1e8 is -3.1e8 in
+    // float), losing a quarter of the image - both checked by hand-mutating the
+    // rasteriser (2026-09-23: 2048 and 768 wrong pixels respectively).
+    //
+    // A level elevation, not plan view: Top is clamped just short of looking
+    // straight down (camera.hpp), so a vertex 1e10 away in y leaks thousands of
+    // units into depth, the near plane cuts the triangle small before the
+    // guard band sees it, and that hides the precision this is about.
+    Camera camera = planCamera(64, 64);
+    camera.setStandardView(StandardView::Front); // x to the right, z up, exactly
+    TaskPool pool(0);
+    for (const double m : {1.0e3, 1.0e6, 1.0e10}) {
+        SCOPED_TRACE(testing::Message() << "m = " << m);
+        auto target = Framebuffer::create(64, 64);
+        ASSERT_TRUE(target.ok());
+        DrawList list;
+        const auto a = list.addVertex(Vec3(-m, 0.0, -m / 2.0), kRed);
+        const auto b = list.addVertex(Vec3(m, 0.0, m / 2.0), kRed);
+        const auto c = list.addVertex(Vec3(m, 0.0, -m), kRed);
+        list.addTriangle(a, b, c);
+
+        Rasterizer rasterizer;
+        const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
+        ASSERT_TRUE(stats.ok()) << stats.error().describe();
+
+        // One unit per pixel, origin at the centre: pixel (col, row) has its
+        // centre at x = col + 0.5 - 32, z = 32 - row - 0.5, so its offset from
+        // the line, z - x / 2 = 47.25 - row - col / 2, is an odd multiple of
+        // 0.25 - never zero, so every pixel has a right answer.
+        std::size_t wrong = 0;
+        for (int row = 0; row < 64; ++row) {
+            for (int col = 0; col < 64; ++col) {
+                const double x = col + 0.5 - 32.0;
+                const double z = 32.0 - row - 0.5;
+                const auto expected = z - x / 2.0 < 0.0 ? kRed : kBackground;
+                wrong += target->colorAt(col, row) == expected ? 0u : 1u;
+            }
+        }
+        EXPECT_EQ(wrong, 0u);
+    }
+}
+
+TEST(RenderRasterizer, ALineFarLongerThanTheImageDrawsAcrossAllOfIt)
+{
+    // Horizontal, at y = 0.25: screen row 31.75, so a 1 px line covers rows
+    // [31.25, 32.25] and every centre on row 31 (31.5) is inside it. Its ends
+    // are m units off either side; at m = 1e10 they overflowed an int unclipped.
+    const Camera camera = planCamera(64, 64);
+    TaskPool pool(0);
+    for (const double m : {1.0e3, 1.0e6, 1.0e10}) {
+        SCOPED_TRACE(testing::Message() << "m = " << m);
+        auto target = Framebuffer::create(64, 64);
+        ASSERT_TRUE(target.ok());
+        DrawList list;
+        list.addSegment(Vec3(-m, 0.25, 0.0), Vec3(m, 0.25, 0.0), kBlue, 1.0f);
+
+        Rasterizer rasterizer;
+        const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
+        ASSERT_TRUE(stats.ok()) << stats.error().describe();
+        std::size_t missing = 0;
+        for (int col = 0; col < 64; ++col) {
+            missing += target->colorAt(col, 31) == kBlue ? 0u : 1u;
+        }
+        EXPECT_EQ(missing, 0u);
+    }
+}
+
+TEST(RenderRasterizer, APointCentredJustOutsideTheImageStillDrawsThePartInside)
+{
+    // Centred one unit beyond the right edge, 5 px across: its left two
+    // columns are inside the image. Rejecting points by their centre alone
+    // would lose them, which is one reason the guard band is wider than the
+    // image.
+    auto target = Framebuffer::create(64, 64);
+    ASSERT_TRUE(target.ok());
+    const Camera camera = planCamera(64, 64);
+    TaskPool pool(0);
+
     DrawList list;
-    const auto a = list.addVertex(Vec3(-30.0, -100.0, 0.0), kRed); // behind the eye
-    const auto b = list.addVertex(Vec3(30.0, 20.0, -20.0), kRed);
-    const auto c = list.addVertex(Vec3(30.0, 20.0, 20.0), kRed);
-    list.addTriangle(a, b, c);
+    const auto v = list.addVertex(Vec3(33.0, 0.0, 0.0), kGreen); // screen x = 65
+    list.addPoint(v, 5.0f);
 
     Rasterizer rasterizer;
     const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
     ASSERT_TRUE(stats.ok()) << stats.error().describe();
-    // Clipping the triangle against the near plane yields a quad, hence two
-    // screen triangles rather than one.
-    EXPECT_EQ(stats->trianglesSubmitted, 1u);
-    EXPECT_GE(stats->trianglesRasterised, 1u);
-
-    // Every written depth must be inside [0, 1]: a vertex that slipped through
-    // the divide with a negative w lands outside it.
-    for (std::size_t i = 0; i < target->depth().size(); ++i) {
-        EXPECT_GE(target->depth()[i], 0.0f);
-        EXPECT_LE(target->depth()[i], 1.0f);
-    }
-    EXPECT_GT(countPixels(*target, kRed), 0u) << "the visible part must still be drawn";
+    EXPECT_EQ(target->colorAt(63, 32), kGreen);
 }
 
 TEST(RenderRasterizer, ATriangleEntirelyBehindTheEyeDrawsNothing)

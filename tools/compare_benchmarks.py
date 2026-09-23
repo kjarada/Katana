@@ -1,15 +1,27 @@
 # tools/compare_benchmarks.py <baseline.json> <candidate.json> [threshold-percent]
+# tools/compare_benchmarks.py --alternate ROUNDS FILTER NAME=EXE [NAME=EXE ...]
 #
-# Compares two Google Benchmark JSON runs and reports what actually moved.
+# Compares Google Benchmark runs and reports what actually moved.
 #
 # It exists because "is the new build faster?" is a question about NOISE as
 # much as about speed: run the same binary twice and individual benchmarks
 # move by a few per cent. Anything inside the threshold is reported as noise
 # rather than as a result, and the summary is the MEDIAN of the per-benchmark
 # ratios, which one wild outlier cannot move.
+#
+# The first form compares two saved runs. It is only as good as the two runs:
+# on this machine, with the application open or a build going, a whole run can
+# drift by up to 2x, and docs/performance.md records a regression that two
+# back-to-back runs "found" and alternating runs did not reproduce. The
+# --alternate form is for that: copy each build's katana_benchmarks.exe aside,
+# and it runs them round by round, reversing the order every round, so whatever
+# the machine is doing lands on all of them alike, then prints the minimum and
+# the median of every repetition of every benchmark for each binary.
 import io
 import json
+import os
 import statistics
+import subprocess
 import sys
 
 
@@ -33,7 +45,42 @@ def load(path):
     return out
 
 
+def alternate(rounds, pattern, binaries):
+    env = dict(os.environ)
+    # The benchmark links the MSYS2 runtime; without it on PATH it cannot start.
+    env['PATH'] = r'C:\msys64\ucrt64\bin' + os.pathsep + env.get('PATH', '')
+    times = {}  # (binary name, benchmark) -> [ms, one per repetition]
+    for round_index in range(rounds):
+        order = binaries if round_index % 2 == 0 else list(reversed(binaries))
+        for name, exe in order:
+            out = subprocess.run([exe, '--benchmark_filter=' + pattern,
+                                  '--benchmark_repetitions=3', '--benchmark_min_time=0.2s',
+                                  '--benchmark_format=json'],
+                                 capture_output=True, text=True, env=env, check=True).stdout
+            for entry in json.loads(out)['benchmarks']:
+                if entry.get('run_type') != 'iteration':
+                    continue
+                scale = {'ms': 1.0, 'us': 1e-3, 'ns': 1e-6}[entry['time_unit']]
+                times.setdefault((name, entry['run_name']), []).append(entry['real_time'] * scale)
+    names = [name for name, _ in binaries]
+    benchmarks = sorted({key[1] for key in times})
+    print('%-40s' % 'ms, min / median' + ''.join('%24s' % name for name in names))
+    for benchmark in benchmarks:
+        row = '%-40s' % benchmark[:40]
+        for name in names:
+            samples = times.get((name, benchmark), [])
+            row += '%24s' % ('%.2f / %.2f' % (min(samples), statistics.median(samples))
+                             if samples else '-')
+        print(row)
+    print('samples per cell: %d (%d rounds x 3 repetitions)' % (rounds * 3, rounds))
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == '--alternate':
+        if len(sys.argv) < 6:
+            sys.exit('usage: compare_benchmarks.py --alternate ROUNDS FILTER NAME=EXE NAME=EXE...')
+        alternate(int(sys.argv[2]), sys.argv[3], [a.split('=', 1) for a in sys.argv[4:]])
+        return
     if len(sys.argv) < 3:
         sys.exit('usage: compare_benchmarks.py <baseline.json> <candidate.json> [threshold%]')
     threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 5.0
