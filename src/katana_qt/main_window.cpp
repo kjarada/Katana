@@ -2466,8 +2466,9 @@ void MainWindow::buildSurfaceFromDrawing()
         if (!entity.visible) {
             return;
         }
-        const bool carriesHeights = entity.properties.contains("elevation") ||
-                                    entity.properties.contains("elevations");
+        const bool carriesHeights =
+            entity.properties.contains(std::string(katana::entity::kElevationProperty)) ||
+            entity.properties.contains(std::string(katana::entity::kElevationsProperty));
         withElevation += carriesHeights ? 1 : 0;
         const auto heightAt = [&](const std::vector<std::optional<double>>& heights,
                                   std::size_t index) -> std::optional<double> {

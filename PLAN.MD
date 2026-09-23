@@ -2986,12 +2986,40 @@ allowed `core;math;geometry;survey`. It parses manufacturer formats into
 | 6 | Leica: GSI-8 and GSI-16, and ASCII/CSV | pending |
 | 7 | Trimble: JobXML, CSV/ASCII, LandXML | pending |
 | 8 | Topcon: documented observation formats, CSV/ASCII | pending |
+| 8b | The `cad` bridge: a `SurveyProject` becomes ONE undoable command | **DELIVERED** |
 | 9 | The Survey menu and its commands | pending |
 | 10 | The import wizard, six steps, with validation and a warning/error report | pending |
 | 11 | Point Manager with source column and filtering | pending |
 | 12 | Instrument profiles, and import history undoable as one transaction | pending |
 | 13 | Reports: point, observation, import, traverse | pending |
 | 14 | The compatibility matrix, stating format AND version actually supported | pending |
+
+## 45.3b The bridge, and a gap it exposed
+
+`cad/survey_import.hpp` turns a `survey::SurveyProject` into one
+`commands::Transaction` - the layers it needs, then its points - so a single
+undo removes an import of ten thousand points. It calls
+`survey::validateProject()` rather than re-checking anything, so a parser and
+the bridge cannot disagree about what a valid project is, and it returns
+`nullptr` with no error for an empty project so that "nothing to do" and
+"something went wrong" stay distinguishable. It lives in `cad` because `cad` may
+not see `surveyio`; a field code is sanitised before it becomes a layer name,
+because a layer name is a PATH and a code containing `/` would otherwise build a
+subtree nobody asked for.
+
+**GAP, found while building it and not yet fixed.**
+`survey::SurveyPoint::elevation` is a plain `double` with no "unset" state, so a
+file with no height column yields 0.0 and the bridge writes it as a real height
+at the datum. A surface built from such a drawing is flattened to zero under
+every one of those points, with nothing reported. A parser can warn about a
+missing Z, but the model cannot carry the distinction, so the warning is lost by
+the time the bridge sees the project.
+
+It is recorded rather than fixed because five parser agents were writing against
+that struct at the time, and changing a field they were all filling would have
+been a merge conflict in five places. The fix - an `std::optional<double>`, or a
+companion flag - belongs in one change made with every parser visible, and the
+brief's own section 17 ("Missing Z", "Invalid Z") is the acceptance test for it.
 
 ## 45.4 The proprietary-format rule, as it will be applied
 

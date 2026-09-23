@@ -86,8 +86,14 @@ namespace katana::archive12d {
 
 // Property and metadata keys, in one place so import and export cannot
 // disagree about them.
-inline constexpr std::string_view kElevationProperty = "elevation";
-inline constexpr std::string_view kElevationsProperty = "elevations";
+//
+// The two elevation keys are NOT here: they are conventions the whole
+// application shares - the surface builder reads them and the survey import
+// writes them - so they live in katana/entity/entity.hpp and are used from
+// there. The `12d.*` keys below are this format's own and stay.
+using katana::entity::kElevationProperty;
+using katana::entity::kElevationsProperty;
+
 inline constexpr std::string_view kMetaName = "12d.name";
 // Which vertex of its string a point came from, one-based. Set only where a
 // `breakline point` string of several vertices was split into one point per
