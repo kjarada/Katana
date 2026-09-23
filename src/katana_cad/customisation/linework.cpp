@@ -500,6 +500,9 @@ class LineBuilder {
             if (member->id != katana::entity::kInvalidEntityId) {
                 built.points.push_back(member->id);
                 placed_.insert(member->id);
+                if (!built.join) {
+                    runMembers_.insert(member->id);
+                }
             }
             built.pointNumbers.push_back(member->number);
         }
@@ -507,6 +510,12 @@ class LineBuilder {
     }
 
     [[nodiscard]] const std::set<EntityId>& placed() const { return placed_; }
+
+    // The points some run of their own string is drawn through - the only
+    // points a line stands in for. A point reached only by a join (a tree, an
+    // uncoded control point) is in a line but is not replaced by one: its own
+    // code, number and symbol are still only on it.
+    [[nodiscard]] const std::set<EntityId>& runMembers() const { return runMembers_; }
 
     // Layers, lines, their styling and the removal of `remove`, as one
     // command; nullptr when no line was built.
@@ -554,6 +563,7 @@ class LineBuilder {
     LineworkReport& report_;
     std::vector<Entity> lines_{};
     std::set<EntityId> placed_{};
+    std::set<EntityId> runMembers_{};
     std::set<std::string> layersNeeded_{};
 };
 
@@ -948,13 +958,12 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
 
     std::vector<EntityId> remove;
     if (!options.keepPoints) {
-        // Only what was asked about: a join may reach a point outside the
-        // selection, and that point is not this command's to delete.
-        for (const EntityId id : builder.placed()) {
-            if (std::binary_search(subject.begin(), subject.end(), id)) {
-                remove.push_back(id);
-            }
-        }
+        // Only the points a run of their own string replaced. A join target
+        // no run placed is kept, in the selection or out of it: the join line
+        // does not carry its code, its number or its symbol. Runs are built
+        // from the selection alone, so this never reaches outside it.
+        const auto& members = builder.runMembers();
+        remove.assign(members.begin(), members.end());
     }
     // nullptr when there is nothing to build, and no error.
     result.command = builder.finish("PROCESS_LINEWORK", options.coding, std::move(remove));

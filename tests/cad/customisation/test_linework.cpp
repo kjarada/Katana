@@ -645,6 +645,38 @@ TEST(Linework, AJoinDrawsALineToTheNumberedPointAndPlacesIt)
     }
 }
 
+TEST(Linework, WithKeepPointsOffAJoinTargetNoRunPlacedIsKept)
+{
+    Document document;
+    document.setSurveyMap(lineAndPointMap());
+    const EntityId first = addPoint(document, Point2(0, 0), "WM01", "1");
+    const EntityId second = addPoint(document, Point2(10, 0), "WM01 JPN 3", "2");
+    const EntityId tree = addPoint(document, Point2(10, 5), "TR01", "3");
+    const EntityId uncoded = addPoint(document, Point2(20, 5), "", "4");
+    const EntityId third = addPoint(document, Point2(20, 0), "WM01 JPN 4", "5");
+
+    LineworkOptions options;
+    options.keepPoints = false;
+    const auto report = run(document, options).report;
+    // WM01 is the run 1-2-5; 2 JPN 3 and 5 JPN 4 are two joins: three lines.
+    ASSERT_EQ(report.strings.size(), 3u);
+    // Only the run's points 1, 2 and 5 are replaced by lines. The tree (a
+    // point code) and the uncoded point were only reached by joins: no line
+    // of their own stands for them, so deleting them would lose a tree and
+    // an uncoded point outright.
+    EXPECT_EQ(report.pointsRemoved, 3u);
+    EXPECT_EQ(document.model().entities.find(first), nullptr);
+    EXPECT_EQ(document.model().entities.find(second), nullptr);
+    EXPECT_EQ(document.model().entities.find(third), nullptr);
+    const Entity* kept = document.model().entities.find(tree);
+    ASSERT_NE(kept, nullptr) << "a point-coded join target is not the command's to delete";
+    EXPECT_EQ(std::get<std::string>(kept->properties.at("code")), "TR01");
+    EXPECT_EQ(std::get<std::string>(kept->properties.at("point")), "3");
+    EXPECT_NE(document.model().entities.find(uncoded), nullptr);
+    // Two points and three lines.
+    EXPECT_EQ(document.model().entities.size(), 5u);
+}
+
 // ---- one command --------------------------------------------------------------------
 
 TEST(Linework, OneUndoRemovesTheLinesTheirLayerTheirStyleAndRestoresThePoints)
