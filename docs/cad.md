@@ -967,3 +967,54 @@ hand out the means to discharge it.
 mechanism works is in `test_cad.cpp`, since a run that survives by luck
 still passes the headless test.
 
+
+## Interactive tools: state machines in cad, a catalogue for the menus
+
+The owner asked on 2026-09-23 for more CAD tools, with icons and menus, "to
+make it professional CAD software". The tools the application had - Point,
+Line, Polyline, Rectangle, Circle, Arc, Move, Copy - were a `switch` inside
+`ViewportWidget::acceptPoint`, and the editing verbs (Rotate, Trim, Fillet,
+...) existed only on the command line. Nothing about a tool's behaviour could
+be tested without clicking, and every new tool meant another case in the view
+and another hand-made action in the window.
+
+**A tool is now a state machine in `katana_cad`**
+(`include/katana/cad/interactive_tool.hpp`). The plan view tells it what the
+user did - a snapped point, a picked entity, a typed value, Enter, Undo - and
+the tool answers with the next prompt, a rubber-band preview for the cursor
+and, when it completes, ONE command, so one undo removes the whole operation.
+A tool never edits the document itself. Each is tested through
+`tests/cad/tools/tool_driver.hpp`, which feeds it the inputs a user would and
+executes what it returns, against geometry worked out by hand.
+
+**One catalogue feeds everything that names a tool**: the menus, the toolbars,
+the command-line aliases and the tooltips are built from `ToolInfo` entries,
+so adding a tool is writing it and listing it in its family's file. The
+catalogue refuses a duplicate id or alias, a lower-case alias and a
+single-letter shortcut (a letter typed into a view goes to the command line);
+a refusal is kept, not lost, and a test asserts there are none.
+
+**The families are listed explicitly** (`src/katana_cad/tools/families.hpp`),
+not self-registered. `katana_cad` is a static archive, and an object file
+nothing references is dropped by the linker - taking its tools with it and
+saying nothing; `src/katana_surveyio/CMakeLists.txt` measured that trap. The
+source files are globbed so that families written at the same time do not
+all edit one list; a family that goes missing is a link error, not a
+silently empty menu.
+
+**Typed input has one router**, `routeTypedInput`: text that looks like a
+point (a comma, or the `@` of relative input) is a point - `x,y`, `@dx,dy`,
+`@distance<angle` from the tool's last point - and anything else is a value,
+so "12.5" reaches a Circle's radius rather than being refused as a malformed
+point, and a clicked point and a typed one are the same input. The command
+interpreter still has its own point parser with the same grammar; folding it
+onto `parsePointInput` is a follow-up.
+
+**Icons live with their family** (`src/katana_qt/tools/icons_<family>.cpp`,
+by tool id), drawn to icons.cpp's conventions: a 24-unit grid, a 1.7-unit
+stroke, neutral for the object and the accent for what the tool does to it. A
+tool with no painter shows a framed initial, visibly a placeholder.
+`katana_tool_icon_sheet` renders every catalogue tool's icon at menu, toolbar
+and large size with its name and aliases, so an icon is reviewed without
+launching the application. `tools::ToolInk` duplicates icons.cpp's private
+`Ink` while other work is changing that file; merging them is a follow-up.
