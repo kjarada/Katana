@@ -1,5 +1,7 @@
 #include "viewport_widget.hpp"
 
+#include "theme.hpp"
+
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/dimension_draw.hpp"
@@ -18,7 +20,11 @@
 #include <QPageSize>
 #include <QLineF>
 #include <QMarginsF>
+#include <QContextMenuEvent>
+#include <QCursor>
+#include <QFocusEvent>
 #include <QFont>
+#include <QFontMetrics>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -63,10 +69,40 @@ constexpr double kPointMarkerPixels = 4.0;
 constexpr double kWheelZoomStep = 1.2;
 // Drags shorter than this are clicks, not selection boxes.
 constexpr double kDragThresholdPixels = 4.0;
+// The margin Zoom Extents leaves round the drawing, as a fraction of the view
+// on each side: enough that a line along the edge of the drawing is not lost
+// under the edge of the view.
+constexpr double kFrameMargin = 0.08;
+// The zoom of a view that has never been framed, in pixels per model unit:
+// ten pixels a metre shows an empty drawing as a few tens of metres of grid,
+// a sensible first look for a site drawn in metres.
+constexpr double kInitialScale = 10.0;
+
+// The smallest a plan view may be made. It used to be 480 x 320, which
+// stopped a dock being shrunk below that and made its neighbours overlap it
+// (the UX audit of 2026-09-23). Measured in the headless screenshot's
+// 1360 x 860 window with the Layers and Properties panels open: the whole
+// central area is 642 x 594 pixels, so 480 x 320 would not let two views sit
+// side by side at all, and each view of a 2 x 2 arrangement gets about
+// 321 x 273 once its title bar is taken off - less on a 1366 x 768 laptop.
+// 160 x 120 fits that quarter with room to spare and still leaves a usable
+// drawing: at the grid's minimum spacing (cad::gridSpacing, 12 px) it is 13
+// by 10 grid cells, twenty pick apertures across, and room for a snap marker
+// and its label.
+constexpr int kMinimumWidth = 160;
+constexpr int kMinimumHeight = 120;
 
 QColor toQColor(const katana::entity::Color& color)
 {
     return QColor(color.r, color.g, color.b, color.a);
+}
+
+// Whether a mesh is drawn at all - in plan as its footprint, and so counted
+// in what Zoom Extents frames. The 3D scene applies the same rule to it.
+bool isShown(const katana::cad::SceneMesh& item)
+{
+    return item.visible && item.mesh != nullptr && !item.mesh->empty() &&
+           item.style != katana::cad::SurfaceStyle::Hidden;
 }
 
 } // namespace
@@ -99,23 +135,27 @@ const char* toString(Tool tool)
 ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, QWidget* parent)
     : QWidget(parent), document_(document), state_(state)
 {
-    setMinimumSize(480, 320);
+    setMinimumSize(kMinimumWidth, kMinimumHeight);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::CrossCursor);
-    view_.scale = 10.0;
+    // Only a view that has never been framed: one rebuilt after a change of
+    // kind keeps the pan and zoom it had.
+    if (!state_.planFramed) {
+        state_.plan.scale = kInitialScale;
+    }
     documentListener_ = document_.addListener([this] { update(); });
 }
 
 QPointF ViewportWidget::toScreen(const Point2& world) const
 {
-    const Point2 p = view_.worldToScreen(world);
+    const Point2 p = state_.plan.worldToScreen(world);
     return QPointF(p.x, p.y);
 }
 
 ViewportWidget::Point2 ViewportWidget::toWorld(const QPointF& screen) const
 {
-    return view_.screenToWorld(Point2(screen.x(), screen.y()));
+    return state_.plan.screenToWorld(Point2(screen.x(), screen.y()));
 }
 
 // ---- public controls --------------------------------------------------------------------
@@ -132,15 +172,42 @@ void ViewportWidget::setTool(Tool tool)
     update();
 }
 
-void ViewportWidget::zoomExtents()
+Box2 ViewportWidget::drawnBounds() const
 {
-    view_.resize(width(), height());
+    // What THIS view draws, through the one visibility rule with this view's
+    // hidden layers: the entities' own bounds counted every entity, so a
+    // layer hidden here - or a hidden stray far away - still pulled the frame
+    // out to it.
+    Box2 bounds = cad::drawnExtent(document_.model(), state_.layers);
     // Zoom Extents means everything the user can see, so imported imagery and
     // point clouds count. A drawing that is empty except for an orthophoto
-    // would otherwise fit an empty box and leave the photo off screen.
-    Box2 bounds = document_.model().entities.bounds();
+    // would otherwise fit an empty box and leave the photo off screen. Layer
+    // by layer rather than ReferenceData::visibleBounds, because a layer
+    // hidden in this view is not seen here.
     if (reference_ != nullptr) {
-        bounds.expand(reference_->visibleBounds());
+        for (const katana::interop::RasterOverlay& raster : reference_->rasters()) {
+            if (raster.visible && !state_.hiddenReferences.contains(raster.id)) {
+                bounds.expand(raster.worldBounds());
+            }
+        }
+        for (const katana::interop::PointCloudLayer& cloud : reference_->pointClouds()) {
+            if (cloud.visible && !state_.hiddenReferences.contains(cloud.id)) {
+                bounds.expand(cloud.worldBounds());
+            }
+        }
+    }
+    // A mesh is drawn in plan as its footprint, so it is seen and counts. A
+    // drawing that is nothing but meshes framed an empty box before.
+    if (meshes_ != nullptr) {
+        for (const katana::cad::SceneMesh& item : *meshes_) {
+            if (isShown(item)) {
+                const katana::math::AABB space = item.mesh->bounds();
+                if (!space.empty()) {
+                    bounds.expand(Point2(space.min.x, space.min.y));
+                    bounds.expand(Point2(space.max.x, space.max.y));
+                }
+            }
+        }
     }
     // Alignments are drawn but are not entities, so they are in no entity
     // bound. Found by looking at a screenshot: the sample's access road ran off
@@ -154,8 +221,15 @@ void ViewportWidget::zoomExtents()
             }
         }
     }
-    view_.fit(bounds, 0.08);
-    update();
+    return bounds;
+}
+
+void ViewportWidget::zoomExtents()
+{
+    // An empty box is fitted too: ViewTransform::fit then goes back to the
+    // origin at one pixel a unit, which is what Zoom Extents on nothing has
+    // always done.
+    frame(drawnBounds());
 }
 
 void ViewportWidget::zoomTo(const Box2& bounds)
@@ -163,9 +237,29 @@ void ViewportWidget::zoomTo(const Box2& bounds)
     if (bounds.empty()) {
         return;
     }
-    view_.resize(width(), height());
-    view_.fit(bounds, 0.08);
+    frame(bounds);
+}
+
+void ViewportWidget::frame(const Box2& bounds)
+{
+    state_.plan.resize(width(), height());
+    state_.plan.fit(bounds, kFrameMargin);
+    state_.planFramed = true;
+    framedBox_ = bounds;
     update();
+}
+
+void ViewportWidget::frameOnFirstPaint()
+{
+    // At the first paint rather than the first resize, because a paint is at
+    // the size the view is seen at - a dock's first resize can be a
+    // provisional one from before the workspace laid it out.
+    state_.planFramed = true;
+    const Box2 bounds = drawnBounds();
+    if (!bounds.empty()) {
+        state_.plan.fit(bounds, kFrameMargin);
+        framedBox_ = bounds;
+    }
 }
 
 void ViewportWidget::setReferenceData(katana::interop::ReferenceData* reference)
@@ -286,12 +380,12 @@ void ViewportWidget::updateCursor(const QPointF& screen)
     if (snapEnabled_ && tool_ != Tool::Select) {
         cad::SnapRequest request;
         request.cursor = raw;
-        request.aperture = view_.pixelsToWorld(kSnapAperturePixels);
+        request.aperture = state_.plan.pixelsToWorld(kSnapAperturePixels);
         request.modes = snapModes_;
         if (!points_.empty()) {
             request.from = points_.back();
         }
-        request.gridSpacing = gridVisible_ ? cad::gridSpacing(view_.scale) : 0.0;
+        request.gridSpacing = gridVisible_ ? cad::gridSpacing(state_.plan.scale) : 0.0;
         request.view = &state_.layers;
         // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
         // Release on 100 000 entities: 4404 us per mouse move scanning,
@@ -393,7 +487,7 @@ void ViewportWidget::selectAt(const QPointF& screen, Qt::KeyboardModifiers modif
     cad::SelectionFilter filter;
     filter.view = &state_.layers;
     const auto picked = cad::pickEntity(document_.model(), toWorld(screen),
-                                        view_.pixelsToWorld(kPickAperturePixels), filter,
+                                        state_.plan.pixelsToWorld(kPickAperturePixels), filter,
                                         &document_.spatialIndex());
     cad::SelectionSet& selection = document_.selection();
     if (modifiers & Qt::ControlModifier) {
@@ -450,10 +544,14 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
         return;
     }
     if (event->button() == Qt::RightButton) {
-        if (points_.empty()) {
-            cancel();
-        } else {
+        if (!points_.empty()) {
             finishOperation(false);
+        } else if (tool_ == Tool::Select && !boxStart_ && onContextMenu) {
+            // Nothing to finish or cancel, and cancel() here would only have
+            // cleared the selection the menu is about to act on.
+            onContextMenu(event->globalPosition().toPoint());
+        } else {
+            cancel();
         }
         return;
     }
@@ -473,7 +571,8 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
 {
     if (panning_) {
         const QPointF delta = event->position() - lastMouse_;
-        view_.panByPixels(delta.x(), delta.y());
+        state_.plan.panByPixels(delta.x(), delta.y());
+        framedBox_.reset(); // the user's view now, kept on a resize
     } else if (boxStart_) {
         boxEnd_ = event->position();
     }
@@ -524,13 +623,38 @@ void ViewportWidget::wheelEvent(QWheelEvent* event)
 {
     const double notches = event->angleDelta().y() / 120.0;
     if (notches != 0.0) {
-        view_.zoomAt(Point2(event->position().x(), event->position().y()),
-                     std::pow(kWheelZoomStep, notches));
+        state_.plan.zoomAt(Point2(event->position().x(), event->position().y()),
+                           std::pow(kWheelZoomStep, notches));
+        framedBox_.reset(); // the user's view now, kept on a resize
         updateCursor(event->position());
         update();
     }
     event->accept();
 }
+
+namespace {
+
+// Text a key press types, as opposed to a shortcut: every character printable
+// and no Ctrl or Alt held. Ctrl AND Alt together are let through, because
+// that is how Windows reports AltGr, which types @, { and the euro sign on
+// most European keyboards - refusing it would make a coordinate or a layer
+// name untypable there.
+bool isTypedText(const QKeyEvent& event)
+{
+    const QString text = event.text();
+    if (text.isEmpty()) {
+        return false;
+    }
+    const Qt::KeyboardModifiers chord =
+        event.modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+    const bool altGr = chord == (Qt::ControlModifier | Qt::AltModifier);
+    if (chord != Qt::NoModifier && !altGr) {
+        return false;
+    }
+    return std::ranges::all_of(text, [](QChar c) { return c.isPrint(); });
+}
+
+} // namespace
 
 void ViewportWidget::keyPressEvent(QKeyEvent* event)
 {
@@ -543,8 +667,16 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
         finishOperation(false);
         return;
     case Qt::Key_C:
-        if (tool_ == Tool::Polyline && points_.size() >= 3) {
-            finishOperation(true);
+        // C closes a polyline, and only means that while one is being drawn;
+        // with fewer than three vertices there is nothing to close yet, but
+        // the key is still the polyline's rather than the start of a typed
+        // command. Otherwise it is text like any other letter.
+        if (tool_ == Tool::Polyline && !points_.empty()) {
+            if (points_.size() >= 3) {
+                finishOperation(true);
+            } else if (onError) {
+                onError("A polyline needs three vertices before C can close it.");
+            }
             return;
         }
         break;
@@ -556,18 +688,53 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
     default:
         break;
     }
+    // Type anywhere: the text goes to the window, which hands it to the
+    // command line, instead of being dropped here.
+    if (onTextTyped && isTypedText(*event)) {
+        onTextTyped(event->text());
+        event->accept();
+        return;
+    }
     QWidget::keyPressEvent(event);
+}
+
+void ViewportWidget::focusInEvent(QFocusEvent* event)
+{
+    QWidget::focusInEvent(event);
+    // A keyboard move into this view - Tab, a shortcut, a floating view's
+    // window being brought forward - makes it the view the menus act on, as a
+    // click does. Not the focus a closing menu gives back: that is the view
+    // the menu was opened over, not a choice of view.
+    if (onActivated && event->reason() != Qt::PopupFocusReason) {
+        onActivated();
+    }
+}
+
+void ViewportWidget::contextMenuEvent(QContextMenuEvent* event)
+{
+    // A right-click was dealt with at the press (a menu, or finishing or
+    // cancelling a tool); what Qt sends after it is swallowed here so that it
+    // cannot reach the dock or the window behind the view. The menu key has
+    // no press, so it opens the menu here, at the cursor when the cursor is
+    // over the view and in the middle of it otherwise.
+    event->accept();
+    if (event->reason() != QContextMenuEvent::Keyboard || !onContextMenu ||
+        tool_ != Tool::Select || !points_.empty() || boxStart_) {
+        return;
+    }
+    const QPoint local = mapFromGlobal(QCursor::pos());
+    onContextMenu(mapToGlobal(rect().contains(local) ? local : rect().center()));
 }
 
 void ViewportWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    view_.resize(width(), height());
-    if (!viewInitialised_) {
-        viewInitialised_ = true;
-        if (!document_.model().entities.empty()) {
-            zoomExtents();
-        }
+    state_.plan.resize(width(), height());
+    // A view still showing what it was framed to goes on showing it at the
+    // new size. One the user has panned or zoomed keeps their centre and
+    // scale: resizing a dock must not undo their zoom.
+    if (framedBox_.has_value()) {
+        state_.plan.fit(*framedBox_, kFrameMargin);
     }
 }
 
@@ -577,7 +744,10 @@ void ViewportWidget::paintEvent(QPaintEvent*)
 {
     QPainter painter(this);
     painter.fillRect(rect(), kBackground);
-    view_.resize(width(), height());
+    state_.plan.resize(width(), height());
+    if (!state_.planFramed) {
+        frameOnFirstPaint();
+    }
 
     // Imagery sits beneath everything: it is a backdrop, and the grid has to
     // stay legible over it. Point clouds sit above the grid but below the
@@ -594,6 +764,9 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     drawEntities(painter);
     drawAlignments(painter);
     drawPreview(painter);
+    if (drawingIsEmpty() && points_.empty()) {
+        drawEmptyHint(painter);
+    }
 
     if (boxStart_) {
         const bool window = boxEnd_.x() >= boxStart_->x();
@@ -606,19 +779,87 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     drawSnapMarker(painter);
 }
 
+bool ViewportWidget::drawingIsEmpty() const
+{
+    const auto& model = document_.model();
+    return model.entities.empty() && model.alignments.empty() &&
+           (reference_ == nullptr || reference_->empty()) &&
+           (meshes_ == nullptr || meshes_->empty());
+}
+
+// A blank grid gives a new user nothing to go on, so an empty drawing says
+// what can be done with it. Only for a drawing with NOTHING in it: a drawing
+// whose layers are all hidden is not empty, and saying so would be wrong.
+void ViewportWidget::drawEmptyHint(QPainter& painter) const
+{
+    QFont headline = font();
+    headline.setPointSizeF(headline.pointSizeF() * 1.4);
+    headline.setBold(true);
+    const QFont body = font();
+    const QString title = QStringLiteral("Nothing drawn yet");
+    const QString detail = QStringLiteral(
+        "Pick a drawing tool, or type a command such as LINE, CIRCLE or HELP "
+        "in the command line.\n"
+        "Bring data in with File > Import, or from the GIS menu.");
+
+    const int margin = 24;
+    const QRect area = rect().adjusted(margin, margin, -margin, -margin);
+    const QFontMetrics titleMetrics(headline);
+    const QFontMetrics bodyMetrics(body);
+    // About seventy characters of the interface font: a line that can be
+    // read at a glance rather than one stretched across a wide view.
+    const int textWidth = std::min(area.width(), 460);
+    const QRect bodyBounds = bodyMetrics.boundingRect(
+        QRect(0, 0, textWidth, area.height()), Qt::AlignHCenter | Qt::TextWordWrap, detail);
+    const int gap = 8;
+    const int blockHeight = titleMetrics.height() + gap + bodyBounds.height();
+    // A view too small to hold the hint shows the grid alone: a hint cut off
+    // at the edges says less than none.
+    if (textWidth < titleMetrics.horizontalAdvance(title) || blockHeight > area.height()) {
+        return;
+    }
+    const int top = area.center().y() - blockHeight / 2;
+    const int left = area.center().x() - textWidth / 2;
+    const int used = std::max(bodyBounds.width(), titleMetrics.horizontalAdvance(title));
+
+    painter.save();
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    // A backing of the drawing's own ground, so the grid's axes, which cross
+    // right where the hint sits, do not strike through the words.
+    QColor backing = kBackground;
+    backing.setAlpha(225);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(backing);
+    painter.drawRoundedRect(
+        QRect(area.center().x() - used / 2 - 16, top - 12, used + 32, blockHeight + 24), 6, 6);
+    painter.setBrush(Qt::NoBrush);
+    // The chrome's muted text, so the hint reads as the application talking
+    // and not as something drawn.
+    painter.setPen(theme::textMuted());
+    painter.setFont(headline);
+    painter.drawText(QRect(left, top, textWidth, titleMetrics.height()), Qt::AlignHCenter,
+                     title);
+    painter.setFont(body);
+    painter.drawText(QRect(left, top + titleMetrics.height() + gap, textWidth, bodyBounds.height()),
+                     Qt::AlignHCenter | Qt::TextWordWrap, detail);
+    painter.restore();
+}
+
 void ViewportWidget::drawRasters(QPainter& painter) const
 {
     if (reference_ == nullptr) {
         return;
     }
     for (const katana::interop::RasterOverlay& raster : reference_->rasters()) {
-        if (!raster.visible || raster.width <= 0 || raster.height <= 0) {
+        // Hidden in the Reference Data panel, or in this view only.
+        if (!raster.visible || state_.hiddenReferences.contains(raster.id) ||
+            raster.width <= 0 || raster.height <= 0) {
             continue;
         }
 
         // Cache the QImage: rebuilding it from the RGBA bytes every frame would
         // copy tens of megabytes per repaint.
-        const auto cached = std::find_if(
+        auto cached = std::find_if(
             rasterCache_.begin(), rasterCache_.end(),
             [&raster](const RasterCache& entry) { return entry.id == raster.id; });
         if (cached == rasterCache_.end()) {
@@ -627,7 +868,10 @@ void ViewportWidget::drawRasters(QPainter& painter) const
             // copy(): the QImage above only borrows the vector's buffer, and the
             // cache must outlive this loop iteration.
             rasterCache_.push_back(RasterCache{raster.id, image.copy()});
-            continue; // drawn on the next pass through, once the cache is warm
+            // Drawn in this same paint. It used to `continue` and be drawn "on
+            // the next pass" - which nothing asked for, so an imported image
+            // stayed invisible until the mouse happened to move over the view.
+            cached = std::prev(rasterCache_.end());
         }
 
         // Pixel -> world is the geotransform; world -> screen is the view. The
@@ -640,9 +884,9 @@ void ViewportWidget::drawRasters(QPainter& painter) const
         // so screen.x = [w/2 + (g0-cx)s] + px*(g1 s) + py*(g2 s)
         //    screen.y = [h/2 - (g3-cy)s] + px*(-g4 s) + py*(-g5 s)
         const auto& g = raster.geotransform;
-        const double s = view_.scale;
-        const double dx = 0.5 * width() + (g[0] - view_.center.x) * s;
-        const double dy = 0.5 * height() - (g[3] - view_.center.y) * s;
+        const double s = state_.plan.scale;
+        const double dx = 0.5 * width() + (g[0] - state_.plan.center.x) * s;
+        const double dy = 0.5 * height() - (g[3] - state_.plan.center.y) * s;
         const QTransform transform(g[1] * s, -g[4] * s, g[2] * s, -g[5] * s, dx, dy);
 
         painter.save();
@@ -664,7 +908,9 @@ void ViewportWidget::drawPointClouds(QPainter& painter) const
     }
 
     for (const katana::interop::PointCloudLayer& cloud : reference_->pointClouds()) {
-        if (!cloud.visible || cloud.points.empty()) {
+        // Hidden in the Reference Data panel, or in this view only.
+        if (!cloud.visible || state_.hiddenReferences.contains(cloud.id) ||
+            cloud.points.empty()) {
             continue;
         }
 
@@ -719,15 +965,15 @@ void ViewportWidget::drawPointClouds(QPainter& painter) const
         auto* bits = reinterpret_cast<QRgb*>(layer.bits());
         const int stride = static_cast<int>(layer.bytesPerLine() / sizeof(QRgb));
 
-        const double s = view_.scale;
+        const double s = state_.plan.scale;
         const double halfWidth = 0.5 * width();
         const double halfHeight = 0.5 * height();
         const int radius = std::max(0, static_cast<int>(cloud.pointSize) - 1);
 
         for (std::size_t i = 0; i < cloud.points.size(); ++i) {
             const auto& point = cloud.points[i];
-            const double sx = halfWidth + (point.x - view_.center.x) * s;
-            const double sy = halfHeight - (point.y - view_.center.y) * s;
+            const double sx = halfWidth + (point.x - state_.plan.center.x) * s;
+            const double sy = halfHeight - (point.y - state_.plan.center.y) * s;
             // Reject before the cast: converting a coordinate far outside int
             // range is undefined behaviour, and panning a UTM-scale cloud when
             // zoomed in produces exactly such values.
@@ -763,8 +1009,8 @@ void ViewportWidget::drawPointClouds(QPainter& painter) const
 
 void ViewportWidget::drawGrid(QPainter& painter) const
 {
-    const double spacing = cad::gridSpacing(view_.scale);
-    const Box2 visible = view_.visibleWorldBounds();
+    const double spacing = cad::gridSpacing(state_.plan.scale);
+    const Box2 visible = state_.plan.visibleWorldBounds();
     const auto firstIndex = [&](double lo) { return static_cast<long long>(std::floor(lo / spacing)); };
     const auto lastIndex = [&](double hi) { return static_cast<long long>(std::ceil(hi / spacing)); };
 
@@ -788,7 +1034,7 @@ void ViewportWidget::drawGrid(QPainter& painter) const
 void ViewportWidget::drawEntities(QPainter& painter) const
 {
     const auto& model = document_.model();
-    const Box2 visible = view_.visibleWorldBounds();
+    const Box2 visible = state_.plan.visibleWorldBounds();
     const cad::SelectionSet& selection = document_.selection();
 
     // Through the spatial index (PLAN.MD Phase 18). This runs on EVERY repaint
@@ -812,8 +1058,16 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         // queryExtents is deliberately wider than the geometry (an arc offers
         // its centre for snapping), so this is the tighter, drawing-specific
         // filter and removing it would paint entities that are off screen.
-        if (!cad::isDrawn(layer, entity, state_.layers) ||
-            !katana::entity::boundingBox(entity.geometry).intersects(visible)) {
+        // Except for a dimension, whose DRAWING - label, arrows, extension
+        // overshoot - reaches beyond its geometry's box, which holds only the
+        // measured points and the dimension line: culling on that box dropped
+        // a dimension whose label alone was on screen (audit QT-25). Its
+        // query extent is exactly the drawing's box.
+        const bool dimension =
+            std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry);
+        const Box2 drawn = dimension ? cad::detail::queryExtents(model, entity)
+                                     : katana::entity::boundingBox(entity.geometry);
+        if (!cad::isDrawn(layer, entity, state_.layers) || !drawn.intersects(visible)) {
             return;
         }
         ++lastDrawnEntities_;
@@ -852,7 +1106,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
                 auto cached = dashCache_.find(key);
                 if (cached == dashCache_.end()) {
                     cad::DashOptions dash;
-                    dash.viewScale = view_.scale;
+                    dash.viewScale = state_.plan.scale;
                     const auto pattern = cad::qtDashPattern(*linetype, dash, penWidthPixels);
                     cached = dashCache_.emplace(key, QList<qreal>(pattern.begin(), pattern.end()))
                                  .first;
@@ -908,8 +1162,7 @@ void ViewportWidget::drawMeshFootprints(QPainter& painter) const
         return;
     }
     for (const katana::cad::SceneMesh& item : *meshes_) {
-        if (!item.visible || item.mesh == nullptr || item.mesh->empty() ||
-            item.style == cad::SurfaceStyle::Hidden) {
+        if (!isShown(item)) {
             continue;
         }
         const auto hull = item.mesh->planHull();
@@ -998,7 +1251,7 @@ double ViewportWidget::paperScale() const
     const double pixelsPerMillimetre = paperPixelsPerMillimetre_ > 0.0
                                            ? paperPixelsPerMillimetre_
                                            : std::max(1.0, logicalDpiX() / 25.4);
-    return pixelsPerMillimetre / std::max(view_.scale, 1e-12);
+    return pixelsPerMillimetre / std::max(state_.plan.scale, 1e-12);
 }
 
 void ViewportWidget::drawStyleText(QPainter& painter, const cad::StyleTextMark& text) const
@@ -1006,7 +1259,7 @@ void ViewportWidget::drawStyleText(QPainter& painter, const cad::StyleTextMark& 
     if (text.text.empty() || text.height <= 0.0) {
         return;
     }
-    const double pixels = text.height * view_.scale;
+    const double pixels = text.height * state_.plan.scale;
     if (pixels < 3.0) {
         return; // smaller than it is worth painting, and unreadable anyway
     }
@@ -1014,7 +1267,7 @@ void ViewportWidget::drawStyleText(QPainter& painter, const cad::StyleTextMark& 
     painter.translate(toScreen(text.at));
     // Screen y grows downwards, so a counter-clockwise model angle turns the
     // other way on the page.
-    painter.rotate(-text.angle * 180.0 / std::numbers::pi);
+    painter.rotate(-text.angle * katana::math::kRadToDeg);
     QFont font = painter.font();
     font.setPixelSize(std::max(1, static_cast<int>(std::lround(pixels))));
     if (!text.font.empty()) {
@@ -1054,7 +1307,7 @@ bool ViewportWidget::drawLineStyle(QPainter& painter,
     const double scale = paperScale();
     // A quarter of a pixel, the same accuracy drawGeometry chords to, so a
     // pattern laid along a curve follows the curve that was drawn.
-    const double chordTolerance = 0.25 / std::max(view_.scale, 1e-12);
+    const double chordTolerance = 0.25 / std::max(state_.plan.scale, 1e-12);
     const auto run = [&](const katana::geometry::Polyline2& shape) {
         if (shape.vertices.size() < 2) {
             return;
@@ -1100,7 +1353,7 @@ void ViewportWidget::drawSymbol(QPainter& painter, const std::string& symbol,
     // size, in model units at the current scale, so it stays a mark and not
     // a blob.
     const double half =
-        size > 0.0 ? 0.5 * size : kPointMarkerPixels / std::max(view_.scale, 1e-12);
+        size > 0.0 ? 0.5 * size : kPointMarkerPixels / std::max(state_.plan.scale, 1e-12);
     for (const auto& stroke : cad::symbolStrokes(symbol, centre, half)) {
         QPolygonF polygon;
         polygon.reserve(static_cast<int>(stroke.vertices.size()) + 1);
@@ -1120,7 +1373,7 @@ void ViewportWidget::drawGeometry(QPainter& painter,
     // Arcs are tessellated in model space so that very large radii, where only a
     // sliver is on screen, never hand QPainter coordinates in the millions.
     const auto drawArcPath = [&](const Arc2& arc) {
-        const double radiusPixels = arc.radius * view_.scale;
+        const double radiusPixels = arc.radius * state_.plan.scale;
         // Chord count for a sagitta under a quarter pixel, within sane bounds.
         const double stepAngle = radiusPixels > 1.0
                                      ? 2.0 * std::acos(std::max(0.0, 1.0 - 0.25 / radiusPixels))
@@ -1244,15 +1497,15 @@ std::string formatStation(double station)
 void ViewportWidget::drawAlignments(QPainter& painter) const
 {
     const auto& model = document_.model();
-    if (model.alignments.empty() || !(view_.scale > 0.0)) {
+    if (model.alignments.empty() || !(state_.plan.scale > 0.0)) {
         return;
     }
     // Half a pixel: finer cannot be seen, coarser shows facets on tight curves.
-    const double tolerance = 0.5 / view_.scale;
-    const Box2 visible = view_.visibleWorldBounds();
+    const double tolerance = 0.5 / state_.plan.scale;
+    const Box2 visible = state_.plan.visibleWorldBounds();
     const QColor kAlignment(0xff, 0xb7, 0x4d); // amber: an overlay, not drawing content
-    const double tick = 6.0 / view_.scale;     // screen-constant, like the snap marker
-    const double height = 11.0 / view_.scale;
+    const double tick = 6.0 / state_.plan.scale;     // screen-constant, like the snap marker
+    const double height = 11.0 / state_.plan.scale;
 
     for (const katana::entity::Alignment& alignment : model.alignments.all()) {
         // Solved per repaint. A document has a handful of alignments and the
@@ -1335,15 +1588,16 @@ katana::core::Status ViewportWidget::plotToPdf(const QString& path,
 
     // The same drawing members as paintEvent, through the sheet instead of
     // the screen, with line weights in paper millimetres - then the screen
-    // view is put back exactly as it was.
-    const cad::ViewTransform screen = view_;
-    view_ = sheet->view;
+    // view is put back exactly as it was. Nothing is painted or processed in
+    // between, so no one sees the view's state holding the sheet.
+    const cad::ViewTransform screen = state_.plan;
+    state_.plan = sheet->view;
     paperPixelsPerMillimetre_ = sheet->pixelsPerMillimetre;
     painter.setRenderHint(QPainter::Antialiasing, true);
     drawEntities(painter);
     drawAlignments(painter);
     painter.end();
-    view_ = screen;
+    state_.plan = screen;
     paperPixelsPerMillimetre_ = 0.0;
     return {};
 }
@@ -1355,7 +1609,7 @@ void ViewportWidget::drawHatch(QPainter& painter, const katana::geometry::Polyli
         return;
     }
     cad::HatchOptions options;
-    options.viewScale = view_.scale;
+    options.viewScale = state_.plan.scale;
     const QColor color = painter.pen().color();
 
     switch (cad::hatchDrawing(*hatch_, options)) {
@@ -1393,7 +1647,7 @@ void ViewportWidget::drawHatch(QPainter& painter, const katana::geometry::Polyli
 void ViewportWidget::drawText(QPainter& painter, const Point2& position, const std::string& text,
                               double height, double rotation) const
 {
-    const double pixels = height * view_.scale;
+    const double pixels = height * state_.plan.scale;
     const QPointF anchor = toScreen(position);
     if (pixels < 3.0) {
         // Too small to read: a stroke along the baseline keeps it discoverable.
@@ -1437,7 +1691,7 @@ void ViewportWidget::drawPreview(QPainter& painter) const
         painter.drawRect(QRectF(toScreen(points_[0]), cursor).normalized());
         break;
     case Tool::Circle: {
-        const double radius = points_[0].distanceTo(cursorWorld_) * view_.scale;
+        const double radius = points_[0].distanceTo(cursorWorld_) * state_.plan.scale;
         painter.drawEllipse(toScreen(points_[0]), radius, radius);
         painter.drawLine(toScreen(points_[0]), cursor);
         break;
