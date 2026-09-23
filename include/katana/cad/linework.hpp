@@ -212,11 +212,17 @@ enum class LineworkNoteKind {
     JoinWithoutTarget,  // "JPN" with no point number after it
     JoinTargetMissing,  // no point has that number (or several do)
     CurveTooShort,      // "BC" then "EC" with no point between: drawn straight
-    CurveCollinear,     // three curve points in a straight line: drawn straight
-    CurveUnterminated,  // "BC" with no "EC": curved to the end of the string
+    CurveCollinear,     // three curve points in a straight line: drawn straight, not counted
+    // "BC" with no "EC": taken to end at the string's last point, or - begun
+    // on that point - nothing curved. The detail says which.
+    CurveUnterminated,
     CurveEndWithoutStart, // "EC" with no open curve: nothing to end
     CloseTooShort,      // "CL" on a string of two points: drawn open
-    RectangleShape,     // "RECT" on other than three points: drawn as closed
+    // "RECT" on other than three points with width, so no rectangle is
+    // constructed and the points are drawn as they are: closed through them
+    // when there are more than three, open when there are two or when the
+    // third lies on the first side's line. The detail says which.
+    RectangleShape,
     DuplicatePointNumber, // two points of one string share a number
     NoRuleForName,      // a line by control code alone: nothing styles it
     FallbackOnlyName,   // a line only because the bare "*" rule says so
