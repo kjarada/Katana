@@ -23,7 +23,8 @@
 //   colour      entity.color, else the style's colour if it has one, else the
 //               layer's colour.
 //   lineWeight  the style's if the entity names one, else the layer's.
-//   linetype    the style's if the entity names one, else the layer's.
+//   linetype    the style's if the entity names one and it is not "ByLayer",
+//               else the layer's.
 //   hatch       the style's if it names one, else the layer's.
 //
 // Colour and the hatch pattern are the two that are optional on a Style, which
@@ -31,16 +32,32 @@
 // That asymmetry is in the Style type itself (`std::optional<Color> color` is
 // documented "empty: ByLayer", and so is `hatchPattern`), not invented here.
 //
+// A linetype has no empty value to say "ByLayer" with - "" is a name like any
+// other in the tables - so a Style says it with the word itself, which DXF
+// already reserves (group code 6) and validate(Linetype) already refuses as a
+// linetype NAME. A symbol-only or colour-only style used to override the
+// layer's linetype with "continuous" whether it meant to or not; one whose
+// linetype is ByLayer now leaves it alone. The weight has no such word: a
+// sentinel weight would be a storage change, and those are deferred.
+//
 // A missing layer or style resolves to the defaults rather than dereferencing
 // null. An entity can reference a layer that has been removed - the model
 // permits it, and a renderer must not crash on it.
 
 #include <string>
+#include <string_view>
 
 #include "katana/entity/entity.hpp"
 #include "katana/entity/model.hpp"
 
 namespace katana::entity {
+
+// What a Style::linetype says to inherit the layer's linetype.
+inline constexpr std::string_view kByLayerLinetype = "ByLayer";
+// In any case, because the reservation it relies on is in any case: no
+// linetype can be called "BYLAYER" either, so the spelling cannot be taken
+// for a name.
+[[nodiscard]] bool isByLayer(std::string_view linetype);
 
 struct ResolvedDisplay {
     Color color{};
@@ -61,5 +78,14 @@ struct ResolvedDisplay {
 // defaults. Returning a Result would make every draw call check something that
 // cannot happen, and would tempt a renderer into ignoring it.
 [[nodiscard]] ResolvedDisplay resolveDisplay(const Model& model, const Entity& entity);
+
+// The two NAMES of the chain above, for a layer and a style already found
+// (either may be null: a missing layer, or no style or a missing one). They
+// are what resolveDisplay itself reads, so a caller that counts entities
+// per linetype or hatch - entity::tableUsage - cannot come to a different
+// answer from the one the entities are drawn with. They return views into
+// the tables, or the built-in names, and copy nothing.
+[[nodiscard]] std::string_view resolvedLinetype(const Layer* layer, const Style* style);
+[[nodiscard]] std::string_view resolvedHatchPattern(const Layer* layer, const Style* style);
 
 } // namespace katana::entity
