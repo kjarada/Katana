@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <cmath>
 
-#include <QFocusEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QWheelEvent>
 
 #include "theme.hpp"
+#include "view_focus.hpp"
 
 namespace katana::qt {
 
@@ -53,6 +53,11 @@ SectionViewWidget::SectionViewWidget(katana::cad::ViewState& state, QWidget* par
     setMouseTracking(true);
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setMinimumSize(80, 60);
+    activateOnFocus(*this, [this] {
+        if (onActivated) {
+            onActivated();
+        }
+    });
 }
 
 void SectionViewWidget::setSection(katana::cad::Section section)
@@ -400,16 +405,6 @@ void SectionViewWidget::resizeEvent(QResizeEvent* event)
     // change.
     originStation_ += 0.5 * (before.width() - after.width()) / scale_;
     originElevation_ += 0.5 * (before.height() - after.height()) / (scale_ * exaggeration());
-}
-
-void SectionViewWidget::focusInEvent(QFocusEvent* event)
-{
-    QWidget::focusInEvent(event);
-    // As a click does; ViewportWidget::focusInEvent says why not the focus a
-    // closing menu gives back.
-    if (onActivated && event->reason() != Qt::PopupFocusReason) {
-        onActivated();
-    }
 }
 
 void SectionViewWidget::mousePressEvent(QMouseEvent* event)

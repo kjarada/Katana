@@ -64,7 +64,8 @@ class SectionViewWidget final : public QWidget {
     // Crossings the last paint left out because this view hides their layer.
     [[nodiscard]] std::size_t lastHiddenCrossingCount() const { return lastHiddenCrossings_; }
 
-    // Raised when this view is clicked or the keyboard focus moves into it.
+    // Raised when this view is clicked or the user moves the keyboard focus
+    // into it (view_focus.hpp).
     std::function<void()> onActivated;
     // Messages the user must see. Nothing here raises it today; it stays for
     // the window's wiring and for a failure this view may one day report.
@@ -84,7 +85,6 @@ class SectionViewWidget final : public QWidget {
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
-    void focusInEvent(QFocusEvent* event) override;
 
   private:
     // Station/elevation -> pixels. `scale_` is pixels per model unit
