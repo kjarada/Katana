@@ -230,7 +230,7 @@ QWidget* SurveyImportWizard::buildFormatPage()
     layout->addWidget(detectionSummary_);
     candidates_ = new QTreeWidget(page);
     candidates_->setObjectName("candidates");
-    candidates_->setHeaderLabels({"Format", "Confidence", "Evidence"});
+    candidates_->setHeaderLabels({"Format", "Confidence", "Evidence", "Record"});
     candidates_->setRootIsDecorated(false);
     candidates_->header()->setStretchLastSection(true);
     layout->addWidget(candidates_, 1);
@@ -627,6 +627,13 @@ Status SurveyImportWizard::readFile()
         item->setText(1, QString::number(candidate.confidence, 'f', 2));
         item->setText(2, qs(candidate.evidence));
         item->setToolTip(2, qs(candidate.evidence));
+        // What the format carries and the parser's version, for every
+        // candidate and not only the chosen one: two formats a file could be
+        // may differ in exactly that.
+        if (descriptor) {
+            item->setText(3, qs(surveyio::describeFormat(*descriptor)));
+            item->setToolTip(3, item->text(3));
+        }
         format_->addItem(name, qs(candidate.formatId));
     }
     if (identified) {
