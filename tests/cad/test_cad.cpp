@@ -1262,6 +1262,52 @@ TEST(CadDocument, ReplacingTheLibraryOrTheMapMovesItsOwnGenerationOnly)
     EXPECT_EQ(session.document.libraryGeneration(), before);
 }
 
+TEST(CadDocument, TheModelRevisionCountsEveryStepAndEveryNewOrOpenedDrawingAndNothingElse)
+{
+    // Worked by hand, one line at a time: a command, its undo and its redo
+    // are +1 each (3); a refused command, a selection, the current layer, a
+    // library, a map, a save and the metadata are +0; a new drawing is +1
+    // (4); an open is +1 (5) - even of the same empty project, which is the
+    // case the history's counts and the table sizes could not see.
+    const fs::path directory =
+        fs::temp_directory_path() / "katana-cad-tests-revision" / "revision.katana";
+    fs::remove_all(directory.parent_path());
+    // Its own scope: the project's database is open until the Document goes,
+    // and Windows will not delete an open file.
+    {
+        Document document;
+        EXPECT_EQ(document.modelRevision(), 0u);
+        ASSERT_TRUE(document.execute(cmd::createLayer(Layer{"Roads"})).ok());
+        EXPECT_EQ(document.modelRevision(), 1u);
+        EXPECT_FALSE(document.execute(cmd::createLayer(Layer{"Roads"})).ok());
+        EXPECT_EQ(document.modelRevision(), 1u) << "a refused command changed nothing";
+        ASSERT_TRUE(document.undo().ok());
+        EXPECT_EQ(document.modelRevision(), 2u);
+        ASSERT_TRUE(document.redo().ok());
+        EXPECT_EQ(document.modelRevision(), 3u);
+
+        document.notifySelectionChanged();
+        ASSERT_TRUE(document.setCurrentLayer("Roads").ok());
+        document.setStyleLibrary(katana::entity::StyleLibrary{});
+        document.setSurveyMap(katana::entity::SurveyMap{});
+        EXPECT_EQ(document.modelRevision(), 3u);
+
+        document.newDocument();
+        EXPECT_EQ(document.modelRevision(), 4u);
+        ASSERT_TRUE(document.saveAs(directory).ok());
+        katana::storage::ProjectMetadata metadata = document.metadata();
+        metadata.name = "renamed";
+        document.setMetadata(metadata);
+        EXPECT_EQ(document.modelRevision(), 4u);
+        const auto opened = document.open(directory);
+        ASSERT_TRUE(opened.ok()) << opened.error().describe();
+        EXPECT_EQ(document.modelRevision(), 5u);
+        EXPECT_FALSE(document.open(directory.parent_path() / "missing.katana").ok());
+        EXPECT_EQ(document.modelRevision(), 5u) << "a failed open changes nothing";
+    }
+    fs::remove_all(directory.parent_path());
+}
+
 TEST(CadInterpreter, DeletingAStyleAnEntityStillUsesIsRefusedAndNamesTheEntity)
 {
     // An entity left naming a deleted style would draw ByLayer with nothing
