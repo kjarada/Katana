@@ -602,6 +602,43 @@ TEST(SurveyCodeManager, AMapLoadedElsewhereIsTakenUpWhenTheBufferIsUnedited)
     EXPECT_FALSE(dialog.dirty());
 }
 
+TEST(SurveyCodeManager, EditsKeptOverAMapChangedElsewhereStayUnappliedWhenUndone)
+{
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    const SurveyMap original = dialog.buffer();
+    // An edit (12 rules), then the drawing takes a one-rule map from
+    // elsewhere, then the edit is undone: the buffer is the fixture's 11 rules
+    // again. The drawing holds 1 rule, so the buffer still differs from what
+    // the drawing has - Apply and Revert both still have work to do, and the
+    // two tabs that run the drawing's map still say so.
+    ASSERT_TRUE(dialog.duplicateRule(1).ok());
+    SurveyMap replacement;
+    katana::entity::SurveyRule rule;
+    rule.key = "QQ*";
+    rule.model = "ELSEWHERE";
+    ASSERT_TRUE(replacement.add(rule).ok());
+    f.document.setSurveyMap(replacement);
+    katana::qt::test::processEvents();
+    ASSERT_TRUE(f.loggedContaining(QStringLiteral("changed elsewhere")));
+    ASSERT_TRUE(dialog.removeRule(2).ok());
+    ASSERT_TRUE(dialog.buffer() == original);
+    ASSERT_EQ(f.document.surveyMap().size(), 1u);
+
+    EXPECT_TRUE(dialog.dirty());
+    EXPECT_TRUE(child<QPushButton>(dialog, "applyMap")->isEnabled());
+    EXPECT_TRUE(child<QPushButton>(dialog, "revertMap")->isEnabled());
+    EXPECT_TRUE(child<QLabel>(dialog, "dirtyIndicator")->text().startsWith(
+        QStringLiteral("Unapplied edits")));
+    EXPECT_FALSE(child<QLabel>(dialog, "applyDirtyNote")->isHidden());
+    EXPECT_FALSE(child<QLabel>(dialog, "lineworkDirtyNote")->isHidden());
+
+    // Revert now takes the drawing's one rule, and nothing is left unapplied.
+    child<QPushButton>(dialog, "revertMap")->click();
+    EXPECT_TRUE(dialog.buffer() == replacement);
+    EXPECT_FALSE(dialog.dirty());
+}
+
 TEST(SurveyCodeManager, TheDialogOutlivesItsDocumentAndThenRefusesToApply)
 {
     auto document = std::make_unique<Document>();

@@ -443,9 +443,18 @@ void SurveyCodeManagerDialog::documentChanged(const DocumentChanges& changes)
             bufferChanged();
             loadForm(SurveyRule{}, std::nullopt);
         } else {
-            log(tr("The drawing's survey map was changed elsewhere while the manager has "
-                   "unapplied edits. They are kept: Apply replaces the new map with them, "
-                   "Revert takes the new map."));
+            // The edits are kept, but what they are measured against moves
+            // to the map the drawing now has: dirty() means "the buffer is
+            // not the drawing's map". Left on the old map, undoing the edits
+            // would read as clean - Apply and Revert off, the tabs' notes
+            // hidden - while Apply Codes and Linework ran a different map.
+            baseline_ = doc->surveyMap();
+            updateDirty();
+            if (dirty()) {
+                log(tr("The drawing's survey map was changed elsewhere while the manager has "
+                       "unapplied edits. They are kept: Apply replaces the new map with them, "
+                       "Revert takes the new map."));
+            }
         }
     }
     if (changes.library) {
