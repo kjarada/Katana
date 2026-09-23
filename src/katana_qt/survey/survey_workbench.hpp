@@ -10,15 +10,36 @@
 // work - which will grow a wizard, a point manager and reports - out of a
 // window source file that is already 3 500 lines, and lets it be written while
 // other work is changing that file.
+//
+// The menu, in sections:
+//   Survey Points           Import Survey Points..., Export Survey Points...,
+//                           Point Manager (a dock), Point Report...
+//   Coordinate Geometry     Inverse..., Forward Point..., Area of Selection,
+//                           Angle and Bearing Calculator...
+//   Traverse and Levelling  Traverse..., Level Book...
+//   Coordinates             Coordinate Converter...
+//   Survey Coding           the window's two customisation actions
+// Each action's object name (surveyImport, surveyExport, surveyPointManager,
+// surveyPointReport, surveyInverse, surveyForward, surveyArea,
+// surveyAngleCalculator, surveyTraverse, surveyLevelBook,
+// surveyCoordinateConverter) is what --action and --survey-dialog know it by.
+// A dialog's object name is its action's plus "Dialog" (survey_dialogs.hpp,
+// survey_import_wizard.hpp, survey_points_ui.hpp); the Point Manager is the
+// dock SurveyPointsDock, which --survey-dock knows it by.
+//
+// The computing is katana::cad's (survey_tools.hpp); this class and its
+// dialogs only gather input and show the reports.
 
 #include <functional>
 
 #include <QKeySequence>
+#include <QPointer>
 #include <QString>
 
 #include "icons.hpp"
 
 class QAction;
+class QDialog;
 class QMainWindow;
 class QMenu;
 class QToolBar;
@@ -29,7 +50,9 @@ class Document;
 
 namespace katana::qt {
 
+class SurveyPointsDock;
 class ViewWorkspace;
+struct SurveyDialogContext;
 
 struct SurveyServices {
     katana::cad::Document* document = nullptr;
@@ -54,14 +77,38 @@ class SurveyWorkbench {
     // Fills `menu` and `toolBar`, which the window has made and placed.
     SurveyWorkbench(QMainWindow& window, SurveyServices services, QMenu& menu,
                     QToolBar& toolBar);
+    // Deletes the dialogs. They are the window's children only so that they
+    // float over it; they hold the document, which the window destroys
+    // BEFORE its children (members go before the QWidget base), so they must
+    // go with this object - which the window destroys before the document.
     ~SurveyWorkbench();
 
     SurveyWorkbench(const SurveyWorkbench&) = delete;
     SurveyWorkbench& operator=(const SurveyWorkbench&) = delete;
 
   private:
+    [[nodiscard]] SurveyDialogContext dialogContext() const;
+    // Shows the dialog in `slot`, making it the first time: one of each,
+    // kept between uses so that what was typed survives closing it.
+    void open(QPointer<QDialog>& slot, const std::function<QDialog*()>& make);
+    // Survey > Area of Selection: no dialog - the report goes to the log.
+    void areaOfSelection();
+    // Survey > Point Manager: made the first time it is shown.
+    void showPointManager(bool show);
+
     QMainWindow& window_;
     SurveyServices services_;
+    QPointer<QDialog> inverse_;
+    QPointer<QDialog> forward_;
+    QPointer<QDialog> angle_;
+    QPointer<QDialog> traverse_;
+    QPointer<QDialog> levelBook_;
+    QPointer<QDialog> converter_;
+    QPointer<QDialog> import_;
+    QPointer<QDialog> export_;
+    QPointer<QDialog> pointReport_;
+    QPointer<SurveyPointsDock> pointManager_;
+    QAction* pointManagerAction_ = nullptr;
 };
 
 } // namespace katana::qt

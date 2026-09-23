@@ -255,4 +255,231 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+
+    # ---- the Survey menu (PLAN.MD 45 slice 9), through the actions a person clicks --
+    #
+    # Each dialog is opened by its action, filled and pressed by the object
+    # names of survey/survey_dialogs.hpp, and grabbed; what it reported is read
+    # from the log. The numbers are worked by hand, not taken from a run:
+    #
+    # Inverse (1000,5000) -> (1003,5004): a 3-4-5 triangle, 5.000 at azimuth
+    # atan2(3, 4) = 36.8698976 degrees = 36 deg 52' 11.63" (0.8698976 * 60 =
+    # 52.19386', 0.19386 * 60 = 11.63").
+    add_test(NAME qt_survey_inverse_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyInverse"
+            "-DFILL=from=1000,5000|to=1003,5004"
+            "-DPRESS=compute"
+            "-DEXPECT=Horizontal distance 5\\.000.*Azimuth 36[^0-9]+52'11\\.63"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_inverse_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Area of Selection over samples/gis/parcels.geojson, everything selected.
+    # Its outlines by the shoelace formula, from the file's coordinates:
+    #   42A (185,0) (300,0) (310,70) (200,95):
+    #     0 + 21000 + (29450 - 14000) + (0 - 17575) = 18875 -> 9437.5 m^2
+    #   42B (200,95) (310,70) (320,150) (215,165):
+    #     (14000 - 29450) + (46500 - 22400) + (52800 - 32250) + (20425 - 33000)
+    #     = 16625 -> 8312.5 m^2
+    #   the spoil heaps, 30 x 30 and 30 x 25 rectangles: 900 and 750 m^2
+    # 19 400 m^2 in all = 1.9400 ha (1 ha = 10 000 m^2). The two roads and
+    # the three control points have no area and are skipped, and said to be.
+    add_test(NAME qt_survey_area_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/parcels.geojson"
+            "-DSELECT_ALL=ON"
+            "-DACTIONS=surveyArea"
+            "-DEXPECT=Total  area 19400\\.000 m[^ ]* \\(1\\.9400 ha\\).*Skipped 3: a point has no area"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_area_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Forward along the same 3-4-5 direction, 5 from (1000,5000,20) with a
+    # height difference of -1: the far corner (1003,5004) at 20 - 1 = 19,
+    # added as a point named P7 on the current layer.
+    add_test(NAME qt_survey_forward_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyForward"
+            "-DFILL=from=1000,5000,20|direction=N 36d52m11.63s E|distance=5|heightDifference=-1|name=P7"
+            "-DPRESS=addPoint"
+            "-DEXPECT=New point P7  E 1003\\.000 N 5004\\.000 Z 19\\.000.*Created on layer"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_forward_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A right angle is 100 gon: 400 gon to the circle, by definition.
+    add_test(NAME qt_survey_angle_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyAngleCalculator"
+            "-DFILL=angle=90|unit=Degrees"
+            "-DPRESS=convert"
+            "-DEXPECT=100\\.00000000 gon"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_angle_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A 200 x 100 rectangle walked clockwise from A(1000,5000): north 100,
+    # east 200, south 100, west 200, turning 270 degrees (clockwise, back to
+    # forward) at every corner - with BC booked 200.100. The angles close;
+    # the figure overshoots 0.100 east: precision 600.1 / 0.1 = 1 : 6001.
+    # Bowditch moves C by -0.100 * (100 + 200.1) / 600.1 = -0.050 in E:
+    # 1200.100 - 0.050 = 1200.050. Added: B, C and D (A is the control it
+    # hangs on) and the traverse line - 4 entities.
+    add_test(NAME qt_survey_traverse_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyTraverse"
+            "-DFILL=name=Block|start=1000,5000|startMark=1000,5100|legs=A 270 100\\nB 270 200.1\\nC 270 100\\nD 270 200"
+            "-DPRESS=addToDrawing"
+            "-DEXPECT=precision 1 : 6001.*C +1200\\.100 +5100\\.000 +1200\\.050 +5100\\.000.*Added to layer 0: 4 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_traverse_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A level book reduced by hand (height of collimation): BM1 100.000 +
+    # BS 1.500 = 101.500; CP1 101.500 - 0.500 = 101.000, + 2.250 = 103.250;
+    # BM2 103.250 - 3.260 = 99.990 against its known 100.000: -0.010. The
+    # check: sum BS 3.750 - sum FS 3.760 = -0.010. Allowable 12 mm x
+    # sqrt(0.250 km) = 6 mm, which the 10 mm misclosure exceeds.
+    add_test(NAME qt_survey_level_book_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyLevelBook"
+            "-DFILL=startLevel=100|closingLevel=100|book=BM1 1.500 - -\\nA - 2.000 -\\nCP1 2.250 - 0.500 100\\nB - 1.250 -\\nBM2 - - 3.260 150|adjustment=By distance levelled"
+            "-DPRESS=reduce"
+            "-DEXPECT=sum BS 3\\.750 - sum FS 3\\.760 = -0\\.010.*Misclosure -0\\.0100 \\(computed - known\\); allowable 0\\.0060"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_level_book_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # UTM by definition (NGA.SIG.0012): zone 30's central meridian is 3 deg
+    # W, the false easting 500 000 m, the false northing 0 in the north, the
+    # scale on the central meridian 0.9996 - so (0, -3) is E 500 000, N 0.
+    add_test(NAME qt_survey_converter_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyCoordinateConverter"
+            "-DFILL=source=4326|target=32630|points=origin 0 -3"
+            "-DPRESS=convert"
+            "-DEXPECT=origin +0\\.000000000 -3\\.000000000 +-> +500000\\.000 0\\.000 +target k 0\\.99960000"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_converter_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The import wizard, the Point Manager, the export and the Point Report
+    # (PLAN.MD 45 slices 10, 11, 13), driven page by page (DRIVE, see
+    # tools/check_screenshot.cmake) on tests/surveyio/data. The fixture
+    # survey_points_pnezd.csv has a header naming its columns and 12 points,
+    # counted by hand: 1 to 12, point 4 without an elevation, point 9's
+    # description "Hydrant, fire" quoted. Its detection is never Identified
+    # (the delimited probe is weak by design), so every run chooses the format.
+    set(_survey_data "${PROJECT_SOURCE_DIR}/tests/surveyio/data")
+    set(_survey_format "format=Delimited text points (CSV, TXT)")
+    # Import all 12, then the Point Manager lists them - 12 rows - and the
+    # filter "CP" keeps the two points whose code is CP (1 and 11; no id or
+    # description holds "cp").
+    add_test(NAME qt_survey_import_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|#surveyPointManager|filter=CP"
+            "-DEXPECT=Records read: 12.*Points to create: 12.*Imported 12 point\\(s\\) from survey_points_pnezd\\.csv.*SurveyPointsDock: 12 points, 2 shown"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A headerless file does not say which column is the northing: Next on the
+    # layout page is refused until the order is confirmed, and then its 3
+    # points import.
+    add_test(NAME qt_survey_import_uncertain_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless.txt|!next|${_survey_format}|!next|columns=P,N,E,Z|delimiter=whitespace|headerLines=0|!next|confirmOrder=on|!next|unit=metres|!next|!next|!import"
+            "-DEXPECT=could not tell the order of the columns.*Imported 3 point\\(s\\) from survey_points_headerless\\.txt"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_uncertain_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The order corrected through the role boxes, one box at a time, as a
+    # person does it. survey_points_headerless_penz.txt is
+    # survey_points_headerless.txt with its 2nd and 3rd columns swapped by
+    # hand, so it is P,E,N,Z; with no header the proposal cannot tell and puts
+    # P,N,E,Z first. Box 2 goes to "ignored" (no northing column) and then to
+    # easting (two easting columns) - both layouts surveyio refuses, which once
+    # removed every role box, so the fill of role3 found no box - and box 3 to
+    # northing. The points exported as P,N,E,Z with no header are then the
+    # original file, text for text: the eastings are the 330 000s and the
+    # northings the 6 250 000s.
+    add_test(NAME qt_survey_import_role_boxes_swap_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless_penz.txt|!next|${_survey_format}|!next|role2=ignored|role2=easting|role3=northing|confirmOrder=on|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt|columns=P,N,E,Z|delimiter=whitespace|header=off|decimals=3|!export"
+            "-DCOMPARE=${_survey_data}/survey_points_headerless.txt|${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt"
+            "-DEXPECT=Layout: P,E,N,Z.delimiter=whitespace.header=0.*Imported 3 point\\(s\\) from survey_points_headerless_penz\\.txt.*Exported 3 point\\(s\\) to survey_role_swap\\.txt"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_role_boxes_swap_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Round trip through files: export(import(fixture)) with the fixture's own
+    # layout and 3 decimals is the fixture, text for text; that export read
+    # back in (replacing the points of the same ids) and written again is the
+    # fixture again.
+    add_test(NAME qt_survey_export_round_trip_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|columns=P,N,E,Z,C,D|decimals=3|!export|@surveyImport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|existing=replace the drawing's point|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv|!export"
+            "-DCOMPARE=${_survey_data}/survey_points_pnezd.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_1.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_round_trip_2.csv"
+            "-DEXPECT=Exported 12 point\\(s\\) to survey_round_trip_1\\.csv.*12 point\\(s\\) in the drawing are replaced.*Exported 12 point\\(s\\) to survey_round_trip_2\\.csv"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_export_round_trip_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The stated transformation: UTM zone 30N (EPSG:32630) to 30S
+    # (EPSG:32730) is the same projection with a false northing of 10 000 000 m
+    # (NGA.SIG.0012), so the export is the fixture with 10 000 000 added to
+    # every northing by hand (survey_points_pnezd_utm30s.csv) and nothing
+    # else changed - not the eastings, not the heights.
+    add_test(NAME qt_survey_import_transform_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|declared=32630|target=32730|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_transform.csv|columns=P,N,E,Z,C,D|decimals=3|!export"
+            "-DCOMPARE=${_survey_data}/survey_points_pnezd_utm30s.csv|${CMAKE_CURRENT_BINARY_DIR}/survey_transform.csv"
+            "-DEXPECT=Transformation: from EPSG:32630 to EPSG:32730.*Imported 12 point"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_transform_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The Point Report after the import lists all 12 (nothing is selected).
+    # A layout template is saved, chosen and deleted in the same run, so the
+    # settings are left as they were found.
+    add_test(NAME qt_survey_point_report_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest survey layout|!saveTemplate|template=ctest survey layout|!deleteTemplate|!next|unit=metres|!next|!next|!import|@surveyPointReport"
+            "-DEXPECT=Saved the survey layout template \"ctest survey layout\": P,N,E,Z,C,D.delimiter=comma.header=1.quote=double.*Deleted the survey layout template.*Point Report: 12 point\\(s\\)"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_point_report_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A template saved or deleted in the import wizard reaches an Export
+    # dialog that is already open. The Export dialog is opened FIRST, so its
+    # list is filled before the save (a list filled only when the dialog was
+    # built never offered it). The template is then chosen in it; after the
+    # wizard deletes it, choosing it again must be refused - the run ends on
+    # that refusal (REFUSED, see tools/check_screenshot.cmake), with the
+    # settings as it found them. The Delete before the Save clears a
+    # template an earlier, killed run may have left; when there is none it
+    # only logs that there is none.
+    add_test(NAME qt_survey_templates_reach_export_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyExport|@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest shared layout|!deleteTemplate|!saveTemplate|@surveyExport|template=ctest shared layout|@surveyImport|!deleteTemplate|@surveyExport|template=ctest shared layout"
+            "-DREFUSED=Saved the survey layout template \"ctest shared layout\".*Deleted the survey layout template \"ctest shared layout\".*--fill: template has no choice 'ctest shared layout'"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_templates_reach_export_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
+                         qt_survey_forward_headless qt_survey_angle_headless
+                         qt_survey_traverse_headless qt_survey_level_book_headless
+                         qt_survey_converter_headless qt_survey_import_headless
+                         qt_survey_import_uncertain_headless
+                         qt_survey_import_role_boxes_swap_headless
+                         qt_survey_export_round_trip_headless
+                         qt_survey_import_transform_headless
+                         qt_survey_point_report_headless
+                         qt_survey_templates_reach_export_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 endif()
