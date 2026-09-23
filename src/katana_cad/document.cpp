@@ -305,12 +305,14 @@ void Document::notify()
 void Document::setStyleLibrary(katana::entity::StyleLibrary library)
 {
     library_ = std::move(library);
+    ++libraryGeneration_;
     notify();
 }
 
 void Document::setSurveyMap(katana::entity::SurveyMap map)
 {
     surveyMap_ = std::move(map);
+    ++surveyMapGeneration_;
     notify();
 }
 
