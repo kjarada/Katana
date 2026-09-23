@@ -91,9 +91,9 @@ class RenderViewWidget final : public QWidget {
     [[nodiscard]] double lastFrameMilliseconds() const { return lastFrameMs_; }
     [[nodiscard]] const katana::render::RenderStats& lastStats() const { return stats_; }
 
-    // Raised when this view is clicked or the keyboard focus moves into it, so
-    // the workspace can make it active; the workspace ignores re-activating
-    // the active view.
+    // Raised when this view is clicked or the user moves the keyboard focus
+    // into it (view_focus.hpp), so the workspace can make it active; the
+    // workspace ignores re-activating the active view.
     std::function<void()> onActivated;
     // Messages the user must see: a failure, never a statistic.
     std::function<void(const QString&)> onStatus;
@@ -112,7 +112,6 @@ class RenderViewWidget final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
-    void focusInEvent(QFocusEvent* event) override;
 
   private:
     void rebuildIfNeeded();

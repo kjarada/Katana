@@ -1,12 +1,12 @@
 #include "render_view_widget.hpp"
 
 #include "theme.hpp"
+#include "view_focus.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 
-#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -40,6 +40,11 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& 
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setMinimumSize(40, 40);
     listenTo(context_.document);
+    activateOnFocus(*this, [this] {
+        if (onActivated) {
+            onActivated();
+        }
+    });
 }
 
 void RenderViewWidget::setContext(const ViewContext& context)
@@ -258,16 +263,6 @@ void RenderViewWidget::mousePressEvent(QMouseEvent* event)
         drag_ = state_.kind == katana::cad::ViewKind::Elevation ? Drag::Pan : Drag::Orbit;
     } else {
         drag_ = Drag::None;
-    }
-}
-
-void RenderViewWidget::focusInEvent(QFocusEvent* event)
-{
-    QWidget::focusInEvent(event);
-    // As a click does; ViewportWidget::focusInEvent says why not the focus a
-    // closing menu gives back.
-    if (onActivated && event->reason() != Qt::PopupFocusReason) {
-        onActivated();
     }
 }
 
