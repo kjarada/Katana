@@ -569,8 +569,8 @@ void ViewportWidget::selectAt(const QPointF& screen, Qt::KeyboardModifiers modif
     document_.notifySelectionChanged();
 }
 
-void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
-                                 Qt::KeyboardModifiers modifiers)
+std::vector<katana::entity::EntityId> ViewportWidget::pickedInBox(const QPointF& from,
+                                                                  const QPointF& to) const
 {
     Box2 box;
     box.expand(toWorld(from));
@@ -581,8 +581,13 @@ void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
                                          : cad::BoxSelectionMode::Crossing;
     cad::SelectionFilter filter;
     filter.view = &state_.layers;
-    const auto picked = cad::pickInBox(document_.model(), box, mode, filter,
-                                       &document_.spatialIndex());
+    return cad::pickInBox(document_.model(), box, mode, filter, &document_.spatialIndex());
+}
+
+void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
+                                 Qt::KeyboardModifiers modifiers)
+{
+    const auto picked = pickedInBox(from, to);
     cad::SelectionSet& selection = document_.selection();
     if (!(modifiers & (Qt::ShiftModifier | Qt::ControlModifier))) {
         selection.clear();
@@ -591,6 +596,30 @@ void ViewportWidget::selectInBox(const QPointF& from, const QPointF& to,
         selection.add(id);
     }
     document_.notifySelectionChanged();
+}
+
+void ViewportWidget::gatherForTool(const QPointF& from, const QPointF& to, bool dragged,
+                                   bool takeOut)
+{
+    std::vector<katana::entity::EntityId> picked;
+    if (dragged) {
+        picked = pickedInBox(from, to);
+    } else if (const auto id = entityAt(to)) {
+        picked.push_back(*id);
+    }
+    cad::SelectionSet& selection = document_.selection();
+    const std::size_t before = selection.size();
+    for (const auto id : picked) {
+        if (takeOut) {
+            selection.remove(id);
+        } else {
+            selection.add(id);
+        }
+    }
+    // All adds or all removes, so the count says whether anything changed.
+    if (selection.size() != before) {
+        document_.notifySelectionChanged();
+    }
 }
 
 void ViewportWidget::mousePressEvent(QMouseEvent* event)
@@ -660,18 +689,11 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
         boxStart_.reset();
         const bool dragged = std::abs(to.x() - from.x()) > kDragThresholdPixels ||
                              std::abs(to.y() - from.y()) > kDragThresholdPixels;
-        Qt::KeyboardModifiers modifiers = event->modifiers();
+        const Qt::KeyboardModifiers modifiers = event->modifiers();
         if (tools_.expects() == cad::ToolInput::Selection) {
-            // A tool's "Select entities" GATHERS, as AutoCAD's does: each
-            // click or box adds to what is picked, and Shift or Ctrl takes a
-            // picked entity back out. Replacing the selection at every
-            // plain click, as the Select tool does, would leave only the
-            // last of several cutting edges picked.
-            modifiers = (modifiers & (Qt::ShiftModifier | Qt::ControlModifier))
-                            ? Qt::KeyboardModifiers(Qt::ControlModifier)
-                            : Qt::KeyboardModifiers(Qt::ShiftModifier);
-        }
-        if (dragged) {
+            gatherForTool(from, to, dragged,
+                          (modifiers & (Qt::ShiftModifier | Qt::ControlModifier)) != 0);
+        } else if (dragged) {
             selectInBox(from, to, modifiers);
         } else {
             selectAt(to, modifiers);
