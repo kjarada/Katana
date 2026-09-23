@@ -1,12 +1,12 @@
 #include "render_view_widget.hpp"
 
 #include "theme.hpp"
+#include "view_focus.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 
-#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -39,7 +39,18 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& 
     // not clear it first: that is a full-window fill saved per frame.
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setMinimumSize(40, 40);
+    // A widget rebuilt over a camera that is already framed - the view went
+    // to a section and came back - must not frame it again at its first
+    // paint: that reset the target and the distance the user had zoomed to.
+    // cameraKind is checked as well so that a state whose flag outlived a
+    // reconfiguration still frames.
+    framed_ = state_.cameraFramed && state_.cameraKind == state_.kind;
     listenTo(context_.document);
+    activateOnFocus(*this, [this] {
+        if (onActivated) {
+            onActivated();
+        }
+    });
 }
 
 void RenderViewWidget::setContext(const ViewContext& context)
@@ -149,6 +160,9 @@ void RenderViewWidget::zoomExtents()
     }
     camera().frame(box);
     framed_ = true;
+    // Only a frame of something drawn is worth keeping for the next widget:
+    // one of the empty ground is replaced by the first real frame anyway.
+    state_.cameraFramed = !framedEmpty_;
     update();
 }
 
@@ -169,6 +183,7 @@ void RenderViewWidget::resizeEvent(QResizeEvent* event)
 void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
 {
     QPainter painter(this);
+    emptyMessageShown_ = false;
     if (framebuffer_.empty()) {
         painter.fillRect(rect(), kBackground);
         return;
@@ -202,8 +217,13 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
                        framebuffer_.width() * static_cast<int>(sizeof(katana::render::Rgba)),
                        QImage::Format_ARGB32);
     painter.drawImage(0, 0, image);
-    if (sceneEmpty_) {
-        drawEmptyMessage(painter);
+    // Only for a drawing with nothing in it. A scene of the grid alone is
+    // also what a drawing whose every layer is hidden - in the document or in
+    // this view - builds, and telling that user to draw or import something
+    // would be wrong; the plan view says nothing then either
+    // (ViewportWidget::drawEmptyHint).
+    if (sceneEmpty_ && drawingIsEmpty()) {
+        emptyMessageShown_ = drawEmptyMessage(painter);
     }
 
     if (onFrameStats) {
@@ -214,9 +234,19 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
     }
 }
 
+bool RenderViewWidget::drawingIsEmpty() const
+{
+    if (context_.document == nullptr) {
+        return true;
+    }
+    const auto& model = context_.document->model();
+    return model.entities.empty() && model.alignments.empty() && surfaces().empty() &&
+           meshes().empty();
+}
+
 // An empty 3D view looked broken: a grid and nothing on it, with no word of
 // why. It says what would put something there.
-void RenderViewWidget::drawEmptyMessage(QPainter& painter) const
+bool RenderViewWidget::drawEmptyMessage(QPainter& painter) const
 {
     const QString message = QStringLiteral("Nothing to show in 3D yet.\n"
                                            "Draw or import something, or build a surface "
@@ -225,7 +255,7 @@ void RenderViewWidget::drawEmptyMessage(QPainter& painter) const
     const int flags = Qt::AlignCenter | Qt::TextWordWrap;
     const QRect text = painter.fontMetrics().boundingRect(area, flags, message);
     if (text.height() > area.height()) {
-        return; // too small a view to say it in; the grid alone says less wrongly
+        return false; // too small a view to say it in; the grid alone says less wrongly
     }
     painter.save();
     // A backing of the view's own ground so the grid does not strike through
@@ -239,6 +269,7 @@ void RenderViewWidget::drawEmptyMessage(QPainter& painter) const
     painter.setPen(theme::textMuted());
     painter.drawText(area, flags, message);
     painter.restore();
+    return true;
 }
 
 void RenderViewWidget::mousePressEvent(QMouseEvent* event)
@@ -258,16 +289,6 @@ void RenderViewWidget::mousePressEvent(QMouseEvent* event)
         drag_ = state_.kind == katana::cad::ViewKind::Elevation ? Drag::Pan : Drag::Orbit;
     } else {
         drag_ = Drag::None;
-    }
-}
-
-void RenderViewWidget::focusInEvent(QFocusEvent* event)
-{
-    QWidget::focusInEvent(event);
-    // As a click does; ViewportWidget::focusInEvent says why not the focus a
-    // closing menu gives back.
-    if (onActivated && event->reason() != Qt::PopupFocusReason) {
-        onActivated();
     }
 }
 
