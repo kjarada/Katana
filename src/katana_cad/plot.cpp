@@ -91,6 +91,18 @@ Result<Sheet> sheetFor(const PlotSettings& settings)
     return sheet;
 }
 
+entity::Color paperColour(entity::Color colour, const PlotSettings& settings)
+{
+    const bool nearWhite = colour.r >= kNearWhiteChannel && colour.g >= kNearWhiteChannel &&
+                           colour.b >= kNearWhiteChannel;
+    if (settings.whiteToBlack && nearWhite) {
+        colour.r = 0;
+        colour.g = 0;
+        colour.b = 0;
+    }
+    return colour;
+}
+
 Result<double> fitScale(const geometry::Box2& extent, const PlotSettings& settings)
 {
     const double widthM = extent.max.x - extent.min.x;

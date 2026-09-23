@@ -128,3 +128,28 @@ TEST(Plot, RefusesASheetThatCannotBePlotted)
     EXPECT_EQ(fitScale(Box2(Point2(5, 5), Point2(5, 5)), a4Landscape300()).error().code,
               ErrorCode::InvalidArgument);
 }
+
+TEST(Plot, WhiteAndNearWhitePrintBlackOnPaperWhileEveryOtherColourKeepsItsOwn)
+{
+    // Decision D7: white on white paper is invisible, and white is the
+    // colour of a new layer and of 130 of a reference mapfile's 457 rules.
+    // "Near" is every channel at 230 or more, so (230, 230, 230) prints
+    // black and (229, 255, 255) - a tint, not a white - keeps its colour.
+    // Alpha is the pen's own and is kept.
+    const PlotSettings settings; // the rule is on by default
+    EXPECT_TRUE(settings.whiteToBlack);
+    using katana::entity::Color;
+    EXPECT_EQ(paperColour(Color{255, 255, 255, 255}, settings), (Color{0, 0, 0, 255}));
+    EXPECT_EQ(paperColour(Color{230, 230, 230, 128}, settings), (Color{0, 0, 0, 128}));
+    EXPECT_EQ(paperColour(Color{229, 255, 255, 255}, settings), (Color{229, 255, 255, 255}));
+    EXPECT_EQ(paperColour(Color{255, 0, 0, 255}, settings), (Color{255, 0, 0, 255}));
+    EXPECT_EQ(paperColour(Color{0, 0, 0, 255}, settings), (Color{0, 0, 0, 255}));
+}
+
+TEST(Plot, TheWhiteToBlackRuleCanBeTurnedOffForAPlotThatWantsItsWhite)
+{
+    PlotSettings settings;
+    settings.whiteToBlack = false;
+    using katana::entity::Color;
+    EXPECT_EQ(paperColour(Color{255, 255, 255, 255}, settings), (Color{255, 255, 255, 255}));
+}
