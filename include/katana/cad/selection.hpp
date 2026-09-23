@@ -74,6 +74,14 @@ class SelectionSet {
 [[nodiscard]] bool isDrawn(const katana::entity::ResolvedLayer& layer,
                            const katana::entity::Entity& entity, const LayerOverrides& view);
 
+// The box round everything `view` draws: each entity passing the rule, by its
+// true geometry (entity::boundingBox - an arc's own extent, not its circle's).
+// Empty when nothing is drawn. What a view's Zoom Extents frames, so a view
+// zooms to what it shows rather than to a stray on a layer it hides - the
+// point audit REN-03 made for the 3D view, made here for every view.
+[[nodiscard]] katana::geometry::Box2 drawnExtent(const katana::entity::Model& model,
+                                                 const LayerOverrides& view);
+
 // Nearest selectable entity whose geometry lies within `tolerance` (model units)
 // of `point`. Ties go to the higher id: the entity drawn last, i.e. on top.
 // `index`, when supplied, narrows the search instead of scanning the model

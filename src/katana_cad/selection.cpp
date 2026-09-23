@@ -74,6 +74,17 @@ bool isSelectable(const Model& model, const Entity& entity, const LayerOverrides
     return isDrawn(layer, entity, view) && !layer.locked;
 }
 
+Box2 drawnExtent(const Model& model, const LayerOverrides& view)
+{
+    Box2 extent;
+    model.entities.forEach([&](const Entity& entity) {
+        if (isDrawn(model, entity, view)) {
+            extent.expand(katana::entity::boundingBox(entity.geometry));
+        }
+    });
+    return extent;
+}
+
 namespace {
 
 const LayerOverrides& viewOf(const SelectionFilter& filter)
