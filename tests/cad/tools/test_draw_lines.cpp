@@ -1085,6 +1085,54 @@ TEST(DrawPolygonTool, UndoStepsBackThroughTheCentreAndTheNumberOfSides)
     EXPECT_EQ(polyline->vertices.size(), 4u);
 }
 
+TEST(DrawPolygonTool, UndoTakesBackAnInscribedOrCircumscribedSwitchBeforeTheCentre)
+{
+    ToolDriver driver;
+    driver.start("draw.polygon");
+    (void)driver.type("4");
+    (void)driver.click(0, 0);
+    const std::string inscribed = "Specify a vertex or type the radius, or [Circumscribed/Undo]";
+    const std::string circumscribed =
+        "Specify the middle of a side or type the radius, or [Inscribed/Undo]";
+    // Each switch is an input, so Undo takes them back one at a time, latest
+    // first, and only then the centre.
+    (void)driver.type("C");
+    (void)driver.type("I");
+    (void)driver.type("C");
+    EXPECT_EQ(driver.undo().outcome, Outcome::Continue);
+    EXPECT_EQ(driver.tool().prompt(), inscribed);
+    EXPECT_EQ(driver.tool().lastPoint(), Point2(0.0, 0.0)) << "the centre is kept";
+    (void)driver.type("U");
+    EXPECT_EQ(driver.tool().prompt(), circumscribed);
+    (void)driver.undo();
+    EXPECT_EQ(driver.tool().prompt(), inscribed);
+    EXPECT_EQ(driver.tool().lastPoint(), Point2(0.0, 0.0));
+    // Inscribed again, so (1, 0) is a vertex of the square round the kept
+    // centre: (1, 0) turned by 90, 180 and 270 degrees.
+    (void)driver.click(1, 0);
+    const auto polyline = onlyPolyline(driver.document());
+    ASSERT_TRUE(polyline);
+    EXPECT_TRUE(verticesNear(polyline->vertices, {{1, 0}, {0, 1}, {-1, 0}, {0, -1}}));
+}
+
+TEST(DrawPolygonTool, UndoAfterEveryModeSwitchIsTakenBackGoesOnToTheCentre)
+{
+    ToolDriver driver;
+    driver.start("draw.polygon");
+    (void)driver.type("4");
+    (void)driver.click(0, 0);
+    (void)driver.type("C");
+    (void)driver.undo();
+    (void)driver.undo();
+    EXPECT_EQ(driver.tool().prompt(), "Specify centre of polygon or [Edge/Undo]");
+    EXPECT_FALSE(driver.tool().lastPoint().has_value());
+    // The mode is the one the centre was given in: every switch after it was
+    // undone, so a new centre starts Inscribed.
+    (void)driver.click(5, 5);
+    EXPECT_EQ(driver.tool().prompt(),
+              "Specify a vertex or type the radius, or [Circumscribed/Undo]");
+}
+
 TEST(DrawPolygonTool, OneUndoRemovesThePolygonAndTheToolAsksForTheSidesAgain)
 {
     ToolDriver driver;
