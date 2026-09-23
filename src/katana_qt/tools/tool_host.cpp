@@ -14,10 +14,13 @@ using katana::core::Status;
 
 bool escapeKeepsWork(std::string_view toolId)
 {
-    // Each checked against the tool's enter(): at every step Esc can reach,
-    // Enter commits what was collected, ends with nothing, or only moves the
-    // tool on a step (Trim's edges, Offset's distance), which cancel() then
-    // drops. Copy is NOT here although its placed copies are collected work,
+    // Each checked against the tool's enter() at every step it can be in
+    // when cancel() sends Enter: Enter commits what was collected, ends with
+    // nothing, or only moves the tool on a step (Trim's edges, Offset's
+    // distance), which cancel() then drops. The exceptions are Fillet's and
+    // Chamfer's value prompts, whose Enter defaults a setting; cancel() steps
+    // back out of those before it sends Enter, so Enter is never sent at a
+    // value prompt. Copy is NOT here although its placed copies are collected work,
     // because at its second-point prompt with none placed yet Enter copies by
     // the base point as a displacement.
     static constexpr std::array<std::string_view, 7> kKeep = {
@@ -93,6 +96,24 @@ void ToolHost::cancel()
         return;
     }
     if (escapeKeepsWork(info_->id)) {
+        // Out of a value prompt first. Enter there takes the prompt's default
+        // - at Chamfer's second distance it stores both distances for every
+        // later Chamfer - or only returns to the lines (Fillet's radius), and
+        // then the corners a Multiple session made would go with the tool.
+        // Undo at those prompts only steps back towards the lines, never
+        // touching the session or the defaults (CornerTool::undo); a value
+        // prompt still showing after that is left rather than defaulted.
+        constexpr int kMostStepsBack = 4; // SecondDistance -> FirstDistance -> First is 2
+        for (int stepped = 0;
+             stepped < kMostStepsBack && tool_->expects() == cad::ToolInput::Value; ++stepped) {
+            if (tool_->undo().outcome != Outcome::Continue) {
+                break;
+            }
+        }
+        if (tool_->expects() == cad::ToolInput::Value) {
+            end();
+            return;
+        }
         cad::ToolStep step = tool_->enter();
         // Only a finished step's command is work to keep. A Continue here is
         // Enter moving the tool on a step (Trim's edges, Offset's distance)
