@@ -15,12 +15,18 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <set>
+#include <string>
 
 #include <QMainWindow>
 #include <QStyle>
 #include <QToolButton>
+#include <QTreeWidget>
 
 #include "dock_chrome.hpp"
+#include "katana/commands/entity_commands.hpp"
+#include "katana/entity/tables.hpp"
+#include "view_layers_popup.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
 
@@ -29,6 +35,7 @@ using katana::cad::LayoutKind;
 using katana::cad::ViewId;
 using katana::cad::ViewKind;
 using katana::qt::DockChrome;
+using katana::qt::ViewLayersPopup;
 using katana::qt::ViewWorkspace;
 using katana::qt::test::processEvents;
 
@@ -90,6 +97,14 @@ struct ChromedWorkspace {
         processEvents();
     }
 };
+
+// A layer of that name, everything else the defaults.
+katana::entity::Layer layerNamed(const char* name)
+{
+    katana::entity::Layer layer;
+    layer.name = name;
+    return layer;
+}
 
 } // namespace
 
@@ -377,4 +392,59 @@ TEST(ViewChrome, QuadPutsTheFourViewsInTheQuartersOfTheWorkspace)
     EXPECT_TRUE(near(w.dock(section)->geometry(), 0, halfHeight + gap, halfWidth, halfHeight));
     EXPECT_TRUE(
         near(w.dock(elevation)->geometry(), halfWidth + gap, halfHeight + gap, halfWidth, halfHeight));
+}
+
+TEST(ViewChrome, HidingALayerInAViewsPopupHidesItInThatViewAloneAndIsNoEdit)
+{
+    ChromedWorkspace w;
+    for (const char* name : {"BUILDING", "ROAD"}) {
+        ASSERT_TRUE(w.document.execute(katana::commands::createLayer(layerNamed(name))).ok());
+    }
+    const ViewId plan = w.active();
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    const bool modified = w.document.isModified();
+    const std::size_t undoable = w.document.history().undoCount();
+
+    ViewLayersPopup* popup = w.views->showLayersPopup(plan);
+    ASSERT_NE(popup, nullptr);
+    QTreeWidgetItem* building = popup->itemFor("BUILDING");
+    ASSERT_NE(building, nullptr);
+    // What a click on its box does.
+    building->setCheckState(0, Qt::Unchecked);
+
+    EXPECT_TRUE(w.views->viewSet().find(plan)->layers.hides("BUILDING"));
+    EXPECT_FALSE(w.views->viewSet().find(plan)->layers.hides("ROAD"));
+    EXPECT_FALSE(w.views->viewSet().find(model)->layers.hides("BUILDING"));
+    EXPECT_EQ(w.views->hiddenCount(plan), 1U);
+    EXPECT_EQ(w.views->hiddenCount(model), 0U);
+    // A view's own filter: no command ran, so nothing to save or undo.
+    EXPECT_EQ(w.document.isModified(), modified);
+    EXPECT_EQ(w.document.history().undoCount(), undoable);
+    popup->close();
+}
+
+TEST(ViewChrome, IsolatingANodeThatIsNotALayerHidesTheSiblingsOfItAndOfEachAncestor)
+{
+    ChromedWorkspace w;
+    for (const char* name : {"ANNOT", "design/road", "design/surface/tin1", "survey/points"}) {
+        ASSERT_TRUE(w.document.execute(katana::commands::createLayer(layerNamed(name))).ok());
+    }
+    const ViewId plan = w.active();
+
+    ViewLayersPopup* popup = w.views->showLayersPopup(plan);
+    ASSERT_NE(popup, nullptr);
+    // design/surface is a node of the tree only: no layer has that name.
+    QTreeWidgetItem* surface = popup->itemFor("design/surface");
+    ASSERT_NE(surface, nullptr);
+    popup->layerTree()->setCurrentItem(surface);
+    ASSERT_TRUE(popup->isolateSelected().ok());
+
+    // Kept: design/surface, what is under it (tin1) and its ancestor design.
+    // Hidden: design's siblings at the root - the default layer 0, ANNOT and
+    // survey (which takes survey/points with it) - and surface's sibling
+    // under design, design/road.
+    const std::set<std::string, std::less<>> expected{"0", "ANNOT", "design/road", "survey"};
+    EXPECT_EQ(w.views->viewSet().find(plan)->layers.hidden(), expected);
+    popup->close();
 }
