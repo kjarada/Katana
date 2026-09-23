@@ -204,7 +204,10 @@ Take the next work item in this order:
    DELIVERED.** Nothing else is started or resumed before then, section 20.2's
    own remainder included (the user's instruction of 2026-09-22); the only
    exception is a defect that blocks it.
-0b. **`PLAN.MD` section 20.2, the 12d Model programme**, once 20.3 is done.
+0a. **`PLAN.MD` section 45, the survey module and instrument
+   interoperability** (the user's request of 2026-09-23), once 20.3 is done.
+0b. **`PLAN.MD` section 20.2's remainder, the 12d Model programme**, once 45
+   is done.
 1. The phase you are part-way through, to a point where it is DELIVERED rather
    than partially delivered.
 2. A real defect found on the way — fix it if it is small and adjacent, record
@@ -268,6 +271,34 @@ An analysis sweep - "find the bottlenecks in these five modules" - is the
 clearest win: it is read-only, so there is nothing to conflict, and it would
 otherwise fill this context with files rather than conclusions.
 
+Practicalities, each learnt the expensive way:
+
+- **A new worktree is missing everything gitignored.** Copy
+  `third_party/_cache` into it before configuring (without it configure tries
+  to download GoogleTest), and copy `docs/12d Refrence Files` in when the work
+  needs the compiled-in customisation - never add those files to git.
+- **Build only what the part needs.** `-DKATANA_MODULE_FILTER="katana_core;
+  katana_math;katana_geometry;katana_survey;katana_surveyio"` with
+  `-DKATANA_BUILD_QT_APP=OFF -DKATANA_BUILD_IO=OFF -DKATANA_BUILD_BENCHMARKS=OFF`
+  is a few minutes; the whole application is most of an hour of CPU.
+- **Cap the parallelism.** Ninja defaults to cores + 2 jobs, so eight agents
+  building at once ask for 144 compilers on 16 cores and 31 GB. Pass `-j 4`
+  (eight agents) or `-j 3` (more) to every build.
+- **Launch waves, not everything.** Seventeen agents at once exhausted the
+  session's usage limit within minutes and every one of them died having read
+  and written nothing. The work order above is also the launch order.
+- **Agents do not edit the shared records.** `PLAN.MD`, `README.md`,
+  `CLAUDE.md` and `docs/` are updated by the lead from the agents' reports, and
+  a shared CMake list belongs to exactly one agent per wave; reserve a test
+  file in advance for any other agent that needs one.
+- **Before committing, `git diff --cached` every staged file.** The owner edits
+  files in the IDE while work is in progress, and `git add -A` once swept an
+  owner's edit and eight agent worktrees (now ignored) into an unrelated
+  commit.
+- **A file written by Python on Windows is CRLF** unless opened with
+  `newline='\n'`; the index is LF, and a Workflow script with CRs in it is
+  refused.
+
 ## 6. Self-improvement — leave the codebase easier to work on
 
 You are expected to improve the *conditions* for the next contributor, not only
@@ -312,6 +343,17 @@ core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> 
   no idea a Document exists — Rule 3 made structural.
 - **No third-party type in any public header** (Rule 4). GDAL, PDAL, CGAL,
   PROJ, SQLite and Qt stay behind `src/`.
+- **Text and units have one home each, low in the stack.** Decoding bytes to
+  UTF-8 is `core/text_encoding.hpp`; trimming and number parsing is
+  `core/text.hpp` (locale-independent - never `std::isspace`, `std::tolower`
+  or `strtod` on file text); the exact length of a foot or a link is
+  `math/unit_ratio.hpp`, which `geodesy/units.hpp` is built from. A module
+  that "cannot see" one of these can: they are in core and math precisely so
+  that every layer can.
+- **Absent is not zero.** A survey point's height is `std::optional<double>`
+  and a point with no coordinates is a `survey::UnpositionedPoint`, not a
+  point at the origin. Never write a placeholder number for a missing
+  measurement.
 
 Build:
 
