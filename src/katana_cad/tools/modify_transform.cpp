@@ -1447,6 +1447,13 @@ class ArrayRectangularTool final : public SelectionTool {
 
     void addArray(ToolFeedback& feedback, const Vec2& spacing) const
     {
+        // Checked before the cells are built: a 1000 x 100 array would
+        // otherwise make a hundred thousand matrices per mouse move only for
+        // addTransformed to decline them.
+        const auto copies = static_cast<std::size_t>(state_.now.rows * state_.now.columns - 1);
+        if (copies * ids().size() > kPreviewLimit) {
+            return;
+        }
         const std::vector<Mat3> transforms = cells(spacing);
         addTransformed(feedback, document(), ids(), transforms);
     }
@@ -1586,9 +1593,12 @@ class ArrayPolarTool final : public SelectionTool {
         case Step::Fill:
         case Step::RotateItems: {
             // What Enter would make: the angle's default, turning the items.
+            feedback.markers.push_back(now.centre);
+            if (static_cast<std::size_t>(now.count - 1) * ids().size() > kPreviewLimit) {
+                break; // as the rectangular array: not built only to be declined
+            }
             const std::vector<Mat3> transforms = items(now.fill, true);
             addTransformed(feedback, document(), ids(), transforms);
-            feedback.markers.push_back(now.centre);
             break;
         }
         }

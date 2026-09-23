@@ -376,7 +376,8 @@ TEST(CopyTool, CopiesToEverySecondPointUntilEnterAsOneCommand)
     (void)driver.click(0.0, 0.0);
     EXPECT_EQ(driver.click(0.0, 2.0).outcome, Outcome::Continue);
     EXPECT_EQ(driver.tool().prompt(), "Specify second point or [Exit/Undo] <Exit>");
-    EXPECT_EQ(driver.click(0.0, 4.0).outcome, Outcome::Continue);
+    // Relative to the base point, as every second point is: (0,0) + (0,4).
+    EXPECT_EQ(driver.type("@0,4").outcome, Outcome::Continue);
     EXPECT_EQ(driver.executed(), 0) << "nothing is made until Enter";
     EXPECT_EQ(driver.enter().outcome, Outcome::Done);
     EXPECT_EQ(driver.executed(), 1);
@@ -468,6 +469,8 @@ TEST(RotateTool, RotatesByATypedAngleCounterClockwiseAboutTheBasePoint)
     expectNear(turned.start, {0.0, 2.0});
     expectNear(turned.end, {0.0, 4.0});
     EXPECT_EQ(driver.messages().back(), "1 entity rotated");
+    ASSERT_TRUE(driver.document().undo().ok());
+    EXPECT_EQ(lineOf(driver, fixture.id), (Segment2{{2.0, 0.0}, {4.0, 0.0}}));
 }
 
 TEST(RotateTool, APickedPointGivesTheAngleOfItsDirectionFromTheBasePoint)
@@ -598,6 +601,8 @@ TEST(ScaleTool, ScalesByATypedFactorAboutTheBasePoint)
     EXPECT_EQ(driver.type("2").outcome, Outcome::Done);
     EXPECT_EQ(lineOf(driver, fixture.id), (Segment2{{2.0, 2.0}, {4.0, 2.0}}));
     EXPECT_EQ(driver.messages().back(), "1 entity scaled");
+    ASSERT_TRUE(driver.document().undo().ok());
+    EXPECT_EQ(lineOf(driver, fixture.id), (Segment2{{1.0, 1.0}, {2.0, 1.0}}));
 }
 
 TEST(ScaleTool, APickedPointGivesItsDistanceFromTheBasePointAsTheFactor)
@@ -802,7 +807,8 @@ TEST(ArrayRectangularTool, AUnitCellGivesBothSpacingsAtOnce)
     const auto lines = previewLines(driver.tool().preview({12.0, 15.0}));
     EXPECT_EQ(lines.size(), 5u) << "the five copies";
     EXPECT_TRUE(contains(lines, Segment2{{4.0, 5.0}, {5.0, 5.0}}));
-    EXPECT_EQ(driver.click(12.0, 15.0).outcome, Outcome::Done);
+    // The opposite corner typed relative to the first: the same cell.
+    EXPECT_EQ(driver.type("@2,5").outcome, Outcome::Done);
     const std::vector<Point2> expected = {{0.0, 0.0}, {2.0, 0.0}, {4.0, 0.0},
                                           {0.0, 5.0}, {2.0, 5.0}, {4.0, 5.0}};
     EXPECT_EQ(sortedStarts(driver), expected);
@@ -861,7 +867,8 @@ TEST(ArrayPolarTool, SpacesTheItemsEvenlyRoundAWholeTurnCountingTheOriginal)
     const EntityId id = driver.add(cmd::createPoint({10.0, 0.0}));
     select(driver, {id});
     driver.start("modify.array_polar");
-    (void)driver.click(0.0, 0.0);
+    EXPECT_EQ(driver.tool().prompt(), "Specify center point of array");
+    EXPECT_EQ(driver.type("0,0").outcome, Outcome::Continue);
     EXPECT_EQ(driver.tool().expects(), ToolInput::Value);
     (void)driver.type("4");
     EXPECT_EQ(driver.tool().prompt(), "Specify the angle to fill (+=ccw, -=cw) <360>");
@@ -1011,7 +1018,7 @@ TEST(StretchTool, MovesThePointsInsideTheWindowAndWhatLiesWhollyWithinIt)
     EXPECT_EQ(driver.click(8.0, -1.0).outcome, Outcome::Continue);
     EXPECT_EQ(driver.messages().back(), "2 entities to stretch");
     (void)driver.click(0.0, 0.0);
-    EXPECT_EQ(driver.click(3.0, 0.0).outcome, Outcome::Done);
+    EXPECT_EQ(driver.type("@3,0").outcome, Outcome::Done);
     EXPECT_EQ(driver.executed(), 1);
 
     // The window x 8..12, y -1..6 holds the rectangle's right-hand corners
@@ -1055,6 +1062,33 @@ TEST(StretchTool, AnArcWithOneEndInsideKeepsItsHeightAboveTheChord)
     expectNear(arc.endPoint(), {-2.0, 0.0}, 1e-9);
     EXPECT_GT(arc.sweep, 0.0) << "still counter-clockwise, bulging upwards";
     expectNear(arc.midpoint(), {1.0, 2.0}, 1e-9);
+}
+
+TEST(StretchTool, AnArcWhollyInsideMovesWholeAndADimensionMovesOnlyThePointInside)
+{
+    ToolDriver driver;
+    const EntityId arc = driver.add(cmd::createArc(Arc2{{2.0, 2.0}, 1.0, 0.0, 1.5}));
+    katana::entity::DimensionGeometry measured;
+    measured.start = {-10.0, 2.0};
+    measured.end = {2.0, 2.0};
+    measured.offset = 1.5;
+    const EntityId dimension = driver.add(cmd::createDimension(measured));
+    driver.start("modify.stretch");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(4.0, 4.0);
+    EXPECT_EQ(driver.messages().back(), "2 entities to stretch");
+    (void)driver.click(0.0, 0.0);
+    EXPECT_EQ(driver.click(0.5, -1.0).outcome, Outcome::Done);
+    // Both ends of the arc are inside, so it moves as it is: centre (2.5,1).
+    EXPECT_EQ(std::get<Arc2>(entityOf(driver, arc)->geometry),
+              (Arc2{{2.5, 1.0}, 1.0, 0.0, 1.5}));
+    // Only the dimension's end at (2,2) is inside; its start stays put, and
+    // it goes on measuring from there, to (2.5,1).
+    const auto& stretched =
+        std::get<katana::entity::DimensionGeometry>(entityOf(driver, dimension)->geometry);
+    EXPECT_EQ(stretched.start, Point2(-10.0, 2.0));
+    EXPECT_EQ(stretched.end, Point2(2.5, 1.0));
+    EXPECT_EQ(stretched.offset, 1.5);
 }
 
 TEST(StretchTool, ACircleAPointAndATextMoveWhenTheirCentreOrPositionIsInside)
