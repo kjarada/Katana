@@ -17,14 +17,16 @@
 // It is not a placeholder that does the obvious slow thing. The structure is
 // the one a tile-based GPU uses:
 //
-//   1. TRANSFORM   every vertex once, in parallel, into clip space. Primitives
-//                  index vertices, so a vertex shared by twenty triangles is
-//                  transformed once - which is the entire reason DrawList is
-//                  indexed.
-//   2. SETUP+BIN   clip against the near plane, project to pixels, widen lines
-//                  into quads, then record each primitive in the list of every
-//                  64x64 screen tile its bounding box touches. Done in parallel
-//                  over a FIXED number of primitive chunks.
+//   1. TRANSFORM   every vertex once, in parallel, into clip space, and
+//                  classify it against the clip planes. Primitives index
+//                  vertices, so a vertex shared by twenty triangles is
+//                  transformed and classified once - which is the entire
+//                  reason DrawList is indexed.
+//   2. SETUP+BIN   clip against the near plane and a guard band (only what
+//                  crosses one - the clip codes say which), project to pixels,
+//                  widen lines into quads, then record each primitive in the
+//                  list of every 64x64 screen tile its bounding box touches.
+//                  Done in parallel over a FIXED number of primitive chunks.
 //   3. RASTERISE   one task per tile. A tile owns its pixels exclusively, so
 //                  there is no lock, no atomic and no false sharing in the
 //                  inner loop, and the colour and depth a tile touches stay in
@@ -34,8 +36,8 @@
 // primitive count alone, never of the number of cores, so the order in which a
 // tile visits its primitives is identical on every machine. With a
 // strictly-less depth test that makes the frame reproducible bit for bit -
-// asserted by a test that renders the same scene with a 1-thread pool and with
-// the shared pool and compares the buffers.
+// asserted by a test that renders the same scene with 0, 1, 3 and 7 worker
+// threads and compares the buffers.
 //
 // SCRATCH is owned by the Rasterizer and reused, so a viewport redrawing at
 // 60 Hz allocates on the first frame and never again (PLAN.MD section 33).
