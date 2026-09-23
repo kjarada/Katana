@@ -21,9 +21,11 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include "katana/cad/view_transform.hpp"
 #include "katana/core/error.hpp"
+#include "katana/entity/entity.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
 namespace katana::cad {
@@ -55,7 +57,25 @@ struct PlotSettings {
     double dpi = 300.0;
     double scaleDenominator = 1000.0;  // 1 : N
     geometry::Point2 center{0.0, 0.0}; // the model point at the sheet centre
+    // White and near-white pens print BLACK (decision D7), as AutoCAD's colour
+    // 7 does. The screen's ground is dark, so white is what a new layer draws
+    // in and what 130 of the 457 map_data rules of a reference mapfile ask
+    // for; on white paper every one of those features would vanish. Off only
+    // for a plot onto a dark sheet or a deliberate white-on-colour print.
+    bool whiteToBlack = true;
 };
+
+// The lowest a channel may be for a colour to count as white on paper. 230 of
+// 255 is within a tenth of white on every channel: a white a screen has been
+// dimmed or tinted towards (240, 240, 240) still prints, while "light grey"
+// (211, 211, 211) and "light yellow" (255, 255, 224) keep their colour - on
+// paper they are faint but they are there, and they are what was asked for.
+inline constexpr std::uint8_t kNearWhiteChannel = 230;
+
+// The colour a pen prints in: black for white and near-white when
+// `settings.whiteToBlack`, and `colour` unchanged otherwise. Alpha is kept, so
+// a faded pen stays faded.
+[[nodiscard]] entity::Color paperColour(entity::Color colour, const PlotSettings& settings);
 
 // The sheet as a view transform: pixels here are device pixels of the plot
 // at `dpi`, so `view.scale` is device pixels per model unit and the width and
