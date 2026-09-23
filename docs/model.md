@@ -296,6 +296,31 @@ under a name that claims full coverage:
 
 Update the `static_assert` count, this document, `PLAN.MD` and `README.md`.
 
+## Layer visibility and lock: one rule, asked everywhere
+
+A layer is shown when it and every ancestor is visible, and locked when it or
+any ancestor is locked (PLAN.MD 5.1). The rule has one implementation,
+`LayerDatabase::resolve`, and every consumer goes through it - `cad::isDrawn`
+and `cad::isSelectable`, which the viewport, the plot, picking, box selection,
+snapping, the 3D scene, sections and Surface From Drawing ask, and the
+`requireUnlockedLayer` check every command runs. Until 2026-09-23 the layer
+panel was the only place that honoured inheritance (audit MOD-01).
+
+The inherited state is STORED, not walked: each map node holds its layer and
+`shown`/`locked`, and every member that changes the table recomputes the
+subtree it touched. Rejected: walking the ancestors on each query, which is what
+`effectivelyVisible` did - it allocated a vector of ancestor names per call, and
+the viewport asks for every entity on every frame; and a per-frame cache in each
+caller, which is nine callers each able to forget it. The recomputation is
+cheap because the state of a layer depends only on itself and its ancestors: an
+update or rename moves only its own subtree, and adding a layer moves nothing
+else, since every layer's ancestors already exist.
+
+The subtree is the node plus the keys from `name/` to `name0` - NOT the keys
+after the node, because space, `-` and `.` sort below `/` and put "design 2"
+between "design" and "design/surface". `hasChildren` made that mistake until
+the same change, and `remove` orphaned children because of it.
+
 ## Named tables
 
 `Linetype`, `DimensionStyle`, `Style`, `HatchPattern` and `Alignment` are stored in `NamedTable<T, Policy>`

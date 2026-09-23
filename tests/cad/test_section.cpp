@@ -273,6 +273,13 @@ TEST(CadSection, EntitiesCrossingTheAlignmentAreReportedAtTheirStation)
 {
     const TinSurface surface = ramp();
     katana::entity::Model model;
+    // The layers the entities name must exist: a section shows what the plan
+    // shows, and an entity on a layer that is not in the table is not drawn
+    // (LayerDatabase::resolve). This fixture put them on layers it never
+    // created, which the model's own commands would have refused, and passed
+    // only while sections ignored layers altogether (audit REN-04).
+    ASSERT_TRUE(model.layers.ensure("FENCE").ok());
+    ASSERT_TRUE(model.layers.ensure("DRAINAGE").ok());
 
     // A line crossing the alignment at x = 30, and a circle centred on the
     // alignment crossing it twice.

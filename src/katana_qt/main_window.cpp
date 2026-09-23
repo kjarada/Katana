@@ -2463,7 +2463,9 @@ void MainWindow::buildSurfaceFromDrawing()
     std::size_t withoutHeight = 0;
 
     document_.model().entities.forEach([&](const Entity& entity) {
-        if (!entity.visible) {
+        // What the drawing SHOWS is what is triangulated: a layer switched off
+        // is left out, as it is out of every view (audit REN-04).
+        if (!katana::cad::isDrawn(document_.model(), entity)) {
             return;
         }
         const bool carriesHeights =

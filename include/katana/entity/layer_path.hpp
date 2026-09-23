@@ -15,9 +15,14 @@
 // path as the single identity means the tree is a VIEW of the names: there is
 // one source of truth and it is the one already persisted.
 //
-// std::map ordering over full paths is already a pre-order traversal of that
-// tree ("a" < "a/b" < "a/c" < "b"), so listing a subtree is a range scan, not a
-// graph walk. That is the other reason the flat representation stays.
+// std::map ordering over full paths puts every parent before its children (a
+// proper prefix sorts first), and everything under "a" is one contiguous
+// range, the keys from "a/" to "a0" - so listing a subtree is a range scan, not
+// a graph walk. That is the other reason the flat representation stays. It is
+// NOT a strict pre-order walk, which this comment used to claim: a sibling
+// whose name continues with a character below '/' ("a 2", "a-old", "a.bak")
+// sorts between "a" and "a/b", so "the keys straight after a layer" are not
+// its children (see LayerDatabase::hasChildren).
 
 #include <string>
 #include <string_view>

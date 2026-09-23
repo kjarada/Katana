@@ -57,18 +57,18 @@ bool SelectionSet::prune(const katana::entity::EntityDatabase& entities)
 
 bool isDrawn(const Model& model, const Entity& entity)
 {
-    return isDrawn(model.layers.find(entity.layer), entity);
+    return isDrawn(model.layers.resolve(entity.layer), entity);
 }
 
-bool isDrawn(const katana::entity::Layer* layer, const Entity& entity)
+bool isDrawn(const katana::entity::ResolvedLayer& layer, const Entity& entity)
 {
-    return entity.visible && layer != nullptr && layer->visible;
+    return entity.visible && layer.shown;
 }
 
 bool isSelectable(const Model& model, const Entity& entity)
 {
-    const katana::entity::Layer* layer = model.layers.find(entity.layer);
-    return entity.visible && layer != nullptr && layer->visible && !layer->locked;
+    const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
+    return entity.visible && layer.shown && !layer.locked;
 }
 
 std::optional<EntityId> pickEntity(const Model& model, const Point2& point, double tolerance,

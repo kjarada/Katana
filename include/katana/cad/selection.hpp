@@ -43,16 +43,22 @@ class SelectionSet {
     std::set<EntityId> ids_;
 };
 
-// Visible entity on a visible, unlocked layer.
+// THE visibility rule, and the one every view and every picker asks, so that
+// what the plan view hides the 3D view, a section, a surface built from the
+// drawing, snapping and selection all hide too (audit MOD-01, REN-03, REN-04).
+// A layer counts as hidden or locked when an ANCESTOR is (PLAN.MD 5.1): turning
+// off "design" turns off "design/surface/tin1".
+//
+// Visible entity on a layer that is shown and unlocked.
 [[nodiscard]] bool isSelectable(const katana::entity::Model& model,
                                 const katana::entity::Entity& entity);
-// Visible entity on a visible layer (locked layers still draw).
+// Visible entity on a layer that is shown (a locked layer still draws).
 [[nodiscard]] bool isDrawn(const katana::entity::Model& model,
                            const katana::entity::Entity& entity);
-// The same rule for a caller that has already found the layer. The viewport
-// draws tens of thousands of entities a frame and looked the layer up twice
-// for every one of them: once here and once to read its colour.
-[[nodiscard]] bool isDrawn(const katana::entity::Layer* layer,
+// The same rule for a caller that has already resolved the layer. The viewport
+// draws tens of thousands of entities a frame and needs the layer for its
+// colour too, so it resolves once and asks this.
+[[nodiscard]] bool isDrawn(const katana::entity::ResolvedLayer& layer,
                            const katana::entity::Entity& entity);
 
 // Nearest selectable entity whose geometry lies within `tolerance` (model units)
