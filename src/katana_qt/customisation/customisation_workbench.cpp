@@ -175,19 +175,20 @@ void CustomisationWorkbench::selectAndShow(const std::vector<katana::entity::Ent
 
 StyleManagerDialog& CustomisationWorkbench::showStyleManager()
 {
-    if (styles_.isNull()) {
+    const bool first = styles_.isNull();
+    if (first) {
         styles_ = new StyleManagerDialog(context(), &window_);
         styles_->setObjectName(QString::fromLatin1(kStyleManagerName));
         // Non-modal, beside the drawing: a style is edited while the lines
         // wearing it are watched change.
         styles_->setModal(false);
-        raise(*styles_);
-        // The forms and previews filled in, rather than an empty pane, the
-        // first time it is seen.
-        styles_->showFirstRows();
-        return *styles_;
     }
     raise(*styles_);
+    if (first) {
+        // The forms and previews filled in, rather than an empty pane, the
+        // first time it is seen (its tables fill once it is shown).
+        styles_->showFirstRows();
+    }
     return *styles_;
 }
 
