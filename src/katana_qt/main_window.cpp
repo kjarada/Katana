@@ -387,7 +387,7 @@ void MainWindow::buildActions()
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
 
     QAction* customiseAction =
-        makeAction(Icon::Import, "&Load 12d Customisation...",
+        makeAction(Icon::Import, "Load 12&d Customisation...",
                    "Load 12d linestyle and symbol libraries (.4d) and mapfiles on top of what is "
                    "loaded: a file's definitions and codes take the place of the same ones, and "
                    "everything else is kept",
@@ -407,7 +407,7 @@ void MainWindow::buildActions()
     connect(replaceCustomisationAction, &QAction::triggered, this,
             [this] { loadCustomisation(katana::archive12d::LoadMode::Replace); });
 
-    QAction* codeAction = makeAction(Icon::Import, "Apply Survey &Codes",
+    QAction* codeAction = makeAction(Icon::Import, "Appl&y Survey Codes",
                                      "Give every entity carrying a field code the model, style "
                                      "and attributes the loaded mapfile says it should have",
                                      {}, "applySurveyCodes");
@@ -489,7 +489,14 @@ void MainWindow::buildActions()
     editMenu->addAction(eraseAction);
     editMenu->addSeparator();
     QAction* attributesAction =
-        editMenu->addAction("&Attributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
+        editMenu->addAction("A&ttributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
+            // Modal, like Layers: a headless run is told how to see it.
+            if (headless_) {
+                logMessage("Attributes: the dialog is modal and a headless run opens no modal "
+                           "box; --attributes grabs it.",
+                           true);
+                return;
+            }
             auto dialog = makeAttributeManager();
             dialog->expandAll();
             dialog->exec();
@@ -693,7 +700,7 @@ void MainWindow::buildActions()
 void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
 {
     QAction* importVector = makeAction(
-        Icon::ImportVector, "Import &Vector Data...",
+        Icon::ImportVector, "Import Vector Da&ta...",
         "Import a Shapefile, GeoPackage, GeoJSON, KML, GML, DXF or MapInfo file through GDAL, "
         "choosing its layers and where they go",
         {}, "importVectorData");
@@ -881,12 +888,40 @@ QStringList MainWindow::shortcutClashes(int* sequences) const
                 << nameOf(*shortcut, "a shortcut");
         }
     }
+    // The letter after a single '&' ("&&" is a literal ampersand), upper case;
+    // empty for a text with none.
+    const auto mnemonic = [](const QString& text) {
+        for (qsizetype at = text.indexOf('&'); at >= 0 && at + 1 < text.size();
+             at = text.indexOf('&', at + 2)) {
+            if (text[at + 1] != '&') {
+                return text.mid(at + 1, 1).toUpper();
+            }
+        }
+        return QString();
+    };
+    // Inside an open menu its items' letters are keys too: two items with
+    // one letter make the key cycle between them instead of choosing.
+    const std::function<void(const QMenu&, const QString&)> letters =
+        [&](const QMenu& menu, const QString& path) {
+            for (const QAction* item : menu.actions()) {
+                if (item->isSeparator() || !item->isVisible()) {
+                    continue;
+                }
+                if (const QString letter = mnemonic(item->text()); !letter.isEmpty()) {
+                    owners[path + " > " + letter] << QString(item->text()).remove('&');
+                }
+                if (const QMenu* sub = item->menu()) {
+                    letters(*sub, path + " > " + QString(item->text()).remove('&'));
+                }
+            }
+        };
     for (const QAction* top : menuBar()->actions()) {
-        const QString text = top->text();
-        const qsizetype amp = text.indexOf('&');
-        if (amp >= 0 && amp + 1 < text.size()) {
-            owners["Alt+" + text.mid(amp + 1, 1).toUpper()]
-                << "the " + QString(text).remove('&') + " menu";
+        const QString title = QString(top->text()).remove('&');
+        if (const QString letter = mnemonic(top->text()); !letter.isEmpty()) {
+            owners["Alt+" + letter] << "the " + title + " menu";
+        }
+        if (const QMenu* menu = top->menu()) {
+            letters(*menu, "Alt+" + mnemonic(top->text()) + " (" + title + ")");
         }
     }
     if (sequences != nullptr) {
@@ -3315,7 +3350,7 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         layoutActions_.push_back(action);
     }
 
-    QMenu* kindMenu = viewMenu->addMenu("Active Viewport &Shows");
+    QMenu* kindMenu = viewMenu->addMenu("Active Viewport S&hows");
     for (const cad::ViewKind kind : {cad::ViewKind::Plan, cad::ViewKind::Model3D,
                                      cad::ViewKind::Section, cad::ViewKind::Elevation}) {
         QAction* action = kindMenu->addAction(cad::toString(kind));
@@ -3344,7 +3379,7 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
             }
         });
     }
-    viewMenu->addAction("Toggle &Perspective", QKeySequence(Qt::Key_F9), this, [this] {
+    viewMenu->addAction("Toggle Pe&rspective", QKeySequence(Qt::Key_F9), this, [this] {
         RenderViewWidget* renderView = views_->activeRenderView();
         if (renderView == nullptr) {
             logMessage("No 3D viewport is open.", true);

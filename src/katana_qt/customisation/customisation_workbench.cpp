@@ -73,12 +73,12 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
              "merge, rename, find what uses each, and what nothing defines",
              "formatStyles", kStyleManagerName);
     symbolsAction_ =
-        make(Icon::FormatSymbols, "S&ymbol Library...",
+        make(Icon::FormatSymbols, "Sym&bol Library...",
              "Every symbol the drawing can draw, by group: what each prints at a scale, "
              "which styles and survey codes use it; put one on the selected points",
              "formatSymbols", kSymbolLibraryName);
     codesAction_ =
-        make(Icon::FormatSurveyCodes, "Survey &Code Manager...",
+        make(Icon::FormatSurveyCodes, "&Survey Code Manager...",
              "The survey code library (the 12d mapfile): test a code, edit its rules, see the "
              "drawing's codes and the map's issues, apply the codes, run linework",
              "formatSurveyCodes", kCodeManagerName);
