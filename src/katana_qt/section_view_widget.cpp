@@ -123,6 +123,8 @@ void SectionViewWidget::zoomExtents()
 void SectionViewWidget::frameExtents()
 {
     framed_ = true;
+    userMoved_ = false;
+    lastSize_ = size();
     const int plotWidth = std::max(width() - kLeftMargin - kRightMargin, 1);
     const int plotHeight = std::max(height() - kTopMargin - kBottomMargin, 1);
 
@@ -389,22 +391,39 @@ void SectionViewWidget::paintEvent(QPaintEvent* /*event*/)
 void SectionViewWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    // Resizing a dock used to throw the user's pan and zoom away and frame
-    // the whole section again. Now the station and elevation at the middle of
-    // the plot area stay there and the scale is kept, as cad::ViewTransform
-    // keeps its centre: the plot area grows or shrinks about its middle. A
-    // section never framed yet has nothing to keep; its first paint frames it.
-    if (!framed_ || !event->oldSize().isValid()) {
+    // The size before this resize is the one this widget last saw, not
+    // event->oldSize(): a widget resized while hidden - a section tabbed
+    // behind another view - is sent its resize when it is shown again, with
+    // no old size, and the drawing jumped by the whole change.
+    const QSize before = lastSize_;
+    lastSize_ = event->size();
+    // A section never framed yet has nothing to keep; its first paint frames it.
+    if (!framed_) {
         return;
     }
-    const QSizeF before = plotSize(event->oldSize());
+    // One still showing what it was framed to goes on showing all of it, as
+    // the plan view does (ViewportWidget::frame): a view is routinely framed
+    // and THEN resized - a 3D view opened beside it takes half its width -
+    // and keeping the scale cut both ends of the section off.
+    if (!userMoved_) {
+        frameExtents();
+        return;
+    }
+    // One the user has panned or zoomed keeps their scale, and the station
+    // and elevation at the middle of the plot area stay there, as
+    // cad::ViewTransform keeps its centre: the plot area grows or shrinks
+    // about its middle rather than throwing their zoom away.
+    if (!before.isValid()) {
+        return;
+    }
+    const QSizeF previous = plotSize(before);
     const QSizeF after = plotSize(event->size());
     // The station at the plot's middle is origin + width / (2 scale), and the
     // elevation there origin + height / (2 scale exaggeration); holding each
     // fixed while the width or height changes moves the origin by half the
     // change.
-    originStation_ += 0.5 * (before.width() - after.width()) / scale_;
-    originElevation_ += 0.5 * (before.height() - after.height()) / (scale_ * exaggeration());
+    originStation_ += 0.5 * (previous.width() - after.width()) / scale_;
+    originElevation_ += 0.5 * (previous.height() - after.height()) / (scale_ * exaggeration());
 }
 
 void SectionViewWidget::mousePressEvent(QMouseEvent* event)
@@ -427,6 +446,7 @@ void SectionViewWidget::mouseMoveEvent(QMouseEvent* event)
         lastMouse_ = event->pos();
         originStation_ -= delta.x() / scale_;
         originElevation_ += delta.y() / (scale_ * exaggeration());
+        userMoved_ = true; // the user's view now, kept on a resize
         update();
         return;
     }
@@ -462,6 +482,7 @@ void SectionViewWidget::wheelEvent(QWheelEvent* event)
     originElevation_ = elevation - (static_cast<double>(height() - kBottomMargin) - position.y()) /
                                        (scale_ * exaggeration());
     framed_ = true;
+    userMoved_ = true; // the user's view now, kept on a resize
     update();
     event->accept();
 }
