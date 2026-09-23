@@ -7,6 +7,7 @@
 
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/table_usage.hpp"
 
 using namespace katana::commands;
 using katana::core::ErrorCode;
@@ -375,10 +376,36 @@ TEST_F(TablePurge, APurgeRefusesAnythingStillUsedOnceTheSetIsGoneAndChangesNothi
     point("Spare");
     EXPECT_EQ(refused(purgeTableItems(TableItems{{"Spare"}, {}, {}})),
               ErrorCode::CommandRejected);
-    EXPECT_EQ(refused(purgeTableItems(TableItems{{}, {"continuous"}, {}})),
-              ErrorCode::CommandRejected);
-    EXPECT_EQ(refused(purgeTableItems(TableItems{{}, {}, {"none"}})), ErrorCode::CommandRejected);
     EXPECT_EQ(refused(purgeTableItems(TableItems{{"nosuch"}, {}, {}})), ErrorCode::NotFound);
     EXPECT_EQ(refused(purgeTableItems(TableItems{})), ErrorCode::InvalidArgument)
         << "never an empty undo step";
+}
+
+TEST_F(TablePurge, ContinuousAndNoneAreRefusedByValidateEvenWhenNothingNamesThem)
+{
+    // Layer 0 names continuous and none by default, so a refusal of either
+    // could come from "still used" alone and never reach the protection.
+    // Layer 0 is pointed elsewhere first, so only the protection can refuse
+    // them - and it has to in validate(), where a caller that pre-validates
+    // looks; the table's own refusal comes only at execute().
+    must(createLinetype(dashed("fence")));
+    katana::entity::HatchPattern stone;
+    stone.name = "stone";
+    stone.families = {{0.0, 1.0, 0.0}};
+    must(createHatchPattern(stone));
+    Layer zero = *model.layers.find("0");
+    zero.linetype = "fence";
+    zero.hatchPattern = "stone";
+    must(updateLayer(zero));
+    const katana::entity::TableUsage usage = katana::entity::tableUsage(model);
+    ASSERT_FALSE(katana::entity::TableUsage::of(usage.linetypes, "continuous").used());
+    ASSERT_FALSE(katana::entity::TableUsage::of(usage.hatchPatterns, "none").used());
+
+    CommandContext context{model};
+    const auto continuous = purgeTableItems(TableItems{{}, {"continuous"}, {}})->validate(context);
+    ASSERT_FALSE(continuous.ok());
+    EXPECT_EQ(continuous.error().code, ErrorCode::CommandRejected);
+    const auto none = purgeTableItems(TableItems{{}, {}, {"none"}})->validate(context);
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::CommandRejected);
 }
