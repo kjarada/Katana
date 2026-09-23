@@ -518,7 +518,8 @@ FormatSignature probeDelimitedPoints(const ProbeInput& input)
     if (analysis.proposal.candidates().empty() || !analysis.delimiter) {
         return ruledOut();
     }
-    std::string evidence = std::string(toString(*analysis.delimiter)) + "-delimited rows of numbers";
+    std::string evidence =
+        std::string(toString(*analysis.delimiter)) + "-delimited rows of numbers";
     if (analysis.headerNamesCoordinates) {
         return {kDelimitedHeaderConfidence,
                 evidence + " under a header naming the coordinate columns; a generic reading, "

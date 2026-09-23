@@ -171,7 +171,11 @@ enum class ColumnPreset { PNEZD, PENZD, PNEZ, PENZ, NEZ, ENZ, PNE, PEN };
 
 enum class LayoutProposalOutcome {
     // A header line names the northing and easting columns in words that mean
-    // nothing else, names no column twice, and the sampled rows agree with it.
+    // nothing else, names no column twice, and the sampled rows agree with it:
+    // every value where the header puts a number is one, no row has a value in
+    // a column the header does not name, and no line starting '#' is otherwise
+    // a row of numbers. Each of those would otherwise lose data without an
+    // error - read past as Ignore, or skipped as a comment.
     Decided,
     // Something is not known - usually the coordinate order: no header, a header
     // that does not name the coordinates, X/Y, or rows that disagree with the
@@ -237,7 +241,10 @@ inline constexpr std::size_t kProposalSampleLines = 200;
 //     them is read as the header when there is one.
 //   * '#' at the start of a line is proposed as a comment prefix when a sampled
 //     line starts with one. Nothing else is: a prefix that happened to match a
-//     point id would drop the point.
+//     point id would drop the point. '#' can match one too, so a '#' line below
+//     the header (or anywhere, with no header) that is a row of numbers once
+//     the '#' is off - a point commented out, or an id such as "#12" - keeps
+//     the proposal Uncertain and is named in the summary.
 //
 // Header words, compared without case, blanks, '_', '-', '.', '#' or a
 // bracketed unit such as "(m)":
