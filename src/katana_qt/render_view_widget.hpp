@@ -19,7 +19,7 @@
 #include <QWidget>
 
 #include "katana/cad/scene.hpp"
-#include "katana/cad/viewport_layout.hpp"
+#include "katana/cad/view_set.hpp"
 #include "katana/render/rasterizer.hpp"
 
 namespace katana::qt {
@@ -37,9 +37,10 @@ struct ViewContext {
 
 class RenderViewWidget final : public QWidget {
   public:
-    // `cell` is owned by the ViewportLayout and outlives this widget; the
-    // camera lives there so that a layout change does not reset the view.
-    RenderViewWidget(ViewContext context, katana::cad::ViewportCell* cell,
+    // `state` belongs to the workspace's ViewSet and outlives this widget; the
+    // camera and the layers hidden in this view live there, so changing the
+    // view's kind and back, or floating its dock, does not reset either.
+    RenderViewWidget(ViewContext context, katana::cad::ViewState& state,
                      QWidget* parent = nullptr);
 
   private:
@@ -53,9 +54,14 @@ class RenderViewWidget final : public QWidget {
 
   public:
 
+    // Takes everything but the layers: those are this view's own, and the
+    // workspace hands every render view the same context.
     void setContext(const ViewContext& context);
-    void setCell(katana::cad::ViewportCell* cell);
-    [[nodiscard]] katana::cad::ViewportCell* cell() const { return cell_; }
+    [[nodiscard]] katana::cad::ViewState& state() const { return state_; }
+    [[nodiscard]] katana::render::Camera& camera() { return state_.camera; }
+    // Lines in the last scene built: the headless checks' proof that a layer
+    // hidden in this view left it.
+    [[nodiscard]] std::size_t lastSceneLineCount() const { return list_.lines.size(); }
 
     // Rebuilds the draw list on the next paint. Call when the document changes.
     void invalidateScene();
@@ -90,10 +96,9 @@ class RenderViewWidget final : public QWidget {
 
   private:
     void rebuildIfNeeded();
-    [[nodiscard]] katana::render::Camera& camera();
 
     ViewContext context_;
-    katana::cad::ViewportCell* cell_ = nullptr;
+    katana::cad::ViewState& state_;
 
     katana::cad::SceneBuilder builder_;
     katana::render::DrawList list_;

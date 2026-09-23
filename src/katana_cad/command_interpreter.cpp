@@ -988,7 +988,10 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
 
     const auto collect = [&](const SelectionFilter& filter) {
         model.entities.forEach([&](const Entity& entity) {
-            if (isSelectable(model, entity) && filter.accepts(entity)) {
+            // The document rule: the interpreter knows no view, and SELECT
+            // ALL meaning "what the last-clicked view shows" would make a
+            // typed command depend on a click the user may not remember.
+            if (isSelectable(model, entity, kNoLayerOverrides) && filter.accepts(entity)) {
                 ids.push_back(entity.id);
             }
         });
@@ -1032,7 +1035,7 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
             if (entity == nullptr) {
                 return makeError(ErrorCode::NotFound, "entity does not exist", text);
             }
-            if (!isSelectable(model, *entity)) {
+            if (!isSelectable(model, *entity, kNoLayerOverrides)) {
                 return makeError(ErrorCode::CommandRejected,
                                  "entity is hidden or on a hidden or locked layer", text);
             }

@@ -33,7 +33,8 @@ const QColor kSurfaceColors[] = {QColor(120, 200, 120), QColor(235, 170, 80),
 
 } // namespace
 
-SectionViewWidget::SectionViewWidget(QWidget* parent) : QWidget(parent)
+SectionViewWidget::SectionViewWidget(katana::cad::ViewState& state, QWidget* parent)
+    : QWidget(parent), state_(state)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);

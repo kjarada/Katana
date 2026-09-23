@@ -25,8 +25,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     main_window.hpp
     viewport_widget.cpp
     viewport_widget.hpp
-    viewport_container.cpp
-    viewport_container.hpp
+    view_workspace.cpp
+    view_workspace.hpp
     render_view_widget.cpp
     render_view_widget.hpp
     section_view_widget.cpp

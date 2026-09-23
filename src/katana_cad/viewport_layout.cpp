@@ -20,22 +20,26 @@ namespace {
 constexpr ViewKind kDefaultKinds[] = {ViewKind::Plan, ViewKind::Model3D, ViewKind::Section,
                                       ViewKind::Elevation};
 
-void configureCamera(ViewportCell& cell)
+void configureCamera(ViewportCell& cell) { katana::cad::configureCamera(cell.camera, cell.kind); }
+
+} // namespace
+
+void configureCamera(katana::render::Camera& camera, ViewKind kind)
 {
-    switch (cell.kind) {
+    switch (kind) {
     case ViewKind::Model3D:
-        cell.camera.setProjection(katana::render::Projection::Perspective);
-        cell.camera.setStandardView(StandardView::IsoSouthWest);
+        camera.setProjection(katana::render::Projection::Perspective);
+        camera.setStandardView(StandardView::IsoSouthWest);
         break;
     case ViewKind::Elevation:
         // Orthographic, because a side view is read off with a scale rule and
         // perspective would make that a lie.
-        cell.camera.setProjection(katana::render::Projection::Orthographic);
-        cell.camera.setStandardView(StandardView::Front);
+        camera.setProjection(katana::render::Projection::Orthographic);
+        camera.setStandardView(StandardView::Front);
         break;
     case ViewKind::Plan:
-        cell.camera.setProjection(katana::render::Projection::Orthographic);
-        cell.camera.setStandardView(StandardView::Top);
+        camera.setProjection(katana::render::Projection::Orthographic);
+        camera.setStandardView(StandardView::Top);
         break;
     case ViewKind::Section:
         // A section has its own 2D station/elevation transform; the camera is
@@ -44,7 +48,33 @@ void configureCamera(ViewportCell& cell)
     }
 }
 
-} // namespace
+ViewKind defaultViewKind(std::size_t slot)
+{
+    constexpr std::size_t count = sizeof(kDefaultKinds) / sizeof(kDefaultKinds[0]);
+    return kDefaultKinds[std::min(slot, count - 1)];
+}
+
+std::vector<DockSplit> dockSplits(LayoutKind kind)
+{
+    // Each step halves `existing`, so the order matters: Quad splits the top
+    // row first and then each half downwards, which is what gives four equal
+    // quarters rather than one half and two quarters.
+    switch (kind) {
+    case LayoutKind::Single:
+        return {};
+    case LayoutKind::SplitVertical:
+        return {{0, 1, true}};
+    case LayoutKind::SplitHorizontal:
+        return {{0, 1, false}};
+    case LayoutKind::ThreeLeft:
+        return {{0, 1, true}, {1, 2, false}};
+    case LayoutKind::ThreeTop:
+        return {{0, 1, false}, {1, 2, true}};
+    case LayoutKind::Quad:
+        return {{0, 1, true}, {0, 2, false}, {1, 3, false}};
+    }
+    return {};
+}
 
 const char* toString(ViewKind kind)
 {
