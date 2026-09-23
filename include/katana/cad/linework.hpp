@@ -169,8 +169,10 @@ struct LineworkOptions {
     // Only these entities, or every point in the drawing when empty. Entities
     // among them that are not points are counted, not processed.
     std::vector<katana::entity::EntityId> ids{};
-    // Off: the points that went into lines are deleted in the same command.
-    // Points not in any line are always kept.
+    // Off: the points a run of their own string went into are deleted in the
+    // same command - the line now stands for them. Points not in any line
+    // are always kept, and so is a point only a join ("JPN") reached: a tree
+    // or an uncoded control point joined to is not replaced by the join line.
     bool keepPoints = true;
     LineworkCodes codes{};
     // The largest gap, in model units, between a chord and the curve it stands
@@ -257,7 +259,8 @@ struct LineworkReport {
     std::vector<UnplacedPoint> unplaced{}; // in entity order
     std::vector<LineworkNote> notes{};
     std::vector<std::string> layersCreated{}; // in name order
-    // Points deleted because they went into lines (keepPoints off).
+    // Points deleted because a run of their string replaced them (keepPoints
+    // off); join targets no run placed are never among them.
     std::size_t pointsRemoved = 0;
     // What applySurveyCodes did to the lines. It runs when the command first
     // executes - it cannot plan styles for lines that do not exist yet - so
