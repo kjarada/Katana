@@ -125,6 +125,15 @@ class CustomisationWorkbench {
     // answer. Unset: QMessageBox::question.
     std::function<bool(const QString& question)> confirm{};
 
+    // Whether the window may close, as far as the managers are concerned:
+    // the code manager's unapplied rule edits live only in its buffer, and
+    // would go with it unasked. None: true. Interactive: the manager is shown
+    // and closed, so its own Apply / Discard / Cancel question is asked over
+    // the rules it is about; false on Cancel (or a failed Apply), the
+    // manager left open with its edits. Headless: nobody can answer, so -
+    // as the window's unsaved-drawing check - refused and said, false.
+    [[nodiscard]] bool confirmClose();
+
     // What every manager is built from, for a caller building one of its
     // own (the window's --style-manager grab).
     [[nodiscard]] CustomisationContext context();

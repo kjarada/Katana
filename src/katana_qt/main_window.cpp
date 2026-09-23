@@ -1664,6 +1664,12 @@ bool MainWindow::saveDocumentAs()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    // The Format managers first: the code manager's Apply puts its rules on
+    // the drawing, which the unsaved-drawing question must then see.
+    if (!format_->confirmClose()) {
+        event->ignore();
+        return;
+    }
     if (confirmDiscard()) {
         event->accept();
     } else {
