@@ -855,13 +855,13 @@ TEST(DrawRectangleTool, PreviewsTheRectangleToTheCursor)
 
 // ---- Polygon -----------------------------------------------------------------------
 
-TEST(DrawPolygonTool, AsksForTheNumberOfSidesFirstAndEnterTakesFour)
+TEST(DrawPolygonTool, AsksForTheNumberOfSidesFirst)
 {
     ToolDriver driver;
     driver.start("draw.polygon");
-    EXPECT_EQ(driver.tool().prompt(), "Enter number of sides <4>");
+    EXPECT_EQ(driver.tool().prompt(), "Enter number of sides");
     EXPECT_EQ(driver.tool().expects(), ToolInput::Value);
-    EXPECT_EQ(driver.enter().outcome, Outcome::Continue);
+    EXPECT_EQ(driver.type("4").outcome, Outcome::Continue);
     EXPECT_EQ(driver.tool().prompt(), "Specify centre of polygon or [Edge/Undo]");
     (void)driver.click(0, 0);
     EXPECT_EQ(driver.tool().prompt(),
@@ -1020,7 +1020,7 @@ TEST(DrawPolygonTool, RefusesANumberOfSidesOutsideThreeTo1024)
     driver.start("draw.polygon");
     for (const char* sides : {"2", "1025", "0", "-5", "4.5", "six", "C"}) {
         expectRefused(driver.type(sides));
-        EXPECT_EQ(driver.tool().prompt(), "Enter number of sides <4>") << sides;
+        EXPECT_EQ(driver.tool().prompt(), "Enter number of sides") << sides;
     }
     expectRefused(driver.click(1, 1));
     EXPECT_EQ(driver.type("3").outcome, Outcome::Continue);
@@ -1074,7 +1074,7 @@ TEST(DrawPolygonTool, UndoStepsBackThroughTheCentreAndTheNumberOfSides)
     (void)driver.undo();
     EXPECT_EQ(driver.tool().prompt(), "Specify centre of polygon or [Edge/Undo]");
     (void)driver.undo();
-    EXPECT_EQ(driver.tool().prompt(), "Enter number of sides <4>");
+    EXPECT_EQ(driver.tool().prompt(), "Enter number of sides");
     expectRefused(driver.undo());
     // Back at the start: a new count, and a square from it.
     (void)driver.type("4");
@@ -1133,6 +1133,41 @@ TEST(DrawPolygonTool, UndoAfterEveryModeSwitchIsTakenBackGoesOnToTheCentre)
               "Specify a vertex or type the radius, or [Circumscribed/Undo]");
 }
 
+TEST(DrawPolygonTool, EnterAfterAFinishedPolygonEndsTheToolAsInTheOtherLineTools)
+{
+    // The tool restarts after each polygon, so Enter (or a right-click) at the
+    // fresh prompt must be the way out, as it is in Point, Line, Polyline and
+    // Rectangle - not a default count that arms the next two clicks to draw
+    // a square.
+    ToolDriver driver;
+    driver.start("draw.polygon");
+    (void)driver.type("5");
+    (void)driver.click(0, 0);
+    (void)driver.click(1, 0);
+    ASSERT_EQ(driver.executed(), 1);
+    ASSERT_FALSE(driver.finished());
+    EXPECT_EQ(driver.enter().outcome, Outcome::Done);
+    EXPECT_TRUE(driver.finished());
+    EXPECT_EQ(driver.executed(), 1);
+    EXPECT_EQ(shapesOf<Polyline2>(driver.document()).size(), 1u);
+}
+
+TEST(DrawPolygonTool, EnterAtTheSidesOrTheCentrePromptEndsTheToolWithNothingDrawn)
+{
+    ToolDriver driver;
+    driver.start("draw.polygon");
+    EXPECT_EQ(driver.enter().outcome, Outcome::Done);
+    EXPECT_TRUE(driver.finished());
+
+    driver.start("draw.polygon");
+    (void)driver.type("6");
+    ASSERT_EQ(driver.tool().prompt(), "Specify centre of polygon or [Edge/Undo]");
+    EXPECT_EQ(driver.enter().outcome, Outcome::Done);
+    EXPECT_TRUE(driver.finished());
+    EXPECT_EQ(driver.executed(), 0);
+    EXPECT_TRUE(entitiesOf(driver.document()).empty());
+}
+
 TEST(DrawPolygonTool, OneUndoRemovesThePolygonAndTheToolAsksForTheSidesAgain)
 {
     ToolDriver driver;
@@ -1142,7 +1177,7 @@ TEST(DrawPolygonTool, OneUndoRemovesThePolygonAndTheToolAsksForTheSidesAgain)
     (void)driver.click(3, 0);
     EXPECT_EQ(driver.executed(), 1);
     EXPECT_FALSE(driver.finished());
-    EXPECT_EQ(driver.tool().prompt(), "Enter number of sides <4>");
+    EXPECT_EQ(driver.tool().prompt(), "Enter number of sides");
     ASSERT_TRUE(driver.document().undo().ok());
     EXPECT_TRUE(entitiesOf(driver.document()).empty());
 }
