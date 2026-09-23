@@ -188,7 +188,10 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // command line), a choice by its item text, or a check box by on/off - and
 // --press clicks the button with object name BUTTON. Fills and presses run in
 // the order given, so a paged dialog (the import wizard) can be filled page by
-// page between its Next presses. The names are listed in
+// page between its Next presses, and the event loop runs after each one, as
+// it does between two things a person does: what a fill sets going there (the
+// wizard's preview and role boxes) has happened before the next step. The
+// names are listed in
 // survey/survey_dialogs.hpp, survey_import_wizard.hpp and survey_points_ui.hpp.
 // What a pressed verb reports goes to the log, and so to stderr, where a test
 // reads it: a dialog is driven the way a person drives it, not through a side
@@ -379,6 +382,7 @@ int main(int argc, char* argv[])
                     if (!fillField(*target, text)) {
                         return 1;
                     }
+                    QApplication::processEvents();
                     continue;
                 }
                 auto* button = target->findChild<QAbstractButton*>(text);

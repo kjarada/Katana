@@ -12,7 +12,9 @@
 //                 starts on "(choose the format)" and Next refuses it. An
 //                 unknown file is never handed to a parser silently.
 //   3 Layout      for a delimited file: proposeLayout's reading of the header,
-//                 its candidates, presets, a role per column, the delimiter,
+//                 its candidates, presets, a role box per column of the list
+//                 as typed (kept while a change such as swapping northing and
+//                 easting passes through a list that does not validate), the delimiter,
 //                 header lines, comment prefix and quoting, saved templates
 //                 (survey_templates.hpp), and a preview of the first points
 //                 with the parser's error - line and column - inline. When the
@@ -115,7 +117,9 @@ class SurveyImportWizard final : public QDialog {
     // whose signals ask (docs/cad.md, "Panels refresh on the event loop").
     void schedulePreview();
     void preview();
-    void rolesChanged();
+    // The role box of `column` (0-based) changed: its entry in the column
+    // list is rewritten, and the preview follows on the event loop.
+    void rolesChanged(int column);
     [[nodiscard]] katana::core::Status parseAndTransform();
     void prepareReport();
     void importNow();
@@ -177,6 +181,7 @@ class SurveyImportWizard final : public QDialog {
     std::string transformText_;
     bool previewPending_ = false;
     bool previewFailed_ = true;
+    bool settingRoles_ = false; // preview() is mirroring the text onto the role boxes
     bool blocked_ = true;
 };
 

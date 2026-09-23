@@ -395,6 +395,25 @@ if(TARGET katana)
             "-DEXPECT=could not tell the order of the columns.*Imported 3 point\\(s\\) from survey_points_headerless\\.txt"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_uncertain_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The order corrected through the role boxes, one box at a time, as a
+    # person does it. survey_points_headerless_penz.txt is
+    # survey_points_headerless.txt with its 2nd and 3rd columns swapped by
+    # hand, so it is P,E,N,Z; with no header the proposal cannot tell and puts
+    # P,N,E,Z first. Box 2 goes to "ignored" (no northing column) and then to
+    # easting (two easting columns) - both layouts surveyio refuses, which once
+    # removed every role box, so the fill of role3 found no box - and box 3 to
+    # northing. The points exported as P,N,E,Z with no header are then the
+    # original file, text for text: the eastings are the 330 000s and the
+    # northings the 6 250 000s.
+    add_test(NAME qt_survey_import_role_boxes_swap_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_headerless_penz.txt|!next|${_survey_format}|!next|role2=ignored|role2=easting|role3=northing|confirmOrder=on|!next|unit=metres|!next|!next|!import|@surveyExport|file=${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt|columns=P,N,E,Z|delimiter=whitespace|header=off|decimals=3|!export"
+            "-DCOMPARE=${_survey_data}/survey_points_headerless.txt|${CMAKE_CURRENT_BINARY_DIR}/survey_role_swap.txt"
+            "-DEXPECT=Layout: P,E,N,Z.delimiter=whitespace.header=0.*Imported 3 point\\(s\\) from survey_points_headerless_penz\\.txt.*Exported 3 point\\(s\\) to survey_role_swap\\.txt"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_import_role_boxes_swap_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Round trip through files: export(import(fixture)) with the fixture's own
     # layout and 3 decimals is the fixture, text for text; that export read
     # back in (replacing the points of the same ids) and written again is the
@@ -438,6 +457,7 @@ if(TARGET katana)
                          qt_survey_traverse_headless qt_survey_level_book_headless
                          qt_survey_converter_headless qt_survey_import_headless
                          qt_survey_import_uncertain_headless
+                         qt_survey_import_role_boxes_swap_headless
                          qt_survey_export_round_trip_headless
                          qt_survey_import_transform_headless
                          qt_survey_point_report_headless

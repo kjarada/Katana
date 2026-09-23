@@ -101,6 +101,43 @@ QString columnLetters(const surveyio::DelimitedLayout& layout)
     return letters.join(',');
 }
 
+// The column list as typed: one trimmed entry per comma-separated part, none
+// for a blank field. NOT validated, because the role boxes follow it while it
+// is not yet a layout surveyio accepts - two easting columns half way through
+// swapping northing and easting, say. Boxes built from the parsed layout
+// vanished at the first such step, and with them the only way to swap.
+QStringList typedColumns(const QLineEdit& field)
+{
+    const QString text = field.text().trimmed();
+    if (text.isEmpty()) {
+        return {};
+    }
+    QStringList entries = text.split(',');
+    for (QString& entry : entries) {
+        entry = entry.trimmed();
+    }
+    return entries;
+}
+
+// The index in roles() of the role an entry's letter spells, matched without
+// regard to case as templates are; -1 for an entry that is not one letter
+// surveyio knows (its box is left blank, and the parser names the entry).
+// Found through surveyio::templateLetter, so the letters are spelt in one
+// place.
+int roleIndexOf(const QString& entry)
+{
+    if (entry.size() != 1) {
+        return -1;
+    }
+    const char letter = katana::core::asciiLower(entry.front().toLatin1());
+    for (std::size_t i = 0; i < roles().size(); ++i) {
+        if (katana::core::asciiLower(surveyio::templateLetter(roles()[i])) == letter) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 // A whole number from a field, or nullopt when it is blank; ParseFailure for
 // anything else - through core/text.hpp, never the locale.
 Result<std::optional<int>> epsgField(const QLineEdit* field, const char* what)
@@ -761,33 +798,42 @@ void SurveyImportWizard::preview()
         preview_->setRowCount(0);
     };
 
-    // A role box per column, rebuilt only when the number of columns changes.
-    // The boxes' own signals lead here, which is why this runs on the event
-    // loop: a box is never deleted inside its own signal.
-    std::vector<surveyio::ColumnRole> columns;
-    if (layout) {
-        columns = layout->columns;
-    }
-    if (static_cast<std::size_t>(roleRow_->count()) != columns.size()) {
+    // A role box per entry of the column list AS TYPED (typedColumns), rebuilt
+    // only when the number of entries changes - never because the layout does
+    // not validate, since swapping two columns passes through a layout that
+    // does not. The boxes' own signals lead here, which is why this runs on
+    // the event loop: a box is never deleted inside its own signal.
+    const QStringList entries = typedColumns(*columns_);
+    if (roleRow_->count() != entries.size()) {
         while (QLayoutItem* item = roleRow_->takeAt(0)) {
             delete item->widget();
             delete item;
         }
-        for (std::size_t i = 0; i < columns.size(); ++i) {
+        for (int i = 0; i < entries.size(); ++i) {
             auto* box = new QComboBox(columnRoles_);
             box->setObjectName(QString("role%1").arg(i + 1));
             box->setToolTip(QString("What column %1 holds").arg(i + 1));
             for (const surveyio::ColumnRole role : roles()) {
                 box->addItem(surveyio::toString(role));
             }
-            connect(box, &QComboBox::activated, this, [this] { rolesChanged(); });
+            // Any change of the choice, not only a click (activated): the
+            // headless --fill chooses with setCurrentIndex, and a box that
+            // ignored it would be a box no test could drive. The guard keeps
+            // out the changes made below, which only mirror the text.
+            connect(box, &QComboBox::currentIndexChanged, this, [this, i] {
+                if (!settingRoles_) {
+                    rolesChanged(i);
+                }
+            });
             roleRow_->addWidget(box);
         }
     }
-    for (std::size_t i = 0; i < columns.size(); ++i) {
-        auto* box = qobject_cast<QComboBox*>(roleRow_->itemAt(static_cast<int>(i))->widget());
-        box->setCurrentIndex(box->findText(surveyio::toString(columns[i])));
+    settingRoles_ = true;
+    for (int i = 0; i < entries.size(); ++i) {
+        auto* box = qobject_cast<QComboBox*>(roleRow_->itemAt(i)->widget());
+        box->setCurrentIndex(roleIndexOf(entries[i]));
     }
+    settingRoles_ = false;
 
     if (!layout) {
         fail(layout.error());
@@ -832,15 +878,23 @@ void SurveyImportWizard::preview()
     previewFailed_ = false;
 }
 
-void SurveyImportWizard::rolesChanged()
+void SurveyImportWizard::rolesChanged(int column)
 {
-    QStringList letters;
-    for (int i = 0; i < roleRow_->count(); ++i) {
-        auto* box = qobject_cast<QComboBox*>(roleRow_->itemAt(i)->widget());
-        letters << QString(QChar(surveyio::templateLetter(roles()[static_cast<std::size_t>(
-                       std::max(0, box->currentIndex()))])));
+    // Only the entry of the box that changed is rewritten. The others stay as
+    // typed, so an entry no box can show - a letter surveyio does not know,
+    // shown as a blank box - is kept for the parser to name rather than
+    // silently read as the first role in the list.
+    QStringList entries = typedColumns(*columns_);
+    if (column >= entries.size() || column >= roleRow_->count()) {
+        return;
     }
-    columns_->setText(letters.join(','));
+    const auto* box = qobject_cast<QComboBox*>(roleRow_->itemAt(column)->widget());
+    if (box == nullptr || box->currentIndex() < 0) {
+        return;
+    }
+    entries[column] = QString(QChar(
+        surveyio::templateLetter(roles()[static_cast<std::size_t>(box->currentIndex())])));
+    columns_->setText(entries.join(','));
 }
 
 // ---- reading, transforming, reporting, importing ---------------------------------------------
