@@ -19,9 +19,13 @@
 #include <string>
 #include <vector>
 
+#include <QAbstractButton>
 #include <QAction>
+#include <QApplication>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMessageBox>
+#include <QTimer>
 #include <QToolBar>
 
 #include "customisation/code_manager.hpp"
@@ -141,6 +145,29 @@ void purgeDrawing(Document& document)
     must(document, katana::commands::createPoint(katana::geometry::Point2(0.0, 0.0), attributes));
     ASSERT_TRUE(document.setCurrentStyle("Current").ok());
 }
+
+// Answers the next question box with `button`, from inside its exec(), as a
+// person clicking it would. Stops with this object, so a box the test did not
+// expect is never answered by a later test's timer.
+struct BoxAnswer {
+    QTimer timer;
+    bool asked = false;
+
+    explicit BoxAnswer(QMessageBox::StandardButton button)
+    {
+        timer.setInterval(10);
+        QObject::connect(&timer, &QTimer::timeout, [this, button] {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            if (box == nullptr || box->button(button) == nullptr) {
+                return;
+            }
+            asked = true;
+            timer.stop();
+            box->button(button)->click();
+        });
+        timer.start();
+    }
+};
 
 } // namespace
 
@@ -314,4 +341,83 @@ TEST(CustomisationWorkbench, AnInteractivePurgeIsAskedFirstAndANoDeletesNothing)
     bench.bench->confirm = [](const QString&) { return true; };
     EXPECT_TRUE(bench.bench->purgeUnused());
     EXPECT_EQ(bench.document.model().styles.find("Spare"), nullptr);
+}
+
+TEST(CustomisationWorkbench, TheWindowMayCloseWhenNoManagerHoldsUnappliedEdits)
+{
+    Bench bench;
+    EXPECT_TRUE(bench.bench->confirmClose()) << "no manager opened";
+    bench.loadFixture();
+    bench.action("formatSurveyCodes").trigger();
+    EXPECT_TRUE(bench.bench->confirmClose()) << "opened, nothing edited";
+    EXPECT_TRUE(bench.log.empty());
+}
+
+TEST(CustomisationWorkbench, AHeadlessCloseWithUnappliedCodeEditsIsRefusedAndSaid)
+{
+    // By hand: the fixture's 11 rules and a duplicate of rule 0 make 12 in
+    // the buffer, none of them on the drawing. Nobody can be asked, so the
+    // close is refused, not the edits dropped - and not called kept.
+    Bench bench;
+    bench.loadFixture();
+    bench.action("formatSurveyCodes").trigger();
+    katana::qt::SurveyCodeManagerDialog* codes = bench.bench->codeManager();
+    ASSERT_TRUE(codes->duplicateRule(0).ok());
+    codes->hide();
+
+    EXPECT_FALSE(bench.bench->confirmClose());
+
+    ASSERT_FALSE(bench.log.empty());
+    EXPECT_EQ(bench.log.back(),
+              "Unapplied Edits: the Survey Code Manager has rule edits that are not on the "
+              "drawing, and a headless run has nobody to ask whether to discard them; Apply or "
+              "Revert them first.");
+    EXPECT_TRUE(codes->dirty());
+    EXPECT_EQ(codes->buffer().size(), 12u);
+    EXPECT_EQ(bench.document.surveyMap().size(), 11u);
+
+    codes->revert();
+    EXPECT_TRUE(bench.bench->confirmClose()) << "reverted: nothing left to lose";
+}
+
+TEST(CustomisationWorkbench, AnInteractiveCloseAsksOverTheCodeManagerAndCancelKeepsItsEdits)
+{
+    // The manager was closed with its edits kept, so it is hidden: it comes
+    // back to ask. Cancel leaves it open and the window with it; Discard lets
+    // the window go with the drawing's 11 rules; Apply puts the 12 on it.
+    Bench bench;
+    bench.headless = false;
+    bench.loadFixture();
+    bench.action("formatSurveyCodes").trigger();
+    katana::qt::SurveyCodeManagerDialog* codes = bench.bench->codeManager();
+    ASSERT_TRUE(codes->interactive());
+    ASSERT_TRUE(codes->duplicateRule(0).ok());
+    codes->hide();
+
+    {
+        BoxAnswer cancel(QMessageBox::Cancel);
+        EXPECT_FALSE(bench.bench->confirmClose());
+        EXPECT_TRUE(cancel.asked);
+    }
+    EXPECT_TRUE(codes->isVisible()) << "shown to ask, and left open";
+    EXPECT_TRUE(codes->dirty());
+    EXPECT_EQ(codes->buffer().size(), 12u);
+
+    {
+        BoxAnswer discard(QMessageBox::Discard);
+        EXPECT_TRUE(bench.bench->confirmClose());
+        EXPECT_TRUE(discard.asked);
+    }
+    EXPECT_FALSE(codes->isVisible());
+    EXPECT_FALSE(codes->dirty());
+    EXPECT_EQ(bench.document.surveyMap().size(), 11u);
+
+    ASSERT_TRUE(codes->duplicateRule(0).ok());
+    {
+        BoxAnswer apply(QMessageBox::Apply);
+        EXPECT_TRUE(bench.bench->confirmClose());
+        EXPECT_TRUE(apply.asked);
+    }
+    EXPECT_FALSE(codes->dirty());
+    EXPECT_EQ(bench.document.surveyMap().size(), 12u);
 }

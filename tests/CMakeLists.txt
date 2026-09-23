@@ -694,6 +694,19 @@ if(TARGET katana)
             "-DEXPECT=there is no plan view to draw in[^\r\n]*[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/refused_tool_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Quitting while the Survey Code Manager holds unapplied rule edits: they
+    # live only in its buffer, so a headless QUIT, with nobody to ask, is
+    # refused and said - as a quit with unsaved drawing changes is - rather
+    # than the edits going with the window. By hand: the built-in map's 1,624
+    # rules and a duplicate of rule 0 make 1625 in the buffer.
+    add_test(NAME qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatSurveyCodes|!ruleDuplicate|?dirtyIndicator|>QUIT"
+            "-DEXPECT=dirtyIndicator: Unapplied edits:[^\r\n]* 1625 rules[.][\r\n]+! Unapplied Edits: the Survey Code Manager has rule edits that are not on the drawing"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quit_with_code_edits_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
     # keys that silently do nothing; and within each menu every underlined
@@ -713,6 +726,7 @@ if(TARGET katana)
                          qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
                          qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
                          qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
+                         qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
