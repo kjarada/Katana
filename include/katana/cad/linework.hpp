@@ -322,6 +322,9 @@ struct SurveyFeatureOptions {
     // when its code names no model - with its points, as processLinework's
     // does. Pass the options the import was given. import.createLayers is NOT
     // read: coding.createLayers governs every layer here, as it does there.
+    // An EMPTY import.codeProperty (the import wrote no code) still gives each
+    // line its code, under codePropertyCandidates().front(), which the report
+    // names: the rules style a line by the code it carries.
     SurveyImportOptions import{};
     // As LineworkOptions::coding: how the lines are styled, and whether a
     // missing layer may be created.

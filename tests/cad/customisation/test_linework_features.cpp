@@ -247,6 +247,34 @@ TEST(SurveyFeatures, ACodeNoRuleKnowsGoesOnItsPointsLayerAndIsSaidToBeUnstyled)
     EXPECT_EQ(result.report.strings[0].key, "") << "no rule matched, so no key";
 }
 
+TEST(SurveyFeatures, AnImportThatWroteNoCodeStillGivesTheLineItsCodeUnderTheFirstCandidateName)
+{
+    Document document;
+    document.setSurveyMap(lineMap());
+    SurveyProject project;
+    project.points = {point("1", 0.0, 0.0), point("2", 0.0, 10.0)};
+    project.features = {feature("WM01", "WM", {"1", "2"})};
+    SurveyFeatureOptions options;
+    // The import wrote no code onto its points; the line still needs one,
+    // because the rules style it by the code it carries.
+    options.import.codeProperty = "";
+
+    const SurveyFeatureResult result = run(document, project, options);
+
+    const auto lines = polylinesOf(document);
+    ASSERT_EQ(lines.size(), 1u);
+    const Entity& line = *lines[0];
+    EXPECT_FALSE(line.properties.contains("")) << "a property with no name is not a property";
+    // codePropertyCandidates().front() is "code", as processLinework reads
+    // when no point carries a candidate.
+    EXPECT_EQ(result.report.property, "code");
+    EXPECT_EQ(textProperty(line, "code"), "WM");
+    // So the rules reach it: WM -> WM*, linestyle WATR Main.
+    EXPECT_EQ(line.style, "WATR Main");
+    ASSERT_NE(result.report.styling, nullptr);
+    EXPECT_EQ(result.report.styling->matched, 1u);
+}
+
 TEST(SurveyFeatures, WhenLayersMayNotBeCreatedAMissingOneIsRefusedAndAnExistingOneUsed)
 {
     Document document;
