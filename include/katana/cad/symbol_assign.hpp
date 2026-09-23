@@ -27,6 +27,7 @@
 // opening a symbol library to fix a drawing needs to see.
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,6 +35,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_catalogue.hpp"
+#include "katana/cad/style_drawing.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
@@ -104,15 +106,43 @@ struct SymbolPrintSize {
     bool insertionInside = true;
 };
 
+// The box a symbol's text covers, in the model units of the mark, ESTIMATED:
+// the face a text is painted in is a Qt question, and cad has no font. The
+// text is taken to fill its `height` - the size it is painted at, which its
+// capitals and ascenders stay within - standing on its anchor, hanging from
+// it ("top") or centred on it ("middle"); and to be kEstimatedCharacterWidth
+// of that height, times its widthFactor, wide per character, starting at the
+// anchor, centred on it ("centre") or ending at it ("right"). The box is then
+// turned about the anchor by the text's angle. The justification is read as
+// the painter reads it (style_painter.cpp's justifiedOrigin), so an unknown
+// spelling stands on the anchor from its left, as an unjustified text does.
+// Descenders are not counted. Empty for an empty text or a height that is
+// not a positive number.
+//
+// 0.6 is about an average sans-serif character: Arial's digits are 0.556 of
+// the size they are set at, its capital V 0.667, most of its lower case 0.5.
+inline constexpr double kEstimatedCharacterWidth = 0.6;
+[[nodiscard]] katana::geometry::Box2 estimatedTextExtent(const StyleTextMark& text);
+
+// Where a text lands, as a box in the text's own model units. A caller that
+// has the font the text is painted in - a Qt dialog, through
+// style_painter's styleTextExtent - measures it, so its answer agrees with
+// the picture beside it; one that does not uses estimatedTextExtent.
+using TextExtent = std::function<katana::geometry::Box2(const StyleTextMark&)>;
+
 // What a point wearing `definition` at `size` (Style::symbolSize: a width in
 // model units, 0 for the definition's own) draws, plotted at 1:N: the box of
-// cad::symbolDrawing's strokes and text anchors, so it is what prints - a
-// worldstyle's units are ground metres, a paperstyle's plot millimetres, and
-// a size scales the definition so the larger side of LineStyle::bounds()
-// spans it. nullopt for a definition that draws nothing, a denominator that
-// is not positive or a size that is not a finite number of at least 0.
+// cad::symbolDrawing's strokes and of the space each of its texts covers, so
+// it is what prints - a worldstyle's units are ground metres, a paperstyle's
+// plot millimetres, and a size scales the definition so the larger side of
+// LineStyle::bounds() spans it. A text's space is `textExtent`'s answer, or
+// estimatedTextExtent's when none is given: a text's anchor alone has no
+// size, and a symbol that is a letter, or carries one above its mark, prints
+// the letter too. nullopt for a definition that draws nothing, a denominator
+// that is not positive or a size that is not a finite number of at least 0.
 [[nodiscard]] std::optional<SymbolPrintSize>
-symbolPrintSize(const katana::entity::LineStyle& definition, double size, double scaleDenominator);
+symbolPrintSize(const katana::entity::LineStyle& definition, double size, double scaleDenominator,
+                const TextExtent& textExtent = {});
 
 // ---- changing which symbol is drawn ----------------------------------------------------------
 
