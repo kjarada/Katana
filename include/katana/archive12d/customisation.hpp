@@ -190,7 +190,9 @@ struct CustomisationMerge {
 };
 
 // Merges or replaces. It returns a result rather than failing, because each
-// input is already a valid library and map (see `problems`). Attribution to files: a definition belongs to the file its
+// input is already a valid library and map (see `problems`).
+//
+// Attribution to files: a definition belongs to the file its
 // LineStyle::source names, and rules to the mapfile whose share of
 // `loaded.map` they are (readCustomisationInto appends each file's rules in
 // order and records how many in LoadedFile::read).
