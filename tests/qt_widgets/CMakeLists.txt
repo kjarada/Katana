@@ -1,7 +1,8 @@
 # The three view widgets (src/katana_qt/{viewport,render_view,section_view}
 # _widget), driven headlessly on Qt's offscreen platform: what they frame, what
 # they draw, what their hooks report and when their focus makes them the
-# active view. The application is one executable with no library of its own,
+# active view; and the workspace that docks them, with the chrome it shares
+# with the main window's panels. The application is one executable with no library of its own,
 # so the widgets' sources are compiled in here as they are into katana.
 #
 # Registered with the prefix "qt_widgets." so that `ctest -R qt_` runs these
@@ -16,10 +17,16 @@ add_executable(katana_qt_widget_tests
     test_render_view.cpp
     test_section_view.cpp
     test_plan_view.cpp
+    test_view_chrome.cpp
     ${_qt_src}/viewport_widget.cpp
     ${_qt_src}/render_view_widget.cpp
     ${_qt_src}/section_view_widget.cpp
     ${_qt_src}/theme.cpp
+    # The workspace and the dock chrome its views wear (test_view_chrome).
+    ${_qt_src}/view_workspace.cpp
+    ${_qt_src}/view_layers_popup.cpp
+    ${_qt_src}/dock_chrome.cpp
+    ${_qt_src}/icons.cpp
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
