@@ -406,7 +406,9 @@ class EdgeTool final : public InteractiveTool {
             return ToolStep::rejected(outcome.error().message);
         }
         session_.begin();
-        session_.replace(id, std::move(outcome->pieces));
+        if (auto status = session_.replace(id, std::move(outcome->pieces)); !status) {
+            return ToolStep::rejected(status.error().message);
+        }
         marks_.push_back(std::move(outcome->mark));
         return ToolStep::next();
     }
