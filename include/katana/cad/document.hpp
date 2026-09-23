@@ -103,6 +103,13 @@ class Document {
     [[nodiscard]] const katana::entity::SurveyMap& surveyMap() const { return surveyMap_; }
     void setStyleLibrary(katana::entity::StyleLibrary library);
     void setSurveyMap(katana::entity::SurveyMap map);
+    // Counters bumped by every setStyleLibrary / setSurveyMap. A cache of
+    // flattened definitions, thumbnails or code lookups keys on these, never
+    // on a LineStyle* or SurveyRule* (both dangle when the whole library or
+    // map is replaced) and never on "a listener fired" (which a selection
+    // click also does).
+    [[nodiscard]] std::uint64_t libraryGeneration() const { return libraryGeneration_; }
+    [[nodiscard]] std::uint64_t surveyMapGeneration() const { return surveyMapGeneration_; }
     // The definition a style's `symbol` or `linetype` names, or nullptr. One
     // place to ask, so that "which library does this name come from" is not a
     // question every caller answers for itself.
@@ -171,6 +178,8 @@ class Document {
     katana::entity::Model model_;
     katana::entity::StyleLibrary library_;
     katana::entity::SurveyMap surveyMap_;
+    std::uint64_t libraryGeneration_ = 0;
+    std::uint64_t surveyMapGeneration_ = 0;
     katana::geometry::SpatialIndex index_;
     std::unique_ptr<katana::commands::CommandStack> stack_;
     std::unique_ptr<katana::storage::ProjectStore> store_;
