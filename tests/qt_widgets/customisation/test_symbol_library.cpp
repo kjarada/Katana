@@ -23,15 +23,19 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QListView>
+#include <QMouseEvent>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QToolButton>
 #include <QTreeWidget>
 
@@ -352,6 +356,59 @@ TEST(SymbolLibrary, TheDetailsPaneStatesTheSurveyMarksPrintSizeWorkedByHandAt1To
     EXPECT_EQ(dialog.preview()->scaleDenominator(), 100);
 }
 
+TEST(SymbolLibrary, TheDetailsPaneCountsASymbolsLettersInWhatItPrints)
+{
+    LibraryFixture fixture;
+    // A symbol that is nothing but a 1 m "H" standing on its insertion point.
+    katana::entity::StyleLibrary library = fixture.document.styleLibrary();
+    katana::entity::LineStyle letter;
+    letter.name = "TEST Letter";
+    letter.atVertices = true;
+    letter.strokes = {katana::entity::Stroke{.op = katana::entity::StrokeOp::Move},
+                      katana::entity::Stroke{.op = katana::entity::StrokeOp::Text, .text = 0}};
+    letter.texts = {katana::entity::StrokeText{.text = "H", .height = 1.0}};
+    ASSERT_TRUE(library.add(letter).ok());
+    fixture.document.setStyleLibrary(std::move(library));
+
+    SymbolLibraryDialog dialog(fixture.context);
+    auto* scale = child<QComboBox>(dialog, "plotScale");
+    ASSERT_NE(scale, nullptr);
+    scale->setCurrentIndex(scale->findData(500));
+    ASSERT_TRUE(dialog.selectSymbol("TEST Valve"));
+
+    // TEST Valve: a 0.8 m box (-0.4..0.4 each way), then a 0.5 m "V" standing
+    // bottom-centre on (0, 0.6), in the preview's own face. Its width is
+    // the box's: a V is narrower than the size it is set at, so at 0.8 wide
+    // it is under 0.5 x 0.8 = 0.4 m, within -0.2..0.2. Its top is 0.6 + 0.5
+    // x the face's ascent (as a share of that size), and every face's ascent
+    // lies between 0.7 and 1.25 of it (Arial 0.905, Segoe UI 1.079), so the
+    // valve is 1 + 0.5 x 0.7 = 1.35 to 1 + 0.5 x 1.25 = 1.625 m high: at
+    // 1:500 (0.5 m a plot millimetre), 2.7 to 3.25 mm. Its anchor alone made
+    // it 1 m, 2 mm.
+    static const QRegularExpression valve(QStringLiteral(
+        R"(^1\.6 × ([0-9.]+) mm at 1:500, 0\.8 × ([0-9.]+) m on the ground$)"));
+    const QString printed = labelText(dialog, "detailPrint");
+    const QRegularExpressionMatch match = valve.match(printed);
+    ASSERT_TRUE(match.hasMatch()) << printed.toStdString();
+    EXPECT_GE(match.captured(1).toDouble(), 2.7) << printed.toStdString();
+    EXPECT_LE(match.captured(1).toDouble(), 3.25) << printed.toStdString();
+    EXPECT_NEAR(match.captured(2).toDouble(), match.captured(1).toDouble() * 0.5, 0.001);
+
+    // The letter alone, set 1 m high: it covers its face's ascent above the
+    // baseline and descent below it, together 1 to 1.4 of the size in every
+    // face (Arial 1.117, Segoe UI 1.33), so 1 to 1.4 m high and 2 to 2.8 mm
+    // at 1:500 - not "0 x 0".
+    ASSERT_TRUE(dialog.selectSymbol("TEST Letter"));
+    static const QRegularExpression letterSize(QStringLiteral(
+        R"(^([0-9.]+) × ([0-9.]+) mm at 1:500, ([0-9.]+) × ([0-9.]+) m on the ground$)"));
+    const QString letterPrinted = labelText(dialog, "detailPrint");
+    const QRegularExpressionMatch letterMatch = letterSize.match(letterPrinted);
+    ASSERT_TRUE(letterMatch.hasMatch()) << letterPrinted.toStdString();
+    EXPECT_GT(letterMatch.captured(1).toDouble(), 0.0) << letterPrinted.toStdString();
+    EXPECT_GE(letterMatch.captured(2).toDouble(), 2.0) << letterPrinted.toStdString();
+    EXPECT_LE(letterMatch.captured(2).toDouble(), 2.8) << letterPrinted.toStdString();
+}
+
 TEST(SymbolLibrary, LoadingMergesIntoTheLibraryAndLogsWhatEachFileAddedAndReplaced)
 {
     // The session starts with the linestyles and its own TEST Tree; loading
@@ -465,6 +522,70 @@ TEST(SymbolLibrary, TheGridsSelectionAndCurrentSymbolSurviveAReloadAndAFilter)
     EXPECT_FALSE(child<QDoubleSpinBox>(dialog, "assignSize")->isEnabled());
 }
 
+// A Ctrl+click on a grid item, as a person makes one: in ExtendedSelection
+// it makes the item current and toggles whether it is selected.
+void ctrlClick(QListView& grid, std::string_view name, const SymbolLibraryDialog& dialog)
+{
+    const QModelIndex index = grid.model()->index(dialog.gridModel().rowOf(name), 0);
+    ASSERT_TRUE(index.isValid()) << name;
+    const QPointF at = grid.visualRect(index).center();
+    const QPointF global = grid.viewport()->mapToGlobal(at);
+    QMouseEvent press(QEvent::MouseButtonPress, at, global, Qt::LeftButton, Qt::LeftButton,
+                      Qt::ControlModifier);
+    QApplication::sendEvent(grid.viewport(), &press);
+    QMouseEvent release(QEvent::MouseButtonRelease, at, global, Qt::LeftButton, Qt::NoButton,
+                        Qt::ControlModifier);
+    QApplication::sendEvent(grid.viewport(), &release);
+    katana::qt::test::processEvents();
+}
+
+TEST(SymbolLibrary, ASymbolDeselectedWithCtrlStaysDeselectedAcrossAFilterAndAReload)
+{
+    // The mark, then the valve and the tree added with Ctrl, then the tree
+    // taken out again with Ctrl: the tree is left current but not selected.
+    LibraryFixture fixture;
+    SymbolLibraryDialog dialog(fixture.context);
+    dialog.show();
+    katana::qt::test::processEvents();
+    ASSERT_TRUE(dialog.selectSymbol("TEST Survey Mark"));
+    QListView* grid = child<QListView>(dialog, "symbolGrid");
+    ASSERT_NE(grid, nullptr);
+    ctrlClick(*grid, "TEST Valve", dialog);
+    ctrlClick(*grid, "TEST Tree", dialog);
+    // Rows in the grid's order: names with case folded.
+    ASSERT_EQ(dialog.selectedNames(),
+              (std::vector<std::string>{"TEST Survey Mark", "TEST Tree", "TEST Valve"}));
+    ctrlClick(*grid, "TEST Tree", dialog);
+    const std::vector<std::string> kept{"TEST Survey Mark", "TEST Valve"};
+    ASSERT_EQ(dialog.selectedNames(), kept);
+    ASSERT_EQ(dialog.currentSymbol(), "TEST Tree");
+
+    // "test" still shows all three: the selection is what the person left,
+    // not the tree they took out of it.
+    plainChild<katana::qt::FilterBar>(dialog, "symbolFilter")->setText(QStringLiteral("test"));
+    EXPECT_EQ(dialog.selectedNames(), kept);
+    EXPECT_EQ(dialog.currentSymbol(), "TEST Tree");
+
+    // A command elsewhere reloads the grid: the same again.
+    fixture.point(0.0, 0.0);
+    katana::qt::test::processEvents();
+    EXPECT_EQ(dialog.selectedNames(), kept);
+    EXPECT_EQ(dialog.currentSymbol(), "TEST Tree");
+
+    // So an export writes the two kept, and not the tree.
+    const std::filesystem::path out =
+        std::filesystem::temp_directory_path() / "katana_symbol_library_ctrl_export.4d";
+    std::filesystem::remove(out);
+    ASSERT_TRUE(dialog.exportSelectedTo(out));
+    std::ifstream in(out, std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    in.close();
+    std::filesystem::remove(out);
+    auto written = katana::archive12d::readStyleLibrary(text);
+    ASSERT_TRUE(written.ok());
+    EXPECT_EQ(written.value().library.names(), kept);
+}
+
 TEST(SymbolLibrary, ReplaceInStylesSwapsAMissingSymbolForALibraryOneInOneUndoStep)
 {
     LibraryFixture fixture;
@@ -492,6 +613,44 @@ TEST(SymbolLibrary, ReplaceInStylesSwapsAMissingSymbolForALibraryOneInOneUndoSte
 
     ASSERT_TRUE(fixture.document.undo().ok());
     EXPECT_EQ(fixture.document.model().styles.find("Old Pits")->symbol, "OLD Pit Lid");
+}
+
+TEST(SymbolLibrary, ReplaceInStylesWaitsForAReplacementAndNeverTakesTheSymbolOff)
+{
+    LibraryFixture fixture;
+    katana::entity::Style marks;
+    marks.name = "Marks";
+    marks.symbol = "TEST Valve";
+    ASSERT_TRUE(fixture.document.execute(katana::commands::createStyle(marks)).ok());
+    SymbolLibraryDialog dialog(fixture.context);
+    ASSERT_TRUE(dialog.selectSymbol("TEST Valve"));
+    auto* with = plainChild<katana::qt::NamePicker>(dialog, "replaceWith");
+    auto* replace = child<QPushButton>(dialog, "replaceInStyles");
+    ASSERT_NE(with, nullptr);
+    ASSERT_NE(replace, nullptr);
+
+    // The picker starts with nothing chosen: nothing to replace it with.
+    ASSERT_EQ(with->currentName(), "");
+    EXPECT_FALSE(replace->isEnabled());
+    const std::size_t steps = fixture.document.history().undoCount();
+    EXPECT_FALSE(dialog.replaceInStyles(""));
+    EXPECT_EQ(fixture.document.model().styles.find("Marks")->symbol, "TEST Valve");
+    EXPECT_EQ(fixture.document.history().undoCount(), steps);
+    EXPECT_TRUE(fixture.loggedExactly(
+        QStringLiteral("Replace \"TEST Valve\": choose the symbol to put in its place first")));
+
+    // Chosen from the list, or typed: the button can be used.
+    with->setCurrentName("TEST Survey Mark");
+    EXPECT_TRUE(replace->isEnabled());
+    // The symbol itself is no replacement for itself.
+    with->setCurrentName("TEST Valve");
+    EXPECT_FALSE(replace->isEnabled());
+    with->setEditText(QStringLiteral("TEST Tree"));
+    EXPECT_EQ(with->currentName(), "TEST Tree");
+    EXPECT_TRUE(replace->isEnabled());
+    // Cleared again: not usable again.
+    with->setCurrentName("");
+    EXPECT_FALSE(replace->isEnabled());
 }
 
 TEST(SymbolLibrary, SetOnStyleAndSelectPointsUsingActOnTheCurrentSymbol)

@@ -120,6 +120,8 @@ class SymbolLibraryDialog : public QDialog {
     // that names the current symbol.
     bool selectPointsUsing();
     // Every style naming the current symbol names `replacement` instead.
+    // Refused (and logged) for an empty `replacement`: taking a symbol off
+    // its styles is not a replacement.
     bool replaceInStyles(const std::string& replacement);
     // Reads a 12d file (a .4d library, or a mapfile - the extension does not
     // say which) and MERGES it into the session's customisation.

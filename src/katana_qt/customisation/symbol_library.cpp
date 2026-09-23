@@ -34,6 +34,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/tables.hpp"
 #include "name_picker.hpp"
+#include "style_painter.hpp"
 #include "style_preview.hpp"
 #include "theme.hpp"
 
@@ -483,6 +484,11 @@ void SymbolLibraryDialog::buildUi()
     });
     QObject::connect(replace_, &QPushButton::clicked, this,
                      [this] { replaceInStyles(replaceWith_->currentName()); });
+    // Choosing or typing a replacement only enables the button beside it.
+    QObject::connect(replaceWith_, &QComboBox::currentIndexChanged, this,
+                     [this] { updateActions(); });
+    QObject::connect(replaceWith_, &QComboBox::currentTextChanged, this,
+                     [this] { updateActions(); });
     QObject::connect(selectUsing_, &QPushButton::clicked, this, [this] { selectPointsUsing(); });
     QObject::connect(load_, &QPushButton::clicked, this, [this] { loadClicked(); });
     QObject::connect(export_, &QPushButton::clicked, this, [this] { exportClicked(); });
@@ -641,11 +647,13 @@ void SymbolLibraryDialog::updateChipCounts()
 void SymbolLibraryDialog::restoreCurrent(const std::vector<std::string>& selected)
 {
     const int row = model_->rowOf(current_);
-    // The selection an export or a reload found, where it is still shown -
-    // or, when the current symbol was not part of it, that symbol alone.
-    const bool keepSelection = std::ranges::find(selected, current_) != selected.end();
+    // Exactly the names asked for, where they are still shown, whether or not
+    // the current symbol is among them: a Ctrl+click that deselects an item
+    // leaves it current, and putting it back in place of what the person
+    // kept made the next search or reload export the wrong symbols.
+    // selectSymbol asks for its symbol alone by passing just that name.
     QItemSelection selection;
-    for (const std::string& name : keepSelection ? selected : std::vector<std::string>{current_}) {
+    for (const std::string& name : selected) {
         if (const int at = model_->rowOf(name); at >= 0) {
             selection.select(model_->index(at), model_->index(at));
         }
@@ -703,7 +711,7 @@ bool SymbolLibraryDialog::selectSymbol(std::string_view name)
         rebuilding_ = false;
     }
     current_ = std::string(name);
-    applyFilter({});
+    applyFilter({current_});
     return !current_.empty();
 }
 
@@ -834,9 +842,17 @@ void SymbolLibraryDialog::updatePrintSize()
 
     if (entry->entry.source == DefinitionSource::Library) {
         const LineStyle* definition = document_->definitionFor(entry->entry.name);
-        const auto printed = definition != nullptr
-                                 ? katana::cad::symbolPrintSize(*definition, size, denominator)
-                                 : std::nullopt;
+        // A text measured in the face the preview beside this paints it in,
+        // so "how big it prints" and the picture agree about a symbol's
+        // letters; cad alone can only estimate them.
+        const QFont font = preview_->font();
+        const katana::cad::TextExtent measured = [&font](const katana::cad::StyleTextMark& mark) {
+            return styleTextExtent(mark, font);
+        };
+        const auto printed =
+            definition != nullptr
+                ? katana::cad::symbolPrintSize(*definition, size, denominator, measured)
+                : std::nullopt;
         if (!printed) {
             print_->setText(QStringLiteral("Draws nothing to measure"));
             showFilledRows();
@@ -883,7 +899,12 @@ void SymbolLibraryDialog::updateActions()
                                        "draws this symbol at the size given (one undo step)")
                             .arg(grouped(selected)));
     setOnStyle_->setEnabled(entry != nullptr && targetStyle_->count() > 0);
-    replace_->setEnabled(entry != nullptr && !entry->entry.users.styles.empty());
+    // Only once a replacement is chosen: the picker starts empty, and an
+    // empty replacement took the symbol off every style naming it - its
+    // points and lines lost their mark - and was logged as a success.
+    const std::string replacement = replaceWith_->currentName();
+    replace_->setEnabled(entry != nullptr && !entry->entry.users.styles.empty() &&
+                         !replacement.empty() && replacement != entry->entry.name);
     selectUsing_->setEnabled(entry != nullptr && entry->entry.users.entities > 0);
     size_->setEnabled(entry != nullptr);
     load_->setEnabled(live);
@@ -1009,6 +1030,14 @@ bool SymbolLibraryDialog::selectPointsUsing()
 bool SymbolLibraryDialog::replaceInStyles(const std::string& replacement)
 {
     if (!alive() || current_.empty()) {
+        return false;
+    }
+    // "" is not a symbol to put in its place: set on a style, it would take
+    // the symbol off (see updateActions).
+    if (replacement.empty()) {
+        log(QStringLiteral("Replace %1: choose the symbol to put in its place first")
+                .arg(inQuotes(current_)),
+            true);
         return false;
     }
     const std::vector<std::string> styles = katana::cad::symbolUsers(*document_, current_).styles;
