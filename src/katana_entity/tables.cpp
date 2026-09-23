@@ -5,10 +5,11 @@
 #include "katana/math/numerics.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <limits>
 #include <utility>
+
+#include "katana/core/text.hpp"
 
 namespace katana::entity {
 
@@ -28,22 +29,6 @@ Status validateLineWeight(double lineWeight)
                          std::to_string(lineWeight));
     }
     return {};
-}
-
-// ASCII case-insensitive compare, for the reserved names an exchange format
-// spells in capitals and a user may not.
-[[nodiscard]] bool equalsIgnoringCase(std::string_view a, std::string_view b)
-{
-    if (a.size() != b.size()) {
-        return false;
-    }
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(a[i])) !=
-            std::tolower(static_cast<unsigned char>(b[i]))) {
-            return false;
-        }
-    }
-    return true;
 }
 
 template <typename Table> auto collect(const Table& table)
@@ -68,7 +53,61 @@ LayerDatabase::LayerDatabase()
 void LayerDatabase::reset()
 {
     layers_.clear();
-    layers_.emplace(std::string(kDefaultLayerName), Layer{});
+    layers_.emplace(std::string(kDefaultLayerName), Node{Layer{}});
+    refreshSubtree(kDefaultLayerName);
+}
+
+// Everything under `name` is exactly the keys beginning "name/", and those are
+// contiguous: they sort from "name/" up to "name0", '0' being the character
+// after '/'. NOT the keys straight after `name` up to the first that is not a
+// descendant: a sibling whose name continues with a character below '/' -
+// "design 2", "design-old", "design.bak" - sorts BETWEEN "design" and
+// "design/surface".
+std::pair<LayerDatabase::Nodes::iterator, LayerDatabase::Nodes::iterator>
+LayerDatabase::descendantRange(std::string_view name)
+{
+    std::string from(name);
+    from += kLayerSeparator;
+    std::string to(name);
+    to += static_cast<char>(kLayerSeparator + 1);
+    return {layers_.lower_bound(from), layers_.lower_bound(to)};
+}
+
+void LayerDatabase::refreshSubtree(std::string_view name)
+{
+    const auto refresh = [this](Node& node, std::string_view path) {
+        node.shown = node.layer.visible;
+        node.locked = node.layer.locked;
+        const std::string_view parent = layerParent(path);
+        if (parent.empty()) {
+            return;
+        }
+        // A parent is a proper prefix of its child, so it sorts first and is
+        // already current by the time the child is reached.
+        const auto above = layers_.find(parent);
+        if (above != layers_.end()) {
+            node.shown = node.shown && above->second.shown;
+            node.locked = node.locked || above->second.locked;
+        }
+    };
+    const auto self = layers_.find(name);
+    if (self == layers_.end()) {
+        return;
+    }
+    refresh(self->second, self->first);
+    const auto [first, last] = descendantRange(name);
+    for (auto it = first; it != last; ++it) {
+        refresh(it->second, it->first);
+    }
+}
+
+ResolvedLayer LayerDatabase::resolve(std::string_view name) const
+{
+    const auto found = layers_.find(name);
+    if (found == layers_.end()) {
+        return {};
+    }
+    return {&found->second.layer, found->second.shown, found->second.locked};
 }
 
 Status LayerDatabase::add(Layer layer)
@@ -89,12 +128,17 @@ Status LayerDatabase::add(Layer layer)
     //
     // Validation happened above and covers the ancestors too (a valid path has
     // only valid prefixes), so nothing here can fail partway.
-    for (const std::string& ancestor : layerAncestors(layer.name)) {
-        layers_.try_emplace(ancestor, Layer{ancestor, Color{}, true, false,
-                                            std::string(kContinuousLinetype), 0.25});
+    const std::vector<std::string> ancestors = layerAncestors(layer.name);
+    for (const std::string& ancestor : ancestors) {
+        layers_.try_emplace(ancestor, Node{Layer{ancestor, Color{}, true, false,
+                                                 std::string(kContinuousLinetype), 0.25}});
     }
-    std::string name = layer.name;
-    layers_.emplace(std::move(name), std::move(layer));
+    const std::string name = layer.name;
+    layers_.emplace(name, Node{std::move(layer)});
+    // From the topmost ancestor: one created just now is as new as the layer,
+    // and refreshing from the root of the path covers both.
+    refreshSubtree(ancestors.empty() ? std::string_view(name)
+                                     : std::string_view(ancestors.front()));
     return {};
 }
 
@@ -107,7 +151,8 @@ Status LayerDatabase::update(const Layer& layer)
     if (auto status = validateLineWeight(layer.lineWeight); !status) {
         return status;
     }
-    found->second = layer;
+    found->second.layer = layer;
+    refreshSubtree(layer.name);
     return {};
 }
 
@@ -127,22 +172,23 @@ Result<Layer> LayerDatabase::remove(std::string_view name)
                          "layer still has nested layers; remove the subtree instead",
                          std::string(name));
     }
-    Layer removed = std::move(found->second);
+    Layer removed = std::move(found->second.layer);
     layers_.erase(found);
-    return removed;
+    return removed; // a leaf: nothing inherited from it
 }
 
 const Layer* LayerDatabase::find(std::string_view name) const
 {
     const auto found = layers_.find(name);
-    return found == layers_.end() ? nullptr : &found->second;
+    return found == layers_.end() ? nullptr : &found->second.layer;
 }
 
 std::vector<std::string> LayerDatabase::names() const
 {
     std::vector<std::string> result;
     result.reserve(layers_.size());
-    for (const auto& [name, layer] : layers_) {
+    for (const auto& [name, node] : layers_) {
+        (void)node;
         result.push_back(name);
     }
     return result;
@@ -150,7 +196,13 @@ std::vector<std::string> LayerDatabase::names() const
 
 std::vector<Layer> LayerDatabase::all() const
 {
-    return collect(layers_);
+    std::vector<Layer> result;
+    result.reserve(layers_.size());
+    for (const auto& [name, node] : layers_) {
+        (void)name;
+        result.push_back(node.layer);
+    }
+    return result;
 }
 
 // ---- the layer tree ------------------------------------------------------------
@@ -206,49 +258,27 @@ std::vector<std::string> LayerDatabase::subtree(std::string_view name) const
 
 bool LayerDatabase::hasChildren(std::string_view name) const
 {
-    // lower_bound past the node itself: the very next key is a child if any is,
-    // because "a/b" sorts immediately after "a" and before any sibling of "a".
-    auto it = layers_.upper_bound(name);
-    return it != layers_.end() && isLayerUnder(it->first, name);
+    // Any key beginning "name/". This used to test only the key straight
+    // after `name`, on the belief that a child sorts immediately after its
+    // parent - but "design 2" sorts between "design" and "design/surface", so
+    // with both present "design" had no children and remove() orphaned them.
+    std::string prefix(name);
+    prefix += kLayerSeparator;
+    const auto it = layers_.lower_bound(prefix);
+    return it != layers_.end() && it->first.starts_with(prefix);
 }
 
+// A layer that is gone is neither shown nor editable: drawing entities that
+// point at one would be drawing something the user cannot turn off or select
+// through the layer tree, and editing them would edit what is not there.
 bool LayerDatabase::effectivelyVisible(std::string_view name) const
 {
-    const Layer* layer = find(name);
-    if (layer == nullptr) {
-        // A layer that is gone cannot be shown: drawing entities that point at
-        // one would be drawing something the user cannot turn off or select
-        // through the layer tree.
-        return false;
-    }
-    if (!layer->visible) {
-        return false;
-    }
-    for (const std::string& ancestor : layerAncestors(name)) {
-        const Layer* above = find(ancestor);
-        if (above != nullptr && !above->visible) {
-            return false;
-        }
-    }
-    return true;
+    return resolve(name).shown;
 }
 
 bool LayerDatabase::effectivelyLocked(std::string_view name) const
 {
-    const Layer* layer = find(name);
-    if (layer == nullptr) {
-        return true; // cannot edit what is not there
-    }
-    if (layer->locked) {
-        return true;
-    }
-    for (const std::string& ancestor : layerAncestors(name)) {
-        const Layer* above = find(ancestor);
-        if (above != nullptr && above->locked) {
-            return true;
-        }
-    }
-    return false;
+    return resolve(name).locked;
 }
 
 Result<std::vector<Layer>> LayerDatabase::removeSubtree(std::string_view name)
@@ -273,10 +303,10 @@ Result<std::vector<Layer>> LayerDatabase::removeSubtree(std::string_view name)
         if (found == layers_.end()) {
             continue;
         }
-        removed.push_back(found->second);
+        removed.push_back(found->second.layer);
         layers_.erase(found);
     }
-    return removed;
+    return removed; // a whole branch: nothing left inherits from it
 }
 
 Result<std::vector<std::pair<std::string, std::string>>>
@@ -332,7 +362,7 @@ LayerDatabase::renameSubtree(std::string_view from, std::string_view to)
         if (found == layers_.end()) {
             continue;
         }
-        Layer layer = found->second;
+        Layer layer = found->second.layer;
         layer.name = after;
         moved.push_back(std::move(layer));
     }
@@ -340,14 +370,18 @@ LayerDatabase::renameSubtree(std::string_view from, std::string_view to)
         (void)after;
         layers_.erase(std::string(before));
     }
-    for (const std::string& ancestor : layerAncestors(to)) {
-        layers_.try_emplace(ancestor, Layer{ancestor, Color{}, true, false,
-                                            std::string(kContinuousLinetype), 0.25});
+    const std::vector<std::string> newAncestors = layerAncestors(to);
+    for (const std::string& ancestor : newAncestors) {
+        layers_.try_emplace(ancestor, Node{Layer{ancestor, Color{}, true, false,
+                                                 std::string(kContinuousLinetype), 0.25}});
     }
     for (Layer& layer : moved) {
         std::string key = layer.name;
-        layers_.insert_or_assign(std::move(key), std::move(layer));
+        layers_.insert_or_assign(std::move(key), Node{std::move(layer)});
     }
+    // The moved branch inherits from its new parents now, some perhaps just
+    // created: refresh from the topmost of them.
+    refreshSubtree(newAncestors.empty() ? to : std::string_view(newAncestors.front()));
     return mapping;
 }
 
@@ -374,7 +408,7 @@ Result<ArrowHead> arrowHeadFromString(std::string_view name)
 {
     for (const ArrowHead head : {ArrowHead::None, ArrowHead::Tick, ArrowHead::ClosedFilled,
                                  ArrowHead::Open, ArrowHead::Dot}) {
-        if (equalsIgnoringCase(toString(head), name)) {
+        if (katana::core::equalsIgnoringCase(toString(head), name)) {
             return head;
         }
     }
@@ -496,7 +530,7 @@ Status validate(const Linetype& linetype)
     // so they can never name a definition. Reserved now, before blocks exist
     // and need BYBLOCK, because doing it later would be a migration.
     for (const char* reserved : {"ByLayer", "ByBlock"}) {
-        if (equalsIgnoringCase(linetype.name, reserved)) {
+        if (katana::core::equalsIgnoringCase(linetype.name, reserved)) {
             return makeError(ErrorCode::InvalidArgument,
                              "that linetype name is reserved by the exchange format",
                              linetype.name);
@@ -682,9 +716,7 @@ const std::vector<std::string_view>& symbolNames()
 
 std::string_view builtInSymbolFor(std::string_view name)
 {
-    std::string key(name);
-    std::transform(key.begin(), key.end(), key.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const std::string key = katana::core::lowered(name); // ASCII, whatever the locale
     const auto has = [&key](std::string_view word) { return key.find(word) != std::string::npos; };
     // Most specific first: "Pole - Light" is a pole, "Suspended Light" a
     // light, "Gully Pit Point" a pit and not a point.

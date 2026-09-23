@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <variant>
 
+#include "katana/cad/selection.hpp"
 #include "katana/geometry/intersection.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -297,8 +298,8 @@ Result<Section> extractSection(const Polyline2& alignment,
 
         katana::geometry::IntersectionResult hit;
         model->entities.forEach([&](const Entity& entity) {
-            if (!entity.visible) {
-                return; // a hidden entity is not on the section either
+            if (!isDrawn(*model, entity)) {
+                return; // what the plan hides is not on the section either
             }
             for (std::size_t s = 0; s < cleaned.segmentCount(); ++s) {
                 const Segment2 along = cleaned.segment(s);

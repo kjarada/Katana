@@ -796,9 +796,9 @@ void ViewportWidget::drawEntities(QPainter& painter) const
     std::vector<katana::geometry::SpatialId> scratch;
     cad::detail::forEachCandidate(
         model, &document_.spatialIndex(), visible, scratch, [&](const Entity& entity) {
-        // The layer is found ONCE and the visibility rule is asked about
-        // that layer, rather than looking it up again inside isDrawn.
-        const katana::entity::Layer* layer = model.layers.find(entity.layer);
+        // The layer is resolved ONCE and the visibility rule is asked about
+        // that, rather than looking it up again inside isDrawn.
+        const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
         // This box test is NOT the one forEachCandidate already did:
         // queryExtents is deliberately wider than the geometry (an arc offers
         // its centre for snapping), so this is the tighter, drawing-specific
@@ -815,8 +815,8 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             painter.setPen(QPen(kSelection, 2, Qt::DashLine));
         } else {
             QColor color = toQColor(display.color);
-            if (layer->locked) {
-                color.setAlpha(110); // locked layers read as background
+            if (layer.locked) {
+                color.setAlpha(110); // locked layers, and their children, read as background
             }
             // On screen every line is a 1.5 px hairline: a screen has no
             // paper for a line weight to be millimetres of. On a plot the
