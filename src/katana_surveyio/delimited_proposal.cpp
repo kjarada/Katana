@@ -468,15 +468,64 @@ std::string quotedHeader(std::string_view header)
     return quotedForMessage(katana::core::trimmed(header), 60);
 }
 
+// The first sampled row with a value in a column past the `named` ones the
+// header names, as a clause; nullopt when there is none. Empty fields do not
+// count: "a,b,c," is how many writers end a row, and the parser reads past them.
+// A value does count, because the layout can only read past it as Ignore - an
+// elevation column the header forgot, or the second word of a description in a
+// whitespace file - and nothing in the import would say it had gone.
+std::optional<std::string> unnamedValue(const std::vector<std::vector<Field>>& rows,
+                                        const std::vector<std::size_t>& lineNumbers,
+                                        std::size_t named)
+{
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        for (std::size_t c = named; c < rows[r].size(); ++c) {
+            const std::string_view value = valueOf(rows[r][c]);
+            if (!value.empty()) {
+                return "line " + std::to_string(lineNumbers[r]) + " has a value in column " +
+                       std::to_string(c + 1) + ", which the header does not name (" +
+                       quotedForMessage(value) + ")";
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// The first '#' line after `after` that is a row of numbers once the '#' is
+// taken off, as a clause; nullopt when there is none. Such a line is a point
+// commented out or a point whose id begins with '#', and the text cannot say
+// which - but either reading of it as a comment, or as one of the lines above
+// the first row, drops a point, so it is never proposed as settled. A '#' line
+// of prose is a comment whatever numbers it mentions, since it does not split
+// into them.
+std::optional<std::string> rowShapedComment(const std::vector<Line>& hashLines,
+                                            Delimiter delimiter, std::size_t after)
+{
+    for (const Line& line : hashLines) {
+        if (line.number <= after) {
+            continue;
+        }
+        const std::string_view rest = katana::core::trimmed(line.text).substr(1);
+        if (numericFields(splitLine(rest, delimiter)) >= kNumbersInARow) {
+            return "line " + std::to_string(line.number) +
+                   " starts with '#' and is otherwise a row of numbers - a point commented "
+                   "out, or a point whose id begins with '#' - and would not be imported; "
+                   "check it before importing";
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 Analysis analyse(std::string_view text)
 {
     Analysis analysis;
 
-    // Content lines: not blank, not a '#' comment.
+    // Content lines: not blank, not a '#' comment. The '#' lines are kept aside
+    // to check, once the delimiter is known, that none of them is a point.
     std::vector<Line> content;
-    bool comments = false;
+    std::vector<Line> hashLines;
     const std::vector<std::string_view> physical = katana::core::splitLines(text);
     for (std::size_t i = 0; i < physical.size() && content.size() < kProposalSampleLines; ++i) {
         const std::string_view line = katana::core::trimmed(physical[i]);
@@ -484,11 +533,12 @@ Analysis analyse(std::string_view text)
             continue;
         }
         if (line.front() == '#') {
-            comments = true;
+            hashLines.push_back(Line{physical[i], i + 1});
             continue;
         }
         content.push_back(Line{physical[i], i + 1});
     }
+    const bool comments = !hashLines.empty();
     if (content.empty()) {
         analysis.proposal = LayoutProposal::empty(
             comments ? "every line of the file is blank or a comment" : "the file holds no text");
@@ -552,12 +602,19 @@ Analysis analyse(std::string_view text)
     const std::vector<ColumnProfile> profiles = profileOf(rows, width);
     const std::string delimiterWord = std::string(toString(split.delimiter)) + "-delimited";
     const std::string commentNote = comments ? "; lines starting '#' are comments" : "";
+    // '#' lines above a header are titles; below it - or anywhere, when there is
+    // no header and every line above the first row is skipped - one may be a
+    // point.
+    const std::optional<std::string> hashRow = rowShapedComment(
+        hashLines, split.delimiter, *split.firstRow > 0 ? content[*split.firstRow - 1].number : 0);
+    const std::string hashNote = hashRow ? "; " + *hashRow : std::string{};
 
     std::string why = "no header line, so the file does not say whether northing or easting "
                       "comes first";
     if (*split.firstRow > 0) {
         const Line& headerLine = content[*split.firstRow - 1];
         const std::vector<Field> names = splitLine(headerLine.text, split.delimiter);
+        const std::optional<std::string> unnamed = unnamedValue(rows, lineNumbers, names.size());
 
         std::vector<KnownName> meanings;
         std::size_t northings = 0;
@@ -635,11 +692,9 @@ Analysis analyse(std::string_view text)
                                           " is not a header word this reader knows, so it is "
                                           "ignored");
             }
-            if (width > names.size()) {
-                notes.push_back("rows have " + std::to_string(width) +
-                                " fields and the header names " + std::to_string(names.size()) +
-                                ", so the rest are ignored");
-            }
+            // Columns past the header's are Ignore, so that the layout parses;
+            // whether any of them holds a value is `unnamed`, which the branches
+            // below report - it is what keeps a header from deciding.
             return layout;
         };
         const auto joined = [](const std::vector<std::string>& notes) {
@@ -674,6 +729,21 @@ Analysis analyse(std::string_view text)
                     header + ", but " + *misfit + "; check the header against the rows");
                 return analysis;
             }
+            if (unnamed) {
+                candidate.evidence += "; " + *unnamed + ", and it is read past";
+                analysis.proposal = LayoutProposal::uncertain(
+                    {std::move(candidate)},
+                    header + ", but " + *unnamed + "; say what that column holds" + joined(notes) +
+                        hashNote);
+                return analysis;
+            }
+            if (hashRow) {
+                candidate.evidence += hashNote;
+                analysis.proposal =
+                    LayoutProposal::uncertain({std::move(candidate)},
+                                              header + ", but " + *hashRow + joined(notes));
+                return analysis;
+            }
             if (repeated) {
                 analysis.proposal = LayoutProposal::uncertain(
                     {std::move(candidate)}, header + ", but it names a column twice" +
@@ -691,7 +761,8 @@ Analysis analyse(std::string_view text)
             std::vector<std::string> notes;
             const DelimitedLayout gisOrder =
                 layoutFromHeader(ColumnRole::Easting, ColumnRole::Northing, notes);
-            const std::string rest = joined(notes) + commentNote;
+            const std::string rest = joined(notes) + (unnamed ? "; " + *unnamed : std::string{}) +
+                                     commentNote + hashNote;
             notes.clear();
             const DelimitedLayout geodeticOrder =
                 layoutFromHeader(ColumnRole::Northing, ColumnRole::Easting, notes);
@@ -711,7 +782,8 @@ Analysis analyse(std::string_view text)
                 std::move(candidates),
                 "the header on line " + std::to_string(headerLine.number) +
                     " names X and Y, which are easting and northing in CAD and GIS but northing "
-                    "and easting in Gauss-Kruger grids; say which this file uses");
+                    "and easting in Gauss-Kruger grids; say which this file uses" +
+                    hashNote);
             return analysis;
         }
 
@@ -723,13 +795,14 @@ Analysis analyse(std::string_view text)
 
     std::vector<LayoutCandidate> candidates = presetCandidates(base, profiles, why);
     for (LayoutCandidate& candidate : candidates) {
-        candidate.evidence += commentNote;
+        candidate.evidence += commentNote + hashNote;
     }
     std::string summary = why;
     summary += candidates.empty()
                    ? "; no preset layout fits these " + delimiterWord +
                          " rows, so the columns have to be set by hand"
                    : "; choose a layout";
+    summary += hashNote;
     analysis.proposal = LayoutProposal::uncertain(std::move(candidates), std::move(summary));
     return analysis;
 }

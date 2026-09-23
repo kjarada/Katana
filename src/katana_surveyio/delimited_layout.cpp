@@ -391,8 +391,8 @@ Result<DelimitedLayout> parseLayoutTemplate(std::string_view text)
         } else if (equalsIgnoringCase(quote->second, toString(Quoting::None))) {
             layout.quoting = Quoting::None;
         } else {
-            return templateError(text,
-                                 "quote '" + std::string(quote->second) + "' is not double or none");
+            return templateError(text, "quote '" + std::string(quote->second) +
+                                           "' is not double or none");
         }
     }
     if (const auto comment = values.find("comment"); comment != values.end()) {
