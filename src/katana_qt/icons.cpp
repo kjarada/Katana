@@ -558,7 +558,8 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         // marks' 2.2 radius at each end.
         ink.line(7.68, 16.58, 17.32, 8.42, true);
         QPainterPath sweep;
-        const QRectF round(-1, 11, 14, 14); // radius 7 about (6, 18)
+        // Radius 10 about (6, 18): large enough to read as the angle at 20 px.
+        const QRectF round(-4, 8, 20, 20);
         sweep.arcMoveTo(round, 90.0);
         // From north (90 degrees in Qt's anticlockwise sense) to the line,
         // atan2(11, 13) = 40.2 degrees: 49.8 degrees clockwise.
@@ -572,15 +573,19 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         // From a known mark along a direction to a NEW point, which is the
         // accent: what the command adds to the drawing.
         drawNorth(ink, 5, 16.8, 4);
-        // (5, 19) to (18, 7): unit (13, -12) / 17.69, trimmed by 2.2 and 2.4.
+        // (5, 19) to (18, 7): unit u = (13, -12) / 17.69, trimmed by 2.2 and
+        // 2.4. The arrowhead at the tip T = (16.24, 8.63), its wings at
+        // T - 3u +- 2.2 n with n = (0.678, 0.735) across the line, says the
+        // direction runs OUT to the new point - which the inverse's has not.
         ink.line(6.62, 17.51, 16.24, 8.63, true);
+        ink.stroke(polyline({{12.55, 9.04}, {16.24, 8.63}, {15.53, 12.28}}), true);
         drawMark(ink, 5, 19, false);
         drawMark(ink, 18, 7, true);
         break;
     case Icon::SurveyArea: {
         const QPainterPath parcel =
             polyline({{3, 19}, {5, 6}, {14, 3}, {21, 9}, {18, 20}}, true);
-        ink.fill(parcel, true, 90);
+        ink.fill(parcel, true, 130);
         ink.stroke(parcel);
         for (const QPointF& p :
              {QPointF(3, 19), QPointF(5, 6), QPointF(14, 3), QPointF(21, 9), QPointF(18, 20)}) {
@@ -614,7 +619,8 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.stroke(rectangle(2.5, 7.5, 7, 3.5, 0.8));
         ink.line(6, 11, 3, 21, false, 1.3);
         ink.line(6, 11, 9, 21, false, 1.3);
-        ink.dashed(polyline({{10, 9.25}, {15.5, 9.25}}), true);
+        // Solid: at 20 px a dashed sight line this short is a single dash.
+        ink.line(10, 9.25, 15.5, 9.25, true);
         ink.stroke(rectangle(16, 3, 5, 18));
         for (const double y : {6.0, 10.0, 14.0, 18.0}) {
             ink.fill(rectangle(16, y, 2.5, 2), false, 160);
