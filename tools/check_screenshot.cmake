@@ -134,7 +134,7 @@ endif()
 # "%NAME" makes the window's own dock or toolbar NAME the target (--panel),
 # ">TEXT" runs TEXT on the command line (--command) and ">" alone is Enter on
 # an empty command line (--enter), "?WIDGET" prints what the target's WIDGET
-# shows (--report), "*NAME" triggers the menu item NAME in its turn
+# shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
 # (--trigger), "!BUTTON" presses a button, and anything else is a FIELD=TEXT
 # fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
