@@ -9,8 +9,8 @@
 // ordinary commands, so every edit made here is on the same undo stack as one
 // made on the command line - and its Undo and Redo buttons are that stack's.
 //
-// NON-MODAL. It may be shown beside the drawing (the workbench's show()) or
-// exec()'d (Edit > Styles and Linetypes). It hears the Document through a
+// NON-MODAL: Format > Styles and Linetypes shows it beside the drawing (the
+// workbench's show()); it may also be exec()'d. It hears the Document through a
 // DocumentWatcher, so an undo, an import or a library load made anywhere
 // reloads it once, from the event loop, keeping the selected rows; and every
 // button that acts on the drawing's selection reads the selection at the

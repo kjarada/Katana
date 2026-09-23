@@ -11,8 +11,8 @@
 // A layer name is a PATH ("design/surface/tin1"), so "move" and "rename" are
 // the same command: renameLayer takes the subtree and the entities with it.
 //
-// NON-MODAL, as the styles manager is. It may be shown beside the drawing or
-// exec()'d (Edit > Layers). It hears the Document through a DocumentWatcher,
+// NON-MODAL, as the styles manager is: Format > Layers shows it beside the
+// drawing; it may also be exec()'d. It hears the Document through a DocumentWatcher,
 // so an undo, an import or a command typed anywhere reloads it once, from the
 // event loop, keeping the selected layer - and the form's unsaved edits, when
 // the layer itself did not change underneath them. No button opens a modal
