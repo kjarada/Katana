@@ -62,7 +62,7 @@ struct RasterImage {
 struct GeoPoint {
     double x = 0.0;
     double y = 0.0;
-    double z = 0.0;
+    double z = 0.0; // meaningful only in a geometry whose hasZ is true
 };
 
 enum class GeometryKind {
@@ -78,6 +78,12 @@ enum class GeometryKind {
 struct VectorGeometry {
     GeometryKind kind = GeometryKind::Unknown;
     std::vector<std::vector<GeoPoint>> parts;
+    // Whether the geometry carries heights: read from the file's own geometry,
+    // and on writing, whether a 3D geometry is written. Without it a 2D source
+    // read as z = 0 everywhere, indistinguishable from real heights at the
+    // datum, and every export wrote a 3D geometry with z = 0 (audit IO-01).
+    // Absent is not zero.
+    bool hasZ = false;
 };
 
 struct VectorFeature {

@@ -213,6 +213,7 @@ void flatten(const OGRGeometry* geometry, const std::map<std::string, std::strin
         feature.geometry.kind = GeometryKind::Point;
         feature.geometry.parts.push_back({GeoPoint{point->getX(), point->getY(),
                                                    point->Is3D() != 0 ? point->getZ() : 0.0}});
+        feature.geometry.hasZ = point->Is3D() != 0;
         feature.attributes = attributes;
         out.push_back(std::move(feature));
         return;
@@ -221,6 +222,7 @@ void flatten(const OGRGeometry* geometry, const std::map<std::string, std::strin
         VectorFeature feature;
         feature.geometry.kind = GeometryKind::LineString;
         feature.geometry.parts.push_back(pointsOf(*geometry->toLineString()));
+        feature.geometry.hasZ = geometry->Is3D() != 0;
         feature.attributes = attributes;
         out.push_back(std::move(feature));
         return;
@@ -240,6 +242,7 @@ void flatten(const OGRGeometry* geometry, const std::map<std::string, std::strin
         if (feature.geometry.parts.empty()) {
             return;
         }
+        feature.geometry.hasZ = polygon->Is3D() != 0;
         feature.attributes = attributes;
         out.push_back(std::move(feature));
         return;
@@ -263,18 +266,30 @@ void flatten(const OGRGeometry* geometry, const std::map<std::string, std::strin
 
 // ---- VectorGeometry -> OGR geometry ---------------------------------------
 
-OGRLinearRing* makeRing(const std::vector<GeoPoint>& points)
+// Adds a vertex in the geometry's own dimension: OGR makes a geometry 3D the
+// moment one vertex is given a z, so a 2D one must never be handed a zero.
+template <typename Line>
+void addVertex(Line& line, const GeoPoint& point, bool hasZ)
+{
+    if (hasZ) {
+        line.addPoint(point.x, point.y, point.z);
+    } else {
+        line.addPoint(point.x, point.y);
+    }
+}
+
+OGRLinearRing* makeRing(const std::vector<GeoPoint>& points, bool hasZ)
 {
     auto* ring = new OGRLinearRing();
     for (const GeoPoint& point : points) {
-        ring->addPoint(point.x, point.y, point.z);
+        addVertex(*ring, point, hasZ);
     }
     // OGR requires a closed ring; close it if the caller's data does not.
     if (!points.empty()) {
         const GeoPoint& first = points.front();
         const GeoPoint& last = points.back();
         if (first.x != last.x || first.y != last.y) {
-            ring->addPoint(first.x, first.y, first.z);
+            addVertex(*ring, first, hasZ);
         }
     }
     return ring;
@@ -288,7 +303,7 @@ OGRGeometry* makeGeometry(const VectorGeometry& geometry)
             return nullptr;
         }
         const GeoPoint& p = geometry.parts.front().front();
-        return new OGRPoint(p.x, p.y, p.z);
+        return geometry.hasZ ? new OGRPoint(p.x, p.y, p.z) : new OGRPoint(p.x, p.y);
     }
     case GeometryKind::LineString: {
         if (geometry.parts.empty() || geometry.parts.front().size() < 2) {
@@ -296,7 +311,7 @@ OGRGeometry* makeGeometry(const VectorGeometry& geometry)
         }
         auto* line = new OGRLineString();
         for (const GeoPoint& p : geometry.parts.front()) {
-            line->addPoint(p.x, p.y, p.z);
+            addVertex(*line, p, geometry.hasZ);
         }
         return line;
     }
@@ -307,7 +322,7 @@ OGRGeometry* makeGeometry(const VectorGeometry& geometry)
         auto* polygon = new OGRPolygon();
         for (const auto& part : geometry.parts) {
             if (part.size() >= 3) {
-                polygon->addRingDirectly(makeRing(part));
+                polygon->addRingDirectly(makeRing(part, geometry.hasZ));
             }
         }
         return polygon;
@@ -846,6 +861,16 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
                                          });
         if (uniform) {
             layerType = ogrTypeFor(first);
+        }
+        // A layer that is going to hold heights is declared 3D, or a driver
+        // with a fixed layer type (a shapefile) drops them. The caller decides
+        // what a format that cannot mix 2D and 3D gets (export.cpp).
+        const bool anyZ = std::any_of(features.begin(), features.end(),
+                                      [](const VectorFeature& feature) {
+                                          return feature.geometry.hasZ;
+                                      });
+        if (anyZ && layerType != wkbUnknown) {
+            layerType = wkbSetZ(layerType);
         }
     }
 

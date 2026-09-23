@@ -555,3 +555,109 @@ TEST(EntitySerialization, WritersReportFailureInsteadOfThrowing)
     entity.properties.emplace("note", std::string("caf\xe9"));
     EXPECT_FALSE(entityToJson(entity).ok());
 }
+
+// ---- heights (the elevation / elevations properties) -----------------------------
+
+TEST(EntityHeights, OneHeightSharedByEveryVertexIsWrittenOnceAsElevation)
+{
+    PropertyMap properties;
+    setHeights(properties, {32.5, 32.5, 32.5});
+    ASSERT_EQ(properties.size(), 1u);
+    EXPECT_EQ(std::get<double>(properties.at(std::string(kElevationProperty))), 32.5);
+    // Read back for any vertex count: a single height is every vertex's.
+    const auto heights = heightsOf(properties, 3);
+    ASSERT_EQ(heights.size(), 3u);
+    for (const auto& z : heights) {
+        ASSERT_TRUE(z.has_value());
+        EXPECT_EQ(*z, 32.5);
+    }
+}
+
+TEST(EntityHeights, AStringSurveyedAtSomeVerticesKeepsItsGapsAsNull)
+{
+    // 0.1 is not exact in binary; the written text must still read back as the
+    // same double, which is what formatExactReal promises.
+    PropertyMap properties;
+    setHeights(properties, {10.25, std::nullopt, 0.1});
+    EXPECT_EQ(std::get<std::string>(properties.at(std::string(kElevationsProperty))),
+              "10.25 null 0.1");
+    EXPECT_FALSE(properties.contains(std::string(kElevationProperty)));
+
+    const auto heights = heightsOf(properties, 3);
+    ASSERT_EQ(heights.size(), 3u);
+    EXPECT_EQ(heights[0], std::optional<double>(10.25));
+    EXPECT_FALSE(heights[1].has_value()) << "a gap is no height, not zero";
+    EXPECT_EQ(heights[2], std::optional<double>(0.1));
+}
+
+TEST(EntityHeights, NoHeightAnywhereWritesNothingAndClearsAStaleOne)
+{
+    PropertyMap properties;
+    properties.emplace(std::string(kElevationProperty), 5.0);
+    properties.emplace(std::string(kElevationsProperty), std::string("1 2"));
+    properties.emplace("note", std::string("kept"));
+    setHeights(properties, {std::nullopt, std::nullopt});
+    EXPECT_FALSE(properties.contains(std::string(kElevationProperty)));
+    EXPECT_FALSE(properties.contains(std::string(kElevationsProperty)));
+    EXPECT_TRUE(properties.contains("note")) << "only the two height properties are touched";
+
+    const auto heights = heightsOf(properties, 2);
+    ASSERT_EQ(heights.size(), 2u);
+    EXPECT_FALSE(heights[0].has_value());
+    EXPECT_FALSE(heights[1].has_value());
+}
+
+TEST(EntityHeights, RewritingReplacesTheOtherFormRatherThanLeavingItToWin)
+{
+    // A list written first and a uniform height written after: the reader
+    // prefers a list of the right length, so a stale one left behind would
+    // silently override the new height.
+    PropertyMap properties;
+    setHeights(properties, {1.0, 2.0});
+    setHeights(properties, {7.0, 7.0});
+    EXPECT_FALSE(properties.contains(std::string(kElevationsProperty)));
+    EXPECT_EQ(heightsOf(properties, 2)[1], std::optional<double>(7.0));
+}
+
+TEST(EntityHeights, AListOfTheWrongLengthIsNotStretchedToFit)
+{
+    // Three heights for a string that now has four vertices: which vertex
+    // lost or gained one is unknowable, so the list is passed over and the
+    // single elevation, if any, stands in.
+    PropertyMap properties;
+    properties.emplace(std::string(kElevationsProperty), std::string("1 2 3"));
+    for (const auto& z : heightsOf(properties, 4)) {
+        EXPECT_FALSE(z.has_value());
+    }
+    properties.emplace(std::string(kElevationProperty), std::int64_t{12});
+    for (const auto& z : heightsOf(properties, 4)) {
+        EXPECT_EQ(z, std::optional<double>(12.0)) << "an integer elevation is a height too";
+    }
+}
+
+TEST(EntityHeights, NonFiniteHeightsAreNoHeight)
+{
+    PropertyMap properties;
+    setHeights(properties, {std::numeric_limits<double>::quiet_NaN(),
+                            std::numeric_limits<double>::infinity()});
+    EXPECT_TRUE(properties.empty());
+
+    setHeights(properties, {4.0, std::numeric_limits<double>::quiet_NaN()});
+    EXPECT_EQ(std::get<std::string>(properties.at(std::string(kElevationsProperty))), "4 null");
+
+    PropertyMap written;
+    written.emplace(std::string(kElevationsProperty), std::string("4 nan inf 5"));
+    const auto heights = heightsOf(written, 4);
+    EXPECT_EQ(heights[0], std::optional<double>(4.0));
+    EXPECT_FALSE(heights[1].has_value());
+    EXPECT_FALSE(heights[2].has_value());
+    EXPECT_EQ(heights[3], std::optional<double>(5.0));
+}
+
+TEST(EntityHeights, AnEmptyVertexListWritesAndReadsNothing)
+{
+    PropertyMap properties;
+    setHeights(properties, {});
+    EXPECT_TRUE(properties.empty());
+    EXPECT_TRUE(heightsOf(properties, 0).empty());
+}

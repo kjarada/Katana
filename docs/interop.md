@@ -88,6 +88,33 @@ Every lossy step is stated rather than hidden.
   and reported in `warnings` — never silently dropped (PLAN.MD §36).
 * **Attributes** become string entity properties; entity properties become
   attributes, doubles formatted at `%.17g` so they round trip exactly.
+* **Heights.** A file's Z becomes the `elevation` / `elevations` properties
+  that the 12d archive, the survey import and Surface From Drawing all read
+  (`entity.hpp`, one writer `setHeights` and one reader `heightsOf`); on export
+  they become the geometry's Z again. A 2D feature gets no height property at
+  all, and a real Z of 0 is kept as 0 - the adapter's `VectorGeometry::hasZ`
+  is what tells them apart, because a 2D source used to read as z = 0
+  everywhere. Until 2026-09-23 (audit IO-01) import dropped Z and export wrote
+  Z = 0, so a 3D DXF became a drawing on the datum and Surface From Drawing
+  built it flat, and nothing said so. What cannot survive is reported:
+  * a vertex dropped for standing on the one before it in plan takes its
+    height with it (a vertical step) - counted in `warnings`;
+  * a 3D geometry needs a height at every vertex, so an entity heighted at
+    only some is written in plan with its heights as attributes, and an arc
+    whose two ends differ is too - a height between an arc's ends is not
+    recorded anywhere, and interpolating one would be inventing it;
+  * a **shapefile** layer is all 2D or all 3D and a 3D one has no "no height",
+    so a drawing mixing heighted and heightless entities goes in plan with the
+    heights as attributes and a warning (GeoPackage, GeoJSON, DXF and GML keep
+    each geometry's own dimension and need none of this). Reading such a file
+    back takes a 2D feature's numeric `elevation` attribute as its height, so
+    the round trip still keeps them;
+  * a source attribute named `elevation` or `elevations` is taken by the
+    geometry's Z when there is one, and the replacement is counted: those two
+    names are where Katana keeps a height.
+
+  Each case has a round-trip test through the real driver (`InteropHeights`),
+  because which of these a GDAL driver does was checked, not assumed.
 
 ### Precision at survey coordinates
 

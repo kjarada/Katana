@@ -7,9 +7,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -748,4 +753,279 @@ TEST(InteropPlacement, TwoLonePointsAreNeverLostHoweverFarApart)
     const Box2 here(Point2(0.0, 0.0), Point2(0.0, 0.0));
     const Box2 there(Point2(255440.07, 7410850.76), Point2(255440.07, 7410850.76));
     EXPECT_FALSE(katana::interop::advisePlacement(here, there).farApart);
+}
+
+// ---- heights (audit IO-01) ------------------------------------------------------------------
+//
+// A vector file's Z is a height, and Katana keeps heights in the `elevation` /
+// `elevations` properties every other part of it reads (entity.hpp). Import
+// used to drop Z and export to write Z = 0 - so a 3D DXF became a drawing on
+// the datum, and a surveyed point went out at sea level.
+
+namespace {
+
+using katana::entity::heightsOf;
+using katana::entity::kElevationProperty;
+using katana::entity::kElevationsProperty;
+
+Entity heightedPoint(double x, double y, std::optional<double> z)
+{
+    Entity entity;
+    entity.geometry = katana::entity::PointGeometry{Point2(x, y)};
+    katana::entity::setHeights(entity.properties, {z});
+    return entity;
+}
+
+// The imported entity that came from model entity `id`, found by the
+// katana_id attribute the export writes.
+const Entity* byKatanaId(const VectorImportResult& read, katana::entity::EntityId id)
+{
+    for (const Entity& entity : read.entities) {
+        const auto found = entity.properties.find("katana_id");
+        if (found != entity.properties.end() &&
+            std::get<std::string>(found->second) == std::to_string(id)) {
+            return &entity;
+        }
+    }
+    return nullptr;
+}
+
+bool hasHeightProperty(const Entity& entity)
+{
+    return entity.properties.contains(kElevationProperty) ||
+           entity.properties.contains(kElevationsProperty);
+}
+
+std::string fileText(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+void writeText(const std::filesystem::path& path, const std::string& text)
+{
+    std::ofstream out(path, std::ios::binary);
+    out << text;
+}
+
+bool warned(const std::vector<std::string>& warnings, const std::string& fragment)
+{
+    return std::any_of(warnings.begin(), warnings.end(), [&](const std::string& warning) {
+        return warning.find(fragment) != std::string::npos;
+    });
+}
+
+} // namespace
+
+TEST(InteropHeights, HeightsGoIntoTheGeometryAndComeBackExactly)
+{
+    // Heights exact in binary except 0.1, which only has to round-trip.
+    const TempDir dir("heights-geojson");
+    const auto path = dir.file("heights.geojson");
+
+    Entity string;
+    Polyline2 polyline;
+    polyline.vertices = {Point2(0, 0), Point2(10, 0), Point2(10, 10)};
+    string.geometry = polyline;
+    katana::entity::setHeights(string.properties, {10.25, 11.5, 0.1});
+    Entity pad = closedSquare(20.0);
+    katana::entity::setHeights(pad.properties, {7.0, 7.0, 7.0, 7.0});
+    const Model model = modelWith({heightedPoint(5, 7, 32.5), string, pad,
+                                   heightedPoint(1, 1, std::nullopt)});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_EQ(fileText(path).find("\"elevation"), std::string::npos)
+        << "a height written into the geometry is not repeated as an attribute";
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 4u);
+
+    const Entity* point = byKatanaId(*read, 1);
+    ASSERT_NE(point, nullptr);
+    EXPECT_EQ(heightsOf(point->properties, 1)[0], std::optional<double>(32.5));
+
+    const Entity* back = byKatanaId(*read, 2);
+    ASSERT_NE(back, nullptr);
+    const auto heights = heightsOf(back->properties, 3);
+    EXPECT_EQ(heights[0], std::optional<double>(10.25));
+    EXPECT_EQ(heights[1], std::optional<double>(11.5));
+    EXPECT_EQ(heights[2], std::optional<double>(0.1));
+
+    const Entity* square = byKatanaId(*read, 3);
+    ASSERT_NE(square, nullptr);
+    for (const auto& z : heightsOf(square->properties, 4)) {
+        EXPECT_EQ(z, std::optional<double>(7.0));
+    }
+
+    const Entity* flat = byKatanaId(*read, 4);
+    ASSERT_NE(flat, nullptr);
+    EXPECT_FALSE(hasHeightProperty(*flat)) << "no height went out and none came back";
+}
+
+TEST(InteropHeights, ARealZeroIsAHeightAndAMissingZIsNone)
+{
+    // The distinction the old import could not make: [5, 7, 0.0] is surveyed
+    // at the datum, [1, 1] has no height at all.
+    const TempDir dir("heights-zero");
+    const auto path = dir.file("mixed.geojson");
+    writeText(path, R"({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"id": "datum"},
+         "geometry": {"type": "Point", "coordinates": [5.0, 7.0, 0.0]}},
+        {"type": "Feature", "properties": {"id": "plan"},
+         "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}}]})");
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 2u);
+    for (const Entity& entity : read->entities) {
+        const auto& id = std::get<std::string>(entity.properties.at("id"));
+        if (id == "datum") {
+            EXPECT_EQ(heightsOf(entity.properties, 1)[0], std::optional<double>(0.0));
+        } else {
+            EXPECT_FALSE(hasHeightProperty(entity)) << "a 2D point must not arrive at 0";
+        }
+    }
+}
+
+TEST(InteropHeights, AVerticalStepLosesAHeightAndSaysSo)
+{
+    // (0,0) at 1 then 5 is one vertex in plan: the model has no zero-length
+    // segment, so the second is dropped - and with it a real height.
+    const TempDir dir("heights-step");
+    const auto path = dir.file("step.geojson");
+    writeText(path, R"({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {},
+         "geometry": {"type": "LineString",
+                      "coordinates": [[0, 0, 1], [0, 0, 5], [10, 0, 6]]}}]})");
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 1u);
+    const auto heights = heightsOf(read->entities.front().properties, 2);
+    EXPECT_EQ(heights[0], std::optional<double>(1.0)) << "the first of the two is kept";
+    EXPECT_EQ(heights[1], std::optional<double>(6.0));
+    EXPECT_TRUE(warned(read->warnings, "1 vertices were dropped")) << "the lost height is reported";
+}
+
+TEST(InteropHeights, AStringHeightedAtOnlySomeVerticesGoesInPlanWithItsHeightsKept)
+{
+    // A 3D geometry needs a height at every vertex; writing 0 for the missing
+    // one would be a height nobody measured. So the string goes in plan and
+    // the list travels as an attribute, and reading it back restores it.
+    const TempDir dir("heights-partial");
+    const auto path = dir.file("partial.geojson");
+
+    Entity string;
+    Polyline2 polyline;
+    polyline.vertices = {Point2(0, 0), Point2(10, 0), Point2(10, 10)};
+    string.geometry = polyline;
+    katana::entity::setHeights(string.properties, {1.0, std::nullopt, 3.0});
+    const Model model = modelWith({string});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_TRUE(warned(written->warnings, "only some of their vertices"));
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 1u);
+    const auto heights = heightsOf(read->entities.front().properties, 3);
+    EXPECT_EQ(heights[0], std::optional<double>(1.0));
+    EXPECT_FALSE(heights[1].has_value());
+    EXPECT_EQ(heights[2], std::optional<double>(3.0));
+}
+
+TEST(InteropHeights, AShapefileOfHeightedPointsIsWritten3D)
+{
+    const TempDir dir("heights-shp");
+    const auto path = dir.file("points.shp");
+    const Model model = modelWith({heightedPoint(0, 0, 12.5), heightedPoint(5, 5, 13.75)});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_FALSE(warned(written->warnings, "written in plan"));
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(heightsOf(byKatanaId(*read, 1)->properties, 1)[0], std::optional<double>(12.5));
+    EXPECT_EQ(heightsOf(byKatanaId(*read, 2)->properties, 1)[0], std::optional<double>(13.75));
+}
+
+TEST(InteropHeights, AShapefileMixingHeightedAndHeightlessEntitiesIsWrittenInPlanAndSaysSo)
+{
+    // A shapefile layer is all 2D or all 3D, and a 3D one has no "no height":
+    // the heightless point would be written at 0. So the layer goes in plan,
+    // the heights ride as attributes, and the round trip still keeps them.
+    const TempDir dir("heights-shp-mixed");
+    const auto path = dir.file("mixed.shp");
+    const Model model = modelWith({heightedPoint(0, 0, 32.5), heightedPoint(5, 5, std::nullopt)});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_TRUE(warned(written->warnings, "1 of 2 entities have heights"));
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    const Entity* heighted = byKatanaId(*read, 1);
+    const Entity* heightless = byKatanaId(*read, 2);
+    ASSERT_NE(heighted, nullptr);
+    ASSERT_NE(heightless, nullptr);
+    EXPECT_EQ(heightsOf(heighted->properties, 1)[0], std::optional<double>(32.5));
+    EXPECT_FALSE(heightsOf(heightless->properties, 1)[0].has_value())
+        << "the heightless point must not come back at 0";
+}
+
+TEST(InteropHeights, ADxfPointKeepsItsHeight)
+{
+    // The audit's case: a DXF carries heights only in its geometry, because
+    // its fields are fixed and an "elevation" attribute has nowhere to go.
+    const TempDir dir("heights-dxf");
+    const auto path = dir.file("survey.dxf");
+    Entity string;
+    string.geometry = Segment2{Point2(255440.0, 7410850.0), Point2(255450.0, 7410860.0)};
+    katana::entity::setHeights(string.properties, {32.5, 33.25});
+    const Model model = modelWith({heightedPoint(255440.125, 7410850.25, 32.5), string});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 2u);
+    bool sawPoint = false;
+    bool sawLine = false;
+    for (const Entity& entity : read->entities) {
+        if (std::holds_alternative<katana::entity::PointGeometry>(entity.geometry)) {
+            EXPECT_EQ(heightsOf(entity.properties, 1)[0], std::optional<double>(32.5));
+            sawPoint = true;
+        } else if (std::holds_alternative<Segment2>(entity.geometry)) {
+            const auto heights = heightsOf(entity.properties, 2);
+            EXPECT_EQ(heights[0], std::optional<double>(32.5));
+            EXPECT_EQ(heights[1], std::optional<double>(33.25));
+            sawLine = true;
+        }
+    }
+    EXPECT_TRUE(sawPoint);
+    EXPECT_TRUE(sawLine);
+}
+
+TEST(InteropHeights, AGeoPackageHoldsHeightedAndHeightlessEntitiesTogether)
+{
+    // Unlike a shapefile, each GeoPackage geometry has its own dimension, so a
+    // mixed drawing keeps its heights in the geometry and nothing goes in plan.
+    const TempDir dir("heights-gpkg");
+    const auto path = dir.file("mixed.gpkg");
+    const Model model = modelWith({heightedPoint(0, 0, 32.5), heightedPoint(5, 5, std::nullopt)});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_FALSE(warned(written->warnings, "written in plan"));
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(heightsOf(byKatanaId(*read, 1)->properties, 1)[0], std::optional<double>(32.5));
+    EXPECT_FALSE(hasHeightProperty(*byKatanaId(*read, 2)))
+        << "the heightless point must not come back at 0";
 }

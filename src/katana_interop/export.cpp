@@ -144,6 +144,8 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
     std::vector<katana::gis::VectorFeature> features;
     std::size_t textSkipped = 0;
     std::size_t dimensionSkipped = 0;
+    std::size_t incompleteHeights = 0;
+    std::size_t slopingArcs = 0;
 
     const auto append = [&](const Entity& entity) {
         if (filterByLayer && std::find(options.layers.begin(), options.layers.end(),
@@ -153,6 +155,13 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
 
         katana::gis::VectorGeometry geometry;
         bool supported = true;
+        // One height per vertex written, from the properties every importer
+        // writes (entity.hpp). A 3D geometry needs one at EVERY vertex, and a
+        // missing one is never written as 0.
+        std::vector<std::optional<double>> heights;
+        const auto uniformHeight = [&](std::size_t written, std::optional<double> z) {
+            heights.assign(written, z);
+        };
 
         std::visit(
             [&](const auto& held) {
@@ -160,20 +169,33 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
                 if constexpr (std::is_same_v<Held, katana::entity::PointGeometry>) {
                     geometry.kind = katana::gis::GeometryKind::Point;
                     geometry.parts.push_back({toGeo(held.position, options.originShift)});
+                    heights = katana::entity::heightsOf(entity.properties, 1);
                 } else if constexpr (std::is_same_v<Held, Segment2>) {
                     geometry.kind = katana::gis::GeometryKind::LineString;
                     geometry.parts.push_back({toGeo(held.start, options.originShift),
                                               toGeo(held.end, options.originShift)});
+                    heights = katana::entity::heightsOf(entity.properties, 2);
                 } else if constexpr (std::is_same_v<Held, Arc2>) {
                     geometry.kind = katana::gis::GeometryKind::LineString;
                     geometry.parts.push_back(
                         tessellateArc(held, options.curveTolerance, options.originShift));
+                    // An arc carries a height at each end and nowhere between
+                    // (the 12d archive, the only source of one). Level, every
+                    // chord point has it; sloping, a height between the ends
+                    // would be invented, so the arc goes in plan.
+                    const auto ends = katana::entity::heightsOf(entity.properties, 2);
+                    if (ends[0] && ends[1] && *ends[0] == *ends[1]) {
+                        uniformHeight(geometry.parts.front().size(), ends[0]);
+                    } else if (ends[0] || ends[1]) {
+                        ++slopingArcs;
+                    }
                 } else if constexpr (std::is_same_v<Held, Polyline2>) {
                     std::vector<katana::gis::GeoPoint> points;
                     points.reserve(held.vertices.size() + 1);
                     for (const Point2& vertex : held.vertices) {
                         points.push_back(toGeo(vertex, options.originShift));
                     }
+                    heights = katana::entity::heightsOf(entity.properties, held.vertices.size());
                     if (held.closed && points.size() >= 3) {
                         geometry.kind = katana::gis::GeometryKind::Polygon;
                     } else {
@@ -184,6 +206,8 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
                     geometry.kind = katana::gis::GeometryKind::Polygon;
                     geometry.parts.push_back(
                         tessellateCircle(held, options.curveTolerance, options.originShift));
+                    uniformHeight(geometry.parts.front().size(),
+                                  katana::entity::heightsOf(entity.properties, 1)[0]);
                 } else if constexpr (std::is_same_v<Held, katana::entity::TextGeometry>) {
                     // A label has no geometry counterpart in these formats.
                     // Exporting its anchor as a point would invent a feature
@@ -214,6 +238,20 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
         if (geometry.parts.empty() || geometry.parts.front().empty()) {
             ++result.entitiesSkipped;
             return;
+        }
+
+        const bool anyHeight = std::any_of(heights.begin(), heights.end(),
+                                           [](const auto& z) { return z.has_value(); });
+        const bool everyHeight =
+            anyHeight && heights.size() == geometry.parts.front().size() &&
+            std::all_of(heights.begin(), heights.end(), [](const auto& z) { return z.has_value(); });
+        if (everyHeight) {
+            for (std::size_t i = 0; i < heights.size(); ++i) {
+                geometry.parts.front()[i].z = *heights[i];
+            }
+            geometry.hasZ = true;
+        } else if (anyHeight) {
+            ++incompleteHeights; // in plan, its heights kept as attributes below
         }
 
         katana::gis::VectorFeature feature;
@@ -278,6 +316,26 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
         }
     }
 
+    // Heights written into a geometry are dropped from its attributes, where
+    // they would only repeat it. The exception is a format whose layer is
+    // either 2D or 3D (a shapefile): a 3D layer has no way to say "no height",
+    // so the drawing's heightless entities would be written at 0. When some
+    // entities have heights and some do not, such a layer is written in plan
+    // and every height stays an attribute - reported, not decided silently.
+    const std::size_t withHeights = static_cast<std::size_t>(
+        std::count_if(features.begin(), features.end(),
+                      [](const katana::gis::VectorFeature& feature) { return feature.geometry.hasZ; }));
+    const bool inPlan = withHeights > 0 && withHeights < features.size() &&
+                        katana::gis::driverHoldsOneGeometryType(driver);
+    for (katana::gis::VectorFeature& feature : features) {
+        if (inPlan) {
+            feature.geometry.hasZ = false;
+        } else if (feature.geometry.hasZ) {
+            feature.attributes.erase(std::string(katana::entity::kElevationProperty));
+            feature.attributes.erase(std::string(katana::entity::kElevationsProperty));
+        }
+    }
+
     katana::gis::VectorExportOptions gdalOptions;
     gdalOptions.driver = driver;
     gdalOptions.layerName = options.layerName;
@@ -312,6 +370,26 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
         result.warnings.push_back(
             std::to_string(dimensionSkipped) +
             " dimension entities were skipped: this format has no dimension geometry");
+    }
+    if (inPlan) {
+        result.warnings.push_back(
+            std::to_string(withHeights) + " of " + std::to_string(features.size()) +
+            " entities have heights, but a " + driver +
+            " layer is either all 2D or all 3D and a 3D one cannot say \"no height\": the "
+            "layer was written in plan and the heights are in the elevation attributes. "
+            "Export to GeoPackage or GeoJSON to keep them in the geometry.");
+    }
+    if (incompleteHeights > 0) {
+        result.warnings.push_back(
+            std::to_string(incompleteHeights) +
+            " entities have heights at only some of their vertices and were written in plan, "
+            "their heights kept as attributes: a 3D geometry needs a height at every vertex");
+    }
+    if (slopingArcs > 0) {
+        result.warnings.push_back(
+            std::to_string(slopingArcs) +
+            " arcs have different heights at their two ends and were written in plan, their "
+            "heights kept as attributes: a height between the ends of an arc is not recorded");
     }
     return result;
 }

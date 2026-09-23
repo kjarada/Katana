@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include "katana/core/error.hpp"
 #include "katana/core/text_encoding.hpp"
@@ -138,6 +139,27 @@ using PropertyMap = std::map<std::string, PropertyValue, std::less<>>;
 // is not the same as zero.
 inline constexpr std::string_view kElevationProperty = "elevation";
 inline constexpr std::string_view kElevationsProperty = "elevations";
+
+// The ONE writer and the ONE reader of those two properties. The 12d archive,
+// the survey import and vector interchange all go through them: until
+// 2026-09-23 there were two writers and a reader in two modules, and a third
+// pair was about to be written for the GDAL formats (audit IO-01), which is
+// how three spellings of "a list with a gap in it" would have begun.
+//
+// setHeights makes the properties describe exactly `heights`, one per vertex:
+// nothing when no vertex has a height (absent is not zero), one `elevation`
+// when every vertex has the same height, otherwise an `elevations` list with
+// "null" where a vertex has none. A non-finite height is no height. The
+// property that does not apply is removed, so a rewrite cannot leave behind a
+// stale one that the reader would prefer.
+void setHeights(PropertyMap& properties, const std::vector<std::optional<double>>& heights);
+
+// The heights of `count` vertices: the `elevations` list when it has exactly
+// `count` entries, else `elevation` for every vertex, else none. A list of the
+// wrong length describes some other geometry - a vertex has been added or
+// removed since - so it is passed over rather than stretched to fit.
+[[nodiscard]] std::vector<std::optional<double>> heightsOf(const PropertyMap& properties,
+                                                           std::size_t count);
 
 struct Entity {
     EntityId id = kInvalidEntityId;

@@ -2478,7 +2478,7 @@ void MainWindow::buildSurfaceFromDrawing()
             return heights[index];
         };
         if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry)) {
-            const auto heights = katana::archive12d::entityHeights(entity, 1);
+            const auto heights = katana::entity::heightsOf(entity.properties, 1);
             if (const auto z = heightAt(heights, 0)) {
                 input.points.push_back(
                     katana::geometry::Point3(point->position.x, point->position.y, *z));
@@ -2488,7 +2488,7 @@ void MainWindow::buildSurfaceFromDrawing()
         } else if (const auto* polyline =
                        std::get_if<katana::geometry::Polyline2>(&entity.geometry)) {
             const auto heights =
-                katana::archive12d::entityHeights(entity, polyline->vertices.size());
+                katana::entity::heightsOf(entity.properties, polyline->vertices.size());
             katana::terrain::Breakline breakline;
             const auto flush = [&] {
                 if (breakline.vertices.size() >= 2) {

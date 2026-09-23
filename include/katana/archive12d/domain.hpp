@@ -303,17 +303,9 @@ fromDomain(const katana::entity::Model& model, const std::vector<ExportSurface>&
 // whose colour did not come from 12d in the first place.
 [[nodiscard]] std::string nearestStandardColour(const katana::entity::Color& colour);
 
-// The heights of an entity's `count` vertices, from the `elevations` list or
-// the single `elevation` that import writes (see HEIGHTS above). nullopt where
-// there is none. A list whose length is not `count` describes some other
-// geometry - a vertex has been added or removed since - and is ignored rather
-// than applied to the wrong vertices; the single elevation then stands in.
-//
-// Here, and public, because there must be ONE reader of that list: export
-// uses it, and so does the desktop application's Surface From Drawing, which
-// is what makes an imported 3D string usable as a breakline.
-[[nodiscard]] std::vector<std::optional<double>>
-entityHeights(const katana::entity::Entity& entity, std::size_t count);
+// The heights import writes are read back with katana::entity::heightsOf
+// (entity.hpp), the one reader of them; this module had its own until
+// 2026-09-23.
 
 // Splits a list written by import (`12d.segment_colours`, `12d.interface_modes`
 // ...): blank-separated, an item with a blank in it in double quotes with the
