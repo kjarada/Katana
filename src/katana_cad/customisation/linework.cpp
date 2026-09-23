@@ -467,14 +467,24 @@ class LineBuilder {
 
     // `code` is what the line carries in the code property, so that
     // applySurveyCodes - now, and whenever it is applied again - codes the
-    // line as its points were coded.
+    // line as its points were coded. `texts` are further text properties
+    // (a survey feature's description); an empty value is not written.
     void emit(LineworkString built, const std::string& code, const Shape& shape,
-              const std::vector<const Candidate*>& members)
+              const std::vector<const Candidate*>& members,
+              const std::vector<std::pair<std::string, std::string>>& texts = {})
     {
         Entity entity;
         entity.geometry = katana::geometry::Polyline2{shape.vertices, shape.closed};
         entity.layer = built.layer;
-        entity.properties.insert_or_assign(property_, PropertyValue(code));
+        // An empty code is no code (codeOf reads it so), not a code "".
+        if (!code.empty()) {
+            entity.properties.insert_or_assign(property_, PropertyValue(code));
+        }
+        for (const auto& [key, value] : texts) {
+            if (!key.empty() && !value.empty()) {
+                entity.properties.insert_or_assign(key, PropertyValue(value));
+            }
+        }
         katana::entity::setHeights(entity.properties, shape.heights);
         lines_.push_back(std::move(entity));
         if (!document_.model().layers.contains(built.layer)) {
@@ -486,9 +496,12 @@ class LineBuilder {
         built.curves = shape.curves;
         built.vertices = shape.vertices.size();
         for (const Candidate* member : members) {
-            built.points.push_back(member->id);
+            // A survey feature's points are the project's, not entities.
+            if (member->id != katana::entity::kInvalidEntityId) {
+                built.points.push_back(member->id);
+                placed_.insert(member->id);
+            }
             built.pointNumbers.push_back(member->number);
-            placed_.insert(member->id);
         }
         report_.strings.push_back(std::move(built));
     }
@@ -734,9 +747,24 @@ std::string_view toString(LineworkNoteKind kind)
     case LineworkNoteKind::DuplicatePointNumber:
         return "two points of one string share a number";
     case LineworkNoteKind::NoRuleForName:
-        return "a line by control code alone: no rule styles it";
+        // processLinework meets this only for a line made by a control code;
+        // drawSurveyFeatures for a feature whose code no rule knows.
+        return "no rule for its code: nothing styles the line";
     case LineworkNoteKind::FallbackOnlyName:
         return "a line only because the fallback rule \"*\" says so";
+    case LineworkNoteKind::UnpositionedPoint:
+        return "a point with no coordinates, left out of the line";
+    }
+    return "unknown";
+}
+
+std::string_view toString(UnplacedFeatureReason reason)
+{
+    switch (reason) {
+    case UnplacedFeatureReason::TooFewPoints:
+        return "fewer than two of its points have a position";
+    case UnplacedFeatureReason::Coincident:
+        return "its positioned points are all in one place";
     }
     return "unknown";
 }
@@ -930,6 +958,125 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
     }
     // nullptr when there is nothing to build, and no error.
     result.command = builder.finish("PROCESS_LINEWORK", options.coding, std::move(remove));
+    return result;
+}
+
+// ---- survey features ---------------------------------------------------------------
+
+katana::core::Result<SurveyFeatureResult>
+drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject& project,
+                   const SurveyFeatureOptions& options)
+{
+    // Asked of the survey layer, as importSurveyProject asks it, so the two
+    // cannot disagree about a valid project. It also guarantees what the loop
+    // relies on: every point a feature names is in one of the two lists, and
+    // every coordinate is finite.
+    if (auto status = katana::survey::validateProject(project); !status) {
+        return status.error();
+    }
+
+    const katana::entity::SurveyMap& map = document.surveyMap();
+    const SurveyImportOptions& import = options.import;
+    SurveyFeatureResult result;
+    LineworkReport& report = result.report;
+    report.property = import.codeProperty;
+    NoteSink note{report.notes};
+
+    std::map<std::string_view, const katana::survey::SurveyPoint*> positioned;
+    for (const auto& point : project.points) {
+        positioned.emplace(point.id, &point);
+    }
+
+    LineBuilder builder(document, import.codeProperty, options.coding.createLayers, report);
+    for (std::size_t index = 0; index < project.features.size(); ++index) {
+        const katana::survey::SurveyFeature& feature = project.features[index];
+        const std::string& name = feature.name.empty() ? feature.code : feature.name;
+
+        // The feature's points as candidates, in the file's order. They carry
+        // no control codes: a feature says its closure itself, and shapeOf
+        // then only joins them straight and checks the closure.
+        std::vector<Candidate> candidates;
+        std::vector<const katana::survey::SurveyPoint*> sources;
+        for (const std::string& id : feature.pointIds) {
+            const auto found = positioned.find(id);
+            if (found == positioned.end()) {
+                // validateProject put it in unpositionedPoints.
+                Candidate missing;
+                missing.number = id;
+                note(missing, LineworkNoteKind::UnpositionedPoint, name);
+                continue;
+            }
+            const katana::survey::SurveyPoint& point = *found->second;
+            Candidate candidate;
+            candidate.number = point.id;
+            // Easting first, as importSurveyProject draws a point: a CAD x is
+            // an easting.
+            candidate.at = Point2(point.easting, point.northing);
+            candidate.height = point.elevation;
+            candidate.codeText = feature.code;
+            candidates.push_back(std::move(candidate));
+            sources.push_back(&point);
+        }
+        auto unplace = [&](UnplacedFeatureReason reason) {
+            result.unplaced.push_back(UnplacedFeature{index, name, feature.code, reason});
+        };
+        if (candidates.size() < 2) {
+            unplace(UnplacedFeatureReason::TooFewPoints);
+            continue;
+        }
+
+        Run run;
+        run.closed = feature.closed;
+        for (const Candidate& candidate : candidates) {
+            run.points.push_back(&candidate);
+        }
+        const Shape shape = shapeOf(run, 1.0, note); // straight only: no tolerance used
+        if (!(katana::geometry::Polyline2{shape.vertices, shape.closed}.length() >
+              tol::kGeometric)) {
+            unplace(UnplacedFeatureReason::Coincident);
+            continue;
+        }
+
+        // The rules are keyed on the CODE, and the line carries the code, so
+        // the code is what is split and resolved - the name may be anything
+        // the file calls the string ("Kerb 1").
+        const StringName split = splitStringName(map, feature.code);
+        if (!split.matched) {
+            note(candidates.front(), LineworkNoteKind::NoRuleForName, feature.code);
+        } else if (split.fallbackOnly) {
+            note(candidates.front(), LineworkNoteKind::FallbackOnlyName, feature.code);
+        }
+        // With its points when no rule names a model: the layer the import
+        // put the first of them on.
+        const std::string pointsLayer = layerForPoint(*sources.front(), import);
+        if (auto status = katana::entity::validateLayerPath(pointsLayer); !status) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "the layer the import options give this feature's points is not "
+                             "a valid layer name",
+                             "feature=" + name + " layer=" + pointsLayer + " " +
+                                 status.error().context);
+        }
+        auto layer = builder.layerFor(map.lookup(feature.code), feature.code, pointsLayer);
+        if (!layer) {
+            return layer.error();
+        }
+        if (!document.model().layers.contains(*layer) && !options.coding.createLayers) {
+            return makeError(ErrorCode::NotFound,
+                             "the drawing has no layer for this feature and layers may not "
+                             "be created",
+                             "feature=" + name + " layer=" + *layer);
+        }
+
+        LineworkString built;
+        built.name = name;
+        built.key = split.key;
+        built.number = split.number;
+        built.layer = *layer;
+        builder.emit(std::move(built), feature.code, shape, run.points,
+                     {{import.descriptionProperty, feature.description}});
+    }
+
+    result.command = builder.finish("DRAW_SURVEY_FEATURES", options.coding, {});
     return result;
 }
 
