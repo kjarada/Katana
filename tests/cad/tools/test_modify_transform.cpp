@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -436,6 +437,15 @@ TEST(CopyTool, RefusesACopyOntoTheOriginalAndExitWithNoCopiesMakesNothing)
 {
     OneLine fixture({0.0, 0.0}, {1.0, 0.0}, "modify.copy");
     ToolDriver& driver = fixture.driver;
+    // A typed displacement of nothing puts the copy on the original.
+    (void)driver.type("D");
+    EXPECT_EQ(driver.type("0,0").outcome, Outcome::Rejected) << "a typed displacement of zero";
+    (void)driver.undo();
+    // With the base point at the origin, Enter's "use first point as
+    // displacement" is a displacement of nothing too.
+    (void)driver.click(0.0, 0.0);
+    EXPECT_EQ(driver.enter().outcome, Outcome::Rejected) << "the base point is the origin";
+    (void)driver.undo();
     (void)driver.click(1.0, 1.0);
     EXPECT_EQ(driver.click(1.0, 1.0).outcome, Outcome::Rejected);
     EXPECT_EQ(driver.type("E").outcome, Outcome::Done);
@@ -545,7 +555,7 @@ TEST(RotateTool, TheCopyOptionRotatesACopyAndLeavesTheOriginal)
     EXPECT_EQ(entityCount(driver), 1u);
 }
 
-TEST(RotateTool, RefusesNoTurnAPointWithNoDirectionAndACollapsedReference)
+TEST(RotateTool, RefusesNoTurnAPointWithNoDirectionAndACollapsedReferenceOrNewAngle)
 {
     OneLine fixture({2.0, 0.0}, {4.0, 0.0}, "modify.rotate");
     ToolDriver& driver = fixture.driver;
@@ -560,6 +570,18 @@ TEST(RotateTool, RefusesNoTurnAPointWithNoDirectionAndACollapsedReference)
     EXPECT_EQ(driver.click(3.0, 3.0).outcome, Outcome::Rejected) << "reference points coincide";
     EXPECT_EQ(driver.executed(), 0);
     EXPECT_EQ(driver.tool().prompt(), "Specify second point of the reference angle");
+
+    // A reference of 30 degrees, then a new angle with no direction. Taken as
+    // due east, either would turn the selection by -30 degrees unasked.
+    (void)driver.undo();
+    EXPECT_EQ(driver.type("30").outcome, Outcome::Continue);
+    EXPECT_EQ(driver.click(1.0, 1.0).outcome, Outcome::Rejected) << "new angle on the base point";
+    EXPECT_EQ(driver.type("P").outcome, Outcome::Continue);
+    (void)driver.click(3.0, 3.0);
+    EXPECT_EQ(driver.click(3.0, 3.0).outcome, Outcome::Rejected) << "new angle points coincide";
+    EXPECT_EQ(driver.executed(), 0);
+    EXPECT_EQ(driver.tool().prompt(), "Specify second point of the new angle");
+    EXPECT_EQ(lineOf(driver, fixture.id), (Segment2{{2.0, 0.0}, {4.0, 0.0}}));
 }
 
 TEST(RotateTool, UndoStepsBackThroughTheReferenceDialogue)
@@ -839,10 +861,23 @@ TEST(ArrayRectangularTool, OneRowAsksOnlyForTheColumnsAndOneColumnOnlyForTheRows
     }
 }
 
-TEST(ArrayRectangularTool, RefusesBadCountsOneCellAZeroSpacingAndAFlatUnitCell)
+TEST(ArrayRectangularTool, RefusesBadCountsOneCellAZeroSpacingAFlatUnitCellAndLevelColumnPoints)
 {
+    {
+        // Two points straight above one another are 0 apart across the
+        // columns: every column would land on the first.
+        OneLine fixture({0.0, 0.0}, {1.0, 0.0}, "modify.array_rectangular");
+        ToolDriver& driver = fixture.driver;
+        (void)driver.enter(); // <1> row
+        (void)driver.type("2");
+        (void)driver.click(1.0, 1.0);
+        EXPECT_EQ(driver.click(1.0, 5.0).outcome, Outcome::Rejected) << "level across the columns";
+        EXPECT_EQ(driver.tool().prompt(), "Specify second point of the distance between columns");
+        EXPECT_EQ(driver.executed(), 0);
+    }
     OneLine fixture({0.0, 0.0}, {1.0, 0.0}, "modify.array_rectangular");
     ToolDriver& driver = fixture.driver;
+    EXPECT_EQ(driver.type("100001").outcome, Outcome::Rejected) << "100001 rows is over the limit";
     EXPECT_EQ(driver.type("0").outcome, Outcome::Rejected);
     EXPECT_EQ(driver.type("2.5").outcome, Outcome::Rejected);
     EXPECT_EQ(driver.type("rows").outcome, Outcome::Rejected);
@@ -857,6 +892,26 @@ TEST(ArrayRectangularTool, RefusesBadCountsOneCellAZeroSpacingAndAFlatUnitCell)
     EXPECT_EQ(driver.click(3.0, 0.0).outcome, Outcome::Rejected) << "a cell with no height";
     EXPECT_EQ(driver.click(0.0, 3.0).outcome, Outcome::Rejected) << "a cell with no width";
     EXPECT_EQ(driver.executed(), 0);
+}
+
+TEST(ArrayRectangularTool, RefusesAColumnCountSoLargeThatRowsTimesColumnsWouldOverflow)
+{
+    OneLine fixture({0.0, 0.0}, {1.0, 0.0}, "modify.array_rectangular");
+    ToolDriver& driver = fixture.driver;
+    // 2^63 = 9223372036854775808, and 3074457345618258603 is 2^63 / 3 rounded
+    // up, so 3 rows of it are 2^63 + 1 items - one past the largest int64.
+    // Multiplied in int64 that wraps round to a negative count, which is
+    // "under" the limit of 100000.
+    (void)driver.type("3");
+    EXPECT_EQ(driver.type("3074457345618258603").outcome, Outcome::Rejected);
+    EXPECT_EQ(driver.tool().prompt(), "Enter the number of columns <1>");
+    // 2 rows of the largest int64, 2^63 - 1, are 2^64 - 2: -2 once wrapped.
+    (void)driver.undo();
+    (void)driver.type("2");
+    EXPECT_EQ(driver.type("9223372036854775807").outcome, Outcome::Rejected);
+    EXPECT_EQ(driver.tool().prompt(), "Enter the number of columns <1>");
+    EXPECT_EQ(driver.executed(), 0);
+    EXPECT_EQ(entityCount(driver), 1u);
 }
 
 // ---- Polar array ---------------------------------------------------------------------
@@ -939,12 +994,13 @@ TEST(ArrayPolarTool, ItemsThatDoNotTurnAreCarriedRoundByTheMiddleOfTheSelection)
     expectNear(carried.end, {1.0, 10.0});
 }
 
-TEST(ArrayPolarTool, RefusesTooFewItemsNoAngleTooMuchAngleAndAnUnclearAnswer)
+TEST(ArrayPolarTool, RefusesTooFewItemsTooManyNoAngleTooMuchAngleAndAnUnclearAnswer)
 {
     OneLine fixture({9.0, 0.0}, {11.0, 0.0}, "modify.array_polar");
     ToolDriver& driver = fixture.driver;
     (void)driver.click(0.0, 0.0);
     EXPECT_EQ(driver.type("1").outcome, Outcome::Rejected) << "the original alone";
+    EXPECT_EQ(driver.type("100001").outcome, Outcome::Rejected) << "over the limit of 100000";
     EXPECT_EQ(driver.type("six").outcome, Outcome::Rejected);
     EXPECT_EQ(driver.enter().outcome, Outcome::Rejected) << "the count has no default";
     (void)driver.type("6");
@@ -987,6 +1043,38 @@ TEST(EraseTool, OneEnterErasesTheSelectionItStartedWithAndOneUndoBringsItBack)
     EXPECT_NE(entityOf(driver, kept), nullptr);
     ASSERT_TRUE(driver.document().undo().ok());
     EXPECT_EQ(entityCount(driver), 3u);
+}
+
+TEST(EraseTool, ASelectionChangedAtItsPromptIsWhatEnterErases)
+{
+    ToolDriver driver;
+    const EntityId a = addLine(driver, {0.0, 0.0}, {1.0, 0.0});
+    const EntityId b = addLine(driver, {0.0, 1.0}, {1.0, 1.0});
+    const EntityId c = addLine(driver, {0.0, 2.0}, {1.0, 2.0});
+    {
+        // At "Select entities to erase" the view selects as the Select tool
+        // does: a plain click on C replaces A and B with C, and C alone is
+        // highlighted - so C alone is erased.
+        select(driver, {a, b});
+        driver.start("modify.erase");
+        select(driver, {c});
+        EXPECT_EQ(driver.enter().outcome, Outcome::Done);
+        EXPECT_EQ(driver.messages().back(), "1 entity erased");
+        EXPECT_NE(entityOf(driver, a), nullptr);
+        EXPECT_NE(entityOf(driver, b), nullptr);
+        EXPECT_EQ(entityOf(driver, c), nullptr);
+        ASSERT_TRUE(driver.document().undo().ok());
+    }
+    {
+        // Cleared there, nothing is highlighted and nothing is erased.
+        select(driver, {a, b});
+        driver.start("modify.erase");
+        select(driver, {});
+        const int executed = driver.executed();
+        EXPECT_EQ(driver.enter().outcome, Outcome::Rejected);
+        EXPECT_EQ(driver.executed(), executed);
+        EXPECT_EQ(entityCount(driver), 3u);
+    }
 }
 
 TEST(EraseTool, WithNothingSelectedEnterIsRefusedUntilSomethingIsPicked)
@@ -1154,6 +1242,39 @@ TEST(StretchTool, RefusesAFlatWindowAnEmptyOneNoDisplacementAndAnArcWhoseEndsWou
     EXPECT_EQ(lineOf(driver, line), (Segment2{{0.0, 0.0}, {10.0, 0.0}}));
     EXPECT_EQ(std::get<Arc2>(entityOf(driver, arc)->geometry),
               (Arc2{{20.0, 0.0}, 2.0, 0.0, katana::math::kPi}));
+}
+
+TEST(StretchTool, RefusesAStretchThatLeavesALineOrPolylineOfZeroLengthAndStaysPut)
+{
+    // The window round the east end (10,0) of a line or open polyline from
+    // (0,0), and that end taken to (0,0) - the other end, where a snap puts
+    // it: what is left has zero length, which the document would refuse.
+    const auto collapse = [](katana::commands::CommandPtr make) {
+        ToolDriver driver;
+        const EntityId id = driver.add(std::move(make));
+        const katana::entity::Geometry before = entityOf(driver, id)->geometry;
+        driver.start("modify.stretch");
+        (void)driver.click(9.0, -1.0);
+        (void)driver.click(11.0, 1.0);
+        (void)driver.click(10.0, 0.0);
+        const ToolStep collapsed = driver.click(0.0, 0.0);
+        EXPECT_EQ(collapsed.outcome, Outcome::Rejected);
+        EXPECT_NE(collapsed.message.find("zero length"), std::string::npos) << collapsed.message;
+        EXPECT_EQ(driver.executed(), 0);
+        EXPECT_FALSE(driver.finished());
+        EXPECT_EQ(entityOf(driver, id)->geometry, before);
+        // The window and base point are kept: the next point finishes it.
+        // (10,0) to (4,0) leaves 4 of the 10.
+        EXPECT_EQ(driver.tool().prompt(),
+                  "Specify second point or <use first point as displacement>");
+        EXPECT_EQ(driver.click(4.0, 0.0).outcome, Outcome::Done);
+        EXPECT_EQ(driver.executed(), 1);
+        return entityOf(driver, id)->geometry;
+    };
+    EXPECT_EQ(collapse(cmd::createLine({0.0, 0.0}, {10.0, 0.0})),
+              katana::entity::Geometry(Segment2{{0.0, 0.0}, {4.0, 0.0}}));
+    EXPECT_EQ(collapse(cmd::createPolyline(Polyline2{{{0.0, 0.0}, {10.0, 0.0}}, false})),
+              katana::entity::Geometry(Polyline2{{{0.0, 0.0}, {4.0, 0.0}}, false}));
 }
 
 TEST(StretchTool, UndoStepsBackAndThePreviewShowsTheStretchForTheCursor)

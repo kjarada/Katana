@@ -220,15 +220,19 @@ class History {
 class SelectionTool : public InteractiveTool {
   public:
     // `verb` completes "Select entities to ...". A tool that `confirms` starts
-    // in the selection step even when there is a selection, holding it, so one
-    // Enter carries it out: Erase, which has nothing else to ask.
+    // in the selection step even when there is a selection, so one Enter
+    // carries it out: Erase, which has nothing else to ask. It does NOT copy
+    // that selection into its picks. The selection lives in the document,
+    // where Enter reads it, and the view changes it there as the Select tool
+    // does - a plain click replaces it. A copy held here could be neither
+    // seen nor taken back, and Erase would delete what the user had just
+    // deselected.
     SelectionTool(const ToolContext& context, std::string verb, bool confirms = false)
         : document_(context.document), verb_(std::move(verb))
     {
         if (context.selection.empty() || confirms) {
             selecting_ = true;
             asked_ = true;
-            picked_ = context.selection;
         } else {
             ids_ = context.selection;
         }
@@ -283,6 +287,11 @@ class SelectionTool : public InteractiveTool {
         }
         std::vector<EntityId> all;
         const katana::entity::Model& model = document_->model();
+        // The document rule alone. ToolContext carries no view, so a layer
+        // hidden in the view the tool runs in is NOT excluded yet, although
+        // selection.hpp says it must be. That needs the view's LayerOverrides
+        // in ToolContext (outstanding for the lead). The same gap applies to
+        // Stretch's window.
         model.entities.forEach([&](const Entity& candidate) {
             if (isSelectable(model, candidate, kNoLayerOverrides)) {
                 all.push_back(candidate.id);
@@ -1440,7 +1449,11 @@ class ArrayRectangularTool final : public SelectionTool {
             now.step = Step::Columns;
             return ToolStep::next();
         }
-        if (count * now.rows > kMaximumArrayItems) {
+        // Divided rather than multiplied: the count is whatever int64 was
+        // typed, and count * rows can overflow - a wrapped, negative product
+        // would pass as "under the limit". For whole numbers,
+        // count * rows > M exactly when count > floor(M / rows).
+        if (count > kMaximumArrayItems / now.rows) {
             return ToolStep::rejected("an array is at most 100000 items");
         }
         if (count == 1 && now.rows == 1) {
@@ -2044,6 +2057,8 @@ class StretchTool final : public InteractiveTool {
         if (document_ == nullptr) {
             return ToolStep::rejected("there is no drawing to stretch");
         }
+        // No filter.view: ToolContext carries no view yet, so layers hidden in
+        // the view are not excluded (see the All option of SelectionTool).
         std::vector<EntityId> caught = pickInBox(
             document_->model(), box, BoxSelectionMode::Crossing, {}, &document_->spatialIndex());
         if (!limit_.empty()) {
@@ -2079,12 +2094,20 @@ class StretchTool final : public InteractiveTool {
             return ToolStep::rejected("a displacement of zero would stretch nothing");
         }
         const State& now = state_.now;
-        // Built once here to refuse, with its reason, a stretch the command
-        // would refuse - an arc whose ends would meet.
+        // Built once here, and checked as the document will check it, to
+        // refuse with its reason a stretch the document would refuse. The
+        // Stretcher refuses an arc or a dimension whose ends would meet, but a
+        // line or polyline stretched onto itself is only caught by the model's
+        // own rule (zero length). Done would end the tool and lose the window
+        // and base point for a command that then fails.
         if (document_ != nullptr) {
-            if (auto changes = stretchChanges(document_->model(), now.caught, now.window, delta);
-                !changes) {
+            auto changes = stretchChanges(document_->model(), now.caught, now.window, delta);
+            if (!changes) {
                 return ToolStep::rejected(changes.error().message);
+            }
+            if (auto status = cmd::validateChangeSet(*changes, document_->model()); !status) {
+                return ToolStep::rejected("that stretch cannot be made: " +
+                                          status.error().message);
             }
         }
         return ToolStep::done(stretchCommand(now.caught, now.window, delta),
