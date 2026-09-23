@@ -412,7 +412,8 @@ void ViewportWidget::cancel()
         // As in a command line: the first Esc takes back what was typed.
         typed_.clear();
     } else if (tools_.active()) {
-        tools_.cancel(); // its onFinished resets the prompt and repaints
+        boxStart_.reset(); // a selection box the tool was being given
+        tools_.cancel();   // its onFinished resets the prompt and repaints
         return;
     } else if (boxStart_) {
         boxStart_.reset();
