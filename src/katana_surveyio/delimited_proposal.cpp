@@ -242,12 +242,62 @@ KnownName meaningOf(std::string_view raw)
     return {raw, NameKind::Unknown, ColumnRole::Ignore};
 }
 
-// ---- Rows --------------------------------------------------------------------------
+// Whether `raw` leaves a bracket open, counted as normalisedName counts them.
+bool leavesBracketOpen(std::string_view raw)
+{
+    int depth = 0;
+    for (const char c : raw) {
+        if (c == '(' || c == '[') {
+            ++depth;
+        } else if (c == ')' || c == ']') {
+            depth = depth > 0 ? depth - 1 : 0;
+        }
+    }
+    return depth > 0;
+}
 
 struct Line {
     std::string_view text;
     std::size_t number = 0; // physical, 1-based
 };
+
+// The names a header line gives its columns, in order.
+//
+// In a whitespace file the blank inside "Easting (m)" splits it exactly as the
+// blanks between names do, and every name after it would then head the column
+// to the right of its data. So there two kinds of word join the name before
+// them: one normalisedName keeps nothing of, such as "(m)" or "#", and one
+// inside a bracket that name left open, as in "Easting (US ft)". "Reduced
+// Level" cannot be put back together this way, since both halves are words;
+// that is left to the check that the header has no more names than the rows
+// have fields.
+//
+// Empty names at the end are dropped: "a,b,c," names three columns, just as a
+// row's trailing empty fields are nothing.
+std::vector<std::string> headerNames(const Line& header, Delimiter delimiter)
+{
+    std::vector<std::string> names;
+    bool open = false; // the last name has a bracket not yet closed
+    for (const Field& field : splitLine(header.text, delimiter)) {
+        const std::string_view word = valueOf(field);
+        const bool partOfLast = delimiter == Delimiter::Whitespace && !names.empty() &&
+                                !field.quoted &&
+                                (open || (!word.empty() && normalisedName(word).empty()));
+        if (partOfLast) {
+            names.back() += ' ';
+            names.back() += word;
+        } else {
+            names.emplace_back(word);
+        }
+        open = !field.quoted && leavesBracketOpen(names.back());
+    }
+    while (!names.empty() && names.back().empty()) {
+        names.pop_back();
+    }
+    return names;
+}
+
+// ---- Rows --------------------------------------------------------------------------
 
 bool isNumber(std::string_view value)
 {
@@ -468,18 +518,22 @@ std::string quotedHeader(std::string_view header)
     return quotedForMessage(katana::core::trimmed(header), 60);
 }
 
-// The first sampled row with a value in a column past the `named` ones the
-// header names, as a clause; nullopt when there is none. Empty fields do not
-// count: "a,b,c," is how many writers end a row, and the parser reads past them.
-// A value does count, because the layout can only read past it as Ignore - an
-// elevation column the header forgot, or the second word of a description in a
-// whitespace file - and nothing in the import would say it had gone.
+// The first sampled row with a value in a column the header does not name - one
+// past its last name, or one under a blank header cell - as a clause; nullopt
+// when there is none. Empty fields do not count: "a,b,c," is how many writers
+// end a row, and the parser reads past them. A value does count, because the
+// layout can only read past it as Ignore - an elevation column the header
+// forgot, a spreadsheet column nobody headed, the second word of a description
+// in a whitespace file - and nothing in the import would say it had gone.
 std::optional<std::string> unnamedValue(const std::vector<std::vector<Field>>& rows,
                                         const std::vector<std::size_t>& lineNumbers,
-                                        std::size_t named)
+                                        const std::vector<std::string>& names)
 {
     for (std::size_t r = 0; r < rows.size(); ++r) {
-        for (std::size_t c = named; c < rows[r].size(); ++c) {
+        for (std::size_t c = 0; c < rows[r].size(); ++c) {
+            if (c < names.size() && !names[c].empty()) {
+                continue;
+            }
             const std::string_view value = valueOf(rows[r][c]);
             if (!value.empty()) {
                 return "line " + std::to_string(lineNumbers[r]) + " has a value in column " +
@@ -594,10 +648,17 @@ Analysis analyse(std::string_view text)
                                              static_cast<std::ptrdiff_t>(*split.firstRow),
                                          split.fields.end());
     std::vector<std::size_t> lineNumbers;
-    std::size_t width = 0;
+    std::size_t width = 0;        // the most fields a row has, empty ones included
+    std::size_t valueColumns = 0; // columns up to the last one any row has a value in
     for (std::size_t i = *split.firstRow; i < content.size(); ++i) {
         lineNumbers.push_back(content[i].number);
         width = std::max(width, split.fields[i].size());
+        for (std::size_t c = split.fields[i].size(); c > valueColumns; --c) {
+            if (!valueOf(split.fields[i][c - 1]).empty()) {
+                valueColumns = c;
+                break;
+            }
+        }
     }
     const std::vector<ColumnProfile> profiles = profileOf(rows, width);
     const std::string delimiterWord = std::string(toString(split.delimiter)) + "-delimited";
@@ -613,8 +674,20 @@ Analysis analyse(std::string_view text)
                       "comes first";
     if (*split.firstRow > 0) {
         const Line& headerLine = content[*split.firstRow - 1];
-        const std::vector<Field> names = splitLine(headerLine.text, split.delimiter);
-        const std::optional<std::string> unnamed = unnamedValue(rows, lineNumbers, names.size());
+        const std::vector<std::string> names = headerNames(headerLine, split.delimiter);
+        const std::optional<std::string> unnamed = unnamedValue(rows, lineNumbers, names);
+        // More names than any row has fields: the header's words do not line up
+        // with the rows' columns. A name with a blank or a delimiter in it that
+        // headerNames could not put back together ("Reduced Level", "Height, m")
+        // has split in two, every name after it heads the column to the right of
+        // its data, and a value under the wrong name is read into the wrong role
+        // or past as Ignore, with nothing to say so.
+        std::optional<std::string> overhang;
+        if (names.size() > width) {
+            overhang = "it names " + std::to_string(names.size()) +
+                       " columns and no sampled row has more than " + std::to_string(width) +
+                       " fields, so its words may not line up with the rows' columns";
+        }
 
         std::vector<KnownName> meanings;
         std::size_t northings = 0;
@@ -623,7 +696,7 @@ Analysis analyse(std::string_view text)
         std::size_t ys = 0;
         std::optional<std::size_t> geographic;
         for (std::size_t c = 0; c < names.size(); ++c) {
-            meanings.push_back(meaningOf(valueOf(names[c])));
+            meanings.push_back(meaningOf(names[c]));
             const KnownName& meaning = meanings.back();
             northings += meaning.kind == NameKind::Role && meaning.role == ColumnRole::Northing;
             eastings += meaning.kind == NameKind::Role && meaning.role == ColumnRole::Easting;
@@ -637,22 +710,32 @@ Analysis analyse(std::string_view text)
         if (geographic) {
             analysis.proposal = LayoutProposal::uncertain(
                 {}, "column " + std::to_string(*geographic + 1) + " is headed " +
-                        quotedForMessage(valueOf(names[*geographic])) +
+                        quotedForMessage(names[*geographic]) +
                         ": this reader takes grid northings and eastings, and latitude and "
                         "longitude read as metres would place the survey wrongly without any "
                         "error; convert the file to grid coordinates first");
             return analysis;
         }
 
-        // The header's roles, for the columns it names; X, Y, repeats and words
-        // it does not know are Ignore here and filled in or reported below.
+        // The header's roles, for the columns it names; X, Y, repeats, blank
+        // cells and words it does not know are Ignore here and filled in or
+        // reported below.
+        //
+        // The layout has the header's columns, and more only when a sampled row
+        // has a value past them: Ignore out to the last such value, so that the
+        // candidate parses the sample while `unnamed`, reported below, keeps it
+        // from being decided. It never reaches out to a trailing EMPTY field. An
+        // Ignore column there would read past a value that first appears after
+        // the sample, where one past the layout's last column the parser refuses,
+        // naming the line.
         const auto layoutFromHeader = [&](std::optional<ColumnRole> xRole,
                                           std::optional<ColumnRole> yRole,
                                           std::vector<std::string>& notes) {
             DelimitedLayout layout = base;
             std::vector<ColumnRole> used;
             std::vector<std::string> unknown; // "2 ('Date')"
-            for (std::size_t c = 0; c < std::max(width, names.size()); ++c) {
+            std::vector<std::size_t> blank;
+            for (std::size_t c = 0; c < std::max(valueColumns, names.size()); ++c) {
                 ColumnRole role = ColumnRole::Ignore;
                 if (c < names.size()) {
                     const KnownName& meaning = meanings[c];
@@ -662,9 +745,11 @@ Analysis analyse(std::string_view text)
                         role = *xRole;
                     } else if (meaning.kind == NameKind::AxisY && yRole) {
                         role = *yRole;
-                    } else if (meaning.kind == NameKind::Unknown && !valueOf(names[c]).empty()) {
+                    } else if (meaning.kind == NameKind::Unknown && names[c].empty()) {
+                        blank.push_back(c + 1);
+                    } else if (meaning.kind == NameKind::Unknown) {
                         unknown.push_back(std::to_string(c + 1) + " (" +
-                                          quotedForMessage(valueOf(names[c])) + ")");
+                                          quotedForMessage(names[c]) + ")");
                     }
                     if (role != ColumnRole::Ignore &&
                         std::find(used.begin(), used.end(), role) != used.end()) {
@@ -692,9 +777,15 @@ Analysis analyse(std::string_view text)
                                           " is not a header word this reader knows, so it is "
                                           "ignored");
             }
-            // Columns past the header's are Ignore, so that the layout parses;
-            // whether any of them holds a value is `unnamed`, which the branches
-            // below report - it is what keeps a header from deciding.
+            if (!blank.empty()) {
+                // Said even when every sampled row is empty there: a value
+                // further down the file would be read past.
+                notes.push_back(blank.size() > 1
+                                    ? "columns " + columnList(blank) +
+                                          " have no header, so they are ignored"
+                                    : "column " + columnList(blank) +
+                                          " has no header, so it is ignored");
+            }
             return layout;
         };
         const auto joined = [](const std::vector<std::string>& notes) {
@@ -729,6 +820,14 @@ Analysis analyse(std::string_view text)
                     header + ", but " + *misfit + "; check the header against the rows");
                 return analysis;
             }
+            if (overhang) {
+                candidate.evidence += "; " + *overhang;
+                analysis.proposal = LayoutProposal::uncertain(
+                    {std::move(candidate)}, header + ", but " + *overhang +
+                                                "; check the header against the rows" +
+                                                joined(notes) + hashNote);
+                return analysis;
+            }
             if (unnamed) {
                 candidate.evidence += "; " + *unnamed + ", and it is read past";
                 analysis.proposal = LayoutProposal::uncertain(
@@ -761,8 +860,10 @@ Analysis analyse(std::string_view text)
             std::vector<std::string> notes;
             const DelimitedLayout gisOrder =
                 layoutFromHeader(ColumnRole::Easting, ColumnRole::Northing, notes);
-            const std::string rest = joined(notes) + (unnamed ? "; " + *unnamed : std::string{}) +
-                                     commentNote + hashNote;
+            const std::string rest = joined(notes) +
+                                     (overhang ? "; " + *overhang : std::string{}) +
+                                     (unnamed ? "; " + *unnamed : std::string{}) + commentNote +
+                                     hashNote;
             notes.clear();
             const DelimitedLayout geodeticOrder =
                 layoutFromHeader(ColumnRole::Northing, ColumnRole::Easting, notes);
