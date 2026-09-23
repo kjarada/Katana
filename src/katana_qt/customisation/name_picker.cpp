@@ -11,12 +11,13 @@
 #include <QPixmap>
 #include <QStandardItem>
 #include <QStandardItemModel>
-#include <QStringListModel>
 
 #include "customisation_context.hpp"
 #include "definition_thumbnails.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_resolver.hpp"
+#include "katana/cad/survey_coding.hpp"
+#include "katana/entity/display.hpp"
 #include "katana/entity/tables.hpp"
 #include "style_painter.hpp"
 #include "theme.hpp"
@@ -51,6 +52,44 @@ constexpr double kMarginFraction = 0.12;
 [[nodiscard]] QString undefinedLabel(std::string_view name)
 {
     return QObject::tr("%1 (not defined)").arg(fromName(name));
+}
+
+// A search that folds case but says it does not. QComboBox finishes every
+// edit with its own findText(text, matchFlags()) before the picker hears of
+// it, and matchFlags() drops Qt::MatchCaseSensitive whenever the line edit's
+// completer is case-insensitive: the combo would jump from "Kerb" typed to a
+// listed "KERB" and report that as the choice. So this completer compares
+// case-SENSITIVELY, and does its folding itself - its model holds each name
+// folded in kFoldedRole, and splitPath folds what was typed - while a
+// completion still puts the exact name in the field.
+class FoldedNameCompleter final : public QCompleter {
+  public:
+    static constexpr int kFoldedRole = Qt::UserRole + 1;
+
+    FoldedNameCompleter(QAbstractItemModel* model, QObject* parent) : QCompleter(model, parent)
+    {
+        setCaseSensitivity(Qt::CaseSensitive);
+        setCompletionRole(kFoldedRole);
+    }
+
+    [[nodiscard]] QStringList splitPath(const QString& path) const override
+    {
+        return {path.toCaseFolded()};
+    }
+
+    // What a completion writes into the field: the name, not the folded key
+    // (QCompleter's own answer is the completion role's data).
+    [[nodiscard]] QString pathFromIndex(const QModelIndex& index) const override
+    {
+        return index.data(Qt::DisplayRole).toString();
+    }
+};
+
+[[nodiscard]] QStandardItem* completionItem(const QString& name)
+{
+    auto* item = new QStandardItem(name);
+    item->setData(name.toCaseFolded(), FoldedNameCompleter::kFoldedRole);
+    return item;
 }
 
 // A model Linetype along the style sample path, painted as the thumbnails
@@ -94,11 +133,11 @@ NamePicker::NamePicker(const CustomisationContext& context, NameRole role, bool 
       role_(role), offerByLayer_(role == NameRole::Linetype && offerByLayer)
 {
     setEditable(true);
-    // Typing never adds an item, and Enter never looks for a case-folded
-    // duplicate to jump to (QComboBox does that when duplicates are off):
-    // "kerb" typed is "kerb", not the "Kerb" further down.
+    // Typing never adds an item: a typed name is a value for the style, not
+    // an entry for this list. The one lookup QComboBox still makes when an
+    // edit finishes is kept exact-case by the completer below, so "kerb"
+    // typed stays "kerb" and never becomes a listed "Kerb".
     setInsertPolicy(QComboBox::NoInsert);
-    setDuplicatesEnabled(true);
     setIconSize(role_ == NameRole::Symbol ? kSymbolIconSize : kLinestyleIconSize);
     setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     setMinimumContentsLength(18);
@@ -110,10 +149,11 @@ NamePicker::NamePicker(const CustomisationContext& context, NameRole role, bool 
     // label - in place of the combo's, which searches its whole model by
     // prefix. Set on the line edit, not through QComboBox::setCompleter,
     // which would map a completion back to a row by a case-folded search and
-    // could land on "Kerb" for "KERB".
-    completions_ = new QStringListModel(this);
-    completer_ = new QCompleter(completions_, this);
-    completer_->setCaseSensitivity(Qt::CaseInsensitive);
+    // could land on "Kerb" for "KERB". Case-sensitive as far as QComboBox can
+    // tell (FoldedNameCompleter says why), so the combo's own lookup when an
+    // edit finishes matches exact text only.
+    completions_ = new QStandardItemModel(this);
+    completer_ = new FoldedNameCompleter(completions_, this);
     completer_->setFilterMode(Qt::MatchContains);
     completer_->setCompletionMode(QCompleter::PopupCompletion);
     completer_->setMaxVisibleItems(16);
@@ -123,10 +163,18 @@ NamePicker::NamePicker(const CustomisationContext& context, NameRole role, bool 
     // Lambdas, not slots: no moc here.
     QObject::connect(this, &QComboBox::activated, this, [this](int) { chosen(); });
     QObject::connect(lineEdit(), &QLineEdit::editingFinished, this, [this] {
-        // Enter on a completion reaches the field first (QCompleter hands
-        // the key to its widget before acting on it), which would report the
-        // typed fragment as a name; the completion's own activation follows.
-        if (completer_->popup() != nullptr && completer_->popup()->isVisible()) {
+        // Enter on a highlighted completion reaches the field first
+        // (QCompleter hands the key to its widget before acting on it),
+        // which would report the typed fragment as a name; the completion's
+        // own activation follows. Only then - the test QComboBox makes for
+        // the same reason. With nothing highlighted the completer activates
+        // nothing, and the field will not finish again on leaving, as its
+        // text has not changed since: what was typed is the choice.
+        const QAbstractItemView* popup = completer_->popup();
+        const bool completing = popup != nullptr && popup->isVisible() &&
+                                popup->selectionModel() != nullptr &&
+                                popup->selectionModel()->isSelected(popup->currentIndex());
+        if (completing) {
             return;
         }
         chosen();
@@ -169,31 +217,24 @@ void NamePicker::setCurrentName(std::string_view name)
     // kept item is the one row that follows the name.
     updating_ = true;
     auto* items = qobject_cast<QStandardItemModel*>(model());
-    if (count() > 0 &&
-        itemData(0, kSourceRole).toInt() == static_cast<int>(DefinitionSource::Undefined)) {
+    // By the flag, not the row's source: a kept plain-line name is not
+    // Undefined, and row 0 of a Style's list is otherwise ByLayer.
+    if (kept_) {
         items->removeRow(0);
+        completions_->removeRow(0);
+        kept_ = false;
     }
     bool listed = false;
     for (int row = 0; row < count() && !listed; ++row) {
         const QVariant stored = itemData(row, kNameRole);
         listed = stored.isValid() && stored.toByteArray() == nameBytes(name);
     }
-    QStringList completions = completions_->stringList();
-    if (!completions.isEmpty() && keptCompletion_) {
-        completions.removeFirst();
-    }
-    keptCompletion_ = false;
     if (!name.empty() && !listed) {
-        CatalogueEntry missing;
-        missing.name = std::string(name);
-        missing.source = DefinitionSource::Undefined;
-        missing.missing = true;
-        QStandardItem* item = addEntry(missing);
+        QStandardItem* item = addEntry(keptEntry(name));
         items->insertRow(0, items->takeRow(item->row()));
-        completions.prepend(fromName(name));
-        keptCompletion_ = true;
+        completions_->insertRow(0, completionItem(fromName(name)));
+        kept_ = true;
     }
-    completions_->setStringList(completions);
     selectName(name);
     lastName_ = std::string(name);
     updating_ = false;
@@ -212,8 +253,12 @@ std::string NamePicker::currentName() const
 bool NamePicker::currentIsDefined() const
 {
     const int row = rowForText(lineEdit()->text());
-    return row >= 0 &&
-           itemData(row, kSourceRole).toInt() != static_cast<int>(DefinitionSource::Undefined);
+    if (row >= 0) {
+        return itemData(row, kSourceRole).toInt() !=
+               static_cast<int>(DefinitionSource::Undefined);
+    }
+    // Typed, and listed nowhere: still defined when it is a plain-line name.
+    return isPlainName(currentName());
 }
 
 void NamePicker::refresh() { rebuild(currentName()); }
@@ -240,18 +285,14 @@ void NamePicker::rebuild(std::string_view keep)
                                               ? katana::cad::symbolChoices(*document_)
                                               : katana::cad::linetypeChoices(*document_,
                                                                              offerByLayer_);
-    QStringList completions;
+    completions_->clear();
     const bool listed = std::ranges::any_of(
         choices, [&kept](const CatalogueEntry& entry) { return entry.name == kept; });
-    keptCompletion_ = false;
+    kept_ = false;
     if (!kept.empty() && !listed) {
-        CatalogueEntry missing;
-        missing.name = kept;
-        missing.source = DefinitionSource::Undefined;
-        missing.missing = true;
-        addEntry(missing);
-        completions << fromName(kept);
-        keptCompletion_ = true;
+        addEntry(keptEntry(kept));
+        completions_->appendRow(completionItem(fromName(kept)));
+        kept_ = true;
     }
     struct Section {
         DefinitionSource source;
@@ -277,11 +318,10 @@ void NamePicker::rebuild(std::string_view keep)
         for (const CatalogueEntry& entry : choices) {
             if (entry.source == section.source) {
                 addEntry(entry);
-                completions << fromName(entry.name);
+                completions_->appendRow(completionItem(fromName(entry.name)));
             }
         }
     }
-    completions_->setStringList(completions);
     selectName(kept);
     lastName_ = kept;
     updating_ = false;
@@ -317,8 +357,13 @@ QStandardItem* NamePicker::addEntry(const CatalogueEntry& entry)
         tip = tr("A linetype of this drawing");
         break;
     case DefinitionSource::BuiltIn:
-        tip = role_ == NameRole::Symbol ? tr("A built-in symbol")
-                                        : tr("The linetype of the entity's layer");
+        if (role_ == NameRole::Symbol) {
+            tip = tr("A built-in symbol");
+        } else if (offerByLayer_ && entry.name == katana::entity::kByLayerLinetype) {
+            tip = tr("The linetype of the entity's layer"); // the listed ByLayer
+        } else {
+            tip = plainDescription(entry.name); // a kept plain-line name
+        }
         break;
     case DefinitionSource::Library:
         tip = tr("12d %1 from %2")
@@ -431,6 +476,45 @@ QString NamePicker::fallbackDescription(std::string_view name) const
     }
     return tr("Not defined in the drawing or any loaded library: drawn as a solid line "
               "until a library or a linetype defines it.");
+}
+
+bool NamePicker::isPlainName(std::string_view name) const
+{
+    // cad::missingNames' own rule (style_catalogue.cpp, isPlainLinetype),
+    // built from the same two public halves so the two cannot drift: the
+    // plain line of 12d and DXF ("1", "0", "continuous" in any case; D4),
+    // or ByLayer in any spelling. "" is nothing chosen, not a name.
+    return role_ == NameRole::Linetype && !name.empty() &&
+           (katana::cad::isPlainLinestyle(name) || katana::entity::isByLayer(name));
+}
+
+CatalogueEntry NamePicker::keptEntry(std::string_view name) const
+{
+    CatalogueEntry entry;
+    entry.name = std::string(name);
+    // A plain-line name needs nothing to define it, so it is kept as given
+    // but not marked: marked, it would contradict missingNames, which never
+    // reports one, and the style manager's Missing count with it.
+    const bool plain = isPlainName(name);
+    entry.source = plain ? DefinitionSource::BuiltIn : DefinitionSource::Undefined;
+    entry.missing = !plain;
+    return entry;
+}
+
+QString NamePicker::plainDescription(std::string_view name) const
+{
+    if (katana::entity::isByLayer(name)) {
+        // entity::resolvedLinetype: a Style's ByLayer inherits; a Layer's
+        // has no layer above it, and draws what a missing layer does.
+        return offerByLayer_
+                   ? tr("ByLayer, spelt \"%1\": the entity is drawn in its layer's linetype")
+                         .arg(fromName(name))
+                   : tr("ByLayer, spelt \"%1\": a layer has no layer above it to inherit from, "
+                        "so it is drawn as a plain line")
+                         .arg(fromName(name));
+    }
+    return tr("\"%1\" is the plain line of 12d and DXF: it needs no definition")
+        .arg(fromName(name));
 }
 
 } // namespace katana::qt

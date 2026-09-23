@@ -12,6 +12,11 @@
 //   and wrote whatever it showed back into the style, rewriting names they
 //   could not show.
 //
+//   A linetype name that needs no definition is kept the same way but NOT
+//   marked: 12d's and DXF's plain line ("1", "0", "continuous" in any case;
+//   D4) and ByLayer in any spelling - exactly the names cad::missingNames
+//   never reports, so the picker's mark and a manager's Missing count agree.
+//
 // The list, in sections (header rows that cannot be chosen):
 //   linetype: [ByLayer - a Style's linetype only]; Drawing linetypes (the
 //             model's Linetype table); Library linestyles (non-vertex 12d
@@ -24,11 +29,17 @@
 //
 // Names are case-SENSITIVE and kept byte for byte (stored as bytes, never
 // round-tripped through a QString); the completer's search folds case and
-// matches anywhere in a name, as a person looking for "kerb" expects.
+// matches anywhere in a name, as a person looking for "kerb" expects. Only
+// the search folds: a name typed and finished is that name, in that case -
+// "Kerb" typed is never swapped for a listed "KERB", nor "KERB" for "Kerb".
+// (QComboBox's own lookup when an edit finishes folds case whenever its line
+// edit's completer does, so the picker's completer folds through its model
+// and reports itself case-sensitive; see FoldedNameCompleter.)
 //
 // onNameChosen fires on the user's choice only - picking from the list,
-// picking a completion, or finishing typing (Enter, or leaving the field)
-// with a name different from the last one - and never on setCurrentName or
+// picking a highlighted completion, or finishing typing (Enter, with the
+// completion popup open or not, or leaving the field) with a name different
+// from the last one - and never on setCurrentName or
 // refresh: a form applies an edit when a person makes one, and a command is
 // never run from a list's own change signal (docs/cad.md).
 //
@@ -49,7 +60,7 @@
 
 class QCompleter;
 class QStandardItem;
-class QStringListModel;
+class QStandardItemModel;
 
 namespace katana::qt {
 
@@ -78,16 +89,19 @@ class NamePicker : public QComboBox {
     NamePicker(const CustomisationContext& context, katana::cad::NameRole role,
                bool offerByLayer, QWidget* parent = nullptr);
 
-    // Shows `name`, adding it as the marked undefined item when no section
-    // holds it exactly. "" shows nothing chosen (no symbol; for a linetype,
-    // nothing to keep). Does not fire onNameChosen.
+    // Shows `name`, adding it first when no section holds it exactly: as the
+    // marked undefined item, or unmarked for a plain-line linetype name.
+    // "" shows nothing chosen (no symbol; for a linetype, nothing to keep).
+    // Does not fire onNameChosen.
     void setCurrentName(std::string_view name);
     // The name being shown, exactly: the stored bytes of a listed item (never
     // its decorated label), or what was typed, as UTF-8, when it matches no
     // item's text exactly (case-sensitively).
     [[nodiscard]] std::string currentName() const;
-    // Whether currentName() is defined by something - a listed name - rather
-    // than kept (the marked item) or typed.
+    // Whether currentName() is defined by something - a listed name, or a
+    // plain-line linetype name, which needs no definition - rather than kept
+    // (the marked item) or typed. False for "" (nothing chosen). Agrees with
+    // cad::missingNames on the plain-line names, which it never reports.
     [[nodiscard]] bool currentIsDefined() const;
 
     // Rebuilds the list from the Document - after a library or survey map is
@@ -95,8 +109,8 @@ class NamePicker : public QComboBox {
     // if it is now undefined). Does not fire onNameChosen.
     void refresh();
 
-    // The names offered, in list order, without the headers: the kept
-    // undefined name first when there is one.
+    // The names offered, in list order, without the headers: the kept name
+    // first when there is one.
     [[nodiscard]] std::vector<std::string> names() const;
     [[nodiscard]] katana::cad::NameRole role() const { return role_; }
     [[nodiscard]] QCompleter* nameCompleter() const { return completer_; }
@@ -116,15 +130,21 @@ class NamePicker : public QComboBox {
     void chosen();
     [[nodiscard]] QIcon iconFor(const katana::cad::CatalogueEntry& entry) const;
     [[nodiscard]] QString fallbackDescription(std::string_view name) const;
+    // A linetype name that needs no definition, by cad::missingNames' rule.
+    [[nodiscard]] bool isPlainName(std::string_view name) const;
+    // The entry for a name no section lists: Undefined, or plain.
+    [[nodiscard]] katana::cad::CatalogueEntry keptEntry(std::string_view name) const;
+    [[nodiscard]] QString plainDescription(std::string_view name) const;
 
     katana::cad::Document* document_ = nullptr;
     DefinitionThumbnails* thumbnails_ = nullptr;
     katana::cad::NameRole role_ = katana::cad::NameRole::Linetype;
     bool offerByLayer_ = false;
     QCompleter* completer_ = nullptr;
-    QStringListModel* completions_ = nullptr;
-    // The completions start with the kept undefined name.
-    bool keptCompletion_ = false;
+    QStandardItemModel* completions_ = nullptr;
+    // Row 0 of the list, and of the completions, is the kept name - marked
+    // when undefined, plain when a plain-line name.
+    bool kept_ = false;
     // The name last set or last reported, so a person finishing an edit that
     // changed nothing does not fire onNameChosen.
     std::string lastName_{};
