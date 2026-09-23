@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <QImage>
+#include <QPoint>
 #include <QPointF>
 #include <QString>
 #include <QWidget>
@@ -43,8 +44,10 @@ enum class Tool { Select, Point, Line, Polyline, Rectangle, Circle, Arc, Move, C
 
 class ViewportWidget final : public QWidget {
   public:
-    // The current view, for a caller that wants the same centre on paper.
-    [[nodiscard]] const katana::cad::ViewTransform& viewTransform() const { return view_; }
+    // The current view, for a caller that wants the same centre on paper. It
+    // is the view's STATE (ViewState::plan), not the widget's, so it survives
+    // the widget being rebuilt when the view changes kind and back.
+    [[nodiscard]] const katana::cad::ViewTransform& viewTransform() const { return state_.plan; }
 
     // Plots the drawing to a PDF: the same drawing code as the screen, painted
     // through a sheet transform, with every line as wide as its layer's line
@@ -72,9 +75,14 @@ class ViewportWidget final : public QWidget {
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const { return tool_; }
 
+    // Frames what THIS view draws: the entities its layers let through
+    // (cad::drawnExtent with this view's hidden layers), the reference layers
+    // visible and not hidden here, the meshes and the alignments.
     void zoomExtents();
     // Frames one specific box, e.g. a single reference layer.
     void zoomTo(const katana::geometry::Box2& bounds);
+    // The box zoomExtents frames. Empty when this view has nothing to show.
+    [[nodiscard]] katana::geometry::Box2 drawnBounds() const;
 
     // Reference data (imported imagery and point clouds) belongs to the window;
     // the viewport only paints it, and never mutates it (Rule 3). Null until the
@@ -111,9 +119,24 @@ class ViewportWidget final : public QWidget {
                        const std::optional<katana::cad::SnapResult>& snap)>
         onCursorMoved;
     std::function<void(Tool tool)> onToolChanged;
-    // Raised when the user clicks into this view, so the workspace can make it
-    // the active one.
+    // Raised when the user clicks into this view or moves the keyboard focus
+    // into it, so the workspace can make it the active one. It can be raised
+    // twice for one click (the press, then the focus it gives); the workspace
+    // ignores re-activating the active view.
     std::function<void()> onActivated;
+    // Printable text typed into this view that the view has no use for
+    // itself: "type anywhere", as in AutoCAD, where typing LINE over the
+    // drawing starts the command. The window forwards it to the command line.
+    // Never raised for a key the view handles (Esc, Enter, Delete, and C while
+    // a polyline is being drawn) or for a Ctrl or Alt chord - those are
+    // shortcuts, not text.
+    std::function<void(const QString& text)> onTextTyped;
+    // A right-click with the Select tool and nothing half-picked, at the
+    // screen position the menu should open at; and the keyboard's menu key
+    // under the same conditions. While a drawing tool is working, a
+    // right-click still finishes or cancels it, and with no handler set it
+    // cancels as it always has.
+    std::function<void(const QPoint& globalPos)> onContextMenu;
 
   protected:
     void paintEvent(QPaintEvent* event) override;
@@ -124,9 +147,26 @@ class ViewportWidget final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
   private:
     using Point2 = katana::geometry::Point2;
+
+    // Fits `bounds` into the view, and keeps fitting it on every resize until
+    // the user pans or zooms. A view is routinely framed and THEN resized: an
+    // import frames every view and then opens a 3D view beside the plan,
+    // which takes part of its space, and the plan kept a scale chosen for a
+    // size it no longer had - the drawing ran off its edges. Once the user
+    // has panned or zoomed, a resize keeps their centre and scale instead.
+    void frame(const katana::geometry::Box2& bounds);
+    // What the first paint of a view that has never been framed does, and
+    // the "nothing drawn yet" hint for an empty drawing.
+    void frameOnFirstPaint();
+    void drawEmptyHint(QPainter& painter) const;
+    // True when nothing at all is loaded: no entity, alignment, reference
+    // layer or mesh. What the empty-drawing hint is shown for.
+    [[nodiscard]] bool drawingIsEmpty() const;
 
     [[nodiscard]] QPointF toScreen(const Point2& world) const;
     [[nodiscard]] Point2 toWorld(const QPointF& screen) const;
@@ -190,8 +230,12 @@ class ViewportWidget final : public QWidget {
     // Declared after document_ and destroyed before anything else here: the
     // listener it owns captures this widget.
     katana::cad::Document::ListenerHandle documentListener_;
-    katana::cad::ViewTransform view_;
-    bool viewInitialised_ = false;
+    // The pan and zoom are state_.plan and whether the view has been framed
+    // is state_.planFramed: both outlive this widget. This is only the box of
+    // the last frame, refitted on a resize until the user pans or zooms; a
+    // widget rebuilt over the same state starts without it, which errs on the
+    // side of keeping the zoom.
+    std::optional<katana::geometry::Box2> framedBox_;
 
     Tool tool_ = Tool::Select;
     std::vector<Point2> points_; // clicks collected for the operation in progress
