@@ -841,3 +841,20 @@ TEST(CustomisationCoverage, ABuiltInSymbolIsNeverListedAsUnresolved)
     EXPECT_EQ(katana::cad::customisationCoverage(document).unresolved,
               (std::vector<std::string>{"CULT Bollard"}));
 }
+
+TEST(CustomisationCoverage, AStyleThatTakesItsLinetypeFromItsLayerNamesNoDefinition)
+{
+    // "ByLayer" as a style's linetype means "whatever the layer draws with"
+    // (decision D2), not a 12d linestyle called ByLayer: reporting it as in
+    // no loaded library sent people looking for a definition that is not
+    // meant to exist.
+    Document document;
+    katana::entity::Style style;
+    style.name = "s";
+    style.linetype = "ByLayer";
+    ASSERT_TRUE(document.execute(cmd::createStyle(style)).ok());
+    const auto coverage = katana::cad::customisationCoverage(document);
+    EXPECT_EQ(coverage.styles, 1u);
+    EXPECT_TRUE(coverage.unresolved.empty());
+    EXPECT_EQ(coverage.named, 0u) << "it names nothing to resolve";
+}
