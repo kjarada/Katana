@@ -1183,8 +1183,15 @@ struct StyleManagerDialog::Impl {
         // becoming a dash or a gap needs one, and half a metre is visible.
         const double size = std::abs(length) > 0.0 ? std::abs(length) : 0.5;
         length = element == Element::Dash ? size : element == Element::Gap ? -size : 0.0;
+        // The row's length box is updated in place, NOT by rebuilding the
+        // grid: this runs inside the row's own combo's signal, and a rebuild
+        // would delete that combo while it is still emitting.
+        if (auto* box = dynamic_cast<QDoubleSpinBox*>(patternGrid->cellWidget(row, 1))) {
+            const QSignalBlocker quiet(box);
+            box->setValue(std::abs(length));
+            box->setEnabled(length != 0.0);
+        }
         patternChanged();
-        rebuildGrid();
     }
 
     void insertElement(double length)
@@ -1398,8 +1405,9 @@ struct StyleManagerDialog::Impl {
     void updateButtons()
     {
         if (!alive()) {
+            // Everything but Close: with no drawing there is nothing to act on.
             for (QPushButton* each : dialog->findChildren<QPushButton*>()) {
-                each->setEnabled(false);
+                each->setEnabled(each->objectName() == QStringLiteral("closeButton"));
             }
             return;
         }
@@ -2790,11 +2798,16 @@ StyleManagerDialog::StyleManagerDialog(const CustomisationContext& context, QWid
 
 StyleManagerDialog::~StyleManagerDialog()
 {
-    // The watcher first, then every hook the children hold: the children
-    // are deleted by ~QWidget, after impl_, and must not call into it.
+    // The watcher first, then every hook and connection the children hold:
+    // left to ~QWidget, they would be deleted after impl_ and could call
+    // into it.
     impl_->watcher.reset();
     impl_->detach();
     impl_->guard.reset();
+    // Then the children themselves, while the Impl their models' columns
+    // read (and the thumbnail cache it may own) is still whole; with every
+    // connection gone, nothing they do while dying reaches it.
+    qDeleteAll(findChildren<QWidget*>(Qt::FindDirectChildrenOnly));
 }
 
 void StyleManagerDialog::showFirstRows()
