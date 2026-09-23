@@ -158,11 +158,11 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 |---|---|
 | `STYLE SET <s> linetype <name>` | takes a model linetype, a loaded 12d linestyle or `ByLayer` (the layer's; decision D2) - it used to refuse library names the viewport draws |
 | `STYLE SYMBOLS [filter]` | the symbols a style may name: the built-in shapes and the library's symbols (D3), filtered with case folded |
-| `STYLE USAGE [name]` | who uses a style: layers, styles and entities (`entity::tableUsage`) |
+| `STYLE USAGE [name]` | how many entities wear each style, or who uses one, flagging a name worn but not in the table (`entity::tableUsage`) |
 | `STYLE MERGE <from> <into>` | moves everything wearing `from` onto `into` and deletes `from`, one undo step |
 | `STYLE CURRENT [name\|-\|ByLayer]` | the style new work is drawn in (D9); `-` or `ByLayer` clears it |
 | `LINETYPE MERGE <from> <into>` | repoints every layer and style, then deletes `from`; `into` must be a model linetype |
-| `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, which a layer is what inherits FROM |
+| `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 
