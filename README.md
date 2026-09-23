@@ -36,7 +36,7 @@ and the command line are two thin front ends over the same engine.
 
 ## Building
 
-Requires a C++23 compiler, CMake 3.24+, Qt 6, Eigen, PROJ, CGAL, SQLite,
+Requires a C++26 compiler, CMake 3.30+, Qt 6, Eigen, PROJ, CGAL, SQLite,
 nlohmann-json, GDAL and PDAL. On Windows these all come from MSYS2 UCRT64.
 
 ```bash

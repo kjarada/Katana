@@ -112,7 +112,7 @@ SQLite
 ## Core
 
 
-* ++23 where compiler/toolchain support is sufficiently mature
+* C++26 (the build variable `KATANA_CXX_STANDARD`; see "The language standard is a build variable" in section 24)
 * CMake
 * Clang
 * GCC
@@ -329,13 +329,14 @@ The required progression is:
 | 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; COPC conversion and resolution queries in the engine; import-time conversion and view-driven re-query outstanding |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
-| 20 | File Interoperability | partial — raster, vector, point cloud and 12d Archive import/export in GUI and CLI; no DWG/LandXML/IFC |
-| 21 | Civil Engineering | partial — sections; clothoid; alignments and profiles; corridor quantities and surface, cross-checked; parcels with bearings, area, deed wording and labels; richer assemblies and grading outstanding |
+| 20 | File Interoperability | partial — raster, vector, point cloud and 12d Archive import/export in GUI and CLI; no DWG/LandXML/IFC. 20.2 (12d programme) delivered bar property definitions; 20.3 (survey coding) delivered bar the library browser |
+| 21 | Civil Engineering | partial — sections; clothoid; alignments and profiles; corridor quantities and surface, cross-checked; parcels with bearings, area, deed wording and labels; grading engine without a GUI route; richer assemblies outstanding |
 | 22 | Drawing/Plotting | partial — Plot to PDF through the screen's own drawing code at ISO sizes and standard scales, `Layer::lineWeight` finally honoured; layouts, title blocks, annotation scaling, printing outstanding |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
 | 24 | Python AI | not started |
 | 25 | AI Agent | not started |
-| 26 | Production Hardening | not started |
+| 26 | Production Hardening | not started — no section of its own yet; section 43 lists it last |
+| 45 | Survey module and instrument interoperability | in progress — model, detection and the cad bridge delivered; parsers, reduction, Survey menu, wizard and Point Manager in progress |
 
 The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
@@ -397,9 +398,14 @@ is complete. Running out of obvious next steps is not a stopping condition: the
 table in this section lists what remains, and `CLAUDE.md` section 6 lists the
 standing improvement work.
 
-**Until section 20.2 (the 12d Model programme) is DELIVERED in full, it is
-the only work to be done.** No other phase is started or resumed before then
-(instruction of 2026-09-22).
+**The order of work is the one `CLAUDE.md` section 5.2 states, and it is
+stated there only.** This paragraph used to say that 20.2 was the only work
+until delivered; the user's later instruction put 20.3 before it, and section
+45 (requested 2026-09-23) after 20.3 and before 20.2's remainder, so three
+documents had come to give three orderings. As of 2026-09-23: 20.3's
+remainder, then section 45, then 20.2's remainder, then the earliest
+undelivered phase, with real defects found on the way fixed when small and
+adjacent.
 
 This does not license committing a half-finished feature to keep moving. Every
 commit still lands green, with the plan and documentation updated in the same
@@ -435,7 +441,10 @@ only in a conversation: the conversation is lost, the repository is not.
 
 **STATUS: DELIVERED.**
 
-CMake 3.24+ / Ninja / C++20, one target per module. `-Wall -Wextra -Wpedantic
+CMake 3.30+ / Ninja / C++26, one target per module. (This line said 3.24 and
+C++20. The project has been C++26 since 6095a19, and `cxx_std_26` is a compile
+feature CMake first knows in 3.30; TEST_LAUNCHER honoured by
+gtest_discover_tests needs 3.29 and preset schema 6 needs 3.25.) `-Wall -Wextra -Wpedantic
 -Wshadow -Werror`, and `-ffp-contract=off -fno-fast-math` for Rule 7.
 
 * `CMakePresets.json` - debug, release, relwithdebinfo, sanitize, tidy, and the
@@ -484,7 +493,10 @@ Linux or macOS bundle.
   may only include from its allow-list, and no public header may include a
   third-party header. Runs as the `layering` CTest case.
 * `.github/workflows/ci.yml` - Debug and Release tests, sanitizers, static
-  analysis, layering, and a Windows MSYS2 job.
+  analysis, layering, and a Windows MSYS2 job. **CORRECTED (2026-09-23): this
+  file was DELETED** in 759c115, a Qt bug fix whose message does not mention it,
+  and no CI had run since; `.github/lsan.supp` was left orphaned and later
+  commits still justified designs by "the sanitizer job". Being restored.
 
 Test discovery runs through a `TEST_LAUNCHER`, so the suite does not depend on
 the ambient PATH.
@@ -578,10 +590,10 @@ It replaced three different answers, two of which were visibly wrong:
   The Style table was validated on write and persisted faithfully, and was
   inert - a style could not change how anything looked.
 
-**OUTSTANDING: no command creates a Style.** The table can only be populated by
-loading a project that already contains one, so styles remain unreachable from
-the application even now that they take effect. A `STYLE` verb and a styles
-panel belong with the Phase 09 work below.
+**Styles are created and edited** (this paragraph used to say no command
+created one): `commands::createStyle / updateStyle / deleteStyle / renameStyle`
+in `table_commands.cpp`, the `STYLE` verb, and Edit > Styles and Linetypes...,
+all delivered with 20.2 slices 1 and 3.
 
 ## 5.4 Dimension styles (delivered)
 
@@ -705,8 +717,9 @@ drawing units and the ISO set in millimetres, while a survey drawing here is in
 metres, so any table shipped would be a conversion of numbers not to hand or an
 invention - and a test would then pin the invention as though it were a standard.
 Patterns are defined by the user until an importer reads real ones. `$LTSCALE`
-and a per-entity scale are parameterised throughout but pinned at 1, and there
-is no GUI editor.
+and a per-entity scale are parameterised throughout but pinned at 1. (The GUI
+editor this used to say was missing is Edit > Styles and Linetypes..., 20.2
+slice 3.)
 
 ## 5.1 Nested layers (delivered)
 
@@ -825,13 +838,10 @@ missing is AUTHORING them, and the two differ in cost:
   definition updates every instance. Expanded-on-import geometry, which is what
   arrives today, cannot do that.
 
-Also outstanding, found while adding the hatch table and recorded rather than
-fixed: **the create / update / delete command classes are now written out three
-times** (linetypes, dimension styles, hatch patterns) with the same shape and
-differing only in which table they touch and what guards a delete. Collapsing
-them needs a template over the table plus a per-table delete guard; it is not
-the small adjacent fix CLAUDE.md section 6 allows to be done in passing, so it
-is recorded here instead.
+**FIXED since it was recorded here:** the create / update / delete command
+classes that were written out three times are one template set over a
+`TablePolicy<T>` in `table_commands.cpp`, done in 20.2 slice 1 and used for
+linetypes, dimension styles, hatch patterns, alignments and styles.
 
 ---
 
@@ -872,8 +882,13 @@ traverse closure and adjustment, differential levelling.
 **STATUS: DELIVERED.** `least_squares.cpp`, `lsq_core.hpp`,
 `network_adjustment.cpp`, `error_propagation.cpp`, `statistics.cpp`.
 
-A genuine normal-equation solve with weights, residuals, variance factor and
-error ellipses - Eigen confined to the implementation. `statistics.cpp` computes
+A genuine weighted least-squares solve with residuals, variance factor and
+error ellipses - Eigen confined to the implementation. The normal equations
+are deliberately NOT formed: the solve is a column-equilibrated,
+column-pivoted Householder QR, with the cofactor matrix from triangular
+solves, which gives the same estimate without squaring the condition number
+(this line used to say "normal-equation solve", describing the method the code
+rejects). `statistics.cpp` computes
 the chi-square CDF through the regularised lower incomplete gamma, using an
 exact half-integer ln-Gamma so the 2 and 4 degree-of-freedom cases are correct
 to the last place.
@@ -1312,7 +1327,7 @@ Reference Data panel) and in `katana_cli` (`IMPORT`, `EXPORT`, `REFS`):
 | Vector out | the same, driver chosen by extension |
 | Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG/JPEG and the rest of GDAL's readers |
 | Point cloud | LAS, LAZ in and out |
-| 12d Archive | `.12da`, `.12daz`, `.12dz` in and out - every element of the format |
+| 12d Archive | `.12da`, `.12daz` in and out - every element of the format (`.12dz` was withdrawn in 20.2 slice 1) |
 
 Vector import produces plain `Entity` values which the caller wraps in
 `createEntities`, so an import is one validated, atomic, undoable command like
@@ -1359,8 +1374,8 @@ formats - and `coverage.hpp` holds the list against the reader in a test, so
 entities with their heights, attributes and everything 12d knows about them
 in metadata; super alignments become named Alignments where their geometry is
 PI-definable and VERIFIED against 12d's own solved vertices; tins become
-surfaces; clouds become reference layers; trimeshes are read and reported
-(Katana has no mesh entity). Export writes entities, alignments and the
+surfaces; clouds become reference layers; trimeshes become session meshes
+(20.2 slice 4). Export writes entities, alignments and the
 session's surfaces back, and what was imported and exported unchanged is the
 string it was. Three conventions the manual gets wrong or leaves out - the
 hand of a radius, the description of a trailing transition, the definition of
@@ -1382,10 +1397,11 @@ and polygons). **No coordinate transformation on import**: a file's declared
 CRS is reported but coordinates are never reprojected, so mixing coordinate
 systems is the user's responsibility. Reference layers are not yet persisted
 into the project - the pixels are re-read from the source path each session.
-For the 12d archive: trimeshes and vertex symbols are read and not drawn,
-super tins are reported and not built, and the test-quality lens of the
-review did not complete - the module's tests were written to CLAUDE.md
-section 3 but have not been audited against it by a second reader.
+For the 12d archive (this list was stale until 2026-09-23: meshes are
+imported and drawn, super tins are built, point symbols are drawn - 20.2
+slices 2, 4 and 8): a per-vertex symbol list that differs along a line is kept
+and not drawn, and the module's tests were audited by a second reader on
+2026-09-23 - its findings are being fixed under section 24's pass.
 
 ---
 
@@ -1882,8 +1898,9 @@ code's treatment is the UNION of the aspects that match it:
    left alone looks exactly like a code that was handled. 7 tests; see
    docs/survey_coding.md for the six decisions in it.
 
-   OUTSTANDING: it is not on a menu in the application yet - the CLI verb and
-   the library are the way to it.
+   On a menu since b15eaa8: File > Apply Survey Codes (this slice said it was
+   CLI-only, and so did the status below, until the audit of 2026-09-23 found
+   the menu item).
 5. **The model and the project. PARTIALLY DELIVERED.** `Style::symbol` is no
    longer a closed set: it is a name resolved when it is drawn, exactly as
    `Style::linetype` already was. `cad::Document` carries the loaded
@@ -1959,18 +1976,24 @@ session against a multi-megabyte translation unit. The generated source is
 never committed, since the customisation is third-party material under its own
 licence; a checkout without it builds an empty table and draws plain lines.
 
-**STATUS: DELIVERED, bar the two things named earlier and repeated here.** The
+**STATUS: DELIVERED, bar the one thing below that is still true.** The
 chain the user asked for works end to end: a mapfile, a linestyle library and
 a symbol library load together; a survey code resolves through the mapfile to
 a model, a colour, a linestyle and a symbol; the entity gets them; and the
 viewport draws the definition's strokes.
 
-OUTSTANDING, neither blocking:
+OUTSTANDING, not blocking:
 - a library BROWSER - the groups tree with a preview of each definition - is
-  not built, so the 792 definitions can be used but not looked through;
-- a project does not remember which customisation it was drawn with, so it is
-  loaded again each session;
-- applying a code is a CLI verb, not a menu item.
+  not built, so the 792 definitions can be used but not looked through (in
+  progress 2026-09-23).
+
+Struck from this list, with the reason: "a project does not remember which
+customisation it was drawn with" stopped being true of the ordinary case when
+the customisation was compiled in (above) - there is nothing to remember. A
+customisation loaded ON TOP of the built-in one is still per-session, and that
+is recorded as a limitation rather than as outstanding work, since nothing
+asks for it. "Applying a code is a CLI verb" was never true after b15eaa8:
+File > Apply Survey Codes exists.
 
 ---
 
