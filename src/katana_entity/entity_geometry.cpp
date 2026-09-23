@@ -6,6 +6,8 @@
 #include <limits>
 #include <string>
 
+#include "katana/core/text.hpp"
+
 namespace katana::entity {
 
 namespace tol = katana::math::tolerance;
@@ -48,6 +50,78 @@ std::string_view typeName(const PropertyValue& value)
         std::string_view operator()(const std::string&) const { return "text"; }
     };
     return std::visit(Visitor{}, value);
+}
+
+void setHeights(PropertyMap& properties, const std::vector<std::optional<double>>& heights)
+{
+    for (const std::string_view key : {kElevationProperty, kElevationsProperty}) {
+        if (const auto found = properties.find(key); found != properties.end()) {
+            properties.erase(found);
+        }
+    }
+    const auto known = [](const std::optional<double>& z) {
+        return z.has_value() && std::isfinite(*z);
+    };
+    if (std::none_of(heights.begin(), heights.end(), known)) {
+        return;
+    }
+    const bool same = std::all_of(heights.begin(), heights.end(), [&](const auto& z) {
+        return known(z) && *z == *heights.front();
+    });
+    if (same) {
+        properties.insert_or_assign(std::string(kElevationProperty), *heights.front());
+        return;
+    }
+    std::string list;
+    for (const auto& z : heights) {
+        if (!list.empty()) {
+            list += ' ';
+        }
+        list += known(z) ? katana::core::formatExactReal(*z) : std::string("null");
+    }
+    properties.insert_or_assign(std::string(kElevationsProperty), std::move(list));
+}
+
+std::vector<std::optional<double>> heightsOf(const PropertyMap& properties, std::size_t count)
+{
+    if (const auto found = properties.find(kElevationsProperty); found != properties.end()) {
+        if (const auto* list = std::get_if<std::string>(&found->second)) {
+            std::vector<std::optional<double>> parsed;
+            std::size_t start = 0;
+            while (start < list->size()) {
+                while (start < list->size() && katana::core::isAsciiSpace((*list)[start])) {
+                    ++start;
+                }
+                std::size_t end = start;
+                while (end < list->size() && !katana::core::isAsciiSpace((*list)[end])) {
+                    ++end;
+                }
+                if (end > start) {
+                    // "null", or anything else that is not a finite number, is
+                    // no height.
+                    parsed.push_back(katana::core::parseFiniteDouble(
+                        std::string_view(*list).substr(start, end - start)));
+                }
+                start = end;
+            }
+            if (parsed.size() == count) {
+                return parsed;
+            }
+        }
+    }
+    std::vector<std::optional<double>> heights(count);
+    if (const auto found = properties.find(kElevationProperty); found != properties.end()) {
+        std::optional<double> z;
+        if (const auto* real = std::get_if<double>(&found->second)) {
+            z = *real;
+        } else if (const auto* integer = std::get_if<std::int64_t>(&found->second)) {
+            z = static_cast<double>(*integer);
+        }
+        if (z && std::isfinite(*z)) {
+            std::fill(heights.begin(), heights.end(), z);
+        }
+    }
+    return heights;
 }
 
 std::string_view toString(EntityType type)

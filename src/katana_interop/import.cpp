@@ -5,10 +5,11 @@
 #include <sstream>
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <limits>
 #include <string>
+
+#include "katana/core/text.hpp"
 
 namespace katana::interop {
 namespace {
@@ -29,9 +30,7 @@ std::string lowerExtension(const std::filesystem::path& path)
     if (!extension.empty() && extension.front() == '.') {
         extension.erase(extension.begin());
     }
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return extension;
+    return katana::core::lowered(extension); // ASCII only, whatever the locale
 }
 
 bool contains(const std::vector<std::string>& values, const std::string& value)
@@ -45,8 +44,11 @@ bool contains(const std::vector<std::string>& values, const std::string& value)
 std::string sanitizeLayerName(std::string name)
 {
     for (char& ch : name) {
+        // The ASCII control characters, tab and newlines among them, and DEL.
+        // Tested by value rather than with std::iscntrl, whose answer for a
+        // byte above 0x7F depends on the process locale.
         const auto value = static_cast<unsigned char>(ch);
-        if (std::iscntrl(value) != 0 || ch == '\n' || ch == '\r' || ch == '\t') {
+        if (value < 0x20 || value == 0x7F) {
             ch = ' ';
         }
     }
@@ -59,15 +61,6 @@ std::string sanitizeLayerName(std::string name)
     return name.substr(first, last - first + 1);
 }
 
-bool equalsIgnoringCase(const std::string& a, const std::string& b)
-{
-    return a.size() == b.size() &&
-           std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-               return std::tolower(static_cast<unsigned char>(x)) ==
-                      std::tolower(static_cast<unsigned char>(y));
-           });
-}
-
 Point2 shifted(const katana::gis::GeoPoint& point, const std::optional<Vec2>& origin)
 {
     if (origin.has_value()) {
@@ -76,24 +69,45 @@ Point2 shifted(const katana::gis::GeoPoint& point, const std::optional<Vec2>& or
     return Point2(point.x, point.y);
 }
 
-// Drops consecutive duplicates, which shapefiles are full of and which would
-// make a zero-length segment the model then rejects.
-std::vector<Point2> distinctPoints(const std::vector<katana::gis::GeoPoint>& source,
-                                   const std::optional<Vec2>& origin)
+// A vertex's height: the file's Z when its geometry has one and it is finite,
+// otherwise none. Never 0.0 for "none" - absent is not zero.
+std::optional<double> heightOf(const katana::gis::GeoPoint& raw, bool hasZ)
 {
+    return hasZ && std::isfinite(raw.z) ? std::optional<double>(raw.z) : std::nullopt;
+}
+
+// A string's vertices in plan with their heights, parallel.
+struct Vertices {
     std::vector<Point2> points;
-    points.reserve(source.size());
+    std::vector<std::optional<double>> heights;
+    // Duplicates dropped whose height differed from the vertex kept.
+    std::size_t heightsLost = 0;
+};
+
+// Drops consecutive duplicates, which shapefiles are full of and which would
+// make a zero-length segment the model then rejects. A duplicate in plan can
+// still differ in height - a vertical step in a 3D string - and that height
+// is the one thing lost here, so it is counted for the warning.
+Vertices distinctVertices(const std::vector<katana::gis::GeoPoint>& source, bool hasZ,
+                          const std::optional<Vec2>& origin)
+{
+    Vertices out;
+    out.points.reserve(source.size());
+    out.heights.reserve(source.size());
     for (const katana::gis::GeoPoint& raw : source) {
         if (!std::isfinite(raw.x) || !std::isfinite(raw.y)) {
             continue;
         }
         const Point2 point = shifted(raw, origin);
-        if (!points.empty() && points.back() == point) {
+        const std::optional<double> z = heightOf(raw, hasZ);
+        if (!out.points.empty() && out.points.back() == point) {
+            out.heightsLost += z != out.heights.back() ? 1u : 0u;
             continue;
         }
-        points.push_back(point);
+        out.points.push_back(point);
+        out.heights.push_back(z);
     }
-    return points;
+    return out;
 }
 
 void copyAttributes(const katana::gis::VectorFeature& feature, Entity& entity)
@@ -199,6 +213,38 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
 
     const std::string sourceName = path.filename().string();
     std::uint64_t remaining = options.maxFeatures;
+    std::size_t heightsLost = 0;
+    std::size_t heightAttributesReplaced = 0;
+
+    // A source's Z becomes the heights every other part of Katana reads
+    // (entity.hpp). A feature without one gets no height property at all.
+    const auto applyHeights = [&](Entity& entity, const std::vector<std::optional<double>>& heights) {
+        if (std::none_of(heights.begin(), heights.end(),
+                         [](const auto& z) { return z.has_value(); })) {
+            // A 2D feature's "elevation" attribute that is a number IS its
+            // height: it is how exportVector writes the heights a 2D layer
+            // cannot hold in its geometry (a shapefile mixing entities with
+            // and without them), so a round trip keeps them. Attributes arrive
+            // as text; the list form, "elevations", is text anyway.
+            const auto found = entity.properties.find(katana::entity::kElevationProperty);
+            if (found != entity.properties.end()) {
+                if (const auto* text = std::get_if<std::string>(&found->second)) {
+                    if (const auto z =
+                            katana::core::parseFiniteDouble(katana::core::trimmed(*text))) {
+                        found->second = *z;
+                    }
+                }
+            }
+            return;
+        }
+        // An ATTRIBUTE named "elevation" is taken by a height here: those two
+        // names are what the rest of the application reads a height from.
+        if (entity.properties.contains(katana::entity::kElevationProperty) ||
+            entity.properties.contains(katana::entity::kElevationsProperty)) {
+            ++heightAttributesReplaced;
+        }
+        katana::entity::setHeights(entity.properties, heights);
+    };
 
     for (int index = firstLayer; index <= lastLayer; ++index) {
         const auto& info = (*layers)[static_cast<std::size_t>(index)];
@@ -227,7 +273,7 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             std::string entityLayer = targetLayer;
             if (options.targetLayer.empty() && !options.layerAttribute.empty()) {
                 for (const auto& [name, value] : feature.attributes) {
-                    if (equalsIgnoringCase(name, options.layerAttribute)) {
+                    if (katana::core::equalsIgnoringCase(name, options.layerAttribute)) {
                         const std::string named = sanitizeLayerName(value);
                         // sanitizeLayerName turns a blank into "IMPORT"; a
                         // blank attribute means "no layer given", not that.
@@ -242,13 +288,15 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                 result.layersNeeded.push_back(entityLayer);
             }
 
-            auto makeEntity = [&](katana::entity::Geometry geometry) {
+            auto makeEntity = [&](katana::entity::Geometry geometry,
+                                  const std::vector<std::optional<double>>& heights) {
                 Entity entity;
                 entity.geometry = std::move(geometry);
                 entity.layer = entityLayer;
                 if (options.attributesAsProperties) {
                     copyAttributes(feature, entity);
                 }
+                applyHeights(entity, heights);
                 entity.metadata.emplace("source.file", sourceName);
                 entity.metadata.emplace("source.layer", info.name);
                 result.entities.push_back(std::move(entity));
@@ -260,19 +308,22 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                     ++result.featuresSkipped;
                     break;
                 }
-                const Point2 position =
-                    shifted(feature.geometry.parts.front().front(), options.originShift);
+                const katana::gis::GeoPoint& raw = feature.geometry.parts.front().front();
+                const Point2 position = shifted(raw, options.originShift);
                 if (!std::isfinite(position.x) || !std::isfinite(position.y)) {
                     ++result.featuresSkipped;
                     break;
                 }
                 result.bounds.expand(position);
-                makeEntity(katana::entity::PointGeometry{position});
+                makeEntity(katana::entity::PointGeometry{position},
+                           {heightOf(raw, feature.geometry.hasZ)});
                 break;
             }
             case katana::gis::GeometryKind::LineString: {
-                const std::vector<Point2> points =
-                    distinctPoints(feature.geometry.parts.front(), options.originShift);
+                Vertices vertices = distinctVertices(feature.geometry.parts.front(),
+                                                     feature.geometry.hasZ, options.originShift);
+                heightsLost += vertices.heightsLost;
+                const std::vector<Point2>& points = vertices.points;
                 if (points.size() < 2) {
                     ++result.featuresSkipped;
                     break;
@@ -284,12 +335,12 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                 // a polyline. Importing a two-point line as a polyline would
                 // make it unfilletable and odd to edit.
                 if (points.size() == 2) {
-                    makeEntity(Segment2{points.front(), points.back()});
+                    makeEntity(Segment2{points.front(), points.back()}, vertices.heights);
                 } else {
                     Polyline2 polyline;
                     polyline.vertices = points;
                     polyline.closed = false;
-                    makeEntity(std::move(polyline));
+                    makeEntity(std::move(polyline), vertices.heights);
                 }
                 break;
             }
@@ -299,12 +350,18 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                 // in metadata so the information is not simply lost.
                 bool wroteAnyRing = false;
                 for (std::size_t ring = 0; ring < feature.geometry.parts.size(); ++ring) {
-                    std::vector<Point2> points =
-                        distinctPoints(feature.geometry.parts[ring], options.originShift);
+                    Vertices vertices = distinctVertices(feature.geometry.parts[ring],
+                                                         feature.geometry.hasZ,
+                                                         options.originShift);
+                    heightsLost += vertices.heightsLost;
+                    std::vector<Point2>& points = vertices.points;
                     // A closed ring repeats its first point; the Polyline2
                     // `closed` flag expresses that instead.
                     if (points.size() > 1 && points.front() == points.back()) {
                         points.pop_back();
+                        heightsLost +=
+                            vertices.heights.back() != vertices.heights.front() ? 1u : 0u;
+                        vertices.heights.pop_back();
                     }
                     if (points.size() < 3) {
                         continue;
@@ -322,6 +379,7 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                     if (options.attributesAsProperties) {
                         copyAttributes(feature, entity);
                     }
+                    applyHeights(entity, vertices.heights);
                     entity.metadata.emplace("source.file", sourceName);
                     entity.metadata.emplace("source.layer", info.name);
                     entity.metadata.emplace("source.ring",
@@ -365,6 +423,18 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
     if (result.featuresSkipped > 0) {
         result.warnings.push_back(std::to_string(result.featuresSkipped) +
                                   " features were skipped: empty or degenerate geometry");
+    }
+    if (heightsLost > 0) {
+        result.warnings.push_back(
+            std::to_string(heightsLost) +
+            " vertices were dropped for standing on the vertex before them in plan, and their "
+            "different heights went with them: a vertical step cannot be drawn in plan");
+    }
+    if (heightAttributesReplaced > 0) {
+        result.warnings.push_back(
+            std::to_string(heightAttributesReplaced) +
+            " features had an attribute named \"elevation\" or \"elevations\", which is "
+            "where Katana keeps a height; the geometry's own Z replaced it");
     }
     return result;
 }

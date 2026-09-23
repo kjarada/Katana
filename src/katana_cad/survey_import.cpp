@@ -150,8 +150,7 @@ katana::core::Result<CommandPtr> importSurveyProject(const Document& document,
         // builder leaves a point without one out, where a zero would be a real
         // height at the datum and pull the surface down to it (PLAN.MD 45.3b).
         if (point.elevation) {
-            properties.insert_or_assign(std::string(katana::entity::kElevationProperty),
-                                        PropertyValue(*point.elevation));
+            katana::entity::setHeights(properties, {point.elevation});
         } else {
             ++withoutElevation;
         }

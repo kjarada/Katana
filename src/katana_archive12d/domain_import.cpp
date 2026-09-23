@@ -157,32 +157,6 @@ void flattenAttributes(const AttributeList& attributes, const std::string& prefi
     return out;
 }
 
-// Heights of a list of points as the `elevation` / `elevations` properties
-// described in domain.hpp.
-void setElevations(const std::vector<std::optional<double>>& heights, PropertyMap& properties)
-{
-    const bool any = std::any_of(heights.begin(), heights.end(),
-                                 [](const auto& z) { return z.has_value(); });
-    if (!any) {
-        return;
-    }
-    const bool same = std::all_of(heights.begin(), heights.end(), [&](const auto& z) {
-        return z.has_value() && *z == *heights.front();
-    });
-    if (same) {
-        properties.insert_or_assign(std::string(kElevationProperty), *heights.front());
-        return;
-    }
-    std::string list;
-    for (const auto& z : heights) {
-        if (!list.empty()) {
-            list += ' ';
-        }
-        list += z ? detail::formatExactReal(*z) : std::string("null");
-    }
-    properties.insert_or_assign(std::string(kElevationsProperty), std::move(list));
-}
-
 class Importer {
   public:
     Importer(const Archive& archive, const ImportOptions& options)
@@ -421,7 +395,7 @@ class Importer {
         } else {
             entity.geometry = std::move(polyline);
         }
-        setElevations(heights, entity.properties);
+        katana::entity::setHeights(entity.properties, heights);
         return true;
     }
 
@@ -887,7 +861,7 @@ class Importer {
         } else {
             entity.geometry = katana::geometry::Arc2{centre, radius, startAngle, sweep};
         }
-        setElevations({arc.start.z, arc.end.z}, entity.properties);
+        katana::entity::setHeights(entity.properties, {arc.start.z, arc.end.z});
         return add(std::move(entity), describe(arc.header, "string arc")) ? 1 : 0;
     }
 
@@ -896,7 +870,7 @@ class Importer {
         const char* keyword = circle.feature ? "string feature" : "string circle";
         Entity entity = makeEntity(circle.header, keyword);
         entity.geometry = katana::geometry::Circle2{plan(circle.centre), std::fabs(circle.radius)};
-        setElevations({circle.centre.z}, entity.properties);
+        katana::entity::setHeights(entity.properties, {circle.centre.z});
         return add(std::move(entity), describe(circle.header, keyword)) ? 1 : 0;
     }
 
@@ -907,7 +881,7 @@ class Importer {
         geometry.position = plan(text.position);
         geometry.text = text.text;
         geometry.height = textHeight(&text.annotation);
-        setElevations({text.position.z}, entity.properties);
+        katana::entity::setHeights(entity.properties, {text.position.z});
         applyAnnotation(entity, geometry, &text.annotation);
         entity.geometry = std::move(geometry);
         return add(std::move(entity), describe(text.header, "string text")) ? 1 : 0;
