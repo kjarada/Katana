@@ -70,6 +70,36 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "POINT 1,1" -c "SELECT ALL"
                 -c "PROP SET code KT01" -c "CODE" -c "CODE CENSUS")
+    # A QUOTED path whose first word is "replace" is a file, not the REPLACE
+    # keyword: taken for the keyword, the file was dropped ("REPLACE needs a
+    # file") or, given twice, replaced the loaded map instead of merging. Run
+    # beside the file, so that the path's first word really is "replace". By
+    # hand: cli-codes.mapfile has 3 rules over 2 keys (KT*, KX*) and this
+    # file 1 rule over RM*, so a merge holds 4 rules over 3 keys, and loading
+    # the same file twice in one load adds its rule once.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/replace me.mapfile" [=[<?xml version="1.0"?>
+<xml12d xmlns="http://www.12d.com/schema/xml12d-10.0">
+  <map_file>
+    <version>11.0</version>
+    <map_data>
+      <item><key>RM*</key><model>REPLACE ME</model></item>
+    </map_data>
+  </map_file>
+</xml12d>
+]=])
+    add_test(NAME cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "customise replace \"${_mapfile}\""
+                -c "CUSTOMISE \"replace me.mapfile\"" -c "CUSTOMISE")
+    add_test(NAME cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_replace}"
+                -c "CUSTOMISE \"replace me.mapfile\" \"replace me.mapfile\"" -c "CUSTOMISE")
+    set_tests_properties(cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
+        cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
+        PROPERTIES PASS_REGULAR_EXPRESSION "4 survey code rules over 3 distinct codes")
     # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
     set(_eol "[\r\n]+")
     set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION
