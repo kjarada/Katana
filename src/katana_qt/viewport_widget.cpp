@@ -132,8 +132,46 @@ const char* toString(Tool tool)
     return "Unknown";
 }
 
+const char* toolId(Tool tool)
+{
+    // The catalogue tools that do what the eight did: Arc is the three-point
+    // arc, as the old tool drew, and Circle is centre and radius.
+    switch (tool) {
+    case Tool::Select:
+        return "";
+    case Tool::Point:
+        return "draw.point";
+    case Tool::Line:
+        return "draw.line";
+    case Tool::Polyline:
+        return "draw.polyline";
+    case Tool::Rectangle:
+        return "draw.rectangle";
+    case Tool::Circle:
+        return "draw.circle";
+    case Tool::Arc:
+        return "draw.arc";
+    case Tool::Move:
+        return "modify.move";
+    case Tool::Copy:
+        return "modify.copy";
+    }
+    return "";
+}
+
+std::optional<Tool> legacyTool(std::string_view id)
+{
+    for (const Tool tool : {Tool::Select, Tool::Point, Tool::Line, Tool::Polyline, Tool::Rectangle,
+                            Tool::Circle, Tool::Arc, Tool::Move, Tool::Copy}) {
+        if (id == toolId(tool)) {
+            return tool;
+        }
+    }
+    return std::nullopt;
+}
+
 ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, QWidget* parent)
-    : QWidget(parent), document_(document), state_(state)
+    : QWidget(parent), document_(document), state_(state), tools_(document)
 {
     setMinimumSize(kMinimumWidth, kMinimumHeight);
     setMouseTracking(true);
@@ -145,6 +183,7 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
         state_.plan.scale = kInitialScale;
     }
     documentListener_ = document_.addListener([this] { update(); });
+    wireToolHost();
     activateOnFocus(*this, [this] {
         if (onActivated) {
             onActivated();
@@ -167,14 +206,80 @@ ViewportWidget::Point2 ViewportWidget::toWorld(const QPointF& screen) const
 
 void ViewportWidget::setTool(Tool tool)
 {
-    points_.clear();
-    boxStart_.reset();
-    tool_ = tool;
-    updatePrompt();
-    if (onToolChanged) {
-        onToolChanged(tool_);
+    if (tool == Tool::Select) {
+        typed_.clear();
+        tools_.cancel();
+        boxStart_.reset();
+        updatePrompt();
+        update();
+        return;
     }
+    // Every id in toolId is in the catalogue (a test asserts it), so this
+    // cannot fail short of a catalogue that lost a tool, and then says so.
+    const auto started = startTool(toolId(tool));
+    if (!started && onError) {
+        onError(QString::fromStdString(started.error().describe()));
+    }
+}
+
+Tool ViewportWidget::tool() const { return legacyTool(tools_.activeId()).value_or(Tool::Select); }
+
+katana::core::Status ViewportWidget::startTool(std::string_view id)
+{
+    boxStart_.reset();
+    typed_.clear();
+    tools_.setPickTolerance(pickTolerance());
+    return tools_.start(id);
+}
+
+bool ViewportWidget::typeIntoTool(const QString& text)
+{
+    if (!tools_.active()) {
+        return false;
+    }
+    typed_.clear();
+    (void)tools_.typed(text.toStdString());
     update();
+    return true;
+}
+
+double ViewportWidget::pickTolerance() const
+{
+    return state_.plan.pixelsToWorld(kPickAperturePixels);
+}
+
+void ViewportWidget::wireToolHost()
+{
+    tools_.onPrompt = [this](const std::string&) { updatePrompt(); };
+    tools_.onMessage = [this](const std::string& message) {
+        if (onToolMessage) {
+            onToolMessage(QString::fromStdString(message));
+        }
+    };
+    tools_.onRejected = [this](const std::string& message) {
+        if (onError) {
+            onError(QString::fromStdString(message));
+        }
+    };
+    tools_.onStarted = [this](const std::string& id) {
+        if (onActiveToolChanged) {
+            onActiveToolChanged(id);
+        }
+        if (const auto legacy = legacyTool(id); legacy && onToolChanged) {
+            onToolChanged(*legacy);
+        }
+        update();
+    };
+    tools_.onFinished = [this](const std::string&) {
+        typed_.clear();
+        if (onActiveToolChanged) {
+            onActiveToolChanged({});
+        }
+        if (onToolChanged) {
+            onToolChanged(Tool::Select);
+        }
+        update();
+    };
 }
 
 Box2 ViewportWidget::drawnBounds() const
@@ -302,12 +407,14 @@ void ViewportWidget::setSnapModes(cad::SnapModes modes)
 
 void ViewportWidget::cancel()
 {
-    if (!points_.empty() || boxStart_) {
-        points_.clear();
-        boxStart_.reset();
-    } else if (tool_ != Tool::Select) {
-        setTool(Tool::Select);
+    if (!typed_.isEmpty()) {
+        // As in a command line: the first Esc takes back what was typed.
+        typed_.clear();
+    } else if (tools_.active()) {
+        tools_.cancel(); // its onFinished resets the prompt and repaints
         return;
+    } else if (boxStart_) {
+        boxStart_.reset();
     } else if (!document_.selection().empty()) {
         document_.selection().clear();
         document_.notifySelectionChanged();
@@ -318,9 +425,10 @@ void ViewportWidget::cancel()
 
 void ViewportWidget::resetInteraction()
 {
-    points_.clear();
+    typed_.clear();
     boxStart_.reset();
     activeSnap_.reset();
+    tools_.reset();
     updatePrompt();
     update();
 }
@@ -330,40 +438,12 @@ void ViewportWidget::updatePrompt()
     if (!onPrompt) {
         return;
     }
-    const std::size_t n = points_.size();
-    QString text;
-    switch (tool_) {
-    case Tool::Select:
-        text = "Select: click an entity, drag right for a window, drag left for crossing";
-        break;
-    case Tool::Point:
-        text = "Point: pick a position";
-        break;
-    case Tool::Line:
-        text = n == 0 ? "Line: pick the start point" : "Line: pick the next point (Enter to finish)";
-        break;
-    case Tool::Polyline:
-        text = n == 0 ? "Polyline: pick the first vertex"
-                      : "Polyline: pick the next vertex (Enter to finish, C to close)";
-        break;
-    case Tool::Rectangle:
-        text = n == 0 ? "Rectangle: pick the first corner" : "Rectangle: pick the opposite corner";
-        break;
-    case Tool::Circle:
-        text = n == 0 ? "Circle: pick the centre" : "Circle: pick a point on the circumference";
-        break;
-    case Tool::Arc:
-        text = n == 0   ? "Arc: pick the start point"
-               : n == 1 ? "Arc: pick a point on the arc"
-                        : "Arc: pick the end point";
-        break;
-    case Tool::Move:
-    case Tool::Copy:
-        text = QString(toString(tool_)) +
-               (n == 0 ? ": pick the base point" : ": pick the destination");
-        break;
+    if (tools_.active()) {
+        onPrompt(QString("%1: %2").arg(QString::fromStdString(tools_.info()->name),
+                                      QString::fromStdString(tools_.prompt())));
+        return;
     }
-    onPrompt(text);
+    onPrompt("Select: click an entity, drag right for a window, drag left for crossing");
 }
 
 void ViewportWidget::run(cmd::CommandPtr command)
@@ -382,14 +462,14 @@ void ViewportWidget::updateCursor(const QPointF& screen)
     cursorWorld_ = raw;
     activeSnap_.reset();
 
-    if (snapEnabled_ && tool_ != Tool::Select) {
+    // Snapping serves a tool that wants a point: a pick of an entity or a
+    // selection is made where the cursor really is.
+    if (snapEnabled_ && tools_.expects() == cad::ToolInput::Point) {
         cad::SnapRequest request;
         request.cursor = raw;
         request.aperture = state_.plan.pixelsToWorld(kSnapAperturePixels);
         request.modes = snapModes_;
-        if (!points_.empty()) {
-            request.from = points_.back();
-        }
+        request.from = tools_.lastPoint();
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(state_.plan.scale) : 0.0;
         request.view = &state_.layers;
         // Through the Document's spatial index (PLAN.MD Phase 18). Measured in
@@ -406,83 +486,52 @@ void ViewportWidget::updateCursor(const QPointF& screen)
     }
 }
 
-void ViewportWidget::acceptPoint(const Point2& point)
+std::optional<katana::entity::EntityId> ViewportWidget::entityAt(const QPointF& screen) const
 {
-    const cmd::EntityAttributes attributes = document_.currentAttributes();
-    switch (tool_) {
-    case Tool::Select:
-        return;
-    case Tool::Point:
-        run(cmd::createPoint(point, attributes));
-        break;
-    case Tool::Line:
-        if (!points_.empty()) {
-            run(cmd::createLine(points_.back(), point, attributes));
-        }
-        points_ = {point}; // chain: the end becomes the next start
-        break;
-    case Tool::Polyline:
-        points_.push_back(point);
-        break;
-    case Tool::Rectangle:
-        if (points_.empty()) {
-            points_.push_back(point);
+    cad::SelectionFilter filter;
+    filter.view = &state_.layers;
+    return cad::pickEntity(document_.model(), toWorld(screen), pickTolerance(), filter,
+                           &document_.spatialIndex());
+}
+
+void ViewportWidget::toolClick(const QPointF& screen)
+{
+    // The aperture at this zoom, for a tool that finds geometry near a point
+    // itself; a tool reads it when it (re)starts.
+    tools_.setPickTolerance(pickTolerance());
+    switch (tools_.expects().value_or(cad::ToolInput::Point)) {
+    case cad::ToolInput::Entity: {
+        // Where the cursor really is, not a snapped point: the pick is of
+        // what is under it. Nothing there is still a click, and the tool
+        // either takes it as a point or says what it wants instead.
+        const Point2 at = toWorld(screen);
+        if (const auto picked = entityAt(screen)) {
+            (void)tools_.entity(*picked, at);
         } else {
-            const auto rectangle = katana::geometry::Rectangle2::fromCorners(points_[0], point);
-            run(cmd::createPolyline(rectangle.toPolyline(), attributes));
-            points_.clear();
-        }
-        break;
-    case Tool::Circle:
-        if (points_.empty()) {
-            points_.push_back(point);
-        } else {
-            run(cmd::createCircle(points_[0], points_[0].distanceTo(point), attributes));
-            points_.clear();
-        }
-        break;
-    case Tool::Arc:
-        points_.push_back(point);
-        if (points_.size() == 3) {
-            const auto arc = Arc2::throughPoints(points_[0], points_[1], points_[2]);
-            if (arc) {
-                run(cmd::createArc(*arc, attributes));
-            } else if (onError) {
-                onError("The three points are collinear or coincident.");
-            }
-            points_.clear();
-        }
-        break;
-    case Tool::Move:
-    case Tool::Copy:
-        if (document_.selection().empty()) {
-            if (onError) {
-                onError("Select the entities first.");
-            }
-            setTool(Tool::Select);
-            return;
-        }
-        if (points_.empty()) {
-            points_.push_back(point);
-        } else {
-            const Vec2 delta = point - points_[0];
-            const auto ids = document_.selection().ids();
-            run(tool_ == Tool::Move ? cmd::moveEntities(ids, delta) : cmd::copyEntities(ids, delta));
-            points_.clear();
+            (void)tools_.point(at);
         }
         break;
     }
-    updatePrompt();
+    case cad::ToolInput::Point:
+    case cad::ToolInput::Value:
+        updateCursor(screen);
+        (void)tools_.point(cursorWorld_);
+        break;
+    case cad::ToolInput::Selection:
+        break; // selected at the release, as the Select tool does
+    }
     update();
 }
 
-void ViewportWidget::finishOperation(bool close)
+void ViewportWidget::toolEnter()
 {
-    if (tool_ == Tool::Polyline && points_.size() >= 2) {
-        run(cmd::createPolyline(Polyline2{points_, close && points_.size() >= 3},
-                                document_.currentAttributes()));
+    if (!typed_.isEmpty()) {
+        const std::string text = typed_.toStdString();
+        typed_.clear();
+        (void)tools_.typed(text);
+    } else {
+        (void)tools_.enter();
     }
-    points_.clear();
     updatePrompt();
     update();
 }
@@ -549,9 +598,12 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
         return;
     }
     if (event->button() == Qt::RightButton) {
-        if (!points_.empty()) {
-            finishOperation(false);
-        } else if (tool_ == Tool::Select && !boxStart_ && onContextMenu) {
+        if (tools_.active()) {
+            // Enter, as in AutoCAD with its shortcut menu off: it finishes a
+            // chain, ends a selection or takes the prompt's default.
+            boxStart_.reset();
+            toolEnter();
+        } else if (!boxStart_ && onContextMenu) {
             // Nothing to finish or cancel, and cancel() here would only have
             // cleared the selection the menu is about to act on.
             onContextMenu(event->globalPosition().toPoint());
@@ -563,13 +615,14 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
     if (event->button() != Qt::LeftButton) {
         return;
     }
-    if (tool_ == Tool::Select) {
+    // Selecting, with no tool or for a tool that asks for a selection: a
+    // click or a box, settled at the release.
+    if (!tools_.active() || tools_.expects() == cad::ToolInput::Selection) {
         boxStart_ = event->position();
         boxEnd_ = event->position();
         return;
     }
-    updateCursor(event->position());
-    acceptPoint(cursorWorld_);
+    toolClick(event->position());
 }
 
 void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
@@ -599,10 +652,21 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
         boxStart_.reset();
         const bool dragged = std::abs(to.x() - from.x()) > kDragThresholdPixels ||
                              std::abs(to.y() - from.y()) > kDragThresholdPixels;
+        Qt::KeyboardModifiers modifiers = event->modifiers();
+        if (tools_.expects() == cad::ToolInput::Selection) {
+            // A tool's "Select entities" GATHERS, as AutoCAD's does: each
+            // click or box adds to what is picked, and Shift or Ctrl takes a
+            // picked entity back out. Replacing the selection at every
+            // plain click, as the Select tool does, would leave only the
+            // last of several cutting edges picked.
+            modifiers = (modifiers & (Qt::ShiftModifier | Qt::ControlModifier))
+                            ? Qt::KeyboardModifiers(Qt::ControlModifier)
+                            : Qt::KeyboardModifiers(Qt::ShiftModifier);
+        }
         if (dragged) {
-            selectInBox(from, to, event->modifiers());
+            selectInBox(from, to, modifiers);
         } else {
-            selectAt(to, event->modifiers());
+            selectAt(to, modifiers);
         }
         update();
     }
@@ -619,7 +683,7 @@ void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
     // means a user clicking quickly while drawing silently loses that vertex, so
     // a drawing tool has to consume it exactly as it would an ordinary press.
     // Select is left alone: there a double click is not a second pick.
-    if (tool_ != Tool::Select) {
+    if (tools_.active()) {
         mousePressEvent(event);
     }
 }
@@ -661,30 +725,76 @@ bool isTypedText(const QKeyEvent& event)
 
 } // namespace
 
+bool ViewportWidget::event(QEvent* event)
+{
+    // Ctrl+Z while a tool runs is the TOOL's: it steps back inside the tool -
+    // the last vertex of a chain, the last pick - as U does, and never undoes
+    // a command underneath a tool still holding points. Claimed here, where
+    // Qt asks whether the window's Undo shortcut may have the key, and acted
+    // on at the key press (keyPressEvent), because Qt may ask more than once
+    // for one press.
+    if (event->type() == QEvent::ShortcutOverride && tools_.active() &&
+        static_cast<QKeyEvent*>(event)->matches(QKeySequence::Undo)) {
+        event->accept();
+        return true;
+    }
+    return QWidget::event(event);
+}
+
 void ViewportWidget::keyPressEvent(QKeyEvent* event)
 {
+    if (tools_.active()) {
+        // While a tool runs, what is typed is ITS input - a coordinate, a
+        // distance, an option letter - kept here and shown after the prompt
+        // until Enter sends it, rather than going to the window as a command.
+        switch (event->key()) {
+        case Qt::Key_Escape:
+            cancel();
+            return;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            toolEnter();
+            return;
+        case Qt::Key_Backspace:
+            typed_.chop(1);
+            updatePrompt();
+            update();
+            return;
+        case Qt::Key_Space:
+            // Space is Enter, as in AutoCAD, except inside something typed
+            // for a tool that wants text, where it is a space.
+            if (typed_.isEmpty() || tools_.expects() != cad::ToolInput::Value) {
+                toolEnter();
+                return;
+            }
+            break;
+        case Qt::Key_Z:
+            if (event->matches(QKeySequence::Undo)) {
+                // A tool with nothing to step back says so (onError); the
+                // drawing's Undo is Esc and then Ctrl+Z.
+                (void)tools_.undo();
+                updatePrompt();
+                update();
+                return;
+            }
+            break;
+        default:
+            break;
+        }
+        if (isTypedText(*event)) {
+            typed_ += event->text();
+            updatePrompt();
+            update();
+            event->accept();
+            return;
+        }
+        QWidget::keyPressEvent(event);
+        return;
+    }
     switch (event->key()) {
     case Qt::Key_Escape:
         cancel();
         return;
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
-        finishOperation(false);
-        return;
-    case Qt::Key_C:
-        // C closes a polyline, and only means that while one is being drawn;
-        // with fewer than three vertices there is nothing to close yet, but
-        // the key is still the polyline's rather than the start of a typed
-        // command. Otherwise it is text like any other letter.
-        if (tool_ == Tool::Polyline && !points_.empty()) {
-            if (points_.size() >= 3) {
-                finishOperation(true);
-            } else if (onError) {
-                onError("A polyline needs three vertices before C can close it.");
-            }
-            return;
-        }
-        break;
     case Qt::Key_Delete:
         if (!document_.selection().empty()) {
             run(cmd::deleteEntities(document_.selection().ids()));
@@ -711,8 +821,8 @@ void ViewportWidget::contextMenuEvent(QContextMenuEvent* event)
     // no press, so it opens the menu here, at the cursor when the cursor is
     // over the view and in the middle of it otherwise.
     event->accept();
-    if (event->reason() != QContextMenuEvent::Keyboard || !onContextMenu ||
-        tool_ != Tool::Select || !points_.empty() || boxStart_) {
+    if (event->reason() != QContextMenuEvent::Keyboard || !onContextMenu || tools_.active() ||
+        boxStart_) {
         return;
     }
     const QPoint local = mapFromGlobal(QCursor::pos());
@@ -757,7 +867,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     drawEntities(painter);
     drawAlignments(painter);
     drawPreview(painter);
-    if (drawingIsEmpty() && points_.empty()) {
+    if (drawingIsEmpty() && !tools_.active()) {
         drawEmptyHint(painter);
     }
 
@@ -770,6 +880,7 @@ void ViewportWidget::paintEvent(QPaintEvent*)
         painter.setBrush(Qt::NoBrush);
     }
     drawSnapMarker(painter);
+    drawPrompt(painter);
 }
 
 bool ViewportWidget::drawingIsEmpty() const
@@ -1663,47 +1774,60 @@ void ViewportWidget::drawText(QPainter& painter, const Point2& position, const s
 
 void ViewportWidget::drawPreview(QPainter& painter) const
 {
-    if (points_.empty()) {
+    lastPreviewCount_ = 0;
+    if (!tools_.active()) {
         return;
     }
+    const cad::ToolFeedback feedback = tools_.feedback(cursorWorld_);
+    // A shape in the preview is drawn as the geometry it will become, so a
+    // dimension or a text previews at its real size. Its style is what new
+    // work gets (the current layer and style), and it is never hatched: a
+    // closed outline previews as its outline.
+    hatch_ = nullptr;
+    katana::entity::Entity drawn;
+    drawn.layer = document_.currentAttributes().layer;
+    drawn.style = document_.currentAttributes().style;
     painter.setPen(QPen(kPreview, 1, Qt::DashLine));
-    const QPointF cursor = toScreen(cursorWorld_);
-    switch (tool_) {
-    case Tool::Line:
-    case Tool::Move:
-    case Tool::Copy:
-        painter.drawLine(toScreen(points_.back()), cursor);
-        break;
-    case Tool::Polyline: {
-        QPolygonF polygon;
-        for (const auto& p : points_) {
-            polygon << toScreen(p);
+    painter.setBrush(Qt::NoBrush);
+    for (const katana::entity::Geometry& shape : feedback.shapes) {
+        if (std::holds_alternative<katana::entity::DimensionGeometry>(shape)) {
+            drawn.geometry = shape;
+            dimensionStyle_ = cad::resolveDimensionStyle(document_.model(), drawn);
         }
-        polygon << cursor;
-        painter.drawPolyline(polygon);
-        break;
+        drawGeometry(painter, shape);
     }
-    case Tool::Rectangle:
-        painter.drawRect(QRectF(toScreen(points_[0]), cursor).normalized());
-        break;
-    case Tool::Circle: {
-        const double radius = points_[0].distanceTo(cursorWorld_) * state_.plan.scale;
-        painter.drawEllipse(toScreen(points_[0]), radius, radius);
-        painter.drawLine(toScreen(points_[0]), cursor);
-        break;
+    // Markers: a small open square, the grip AutoCAD draws at a base point.
+    painter.setPen(QPen(kPreview, 1.5));
+    const double r = 3.5;
+    for (const Point2& marker : feedback.markers) {
+        const QPointF p = toScreen(marker);
+        painter.drawRect(QRectF(p.x() - r, p.y() - r, 2 * r, 2 * r));
     }
-    case Tool::Arc:
-        if (points_.size() == 2) {
-            if (const auto arc = Arc2::throughPoints(points_[0], points_[1], cursorWorld_)) {
-                drawGeometry(painter, *arc);
-                break;
-            }
-        }
-        painter.drawLine(toScreen(points_.back()), cursor);
-        break;
-    default:
-        break;
+    lastPreviewCount_ = feedback.shapes.size() + feedback.markers.size();
+}
+
+void ViewportWidget::drawPrompt(QPainter& painter) const
+{
+    if (!tools_.active()) {
+        return;
     }
+    // The prompt in the view as well as in the window's command line: the
+    // eye is on the drawing, and a floating view may be far from the window.
+    // What has been typed follows it with a caret, as it will be sent.
+    const QString text = QString("%1: %2  %3_").arg(QString::fromStdString(tools_.info()->name),
+                                                    QString::fromStdString(tools_.prompt()),
+                                                    typed_);
+    QFont font("Segoe UI");
+    font.setPixelSize(12);
+    painter.setFont(font);
+    const QFontMetrics metrics(font);
+    const int pad = 4;
+    const int height = metrics.height() + 2 * pad;
+    const QRect band(0, this->height() - height, width(), height);
+    painter.fillRect(band, QColor(0x12, 0x16, 0x1a, 220));
+    painter.setPen(kPreview);
+    painter.drawText(band.adjusted(pad + 2, 0, -pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                     metrics.elidedText(text, Qt::ElideLeft, band.width() - 2 * pad - 2));
 }
 
 void ViewportWidget::drawSnapMarker(QPainter& painter) const
