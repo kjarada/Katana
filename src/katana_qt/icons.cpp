@@ -853,13 +853,15 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         drawMark(ink, 19.2, 17.5, true);
         break;
     case Icon::Purge:
-        // A bin: the lid and its handle, the body, and in the accent the
-        // unused items going into it.
-        ink.line(4, 6.5, 20, 6.5);
-        ink.stroke(polyline({{9.5, 6.5}, {9.5, 3.5}, {14.5, 3.5}, {14.5, 6.5}}));
-        ink.stroke(polyline({{6, 6.5}, {7.3, 21}, {16.7, 21}, {18, 6.5}}));
-        ink.line(10, 10, 10.4, 17.5, true, 1.3);
-        ink.line(14, 10, 13.6, 17.5, true, 1.3);
+        // A broom sweeping the unused away (the accent): not Erase's bin,
+        // which deletes what is picked, where Purge clears what nothing uses.
+        ink.line(20.5, 2.5, 12.5, 11.5);
+        ink.stroke(polyline({{9.8, 9.6}, {15.2, 13.8}, {11, 20.5}, {3, 16.5}}, true));
+        ink.line(7.4, 13.3, 5.8, 17.9, false, 1.1);
+        ink.line(10.4, 15, 8.8, 19.4, false, 1.1);
+        ink.dot(16.5, 19.5, 1.3, true);
+        ink.dot(20, 17, 1.3, true);
+        ink.dot(20.5, 21, 1.3, true);
         break;
     }
     painter.restore();
