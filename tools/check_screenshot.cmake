@@ -180,24 +180,15 @@ endif()
 
 if(DEFINED COMPARE)
     file(READ "${_reference}" _expected)
-    string(REPLACE "
-" "
-" _expected "${_expected}")
+    string(REPLACE "\r\n" "\n" _expected "${_expected}")
     foreach(_file IN LISTS _written)
         if(NOT EXISTS "${_file}")
-            message(FATAL_ERROR "the run wrote no ${_file}
-${out}
-${err}")
+            message(FATAL_ERROR "the run wrote no ${_file}\n${out}\n${err}")
         endif()
         file(READ "${_file}" _actual)
-        string(REPLACE "
-" "
-" _actual "${_actual}")
+        string(REPLACE "\r\n" "\n" _actual "${_actual}")
         if(NOT _actual STREQUAL _expected)
-            message(FATAL_ERROR "${_file} differs from ${_reference}:
-${_actual}
---- expected ---
-${_expected}")
+            message(FATAL_ERROR "${_file} differs from ${_reference}:\n${_actual}\n--- expected ---\n${_expected}")
         endif()
     endforeach()
 endif()
