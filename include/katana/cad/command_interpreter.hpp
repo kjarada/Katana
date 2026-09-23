@@ -67,6 +67,9 @@ class CommandInterpreter {
     [[nodiscard]] Reply style(const Tokens& args);
     [[nodiscard]] Reply alignment(const Tokens& args);
     [[nodiscard]] Reply parcel(const Tokens& args);
+    // INVERSE, FORWARD (RADIATE) and AREA: the survey tools of survey_tools.hpp,
+    // printing the same report the Survey menu's dialogs print.
+    [[nodiscard]] Reply survey(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply attributes(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply undoRedo(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply file(const std::string& verb, const Tokens& args);
