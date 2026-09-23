@@ -72,6 +72,12 @@ struct EditDefaults {
 // locked - or nullopt when it can. A tool refuses the pick up front with this
 // rather than returning a command the document would refuse.
 [[nodiscard]] std::optional<std::string> refusalToEdit(const Document& document, EntityId id);
+// Whether the drawing would hold `geometry` - the check the command that adds
+// it makes (entity::validate) - as an error whose message is the sentence to
+// refuse with. A tool's whole session becomes one command, so a single piece
+// the drawing refuses would lose every edit made with it; a tool asks this
+// before it takes a pick, and EditSession asks it of everything it is given.
+[[nodiscard]] katana::core::Status drawable(const Geometry& geometry);
 
 // The entities a Selection step ends with: what the tool was given or picked,
 // and the document's selection as it is when Enter is pressed (the view
@@ -164,8 +170,12 @@ class EditSession {
 
     // Marks the start of one operation, which undo() takes back whole.
     void begin();
-    void replace(EntityId id, std::vector<Entity> pieces);
-    void add(Entity entity);
+    // Each fails, with drawable()'s sentence, when a piece is one the drawing
+    // would refuse - and then the whole operation since begin() is abandoned,
+    // so an operation is taken entirely or not at all and the command the
+    // session becomes is always one the drawing accepts.
+    [[nodiscard]] katana::core::Status replace(EntityId id, std::vector<Entity> pieces);
+    [[nodiscard]] katana::core::Status add(Entity entity);
     // Back to before the last begin(). False when there is nothing to undo.
     bool undo();
     [[nodiscard]] std::size_t operations() const { return history_.size(); }

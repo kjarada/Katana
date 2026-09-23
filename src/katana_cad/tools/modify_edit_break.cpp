@@ -1,9 +1,11 @@
 // Break and Break at Point. Break takes the object at the point it is picked
 // - the first break point, as in AutoCAD, or [First point] to give it exactly -
 // and a second point, and removes what lies between; typing @0,0 for the
-// second point breaks at the first without a gap. Break at Point splits the
-// object in two at one point. Each is ONE command: the object keeps its id
-// for the first piece and the second piece is new.
+// second point breaks at the first without a gap. Break at Point splits a
+// line, arc or open polyline in two at one point; a circle or closed polyline
+// has no ends, so one point cannot split it in two, and it is refused when
+// picked. Each is ONE command: the object keeps its id for the first piece
+// and the second piece is new.
 
 #include <cmath>
 
@@ -215,6 +217,14 @@ class BreakTool final : public InteractiveTool {
             return ToolStep::rejected("A " + kindName(entity->geometry) +
                                       " cannot be broken; pick a line, arc, circle or polyline.");
         }
+        const auto* polyline = std::get_if<Polyline2>(&entity->geometry);
+        if (atPoint_ && (type == EntityType::Circle || (polyline != nullptr && polyline->closed))) {
+            // Refused at the pick: every point after it would be refused as
+            // "one point", and a one-point tool cannot take a second.
+            return ToolStep::rejected(asSentence(withArticle(kindName(entity->geometry)) +
+                                                 " has no ends, so one point cannot split it; "
+                                                 "use Break with two points"));
+        }
         target_ = id;
         first_ = onto(entity->geometry, at);
         step_ = Step::Second;
@@ -245,7 +255,9 @@ class BreakTool final : public InteractiveTool {
             pieces.push_back(std::move(piece));
         }
         session_.begin();
-        session_.replace(target_, std::move(pieces));
+        if (auto status = session_.replace(target_, std::move(pieces)); !status) {
+            return ToolStep::rejected(status.error().message);
+        }
         return ToolStep::done(session_.commit("BREAK"),
                               broken->pieces.size() == 2 ? "Broken in two." : "Broken.");
     }
