@@ -1,12 +1,18 @@
 # Katana — instructions for AI contributors
 
 This file is loaded automatically at the start of every session. It is the
-standing contract for how work is done here. `PLAN.MD` says *what* is being
-built; this file says *how to work on it*.
+standing contract for how work is done here. The plan says *what* is being
+built; this file says *how to work on it*. The plan's text is in `plan/`, one
+file per section with the section numbers unchanged, and `PLAN.MD` is its
+index: a table giving the file for every section and subsection, so a
+citation such as `PLAN.MD 45.2` or `PLAN.MD Phase 15` resolves in one lookup.
 
-**Read `PLAN.MD` sections 4 (Absolute Architectural Rules), 32 (Performance
-Targets), 35 (Numerical Correctness) and 36 (Error Handling) before your first
-change in a session.** Everything below assumes them.
+**Read the plan's sections 4 (Absolute Architectural Rules,
+`plan/04-absolute-architectural-rules.md`), 32 (Performance Targets,
+`plan/32-performance-targets.md`), 35 (Numerical Correctness,
+`plan/35-numerical-correctness.md`) and 36 (Error Handling,
+`plan/36-error-handling.md`) before your first change in a session.**
+Everything below assumes them.
 
 ---
 
@@ -28,8 +34,8 @@ change.
    reported "built" over a missing binary.
 5. **Run the whole suite**, not just your module: `ctest --test-dir build/debug -j 8`.
    The layering check is one of those tests.
-6. **Update `PLAN.MD` and the affected document in `docs/`.** See §2. This is
-   not optional and not a separate task to do later.
+6. **Update the plan (`plan/`) and the affected document in `docs/`.** See §2.
+   This is not optional and not a separate task to do later.
 7. **Commit.** See §5.
 
 ## 2. Keeping the plan and documentation true — MANDATORY
@@ -40,16 +46,22 @@ stale has not been finished.
 **Every time you complete a phase, a sub-feature, or anything that changes what
 the software can do, in the same change:**
 
-- **`PLAN.MD`** — update the status of the phase you touched. The vocabulary is:
+- **The plan** — update the status of the phase you touched. Updates go in
+  that section's file, `plan/<file>` (the `PLAN.MD` index names it), and when
+  a `#` or `##` heading is added or its title changes, its row in the
+  `PLAN.MD` index changes in the same commit; `python tools/check_plan_split.py`
+  checks the two agree. The vocabulary is:
   - `**STATUS: DELIVERED.**` followed by a short record of *what was actually
     built and where it lives*, replacing the original instructions.
   - `**STATUS: PARTIALLY DELIVERED.**` followed by what exists **and an explicit
     `OUTSTANDING:` paragraph** naming what does not. Never quietly narrow a
     phase to what you managed.
   - Untouched phases keep their original text.
-  - Keep the roadmap table in §5 in step.
+  - Keep the roadmap table in §5 (`plan/05-development-strategy.md`) in step.
   - **Do not renumber sections.** Source comments cite them (`PLAN.MD §32`,
-    `Rule 4`), and renumbering silently invalidates every one of those.
+    `Rule 4`), and renumbering silently invalidates every one of those. The
+    citations stay as they are - the index resolves them to files - so do not
+    rewrite them to file paths either.
 - **`docs/`** — one document per area (`docs/cad.md`, `docs/interop.md`, ...).
   Record the *decisions and their reasons*, not a restatement of the code.
   A performance claim goes in with its before/after numbers and the machine.
@@ -100,7 +112,8 @@ Other standing rules:
 
 ## 4. Performance
 
-`PLAN.MD` §32 sets the targets; Rule 6 says profile before optimising. In
+`PLAN.MD` §32 (`plan/32-performance-targets.md`) sets the targets; Rule 6
+(section 4) says profile before optimising. In
 practice:
 
 - **Measure before and after, and put both numbers in the commit message and
@@ -192,7 +205,7 @@ and runs, and say what remains.
 
 ## 5.2 Do not stop until the plan is finished — MANDATORY
 
-**Work continuously through `PLAN.MD` until every phase is delivered.** Do not
+**Work continuously through the plan until every phase is delivered.** Do not
 stop at a natural pause point, do not stop because a feature is complete, and
 do not stop to ask whether to carry on. Finish a milestone, commit it, and
 start the next one in the same session.
@@ -203,17 +216,20 @@ Take the next work item in this order:
    linestyle library and the symbol library — until every slice of it is
    DELIVERED.** Nothing else is started or resumed before then, section 20.2's
    own remainder included (the user's instruction of 2026-09-22); the only
-   exception is a defect that blocks it.
+   exception is a defect that blocks it. It is Phase 20's subsection, in
+   `plan/25-phase-20-file-interoperability/03-20-3-survey-coding-programme.md`.
 0a. **`PLAN.MD` section 45, the survey module and instrument
-   interoperability** (the user's request of 2026-09-23), once 20.3 is done.
+   interoperability** (the user's request of 2026-09-23), once 20.3 is done:
+   `plan/45-survey-module-and-instruments.md`.
 0b. **`PLAN.MD` section 20.2's remainder, the 12d Model programme**, once 45
-   is done.
+   is done: `plan/25-phase-20-file-interoperability/02-20-2-12d-model-programme.md`.
 1. The phase you are part-way through, to a point where it is DELIVERED rather
    than partially delivered.
 2. A real defect found on the way — fix it if it is small and adjacent, record
-   it in `PLAN.MD` otherwise.
-3. The earliest phase in `PLAN.MD` §5's table that is not yet delivered, unless
-   a measurement says a later one is worth more (record the measurement).
+   it in the plan, under its phase's file in `plan/`, otherwise.
+3. The earliest phase in §5's roadmap table (`plan/05-development-strategy.md`)
+   that is not yet delivered, unless a measurement says a later one is worth
+   more (record the measurement).
 
 Stop only for these, and say which:
 
@@ -224,9 +240,9 @@ Stop only for these, and say which:
   has. Say exactly what is needed.
 - **The plan is complete.**
 
-Running out of obvious next steps is not a stopping condition: §5 of `PLAN.MD`
-lists the remaining phases and §6 of this file lists the standing improvement
-work. Neither is ever empty.
+Running out of obvious next steps is not a stopping condition: §5 of the plan
+(`plan/05-development-strategy.md`) lists the remaining phases and §6 of this
+file lists the standing improvement work. Neither is ever empty.
 
 Two things this does NOT license. It does not license committing a broken or
 half-finished feature to keep moving — §5 still applies, and every commit lands
@@ -294,7 +310,7 @@ Practicalities, each learnt the expensive way:
 - **Launch waves, not everything.** Seventeen agents at once exhausted the
   session's usage limit within minutes and every one of them died having read
   and written nothing. The work order above is also the launch order.
-- **Agents do not edit the shared records.** `PLAN.MD`, `README.md`,
+- **Agents do not edit the shared records.** `PLAN.MD` and `plan/`, `README.md`,
   `CLAUDE.md` and `docs/` are updated by the lead from the agents' reports, and
   a shared CMake list belongs to exactly one agent per wave; reserve a test
   file in advance for any other agent that needs one.
@@ -316,18 +332,21 @@ to add features. On every session, actively look for and act on:
   with the reason, or delete it.
 - **A test that would pass if the code were wrong.** Strengthen it or say so.
 - **A silent failure** — an ignored return, a swallowed error, a default that
-  hides a mistake. `PLAN.MD` §36 forbids these.
+  hides a mistake. `PLAN.MD` §36 (`plan/36-error-handling.md`) forbids these.
 - **A number with no source.** Every constant gets a comment naming where it
   comes from (a standard, a measurement, a stated policy).
 - **Something you had to work out by reading three files.** Write it down where
   the second file would have told you.
 
 When you find a real defect outside the task you were given: fix it if it is
-small and adjacent, otherwise record it in `PLAN.MD` under the phase it belongs
-to. Never leave it only in the conversation — the conversation is lost and the
-repository is not. The audit of 2026-09-23 is registered in `PLAN.MD`
-§46 with an ID per defect and the detail in `docs/audit/`: cite the ID in the
-commit that fixes one and mark it FIXED there in the same commit.
+small and adjacent, otherwise record it in the plan, in the file under `plan/`
+of the phase it belongs to. Never leave it only in the conversation — the
+conversation is lost and the repository is not. The audit of 2026-09-23 is
+registered in `PLAN.MD` §46 (`plan/46-audit-defect-register.md`) with an ID
+per defect and the detail in `docs/audit/`: cite the ID in the commit that
+fixes one and mark it FIXED there in the same commit, with
+`python tools/audit_register.py <date> <ID>`, which also recounts §46's table
+and §5's roadmap row.
 
 **Report honestly.** If tests fail, say so and show the output. If you skipped
 part of the scope, say which part and why. A green summary over a red build
@@ -376,10 +395,10 @@ ctest --test-dir build/debug -j 8
 `build/debug`, `build/rel` and `build/release` are the primary build
 directories. C++26, GCC 16.2 (MSYS2 UCRT64) on Windows. The standard is the
 cache variable `KATANA_CXX_STANDARD` (default 26) so that a claim about it can
-be measured rather than argued about - see `PLAN.MD`, "The language standard is
-a build variable". The toolchain is a rolling MSYS2 install, so check
-`g++ --version` before quoting it in a measurement; it moved from 15.2 to 16.2
-on 2026-09-21.
+be measured rather than argued about - see `PLAN.MD` §24, "The language standard
+is a build variable" (`plan/24-phase-19-performance-architecture.md`). The
+toolchain is a rolling MSYS2 install, so check `g++ --version` before quoting
+it in a measurement; it moved from 15.2 to 16.2 on 2026-09-21.
 
 ## 8. Style
 
