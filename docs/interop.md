@@ -414,6 +414,12 @@ than the zip (`UT5527 Appin Rd V5.12daz` holds `Appin Rd V5.12da`). So the
 importer does not predict the member's name; it takes the one member that is
 a `.12da`, and refuses an archive with two rather than guess.
 
+The same module holds 12d's CUSTOMISATION - the `.4d` linestyle and symbol
+libraries and the mapfile: their readers, their writers (`writeStyleLibrary`,
+`writeMapFile`), the loader that tells them apart by content, and
+`mergeCustomisation`, which loads one on top of another. None of that is the
+archive format, and it is recorded in `docs/survey_coding.md`.
+
 ### Three layers: text, archive, domain
 
 `readArchive` turns text into an `Archive` - typed values, every element the
@@ -536,31 +542,42 @@ The mapping is documented in full at the head of
   metadata. The importer lists the styles it needs and the caller creates the
   missing ones in the same transaction as the layers, so an import is still
   one undo step. A 12da says nothing about what a linestyle looks like, so a
-  new one is continuous at the default weight and described as "12d
-  linestyle" for the user to finish in the style manager. **Rejected:**
-  guessing a dash pattern from the name ("DRAIN Water Course" is probably
-  dashed): wrong more often than right, and a wrong pattern is worse than a
-  solid line the user knows to fix.
+  new style's LINETYPE is the 12d linestyle's own name, at the default weight
+  and described as "12d linestyle": a loaded 12d library draws it by that
+  name, and with none loaded the name resolves to nothing and the line is
+  solid (`docs/cad.md`, "What a style draws"). This bullet used to say a new
+  style was "continuous", which is what the import once wrote - and why no
+  imported line ever drew its linestyle (`docs/survey_coding.md`, "The import
+  has to keep the real names"). An empty 12d linestyle name is ByLayer: the
+  entity gets no style. **Rejected:** guessing a dash pattern from the name
+  ("DRAIN Water Course" is probably dashed): wrong more often than right, and
+  a wrong pattern is worse than a solid line the user knows to fix.
 - **Symbols are on the style, and a point takes its symbol's style.** A
   12d vertex symbol (`symbol_value` for the string, `symbol_data` per
   vertex) is a linestyle drawn at a vertex with a colour, a size, a rotation,
   an offset and a raise; 12d writes one on every surveyed point - 27 075 of
   them across the sample archives, the string's own linestyle "0" beside
-  the symbol's. On a one-vertex point string the symbol is the point's whole
-  appearance, so the point's `style` becomes the symbol's linestyle, the
-  `Style` row carries the shape and the size, and the symbol's colour is the
-  entity's colour. The shape is read from the linestyle name
-  (`symbolForLinestyle`: "SEWR Manhole Cover" is a manhole, "ELEC Pole -
-  Light" a pole, "TOPO Natural Surface Point" a cross, anything unreadable a
-  circle), because a 12da carries only the name and what it looks like lives
-  in the 12d project; the style manager is where a wrong guess is put right,
-  once per name rather than once per point. The string's own linestyle is
-  kept as `12d.string_style` and written back, so the string is the string
-  it was. What 12d writes on tens of thousands of points as `rotation 0
-  offset 0 raise 0` is not kept: only a value that says something becomes
-  `12d.symbol.<key>` metadata, and export writes the defaults. On a LINE the
-  vertices have no style of their own; every block is kept as one list per
-  key (`12d.symbol.style` = `Post Post "Gate Post"`), written back as
+  the symbol's. A string with ONE symbol block - a one-vertex point, or a
+  line of any length - takes that symbol as its whole appearance: its `style`
+  becomes a style named after the symbol's linestyle, whose `symbol` is the
+  REAL 12d name and whose `symbolSize` is the block's size (described "12d
+  symbol"), and the symbol's colour is the entity's colour. The name is kept,
+  not a guess at a shape: a loaded symbol library draws it, and only when
+  nothing defines the name does the viewport fall back to the built-in shape
+  the name suggests (`entity::builtInSymbolFor`: "SEWR Manhole Cover" is a
+  manhole, "ELEC Pole - Light" a pole, "TOPO Natural Surface Point" a cross,
+  anything unreadable a circle) - the import used to store the guess and
+  throw the name away, so a loaded library could never match it. On a line
+  the symbol is drawn at every vertex (decision D8, `docs/cad.md`), and the
+  style's linetype, being the symbol's own name, draws a plain line under
+  it. The string's own linestyle is kept as `12d.string_style` when it
+  differs, and written back, so the string is the string it was. What 12d
+  writes on tens of thousands of points as `rotation 0 offset 0 raise 0` is
+  not kept: only a value that says something becomes `12d.symbol.<key>`
+  metadata, and export writes the defaults. A string carrying a DIFFERENT
+  symbol per vertex, which the format allows and 12d does not write, has no
+  one symbol for its style: every block is kept as one list per key
+  (`12d.symbol.style` = `Post Post "Gate Post"`), written back as
   `symbol_value` or `symbol_data` by the length of the lists, and counted in
   a warning because they are not drawn. **Rejected:** a symbol field on the
   entity - it would mean two places a point's appearance can come from, and
@@ -576,6 +593,18 @@ The mapping is documented in full at the head of
   what happens when they differ, and the answer was that the string's colour
   was lost. A symbol colour Katana has no RGB for is kept by name and
   written back.
+- **Export writes what the style draws.** A string's 12d linestyle is the
+  LINETYPE of its Katana style, and a symbol block's `style` is the style's
+  `symbol` - never the style's own name (`domain_export.cpp`,
+  `linestyleOf`). Import makes the two the same, so this changed nothing
+  until someone renamed a style in Katana, at which point export used to
+  rename the linestyle 12d draws to one no 12d library defines. A ByLayer
+  entity - no style, or a style whose linetype is `ByLayer` (decision D2) -
+  writes its LAYER's linetype. Katana's `continuous` goes out as `1`, 12d's
+  default solid linestyle (manual 1.4.3), since 12d has no linestyle called
+  continuous; for every layer an import creates that is still `1`, as it
+  always was. The style's name is written only for a style the model does
+  not hold, where it is the only information there is.
 - **Text is placed where 12d put it.** A 12d annotation anchors text by one
   of nine justifications ("top|middle|bottom" by "left|centre|right"); a
   Katana `TextGeometry` position IS the left end of the baseline, so the
@@ -713,7 +742,7 @@ handling column is asserted by `tests/archive12d/test_coverage.cpp`.
 |---|---|---|---|
 | `model` | 1.4.1 | import and export | a layer; a tree name such as Stage 1/Water arrives as that nested layer |
 | `colour` | 1.4.2 | import and export | the entity's colour where the name is one of 12d's standard colours; the name is always kept |
-| `style` | 1.4.3 | import and export | a Katana Style of that name in the entity's own style field; a vertex symbol's linestyle is the point's style, with the symbol on it |
+| `style` | 1.4.3 | import and export | a Katana Style of that name, with the name as its linetype, in the entity's own style field; a vertex symbol's linestyle is the string's style, with the symbol on it. Export writes the linestyle the style DRAWS (its linetype), not the style's name - see "Export writes what the style draws" below |
 | `breakline` | 1.4.4 | import and export | kept on the entity as 12d.breakline and written back |
 | `null` | 1.4.5 | import and export | a height equal to the null value, or the null keyword, is no height at all |
 | `attributes` | 1.3 | import and export | typed entity properties; a group flattens into Group/Name and is rebuilt on export |
@@ -840,9 +869,12 @@ away.
 ### Not done
 
 A symbol on the vertices of a LINE (468 fence and kerb strings in Windsor
-Road, 18 in `Test 4`) is kept and written back but not drawn, and a point
-symbol's rotation, offset and raise are kept and not drawn either: a Katana
-point has no rotation, and offset and raise are paper-space quantities. A
+Road, 18 in `Test 4`) is now drawn at every vertex (decision D8) when the
+string carries one symbol block, which is what 12d writes; a string carrying
+a different symbol per vertex - which the format allows and 12d does not
+write - is still kept and written back but not drawn. A point symbol's rotation, offset
+and raise are kept and not drawn: a Katana style has no rotation (a schema
+change, deferred), and offset and raise are paper-space quantities. A
 mesh is session data, so it is drawn but not saved with the project - the
 same open question as a surface. A mesh's vertex and edge infos, its edge
 list and its `blend` are read and not modelled. A text's slant and width factor are kept and not
