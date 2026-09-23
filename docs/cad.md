@@ -1161,10 +1161,10 @@ really 31.249 is a lie in survey work.
 
 ## The Format menu: the customisation workbench and its three managers
 
-The owner asked on 2026-09-23 and 2026-09-24 to "enhance the linestyle and
-symbol and survey codes managers" and to "make it professional CAD
-software". Format is where AutoCAD keeps Layer, Linetype and Text Style, and
-it is where the three managers and what goes with them now live:
+The owner's requests were to "enhance the linestyle and symbol and survey
+codes managers" and to "make it professional CAD software". Format is where
+AutoCAD keeps Layer, Linetype and Text Style, and it is where the three
+managers and what goes with them now live:
 
 ```
 Format
@@ -1345,8 +1345,9 @@ stand-in for a missing name, has no size of its own at size 0: its print size
 is the viewport's plain mark, and the pane says so rather than giving a
 number.
 
-The actions, each ONE undo step through `Document::execute` and each from a
-button, never from the grid's own selection signal:
+The actions, each from a button and never from the grid's own selection
+signal; each that changes the drawing is ONE undo step through
+`Document::execute`:
 
 | Button | What it does |
 |---|---|
@@ -1383,10 +1384,11 @@ what each tab shows, is `docs/survey_coding.md` ("The Survey Code Manager").
 
 What was merged on 2026-09-23 is the tested logic below Qt that the managers
 above need, each piece reachable from the command line too; the dialogs of
-2026-09-24 render it and decide nothing of their own. Professional managers (AutoCAD's, Civil 3D's,
-TBC's, MicroStation's, 12d's) share a vocabulary - usage counts, purge,
-merge, duplicate, a current style, pickers that browse a library with
-pictures - and each item here is one of those, in the layer that can test it.
+2026-09-24 render it and decide nothing of their own. Professional managers
+(AutoCAD's, Civil 3D's, TBC's, MicroStation's, 12d's) share a vocabulary -
+usage counts, purge, merge, duplicate, a current style, pickers that browse a
+library with pictures - and each item here is one of those, in the layer that
+can test it.
 
 - **Who uses what, in one pass** (`entity::tableUsage`,
   `include/katana/entity/table_usage.hpp`). Every style, linetype name,
@@ -1875,8 +1877,10 @@ with nothing done, because its Enter at some step applies a DEFAULT - Move's
 "use the first point as the displacement", Join's "join what is selected" -
 which Esc must never do; Copy is dropped for that reason although its placed
 copies are collected work. A Fillet or Chamfer at a VALUE prompt (its radius,
-its distances) is first stepped back out of it, because Enter there would take
-the default and store it for every later Fillet. The list stands in for a
+its distances) is first stepped back out of it: Enter there takes the prompt's
+default - at Chamfer's second distance it stores both distances for every
+later Chamfer - or, at Fillet's radius, only returns to the lines, and the
+corners a Multiple run made would go with the tool. The list stands in for a
 `cancel()` the tool interface does not have; a virtual commit-on-cancel on
 `InteractiveTool` would replace it.
 
