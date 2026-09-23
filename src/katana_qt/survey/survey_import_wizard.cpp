@@ -310,7 +310,7 @@ QWidget* SurveyImportWizard::buildLayoutPage()
     template_ = new QComboBox(page);
     template_->setObjectName("template");
     template_->setToolTip("A layout saved earlier");
-    fillTemplateChoice(*template_);
+    keepTemplateChoiceCurrent(*template_);
     templateName_ = new QLineEdit(page);
     templateName_->setObjectName("templateName");
     templateName_->setPlaceholderText("name to save as");
@@ -436,7 +436,8 @@ QWidget* SurveyImportWizard::buildLayoutPage()
             showError(status.error());
             return;
         }
-        fillTemplateChoice(*template_);
+        // The list was refilled by the save (keepTemplateChoiceCurrent);
+        // the new name is chosen without re-applying what the fields hold.
         template_->blockSignals(true);
         template_->setCurrentIndex(std::max(0, template_->findText(name)));
         template_->blockSignals(false);
@@ -452,7 +453,6 @@ QWidget* SurveyImportWizard::buildLayoutPage()
             showError(status.error());
             return;
         }
-        fillTemplateChoice(*template_);
         showMessage("Deleted the template \"" + name.trimmed() + "\".");
         context_.log("Deleted the survey layout template \"" + name.trimmed() + "\"", false);
     });
@@ -545,6 +545,14 @@ QWidget* SurveyImportWizard::buildReportPage()
     report_->setLineWrapMode(QPlainTextEdit::NoWrap);
     layout->addWidget(report_, 1);
     return page;
+}
+
+void SurveyImportWizard::showEvent(QShowEvent* event)
+{
+    // Saves and deletes in this Katana refill the list as they happen; this
+    // catches a template another Katana saved into the settings meanwhile.
+    fillTemplateChoice(*template_);
+    QDialog::showEvent(event);
 }
 
 // ---- moving between pages --------------------------------------------------------------------

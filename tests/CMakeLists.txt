@@ -452,6 +452,23 @@ if(TARGET katana)
             "-DEXPECT=Saved the survey layout template \"ctest survey layout\": P,N,E,Z,C,D.delimiter=comma.header=1.quote=double.*Deleted the survey layout template.*Point Report: 12 point\\(s\\)"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_point_report_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A template saved or deleted in the import wizard reaches an Export
+    # dialog that is already open. The Export dialog is opened FIRST, so its
+    # list is filled before the save (a list filled only when the dialog was
+    # built never offered it). The template is then chosen in it; after the
+    # wizard deletes it, choosing it again must be refused - the run ends on
+    # that refusal (REFUSED, see tools/check_screenshot.cmake), with the
+    # settings as it found them. The Delete before the Save clears a
+    # template an earlier, killed run may have left; when there is none it
+    # only logs that there is none.
+    add_test(NAME qt_survey_templates_reach_export_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@surveyExport|@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|templateName=ctest shared layout|!deleteTemplate|!saveTemplate|@surveyExport|template=ctest shared layout|@surveyImport|!deleteTemplate|@surveyExport|template=ctest shared layout"
+            "-DREFUSED=Saved the survey layout template \"ctest shared layout\".*Deleted the survey layout template \"ctest shared layout\".*--fill: template has no choice 'ctest shared layout'"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_templates_reach_export_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
                          qt_survey_forward_headless qt_survey_angle_headless
                          qt_survey_traverse_headless qt_survey_level_book_headless
@@ -461,6 +478,7 @@ if(TARGET katana)
                          qt_survey_export_round_trip_headless
                          qt_survey_import_transform_headless
                          qt_survey_point_report_headless
+                         qt_survey_templates_reach_export_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
