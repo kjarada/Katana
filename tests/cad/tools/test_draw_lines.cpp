@@ -11,6 +11,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -421,10 +422,16 @@ TEST(DrawLineTool, RefusesUndoBeforeAnyPointAndInputThatIsNeitherAPointNorAnOpti
     EXPECT_EQ(driver.tool().lastPoint(), Point2(0.0, 0.0));
 }
 
-TEST(DrawLineTool, ARefusalNamesOnlyTheInputsThePromptWouldTake)
+namespace {
+
+// Line and Polyline answer text that is neither a point nor an option the
+// same way, and both offer Close from the third point on, so one check
+// serves both.
+void expectRefusalsToNameOnlyWhatThePromptTakes(std::string_view id)
 {
+    SCOPED_TRACE(std::string(id));
     ToolDriver driver;
-    driver.start("draw.line");
+    driver.start(id);
     // Nothing to measure from yet, so no relative input and no Close.
     std::string why = driver.type("X").message;
     EXPECT_NE(why.find("x,y"), std::string::npos) << why;
@@ -438,6 +445,13 @@ TEST(DrawLineTool, ARefusalNamesOnlyTheInputsThePromptWouldTake)
     (void)driver.click(4, 3);
     why = driver.type("X").message;
     EXPECT_NE(why.find("C to close"), std::string::npos) << why;
+}
+
+} // namespace
+
+TEST(DrawLineTool, ARefusalNamesOnlyTheInputsThePromptWouldTake)
+{
+    expectRefusalsToNameOnlyWhatThePromptTakes("draw.line");
 }
 
 TEST(DrawLineTool, EnterBeforeTheFirstLineEndsTheToolWithNothingDrawn)
@@ -637,6 +651,11 @@ TEST(DrawPolylineTool, StartsANewPolylineAfterFinishingOne)
     (void)driver.click(1, 1);
     (void)driver.enter();
     EXPECT_EQ(shapesOf<Polyline2>(driver.document()).size(), 2u);
+}
+
+TEST(DrawPolylineTool, ARefusalNamesOnlyTheInputsThePromptWouldTake)
+{
+    expectRefusalsToNameOnlyWhatThePromptTakes("draw.polyline");
 }
 
 TEST(DrawPolylineTool, PreviewsThePolylineRunningOnToTheCursor)
@@ -913,6 +932,48 @@ TEST(DrawPolygonTool, ACircumscribedPolygonHasTheMiddleOfASideAtThePickedPoint)
     const auto polyline = onlyPolyline(driver.document());
     ASSERT_TRUE(polyline);
     EXPECT_TRUE(verticesNear(polyline->vertices, {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}));
+}
+
+TEST(DrawPolygonTool, ACircumscribedTriangleOrHexagonHasEverySideTangentToTheCircle)
+{
+    // A square cannot tell the apothem-to-corner factor 1/cos(pi/n) from
+    // 1/sin(pi/n), nor a turn of pi/n from one of pi/2 - pi/n: at n = 4 they
+    // are equal. A hexagon and a triangle can.
+    ToolDriver driver;
+    driver.start("draw.polygon");
+    (void)driver.type("6");
+    (void)driver.click(0, 0);
+    (void)driver.type("C");
+    (void)driver.click(0, -1);
+    // About the unit circle the hexagon's corners are 1/cos30 = 2/sqrt3 out.
+    // The first is the picked direction, -90 degrees, turned 30 degrees
+    // clockwise to -120: (2/sqrt3)(cos -120, sin -120) = (-1/sqrt3, -1). The
+    // rest are 60 degrees apart: -60, 0, 60, 120 and 180.
+    (void)driver.type("3");
+    (void)driver.click(0, 0);
+    (void)driver.type("C");
+    (void)driver.type("1");
+    // A typed radius puts the bottom side's middle at (0, -1). The corners
+    // are 1/cos60 = 2 out, the first at -90 - 60 = -150 degrees:
+    // 2(cos -150, sin -150) = (-sqrt3, -1); then -30 and 90.
+    const auto polylines = shapesOf<Polyline2>(driver.document());
+    ASSERT_EQ(polylines.size(), 2u);
+    const double third = 1 / kRoot3;
+    EXPECT_TRUE(verticesNear(polylines[0].vertices, {{-third, -1},
+                                                     {third, -1},
+                                                     {2 * third, 0},
+                                                     {third, 1},
+                                                     {-third, 1},
+                                                     {-2 * third, 0}}));
+    EXPECT_TRUE(verticesNear(polylines[1].vertices, {{-kRoot3, -1}, {kRoot3, -1}, {0, 2}}));
+    // Tangent: the middle of every side is on the unit circle.
+    for (const Polyline2& polygon : polylines) {
+        const std::size_t n = polygon.vertices.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const Point2 middle = (polygon.vertices[i] + polygon.vertices[(i + 1) % n]) * 0.5;
+            EXPECT_NEAR(middle.length(), 1.0, 1e-12) << n << " sides, side " << i;
+        }
+    }
 }
 
 TEST(DrawPolygonTool, ATypedRadiusDrawsTheBottomSideLevel)
@@ -1229,10 +1290,13 @@ TEST(DrawPolygonTool, EveryVertexOfA1024GonIsOnTheCircle)
     ASSERT_TRUE(polyline);
     ASSERT_EQ(polyline->vertices.size(), 1024u);
     // Each vertex is the first turned about the centre, so none carries the
-    // rounding of the ones before it: all are at radius 1000 to a few ulps,
-    // and vertex 512 is half a turn round, (-1000, 0).
+    // rounding of the ones before it: one cos, one sin and a product each, a
+    // few ulps. An ulp of 1000 is 2^-43, about 1.1e-13, so 1e-12 is some
+    // nine ulps. Turning the previous vertex again instead adds a turn's
+    // rounding at each of 1023 steps, and that walks tens of times past it.
+    // Vertex 512 is half a turn round, (-1000, 0).
     for (const Point2& vertex : polyline->vertices) {
-        EXPECT_NEAR(vertex.length(), 1000.0, 1e-9);
+        EXPECT_NEAR(vertex.length(), 1000.0, 1e-12);
     }
-    EXPECT_TRUE(near(polyline->vertices[512], {-1000, 0}, 1e-9));
+    EXPECT_TRUE(near(polyline->vertices[512], {-1000, 0}, 1e-12));
 }
