@@ -1,7 +1,7 @@
 # Katana
 
 A high-performance, deterministic C++ CAD and surveying platform, built to the
-plan in [PLAN.MD](PLAN.MD).
+plan in [plan/](plan/), one file per section, indexed by [PLAN.MD](PLAN.MD).
 
 Katana is an engineering core first and an application second. Every geometric,
 survey and numerical operation lives in a C++ library with no dependency on the
@@ -10,8 +10,9 @@ and the command line are two thin front ends over the same engine.
 
 ## Status
 
-The authoritative record is the roadmap table in [PLAN.MD](PLAN.MD) section 5;
-this is a summary of it.
+The authoritative record is the roadmap table in the plan's section 5,
+[plan/05-development-strategy.md](plan/05-development-strategy.md); this is a
+summary of it.
 
 | Phase | Subject | State |
 |---|---|---|
@@ -97,7 +98,9 @@ others through its menus). Points may be absolute
 
 Dependencies run one way only, lowest layer first. A layer may never include a
 header from a layer above it, and public headers may never expose a third-party
-type (PLAN.MD Rule 4). Both rules are enforced by
+type (PLAN.MD Rule 4, in
+[plan/04-absolute-architectural-rules.md](plan/04-absolute-architectural-rules.md)).
+Both rules are enforced by
 [tools/check_layering.cmake](tools/check_layering.cmake), which runs as the
 `layering` test on every `ctest`.
 
