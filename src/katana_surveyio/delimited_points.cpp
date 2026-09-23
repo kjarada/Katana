@@ -326,8 +326,9 @@ bool isPadding(char c)
 
 // `value` as it has to be written for the reader to give it back exactly, or an
 // error saying why it cannot be written with this layout. `what` names the
-// value for that error.
-Result<std::string> encodeField(std::string_view value, bool firstColumn,
+// value for that error. `startsLine` says that nothing but empty fields is
+// written before it on its line - see writeDelimitedPoints.
+Result<std::string> encodeField(std::string_view value, bool startsLine,
                                 const DelimitedLayout& layout, const std::string& what)
 {
     const char delimiter = delimited::delimiterCharacter(layout.delimiter);
@@ -352,7 +353,7 @@ Result<std::string> encodeField(std::string_view value, bool firstColumn,
                 reason = "holds a quote";
             }
         }
-        if (firstColumn && !layout.commentPrefix.empty() &&
+        if (startsLine && !layout.commentPrefix.empty() &&
             katana::core::trimmed(value).starts_with(layout.commentPrefix)) {
             reason = "begins with the comment prefix, so its line would be skipped";
         }
@@ -426,16 +427,26 @@ Result<std::string> writeDelimitedPoints(std::span<const SurveyPoint> points,
     const std::string separator(1, delimited::delimiterCharacter(layout.delimiter));
     std::string out;
 
+    // Whether a field is the one a reader would find the comment prefix at. Not
+    // only column 1: the reader looks for the prefix once the line is trimmed of
+    // blanks (core::trimmed), and a tab is one, so in a tab file the tabs after
+    // empty leading fields are trimmed away and "\t#12\t..." reads as a comment.
+    // A comma or semicolon is not trimmed and starts the line itself, and with
+    // whitespace an empty field is written "", so there column 1 is the one.
+    const bool separatorTrimmed = katana::core::isAsciiSpace(separator.front());
+    bool startsLine = true;
+
     if (layout.headerLines == 1) {
         for (std::size_t c = 0; c < layout.columns.size(); ++c) {
             Result<std::string> cell =
-                encodeField(headerName(layout.columns[c]), c == 0, layout,
+                encodeField(headerName(layout.columns[c]), startsLine, layout,
                             std::string("the header of column ") + std::to_string(c + 1));
             if (!cell) {
                 return cell.error();
             }
             out += c == 0 ? "" : separator;
             out += cell.value();
+            startsLine = startsLine && separatorTrimmed && cell.value().empty();
         }
         out += "\r\n";
     }
@@ -444,6 +455,7 @@ Result<std::string> writeDelimitedPoints(std::span<const SurveyPoint> points,
         const SurveyPoint& point = points[i];
         const std::string label =
             point.id.empty() ? "point " + std::to_string(i + 1) : "point '" + point.id + "'";
+        startsLine = true;
         for (std::size_t c = 0; c < layout.columns.size(); ++c) {
             const ColumnRole role = layout.columns[c];
             std::string value;
@@ -483,12 +495,13 @@ Result<std::string> writeDelimitedPoints(std::span<const SurveyPoint> points,
                 value = std::move(text).value();
             }
             Result<std::string> cell =
-                encodeField(value, c == 0, layout, label + ": its " + toString(role));
+                encodeField(value, startsLine, layout, label + ": its " + toString(role));
             if (!cell) {
                 return cell.error();
             }
             out += c == 0 ? "" : separator;
             out += cell.value();
+            startsLine = startsLine && separatorTrimmed && cell.value().empty();
         }
         out += "\r\n";
     }
