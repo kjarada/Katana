@@ -510,6 +510,25 @@ TEST(DrawCurves, ATangentTangentRadiusCircleTouchesTwoSegmentsOfOnePolyline)
     EXPECT_EQ(std::get<Circle2>(entities[1].geometry), (Circle2{{15.0, 5.0}, 5.0}));
 }
 
+TEST(DrawCurves, APolylinesZeroLengthSegmentIsPassedOverForTheSegmentBesideIt)
+{
+    // A repeated vertex makes a segment of no length at (0, 0), and a pick at
+    // (-1, 0) is 1 from it and 1 from the real segment after it: a tie the
+    // zero-length one would win by coming first, and then be refused as
+    // having no direction. The real segment, y = 0, is the line meant.
+    ToolDriver driver;
+    Polyline2 repeated;
+    repeated.vertices = {{0.0, 0.0}, {0.0, 0.0}, {20.0, 0.0}};
+    const EntityId id = driver.add(cmd::createPolyline(repeated));
+    const EntityId y = addLine(driver, {0.0, 0.0}, {0.0, 20.0});
+    driver.start("draw.circle.ttr");
+    EXPECT_EQ(driver.pick(id, -1.0, 0.0).outcome, Outcome::Continue);
+    EXPECT_EQ(driver.pick(y, 0.0, 10.0).outcome, Outcome::Continue);
+    EXPECT_EQ(driver.type("5").outcome, Outcome::Done);
+    // The arms run west (towards the pick at x = -1) and north: centre (-5, 5).
+    EXPECT_EQ(std::get<Circle2>(drawn(driver).back().geometry), (Circle2{{-5.0, 5.0}, 5.0}));
+}
+
 TEST(DrawCurves, TangentTangentRadiusRefusesWhatHasNoCornerToFitIn)
 {
     ToolDriver driver;
