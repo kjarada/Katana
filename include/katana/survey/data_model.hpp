@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "katana/core/error.hpp"
+#include "katana/math/unit_ratio.hpp"
 #include "katana/survey/coordinate.hpp"
 
 namespace katana::survey {
@@ -108,7 +109,16 @@ struct SurveyPoint {
     std::string id; // unique within a network; doubles as the point name
     double northing = 0.0;
     double easting = 0.0;
-    double elevation = 0.0;
+    // ABSENT IS NOT ZERO. A coordinate list with no height column, a GSI block
+    // with no word 83, a LandXML CgPoint of two ordinates: each is a point whose
+    // height nobody measured, and 0.0 in its place is a real height at the
+    // datum. A surface built from it is pulled down to zero under every such
+    // point with nothing to say why. So the model carries "no height" as a
+    // value of its own and every consumer has to decide what it means for them:
+    // the drawing leaves the height property off, a level adjustment refuses a
+    // benchmark that has none (PLAN.MD 45.3b is the record of how this was
+    // found).
+    std::optional<double> elevation;
     std::string code;        // feature code, e.g. "IP", "EOP"
     std::string description; // free text
     std::map<std::string, std::string> metadata;
@@ -118,6 +128,33 @@ struct SurveyPoint {
     [[nodiscard]] Coordinate2 position() const { return Coordinate2{northing, easting}; }
 
     friend bool operator==(const SurveyPoint&, const SurveyPoint&) = default;
+};
+
+// A point a source NAMES and gives no coordinates for: the target of a raw
+// observation before anything has reduced it, a backsight known only by its
+// number, a point a traverse record refers to and never lists.
+//
+// A type of its own, and deliberately NOT a SurveyPoint with placeholder
+// ordinates. The first round of instrument parsers each needed this and each
+// improvised: one created the point at the origin with a marker in its
+// metadata, another at placeholder ordinates. Either reaches the drawing as a
+// real mark at (0, 0) the moment one consumer forgets to look for the marker -
+// and nothing about a point at the origin says it was never measured. Keeping
+// such a point OUT of SurveyProject::points means "every SurveyPoint has a
+// position" stays true by construction; the bridge cannot draw one because it
+// is not in the list it draws. The rejected alternative, an optional northing
+// and easting, would have let the two disagree and made every horizontal
+// consumer - the network, the COGO, the bridge - check for a case most of them
+// can never meet. Reducing observations to give these a position is the job of
+// a reduction step, which produces SurveyPoints with CoordinateSource::Calculated.
+struct UnpositionedPoint {
+    std::string id; // shares SurveyPoint's id space: unique across both lists
+    std::string code;
+    std::string description;
+    std::map<std::string, std::string> metadata;
+    SourceRecord source;
+
+    friend bool operator==(const UnpositionedPoint&, const UnpositionedPoint&) = default;
 };
 
 // ---- Observations ------------------------------------------------------------
@@ -448,6 +485,14 @@ enum class AngularUnit { Unknown, Radians, DecimalDegrees, DegreesMinutesSeconds
 [[nodiscard]] const char* toString(LinearUnit unit);
 [[nodiscard]] const char* toString(AngularUnit unit);
 
+// Metres in one `unit`, as the exact ratio katana/math/unit_ratio.hpp defines:
+// Feet is the international foot (EPSG:9002), UsSurveyFeet the US survey foot
+// (EPSG:9003), Links the international link of 0.201168 m (EPSG:9098).
+// InvalidArgument for Unknown - there is no default unit, because a factor of 1
+// silently applied to a file in feet puts a survey 3.28 times too far from the
+// origin and every mark on it looks fine.
+[[nodiscard]] katana::core::Result<katana::math::UnitRatio> metresPer(LinearUnit unit);
+
 struct DeclaredUnits {
     LinearUnit linear = LinearUnit::Unknown;
     AngularUnit angular = AngularUnit::Unknown;
@@ -466,6 +511,10 @@ struct SurveyProject {
     DeclaredCoordinateSystem coordinateSystem;
     DeclaredUnits units;
     std::vector<SurveyPoint> points;
+    // Named by the source with no coordinates - see UnpositionedPoint. An
+    // observation, station or feature may refer to one of these exactly as it
+    // may to a point; nothing may draw one.
+    std::vector<UnpositionedPoint> unpositionedPoints;
     std::vector<SurveyStation> stations;
     // Observations belonging to no one setup: levelling runs, GNSS vectors.
     // An observation taken FROM a setup lives on that SurveyStation instead, so
@@ -481,7 +530,10 @@ struct SurveyProject {
 
 // Checks one project's internal consistency, so that importers do not each invent
 // their own check and disagree about what a valid project is:
-//   * point ids are non-empty and unique, and coordinates are finite;
+//   * point ids are non-empty and unique across `points` and
+//     `unpositionedPoints` together, and coordinates are finite (an absent
+//     elevation is valid; a present one must be finite);
+//   * every reference below resolves to a point in EITHER list;
 //   * station ids are non-empty and unique, and every occupied and backsighted
 //     point is in the project;
 //   * every feature names at least one point and every point it names is in the

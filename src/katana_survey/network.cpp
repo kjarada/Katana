@@ -19,7 +19,7 @@ Status checkPointValues(const SurveyPoint& point)
         return makeError(ErrorCode::InvalidArgument, "point id is empty");
     }
     if (!std::isfinite(point.northing) || !std::isfinite(point.easting) ||
-        !std::isfinite(point.elevation)) {
+        (point.elevation && !std::isfinite(*point.elevation))) {
         return makeError(ErrorCode::InvalidArgument, "point coordinates are not finite",
                          "point " + point.id);
     }

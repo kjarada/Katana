@@ -12,15 +12,6 @@ namespace katana::archive12d {
 
 namespace detail {
 
-std::string lowered(std::string_view text)
-{
-    std::string out(text);
-    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return out;
-}
-
 std::string_view CaseBuffer::lower(std::string_view text)
 {
     char* out = inline_.data();
@@ -28,9 +19,7 @@ std::string_view CaseBuffer::lower(std::string_view text)
         spill_.resize(text.size());
         out = spill_.data();
     }
-    std::transform(text.begin(), text.end(), out, [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
+    std::transform(text.begin(), text.end(), out, katana::core::asciiLower);
     return {out, text.size()};
 }
 
@@ -41,46 +30,10 @@ std::size_t CaseFoldedHash::operator()(std::string_view text) const noexcept
     // needs no buffer to hash text this does not own a folded copy of.
     std::size_t hash = 14695981039346656037ULL;
     for (const char ch : text) {
-        hash ^= static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(ch)));
+        hash ^= static_cast<unsigned char>(katana::core::asciiLower(ch));
         hash *= 1099511628211ULL;
     }
     return hash;
-}
-
-bool equalsIgnoringCase(std::string_view a, std::string_view b)
-{
-    return a.size() == b.size() &&
-           std::equal(a.begin(), a.end(), b.begin(), [](unsigned char x, unsigned char y) {
-               return std::tolower(x) == std::tolower(y);
-           });
-}
-
-std::string_view trimmed(std::string_view text)
-{
-    const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
-    while (!text.empty() && isSpace(static_cast<unsigned char>(text.front()))) {
-        text.remove_prefix(1);
-    }
-    while (!text.empty() && isSpace(static_cast<unsigned char>(text.back()))) {
-        text.remove_suffix(1);
-    }
-    return text;
-}
-
-std::optional<std::int64_t> parseInteger(std::string_view token)
-{
-    if (!token.empty() && token.front() == '+') {
-        token.remove_prefix(1);
-    }
-    if (token.empty()) {
-        return std::nullopt;
-    }
-    std::int64_t value = 0;
-    const auto result = std::from_chars(token.data(), token.data() + token.size(), value);
-    if (result.ec != std::errc{} || result.ptr != token.data() + token.size()) {
-        return std::nullopt;
-    }
-    return value;
 }
 
 std::optional<bool> parseBoolean(std::string_view token)
@@ -139,13 +92,6 @@ std::string formatHexReal(double value)
     std::string text = negative ? "-0x" : "0x";
     text.append(buffer, result.ptr);
     return text;
-}
-
-std::string formatExactReal(double value)
-{
-    char buffer[64];
-    const auto result = std::to_chars(buffer, buffer + sizeof buffer, value);
-    return std::string(buffer, result.ptr);
 }
 
 } // namespace detail

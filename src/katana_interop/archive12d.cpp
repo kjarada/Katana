@@ -7,7 +7,7 @@
 #include <system_error>
 
 #include "katana/archive12d/reader.hpp"
-#include "katana/archive12d/text_encoding.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/archive12d/writer.hpp"
 #include "katana/gis/zip_container.hpp"
 #include "katana/interop/import.hpp"
@@ -171,13 +171,13 @@ Result<Archive12dImportResult> importArchive12d(const std::filesystem::path& pat
     if (!bytes) {
         return bytes.error();
     }
-    auto decoded = katana::archive12d::decodeText(*bytes);
+    auto decoded = katana::core::decodeText(*bytes);
     if (!decoded) {
         return makeError(decoded.error().code, decoded.error().message, path.string());
     }
     bytes->clear();
     bytes->shrink_to_fit(); // a 58 MB UTF-16 file is not needed beside its decoded text
-    result.encoding = katana::archive12d::toString(decoded->encoding);
+    result.encoding = katana::core::toString(decoded->encoding);
 
     auto archive = katana::archive12d::readArchive(decoded->text);
     if (!archive) {
@@ -277,7 +277,7 @@ exportArchive12d(const katana::entity::Model& model,
     writing.banner = "Written by Katana\nexport_file_name : " + utf8(path.filename());
     std::string text = katana::archive12d::writeArchive(domain->archive, writing);
     if (options.utf16) {
-        auto encoded = katana::archive12d::encodeUtf16LittleEndian(text);
+        auto encoded = katana::core::encodeUtf16LittleEndian(text);
         if (!encoded) {
             return makeError(ErrorCode::FileExportFailure, encoded.error().message, path.string());
         }

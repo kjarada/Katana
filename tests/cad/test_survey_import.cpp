@@ -145,6 +145,68 @@ TEST(SurveyImport, TheHeightUsesTheSamePropertyTheSurfaceBuilderReads)
     EXPECT_TRUE(entity->properties.contains(std::string(katana::entity::kElevationProperty)));
 }
 
+// PLAN.MD 45.3b. A point the file gave no height for must not arrive at the
+// datum: 0.0 is a real height, and a surface built from it is pulled down to
+// zero under every such point. It arrives with no elevation property at all -
+// which the surface builder already reads as "leave this point out" - and the
+// report counts it and says so.
+TEST(SurveyImport, APointWithNoHeightArrivesWithoutOneRatherThanAtTheDatum)
+{
+    SurveyProject project = oneLeicaPoint();
+    SurveyPoint flat = pointAt("102", kNorthing + 10.0, kEasting);
+    flat.elevation.reset();
+    project.points.push_back(std::move(flat));
+
+    Document document;
+    SurveyImportReport report;
+    ASSERT_NO_FATAL_FAILURE(importInto(document, project, {}, &report));
+    EXPECT_EQ(report.points, 2u);
+    EXPECT_EQ(report.pointsWithoutElevation, 1u);
+    ASSERT_FALSE(report.warnings.empty());
+    EXPECT_NE(report.warnings.back().find("1 point(s) have no height"), std::string::npos)
+        << report.warnings.back();
+
+    std::size_t withHeight = 0;
+    for (const auto id : document.model().entities.ids()) {
+        const Entity* entity = document.model().entities.find(id);
+        const bool hasHeight =
+            entity->properties.contains(std::string(katana::entity::kElevationProperty));
+        if (textProperty(entity->properties, "point") == "102") {
+            EXPECT_FALSE(hasHeight) << "the unheighted point must carry no elevation";
+        } else {
+            EXPECT_TRUE(hasHeight);
+            ++withHeight;
+        }
+    }
+    EXPECT_EQ(withHeight, 1u);
+}
+
+// A raw observation file names its targets without coordinates. They are not
+// drawn - there is nowhere to draw them - and the report says so, including
+// when that leaves nothing at all to import.
+TEST(SurveyImport, APointWithNoCoordinatesIsReportedAndNeverDrawnAtTheOrigin)
+{
+    SurveyProject project;
+    katana::survey::UnpositionedPoint target;
+    target.id = "7";
+    project.unpositionedPoints.push_back(target);
+
+    Document document;
+    SurveyImportReport report;
+    const auto nothing = importSurveyProject(document, project, {}, &report);
+    ASSERT_TRUE(nothing.ok());
+    EXPECT_EQ(*nothing, nullptr) << "no positioned point, so nothing to do";
+    EXPECT_EQ(report.pointsWithoutPosition, 1u);
+    ASSERT_EQ(report.warnings.size(), 1u);
+    EXPECT_NE(report.warnings.front().find("no coordinates"), std::string::npos);
+
+    project.points.push_back(pointAt("101", kNorthing, kEasting, 1.0));
+    ASSERT_NO_FATAL_FAILURE(importInto(document, project, {}, &report));
+    EXPECT_EQ(report.points, 1u);
+    EXPECT_EQ(report.pointsWithoutPosition, 1u);
+    EXPECT_EQ(document.model().entities.ids().size(), 1u);
+}
+
 // The brief's section 18: the drawing alone has to answer "where did this come
 // from", down to the record.
 TEST(SurveyImport, EveryPointRecordsTheFileAndRecordItCameFrom)
