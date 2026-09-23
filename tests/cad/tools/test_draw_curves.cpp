@@ -315,6 +315,23 @@ TEST(DrawCurves, TheCirclePreviewIsTheCircleThroughTheCursorWithItsRadius)
     EXPECT_EQ(feedback.markers[0], Point2(10.0, 20.0));
 }
 
+TEST(DrawCurves, TheDiameterPreviewIsTheCircleWhoseDiameterReachesTheCursor)
+{
+    ToolDriver driver;
+    driver.start("draw.circle.diameter");
+    (void)driver.click(10.0, 20.0);
+    // The cursor is 10 from the centre along x. At the diameter prompt that
+    // distance is the diameter, so the rubber band is the circle of radius 5 -
+    // the one a click there draws (TheDiameterOptionTakesATypedOrPickedDiameter)
+    // - and not the circle of radius 10 through the cursor.
+    const auto feedback = driver.tool().preview({20.0, 20.0});
+    ASSERT_EQ(feedback.shapes.size(), 2u);
+    EXPECT_EQ(std::get<Circle2>(feedback.shapes[0]), (Circle2{{10.0, 20.0}, 5.0}));
+    EXPECT_EQ(std::get<Segment2>(feedback.shapes[1]), (Segment2{{10.0, 20.0}, {20.0, 20.0}}));
+    ASSERT_EQ(feedback.markers.size(), 1u);
+    EXPECT_EQ(feedback.markers[0], Point2(10.0, 20.0));
+}
+
 // ---- Circle: two points ------------------------------------------------------------
 
 TEST(DrawCurves, ATwoPointCircleHasItsDiameterBetweenThePoints)
@@ -960,6 +977,34 @@ TEST(DrawCurves, APickedCentreForAStartEndRadiusArcIsMovedOntoTheEndsBisector)
     EXPECT_EQ(arc->center, Point2(4.0, 3.0));
     EXPECT_EQ(arc->radius, 5.0);
     EXPECT_NEAR(arc->sweep, 2.0 * std::atan(4.0 / 3.0), 1e-12);
+}
+
+TEST(DrawCurves, APickedCentreOnTheRightOfTheChordGivesTheMajorArcAsANegativeRadiusDoes)
+{
+    ToolDriver driver;
+    driver.start("draw.arc.ser");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(8.0, 0.0);
+    // (1, -3) is on the RIGHT of start->end. Its foot on the bisector x = 4 is
+    // (4, -3): the centre a radius of -5 gives, so the arc is the major one.
+    // The working is that of AStartEndRadiusArcTakesTheMajorArcForANegativeRadius:
+    // radius |(4,-3)| = 5; counter-clockwise from (0,0), at atan2(3,-4), round
+    // through south to (8,0), a sweep of 2 pi - 2 atan(4/3) = 253.74 degrees
+    // whose middle is the bottom of the circle, (4, -3 - 5) = (4, -8).
+    const auto feedback = driver.tool().preview({1.0, -3.0});
+    ASSERT_EQ(feedback.shapes.size(), 1u);
+    const auto bent = std::get<Arc2>(feedback.shapes[0]);
+    EXPECT_EQ(bent.center, Point2(4.0, -3.0));
+    EXPECT_NEAR(bent.sweep, 2.0 * kPi - 2.0 * std::atan(4.0 / 3.0), 1e-12);
+
+    EXPECT_EQ(driver.click(1.0, -3.0).outcome, Outcome::Done);
+    const auto arc = theArc(driver);
+    ASSERT_TRUE(arc);
+    EXPECT_EQ(arc->center, Point2(4.0, -3.0));
+    EXPECT_EQ(arc->radius, 5.0);
+    EXPECT_NEAR(arc->sweep, 2.0 * kPi - 2.0 * std::atan(4.0 / 3.0), 1e-12);
+    EXPECT_NEAR(arc->midpoint().x, 4.0, 1e-12);
+    EXPECT_NEAR(arc->midpoint().y, -8.0, 1e-12);
 }
 
 TEST(DrawCurves, AStartEndRadiusArcRefusesCoincidentEndsAndATooSmallRadius)
