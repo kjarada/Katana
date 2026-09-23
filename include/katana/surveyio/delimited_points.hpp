@@ -364,7 +364,9 @@ struct DelimitedExportOptions {
 // absent elevation is an empty field, never 0 - quoted as "" when the delimiter
 // is whitespace, where an unquoted empty field would vanish. A field is quoted
 // when it holds the delimiter, a quote, a line break or blanks at either end,
-// or when it would make the line read as a comment.
+// or when it would make the line read as a comment: when it starts with the
+// comment prefix and starts the line - in column 1, or in a tab file after
+// nothing but empty fields, since a reader trims the tabs before them.
 //
 // Refused, InvalidArgument naming the point: a layout validateLayout() refuses;
 // headerLines above 1 (this writer produces one header line and nothing to fill

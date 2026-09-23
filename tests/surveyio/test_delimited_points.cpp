@@ -810,6 +810,39 @@ TEST(DelimitedPointsExport, FieldsThatWouldBeMisreadAreQuoted)
                             "4,1,2,\"two\nlines\"\r\n");
 }
 
+TEST(DelimitedPointsExport, AFieldAfterEmptyTabFieldsIsQuotedWhenItWouldStartTheLineAsAComment)
+{
+    // The reader looks for the comment prefix once the line is trimmed of
+    // blanks, tabs among them. In a tab file whose first column is written
+    // empty, the line therefore starts with the second column: an id "#12"
+    // there is where a comment would start, and unquoted, the point would be
+    // skipped as one.
+    const std::vector<SurveyPoint> points = {pointOf("1", 100.0, 200.0, std::nullopt),
+                                             pointOf("#12", 110.0, 210.0, std::nullopt)};
+    DelimitedLayout layout = layoutOf("-,P,N,E;delimiter=tab;header=0;quote=double;comment=#");
+    const Result<std::string> text = writeDelimitedPoints(points, layout, exportOptions(3));
+    ASSERT_TRUE(text.ok()) << text.error().describe();
+    // Worked by hand: an empty Ignore field, then the id, then the coordinates
+    // to three places; "#12" is the first thing on its line, so it is quoted.
+    EXPECT_EQ(text.value(), "\t1\t100.000\t200.000\r\n"
+                            "\t\"#12\"\t110.000\t210.000\r\n");
+    const Result<ImportResult> back =
+        parseDelimitedPoints(text.value(), layout, "export.txt", inMetres());
+    ASSERT_TRUE(back.ok()) << errorOf(back);
+    ASSERT_EQ(back->project.points.size(), 2u);
+    EXPECT_EQ(back->project.points[1].id, "#12");
+    EXPECT_FALSE(anyWarningContains(*back, "comment"));
+
+    // An empty code in front does the same, and with quoting off the point
+    // cannot be written at all.
+    layout = layoutOf("C,P,N,E;delimiter=tab;header=1;quote=none;comment=#");
+    const Result<std::string> unquotable = writeDelimitedPoints(points, layout, exportOptions(3));
+    ASSERT_FALSE(unquotable.ok());
+    EXPECT_EQ(unquotable.error().code, ErrorCode::InvalidArgument);
+    EXPECT_TRUE(contains(unquotable.error().message, "point '#12': its point id"))
+        << unquotable.error().message;
+}
+
 TEST(DelimitedPointsExport, WhatCannotBeWrittenIsRefusedNamingThePoint)
 {
     const std::vector<SurveyPoint> points = {pointOf("1", kNorthing, kEasting, kElevation)};
@@ -880,6 +913,10 @@ TEST(DelimitedPointsExport, WhatExportWritesImportReadsBackUnchanged)
         "P,E,N,Z,C,D;delimiter=whitespace;header=0",
         "P,N,E,Z,C,D;delimiter=tab;header=1;comment=#",
         "P,-,N,E,Z,C,D;delimiter=semicolon;header=0",
+        // Empty fields in front of the id: an Ignore column, and a code that is
+        // empty for "#2". The line then starts with tabs, which a reader trims.
+        "-,P,N,E,Z,D;delimiter=tab;header=0;comment=#",
+        "C,P,N,E,Z,D;delimiter=tab;header=1;comment=#",
     };
     for (const std::string_view templateText : templates) {
         SCOPED_TRACE(templateText);
