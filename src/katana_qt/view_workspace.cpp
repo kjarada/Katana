@@ -204,6 +204,11 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
                 onStatus(text);
             }
         };
+        render->onFrameStats = [this](const QString& text) {
+            if (onFrameStats) {
+                onFrameStats(text);
+            }
+        };
         view.render = render;
         break;
     }
@@ -213,6 +218,11 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
         section->onStatus = [this](const QString& text) {
             if (onStatus) {
                 onStatus(text);
+            }
+        };
+        section->onFrameStats = [this](const QString& text) {
+            if (onFrameStats) {
+                onFrameStats(text);
             }
         };
         view.section = section;

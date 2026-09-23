@@ -819,6 +819,49 @@ TEST(SurveyCodingReport, EveryEntityGetsWhatALookupOfItsOwnCodeGivesWhenCodesRep
     EXPECT_EQ(report.codes.size(), 8u);
 }
 
+TEST(SurveyCoding, APointsLineworkControlsAreLeftOutOfTheCodeItIsLookedUpBy)
+{
+    // "PABB ST" is the string PABB with a start control, as a controller
+    // writes it. The exact key PABB must code it: the whole field, blank
+    // included, matches no key. A prefix key hid this ("KB1 ST" still begins
+    // with KB), which is why the key here is exact.
+    katana::entity::SurveyMap map;
+    SurveyRule bollard;
+    bollard.key = "PABB";
+    bollard.model = "SURVEY DETAIL";
+    ASSERT_TRUE(map.add(bollard).ok());
+    Document document;
+    document.setSurveyMap(std::move(map));
+    const EntityId started = addCodedPoint(document, Point2(0, 0), "PABB ST");
+    const EntityId lowerCase = addCodedPoint(document, Point2(1, 0), "PABB st JPN 12");
+    const EntityId plain = addCodedPoint(document, Point2(2, 0), "PABB");
+    // A line is not a field point: its code is looked up as it is written.
+    ASSERT_TRUE(document.execute(cmd::createLine(Point2(0, 5), Point2(9, 5), {})).ok());
+    const EntityId line = document.model().entities.ids().back();
+    ASSERT_TRUE(document
+                    .execute(cmd::setEntityProperty({line}, "code",
+                                                    katana::entity::PropertyValue("PABB ST")))
+                    .ok());
+
+    SurveyCodingReport report;
+    apply(document, {}, &report);
+    // By hand: three points reduce to PABB, which the exact key matches; the
+    // line keeps "PABB ST", which nothing matches. Four coded, three matched,
+    // two rows in name order ("PABB" < "PABB ST").
+    EXPECT_EQ(report.coded, 4u);
+    EXPECT_EQ(report.matched, 3u);
+    EXPECT_EQ(report.unmatchedCodes, (std::vector<std::string>{"PABB ST"}));
+    ASSERT_EQ(report.codes.size(), 2u);
+    EXPECT_EQ(report.codes[0].code, "PABB") << "reported under the code it was looked up by";
+    EXPECT_EQ(report.codes[0].entities, 3u);
+    EXPECT_EQ(report.codes[1].code, "PABB ST");
+    for (const EntityId id : {started, lowerCase, plain}) {
+        EXPECT_EQ(document.model().entities.find(id)->layer, "SURVEY DETAIL") << id;
+    }
+    EXPECT_EQ(document.model().entities.find(line)->layer,
+              std::string(katana::entity::kDefaultLayerName));
+}
+
 TEST(CustomisationCoverage, ABuiltInSymbolIsNeverListedAsUnresolved)
 {
     // Audit CAD-17: "cross" draws through Katana's own shapes.

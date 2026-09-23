@@ -193,6 +193,10 @@ struct CustomisationCoverage {
 // rule gives - so a caller can tell "nothing to do" from "something went
 // wrong". Fails only on a rule that cannot be turned into a valid layer or
 // style.
+//
+// A POINT is coded by the string name of its field code, its linework
+// controls left out (parseFieldCode in linework.hpp): "PABB ST" is coded as
+// PABB, and reported under PABB. Any other entity's code is looked up whole.
 [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
 applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
                  SurveyCodingReport* report = nullptr);
