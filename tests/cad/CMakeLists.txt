@@ -11,3 +11,7 @@ katana_add_test_suite(cad
         ${_cad_tool_tests}
         ${_cad_customisation_tests}
 )
+# The Modify > Edit family's tests reach its internal header
+# (tools/modify_edit_support.hpp: EditSession, drawable) the way the family's
+# sources do, rather than by a path climbing out of tests/.
+target_include_directories(katana_cad_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/katana_cad")

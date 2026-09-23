@@ -8,9 +8,11 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <numeric>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
@@ -97,9 +99,11 @@ TEST(TaskPool, ResultsAreIdenticalWhateverTheWorkerCount)
     }
 }
 
-TEST(TaskPool, AnExceptionInABodyReachesTheCallerAndStopsTheRest)
+TEST(TaskPool, AnExceptionStopsTheThreadThatThrewAtOnce)
 {
-    TaskPool pool(4);
+    // No worker threads, so the calling thread runs the range in order and
+    // the count is exact whatever the machine is doing.
+    TaskPool pool(0);
     std::atomic<int> ran{0};
 
     EXPECT_THROW(
@@ -113,12 +117,80 @@ TEST(TaskPool, AnExceptionInABodyReachesTheCallerAndStopsTheRest)
         },
         std::runtime_error);
 
-    // Not all of them: the failure must stop work being handed out, or a bad
-    // frame keeps burning cores.
+    // By hand: indices 0 to 10 ran, 10 threw, and none after it - 11.
+    EXPECT_EQ(ran.load(), 11);
+}
+
+TEST(TaskPool, AnExceptionInABodyReachesTheCallerAndStopsTheRest)
+{
+    // The other threads must stop taking work once one has failed, or a bad
+    // frame keeps burning cores. This used to race: the thread that claimed
+    // index 10 could be descheduled before running it while the others ran
+    // all 100 000 trivial bodies, and it failed once that way on a loaded
+    // machine. Now the body that throws is index 0 - the first claimed, so
+    // some thread is certainly running it - and every other body waits until
+    // the throw has begun. Only the moment between the throw and the pool
+    // recording it is left to chance, and every body after that costs 20 us:
+    // running the rest (100 000 x 20 us over 5 threads, 0.4 s) needs the
+    // failing thread held off for that long in the middle of its throw. How
+    // many run in that moment is up to the scheduler, which is why only the
+    // bound is asserted.
+    TaskPool pool(4);
+    std::atomic<int> ran{0};
+    std::atomic<bool> thrown{false};
+
+    EXPECT_THROW(
+        {
+            pool.parallelFor(0, 100'000, [&](std::size_t i) {
+                ++ran;
+                if (i == 0) {
+                    thrown.store(true);
+                    throw std::runtime_error("boom");
+                }
+                while (!thrown.load()) {
+                    std::this_thread::yield();
+                }
+                const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(20);
+                while (std::chrono::steady_clock::now() < until) {
+                }
+            });
+        },
+        std::runtime_error);
+
     EXPECT_LT(ran.load(), 100'000);
 
     // And the pool is still usable afterwards - a job left half-claimed would
     // hang here instead.
+    std::atomic<int> after{0};
+    pool.parallelFor(0, 1000, [&](std::size_t) { ++after; });
+    EXPECT_EQ(after.load(), 1000);
+}
+
+TEST(TaskPool, AnExceptionOnAWorkerThreadReachesTheCallerAndThePoolStaysUsable)
+{
+    // The calling thread's bodies wait until a worker has thrown, so the
+    // throw is certainly on a worker thread and the caller cannot run the
+    // whole range alone first - whatever the scheduling.
+    TaskPool pool(4);
+    const std::thread::id caller = std::this_thread::get_id();
+    std::atomic<bool> thrown{false};
+
+    try {
+        pool.parallelFor(0, 100'000, [&](std::size_t) {
+            if (std::this_thread::get_id() != caller) {
+                thrown.store(true);
+                throw std::runtime_error("boom on a worker");
+            }
+            while (!thrown.load()) {
+                std::this_thread::yield();
+            }
+        });
+        ADD_FAILURE() << "the worker's exception did not reach the caller";
+    } catch (const std::runtime_error& error) {
+        EXPECT_STREQ(error.what(), "boom on a worker");
+    }
+
+    // A job left half-claimed would hang here instead.
     std::atomic<int> after{0};
     pool.parallelFor(0, 1000, [&](std::size_t) { ++after; });
     EXPECT_EQ(after.load(), 1000);

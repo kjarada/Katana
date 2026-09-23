@@ -20,8 +20,9 @@
 #include "tool_driver.hpp"
 
 // The family's own session, tested directly below (ModifyEditSession): it is
-// internal to src/katana_cad/tools/, which is on no include path of the tests.
-#include "../../../src/katana_cad/tools/modify_edit_support.hpp"
+// internal to src/katana_cad/tools/, and src/katana_cad is on this suite's
+// include path for it alone (tests/cad/CMakeLists.txt).
+#include "tools/modify_edit_support.hpp"
 
 namespace {
 
