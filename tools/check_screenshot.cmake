@@ -127,8 +127,10 @@ endif()
 # order, for a paged dialog that has to be filled between presses (the import
 # wizard) or a run that uses several: "@NAME" opens the dialog of action NAME
 # (--survey-dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
-# "!BUTTON" presses a button, and anything else is a FIELD=TEXT fill. '|'
-# between steps, for FILL's reason.
+# "%NAME" makes the window's own dock or toolbar NAME the target (--panel),
+# ">TEXT" runs TEXT on the command line (--command), "!BUTTON" presses a
+# button, and anything else is a FIELD=TEXT fill. '|' between steps, for
+# FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
     foreach(_step IN LISTS _steps)
@@ -138,6 +140,10 @@ if(DEFINED DRIVE)
             list(APPEND extra --survey-dialog "${_rest}")
         elseif(_sigil STREQUAL "#")
             list(APPEND extra --survey-dock "${_rest}")
+        elseif(_sigil STREQUAL "%")
+            list(APPEND extra --panel "${_rest}")
+        elseif(_sigil STREQUAL ">")
+            list(APPEND extra --command "${_rest}")
         elseif(_sigil STREQUAL "!")
             list(APPEND extra --press "${_rest}")
         else()

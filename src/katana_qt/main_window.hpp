@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "icons.hpp"
+#include "katana/archive12d/customisation.hpp"
+#include "katana/cad/customisation_record.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/cad/corridor.hpp"
@@ -32,6 +34,7 @@
 class QAction;
 class QActionGroup;
 class QCloseEvent;
+class QComboBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
@@ -42,6 +45,7 @@ class QTreeWidgetItem;
 class QMenu;
 
 class QToolBar;
+class QToolButton;
 class QDockWidget;
 class QKeySequence;
 namespace katana::qt {
@@ -91,10 +95,14 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] katana::core::Status toggleLayerThroughPanel(const QString& layer);
 
     // Loads a 12d customisation - linestyle and symbol libraries, mapfiles -
-    // and reports what it found into the message log. Public because the
-    // headless --customise switch drives the same path the menu item does, so
-    // what a test exercises is what a person gets.
-    void applyCustomisation(const std::vector<std::filesystem::path>& paths);
+    // ON TOP OF what is loaded (archive12d::mergeCustomisation; the lead's
+    // D1), or in place of the loaded kinds it brings with LoadMode::Replace,
+    // and reports what each file added and replaced into the message log.
+    // Public because the headless --customise switch drives the same path
+    // the menu item does, so what a test exercises is what a person gets.
+    void applyCustomisation(
+        const std::vector<std::filesystem::path>& paths,
+        katana::archive12d::LoadMode mode = katana::archive12d::LoadMode::Merge);
     // The customisation the application ships with or finds beside itself,
     // loaded at startup so a survey drawing is drawn with its linestyles,
     // symbols and survey codes without anyone being asked for them.
@@ -129,6 +137,10 @@ class MainWindow final : public QMainWindow {
     // whose dialog acts on a selection.
     void selectAll();
     void selectOnly(katana::entity::EntityId id);
+    // Runs `line` as if it were typed on the command line and Enter pressed.
+    // For the headless --command switch, so a test can set up a drawing -
+    // styles, entities, a selection - through the verbs a person types.
+    void runCommand(const QString& line);
 
   protected:
     void closeEvent(QCloseEvent* event) override;
@@ -142,7 +154,8 @@ class MainWindow final : public QMainWindow {
     // drift.
     void buildGisActions(QAction* exportAction);
     // The Survey menu and toolbar; the workbench fills both (PLAN.MD 45).
-    void buildSurveyActions(QAction* customiseAction, QAction* codeAction);
+    void buildSurveyActions(QAction* customiseAction, QAction* replaceCustomisationAction,
+                            QAction* codeAction);
     void buildViewMenu(QMenu* viewMenu);
     // `name`, when given, becomes the action's object name: what --action and
     // QMainWindow::saveState know it by.
@@ -200,11 +213,24 @@ class MainWindow final : public QMainWindow {
     void refreshLayers();
     void refreshProperties();
     void refreshReferences();
+    // The Properties panel's Style row and the Properties toolbar's current
+    // style (decision D9). Part of refreshAll, so it is deferred and
+    // coalesced like every panel.
+    void refreshStyleChoices();
+    // The Style row's Apply: the selection's entities that are not in the
+    // chosen style yet get it, in one undoable command.
+    void applyPropertyStyle();
 
     // ---- import / export (PLAN.MD Phase 20) ---------------------------------
     void importFile();
-    void loadCustomisation();
+    void loadCustomisation(katana::archive12d::LoadMode mode);
     void applySurveyCodes();
+    // Before a save: the project records the names of the customisation
+    // files it was drawn with (storage::ProjectMetadata::customisation).
+    void recordCustomisation();
+    // After an open: says which files the project records that are not
+    // loaded. A warning; the project opens all the same.
+    void reportMissingCustomisation();
     void reportCustomisationCoverage();
     // The options are the GIS menu's dialogs' choices; File > Import and a
     // path on the command line take the defaults.
@@ -298,6 +324,18 @@ class MainWindow final : public QMainWindow {
     QLabel* coordinateLabel_ = nullptr;
     QLabel* snapLabel_ = nullptr;
     QLabel* layerLabel_ = nullptr;
+    // The active view's own readout - a section's station and elevation
+    // under the cursor, a 3D view's frame time - in a PERMANENT status-bar
+    // label, so that it never overwrites a prompt or an error message.
+    QLabel* frameStatsLabel_ = nullptr;
+    // The Properties panel's Style row, and the Properties toolbar's
+    // current style for new work (D9).
+    QComboBox* propertyStyle_ = nullptr;
+    QToolButton* propertyStyleApply_ = nullptr;
+    QComboBox* currentStyle_ = nullptr;
+    // The 12d customisation files loaded this session, in load order: what a
+    // save records in the project (cad/customisation_record.hpp).
+    std::vector<katana::cad::CustomisationSource> customisation_;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
     QAction* gridAction_ = nullptr;
@@ -320,6 +358,7 @@ class MainWindow final : public QMainWindow {
 
     bool refreshingLayers_ = false;     // suppresses cellChanged while rebuilding
     bool refreshingReferences_ = false; // ditto, for the reference table
+    bool refreshingStyles_ = false;     // ditto, for the current-style choice
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
     bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history

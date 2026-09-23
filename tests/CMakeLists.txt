@@ -469,6 +469,78 @@ if(TARGET katana)
             "-DREFUSED=Saved the survey layout template \"ctest shared layout\".*Deleted the survey layout template \"ctest shared layout\".*--fill: template has no choice 'ctest shared layout'"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_templates_reach_export_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ---- the window's wiring of the managers' foundations ----------------------
+    #
+    # File > Load 12d Customisation merges (audit QT-21), through the window's
+    # CUSTOMISE line, which runs the menu item's applyCustomisation: the
+    # hand-written fixture mapfile REPLACES the map, then the symbol fixture
+    # alone is MERGED in - and the map must still be there. By hand, from the
+    # fixtures' head comments: test_survey.mapfile has 11 rules, and
+    # test_symbols.4d 4 definitions, all named TEST ..., which no other
+    # library defines, so all 4 are added.
+    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    add_test(NAME qt_customisation_merges_and_keeps_the_map_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE REPLACE ${_fixture}/test_survey.mapfile|>CUSTOMISE ${_fixture}/test_symbols.4d"
+            "-DEXPECT=test_symbols\\.4d: style library, 4 added, 0 replaced[^\r\n]*[\r\n]+Customisation now: [0-9,]+ definitions \\([0-9,]+ symbols\\) and 11 survey code rules"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_merge_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+
+    # The project records its customisation (ProjectMetadata::customisation):
+    # the site plan saved with the symbol fixture loaded, then opened by a
+    # second run that never loads it, which must say which file is missing -
+    # a warning in the log, the project opened all the same.
+    set(_recorded "${CMAKE_CURRENT_BINARY_DIR}/customisation_recorded.katana")
+    add_test(NAME qt_customisation_recorded_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}")
+    add_test(NAME qt_a_project_records_its_customisation_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE ${_fixture}/test_symbols.4d|>LINE 0,0 10,0|>SAVE ${_recorded}"
+            "-DEXPECT=saved to "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_record_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_opening_names_the_customisation_not_loaded_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>OPEN ${_recorded}"
+            "-DEXPECT=opened .*Warning: this project was drawn with customisation files that are not loaded: \"test_symbols\\.4d\""
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_missing_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_customisation_recorded_cleanup PROPERTIES
+        FIXTURES_SETUP qt_recorded_clean)
+    set_tests_properties(qt_a_project_records_its_customisation_headless PROPERTIES
+        FIXTURES_REQUIRED qt_recorded_clean FIXTURES_SETUP qt_recorded)
+    set_tests_properties(qt_opening_names_the_customisation_not_loaded_headless PROPERTIES
+        FIXTURES_REQUIRED qt_recorded)
+
+    # The current style (decision D9) and the Properties panel's Style row,
+    # driven through their widgets. By hand: Kerb made current, a line is
+    # drawn in it (entity 1); ByLayer made current, two lines are drawn
+    # ByLayer (2 and 3); everything selected, the row given Kerb and applied:
+    # only 2 and 3 change, as ONE command - Kerb holds 3 entities, one UNDO
+    # takes it back to 1, and REDO to 3 again.
+    add_test(NAME qt_current_style_and_the_style_row_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>STYLE NEW Kerb|%PropertiesToolBar|CurrentStyleCombo=Kerb|>LINE 0,9 10,9|>STYLE USAGE Kerb|CurrentStyleCombo=ByLayer|>LINE 0,0 10,0|>LINE 0,5 10,5|>SELECT ALL|%PropertiesDock|PropertyStyle=Kerb|!PropertyStyleApply|>STYLE USAGE Kerb|>UNDO|>STYLE USAGE Kerb|>REDO|>STYLE USAGE Kerb"
+            "-DEXPECT=New work is drawn in Kerb.*style Kerb: used by 1 entity, e.g. id=1.*New work is drawn in ByLayer.*Style Kerb given to 2 entities.*style Kerb: used by 3 entities.*style Kerb: used by 1 entity.*style Kerb: used by 3 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/style_row_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_customisation_merges_and_keeps_the_map_headless
+                         qt_customisation_recorded_cleanup
+                         qt_a_project_records_its_customisation_headless
+                         qt_opening_names_the_customisation_not_loaded_headless
+                         qt_current_style_and_the_style_row_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
     set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
                          qt_survey_forward_headless qt_survey_angle_headless
                          qt_survey_traverse_headless qt_survey_level_book_headless
