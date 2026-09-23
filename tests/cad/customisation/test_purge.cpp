@@ -93,6 +93,36 @@ TEST_F(Purge, ProtectedItemsAreNeverPlannedEvenInAnEmptyDrawing)
     EXPECT_EQ(*command, nullptr) << "nothing to purge is no command, not an empty one";
 }
 
+TEST_F(Purge, ContinuousAndNoneAreNeverPlannedEvenWhenNothingNamesThem)
+{
+    // In the drawings above layer 0 names continuous and none, so they are
+    // "used" and the protection is never what keeps them out. Point layer
+    // 0 at dash and stone: now continuous is named only by Spare, which is
+    // purged, and none by nothing (Kerb's hatch is empty, so the point
+    // reaches layer 0's stone). Only the protection can exclude them.
+    katana::entity::Layer zero = *document.model().layers.find("0");
+    zero.linetype = "dash";
+    zero.hatchPattern = "stone";
+    must(katana::commands::updateLayer(zero));
+
+    // Without the protection these would be {continuous, fence, spare} and
+    // {brick, grass, none}.
+    const TableItems plan = planPurge(document.model());
+    EXPECT_EQ(plan.styles, (std::vector<std::string>{"Post", "Spare"}));
+    EXPECT_EQ(plan.linetypes, (std::vector<std::string>{"fence", "spare"}));
+    EXPECT_EQ(plan.hatchPatterns, (std::vector<std::string>{"brick", "grass"}));
+
+    // And so the purge goes through: a plan holding continuous would be
+    // refused as a whole, and remove nothing - not even spare.
+    auto command = purgeCommand(document.model());
+    ASSERT_TRUE(command.ok());
+    ASSERT_NE(*command, nullptr);
+    must(std::move(*command));
+    EXPECT_FALSE(document.model().linetypes.contains("spare"));
+    EXPECT_TRUE(document.model().linetypes.contains("continuous"));
+    EXPECT_TRUE(document.model().hatchPatterns.contains("none"));
+}
+
 TEST_F(Purge, ALinetypeAStayingStyleNamesIsKept)
 {
     // Styles not purged: Post stays, so fence and grass stay with it.
