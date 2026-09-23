@@ -1752,7 +1752,15 @@ exception is a defect that blocks this work.
 They are a real production customisation from a road authority, and they are
 how a survey becomes a drawing. The files are third-party material under
 their own licence and are NOT part of this repository; everything that uses
-them skips when they are absent:
+them skips when they are absent.
+
+**CORRECTED (2026-09-23): until this date they WERE in the repository.** Commit
+b77386e said it took them out and that `.gitignore` kept them out; neither was
+true - all four were still tracked at HEAD and `.gitignore` had no rule for
+them. They are now untracked with a rule added. They remain in the history
+from commit 4e070d8 onwards, which has been pushed to `origin`; removing them
+from the history needs a history rewrite and a force-push, which is the
+owner's decision and has not been done.
 
 | File | What it is |
 |---|---|

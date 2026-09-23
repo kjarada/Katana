@@ -15,3 +15,9 @@ legacy-scaffold-*.zip
 # Running the application against a sample writes a backup beside its project.
 # The samples are inputs, not working directories.
 samples/*/backups/
+
+# A production 12d customisation (a mapfile and two .4d libraries) under its
+# author's own licence. It stays on disk for the tests and the embedded build
+# (tools/embed_customisation.py) and never in the repository; everything that
+# reads it skips when it is absent. See PLAN.MD 20.3.
+docs/12d Refrence Files/
