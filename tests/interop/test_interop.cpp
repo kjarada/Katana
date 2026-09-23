@@ -692,3 +692,60 @@ TEST(InteropPlacement, ADrawingSmallButStillVisibleIsNotReported)
     const Box2 b(Point2(5000.0, 0.0), Point2(5100.0, 100.0));
     EXPECT_FALSE(katana::interop::advisePlacement(a, b).farApart);
 }
+
+TEST(InteropPlacement, SmallDataPlacedInOrBesideTheDrawingIsNotFarApart)
+{
+    // Audit IO-02. Correctly placed data that is merely small used to be "far
+    // apart" with a separation of 0, and the default button moved it to the
+    // drawing's corner. Each case worked by hand against a 2 km site, diagonal
+    // 2 828.4 m:
+    const Box2 site(Point2(0.0, 0.0), Point2(2000.0, 2000.0));
+
+    // One control point in the middle: no extent, so never lost by its size;
+    // the site is the whole combined view, 100% of it.
+    const Box2 onePoint(Point2(500.0, 500.0), Point2(500.0, 500.0));
+    const auto point = katana::interop::advisePlacement(site, onePoint);
+    EXPECT_FALSE(point.farApart);
+    EXPECT_TRUE(point.message.empty());
+    EXPECT_EQ(point.suggestedShift.x, 0.0);
+    EXPECT_EQ(point.suggestedShift.y, 0.0);
+
+    // A 10 m detail inside: 14.1 m, 0.5% of the view - but also 0.5% of the
+    // site alone, so it would be as small wherever it sat. Either way round.
+    const Box2 detail(Point2(1000.0, 1000.0), Point2(1010.0, 1010.0));
+    EXPECT_FALSE(katana::interop::advisePlacement(site, detail).farApart);
+    EXPECT_FALSE(katana::interop::advisePlacement(detail, site).farApart);
+
+    // The corner case the margin is for: a 20.5 m shed 79.5 m off the site's
+    // corner. Combined view (0,0)-(2100,2100), diagonal 2 969.8 m; the shed's
+    // diagonal 29.0 m is 0.98% of it, under the line, and 1.025% of the site's,
+    // over it - lost "by placement" to a margin of 1x, though showing both grows
+    // the view by only 5%. Against the 2% margin (56.6 m) it is not.
+    const Box2 shed(Point2(2079.5, 2079.5), Point2(2100.0, 2100.0));
+    EXPECT_FALSE(katana::interop::advisePlacement(site, shed).farApart);
+}
+
+TEST(InteropPlacement, OnePointFarAwayStillReportsTheDrawingItWouldHide)
+{
+    // The case the advice exists for must survive IO-02's fix even when the
+    // import is a single point: a control point in MGA coordinates imported
+    // into a drawing near the origin. The point has no size to lose, but the
+    // DRAWING, diagonal 188.7 m, is 0.0025% of a 7.4e6 m view. The shift is the
+    // same corner-to-corner one as for any far import.
+    const Box2 drawing(Point2(0.0, 0.0), Point2(160.0, 100.0));
+    const Box2 point(Point2(255440.07, 7410850.76), Point2(255440.07, 7410850.76));
+    const auto advice = katana::interop::advisePlacement(drawing, point);
+    EXPECT_TRUE(advice.farApart);
+    EXPECT_FALSE(advice.message.empty());
+    EXPECT_NEAR(advice.suggestedShift.x, 255440.07, 1e-6);
+    EXPECT_NEAR(advice.suggestedShift.y, 7410850.76, 1e-6);
+}
+
+TEST(InteropPlacement, TwoLonePointsAreNeverLostHoweverFarApart)
+{
+    // The degenerate case: neither part has an extent, so both draw as markers
+    // at any zoom and neither can become invisible. Nothing to warn about.
+    const Box2 here(Point2(0.0, 0.0), Point2(0.0, 0.0));
+    const Box2 there(Point2(255440.07, 7410850.76), Point2(255440.07, 7410850.76));
+    EXPECT_FALSE(katana::interop::advisePlacement(here, there).farApart);
+}
