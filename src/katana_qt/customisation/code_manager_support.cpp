@@ -1,6 +1,5 @@
 #include "customisation/code_manager_support.hpp"
 
-#include <array>
 #include <string_view>
 
 #include <QColor>
@@ -17,28 +16,6 @@
 #include "katana/entity/tables.hpp"
 
 namespace katana::qt {
-
-std::vector<std::string> standardColourNames()
-{
-    // 12d Model's standard colour names. archive12d keeps its table private,
-    // so the names are listed here and each is kept only while archive12d's
-    // standardColour still knows it: this list can offer a name the table
-    // lacks, never a swatch the table disagrees with.
-    static constexpr std::array<std::string_view, 27> kNames{
-        "red",          "green",       "blue",        "yellow",       "cyan",
-        "magenta",      "white",       "black",       "grey",         "orange",
-        "brown",        "purple",      "pink",        "violet",       "dark red",
-        "dark green",   "dark blue",   "dark cyan",   "dark magenta", "dark orange",
-        "dark grey",    "light grey",  "light blue",  "light green",  "light cyan",
-        "light yellow", "light pink"};
-    std::vector<std::string> names;
-    for (const std::string_view name : kNames) {
-        if (katana::archive12d::standardColour(name)) {
-            names.emplace_back(name);
-        }
-    }
-    return names;
-}
 
 DefinitionState linestyleState(const katana::cad::Document* document, std::string_view name)
 {
@@ -97,7 +74,11 @@ void makeColourField(QComboBox* box)
     box->setEditable(true);
     box->setInsertPolicy(QComboBox::NoInsert);
     box->addItem(QString());
-    for (const std::string& name : standardColourNames()) {
+    // archive12d's own table, so the field offers exactly the names
+    // standardColour draws. A person may still type any other name: 12d
+    // defines colours per project, and a map's "sui water potable" is kept
+    // as written.
+    for (const std::string& name : katana::archive12d::standardColourNames()) {
         const auto rgb = katana::archive12d::standardColour(name);
         box->addItem(rgb ? colourSwatch(*rgb, 14) : QIcon(), QString::fromStdString(name));
     }

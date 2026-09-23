@@ -155,6 +155,23 @@ TEST(StandardColour, EveryNameIsItsOwnNearestColour)
     EXPECT_EQ(a12::nearestStandardColour({250, 5, 5, 255}), "red");
 }
 
+TEST(StandardColour, TheListedNamesAreTheTwentySevenTheTableKnowsEachDistinctAndDrawn)
+{
+    // The code manager's colour field lists these, so each must be a name
+    // standardColour draws, and nothing it knows may be missing from them:
+    // 14 plain names, 7 dark and 6 light, as the table in domain_common.cpp.
+    const std::vector<std::string> names = a12::standardColourNames();
+    ASSERT_EQ(names.size(), 27u);
+    EXPECT_EQ(names.front(), "red");
+    EXPECT_EQ(names.back(), "light pink");
+    for (const std::string& name : names) {
+        EXPECT_TRUE(a12::standardColour(name).has_value()) << name;
+        EXPECT_EQ(std::count(names.begin(), names.end(), name), 1) << name;
+        EXPECT_EQ(a12::nearestStandardColour(*a12::standardColour(name)), name)
+            << "two names for one RGB would make export's choice arbitrary";
+    }
+}
+
 TEST(DomainImport, AStandardColourColoursTheEntityAndAnyOtherIsLeftToTheLayerButKept)
 {
     const auto domain = import("string super { colour yellow data_2d { 0 0 1 1 } }\n"
