@@ -69,8 +69,9 @@ constexpr std::array<Command, 19> kCommands{{
 
 class LibraryReader {
   public:
-    LibraryReader(katana::entity::StyleLibrary library, std::string_view text)
-        : lexer_(text)
+    LibraryReader(katana::entity::StyleLibrary library, std::string_view text,
+                  std::string source)
+        : lexer_(text), source_(std::move(source))
     {
         result_.library = std::move(library);
     }
@@ -197,6 +198,7 @@ class LibraryReader {
         LineStyle style;
         style.name = nameToken.text();
         style.units = *units;
+        style.source = source_;
         lexer_.collectComments = false; // the header is read; the rest is licence text
         readBody(style, depthOutside);
 
@@ -407,21 +409,32 @@ class LibraryReader {
     }
 
     Lexer lexer_;
+    std::string source_;
     StyleLibraryRead result_{};
     std::size_t suppressed_ = 0;
 };
 
 } // namespace
 
-katana::core::Result<StyleLibraryRead> readStyleLibrary(std::string_view text)
+std::string sourceFileName(std::string_view source)
 {
-    return readStyleLibraryInto({}, text);
+    // Both separators, whatever the platform: a name recorded on Windows is
+    // read on Linux, and std::filesystem there would keep "C:\x\y.4d" whole.
+    const std::size_t slash = source.find_last_of("/\\");
+    return std::string(slash == std::string_view::npos ? source : source.substr(slash + 1));
+}
+
+katana::core::Result<StyleLibraryRead> readStyleLibrary(std::string_view text,
+                                                        std::string_view sourceName)
+{
+    return readStyleLibraryInto({}, text, sourceName);
 }
 
 katana::core::Result<StyleLibraryRead> readStyleLibraryInto(katana::entity::StyleLibrary library,
-                                                            std::string_view text)
+                                                            std::string_view text,
+                                                            std::string_view sourceName)
 {
-    LibraryReader reader(std::move(library), text);
+    LibraryReader reader(std::move(library), text, sourceFileName(sourceName));
     return reader.run();
 }
 

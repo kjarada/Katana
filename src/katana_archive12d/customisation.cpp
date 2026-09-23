@@ -68,31 +68,32 @@ const Customisation& builtinCustomisation()
     // by whoever first needs a linestyle and never by a session that does
     // not, and so that nothing depends on static initialisation order.
     static const Customisation built = [] {
-        Customisation customisation;
-        for (const std::string_view bytes : detail::builtinCustomisationFiles()) {
-            const auto decoded = katana::core::decodeText(std::string(bytes));
-            if (!decoded) {
-                continue; // a file that will not decode cannot be part of a build
-            }
-            const auto kind = customisationKind(decoded->text);
-            if (!kind) {
-                continue;
-            }
-            if (*kind == CustomisationFile::MapFile) {
-                auto read = readMapFileInto(std::move(customisation.map), decoded->text);
-                if (read) {
-                    customisation.map = std::move(read->map);
-                }
-            } else {
-                auto read = readStyleLibraryInto(std::move(customisation.library), decoded->text);
-                if (read) {
-                    customisation.library = std::move(read->library);
-                }
-            }
+        std::vector<CustomisationBytes> files;
+        for (const detail::EmbeddedFile& file : detail::builtinCustomisationFiles()) {
+            files.push_back(CustomisationBytes{std::string(file.name), file.bytes});
         }
-        return customisation;
+        return readEachCustomisationFile(files);
     }();
     return built;
+}
+
+Customisation readEachCustomisationFile(const std::vector<CustomisationBytes>& files)
+{
+    Customisation customisation;
+    for (const CustomisationBytes& file : files) {
+        // Read into a COPY. The readers take the library and map by value, so
+        // reading into the one being built would leave it moved-from - empty
+        // - when a file fails, which is exactly how one bad file used to wipe
+        // every file before it (A12-06). A copy per file is cheap next to the
+        // parse, and this runs once a session.
+        auto next = readCustomisationBytes(customisation, file.name, file.bytes);
+        if (!next) {
+            customisation.errors.push_back(next.error().describe());
+            continue;
+        }
+        customisation = std::move(*next);
+    }
+    return customisation;
 }
 
 std::vector<std::filesystem::path>
@@ -150,21 +151,37 @@ katana::core::Result<Customisation> readCustomisationInto(Customisation into,
     }
     std::ostringstream buffer;
     buffer << file.rdbuf();
-    const auto decoded = katana::core::decodeText(buffer.str());
+    // The NAME, as UTF-8: it is stamped on every definition and shown to a
+    // person, and path::string() would turn a non-ASCII name into whatever
+    // the Windows code page makes of it.
+    const std::u8string name = path.filename().u8string();
+    auto read = readCustomisationBytes(std::move(into),
+                                       std::string_view(reinterpret_cast<const char*>(name.data()),
+                                                        name.size()),
+                                       buffer.str());
+    if (read) {
+        read->files.back().path = path; // the caller's path, for a caller that reopens it
+    }
+    return read;
+}
+
+katana::core::Result<Customisation> readCustomisationBytes(Customisation into, std::string_view name,
+                                                           std::string_view bytes)
+{
+    const std::string where = std::string(name) + ": ";
+    const auto decoded = katana::core::decodeText(bytes);
     if (!decoded) {
-        return makeError(decoded.error().code, "cannot read " + path.filename().string() + ": " +
+        return makeError(decoded.error().code, "cannot read " + std::string(name) + ": " +
                                                    decoded.error().describe());
     }
     const auto kind = customisationKind(decoded->text);
     if (!kind) {
-        return makeError(kind.error().code, path.filename().string() + ": " +
-                                                kind.error().describe());
+        return makeError(kind.error().code, where + kind.error().describe());
     }
 
     LoadedFile loaded;
-    loaded.path = path;
+    loaded.path = std::filesystem::path(std::u8string(name.begin(), name.end()));
     loaded.kind = *kind;
-    const std::string where = path.filename().string() + ": ";
 
     if (*kind == CustomisationFile::MapFile) {
         const std::size_t before = into.map.size();
@@ -179,7 +196,7 @@ katana::core::Result<Customisation> readCustomisationInto(Customisation into,
         }
     } else {
         const std::size_t before = into.library.size();
-        auto read = readStyleLibraryInto(std::move(into.library), decoded->text);
+        auto read = readStyleLibraryInto(std::move(into.library), decoded->text, name);
         if (!read) {
             return makeError(read.error().code, where + read.error().describe());
         }
