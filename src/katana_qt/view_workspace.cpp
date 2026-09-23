@@ -363,11 +363,14 @@ void ViewWorkspace::activateShowingInsteadOf(ViewId hidden)
             return;
         }
     }
-    // None on screen yet. The hidden view was the current page of a tab
-    // group whose other pages are all still parked off the window: Qt lays
-    // the group out again only after a posted event, and picks its new
-    // current page then. Raising a page makes it the current one now, so the
-    // view made active is the one that shows.
+    // None where the user can see it, by geometry. Not the tab page that
+    // takes over from a hidden current page: Qt lays the group out again as
+    // the page is hidden (measured on Qt 6.11.2 - the new current page is
+    // already inside the window here), so the loop above finds it. What is
+    // left is a window never laid out (not yet shown, or headless), where no
+    // geometry means anything. Raising the view makes it the current page of
+    // any tab group it is in, so the view made active is the one that will
+    // show.
     for (const View& view : docks_) {
         if (view.id != hidden && !view.dock->isHidden()) {
             activate(view.id);

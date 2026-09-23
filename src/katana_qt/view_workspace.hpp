@@ -247,9 +247,10 @@ class ViewWorkspace final : public QMainWindow {
     // window (a tab page behind another is parked outside it).
     [[nodiscard]] bool onScreen(const View& view) const;
     // After `hidden` was hidden (minimised) while it was the active view:
-    // activates a view on screen, or, when none is yet, raises a parked tab
-    // page to be the current one and activates that. Nothing when no other
-    // view is open and unhidden.
+    // activates a view on screen, the first in the order opened; when none
+    // is by geometry (a window not yet laid out), the first unhidden view,
+    // raised so that it is the current page of its tab group. Nothing when no
+    // other view is open and unhidden.
     void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
