@@ -225,19 +225,38 @@ TEST(SurveyPoints, TheSouthernUtmZoneIsTheNorthernOneTenMillionMetresUp)
     EXPECT_TRUE(moved->metadata.contains("transformed from"));
 }
 
-TEST(SurveyPoints, ASystemInUsSurveyFeetIsFedFeetAndItsFeetComeBackAsMetres)
+// EPSG:32118 (NAD83 / New York Long Island, metres) and EPSG:2263 (the same
+// projection and datum in US survey feet, 1 ftUS = 1200/3937 m) describe the
+// SAME grid, so a point keeps its metres through a transformation between
+// them either way - but only if the model's metres are turned into the feet
+// system's own unit on its side of the transformation. The two tests below
+// run one direction each, because each direction needs a different half of
+// that conversion.
+
+TEST(SurveyPoints, TransformingIntoAUsSurveyFootSystemGivesItsFeetBackAsMetres)
 {
-    // EPSG:32118 (NAD83 / New York Long Island, metres) and EPSG:2263 (the same
-    // projection and datum in US survey feet) describe the SAME grid, so a
-    // point keeps its metres through a transformation between them - but only
-    // if the metres are turned into feet for the second system's side and
-    // back. Read as if it were metres, 300 000 ftUS would come back as
-    // 300 000 x 1200/3937 = 91 440.18 m.
+    // The target is in feet: the transformer returns 300 000 m as
+    // 300 000 x 3937/1200 = 984 250 ftUS, which must be turned back into
+    // metres. Taken as metres, the easting would come back as 984 250.
     auto moved =
         transformSurveyProject(projectOf({pointAt("1", 60000.0, 300000.0)}), 32118, 2263);
     ASSERT_TRUE(moved.ok()) << moved.error().describe();
     EXPECT_NEAR(moved->points[0].easting, 300000.0, 1e-4);
     EXPECT_NEAR(moved->points[0].northing, 60000.0, 1e-4);
+}
+
+TEST(SurveyPoints, TransformingOutOfAUsSurveyFootSystemFeedsItFeetNotMetres)
+{
+    // The source is in feet: the model's 300 000 m must reach the transformer
+    // as 984 250 ftUS. Fed as 300 000 ftUS it would come back as
+    // 300 000 x 1200/3937 = 91 440.18 m, and the northing 60 000 as
+    // 60 000 x 1200/3937 = 18 288.04 m.
+    auto moved =
+        transformSurveyProject(projectOf({pointAt("1", 60000.0, 300000.0)}), 2263, 32118);
+    ASSERT_TRUE(moved.ok()) << moved.error().describe();
+    EXPECT_NEAR(moved->points[0].easting, 300000.0, 1e-4);
+    EXPECT_NEAR(moved->points[0].northing, 60000.0, 1e-4);
+    EXPECT_EQ(moved->coordinateSystem.epsgCode, 32118);
 }
 
 TEST(SurveyPoints, AGeographicSystemIsRefusedBecausePointsAreGridCoordinates)
