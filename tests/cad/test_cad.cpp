@@ -1313,6 +1313,175 @@ TEST(CadInterpreter, StyleEditsAreUndoableAndTheOtherTablesStillAre)
     EXPECT_EQ(session.fails("HATCH DELETE none"), ErrorCode::CommandRejected);
 }
 
+// ---- the style and linetype managers' verbs ------------------------------------------------
+
+namespace {
+
+// A library as a customisation load gives one: a linestyle from a linestyle
+// file, a vertex symbol, and a NON-vertex symbol from a symbol file - the
+// kind most symbols in use are (docs/survey_coding.md).
+void loadManagerLibrary(Document& document)
+{
+    katana::entity::StyleLibrary library;
+    const auto add = [&](const char* name, bool atVertices, const char* source) {
+        katana::entity::LineStyle style;
+        style.name = name;
+        style.atVertices = atVertices;
+        style.source = source;
+        style.strokes.push_back(
+            {katana::entity::StrokeOp::Draw, katana::geometry::Point2(1.0, 0.0)});
+        ASSERT_TRUE(library.add(style).ok());
+    };
+    add("WATR Main", false, "user_linestyl_test.4d");
+    add("CULT Bollard", true, "user_symbols_test.4d");
+    add("SEWR Manhole Cover", false, "user_symbols_test.4d");
+    document.setStyleLibrary(std::move(library));
+}
+
+} // namespace
+
+TEST(CadInterpreter, AStyleOrLayerLinetypeMayNameALibraryLinestyleAndAStyleMaySayByLayer)
+{
+    // audit CAD-06: the model and the viewport take a 12d linestyle name,
+    // and STYLE SET refused one - so a user could get one only by import.
+    Session session;
+    loadManagerLibrary(session.document);
+    session.ok("STYLE NEW s");
+    session.ok("STYLE SET s linetype WATR Main");
+    EXPECT_EQ(session.document.model().styles.find("s")->linetype, "WATR Main")
+        << "the rest of the line, unquoted, as SYMBOL takes it";
+    session.ok("STYLE SET s linetype bylayer");
+    EXPECT_EQ(session.document.model().styles.find("s")->linetype, "ByLayer")
+        << "any case, stored in the one spelling";
+    EXPECT_EQ(session.fails("STYLE SET s linetype CULT Bollard"), ErrorCode::InvalidArgument)
+        << "a vertex symbol is never a line pattern; the reply says to give it as the symbol";
+    EXPECT_EQ(session.fails("STYLE SET s linetype nosuch"), ErrorCode::NotFound);
+
+    session.ok("LAYER NEW services");
+    session.ok("LAYER LTYPE services WATR Main");
+    EXPECT_EQ(session.document.model().layers.find("services")->linetype, "WATR Main");
+    EXPECT_EQ(session.fails("LAYER LTYPE services ByLayer"), ErrorCode::InvalidArgument)
+        << "a layer is what ByLayer inherits from";
+    EXPECT_EQ(session.fails("LAYER LTYPE services nosuch"), ErrorCode::NotFound);
+}
+
+TEST(CadInterpreter, StyleSymbolsListsTheCataloguesSymbolsAndFiltersThem)
+{
+    Session session;
+    loadManagerLibrary(session.document);
+    const std::string all = session.ok("STYLE SYMBOLS");
+    // The built-ins, the vertex symbol, and the non-vertex one from the
+    // symbol file; not the linestyle.
+    EXPECT_NE(all.find("  manhole  (built-in)"), std::string::npos) << all;
+    EXPECT_NE(all.find("  CULT Bollard  (library)"), std::string::npos) << all;
+    EXPECT_NE(all.find("  SEWR Manhole Cover  (library)"), std::string::npos) << all;
+    EXPECT_EQ(all.find("WATR Main"), std::string::npos) << all;
+
+    // Filtered, case folded: "manhole" and "SEWR Manhole Cover", in that
+    // order (folded, "manhole" < "sewr manhole cover").
+    EXPECT_EQ(session.ok("STYLE SYMBOLS MANHOLE"),
+              "  manhole  (built-in)\n  SEWR Manhole Cover  (library)");
+    EXPECT_EQ(session.ok("STYLE SYMBOLS zzz"), "no symbol matches");
+}
+
+TEST(CadInterpreter, StyleUsageCountsTheEntitiesWearingEachStyle)
+{
+    Session session;
+    session.ok("STYLE NEW Kerb");
+    session.ok("STYLE NEW Spare");
+    session.ok("POINT 1,1");
+    session.ok("POINT 2,2");
+    session.ok("SELECT ALL");
+    session.ok("STYLE APPLY Kerb");
+    // Kerb: the two points, 1 and 2. Spare: none.
+    EXPECT_EQ(session.ok("STYLE USAGE"), "  Kerb  2 entities\n  Spare  0 entities");
+    EXPECT_EQ(session.ok("STYLE USAGE Kerb"), "style Kerb: used by 2 entities, e.g. id=1");
+    EXPECT_EQ(session.ok("STYLE USAGE Spare"), "style Spare: unused");
+    EXPECT_EQ(session.fails("STYLE USAGE nosuch"), ErrorCode::NotFound);
+}
+
+TEST(CadInterpreter, StyleAndLinetypeMergeRepointEveryHolderAsOneUndoStep)
+{
+    Session session;
+    session.ok("STYLE NEW Kerb");
+    session.ok("STYLE NEW \"Kerb 2\"");
+    session.ok("POINT 1,1");
+    session.ok("SELECT ALL");
+    session.ok("STYLE APPLY \"Kerb 2\"");
+    const auto ids = session.document.model().entities.ids();
+    ASSERT_EQ(ids.size(), 1u);
+    EXPECT_EQ(session.ok("STYLE MERGE \"Kerb 2\" Kerb"),
+              "style Kerb 2 merged into Kerb (1 entity moved)");
+    EXPECT_EQ(session.entity(ids[0]).style, "Kerb");
+    EXPECT_FALSE(session.document.model().styles.contains("Kerb 2"));
+    session.ok("UNDO");
+    EXPECT_EQ(session.entity(ids[0]).style, "Kerb 2");
+    EXPECT_EQ(session.fails("STYLE MERGE Kerb nosuch"), ErrorCode::NotFound);
+
+    session.ok("LINETYPE NEW fence 1 -0.5");
+    session.ok("LINETYPE NEW rail 2 -1");
+    session.ok("LAYER NEW survey");
+    session.ok("LAYER LTYPE survey rail");
+    session.ok("LINETYPE MERGE rail fence");
+    EXPECT_EQ(session.document.model().layers.find("survey")->linetype, "fence");
+    EXPECT_FALSE(session.document.model().linetypes.contains("rail"));
+    session.ok("UNDO");
+    EXPECT_EQ(session.document.model().layers.find("survey")->linetype, "rail");
+    EXPECT_EQ(session.fails("LINETYPE MERGE continuous fence"), ErrorCode::CommandRejected);
+}
+
+TEST(CadInterpreter, PurgeDeletesWhatNothingUsesAsOneUndoStepAndKeepsTheCurrentStyle)
+{
+    Session session;
+    session.ok("LINETYPE NEW fence 1 -0.5");
+    session.ok("STYLE NEW Post");
+    session.ok("STYLE SET Post linetype fence");
+    session.ok("STYLE NEW Spare");
+    session.ok("STYLE NEW Next");
+    session.ok("STYLE CURRENT Next");
+    // Post and Spare go, fence with Post; Next is kept, being current.
+    EXPECT_EQ(session.ok("PURGE STYLES"),
+              "purged 2 styles, 0 linetypes and 0 hatch patterns (one UNDO restores them)\n"
+              "  styles: Post, Spare")
+        << "STYLES alone purges no linetype, not even one a purged style freed";
+    session.ok("UNDO");
+    EXPECT_TRUE(session.document.model().styles.contains("Post"));
+    EXPECT_EQ(session.ok("PURGE"),
+              "purged 2 styles, 1 linetype and 0 hatch patterns (one UNDO restores them)\n"
+              "  styles: Post, Spare\n  linetypes: fence");
+    EXPECT_TRUE(session.document.model().styles.contains("Next"));
+    EXPECT_EQ(session.ok("PURGE"), "nothing to purge: everything is used")
+        << "and no empty undo step";
+    session.ok("UNDO");
+    EXPECT_TRUE(session.document.model().styles.contains("Post"));
+    EXPECT_TRUE(session.document.model().linetypes.contains("fence"));
+    EXPECT_EQ(session.fails("PURGE EVERYTHING"), ErrorCode::InvalidArgument);
+}
+
+TEST(CadInterpreter, StyleCurrentSetsWhatNewWorkIsDrawnIn)
+{
+    Session session;
+    EXPECT_EQ(session.ok("STYLE CURRENT"), "current style is ByLayer");
+    session.ok("STYLE NEW Kerb");
+    EXPECT_EQ(session.ok("STYLE CURRENT Kerb"), "current style is Kerb");
+    EXPECT_EQ(session.document.currentAttributes().style, "Kerb");
+    EXPECT_EQ(session.fails("STYLE CURRENT nosuch"), ErrorCode::NotFound);
+    EXPECT_EQ(session.ok("STYLE CURRENT -"), "current style is ByLayer");
+    EXPECT_EQ(session.ok("STYLE CURRENT Kerb"), "current style is Kerb");
+    EXPECT_EQ(session.ok("STYLE CURRENT ByLayer"), "current style is ByLayer");
+}
+
+TEST(CadInterpreter, SettingAStyleFieldToWhatItAlreadyIsIsNoUndoStep)
+{
+    Session session;
+    session.ok("STYLE NEW s");
+    session.ok("STYLE SET s weight 0.5");
+    const std::size_t steps = session.document.history().undoCount();
+    EXPECT_EQ(session.ok("STYLE SET s weight 0.5"), "style s unchanged");
+    EXPECT_EQ(session.document.history().undoCount(), steps);
+    EXPECT_FALSE(session.document.history().canRedo());
+}
+
 // ---- alignments -----------------------------------------------------------------------
 
 TEST(CadInterpreter, AnAlignmentIsDefinedByItsPIsAndSolvedOnDemand)
