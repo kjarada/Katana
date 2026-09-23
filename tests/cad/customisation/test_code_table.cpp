@@ -601,6 +601,40 @@ TEST(FormatCodingReport, SaysWhatHappenedOverallAndCodeByCode)
               "  ZZ99: 1 entity, none, not matched; 0 changed\n");
 }
 
+TEST(FormatCodingReport, AnEntityThatKeptItsLayerIsNotShownMovingInItsCodesRow)
+{
+    // createLayers off and no SURVEY SERVICES layer: the WM01 point stays on
+    // "0" (audit CAD-18 keeps its style changing). Its row used to read
+    // "layer 0 -> SURVEY SERVICES" all the same.
+    SurveyMap map;
+    ASSERT_TRUE(map.add(mapData("WM*", "SURVEY SERVICES", "", "WATR Main")).ok());
+    Document document;
+    document.setSurveyMap(std::move(map));
+    const EntityId id = addCodedPoint(document, Point2(0, 0), "WM01");
+
+    katana::cad::SurveyCodingOptions options;
+    options.createLayers = false;
+    katana::cad::SurveyCodingReport report;
+    auto command = katana::cad::applySurveyCodes(document, options, &report);
+    ASSERT_TRUE(command.ok());
+    ASSERT_NE(*command, nullptr);
+    ASSERT_TRUE(document.execute(std::move(*command)).ok());
+    ASSERT_EQ(document.model().entities.find(id)->layer, "0") << "the premise: it did not move";
+    // By hand: one coded, matched by WM*. It changes (its style), keeps
+    // layer "0" because SURVEY SERVICES does not exist, and no layer is
+    // created; the new style WATR Main is in no loaded library.
+    EXPECT_EQ(katana::cad::formatCodingReport(report),
+              "1 entity carries a code in \"code\": 1 matched, 0 fallback-only (only the bare * "
+              "rule answers), 0 with no rule\n"
+              "1 entity changed\n"
+              "Styles created: WATR Main\n"
+              "1 entity kept their layer: it does not exist and layers are not being created\n"
+              "Named but in no loaded library: WATR Main\n"
+              "By code:\n"
+              "  WM01: 1 entity, prefix, matched; layer 0 kept: SURVEY SERVICES does not exist "
+              "and layers are not being created; style WATR Main (created); 1 changed\n");
+}
+
 TEST(FormatCoverage, NamesBuiltInShapesApartFromMissingNames)
 {
     katana::cad::CustomisationCoverage coverage;
