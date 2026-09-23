@@ -337,7 +337,7 @@ The required progression is:
 | 25 | AI Agent | not started |
 | 26 | Production Hardening | not started — no section of its own yet; section 43 lists it last |
 | 45 | Survey module and instrument interoperability | in progress — model, detection and the cad bridge delivered; parsers, reduction, Survey menu, wizard and Point Manager in progress |
-| 46 | The audit of 2026-09-23 — defect register | open — 140 of 142 confirmed defects outstanding, 6 of them high |
+| 46 | The audit of 2026-09-23 — defect register | open — 139 of 142 confirmed defects outstanding, 5 of them high |
 
 The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
@@ -1351,7 +1351,11 @@ Vector import produces plain `Entity` values which the caller wraps in
 any other edit - including the layers it needs, in a single `Transaction`.
 Multi-geometries are flattened to one entity per part, polygon rings become
 closed polylines, and a two-point LineString becomes a Line rather than a
-polyline so it can still be filleted.
+polyline so it can still be filleted. A file's Z becomes the entity's heights
+(the `elevation` / `elevations` properties) and goes back out as Z; a 2D
+feature has no height, not a height of 0. CORRECTED 2026-09-23 (audit IO-01):
+import dropped Z and export wrote Z = 0 until then; what a format cannot carry
+is reported, and the rules are in `docs/interop.md`, "Conversion".
 
 Raster and point cloud import produce REFERENCE DATA instead: backdrop that is
 drawn, not drawn ON. It is deliberately outside the entity model and outside
@@ -3153,7 +3157,7 @@ over the bug:
 
 # 46. The audit of 2026-09-23 — the defect register
 
-**STATUS: OPEN — 140 of 142 confirmed defects outstanding.**
+**STATUS: OPEN — 139 of 142 confirmed defects outstanding.**
 
 A read-only audit of every subsystem: ten auditors, one per area, each told to
 verify the code rather than trust this plan, and every defect they reported put
@@ -3176,7 +3180,7 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 |---|---|---|---|---|
 | MOD — entity model, commands, storage, selection | 1 | 3 | 12 | 16 |
 | QT — the desktop application | 2 | 10 | 15 | 27 |
-| IO — raster, vector and point-cloud interoperability | 2 | 6 | 9 | 17 |
+| IO — raster, vector and point-cloud interoperability | 1 | 6 | 9 | 16 |
 | A12 — the 12d archive and customisation | 1 | 4 | 11 | 16 |
 | CAD — the CAD engine | 0 | 5 | 13 | 18 |
 | REN — rendering and scene building | 0 | 4 | 5 | 9 |
@@ -3185,7 +3189,7 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 | SUR — survey, geodesy and survey import | 0 | 1 | 4 | 5 |
 | NET — least-squares adjustment | 0 | 1 | 2 | 3 |
 | BLD — build, tests and tooling | 0 | 3 | 9 | 12 |
-| **total** | **6** | **40** | **94** | **140** |
+| **total** | **5** | **40** | **94** | **139** |
 
 The high-severity ones, taken first:
 
@@ -3195,7 +3199,7 @@ The high-severity ones, taken first:
   the empty import transaction is rejected and the surfaces are thrown away.
 * **QT-02** — Styles and Linetypes' Save Changes rewrites the linetype and
   symbol of every 12d-imported style.
-* **IO-01** — vector import discards Z and vector export writes Z = 0.
+* ~~**IO-01**~~ FIXED 2026-09-23 — vector import discards Z and vector export writes Z = 0.
 * ~~**IO-02**~~ FIXED 2026-09-23 — placement advice calls small data inside a large drawing "far
   apart", and its default button then moves it.
 * **IO-03** — a budgeted point-cloud read materialises the whole file.

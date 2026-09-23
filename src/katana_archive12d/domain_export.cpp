@@ -261,7 +261,7 @@ class Exporter {
     [[nodiscard]] static std::vector<std::optional<double>> heightsOf(const Entity& entity,
                                                                       std::size_t count)
     {
-        return entityHeights(entity, count);
+        return katana::entity::heightsOf(entity.properties, count);
     }
 
     // The polyline an alignment was imported as, which the alignment will
@@ -817,34 +817,6 @@ std::vector<std::string> splitList(std::string_view text)
         items.push_back(std::move(item));
     }
     return items;
-}
-
-std::vector<std::optional<double>> entityHeights(const katana::entity::Entity& entity,
-                                                  std::size_t count)
-{
-    std::vector<std::optional<double>> heights(count);
-    if (const auto* list = textOf(entity.properties, kElevationsProperty)) {
-        std::vector<std::optional<double>> parsed;
-        std::size_t start = 0;
-        while (start < list->size()) {
-            std::size_t end = list->find(' ', start);
-            if (end == std::string::npos) {
-                end = list->size();
-            }
-            if (end > start) {
-                // "null", or anything else that is not a number, is no height.
-                parsed.push_back(parseReal(std::string_view(*list).substr(start, end - start)));
-            }
-            start = end + 1;
-        }
-        if (parsed.size() == count) {
-            return parsed;
-        }
-    }
-    if (const auto z = realOf(entity.properties, kElevationProperty)) {
-        std::fill(heights.begin(), heights.end(), *z);
-    }
-    return heights;
 }
 
 katana::core::Result<DomainExport> fromDomain(const katana::entity::Model& model,
