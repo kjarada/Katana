@@ -14,6 +14,7 @@
 #include <optional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <QList>
 #include <vector>
@@ -35,15 +36,24 @@
 #include "katana/interop/reference_data.hpp"
 
 #include "customisation/style_painter.hpp"
+#include "tools/tool_host.hpp"
 
 class QPainter;
 class QPen;
 
 namespace katana::qt {
 
+// The window's first eight tools, from before the tool catalogue. Each one
+// but Select is now a catalogue tool (toolId), run by the view's ToolHost like
+// every other; the enum stays only while MainWindow's toolbar and command
+// words still name tools by it, and goes when they name catalogue ids.
 enum class Tool { Select, Point, Line, Polyline, Rectangle, Circle, Arc, Move, Copy };
 
 [[nodiscard]] const char* toString(Tool tool);
+// The catalogue id a legacy tool runs as ("draw.line"); "" for Select.
+[[nodiscard]] const char* toolId(Tool tool);
+// The legacy tool a catalogue id is, if it is one of the eight; Select for "".
+[[nodiscard]] std::optional<Tool> legacyTool(std::string_view id);
 
 class ViewportWidget final : public QWidget {
   public:
@@ -75,8 +85,31 @@ class ViewportWidget final : public QWidget {
     // hidden in one view is gone from that view and from no other.
     [[nodiscard]] std::size_t lastDrawnEntityCount() const { return lastDrawnEntities_; }
 
+    // Legacy: Select stops the running tool; the others start their
+    // catalogue tool (toolId).
     void setTool(Tool tool);
-    [[nodiscard]] Tool tool() const { return tool_; }
+    // The legacy tool running, Select when none is or when the running tool
+    // is not one of the eight.
+    [[nodiscard]] Tool tool() const;
+
+    // ---- the catalogue's tools (include/katana/cad/interactive_tool.hpp) -----
+    // Starts catalogue tool `id` in this view. NotFound for an unknown id.
+    [[nodiscard]] katana::core::Status startTool(std::string_view id);
+    // The running tool's id, "" when the view is selecting.
+    [[nodiscard]] std::string activeToolId() const { return tools_.activeId(); }
+    [[nodiscard]] bool toolActive() const { return tools_.active(); }
+    // The host itself, for a caller that wants its hooks or to drive it.
+    [[nodiscard]] tools::ToolHost& toolHost() { return tools_; }
+    // A whole line of typed input handed to the running tool, as the command
+    // line hands it over when Enter is pressed there. False, and nothing
+    // done, when no tool is running: the line is then the command line's.
+    bool typeIntoTool(const QString& text);
+    // What has been typed into the view for the running tool and not yet
+    // entered: shown after the prompt, sent by Enter, cleared by Esc.
+    [[nodiscard]] const QString& typedInput() const { return typed_; }
+    // How many rubber-band shapes and markers the last paint drew, for the
+    // headless tests that cannot look at pixels.
+    [[nodiscard]] std::size_t lastPreviewCount() const { return lastPreviewCount_; }
 
     // Frames what THIS view draws: the entities its layers let through
     // (cad::drawnExtent with this view's hidden layers), the reference layers
@@ -105,7 +138,9 @@ class ViewportWidget final : public QWidget {
     void setSnapModes(katana::cad::SnapModes modes);
     [[nodiscard]] katana::cad::SnapModes snapModes() const { return snapModes_; }
 
-    // Abandons the operation in progress (Esc).
+    // Esc: clears typed input first; then ends the running tool (keeping the
+    // work tools::escapeKeepsWork says Esc keeps); with no tool running,
+    // abandons a selection box, and then clears the selection.
     void cancel();
 
     // Abandons the operation in progress WITHOUT changing the active tool.
@@ -121,7 +156,15 @@ class ViewportWidget final : public QWidget {
     std::function<void(const katana::geometry::Point2& world,
                        const std::optional<katana::cad::SnapResult>& snap)>
         onCursorMoved;
+    // Legacy: raised with the legacy tool when one of the eight starts, and
+    // with Select when a tool ends.
     std::function<void(Tool tool)> onToolChanged;
+    // Raised with the catalogue id when a tool starts in this view, and with
+    // "" when it ends.
+    std::function<void(const std::string& toolId)> onActiveToolChanged;
+    // What a running tool reports that is not an error: "3 lines", "2
+    // selected", a measurement. Refusals go to onError.
+    std::function<void(const QString& message)> onToolMessage;
     // Raised when the user clicks into this view or moves the keyboard focus
     // into it, so the workspace can make it the active one; not when Qt moves
     // the focus itself (view_focus.hpp, focusChoosesView). It can be raised
@@ -151,6 +194,7 @@ class ViewportWidget final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    bool event(QEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 
   private:
@@ -175,8 +219,16 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] Point2 toWorld(const QPointF& screen) const;
 
     void updateCursor(const QPointF& screen);
-    void acceptPoint(const Point2& point);
-    void finishOperation(bool close);
+    // A left click while a tool runs, by what the tool expects.
+    void toolClick(const QPointF& screen);
+    // Enter, Space and a right-click while a tool runs: the typed input when
+    // there is some, otherwise the tool's Enter.
+    void toolEnter();
+    // The view's pick aperture in model units at the current zoom.
+    [[nodiscard]] double pickTolerance() const;
+    // The entity under `screen` that this view lets be picked, if any.
+    [[nodiscard]] std::optional<katana::entity::EntityId> entityAt(const QPointF& screen) const;
+    void wireToolHost();
     void selectAt(const QPointF& screen, Qt::KeyboardModifiers modifiers);
     void selectInBox(const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers);
     void run(katana::commands::CommandPtr command);
@@ -229,6 +281,9 @@ class ViewportWidget final : public QWidget {
     void drawText(QPainter& painter, const Point2& position, const std::string& text,
                   double height, double rotation) const;
     void drawPreview(QPainter& painter) const;
+    // The running tool's prompt and what has been typed for it, in a band
+    // along the bottom of the view.
+    void drawPrompt(QPainter& painter) const;
     void drawSnapMarker(QPainter& painter) const;
 
     katana::cad::Document& document_;
@@ -244,9 +299,12 @@ class ViewportWidget final : public QWidget {
     // side of keeping the zoom.
     std::optional<katana::geometry::Box2> framedBox_;
 
-    Tool tool_ = Tool::Select;
-    std::vector<Point2> points_; // clicks collected for the operation in progress
-    Point2 cursorWorld_;         // after snapping
+    // The tool running in this view, if any. Declared after document_, which
+    // it holds a reference to.
+    tools::ToolHost tools_;
+    QString typed_;
+    mutable std::size_t lastPreviewCount_ = 0;
+    Point2 cursorWorld_; // after snapping
     std::optional<katana::cad::SnapResult> activeSnap_;
 
     bool gridVisible_ = true;
