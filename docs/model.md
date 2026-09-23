@@ -129,8 +129,9 @@ Available commands: `CREATE_POINT`/`LINE`/`CIRCLE`/`ARC`/`POLYLINE`/`TEXT`/
 `SET_COLOR`, `SET_STYLE`, `SET_VISIBLE`, `SET_PROPERTY`, `REMOVE_PROPERTY`,
 `SET_GEOMETRY`, `RENAME_PROPERTY`, `CREATE_LAYER`, `UPDATE_LAYER`,
 `DELETE_LAYER`, and the layer-tree and table commands - `DeleteLayerTree`,
-`RenameLayer`, and create / update / delete / rename for each named table (one
-template set over a `TablePolicy`, `table_commands.cpp`). The upper-case names
+`RenameLayer`, and create / update / delete / rename / merge / duplicate for
+each named table, plus `PurgeTables` (one template set over a `TablePolicy`,
+`table_commands.cpp`; see "Named tables" below). The upper-case names
 are stable identifiers meant to become the vocabulary of the structured API in
 Phase 23; the layer-tree and table commands are named in CamelCase
 (`CreateLinetype`), which is an inconsistency to settle before that API is
@@ -190,6 +191,29 @@ faster. Properties, metadata and property defaults are JSON text via
 `katana_entity/serialization.cpp`, which keeps nlohmann confined to one
 translation unit and keeps those readable for debugging and diffing. (This
 paragraph said geometry was JSON too, from before schema 3.)
+
+### Metadata a newer build wrote
+
+The `metadata` table is key and value, and it is the one table `save` does not
+empty. A key this build does not read is carried in
+`ProjectMetadata::unknownKeys` on load and written back as it was, and `save`
+writes the keys it knows with `INSERT OR REPLACE` - so opening and saving a
+project in an OLDER build no longer strips what a newer one recorded, and
+Save As keeps it too. `save` refuses an unknown key that names a field this
+build writes itself, rather than let it overwrite the field. The keys this
+build reads are listed once, in `kMetadataKeys` (`project_store.cpp`); a key
+added to that list and not to the writer would be read back as unknown, or
+never written.
+
+The first new key is `customisation`: the NAMES of the 12d linestyle, symbol
+and map files a drawing was drawn with, in load order
+(`ProjectMetadata::customisation`), stored one per line - a Windows file name
+may hold `;` but not a line break - and refused by `save` when a name is
+empty or holds a line break or a path separator, since that would read back
+as a different list. It is a record, not a reference: nothing is loaded from
+it (`docs/survey_coding.md`). A new key is not a schema change, which is why
+this could be added while migrations are deferred (decision D6); nothing sets
+it yet.
 
 ## Numerical assumptions
 
@@ -373,7 +397,8 @@ does not.
   rewrites every table it owns, so a missing `DELETE` fails on the *second*
   save with a primary-key conflict, not the first. Both the linetype and the
   dimension style tables shipped this bug and were caught by saving twice in a
-  test. Do that.
+  test. Do that. The one exception is the `metadata` table, which `save`
+  does NOT empty (see "Metadata a newer build wrote" below).
 * **The schema migration** - a new column needs a `DEFAULT` that reproduces the
   behaviour of projects written before it existed, or old drawings change
   appearance on open.
@@ -387,6 +412,55 @@ still uses an item so a deletion is refused naming the holder. There used to
 be four hand-written copies; adding a fifth for styles is what made the
 pattern visible, and a change to how these commands undo now lands in one
 place.
+
+**Who uses an item is one function** (`entity::tableUsage`,
+`include/katana/entity/table_usage.hpp`), one pass over the entities for
+every style, linetype name, symbol name, hatch pattern and layer, counting
+an entity against the linetype and hatch it is DRAWN with (through
+`resolvedLinetype` and `resolvedHatchPattern`, which `resolveDisplay` itself
+reads). The delete guards, `cad::planPurge` and the managers' "Used" column
+all read it, so no manager can call an item unused that a delete would then
+refuse. A refusal gives the count and the first holder -
+`Users::describe()`, "used by 1 layer, 1 style and 3 entities, e.g.
+layer=survey" - a layer first, then a style, then the lowest entity id.
+
+The table managers of 2026-09-23 added three commands to the set:
+
+- **Merge** (`mergeStyle`, `mergeLinetype`): repoint every holder of `from`
+  to `into`, then delete `from` - what a rename onto an existing name has to
+  be, and why a rename refuses one. `into` must be in the same table, so a
+  model linetype cannot be merged into a 12d LIBRARY linestyle: the commands
+  cannot see the library.
+- **Duplicate**: a copy under a new name. Redo reproduces the copy taken at
+  execute, even if `from` was edited in between by a command since undone.
+- **`PurgeTables`** (`purgeTableItems`): many unused items as ONE undo step,
+  judged as a set - a linetype named only by styles the same purge removes is
+  free - with one usage pass for the whole set. It refuses an empty set, since
+  an empty undo step is a defect (the shape of audit QT-01).
+
+Two corrections came with them. **Undo of a rename or merge restores
+before-images** of exactly the holders it moved, not a reverse repoint: the
+new name may already have had holders the table does not know of (a style
+naming a 12d library linestyle), and moving "everything named `to` back"
+moved those too. The item goes back under its old name first, so the holders
+put back after it name something that exists at every step. And **the
+update guard is asked, not restated**: `validate` said a dash pattern on
+`continuous` was fine and `execute` then refused it (audit MOD-09, fixed for
+the tables). Deleting, merging and purging are marked destructive, as
+`DELETE_LAYER` is (MOD-08, fixed for the tables; the layer-tree deletion
+still is not). An unchanged update is no step at all: `updateStyleIfChanged`
+and `updateLinetypeIfChanged` return nullptr, because a Command cannot decline
+to be pushed onto the stack.
+
+**`ByLayer` is a word, not an empty string.** A linetype has no empty value to
+say "inherit" with - `""` is a name like any other in the tables - so a
+`Style` says it with `ByLayer` (`entity::kByLayerLinetype`, `isByLayer`, any
+case), which DXF already reserves and `validate(Linetype)` already refused as
+a name. `resolveDisplay` gives an entity whose style's linetype is ByLayer its
+layer's linetype. A symbol-only or colour-only style used to override the
+layer's linetype with `continuous` whether it meant to or not. Weight has no
+such word: a sentinel weight would be a storage change, and those are
+deferred (decision D6).
 
 `LayerDatabase` is deliberately not one of these. Layer names are `/`-separated
 paths and the table derives a tree from them (`children`, `subtree`,
