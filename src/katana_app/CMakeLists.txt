@@ -61,7 +61,11 @@ if(KATANA_BUILD_TESTS)
     add_test(NAME cli.mapfile_list
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "MAPFILE LIST katana")
-    # Loaded again WITHOUT replace: merged, and every rule is already there.
+    # Loaded again WITHOUT replace: merged, so each of its (code, section)
+    # groups - KT* map_data, KX* map_data, KT* vertex_symbol_data - replaces
+    # itself. A code's loaded rules are gathered at its first rule (so that
+    # what the load brought outranks what it left of that code), which makes
+    # KX* rule #2: KT* map_data, KT* vertex_symbol_data, KX* map_data.
     add_test(NAME cli.mapfile_check_after_a_merge
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE \"${_mapfile}\""
@@ -100,6 +104,46 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.a_quoted_path_starting_with_replace_is_loaded_as_a_file
         cli.the_same_quoted_replace_path_twice_merges_rather_than_replaces
         PROPERTIES PASS_REGULAR_EXPRESSION "4 survey code rules over 3 distinct codes")
+    # A library-only load keeps the map (audit QT-21): the symbol fixture is
+    # merged in after the tests' mapfile, and the mapfile's 3 rules over 2
+    # codes are still there. By hand, from cli-codes.mapfile above.
+    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    add_test(NAME cli.a_library_alone_merged_in_keeps_the_survey_codes
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_replace}"
+                -c "CUSTOMISE \"${_fixture}/test_symbols.4d\"" -c "CUSTOMISE")
+    set_tests_properties(cli.a_library_alone_merged_in_keeps_the_survey_codes PROPERTIES
+        PASS_REGULAR_EXPRESSION "test_symbols\\.4d: style library, [0-9]+ added.*3 survey code rules over 2 distinct codes")
+
+    # A saved project records the customisation files it was drawn with, and
+    # a later session that opens it without one of them is told which (a
+    # warning; the project still opens). Saved with the symbol fixture merged
+    # in, then opened in a second process that never loads it. With the
+    # fixture loaded first, nothing is missing.
+    set(_recorded "${CMAKE_CURRENT_BINARY_DIR}/cli-recorded.katana")
+    add_test(NAME cli.recorded_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_recorded}")
+    add_test(NAME cli.a_saved_project_records_its_customisation
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_fixture}/test_symbols.4d\""
+                -c "LINE 0,0 10,0" -c "SAVE \"${_recorded}\"")
+    add_test(NAME cli.opening_a_project_names_the_customisation_files_not_loaded
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "OPEN \"${_recorded}\"")
+    add_test(NAME cli.opening_a_project_with_its_customisation_loaded_warns_of_nothing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "CUSTOMISE \"${_fixture}/test_symbols.4d\""
+                -c "OPEN \"${_recorded}\"")
+    set_tests_properties(cli.recorded_cleanup PROPERTIES FIXTURES_SETUP cli_recorded_clean)
+    set_tests_properties(cli.a_saved_project_records_its_customisation PROPERTIES
+        FIXTURES_REQUIRED cli_recorded_clean FIXTURES_SETUP cli_recorded)
+    set_tests_properties(cli.opening_a_project_names_the_customisation_files_not_loaded PROPERTIES
+        FIXTURES_REQUIRED cli_recorded
+        PASS_REGULAR_EXPRESSION "opened .*warning: this project was drawn with customisation files that are not loaded: \"test_symbols\\.4d\"[\r\n]")
+    set_tests_properties(cli.opening_a_project_with_its_customisation_loaded_warns_of_nothing PROPERTIES
+        FIXTURES_REQUIRED cli_recorded
+        PASS_REGULAR_EXPRESSION "opened "
+        FAIL_REGULAR_EXPRESSION "not loaded")
+
     # "[\r\n]+" where a line ends: the console writes CRLF on Windows.
     set(_eol "[\r\n]+")
     set_tests_properties(cli.code_explain PROPERTIES PASS_REGULAR_EXPRESSION
@@ -107,7 +151,7 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.mapfile_list PROPERTIES PASS_REGULAR_EXPRESSION
         "KT\\*  \\[prefix; 2 rules: map_data, vertex_symbol_data\\]  model KATANA TEST; linestyle 0; symbol cross; colour red; \"\\[KT\\*\\] Katana test\"${_eol}1 of 2 codes match \"katana\"")
     set_tests_properties(cli.mapfile_check_after_a_merge PROPERTIES PASS_REGULAR_EXPRESSION
-        "3 rules were loaded already.*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no model${_eol}  rule #1 KX\\* \\(map_data\\): warning, no model")
+        "cli-codes\\.mapfile: mapfile, 0 added, 3 replaced \\(codes, once for each section\\): \"KT\\*\", \"KX\\*\", \"KT\\*\".*3 rules checked: 0 errors, 1 warning${_eol}  by kind: 1 no model${_eol}  rule #2 KX\\* \\(map_data\\): warning, no model")
     set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
         "1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched; layer 0 -> KATANA TEST; style cross \\(created\\); 1 changed${_eol}Applied as one command.*1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, model KATANA TEST")
 endif()
