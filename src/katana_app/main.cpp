@@ -30,7 +30,9 @@
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
+#include "katana/interop/dataset_info.hpp"
 #include "katana/interop/reference_data.hpp"
+#include "katana/pointcloud/point_cloud_engine.hpp"
 #endif
 
 namespace {
@@ -429,8 +431,25 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         }
         return true;
     }
+    case interop::SourceKind::Raster:
+    case interop::SourceKind::PointCloud:
+        // Reference data is drawn at its own coordinates and has no shift to
+        // take, so LOCAL is refused by name rather than dropped - or, as it
+        // was, left on the end of the path to fail as a missing file
+        // "ortho.tif LOCAL" (audit QT-13, QT-14).
+        if (shiftToLocal) {
+            std::cerr << "error: InvalidArgument: LOCAL is not supported for rasters and point "
+                         "clouds, which are reference data drawn at their own coordinates\n";
+            return false;
+        }
+        break;
+    default:
+        break;
+    }
+
+    switch (interop::kindForPath(file)) {
     case interop::SourceKind::Raster: {
-        auto raster = interop::importRaster(path);
+        auto raster = interop::importRaster(file);
         if (!raster) {
             std::cerr << "error: " << raster.error().describe() << '\n';
             return false;
@@ -440,7 +459,7 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         const bool georeferenced = raster->hasGeotransform;
         const auto bounds = raster->worldBounds();
         state.reference.add(std::move(*raster));
-        std::cout << "imported raster " << path.filename().string() << " (" << w << "x" << h
+        std::cout << "imported raster " << file.filename().string() << " (" << w << "x" << h
                   << " px)";
         if (georeferenced) {
             std::cout << " covering " << bounds.min.x << ',' << bounds.min.y << " to "
@@ -452,7 +471,7 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         return true;
     }
     case interop::SourceKind::PointCloud: {
-        auto cloud = interop::importPointCloud(path);
+        auto cloud = interop::importPointCloud(file);
         if (!cloud) {
             std::cerr << "error: " << cloud.error().describe() << '\n';
             return false;
@@ -461,7 +480,7 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         const std::uint64_t total = cloud->sourcePointCount;
         const bool decimated = cloud->isDecimated();
         state.reference.add(std::move(*cloud));
-        std::cout << "imported point cloud " << path.filename().string() << " (" << shown
+        std::cout << "imported point cloud " << file.filename().string() << " (" << shown
                   << " points";
         if (decimated) {
             std::cout << " sampled from " << total;
@@ -469,11 +488,78 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         std::cout << ")\n";
         return true;
     }
+    case interop::SourceKind::Vector:
+    case interop::SourceKind::Archive12d:
     case interop::SourceKind::Unknown:
         break;
     }
-    std::cerr << "error: Unsupported: no importer for '" << path.extension().string() << "'\n";
+    std::cerr << "error: Unsupported: no importer for '" << file.extension().string() << "'\n";
     return false;
+}
+
+// INFO <file>: what a GIS file or point cloud holds, without importing it. The
+// wording is interop::formatDescription's, which the desktop application's
+// GIS > Dataset Information shows too.
+bool describePath(const std::string& text)
+{
+    auto description = katana::interop::describeSource(std::filesystem::path(text));
+    if (!description) {
+        std::cerr << "error: " << description.error().describe() << '\n';
+        return false;
+    }
+    std::cout << katana::interop::formatDescription(*description);
+    return true;
+}
+
+// The two paths of COPC <source> <destination>: each either "quoted" or one
+// word, so a path with spaces is quoted and one without need not be.
+std::vector<std::string> pathArguments(const std::string& text)
+{
+    std::vector<std::string> paths;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        at = text.find_first_not_of(" \t", at);
+        if (at == std::string::npos) {
+            break;
+        }
+        std::size_t end = 0;
+        if (text[at] == '"') {
+            end = text.find('"', at + 1);
+            if (end == std::string::npos) {
+                end = text.size();
+            }
+            paths.push_back(text.substr(at + 1, end - at - 1));
+            at = end + 1;
+        } else {
+            end = text.find_first_of(" \t", at);
+            if (end == std::string::npos) {
+                end = text.size();
+            }
+            paths.push_back(text.substr(at, end - at));
+            at = end;
+        }
+    }
+    return paths;
+}
+
+// COPC <source> <destination.copc.laz>: the whole file rewritten as a Cloud
+// Optimised Point Cloud, every point kept, so that later reads can ask for a
+// level of detail instead of decimating (PLAN.MD Phase 17).
+bool convertToCopc(const std::string& text)
+{
+    const std::vector<std::string> paths = pathArguments(text);
+    if (paths.size() != 2) {
+        std::cerr << "error: InvalidArgument: usage: COPC <source> <destination.copc.laz>\n";
+        return false;
+    }
+    const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(paths[0], paths[1]);
+    if (!status) {
+        std::cerr << "error: " << status.error().describe() << '\n';
+        return false;
+    }
+    std::cout << "converted " << std::filesystem::path(paths[0]).filename().string() << " to "
+              << std::filesystem::path(paths[1]).filename().string() << " (COPC)\n";
+    return true;
 }
 
 bool exportPath(katana::cad::Document& document, const std::string& text)
@@ -552,6 +638,18 @@ std::optional<bool> runInterop(katana::cad::Document& document, InteropState& st
     if (verb == "REFS") {
         listReferences(state);
         return true;
+    }
+    if (verb == "INFO" || verb == "COPC") {
+        const std::size_t space = line.find_first_of(" \t");
+        const std::string argument = argumentOf(line, space == std::string::npos ? line.size() : space);
+        if (argument.empty()) {
+            std::cerr << "error: InvalidArgument: usage: " << verb
+                      << (verb == "INFO" ? " <file>\n" : " <source> <destination.copc.laz>\n");
+            return false;
+        }
+        // COPC takes the raw rest of the line: argumentOf strips one pair of
+        // surrounding quotes, which would run two quoted paths together.
+        return verb == "INFO" ? describePath(argument) : convertToCopc(line.substr(space));
     }
     return std::nullopt;
 }
@@ -667,9 +765,13 @@ int main(int argc, char* argv[])
                          "          CUSTOMISE <file> [<file>...]  load 12d linestyle and symbol\n"
                          "          libraries (.4d) and mapfiles; CUSTOMISE alone reports what "
                          "is loaded\n"
-                         "Interop   IMPORT <file> | EXPORT <file> | REFS\n"
+                         "Interop   IMPORT <file> [LOCAL] | EXPORT <file> | REFS\n"
                       << "          vector -> entities; raster and point cloud -> "
-                         "reference layers\n";
+                         "reference layers\n"
+                         "          INFO <file>  what a GIS file or point cloud holds, "
+                         "without importing it\n"
+                         "          COPC <source> <destination.copc.laz>  rewrite a point "
+                         "cloud as COPC\n";
 #endif
             return 0;
         }

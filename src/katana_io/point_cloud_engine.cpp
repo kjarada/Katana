@@ -1,9 +1,10 @@
 #include "katana/pointcloud/point_cloud_engine.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <limits>
 #include <string>
+
+#include "katana/core/text.hpp"
 
 #include <pdal/io/BufferReader.hpp>
 #include <pdal/Dimension.hpp>
@@ -43,6 +44,26 @@ std::string inferDriver(const std::filesystem::path& path, bool forWriting)
     pdal::StageFactory factory;
     return forWriting ? pdal::StageFactory::inferWriterDriver(path.string())
                       : pdal::StageFactory::inferReaderDriver(path.string());
+}
+
+// ASPRS LAS 1.4 R15 stores X, Y and Z as 32-bit integers, each multiplied by
+// the public header's scale factor and added to its offset, so the scale IS the
+// resolution of every coordinate in the file. PDAL's writers default it to
+// 0.01 - a centimetre - which quantised every point written here by up to 5 mm
+// (audit IO-17). 0.001 is the millimetre survey coordinates are quoted to.
+//
+// With that resolution an int32 spans +/-2 147 km, less than a projected
+// northing of 7 410 km, so the offset must move the origin to the data: "auto"
+// has PDAL take it from the points' minimum.
+constexpr const char* kLasScale = "0.001";
+constexpr const char* kLasOffset = "auto";
+
+void addMillimetreScale(pdal::Options& options)
+{
+    for (const char* axis : {"x", "y", "z"}) {
+        options.add(std::string("scale_") + axis, kLasScale);
+        options.add(std::string("offset_") + axis, kLasOffset);
+    }
 }
 
 void growBounds(PointCloudBounds& bounds, double x, double y, double z)
@@ -307,9 +328,8 @@ Status PointCloudEngine::convertToCopc(const std::filesystem::path& source,
     if (!std::filesystem::exists(source, existsError)) {
         return makeError(ErrorCode::NotFound, "file does not exist", source.string());
     }
-    std::string name = destination.filename().string();
-    std::transform(name.begin(), name.end(), name.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    // ASCII folding, whatever the process locale (core/text.hpp).
+    const std::string name = katana::core::lowered(destination.filename().string());
     if (!name.ends_with(".copc.laz")) {
         // The extension is what makes every later read infer readers.copc;
         // a COPC file called .laz would be read as plain LAZ and could never
@@ -328,6 +348,21 @@ Status PointCloudEngine::convertToCopc(const std::filesystem::path& source,
             pdal::Stage& reader = pipeline.makeReader(source.string(), driver);
             pdal::Options writerOptions;
             writerOptions.add("filename", destination.string());
+            // The conversion must not coarsen the data it indexes (audit
+            // IO-17): writers.copc, like writers.las, defaults to a 0.01
+            // scale. From a LAS source the source's own scale and offset are
+            // forwarded - a 0.1 mm scan stays 0.1 mm - with its header fields
+            // and VLRs. Any other format has no LAS header to forward, so it
+            // gets the millimetre, stated explicitly. Never both: an explicit
+            // scale OVERRIDES a forwarded one (measured with PDAL 2.10.2: a
+            // 0.0001-scale LAS converted with forward=all kept 0.0001, and
+            // with forward=all plus scale_x=0.001 came out at 0.001).
+            const bool lasSource = driver == "readers.las" || driver == "readers.copc";
+            if (lasSource) {
+                writerOptions.add("forward", "all");
+            } else {
+                addMillimetreScale(writerOptions);
+            }
             pipeline.makeWriter(destination.string(), "writers.copc", reader, writerOptions);
             pipeline.execute();
             return {};
@@ -401,6 +436,14 @@ Status PointCloudEngine::write(const std::filesystem::path& path, const PointClo
             }
             pdal::Options writerOptions;
             writerOptions.add("filename", path.string());
+            // Only the LAS family has a scale and an offset; any other writer
+            // would refuse the options as unknown. writers.las compresses a
+            // path ending .laz by its name alone (PDAL 2.10.2, although its
+            // `compression` option defaults to false), which
+            // ALazIsCompressedAndReadsBackAsTheSamePoints holds it to.
+            if (driver == "writers.las" || driver == "writers.copc") {
+                addMillimetreScale(writerOptions);
+            }
             // PointView::setSpatialReference is private, so the CRS is declared
             // to the writer instead - which is also where it belongs, since it
             // is a property of the file being produced.

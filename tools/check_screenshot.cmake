@@ -79,6 +79,23 @@ endif()
 if(LAYER_MANAGER)
     list(APPEND extra --layer-manager)
 endif()
+# -DACTIONS=<name>[,<name>...] triggers those menu items, in order, after the
+# import (see --action in main.cpp). Commas, not semicolons, for the reason
+# CUSTOMISE_DIR is a directory: a CMake list does not survive `cmake -D`.
+if(DEFINED ACTIONS)
+    string(REPLACE "," ";" _actions "${ACTIONS}")
+    foreach(_action IN LISTS _actions)
+        list(APPEND extra --action "${_action}")
+    endforeach()
+endif()
+# -DDATASET_INFO=<file> and -DIMPORT_OPTIONS=<file> grab GIS > Dataset
+# Information and the GIS menu's import dialog for that file.
+if(DEFINED DATASET_INFO)
+    list(APPEND extra --dataset-info "${DATASET_INFO}")
+endif()
+if(DEFINED IMPORT_OPTIONS)
+    list(APPEND extra --import-options "${IMPORT_OPTIONS}")
+endif()
 
 execute_process(
     COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
@@ -92,6 +109,13 @@ endif()
 if(NOT EXISTS "${OUTPUT}")
     message(FATAL_ERROR "no PNG was written to ${OUTPUT}\n${out}\n${err}")
 endif()
+# -DEXPECT=<regex> must match what the run printed. A headless run echoes its
+# command log to stderr, so this is how a test sees what a command REPORTED -
+# a surface's elevation range, which returns a cloud's surface was built from
+# - and not only that the window painted.
+if(DEFINED EXPECT AND NOT "${out}${err}" MATCHES "${EXPECT}")
+    message(FATAL_ERROR "the run did not report /${EXPECT}/:\n${out}\n${err}")
+endif()
 
 # A 1360 x 860 window with a drawing in it compresses to tens of kilobytes; a
 # window that painted nothing but its background is a few. The dialog is a
@@ -100,6 +124,11 @@ endif()
 set(floor 20000)
 if(STYLE_MANAGER OR DEFINED ATTRIBUTES OR LAYER_MANAGER)
     set(floor 10000)
+endif()
+# The GIS dialogs are small forms and a page of text: kilobytes of PNG when
+# they paint, a few hundred bytes of flat background when they do not.
+if(DEFINED DATASET_INFO OR DEFINED IMPORT_OPTIONS)
+    set(floor 4000)
 endif()
 file(SIZE "${OUTPUT}" size)
 if(size LESS floor)

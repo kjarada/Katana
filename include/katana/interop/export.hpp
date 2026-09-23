@@ -63,5 +63,12 @@ struct FormatChoice {
 };
 
 [[nodiscard]] std::vector<FormatChoice> vectorExportFormats();
+// What exportSurfaceRaster (terrain_io.hpp) writes: GeoTIFF, Esri ASCII grid,
+// Erdas Imagine.
+[[nodiscard]] std::vector<FormatChoice> rasterExportFormats();
+// What exportPointCloud writes: LAS and LAZ. COPC is a conversion of a FILE,
+// not an export of the sample held in memory - see
+// PointCloudEngine::convertToCopc - so it is not offered here.
+[[nodiscard]] std::vector<FormatChoice> pointCloudExportFormats();
 
 } // namespace katana::interop

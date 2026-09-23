@@ -43,7 +43,8 @@ adapter boundary and converted, so nothing throws across the interface.
 | Vector in | Shapefile, GeoJSON, GeoPackage, KML, GML, DXF, MapInfo TAB, SQLite |
 | Vector out | the same, driver inferred from the extension |
 | Raster in | GeoTIFF, ASCII Grid, IMG, VRT, PNG, JPEG, JP2 — GDAL's readers |
-| Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out |
+| Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out, at 1 mm (audit IO-17); any of them to COPC |
+| Raster out | a surface as a DEM: GeoTIFF, Esri ASCII grid, Erdas IMG (`exportSurfaceRaster`) |
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
 
 Not supported: **DWG, IFC**, and **ECW and E57**: the extensions are routed
@@ -183,7 +184,10 @@ is opened as a decimated sample held in memory, not worked on in full.
 | Extension has no importer/driver | `Unsupported`, naming the extension |
 | Mixed geometry into a Shapefile | `Unsupported`, nothing written |
 | Nothing matched the export filter | `InvalidArgument`, no file created |
-| Raster with no georeferencing | imported, placed at the origin, **warned** |
+| Raster with no georeferencing | imported, placed at the origin, **warned**; refused by Surface From Raster (`InvalidArgument`), which would otherwise build ground in the wrong place |
+| Vector export with a CRS GDAL cannot read | `InvalidCRS` before anything is written (it used to be dropped and the file written with none) |
+| A write that fails at GDAL's setters or at close | `FileExportFailure`, and the partial file removed (audit IO-14; the close path is reviewed, not tested - no failure could be injected there) |
+| DEM export over `maxCells` (25 million) | `InvalidArgument` naming the cell count; the dialog refuses first |
 | Band index out of range | `InvalidArgument` |
 | No points survive the import filters | `InvalidArgument` |
 | GDAL/PDAL internal failure | `FileImportFailure` / `FileExportFailure`, carrying the library's own message as context |
@@ -235,10 +239,13 @@ happens to produce: coarser is never more, a 5 m query is under a quarter of
 the file, and it still spans the whole extent - which is the difference
 between a level of detail and the `maxPoints` truncation it replaces.
 
-**Not done yet.** The engine can answer the query; nothing asks it. The
-importer still decimates by a fixed step, and the viewport still holds that
-one sample. Converting on import and re-querying at a resolution derived
-from the view's `worldPerPixel` is the next slice.
+**Asked by a person since 2026-09-23.** GIS > Convert Point Cloud to COPC
+(and the CLI's `COPC`) converts a file, and GIS > Import Point Cloud offers a
+point spacing when - and only when - the file is COPC
+(`PointCloudImportOptions::resolution`). **Not done yet:** nothing converts
+on import by itself, and the viewport still holds the one sample it was given;
+re-querying at a resolution derived from the view's `worldPerPixel` is the
+next slice.
 
 ## DXF export had never worked, and why nothing noticed
 
@@ -296,6 +303,82 @@ wins, and no empty `entities` layer is created when nothing ends up on it.
 
 **Still open:** text and dimensions are skipped on DXF export, though DXF has
 both, because the vector path models only points, lines and polygons.
+
+## The GIS menu: every GDAL and PDAL capability, reachable
+
+Until 2026-09-23 the desktop application reached GDAL and PDAL through two
+items - File > Import (any file, default options) and File > Export Vector -
+and several things the libraries and `katana_interop` could already do had no
+way in: writing a point cloud, converting to COPC and reading COPC at a level
+of detail, choosing a GeoPackage's layer, a point budget or a class filter,
+the export's curve tolerance, looking at a file before importing it. And two
+commands that should have used GDAL and PDAL did not: Surface From Raster
+rebuilt heights from 8-bit display greys (audit QT-23), and Surface From Point
+Cloud triangulated every return, canopy and roofs included (QT-10).
+
+The **GIS** menu and toolbar hold all of it, grouped by library and data:
+
+| Section | Item | What it calls |
+|---|---|---|
+| Vector - GDAL | Import Vector Data... | `describeSource`, then `importVector` with the dialog's `VectorImportOptions` (source layer, target layer, attributes) |
+| | Export Vector... | File's own action; now with a dialog for `VectorExportOptions` (selection, layer name, curve tolerance, properties) |
+| Raster - GDAL | Import Raster... | `importRaster` with a display resolution |
+| | Export Surface as DEM... | `exportSurfaceRaster` - GeoTIFF, Esri ASCII grid or IMG |
+| Point Cloud - PDAL | Import Point Cloud... | `importPointCloud` with a budget, an ASPRS class, and a COPC resolution when the file is COPC |
+| | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
+| | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
+| | Dataset Information... | `describeSource` + `formatDescription`, the gdalinfo / pdal info a person needs first |
+
+Decisions, and what was rejected:
+
+* **File > Import stays as it was.** It is the quick way in - any file, the
+  default options, no questions - and a command-line argument and the `IMPORT`
+  verb take the same path. The GIS imports are the considered way: they
+  describe the file and offer its options before anything is read. Putting a
+  dialog on File > Import was rejected: a single-layer shapefile would then
+  cost a click for nothing, every time.
+* **A dialog is built from a description of the file, not from the kind of
+  menu item.** `makeImportOptions` routes by what `describeSource` finds, so a
+  `.las` picked through Import Vector's "All files" still gets the point-cloud
+  dialog, and the dialog offers the layers THIS GeoPackage has and a COPC
+  level of detail only when the file IS COPC - the engine refuses the question
+  of any other file, so offering it would be offering a failure.
+* **One wording.** `formatDescription` is shown by Dataset Information, above
+  every import dialog's options, by the Reference Data panel's Info button,
+  and by the `INFO` verb of both command lines, so a file cannot be described
+  two ways.
+* **A point cloud's export says when it is a sample.** A budgeted import holds
+  one point in N; Export Point Cloud asks before writing a sample as though it
+  were the survey, and points at Convert to COPC for the whole file.
+* **Surfaces use the libraries.** Surface From Raster re-reads the band's
+  true values through GDAL (`readRasterElevations`) on a stride that keeps the
+  whole extent under the triangulation cap (QT-24: the old stride could pass
+  it threefold). Surface From Point Cloud uses `surfacePoints`, the one policy:
+  the ground returns (ASPRS class 2) when the cloud has any, otherwise every
+  return - and the log says which, because a surface over trees presented as
+  ground is the failure QT-10 found. Choosing which raster or cloud now takes
+  the panel's selection, or the only one there is, before asking.
+* **Reference data goes with its drawing.** File > New, Open, and `NEW` or
+  `OPEN` typed on the command line clear the rasters and clouds (QT-17): an
+  orthophoto of the last site no longer sits behind the next one.
+
+The interoperability verbs now exist in BOTH command lines, as the CLI's own
+comment always claimed: `IMPORT`, `EXPORT`, `INFO` and `REFS` in the desktop
+application's, and `INFO` and `COPC <source> <destination.copc.laz>` added to
+`katana_cli`'s. `IMPORT <raster or cloud> LOCAL` in the CLI is refused by name
+(QT-13, QT-14): reference data is drawn at its own coordinates, and the old
+code left " LOCAL" on the path and reported a missing file.
+
+Everything a menu item does can be driven headlessly: `--action <name>`
+triggers the QAction by its object name, `--dataset-info` and
+`--import-options` build and grab those windows, and a headless run echoes its
+log to stderr, where `tools/check_screenshot.cmake`'s `EXPECT` reads it. The
+ctest cases assert values worked out outside Katana: the sample DEM's range
+read straight from the ASCII grid (24.892 to 38.819 - not the 25.054 to 38.633
+of the approximate statistics GDAL had once written into a
+`terrain.asc.aux.xml` that was then committed by accident; audit IO-13, and
+the file is gone and `samples/**/*.aux.xml` ignored), and the sample scan's
+29 512 ground points counted by `pdal translate` with `filters.range`.
 
 ## The 12d Archive format (.12da, .12daz)
 

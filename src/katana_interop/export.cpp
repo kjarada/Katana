@@ -411,4 +411,23 @@ Status exportPointCloud(const PointCloudLayer& cloud, const std::filesystem::pat
     return engine.write(path, out);
 }
 
+std::vector<FormatChoice> rasterExportFormats()
+{
+    // Exactly the extensions gis::GdalDataset::rasterDriverForPath maps, so
+    // nothing offered here can then be refused by name.
+    return {
+        {"GeoTIFF", "tif"},
+        {"Esri ASCII grid", "asc"},
+        {"Erdas Imagine", "img"},
+    };
+}
+
+std::vector<FormatChoice> pointCloudExportFormats()
+{
+    return {
+        {"LAS", "las"},
+        {"LAZ (compressed LAS)", "laz"},
+    };
+}
+
 } // namespace katana::interop

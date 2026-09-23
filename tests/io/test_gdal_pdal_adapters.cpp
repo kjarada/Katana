@@ -11,8 +11,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/pointcloud/point_cloud_engine.hpp"
@@ -20,6 +24,13 @@
 using katana::core::ErrorCode;
 
 namespace {
+
+std::filesystem::path auxiliaryOf(const std::filesystem::path& path)
+{
+    std::filesystem::path aux = path;
+    aux += ".aux.xml";
+    return aux;
+}
 
 // Unique per test so the suite can run in parallel with itself.
 class TempFile {
@@ -40,12 +51,17 @@ class TempFile {
     {
         std::error_code error;
         std::filesystem::remove(path_, error);
-        // Sidecars of the shapefile family.
+        // Sidecars of the shapefile family, and the .prj an Esri ASCII grid
+        // keeps its coordinate system in.
         for (const char* extension : {".shx", ".dbf", ".prj", ".cpg"}) {
             std::filesystem::path sidecar = path_;
             sidecar.replace_extension(extension);
             std::filesystem::remove(sidecar, error);
         }
+        // GDAL's auxiliary metadata, which is named by APPENDING to the whole
+        // file name (dem.tif.aux.xml). One left behind by a run of an older
+        // build would be trusted by the next run (audit IO-13), so it goes too.
+        std::filesystem::remove(auxiliaryOf(path_), error);
     }
 
     std::filesystem::path path_;
@@ -125,8 +141,9 @@ TEST(PointCloudEngine, WritesAndReadsLasPreservingFields)
     ASSERT_EQ(loaded->points.size(), 2u);
 
     // LAS stores coordinates as scaled integers, so exact equality is not
-    // guaranteed by the format; the default scale is 0.001, and these values
-    // are chosen to be representable.
+    // guaranteed by the format. The writer sets a 0.001 scale (PDAL's own
+    // default is 0.01; audit IO-17), and whole numbers are representable at
+    // either - SurveyCoordinatesSurviveToTheMillimetre is the test of the scale.
     EXPECT_NEAR(loaded->points[0].x, 1.0, 1e-6);
     EXPECT_NEAR(loaded->points[1].z, 6.0, 1e-6);
     EXPECT_EQ(loaded->points[0].classification, 2);
@@ -342,6 +359,111 @@ TEST(PointCloudEngine, CopcConversionRefusesWhatItCannotDo)
     EXPECT_EQ(engine.read(copc.path(), negative).error().code, ErrorCode::InvalidArgument);
 }
 
+// ---- coordinate resolution (audit IO-17) -------------------------------------------------------
+
+namespace {
+
+// Projected coordinates of survey magnitude - an MGA northing is seven digits -
+// quoted to the millimetre, with fractions that no centimetre grid holds. More
+// than one point, and not all on one grid line: with an automatic offset a
+// LONE point is stored as zero from its own offset and comes back exact at any
+// scale, which would make the test pass over the defect.
+PointCloud surveyMagnitudeCloud()
+{
+    PointCloud cloud;
+    cloud.points.push_back({255440.1234, 7410850.4567, 12.3456, 1.0, 2, 0, 0, 0, false});
+    cloud.points.push_back({255441.9876, 7410851.0021, 13.0009, 1.0, 2, 0, 0, 0, false});
+    cloud.points.push_back({255439.5555, 7410849.7777, 11.1111, 1.0, 2, 0, 0, 0, false});
+    return cloud;
+}
+
+// ASPRS LAS 1.4 R15 stores a coordinate as round((value - offset) / scale), so
+// at a 0.001 scale it comes back within half a millimetre. The 1e-9 is the
+// rounding of reconstructing int * scale + offset in doubles: one half-ulp at
+// 7.4 x 10^6 is 4.7e-10. PDAL's default 0.01 scale misses it on every one of
+// these coordinates, by 0.9 to 4.5 mm (measured with the scale removed:
+// 255440.1234 came back as 255440.12).
+constexpr double kMillimetreRoundTrip = 0.0005 + 1e-9;
+
+void expectMillimetres(const PointCloud& source, const PointCloud& loaded)
+{
+    ASSERT_EQ(loaded.points.size(), source.points.size());
+    for (const PointCloudPoint& expected : source.points) {
+        // Matched by position, not by index: nothing in LAS promises order.
+        const auto found = std::find_if(
+            loaded.points.begin(), loaded.points.end(), [&expected](const PointCloudPoint& p) {
+                return std::abs(p.x - expected.x) < 0.1 && std::abs(p.y - expected.y) < 0.1;
+            });
+        ASSERT_NE(found, loaded.points.end()) << "no point near x = " << expected.x;
+        EXPECT_NEAR(found->x, expected.x, kMillimetreRoundTrip);
+        EXPECT_NEAR(found->y, expected.y, kMillimetreRoundTrip);
+        EXPECT_NEAR(found->z, expected.z, kMillimetreRoundTrip);
+    }
+}
+
+} // namespace
+
+TEST(PointCloudEngine, SurveyCoordinatesSurviveToTheMillimetre)
+{
+    const TempFile file("survey.las");
+    const PointCloudEngine engine;
+    const PointCloud source = surveyMagnitudeCloud();
+    ASSERT_TRUE(engine.write(file.path(), source).ok());
+    const auto loaded = engine.read(file.path());
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    expectMillimetres(source, *loaded);
+}
+
+TEST(PointCloudEngine, CopcConversionKeepsTheSourcesMillimetres)
+{
+    // writers.copc defaults to a 0.01 scale too. Converting a millimetre LAS
+    // must not coarsen it: the whole point of the conversion is to index the
+    // data, not to lose some of it.
+    const TempFile las("survey-source.las");
+    const TempFile copc("survey.copc.laz");
+    const PointCloudEngine engine;
+    const PointCloud source = surveyMagnitudeCloud();
+    ASSERT_TRUE(engine.write(las.path(), source).ok());
+    const auto converted = engine.convertToCopc(las.path(), copc.path());
+    ASSERT_TRUE(converted.ok()) << converted.error().describe();
+    const auto loaded = engine.read(copc.path());
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    expectMillimetres(source, *loaded);
+}
+
+TEST(PointCloudEngine, ALazIsCompressedAndReadsBackAsTheSamePoints)
+{
+    // The extension is all a caller says; writers.las has to be told to
+    // compress, and a .laz that is really an uncompressed LAS is a file every
+    // other reader rejects.
+    const TempFile las("compress.las");
+    const TempFile laz("compress.laz");
+    const PointCloudEngine engine;
+    const PointCloud source = denseGround();
+    ASSERT_TRUE(engine.write(las.path(), source).ok());
+    const auto written = engine.write(laz.path(), source);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+
+    const auto lasSize = std::filesystem::file_size(las.path());
+    const auto lazSize = std::filesystem::file_size(laz.path());
+    // A regular grid compresses by far more than this; half is a floor that
+    // no uncompressed file of the same points can meet.
+    EXPECT_LT(lazSize * 2, lasSize) << "LAS " << lasSize << " bytes, LAZ " << lazSize;
+
+    const auto fromLas = engine.read(las.path());
+    const auto fromLaz = engine.read(laz.path());
+    ASSERT_TRUE(fromLas.ok()) << fromLas.error().describe();
+    ASSERT_TRUE(fromLaz.ok()) << fromLaz.error().describe();
+    ASSERT_EQ(fromLaz->points.size(), source.points.size());
+    ASSERT_EQ(fromLaz->points.size(), fromLas->points.size());
+    // Compression is lossless: the same integers, so the same doubles.
+    for (std::size_t i = 0; i < fromLas->points.size(); ++i) {
+        ASSERT_EQ(fromLaz->points[i].x, fromLas->points[i].x) << i;
+        ASSERT_EQ(fromLaz->points[i].y, fromLas->points[i].y) << i;
+        ASSERT_EQ(fromLaz->points[i].z, fromLas->points[i].z) << i;
+    }
+}
+
 // ---- GDAL raster ------------------------------------------------------------------------------
 
 namespace gis = katana::gis;
@@ -459,6 +581,357 @@ TEST(GdalAdapter, ReadImageRejectsANonsensePixelBudget)
     const auto image = (*dataset)->readImage(0);
     ASSERT_FALSE(image.ok());
     EXPECT_EQ(image.error().code, ErrorCode::InvalidArgument);
+}
+
+namespace {
+
+// EPSG:28356, GDA94 / MGA zone 56, as the EPSG registry publishes it in WKT1
+// (epsg.io/28356.wkt): its name and code are the independent answer
+// describeCrs has to find.
+constexpr const char* kMga56Wkt =
+    R"(PROJCS["GDA94 / MGA zone 56",GEOGCS["GDA94",DATUM["Geocentric_Datum_of_Australia_1994",)"
+    R"(SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],)"
+    R"(TOWGS84[0,0,0,0,0,0,0],AUTHORITY["EPSG","6283"]],PRIMEM["Greenwich",0,)"
+    R"(AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],)"
+    R"(AUTHORITY["EPSG","4283"]],PROJECTION["Transverse_Mercator"],)"
+    R"(PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",153],)"
+    R"(PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],)"
+    R"(PARAMETER["false_northing",10000000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],)"
+    R"(AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","28356"]])";
+
+// A band whose value names its pixel: 10 * row + column. Every sample
+// then says which source pixel it came from, exactly, in any binary format.
+std::vector<double> namedPixels(int width, int height)
+{
+    std::vector<double> values;
+    for (int row = 0; row < height; ++row) {
+        for (int column = 0; column < width; ++column) {
+            values.push_back(10.0 * row + column);
+        }
+    }
+    return values;
+}
+
+} // namespace
+
+TEST(GdalAdapter, RasterInfoReportsTheBandsNoDataValueOnlyWhenOneIsDeclared)
+{
+    const TempFile with("nodata.tif");
+    const TempFile without("no-nodata.tif");
+    gis::RasterExportOptions options;
+    options.width = 2;
+    options.height = 1;
+    ASSERT_TRUE(gis::GdalDataset::writeRaster(without.path(), options, {1.0, 2.0}).ok());
+    options.noDataValue = -9999.0;
+    ASSERT_TRUE(gis::GdalDataset::writeRaster(with.path(), options, {1.0, -9999.0}).ok());
+
+    const auto declared = gis::GdalDataset::open(with.path());
+    ASSERT_TRUE(declared.ok());
+    const auto declaredInfo = (*declared)->rasterInfo();
+    ASSERT_TRUE(declaredInfo.ok());
+    ASSERT_TRUE(declaredInfo->noDataValue.has_value());
+    EXPECT_EQ(*declaredInfo->noDataValue, -9999.0);
+
+    // Absent is not a value: a DEM without a no-data value has every pixel
+    // meaningful, and zero is a real height.
+    const auto undeclared = gis::GdalDataset::open(without.path());
+    ASSERT_TRUE(undeclared.ok());
+    const auto undeclaredInfo = (*undeclared)->rasterInfo();
+    ASSERT_TRUE(undeclaredInfo.ok());
+    EXPECT_FALSE(undeclaredInfo->noDataValue.has_value());
+}
+
+TEST(GdalAdapter, TheDriverIsReportedByItsShortName)
+{
+    const TempFile raster("driver.tif");
+    const TempFile vector("driver.geojson");
+    gis::RasterExportOptions options;
+    options.width = options.height = 1;
+    ASSERT_TRUE(gis::GdalDataset::writeRaster(raster.path(), options, {1.0}).ok());
+    gis::VectorFeature point;
+    point.geometry.kind = gis::GeometryKind::Point;
+    point.geometry.parts.push_back({gis::GeoPoint{1.0, 2.0, 0.0}});
+    ASSERT_TRUE(gis::GdalDataset::writeVector(vector.path(), {point}, {}).ok());
+
+    EXPECT_EQ((*gis::GdalDataset::open(raster.path()))->driverName(), "GTiff");
+    EXPECT_EQ((*gis::GdalDataset::open(vector.path()))->driverName(), "GeoJSON");
+}
+
+TEST(GdalAdapter, ASampledReadKeepsExactSourcePixelsOnTheStride)
+{
+    const TempFile file("sampled.tif");
+    gis::RasterExportOptions options;
+    options.width = 7;
+    options.height = 5;
+    ASSERT_TRUE(gis::GdalDataset::writeRaster(file.path(), options, namedPixels(7, 5)).ok());
+    const auto dataset = gis::GdalDataset::open(file.path());
+    ASSERT_TRUE(dataset.ok());
+
+    // Stride 3 keeps columns 0, 3, 6 and rows 0, 3: ceil(7/3) = 3 by
+    // ceil(5/3) = 2, and each value is its source pixel's, not an average.
+    const auto everyThird = (*dataset)->readBandSampled(1, 3);
+    ASSERT_TRUE(everyThird.ok()) << everyThird.error().describe();
+    EXPECT_EQ(everyThird->columns, 3);
+    EXPECT_EQ(everyThird->rows, 2);
+    EXPECT_EQ(everyThird->stride, 3);
+    EXPECT_EQ(everyThird->values, (std::vector<double>{0, 3, 6, 30, 33, 36}));
+    EXPECT_FALSE(everyThird->noDataValue.has_value());
+
+    // Stride 1 is the whole band, identical to readBand.
+    const auto all = (*dataset)->readBandSampled(1, 1);
+    ASSERT_TRUE(all.ok());
+    EXPECT_EQ(all->columns, 7);
+    EXPECT_EQ(all->rows, 5);
+    EXPECT_EQ(all->values, *(*dataset)->readBand(1));
+
+    // A stride at or beyond both sides keeps the first pixel alone.
+    for (const int stride : {7, 1000}) {
+        const auto one = (*dataset)->readBandSampled(1, stride);
+        ASSERT_TRUE(one.ok());
+        EXPECT_EQ(one->columns, 1);
+        EXPECT_EQ(one->rows, 1);
+        EXPECT_EQ(one->values, (std::vector<double>{0}));
+    }
+}
+
+TEST(GdalAdapter, ASampledReadRefusesABadBandOrStrideAndReportsNoData)
+{
+    const TempFile file("sampled-bad.tif");
+    gis::RasterExportOptions options;
+    options.width = 2;
+    options.height = 2;
+    options.noDataValue = -32768.0;
+    ASSERT_TRUE(
+        gis::GdalDataset::writeRaster(file.path(), options, {1.0, -32768.0, 3.0, 4.0}).ok());
+    const auto dataset = gis::GdalDataset::open(file.path());
+    ASSERT_TRUE(dataset.ok());
+
+    for (const int band : {0, 2, -1}) {
+        const auto refused = (*dataset)->readBandSampled(band, 1);
+        ASSERT_FALSE(refused.ok()) << "band " << band;
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    }
+    for (const int stride : {0, -3}) {
+        const auto refused = (*dataset)->readBandSampled(1, stride);
+        ASSERT_FALSE(refused.ok()) << "stride " << stride;
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument);
+    }
+
+    // The sentinel is delivered as the file holds it, with the band's value
+    // beside it: deciding what no-data means is the caller's business.
+    const auto samples = (*dataset)->readBandSampled(1, 1);
+    ASSERT_TRUE(samples.ok());
+    ASSERT_TRUE(samples->noDataValue.has_value());
+    EXPECT_EQ(*samples->noDataValue, -32768.0);
+    EXPECT_EQ(samples->values, (std::vector<double>{1.0, -32768.0, 3.0, 4.0}));
+}
+
+TEST(GdalAdapter, RasterDriverIsChosenByExtensionAndUnknownOnesAreNamed)
+{
+    EXPECT_EQ(*gis::GdalDataset::rasterDriverForPath("dem.tif"), "GTiff");
+    EXPECT_EQ(*gis::GdalDataset::rasterDriverForPath("dem.TIFF"), "GTiff")
+        << "extension matching must be case insensitive";
+    EXPECT_EQ(*gis::GdalDataset::rasterDriverForPath("dem.asc"), "AAIGrid");
+    EXPECT_EQ(*gis::GdalDataset::rasterDriverForPath("dem.img"), "HFA");
+
+    const auto unknown = gis::GdalDataset::rasterDriverForPath("dem.xyzzy");
+    ASSERT_FALSE(unknown.ok());
+    EXPECT_EQ(unknown.error().code, ErrorCode::Unsupported);
+    EXPECT_NE(unknown.error().message.find("xyzzy"), std::string::npos);
+
+    const auto none = gis::GdalDataset::rasterDriverForPath("dem");
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::Unsupported);
+}
+
+TEST(GdalAdapter, ACoordinateSystemIsDescribedByItsNameAndAuthorityCode)
+{
+    EXPECT_EQ(gis::describeCrs(kMga56Wkt), "GDA94 / MGA zone 56 (EPSG:28356)");
+
+    // No AUTHORITY node anywhere, as an Esri .prj is written, yet each is an
+    // EPSG system by its parameters, and GDAL can say which. The codes are the
+    // EPSG registry's: 4326 is WGS 84 geographic (a = 6378137, 1/f =
+    // 298.257223563); 28356 is GDA94 / MGA zone 56 (GRS 1980, transverse
+    // Mercator, central meridian 153, k 0.9996, false origin 500 000 m E,
+    // 10 000 000 m N). `gdalsrsinfo -e` names the same codes.
+    constexpr const char* kBareWgs84 =
+        R"(GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],)"
+        R"(PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]])";
+    EXPECT_EQ(gis::describeCrs(kBareWgs84), "WGS 84 (EPSG:4326)");
+    constexpr const char* kEsriMga56 =
+        R"(PROJCS["GDA_1994_MGA_Zone_56",GEOGCS["GCS_GDA_1994",DATUM["D_GDA_1994",)"
+        R"(SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],)"
+        R"(UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],)"
+        R"(PARAMETER["False_Easting",500000.0],PARAMETER["False_Northing",10000000.0],)"
+        R"(PARAMETER["Central_Meridian",153.0],PARAMETER["Scale_Factor",0.9996],)"
+        R"(PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]])";
+    const std::string esri = gis::describeCrs(kEsriMga56);
+    EXPECT_NE(esri.find("(EPSG:28356)"), std::string::npos) << esri;
+
+    // A local site grid is no EPSG system: its name, and no invented code.
+    EXPECT_EQ(gis::describeCrs(R"(LOCAL_CS["site grid",UNIT["metre",1]])"), "site grid");
+
+    // Nothing declared is nothing; something unreadable is NOT nothing.
+    EXPECT_EQ(gis::describeCrs(""), "");
+    const std::string unreadable = gis::describeCrs("this is not a coordinate system");
+    EXPECT_FALSE(unreadable.empty());
+    EXPECT_NE(unreadable.find("unrecognised"), std::string::npos) << unreadable;
+}
+
+TEST(GdalAdapter, AFormatThatCanOnlyCopyIsWrittenThroughAnInMemoryDataset)
+{
+    // AAIGrid has no Create - GDAL can only copy a finished dataset into it.
+    // Values exact in binary and at Float32 (AAIGrid reads decimals as
+    // Float32 by default), so they must come back exactly.
+    const TempFile file("copied.asc");
+    gis::RasterExportOptions options;
+    options.driver = "AAIGrid";
+    options.width = 3;
+    options.height = 2;
+    options.geotransform = {1000.0, 2.0, 0.0, 2000.0, 0.0, -2.0};
+    options.noDataValue = -9999.0;
+    options.projectionWkt = kMga56Wkt;
+    const auto written = gis::GdalDataset::writeRaster(
+        file.path(), options, {10.5, 11.25, -9999.0, 12.125, 13.0, 14.75});
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    // The grid and its .prj, and nothing else: GDAL copying from a GeoTIFF
+    // leaves a .asc.aux.xml of metadata the format cannot hold, but the
+    // in-memory dataset has none to leave.
+    EXPECT_FALSE(std::filesystem::exists(auxiliaryOf(file.path())));
+
+    const auto dataset = gis::GdalDataset::open(file.path());
+    ASSERT_TRUE(dataset.ok()) << dataset.error().describe();
+    EXPECT_EQ((*dataset)->driverName(), "AAIGrid");
+    const auto info = (*dataset)->rasterInfo();
+    ASSERT_TRUE(info.ok());
+    EXPECT_EQ(info->width, 3);
+    EXPECT_EQ(info->height, 2);
+    EXPECT_TRUE(info->hasGeotransform);
+    EXPECT_EQ(info->geotransform, (std::array<double, 6>{1000.0, 2.0, 0.0, 2000.0, 0.0, -2.0}));
+    ASSERT_TRUE(info->noDataValue.has_value());
+    EXPECT_EQ(*info->noDataValue, -9999.0);
+    EXPECT_NE(gis::describeCrs(info->projectionWkt).find("MGA zone 56"), std::string::npos)
+        << "the .prj beside the grid carries the coordinate system";
+    EXPECT_EQ(*(*dataset)->readBand(1),
+              (std::vector<double>{10.5, 11.25, -9999.0, 12.125, 13.0, 14.75}));
+}
+
+TEST(GdalAdapter, AnErdasImagineRasterIsWrittenWithItsGeoreferencing)
+{
+    const TempFile file("created.img");
+    gis::RasterExportOptions options;
+    options.driver = "HFA";
+    options.width = 2;
+    options.height = 2;
+    options.geotransform = {500.0, 0.5, 0.0, 800.0, 0.0, -0.5};
+    const auto written = gis::GdalDataset::writeRaster(file.path(), options, {1.5, 2.5, 3.5, 4.5});
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    const auto dataset = gis::GdalDataset::open(file.path());
+    ASSERT_TRUE(dataset.ok()) << dataset.error().describe();
+    EXPECT_EQ((*dataset)->driverName(), "HFA");
+    const auto info = (*dataset)->rasterInfo();
+    ASSERT_TRUE(info.ok());
+    EXPECT_EQ(info->geotransform, (std::array<double, 6>{500.0, 0.5, 0.0, 800.0, 0.0, -0.5}));
+    EXPECT_EQ(*(*dataset)->readBand(1), (std::vector<double>{1.5, 2.5, 3.5, 4.5}));
+}
+
+TEST(GdalAdapter, ARasterWhoseCoordinateSystemCannotBeSetIsRefusedAndNotLeftBehind)
+{
+    // Regression, audit IO-14: the georeferencing setters' answers were
+    // ignored, so this wrote a GeoTIFF with no coordinate system and reported
+    // success.
+    const TempFile file("bad-crs.tif");
+    gis::RasterExportOptions options;
+    options.width = options.height = 1;
+    options.projectionWkt = "this is not a coordinate system";
+    const auto status = gis::GdalDataset::writeRaster(file.path(), options, {1.0});
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::FileExportFailure);
+    EXPECT_FALSE(std::filesystem::exists(file.path()))
+        << "a raster that failed to write must not be left looking finished";
+
+    // The in-memory route (a copy-only format) refuses it the same way.
+    const TempFile copied("bad-crs.asc");
+    options.driver = "AAIGrid";
+    const auto viaCopy = gis::GdalDataset::writeRaster(copied.path(), options, {1.0});
+    ASSERT_FALSE(viaCopy.ok());
+    EXPECT_EQ(viaCopy.error().code, ErrorCode::FileExportFailure);
+    EXPECT_FALSE(std::filesystem::exists(copied.path()));
+}
+
+TEST(GdalAdapter, AVectorWhoseCoordinateSystemCannotBeReadIsRefusedBeforeWriting)
+{
+    // The WKT used to be dropped when GDAL could not parse it: the file was
+    // written with no CRS and the export reported success.
+    const TempFile file("bad-crs.gpkg");
+    gis::VectorFeature point;
+    point.geometry.kind = gis::GeometryKind::Point;
+    point.geometry.parts.push_back({gis::GeoPoint{1.0, 2.0, 0.0}});
+    gis::VectorExportOptions options;
+    options.projectionWkt = "this is not a coordinate system";
+    const auto status = gis::GdalDataset::writeVector(file.path(), {point}, options);
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::InvalidCRS);
+    EXPECT_FALSE(std::filesystem::exists(file.path()));
+}
+
+TEST(GdalAdapter, DisplayingARasterWritesNothingBesideTheUsersFile)
+{
+    // Regression, audit IO-13: readImage forced GDAL's band statistics, and
+    // GDAL persisted them to <file>.aux.xml on close - into the user's data
+    // folder, on a read-only open.
+    const TempFile file("no-sidecar.tif");
+    gis::RasterExportOptions options;
+    options.width = 4;
+    options.height = 4;
+    options.geotransform = {100.0, 1.0, 0.0, 200.0, 0.0, -1.0};
+    std::vector<double> values(16);
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        values[i] = 300.0 + static_cast<double>(i);
+    }
+    ASSERT_TRUE(gis::GdalDataset::writeRaster(file.path(), options, values).ok());
+    ASSERT_FALSE(std::filesystem::exists(auxiliaryOf(file.path())));
+    {
+        const auto dataset = gis::GdalDataset::open(file.path());
+        ASSERT_TRUE(dataset.ok());
+        ASSERT_TRUE((*dataset)->readImage(16).ok());
+        ASSERT_TRUE((*dataset)->readBandSampled(1, 2).ok());
+    } // closed here, which is when GDAL would write it
+    EXPECT_FALSE(std::filesystem::exists(auxiliaryOf(file.path())))
+        << auxiliaryOf(file.path()).string() << " was written";
+}
+
+TEST(GdalAdapter, AReplacedDemIsStretchedOverItsOwnValues)
+{
+    // Regression, audit IO-13: the persisted statistics were trusted on the
+    // next open, so a DEM replaced under the same name was stretched by the
+    // OLD one's range. 300 and 400 against a stale 0-255 both clamp to white.
+    const TempFile file("replaced.tif");
+    const TempFile replacement("replacement.tif");
+    gis::RasterExportOptions options;
+    options.width = 2;
+    options.height = 1;
+    ASSERT_TRUE(gis::GdalDataset::writeRaster(file.path(), options, {0.0, 255.0}).ok());
+    {
+        const auto first = gis::GdalDataset::open(file.path());
+        ASSERT_TRUE(first.ok());
+        ASSERT_TRUE((*first)->readImage(16).ok());
+    }
+    // Replaced the way a person replaces a file - copied over it - and NOT
+    // through GDAL, whose Create deletes a dataset's sidecars along with it
+    // and so would hide the defect.
+    ASSERT_TRUE(
+        gis::GdalDataset::writeRaster(replacement.path(), options, {300.0, 400.0}).ok());
+    std::filesystem::copy_file(replacement.path(), file.path(),
+                               std::filesystem::copy_options::overwrite_existing);
+    const auto second = gis::GdalDataset::open(file.path());
+    ASSERT_TRUE(second.ok());
+    const auto image = (*second)->readImage(16);
+    ASSERT_TRUE(image.ok());
+    ASSERT_EQ(image->rgba.size(), 8u);
+    // Its own range is 300 to 400: the lower pixel is black, the upper white.
+    EXPECT_EQ(image->rgba[0], 0) << "stretched by a range that is not this file's";
+    EXPECT_EQ(image->rgba[4], 255);
 }
 
 // ---- GDAL vector ------------------------------------------------------------------------------

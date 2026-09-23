@@ -4,6 +4,8 @@ katana_add_test_suite(interop
         test_interop.cpp
         test_archive12d.cpp
         test_round_trip.cpp
+        test_dataset_info.cpp
+        test_terrain_io.cpp
 )
 # The 12d archive fixtures live with the format's own tests; the container and
 # the file handling tested here read the same ones.

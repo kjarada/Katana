@@ -136,19 +136,18 @@ struct PointCloudImportOptions {
     std::uint64_t budget = 2'000'000;
     std::optional<std::uint8_t> classification;
     std::optional<katana::pointcloud::PointCloudBounds> clip;
+    // COPC only: read the octree levels no finer than this point spacing, in
+    // the cloud's units, instead of decimating (PLAN.MD Phase 17). The budget
+    // still caps what is kept. Refused with InvalidArgument for a file that
+    // is not COPC, as PointCloudReadOptions::resolution is.
+    std::optional<double> resolution;
     std::string name; // empty: the file stem
 };
 
 [[nodiscard]] katana::core::Result<PointCloudLayer>
 importPointCloud(const std::filesystem::path& path, const PointCloudImportOptions& options = {});
 
-// ---- point cloud -> terrain ----------------------------------------------
-
-// Ground points (ASPRS class 2) as survey positions, ready for the TIN builder.
-// Returns InvalidArgument when the cloud carries no class 2 points at all,
-// because silently building a surface from vegetation returns would be worse
-// than refusing.
-[[nodiscard]] katana::core::Result<std::vector<katana::geometry::Point2>>
-groundPointsXY(const PointCloudLayer& cloud);
+// Turning a cloud into a surface is in terrain_io.hpp, with the other
+// conversions between terrain and GDAL/PDAL data.
 
 } // namespace katana::interop
