@@ -220,6 +220,13 @@ class SurveyCodeManagerDialog : public QDialog {
     std::string explained_{};
     bool loadingForm_ = false;
     bool rebuildingTree_ = false;
+    // The linestyle and symbol names the form was last loaded with. Once the
+    // drawing has gone the pickers cannot be loaded (they read its library),
+    // so formRule() takes these instead of what the pickers still hold - the
+    // names of whichever rule was loaded before the drawing closed.
+    std::string formLinestyle_{};
+    std::string formSymbol_{};
+    bool pickersLoaded_ = true;
 
     katana::commands::CommandPtr plannedCodes_{};
     std::optional<PlanStamp> codesStamp_{};
