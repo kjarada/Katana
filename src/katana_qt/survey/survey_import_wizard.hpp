@@ -93,6 +93,9 @@ class SurveyImportWizard final : public QDialog {
   public:
     SurveyImportWizard(SurveyImportContext context, QWidget* parent);
 
+  protected:
+    void showEvent(QShowEvent* event) override;
+
   private:
     enum Page { FilePage, FormatPage, LayoutPage, SystemPage, OptionsPage, ReportPage, Pages };
 

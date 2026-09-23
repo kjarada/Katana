@@ -164,6 +164,24 @@ execute_process(
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err
     TIMEOUT 120)
+# -DREFUSED=<regex>: the run must be REFUSED - exit 1, which is how the
+# application turns down a step it cannot take (a --fill of a choice the
+# dialog does not offer, a --press of a disabled button); a crash is not a
+# refusal - and what it printed must match <regex>. Let the regex name what
+# came before the refusal as well as the refusal itself, so that a run
+# stopped earlier for another reason cannot pass. This is how a test shows
+# that something is NOT offered. A refused run writes no PNG, so nothing
+# below applies to it.
+if(DEFINED REFUSED)
+    if(NOT rc EQUAL 1)
+        message(FATAL_ERROR "katana --screenshot was not refused (exit ${rc}, not 1)\n${out}\n${err}")
+    endif()
+    if(NOT "${out}${err}" MATCHES "${REFUSED}")
+        message(FATAL_ERROR "the run was refused, but did not report /${REFUSED}/:\n${out}\n${err}")
+    endif()
+    message(STATUS "screenshot_headless: refused as the test requires")
+    return()
+endif()
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "katana --screenshot exited with ${rc}\n${out}\n${err}")
 endif()

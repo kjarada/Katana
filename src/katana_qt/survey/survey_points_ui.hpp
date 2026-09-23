@@ -43,6 +43,9 @@ class SurveyExportDialog final : public SurveyToolDialog {
   public:
     SurveyExportDialog(SurveyDialogContext context, QWidget* parent);
 
+  protected:
+    void showEvent(QShowEvent* event) override;
+
   private:
     [[nodiscard]] katana::core::Result<std::string> exportPoints();
 

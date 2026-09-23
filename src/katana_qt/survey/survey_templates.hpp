@@ -35,4 +35,13 @@ namespace katana::qt {
 // the current name when it is still there.
 void fillTemplateChoice(QComboBox& box);
 
+// Fills `box` now and again after every successful saveLayoutTemplate and
+// deleteLayoutTemplate in this process, for as long as the box exists. The
+// import wizard and the Export dialog are both kept and both non-modal, so a
+// list filled only when its dialog was built offered none of the templates
+// saved since - and still offered, with its old text, one deleted since.
+// Another Katana saving into the same settings is not seen here: each dialog
+// also refills its list when it is shown again.
+void keepTemplateChoiceCurrent(QComboBox& box);
+
 } // namespace katana::qt

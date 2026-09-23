@@ -1,6 +1,7 @@
 #include "survey/survey_templates.hpp"
 
 #include <QComboBox>
+#include <QPointer>
 #include <QSettings>
 
 #include <algorithm>
@@ -15,6 +16,27 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 
 constexpr const char* kGroup = "survey/templates";
+
+// Every choice keepTemplateChoiceCurrent was given. QPointer, because the
+// dialogs holding them are destroyed with the window, before this list: a
+// box that has gone leaves a null behind, never a dangling pointer.
+std::vector<QPointer<QComboBox>>& keptChoices()
+{
+    static std::vector<QPointer<QComboBox>> choices;
+    return choices;
+}
+
+// After a save or a delete. Each box is refilled with its signals blocked
+// (fillTemplateChoice), so no dialog re-applies a template it did not ask
+// for, and none is refilled inside a signal of its own.
+void refillKeptChoices()
+{
+    std::vector<QPointer<QComboBox>>& choices = keptChoices();
+    std::erase_if(choices, [](const QPointer<QComboBox>& box) { return box.isNull(); });
+    for (const QPointer<QComboBox>& box : choices) {
+        fillTemplateChoice(*box);
+    }
+}
 
 } // namespace
 
@@ -48,6 +70,7 @@ katana::core::Status saveLayoutTemplate(const QString& name, const QString& text
         return makeError(ErrorCode::FileExportFailure, "the template could not be saved in the settings",
                          trimmed.toStdString());
     }
+    refillKeptChoices();
     return {};
 }
 
@@ -61,6 +84,7 @@ katana::core::Status deleteLayoutTemplate(const QString& name)
     }
     settings.remove(name);
     settings.sync();
+    refillKeptChoices();
     return {};
 }
 
@@ -77,6 +101,12 @@ void fillTemplateChoice(QComboBox& box)
     const int index = current.isEmpty() ? 0 : box.findText(current);
     box.setCurrentIndex(index < 0 ? 0 : index);
     box.blockSignals(false);
+}
+
+void keepTemplateChoiceCurrent(QComboBox& box)
+{
+    fillTemplateChoice(box);
+    keptChoices().emplace_back(&box);
 }
 
 } // namespace katana::qt
