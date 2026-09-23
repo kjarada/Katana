@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "katana/archive12d/customisation.hpp"
@@ -270,4 +271,139 @@ TEST(CustomisationMerge, ALoadFileThatChangesNothingIsStillListed)
     EXPECT_EQ(merged.files[1].added, (std::vector<std::string>{"X"}));
     ASSERT_NE(merged.library.find("X"), nullptr);
     EXPECT_EQ(merged.library.find("X")->strokes.size(), 2u) << "the later file's definition";
+}
+
+namespace {
+
+// Two pairs of sections fill ONE field of a code: pipe_data and
+// string_attribute_data both give the string's attributes, vertex_pipe_data
+// and vertex_attribute_data both give each vertex's. Where two rules of one
+// key name the same attribute the EARLIER rule's value is the one a code gets
+// (SurveyMap::lookup), whichever sections they are in.
+const std::string kPipeMap = R"(<xml12d><map_file><version>11.0</version>
+<pipe_data>
+  <item><key>*</key>
+    <attributes><text><name>DepthLocation</name><value>Top of Pipe</value></text>
+                <text><name>Material</name><value>PVC</value></text></attributes>
+    <justify>Obvert</justify></item>
+</pipe_data>
+<vertex_pipe_data>
+  <item><key>SW*</key>
+    <vertex_attributes><text><name>Pit</name><value>Grated</value></text></vertex_attributes>
+    <justify>Invert</justify></item>
+</vertex_pipe_data>
+</map_file></xml12d>)";
+
+a12::Customisation mapOnly(const std::string& name, const std::string& text)
+{
+    auto read = a12::readCustomisationBytes({}, name, text);
+    EXPECT_TRUE(read.ok()) << (read.ok() ? "" : read.error().describe());
+    return read.ok() ? std::move(*read) : a12::Customisation{};
+}
+
+// "type name=value" each, so that a failure prints something readable.
+std::vector<std::string> shown(const std::vector<katana::entity::SurveyAttribute>& attributes)
+{
+    std::vector<std::string> out;
+    for (const auto& attribute : attributes) {
+        out.push_back(attribute.type + " " + attribute.name + "=" + attribute.value);
+    }
+    return out;
+}
+
+// Each rule's section, in map order.
+std::vector<std::string> sections(const katana::entity::SurveyMap& map)
+{
+    std::vector<std::string> out;
+    for (const auto& rule : map.rules()) {
+        out.emplace_back(katana::entity::toString(rule.section));
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(CustomisationMerge, ALoadedAttributeWinsOverTheSameAttributeFromTheOtherSectionThatSetsIt)
+{
+    // The load gives `*` a DepthLocation in string_attribute_data and SW* a
+    // Pit in vertex_attribute_data; the current map gives both in the
+    // sibling sections, pipe_data and vertex_pipe_data. Neither (section,
+    // key) group is in the current map, so both are ADDED - and what the load
+    // brings must still be what a code gets.
+    const a12::Customisation now = mapOnly("builtin.mapfile", kPipeMap);
+    const a12::Customisation loaded = mapOnly("mine.mapfile", R"(<xml12d><map_file>
+<string_attribute_data>
+  <item><key>*</key>
+    <map_attributes><text><name>DepthLocation</name><value>Invert</value></text></map_attributes></item>
+</string_attribute_data>
+<vertex_attribute_data>
+  <item><key>SW*</key>
+    <map_attributes><text><name>Pit</name><value>Solid</value></text></map_attributes></item>
+</vertex_attribute_data>
+</map_file></xml12d>)");
+    const auto merged = a12::mergeCustomisation(now.library, now.map, loaded, a12::LoadMode::Merge);
+
+    ASSERT_EQ(merged.files.size(), 1u);
+    EXPECT_EQ(merged.files[0].added, (std::vector<std::string>{"*", "SW*"}));
+    EXPECT_TRUE(merged.files[0].replaced.empty());
+    // 2 current rules, none replaced, + 2 loaded = 4.
+    ASSERT_EQ(merged.map.size(), 4u);
+
+    const auto sw = merged.map.lookup("SW1");
+    // SW1 meets SW* and then `*`. The string's attributes all come from `*`:
+    // DepthLocation from the LOADED string_attribute_data rule, Material -
+    // which the load says nothing about - still from the current pipe_data
+    // rule, in that order.
+    EXPECT_EQ(shown(sw.resolved.attributes),
+              (std::vector<std::string>{"text DepthLocation=Invert", "text Material=PVC"}));
+    // Each vertex's Pit comes from SW*: the loaded vertex_attribute_data rule,
+    // not the current vertex_pipe_data one.
+    EXPECT_EQ(shown(sw.resolved.vertexAttributes), (std::vector<std::string>{"text Pit=Solid"}));
+    // And the current rules still give what only they say.
+    ASSERT_TRUE(sw.resolved.pipe.has_value());
+    EXPECT_EQ(sw.resolved.pipe->justify, "Obvert");
+    ASSERT_TRUE(sw.resolved.vertexPipe.has_value());
+    EXPECT_EQ(sw.resolved.vertexPipe->justify, "Invert");
+
+    // Worked out by hand: at the current map's first `*` rule the loaded `*`
+    // rule goes in first, then the current one it leaves standing; the same
+    // at SW*.
+    EXPECT_EQ(sections(merged.map),
+              (std::vector<std::string>{"string_attribute_data", "pipe_data",
+                                        "vertex_attribute_data", "vertex_pipe_data"}));
+}
+
+TEST(CustomisationMerge, ALoadedGroupReplacingOneInPlaceStillGoesAheadOfItsKeysOtherSections)
+{
+    // The current map has `*` in pipe_data AND, after it, in
+    // string_attribute_data. The load replaces the string_attribute_data
+    // group; put back where that group stood, it would stand behind the
+    // pipe_data rule and its DepthLocation would lose to "Top of Pipe".
+    const a12::Customisation now = mapOnly("builtin.mapfile", R"(<xml12d><map_file>
+<pipe_data>
+  <item><key>*</key>
+    <attributes><text><name>DepthLocation</name><value>Top of Pipe</value></text></attributes>
+    <justify>Obvert</justify></item>
+</pipe_data>
+<string_attribute_data>
+  <item><key>*</key>
+    <map_attributes><text><name>DepthLocation</name><value>Centre</value></text></map_attributes></item>
+</string_attribute_data>
+</map_file></xml12d>)");
+    const a12::Customisation loaded = mapOnly("mine.mapfile", R"(<xml12d><map_file>
+<string_attribute_data>
+  <item><key>*</key>
+    <map_attributes><text><name>DepthLocation</name><value>Invert</value></text></map_attributes></item>
+</string_attribute_data>
+</map_file></xml12d>)");
+    const auto merged = a12::mergeCustomisation(now.library, now.map, loaded, a12::LoadMode::Merge);
+
+    ASSERT_EQ(merged.files.size(), 1u);
+    EXPECT_EQ(merged.files[0].replaced, (std::vector<std::string>{"*"}));
+    // 2 current - 1 replaced + 1 loaded = 2: the loaded rule, then pipe_data.
+    ASSERT_EQ(merged.map.size(), 2u);
+    EXPECT_EQ(sections(merged.map),
+              (std::vector<std::string>{"string_attribute_data", "pipe_data"}));
+    EXPECT_EQ(shown(merged.map.lookup("ANY").resolved.attributes),
+              (std::vector<std::string>{"text DepthLocation=Invert"}));
 }
