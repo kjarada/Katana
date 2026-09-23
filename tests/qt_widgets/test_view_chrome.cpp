@@ -17,6 +17,7 @@
 #include <cstdlib>
 
 #include <QMainWindow>
+#include <QStyle>
 #include <QToolButton>
 
 #include "dock_chrome.hpp"
@@ -54,6 +55,12 @@ struct ChromedWorkspace {
     }
 
     [[nodiscard]] ViewId active() const { return views->viewSet().activeId(); }
+    // The gap QMainWindow leaves between two docks - the style's, as the
+    // workspace's own splits read it.
+    [[nodiscard]] int separator() const
+    {
+        return views->style()->pixelMetric(QStyle::PM_DockWidgetSeparatorExtent, nullptr, views);
+    }
     [[nodiscard]] QDockWidget* dock(ViewId id) const { return views->dockFor(id); }
 
     // Where the user can see it: shown, and floating or within the
@@ -234,4 +241,140 @@ TEST(ViewChrome, AViewOpenedWhileEveryViewIsMinimisedIsActive)
 
     EXPECT_EQ(w.active(), model);
     EXPECT_TRUE(w.onScreen(model));
+}
+
+TEST(ViewChrome, PressingMaximiseOnAViewThatIsNotActiveMakesItTheActiveView)
+{
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    ASSERT_EQ(w.active(), model);
+
+    // A button takes its own press, so the bar's press-to-activate never
+    // sees it: the maximise would hide the active 3D view and leave the
+    // menus acting on it.
+    w.chrome->titleBar(w.dock(plan))->maximiseButton()->click();
+    processEvents();
+
+    ASSERT_TRUE(w.chrome->isMaximised(w.dock(plan)));
+    EXPECT_FALSE(w.onScreen(model));
+    EXPECT_EQ(w.active(), plan);
+}
+
+TEST(ViewChrome, PressingAViewsZoomExtentsMakesItTheActiveView)
+{
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    (void)w.views->openView(ViewKind::Model3D);
+    processEvents();
+
+    auto* extents = w.dock(plan)->findChild<QToolButton*>("ViewZoomExtentsButton");
+    ASSERT_NE(extents, nullptr);
+    extents->click();
+    processEvents();
+
+    EXPECT_EQ(w.active(), plan);
+}
+
+TEST(ViewChrome, OpeningAViewSplitsTheActiveViewIntoEqualHalvesAlongItsLongerSide)
+{
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    const QRect whole = w.dock(plan)->geometry();
+    // The lone plan fills the workspace, which fills the 800 x 600 window
+    // while nothing is in the tray: wider than it is tall.
+    ASSERT_EQ(whole, w.views->rect());
+    ASSERT_GT(whole.width(), whole.height());
+    const int gap = w.separator();
+
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    processEvents();
+    // Side by side: the two halves and the gap make up the plan's width, and
+    // an odd remainder leaves them one pixel apart at most.
+    const QRect left = w.dock(plan)->geometry();
+    const QRect right = w.dock(model)->geometry();
+    EXPECT_EQ(left.topLeft(), whole.topLeft());
+    EXPECT_EQ(left.width() + gap + right.width(), whole.width());
+    EXPECT_LE(std::abs(left.width() - right.width()), 1);
+    EXPECT_EQ(right.x(), left.width() + gap);
+    EXPECT_EQ(left.height(), whole.height());
+    EXPECT_EQ(right.height(), whole.height());
+
+    // The 3D view, now active, is about 400 wide by nearly 600 tall: taller
+    // than it is wide, so the section goes under it.
+    ASSERT_GT(right.height(), right.width());
+    const ViewId section = w.views->openView(ViewKind::Section).id;
+    processEvents();
+    // A split inside the side-by-side one. Offscreen, with the plain style's
+    // 6 px separator, the halves of 600 - 6 are 297 each; before the fix they
+    // were 397 and 197, the new view having been left out of resizeDocks' row.
+    const QRect top = w.dock(model)->geometry();
+    const QRect bottom = w.dock(section)->geometry();
+    EXPECT_EQ(top.topLeft(), right.topLeft());
+    EXPECT_EQ(top.height() + gap + bottom.height(), right.height());
+    EXPECT_LE(std::abs(top.height() - bottom.height()), 1)
+        << "3D " << top.height() << " px, section " << bottom.height() << " px";
+    EXPECT_EQ(bottom.y(), top.height() + gap);
+    EXPECT_EQ(top.width(), right.width());
+    EXPECT_EQ(bottom.width(), right.width());
+    // The plan beside them is untouched.
+    EXPECT_EQ(w.dock(plan)->geometry(), left);
+}
+
+TEST(ViewChrome, AMaximisedViewFillsTheWorkspaceAndRestoreGivesEveryViewBackItsPlace)
+{
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    const ViewId model = w.views->openView(ViewKind::Model3D).id;
+    const ViewId section = w.views->openView(ViewKind::Section).id;
+    processEvents();
+    const QRect planBefore = w.dock(plan)->geometry();
+    const QRect modelBefore = w.dock(model)->geometry();
+    const QRect sectionBefore = w.dock(section)->geometry();
+
+    QToolButton* maximise = w.chrome->titleBar(w.dock(model))->maximiseButton();
+    maximise->click();
+    processEvents();
+    EXPECT_EQ(w.dock(model)->geometry(), w.views->rect());
+    EXPECT_FALSE(w.onScreen(plan));
+    EXPECT_FALSE(w.onScreen(section));
+
+    // The same button, now Restore.
+    maximise->click();
+    processEvents();
+    EXPECT_FALSE(w.chrome->isMaximised(w.dock(model)));
+    EXPECT_EQ(w.dock(plan)->geometry(), planBefore);
+    EXPECT_EQ(w.dock(model)->geometry(), modelBefore);
+    EXPECT_EQ(w.dock(section)->geometry(), sectionBefore);
+}
+
+TEST(ViewChrome, QuadPutsTheFourViewsInTheQuartersOfTheWorkspace)
+{
+    ChromedWorkspace w;
+    const ViewId plan = w.active();
+    w.views->arrange(LayoutKind::Quad);
+    processEvents();
+    // Quad opens the kinds it expects in the preset's order - 3D, section,
+    // elevation, ids 2, 3 and 4 after the plan's - and splits them as
+    // cad::dockSplits(Quad) says: 3D right of the plan, the section under the
+    // plan, the elevation under the 3D view.
+    ASSERT_EQ(w.views->viewSet().size(), 4U);
+    const ViewId model = plan + 1;
+    const ViewId section = plan + 2;
+    const ViewId elevation = plan + 3;
+    const QRect area = w.views->rect();
+    const int gap = w.separator();
+    // Each half is (extent - gap) / 2, give or take the odd pixel.
+    const int halfWidth = (area.width() - gap) / 2;
+    const int halfHeight = (area.height() - gap) / 2;
+    const auto near = [](const QRect& actual, int x, int y, int width, int height) {
+        return std::abs(actual.x() - x) <= 1 && std::abs(actual.y() - y) <= 1 &&
+               std::abs(actual.width() - width) <= 1 && std::abs(actual.height() - height) <= 1;
+    };
+    EXPECT_TRUE(near(w.dock(plan)->geometry(), 0, 0, halfWidth, halfHeight));
+    EXPECT_TRUE(near(w.dock(model)->geometry(), halfWidth + gap, 0, halfWidth, halfHeight));
+    EXPECT_TRUE(near(w.dock(section)->geometry(), 0, halfHeight + gap, halfWidth, halfHeight));
+    EXPECT_TRUE(
+        near(w.dock(elevation)->geometry(), halfWidth + gap, halfHeight + gap, halfWidth, halfHeight));
 }

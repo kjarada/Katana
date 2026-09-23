@@ -489,6 +489,12 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
             !beside->dock->isVisible() || size.width() >= size.height() ? Qt::Horizontal
                                                                         : Qt::Vertical;
         splitDockWidget(beside->dock, added.dock, direction);
+        // Shown now, as arrange() does after each split. Qt shows a dock it
+        // has just laid out only from a queued call, and resizeDocks leaves a
+        // hidden dock out of the total it gives the enclosing row: in a split
+        // nested inside another (a stacked split of a view already side by
+        // side) the new halves came out 397 and 197 px of 600, not 297 each.
+        added.dock->show();
         // Equal halves of the space the active view had. Qt gives the new
         // dock its size hint otherwise, and what the user sees is a sliver.
         // Sizes in pixels, not a ratio: the other docks of the same row keep
