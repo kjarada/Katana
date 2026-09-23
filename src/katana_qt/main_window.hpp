@@ -26,6 +26,7 @@
 #include "katana/interop/export.hpp"
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
+#include "survey/survey_workbench.hpp"
 #include "view_workspace.hpp"
 
 class QAction;
@@ -140,6 +141,8 @@ class MainWindow final : public QMainWindow {
     // `exportAction` is File's Export Vector, shared so the two menus cannot
     // drift.
     void buildGisActions(QAction* exportAction);
+    // The Survey menu and toolbar; the workbench fills both (PLAN.MD 45).
+    void buildSurveyActions(QAction* customiseAction, QAction* codeAction);
     void buildViewMenu(QMenu* viewMenu);
     // `name`, when given, becomes the action's object name: what --action and
     // QMainWindow::saveState know it by.
@@ -270,6 +273,7 @@ class MainWindow final : public QMainWindow {
     katana::cad::CommandInterpreter interpreter_{document_};
 
     ViewWorkspace* views_ = nullptr;
+    std::unique_ptr<SurveyWorkbench> survey_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
