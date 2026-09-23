@@ -223,6 +223,69 @@ TEST(DelimitedLayoutProposal, RowsThatContradictTheHeaderMakeItUncertain)
     EXPECT_TRUE(contains(proposal.summary(), "line 3, column 2 (northing)")) << proposal.summary();
 }
 
+TEST(DelimitedLayoutProposal, ValuesInAColumnTheHeaderDoesNotNameMakeItUncertain)
+{
+    // The header names three columns and every row has a fourth - an elevation,
+    // by the look of it, that a Decided layout would read past as Ignore and
+    // import no point with. The header does not describe these rows.
+    const std::string text = "Point,Northing,Easting\n"
+                             "1,5000000.25,500000.5,101.75\n"
+                             "2,5000010.125,500020.375,99.5\n";
+    const LayoutProposal proposal = propose(text);
+    ASSERT_EQ(proposal.outcome(), LayoutProposalOutcome::Uncertain) << proposal.summary();
+    ASSERT_EQ(proposal.candidates().size(), 1u);
+    // The header's reading is still offered, and it parses: the unnamed column
+    // is Ignore rather than text past the last column.
+    EXPECT_EQ(proposal.candidates()[0].layout.columns, roles("PNE-"));
+    EXPECT_TRUE(contains(proposal.summary(), "line 2 has a value in column 4"))
+        << proposal.summary();
+    EXPECT_TRUE(contains(proposal.summary(), "'101.75'")) << proposal.summary();
+
+    // The same with blanks: a description with a space in it runs one field
+    // past the header, and taking the layout would cut "Kerb line" to "Kerb".
+    const LayoutProposal aligned = propose("Point Northing Easting Description\n"
+                                           "1 5000000.25 500000.5 Kerb line\n");
+    ASSERT_EQ(aligned.outcome(), LayoutProposalOutcome::Uncertain) << aligned.summary();
+    EXPECT_TRUE(contains(aligned.summary(), "column 5")) << aligned.summary();
+
+    // Empty trailing fields are not values - "a,b,c," is how many writers end a
+    // row - so they leave the header in charge.
+    const LayoutProposal trailing =
+        propose("Point,Northing,Easting\n1,5000000.25,500000.5,\n2,5000010.125,500020.375,,\n");
+    EXPECT_EQ(trailing.outcome(), LayoutProposalOutcome::Decided) << trailing.summary();
+}
+
+TEST(DelimitedLayoutProposal, AHashLineThatIsOtherwiseARowOfNumbersIsNotDecidedToBeAComment)
+{
+    // Line 3 is a point commented out, or a point whose id is "#2": the text
+    // cannot say which, and reading it as a comment drops a point.
+    const std::string text = "Point,Northing,Easting\n"
+                             "1,5000000.25,500000.5\n"
+                             "#2,5000010.125,500020.375\n"
+                             "3,5000020.5,500040.0625\n";
+    const LayoutProposal proposal = propose(text);
+    ASSERT_EQ(proposal.outcome(), LayoutProposalOutcome::Uncertain) << proposal.summary();
+    ASSERT_EQ(proposal.candidates().size(), 1u);
+    EXPECT_EQ(proposal.candidates()[0].layout.columns, roles("PNE"));
+    EXPECT_TRUE(contains(proposal.summary(), "line 3 starts with '#'")) << proposal.summary();
+
+    // With no header the proposal is uncertain anyway, but a '#' row above the
+    // first row would otherwise be counted as a header line and skipped with
+    // no warning at all; the summary has to say so.
+    const LayoutProposal headerless =
+        propose("#1,5000000.25,500000.5\n2,5000010.125,500020.375\n");
+    ASSERT_EQ(headerless.outcome(), LayoutProposalOutcome::Uncertain);
+    EXPECT_TRUE(contains(headerless.summary(), "line 1 starts with '#'")) << headerless.summary();
+
+    // A comment that is prose - even prose with numbers in it - is a comment.
+    const LayoutProposal prose = propose("Point,Northing,Easting\n"
+                                         "1,5000000.25,500000.5\n"
+                                         "# checked 23 September, 2 points\n"
+                                         "2,5000010.125,500020.375\n");
+    EXPECT_EQ(prose.outcome(), LayoutProposalOutcome::Decided) << prose.summary();
+    EXPECT_EQ(prose.layout()->commentPrefix, "#");
+}
+
 TEST(DelimitedLayoutProposal, LatitudeAndLongitudeAreRefusedRatherThanReadAsGridCoordinates)
 {
     const LayoutProposal proposal =

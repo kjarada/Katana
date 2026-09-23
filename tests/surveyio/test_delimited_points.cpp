@@ -189,7 +189,8 @@ TEST(DelimitedPointsLayout, ACommentPrefixThatCouldSwallowALineOfDataIsRefused)
 
 TEST(DelimitedPointsTemplate, TheBriefsExampleTemplateReadsAsTheLayoutItSpells)
 {
-    const Result<DelimitedLayout> layout = parseLayoutTemplate("P,N,E,Z,D;delimiter=comma;header=1");
+    const Result<DelimitedLayout> layout =
+        parseLayoutTemplate("P,N,E,Z,D;delimiter=comma;header=1");
     ASSERT_TRUE(layout.ok()) << layout.error().describe();
     EXPECT_EQ(layout->columns, presetColumns(ColumnPreset::PNEZD));
     EXPECT_EQ(layout->delimiter, Delimiter::Comma);
@@ -286,7 +287,8 @@ TEST(DelimitedPointsImport, APointFileReadsIntoTheModelWithItsProvenance)
                              "2,5000010.125,500020.375,99.5,Fence\r\n";
     const std::string templateText = "P,N,E,Z,D;delimiter=comma;header=1";
     // A path a file (or a careless caller) supplied: only the name may survive.
-    const Result<ImportResult> result = readText(text, templateText, "..\\..\\jobs\\site survey.csv");
+    const Result<ImportResult> result =
+        readText(text, templateText, "..\\..\\jobs\\site survey.csv");
     ASSERT_TRUE(result.ok()) << errorOf(result);
 
     EXPECT_EQ(result->formatId, "delimited-points");
@@ -615,7 +617,8 @@ TEST(DelimitedPointsImportErrors, AnEmptyNorthingOrEastingIsAnError)
 TEST(DelimitedPointsImportErrors, ALineTooShortToReachARequiredColumnIsAnError)
 {
     const Result<ImportResult> result =
-        readText("1,5000000.25,500000.5,101.75\n2,5000000.25\n", "P,N,E,Z;delimiter=comma;header=0");
+        readText("1,5000000.25,500000.5,101.75\n2,5000000.25\n",
+                 "P,N,E,Z;delimiter=comma;header=0");
     ASSERT_FALSE(result.ok());
     EXPECT_EQ(result.error().code, ErrorCode::ParseFailure);
     EXPECT_TRUE(contains(result.error().message, "line 2, column 3 (easting): missing"))
@@ -695,7 +698,8 @@ TEST(DelimitedPointsImportErrors, BytesThatClaimAnEncodingTheyAreNotInAreAnError
     // A UTF-8 byte order mark followed by a byte that cannot be UTF-8: a
     // truncated or corrupt file, not something to decode to anything plausible.
     const Result<ImportResult> result =
-        readText("\xEF\xBB\xBF" "1,5000000.25,500000.5,,Caf\xE9\n", "P,N,E,Z,D;delimiter=comma;header=0");
+        readText("\xEF\xBB\xBF" "1,5000000.25,500000.5,,Caf\xE9\n",
+                 "P,N,E,Z,D;delimiter=comma;header=0");
     ASSERT_FALSE(result.ok());
     EXPECT_EQ(result.error().code, ErrorCode::ParseFailure);
 }
@@ -810,7 +814,8 @@ TEST(DelimitedPointsExport, WhatCannotBeWrittenIsRefusedNamingThePoint)
     EXPECT_EQ(writeDelimitedPoints(points, pnez, DelimitedExportOptions{}).error().code,
               ErrorCode::InvalidArgument);
     EXPECT_FALSE(writeDelimitedPoints(points, pnez, exportOptions(-1)).ok());
-    EXPECT_FALSE(writeDelimitedPoints(points, pnez, exportOptions(kMaximumExportDecimals + 1)).ok());
+    EXPECT_FALSE(
+        writeDelimitedPoints(points, pnez, exportOptions(kMaximumExportDecimals + 1)).ok());
     EXPECT_TRUE(writeDelimitedPoints(points, pnez, exportOptions(kMaximumExportDecimals)).ok());
     EXPECT_FALSE(
         writeDelimitedPoints(points, pnez, exportOptions(3, LinearUnit::Unknown)).ok());
