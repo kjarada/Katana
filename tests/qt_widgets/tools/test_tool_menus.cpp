@@ -10,6 +10,8 @@
 #include <vector>
 
 #include <QAction>
+#include <QCoreApplication>
+#include <QKeyEvent>
 #include <QMainWindow>
 #include <QMenu>
 #include <QToolBar>
@@ -230,6 +232,39 @@ TEST(ToolMenus, EscInTheWorkspaceEndsTheToolBeforeItClearsTheSelection)
     EXPECT_FALSE(document.selection().empty());
     views->cancel();
     EXPECT_TRUE(document.selection().empty());
+}
+
+TEST(ToolMenus, EnterInAnIdleViewRepeatsTheLastToolWithOnlyOneToolRunning)
+{
+    // Line ran in plan view A and ended; Circle now runs in plan view B.
+    // Enter in A repeats the last tool the USER ran - Circle, not A's own
+    // Line - through the workspace, which stops B's Circle first: one tool
+    // in the workspace, so the command line and the toolbar each name the
+    // tool that is really running.
+    katana::cad::Document document;
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    ASSERT_TRUE(views->startTool("draw.line").ok());
+    views->cancel(); // Line with no point: nothing kept
+    views->openView(katana::cad::ViewKind::Plan);
+    const auto plans = views->planViews();
+    ASSERT_EQ(plans.size(), 2u);
+    katana::qt::ViewportWidget* a = plans[0];
+    katana::qt::ViewportWidget* b = plans[1];
+    ASSERT_EQ(views->activePlanView(), b) << "a view opened is the active one";
+    ASSERT_TRUE(views->startTool("draw.circle").ok());
+    ASSERT_TRUE(b->toolActive());
+
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(a, &enter);
+
+    EXPECT_EQ(std::ranges::count_if(plans, [](const auto* plan) { return plan->toolActive(); }),
+              1);
+    EXPECT_EQ(a->activeToolId(), "draw.circle");
+    EXPECT_FALSE(b->toolActive());
+    EXPECT_EQ(views->activePlanView(), a) << "the view Enter was pressed in";
+    EXPECT_EQ(views->activeToolId(), "draw.circle");
 }
 
 TEST(ToolMenus, AToolbarWithNoMenuStillOwnsItsFamilyDropDowns)
