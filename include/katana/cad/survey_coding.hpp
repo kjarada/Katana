@@ -118,6 +118,11 @@ struct SurveyCodeRow {
     // one the rule gives (empty: it gives none, so they stay where they are).
     std::vector<std::string> layersFrom{};
     std::string layer{};
+    // Of `entities`, those that stayed where they were because `layer` does
+    // not exist and layers are not being created (they are also counted in
+    // SurveyCodingReport::skippedNoLayer). Kept per code so that a row never
+    // reads as a move that did not happen.
+    std::size_t layerKept = 0;
     std::string style{}; // the style they get; empty with SurveyStyleOutcome::None
     SurveyStyleOutcome styleOutcome = SurveyStyleOutcome::None;
     // Attribute NAMES, in the order the combined rule lists them.

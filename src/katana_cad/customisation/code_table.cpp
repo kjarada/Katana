@@ -636,7 +636,11 @@ std::string formatCodingReport(const SurveyCodingReport& report)
     for (const SurveyCodeRow& row : report.codes) {
         out << "  " << row.code << ": " << counted(row.entities, "entity", "entities") << ", "
             << katana::entity::toString(row.kind) << (row.matched ? ", matched" : ", not matched");
-        if (row.layersFrom == std::vector<std::string>{row.layer}) {
+        if (row.layerKept != 0) {
+            // Not an arrow: they did not move.
+            out << "; layer " << joined(row.layersFrom) << " kept: " << row.layer
+                << " does not exist and layers are not being created";
+        } else if (row.layersFrom == std::vector<std::string>{row.layer}) {
             out << "; layer " << row.layer << " already";
         } else if (!row.layer.empty()) {
             out << "; layer " << joined(row.layersFrom) << " -> " << row.layer;
