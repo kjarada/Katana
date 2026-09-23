@@ -388,6 +388,41 @@ TEST(PlanViewTools, TheLayerNewWorkIsDrawnOnIsTheDocumentsCurrentLayer)
     EXPECT_EQ(made.front()->layer, "Kerbs");
 }
 
+TEST(PlanViewTools, AToolRunningAcrossANewDrawingEndsAndItsNextStartDrawsOnTheNewDrawing)
+{
+    // MainWindow::newDocument calls resetInteraction BEFORE it replaces the
+    // document. A tool rebuilt at that moment read the old drawing's current
+    // layer, Kerbs, and its first chain in the new drawing was refused (no
+    // such layer); Move kept ids from the discarded drawing. The tool ends
+    // instead, so the order of the two calls no longer matters.
+    PlanFixture plan;
+    ASSERT_TRUE(plan.document
+                    .execute(katana::commands::createLayer(
+                        katana::entity::Layer{.name = "Kerbs"}))
+                    .ok());
+    ASSERT_TRUE(plan.document.setCurrentLayer("Kerbs").ok());
+    std::vector<std::string> changes;
+    plan.view.onActiveToolChanged = [&](const std::string& id) { changes.push_back(id); };
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150);
+
+    plan.view.resetInteraction(); // in MainWindow::newDocument's order
+    plan.document.newDocument();
+    EXPECT_FALSE(plan.view.toolActive());
+    ASSERT_FALSE(changes.empty());
+    EXPECT_EQ(changes.back(), "") << "the toolbar hears that the tool ended";
+
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150); // (0, 0)
+    plan.press(300, 150); // (10, 0)
+    plan.enter();
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 1u);
+    EXPECT_EQ(made.front()->layer, std::string(katana::entity::kDefaultLayerName));
+    expectSegment(made.front(), Point2(0, 0), Point2(10, 0));
+    EXPECT_TRUE(plan.errors.empty()) << plan.errors.front().toStdString();
+}
+
 TEST(PlanViewTools, EnterAtNoPromptRepeatsTheLastTool)
 {
     PlanFixture plan;

@@ -72,16 +72,20 @@ TEST(ToolHost, ARestartingToolReportsItsPromptAgainAndEndsOnlyOnEsc)
     EXPECT_EQ(finished.front(), "draw.point");
 }
 
-TEST(ToolHost, ResetDropsTheCollectedPointsWithoutCommittingThem)
+TEST(ToolHost, AbandonEndsTheToolWithoutCommittingItsPoints)
 {
-    // For a replaced document: the chain belongs to the drawing that went.
+    // For a replaced document: the chain belongs to the drawing that went,
+    // and the tool ends, as Esc ends it, so the toolbar hears of it.
     Document document;
     ToolHost host(document);
+    std::vector<std::string> finished;
+    host.onFinished = [&](const std::string& id) { finished.push_back(id); };
     ASSERT_TRUE(host.start("draw.line").ok());
     (void)host.point(Point2(0, 0));
     (void)host.point(Point2(5, 0));
-    host.reset();
-    EXPECT_TRUE(host.active());
-    EXPECT_EQ(host.lastPoint(), std::nullopt);
-    EXPECT_EQ(document.history().undoCount(), 0u);
+    host.abandon();
+    EXPECT_FALSE(host.active());
+    EXPECT_EQ(document.history().undoCount(), 0u) << "Esc would have kept the segment";
+    ASSERT_EQ(finished.size(), 1u);
+    EXPECT_EQ(finished.front(), "draw.line");
 }

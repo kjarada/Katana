@@ -20,9 +20,9 @@ bool escapeKeepsWork(std::string_view toolId)
     // distance), which cancel() then drops. The exceptions are Fillet's and
     // Chamfer's value prompts, whose Enter defaults a setting; cancel() steps
     // back out of those before it sends Enter, so Enter is never sent at a
-    // value prompt. Copy is NOT here although its placed copies are collected work,
-    // because at its second-point prompt with none placed yet Enter copies by
-    // the base point as a displacement.
+    // value prompt. Copy is NOT here although its placed copies are collected
+    // work, because at its second-point prompt with none placed yet Enter
+    // copies by the base point as a displacement.
     static constexpr std::array<std::string_view, 7> kKeep = {
         "draw.line",     "draw.polyline", "modify.trim",   "modify.extend",
         "modify.offset", "modify.fillet", "modify.chamfer",
@@ -127,13 +127,11 @@ void ToolHost::cancel()
     end();
 }
 
-void ToolHost::reset()
+void ToolHost::abandon()
 {
-    if (tool_ == nullptr) {
-        return;
+    if (tool_ != nullptr) {
+        end();
     }
-    make();
-    report(onPrompt, prompt());
 }
 
 void ToolHost::make()
