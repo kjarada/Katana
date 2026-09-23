@@ -80,6 +80,12 @@ namespace {
                                 display.color.a);
 }
 
+// The view a scene is built for: null options.layers means the document rule.
+[[nodiscard]] const LayerOverrides& viewOf(const SceneOptions& options)
+{
+    return options.layers != nullptr ? *options.layers : kNoLayerOverrides;
+}
+
 } // namespace
 
 
@@ -367,8 +373,7 @@ void SceneBuilder::appendEntities(const Document& document, const SceneOptions& 
     document.model().entities.forEach([&](const Entity& entity) {
         // The plan view's rule, so a layer switched off disappears here too
         // (audit REN-03). It used to test the entity's own flag only.
-        if (!isDrawn(document.model(), entity,
-                     options.layers != nullptr ? *options.layers : kNoLayerOverrides)) {
+        if (!isDrawn(document.model(), entity, viewOf(options))) {
             return;
         }
         const bool selected = selection.contains(entity.id);
@@ -532,14 +537,9 @@ AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surf
     }
     if (options.drawEntities) {
         // What is DRAWN, not every entity: a hidden stray far away used to
-        // frame an almost empty view (audit REN-03).
-        katana::geometry::Box2 plan;
-        document.model().entities.forEach([&](const Entity& entity) {
-            if (isDrawn(document.model(), entity,
-                        options.layers != nullptr ? *options.layers : kNoLayerOverrides)) {
-                plan.expand(katana::entity::boundingBox(entity.geometry));
-            }
-        });
+        // frame an almost empty view (audit REN-03). The same box a plan
+        // view's Zoom Extents frames, from the one function that computes it.
+        const katana::geometry::Box2 plan = drawnExtent(document.model(), viewOf(options));
         if (!plan.empty()) {
             const double z = std::isfinite(options.entityElevation) ? options.entityElevation : 0.0;
             box.expand(Vec3(plan.min.x, plan.min.y, z));
