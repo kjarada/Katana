@@ -9,6 +9,7 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -74,6 +75,8 @@ QComboBox* propertyChooser(QWidget* parent, const char* name)
         box->addItem(text(candidate));
     }
     box->lineEdit()->setPlaceholderText(QObject::tr("found in the drawing"));
+    // A property name is matched exactly: "Code" typed is not "code".
+    box->completer()->setCaseSensitivity(Qt::CaseSensitive);
     return box;
 }
 

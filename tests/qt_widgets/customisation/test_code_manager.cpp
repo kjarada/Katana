@@ -27,7 +27,9 @@
 #include <utility>
 #include <vector>
 
+#include <QComboBox>
 #include <QCoreApplication>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -614,4 +616,26 @@ TEST(SurveyCodeManager, TheDialogOutlivesItsDocumentAndThenRefusesToApply)
     child<QPushButton>(dialog, "lineworkPreview")->click();
     child<QPushButton>(dialog, "ruleNew")->click();
     katana::qt::test::paint(dialog);
+}
+
+TEST(SurveyCodeManager, ATypedColourNameIsKeptAsWrittenListedInAnotherCaseOrNotAtAll)
+{
+    ManagerFixture f;
+    SurveyCodeManagerDialog dialog(f.context);
+    dialog.selectRule(0);
+    auto* colour = child<QComboBox>(dialog, "ruleColour");
+    ASSERT_NE(colour, nullptr);
+    ASSERT_NE(colour->lineEdit(), nullptr);
+    // "Blue" is listed only as "blue": Enter must not fold it into the listed
+    // name (a combo's own lookup at the end of an edit would, with a
+    // case-insensitive completer), because a map keeps names as written.
+    for (const QString& typed : {QStringLiteral("Blue"), QStringLiteral("sui water potable")}) {
+        colour->lineEdit()->selectAll();
+        colour->lineEdit()->setText(typed);
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(colour->lineEdit(), &enter);
+        const auto rule = dialog.formRule();
+        ASSERT_TRUE(rule.ok()) << rule.error().describe();
+        EXPECT_EQ(rule->colour, typed.toStdString());
+    }
 }

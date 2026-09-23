@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -137,6 +138,8 @@ QComboBox* choiceField(QWidget* parent, const char* name, const QStringList& cho
     box->setEditable(editable);
     if (editable) {
         box->setInsertPolicy(QComboBox::NoInsert);
+        // As for the colour field: a typed value is kept in its own case.
+        box->completer()->setCaseSensitivity(Qt::CaseSensitive);
     }
     return box;
 }
