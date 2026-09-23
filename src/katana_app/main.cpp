@@ -200,7 +200,7 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
 
 // CUSTOMISE [REPLACE] <file>...: a load MERGES into what is loaded (the lead's
 // decision D1) through archive12d::mergeCustomisation - the merge the window's
-// File > Load 12d Customisation makes, so the two cannot come to differ. A
+// Format > Load 12d Customisation makes, so the two cannot come to differ. A
 // load's definitions replace those of the same name, and the rules it gives a
 // key in a section replace that key's rules there; everything else loaded is
 // kept. REPLACE swaps out what the load brought - and only that: a load with
@@ -249,7 +249,7 @@ bool runCustomise(katana::cad::Document& document,
     }
 
     // A file named twice in one load is read once: read twice, each of its
-    // rules would be in the map twice. The window's CUSTOMISE and File > Load
+    // rules would be in the map twice. The window's CUSTOMISE and Format > Load
     // go through the same rule.
     const katana::cad::DistinctFiles distinct = katana::cad::distinctCustomisationFiles(
         std::vector<std::filesystem::path>(paths.begin(), paths.end()));

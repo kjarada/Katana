@@ -498,25 +498,26 @@ void MainWindow::buildActions()
         });
     attributesAction->setObjectName("editAttributes");
 
-    // Format > Layers. Still modal this round (it asks its questions in
-    // boxes), so a headless run - which has nobody to close a box - is told
-    // how to see it instead of being left waiting on one.
+    // Format > Layers: beside the drawing, like the Format menu's other
+    // managers. One instance, made the first time and kept, so it reopens on
+    // the layer it showed; it asks nothing in boxes and reloads itself from
+    // the Document, so it needs no refresh from here and a headless run can
+    // open it too. The layers dock follows the Document as it always has.
     QAction* layersAction =
         makeAction(Icon::Layers, "&Layers...",
                    "The drawing's layers: colour, linetype, weight, what is on each",
                    QKeySequence(Qt::CTRL | Qt::Key_L), "formatLayers");
     connect(layersAction, &QAction::triggered, this, [this] {
-        if (headless_) {
-            logMessage("Layers: the dialog is modal and a headless run opens no modal box; "
-                       "--layer-manager grabs it.",
-                       true);
-            return;
+        if (!layers_) {
+            layers_ = makeLayerManager();
+            // The action's name plus "Dialog", as the headless --dialog
+            // looks a dialog up.
+            layers_->setObjectName("formatLayersDialog");
+            layers_->showFirstRow();
         }
-        auto dialog = makeLayerManager();
-        dialog->showFirstRow();
-        dialog->exec();
-        // The dock shows the same layers, so it follows the dialog.
-        scheduleRefresh();
+        layers_->show();
+        layers_->raise();
+        layers_->activateWindow();
     });
 
     QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
@@ -2377,6 +2378,15 @@ void MainWindow::reportCustomisationCoverage()
         logMessage(grouped(coverage.unresolved.size()) +
                    " names are in no loaded library, starting with \"" +
                    QString::fromStdString(coverage.unresolved.front()) + "\"");
+    }
+    // The other reason a style draws a fallback, with a different fix: the
+    // library IS loaded and defines the name - as a symbol, which a line
+    // cannot be drawn with, so it is drawn solid (D2). Pick a linestyle.
+    if (!coverage.notLinestyles.empty()) {
+        logMessage(grouped(coverage.notLinestyles.size()) +
+                   " linetype names are symbols, not linestyles, so those lines are drawn "
+                   "solid; starting with \"" +
+                   QString::fromStdString(coverage.notLinestyles.front()) + "\"");
     }
 }
 

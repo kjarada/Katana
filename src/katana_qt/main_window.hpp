@@ -339,6 +339,11 @@ class MainWindow final : public QMainWindow {
     // The Format menu's managers and what they share. Declared after the
     // Document, so it - and the dialogs it deletes - go first.
     std::unique_ptr<CustomisationWorkbench> format_;
+    // Format > Layers, shown beside the drawing and kept between uses. It
+    // holds the Document, so it is owned here - declared after document_,
+    // destroyed before it - rather than left to Qt, which deletes a window's
+    // children only after its members are gone.
+    std::unique_ptr<LayerManagerDialog> layers_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
