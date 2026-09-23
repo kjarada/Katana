@@ -24,7 +24,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
                              const QString& name) {
         return services_.makeAction(icon, text, tip, QKeySequence(), name);
     };
-    QAction* inverse = make(Icon::SurveyInverse, "&Inverse...",
+    QAction* inverse = make(Icon::SurveyInverse, "In&verse...",
                             "Distance, azimuth, bearing and height difference between two points",
                             "surveyInverse");
     QAction* forward = make(Icon::SurveyForward, "&Forward Point...",
@@ -61,7 +61,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     pointManagerAction_->setCheckable(true);
     // The dock it shows, by object name: how --survey-dock finds it.
     pointManagerAction_->setData(QString("SurveyPointsDock"));
-    QAction* pointReport = make(Icon::SurveyPointReport, "Point &Report...",
+    QAction* pointReport = make(Icon::SurveyPointReport, "Point Re&port...",
                                 "The survey points as a report, to copy or save as CSV",
                                 "surveyPointReport");
 
@@ -112,6 +112,9 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     menu.addSection("Coordinates");
     menu.addAction(converter);
     menu.addSection("Survey Coding");
+    if (services_.codeManager != nullptr) {
+        menu.addAction(services_.codeManager);
+    }
     if (services_.loadCustomisation != nullptr) {
         menu.addAction(services_.loadCustomisation);
     }

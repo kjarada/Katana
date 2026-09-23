@@ -536,6 +536,41 @@ TEST(EntityUtf8, InvalidPropertyStringsAreRefused)
     EXPECT_FALSE(properties.validate("na\xe9me", PropertyValue{std::string("ok")}).ok());
 }
 
+TEST(EntityUtf8, DescriptionsAreRefusedAsNamesAreWhenTheyAreNotUtf8)
+{
+    // Audit MOD-12: a description is saved as JSON like the name beside it,
+    // and was the one string of these records nothing checked.
+    const std::string latin1 = "caf\xe9"; // CP1252, not UTF-8
+    HatchPattern hatch;
+    hatch.name = "grass";
+    hatch.solid = true;
+    hatch.description = latin1;
+    EXPECT_EQ(validate(hatch).error().code, ErrorCode::InvalidArgument);
+    hatch.description = "caf\xc3\xa9";
+    EXPECT_TRUE(validate(hatch).ok());
+
+    PropertyDatabase properties;
+    PropertyDefinition note;
+    note.name = "note";
+    note.description = latin1;
+    EXPECT_EQ(properties.define(note).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(properties.find("note"), nullptr) << "nothing defined";
+    note.description = "caf\xc3\xa9";
+    EXPECT_TRUE(properties.define(note).ok());
+
+    // An alignment with no PIs is refused anyway; the description is looked
+    // at first, and says so.
+    Alignment road;
+    road.name = "road";
+    road.description = latin1;
+    const auto refused = validate(road);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().message, "alignment description is not valid UTF-8");
+    road.description = "caf\xc3\xa9";
+    ASSERT_FALSE(validate(road).ok());
+    EXPECT_NE(validate(road).error().message, "alignment description is not valid UTF-8");
+}
+
 // The writers report failure rather than throwing, whatever they are handed.
 // Nothing that survives validation can reach this, but a save path must not be
 // able to abort the process even if a guard is one day bypassed.

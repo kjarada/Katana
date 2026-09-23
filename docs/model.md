@@ -212,8 +212,10 @@ may hold `;` but not a line break - and refused by `save` when a name is
 empty or holds a line break or a path separator, since that would read back
 as a different list. It is a record, not a reference: nothing is loaded from
 it (`docs/survey_coding.md`). A new key is not a schema change, which is why
-this could be added while migrations are deferred (decision D6); nothing sets
-it yet.
+this could be added while migrations are deferred (decision D6). Both front
+ends set it before a save and warn on opening a project whose files are not
+loaded (`cad/customisation_record.hpp`; `docs/survey_coding.md`, "What the
+project records").
 
 ## Numerical assumptions
 
@@ -447,10 +449,29 @@ put back after it name something that exists at every step. And **the
 update guard is asked, not restated**: `validate` said a dash pattern on
 `continuous` was fine and `execute` then refused it (audit MOD-09, fixed for
 the tables). Deleting, merging and purging are marked destructive, as
-`DELETE_LAYER` is (MOD-08, fixed for the tables; the layer-tree deletion
-still is not). An unchanged update is no step at all: `updateStyleIfChanged`
-and `updateLinetypeIfChanged` return nullptr, because a Command cannot decline
-to be pushed onto the stack.
+`DELETE_LAYER` is (MOD-08). An unchanged update is no step at all:
+`updateStyleIfChanged` and `updateLinetypeIfChanged` return nullptr, because a
+Command cannot decline to be pushed onto the stack.
+
+The layer halves of those audits were fixed on 2026-09-24, in the layer
+commands and the layer table:
+
+- **One statement of each layer rule** (MOD-09). `LayerDatabase::checkAdd`,
+  `checkUpdate` and `checkRemove` say what `add()`, `update()` and `remove()`
+  would refuse, with the same error and changing nothing; those three call
+  them, and so does each layer command's `validate()`. CreateLayer's
+  `validate()` had restated a part of the rule and skipped the path and the
+  weight, so `a//b` or a negative weight passed it and failed `execute()`.
+- **Deleting a branch is destructive** (MOD-08): `DeleteLayerTreeCommand`, as
+  much as `DELETE_LAYER` of one empty leaf, goes through the confirmation
+  gate.
+- **Layer names are UTF-8** (MOD-12): `validateLayerPath` refuses a name that
+  is not - "Café" typed on a CP1252 console arrives as the bytes `Caf\xE9`
+  and was accepted, and then no entity on it could be written as JSON - and
+  so does the table for a layer's
+  linetype, hatch-pattern and dimension-style names and for the hatch-pattern,
+  alignment and property-definition descriptions, which is the model-wide
+  invariant everything else already kept.
 
 **`ByLayer` is a word, not an empty string.** A linetype has no empty value to
 say "inherit" with - `""` is a name like any other in the tables - so a

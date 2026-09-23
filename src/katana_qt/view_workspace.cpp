@@ -5,6 +5,8 @@
 
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QCoreApplication>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QStyle>
 #include <QTimer>
@@ -144,8 +146,17 @@ const ViewWorkspace::View* ViewWorkspace::find(ViewId id) const
     return nullptr;
 }
 
+void ViewWorkspace::stopToolIn(const View& view)
+{
+    if (view.plan != nullptr && view.plan->toolActive()) {
+        view.plan->setTool(Tool::Select);
+    }
+}
+
 void ViewWorkspace::buildContent(View& view, ViewState& state)
 {
+    // The plan view about to be deleted says its tool ended while it still can.
+    stopToolIn(view);
     QWidget* old = view.widget();
     view.plan = nullptr;
     view.render = nullptr;
@@ -520,6 +531,14 @@ ViewState& ViewWorkspace::openView(ViewKind kind, bool activateIt)
 
 Status ViewWorkspace::closeView(ViewId id)
 {
+    // Before the dock - and the plan view in it - is deleted: a tool left
+    // running there would never report its end, so the window would keep
+    // its action checked and its prompt in the command line. Stopped before
+    // the view is looked up for erasing, so nothing the window does on
+    // hearing the tool end can leave that iterator stale.
+    if (const View* closing = find(id)) {
+        stopToolIn(*closing);
+    }
     const auto at = std::ranges::find_if(docks_, [&](const View& view) { return view.id == id; });
     if (at == docks_.end()) {
         return makeError(ErrorCode::NotFound, "no such view", std::to_string(id));
@@ -810,12 +829,6 @@ bool ViewWorkspace::showSection(katana::cad::Section section)
 
 void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
 {
-    plan.onToolChanged = [this](Tool tool) {
-        tool_ = tool;
-        if (onToolChanged) {
-            onToolChanged(tool);
-        }
-    };
     plan.onActiveToolChanged = [this](const std::string& toolId) {
         if (!toolId.empty()) {
             lastToolId_ = toolId;
@@ -844,6 +857,11 @@ void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
             onToolMessage(message);
         } else if (onStatus) {
             onStatus(message);
+        }
+    };
+    plan.onTextTyped = [this](const QString& text) {
+        if (onTextTyped) {
+            onTextTyped(text);
         }
     };
 }
@@ -888,19 +906,35 @@ bool ViewWorkspace::typeIntoTool(const QString& text)
     return false;
 }
 
-void ViewWorkspace::setTool(Tool tool)
+void ViewWorkspace::stopTool()
 {
-    if (tool == Tool::Select) {
-        for (ViewportWidget* plan : planViews()) {
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
             plan->setTool(Tool::Select);
         }
-        tool_ = Tool::Select;
-        return;
     }
-    const Status started = startTool(toolId(tool));
-    if (!started && onError) {
-        onError(QString::fromStdString(started.error().describe()));
+}
+
+bool ViewWorkspace::pressEnter()
+{
+    ViewportWidget* target = nullptr;
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
+            target = plan;
+            break;
+        }
     }
+    if (target == nullptr) {
+        target = activePlanView();
+    }
+    if (target == nullptr) {
+        return false;
+    }
+    // Delivered as the key itself, so the command line's Enter and the
+    // drawing's are one path and cannot come to mean different things.
+    QKeyEvent press(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(target, &press);
+    return true;
 }
 
 void ViewWorkspace::setGridVisible(bool visible)

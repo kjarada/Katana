@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "katana/core/text_encoding.hpp"
+
 namespace katana::entity {
 
 using katana::core::ErrorCode;
@@ -29,6 +31,13 @@ Status validateLayerPath(std::string_view name)
         return makeError(ErrorCode::InvalidArgument, "layer name is too long",
                          std::to_string(name.size()) + " > " +
                              std::to_string(kMaximumLayerNameLength));
+    }
+    if (!katana::core::isValidUtf8(name)) {
+        // Every other name in the model is checked (detail::validateName). A
+        // layer name typed on a CP1252 console - "Café" - was accepted, and
+        // then no entity on it could be written as JSON (audit MOD-12). The
+        // bytes are left out of the error, which may itself become JSON.
+        return makeError(ErrorCode::InvalidArgument, "layer name is not valid UTF-8");
     }
     if (name.front() == kLayerSeparator || name.back() == kLayerSeparator) {
         return makeError(ErrorCode::InvalidArgument,

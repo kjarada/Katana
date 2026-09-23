@@ -570,7 +570,9 @@ The mapping is documented in full at the head of
   throw the name away, so a loaded library could never match it. On a line
   the symbol is drawn at every vertex (decision D8, `docs/cad.md`), and the
   style's linetype, being the symbol's own name, draws a plain line under
-  it. The string's own linestyle is kept as `12d.string_style` when it
+  it - so no list of missing names reports that linetype
+  (`cad::NameStatus::OwnSymbol`; `docs/cad.md`, "What the managers stand
+  on"), although it names a symbol and no linestyle. The string's own linestyle is kept as `12d.string_style` when it
   differs, and written back, so the string is the string it was. What 12d
   writes on tens of thousands of points as `rotation 0 offset 0 raise 0` is
   not kept: only a value that says something becomes `12d.symbol.<key>`
@@ -637,7 +639,10 @@ The mapping is documented in full at the head of
   lighter than its Gray); an unknown name (`pen 025`, `vis concrete`) leaves
   the entity ByLayer and is kept as metadata. On export the name is written
   back unless the colour has been changed since, when the nearest standard
-  name is written instead - the old name would be a lie.
+  name is written instead - the old name would be a lie. The standard names
+  are listed by `archive12d::standardColourNames()`, read from the same table
+  `standardColour` draws with, which is what the Survey Code Manager's colour
+  field offers; the dialog keeps no copy of the table.
 - **Drainage.** The line becomes a polyline carrying its pipes as properties
   (pipe *i* joins pit *i* to *i+1* and has no position of its own), each pit
   a point at its top with its name, type and size, each house connection a

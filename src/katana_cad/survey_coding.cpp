@@ -5,8 +5,10 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 
 #include "katana/cad/linework.hpp"
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/tables.hpp"
@@ -300,41 +302,56 @@ const char* toString(SurveyStyleOutcome outcome)
 CustomisationCoverage customisationCoverage(const Document& document)
 {
     CustomisationCoverage coverage;
-    std::set<std::string> missing;
+    std::set<std::string> undefined;
+    std::set<std::string> notLinestyles;
     // forEach rather than all(): all() returns the whole style table by
     // value, and this only reads it.
     document.model().styles.forEach([&](const Style& style) {
         ++coverage.styles;
-        // A style names a definition through either field. A plain line names
-        // nothing; neither does a name Katana draws itself - a linetype of
-        // the drawing's own, or a built-in symbol shape - unless a loaded
-        // library defines it, which then wins (decision D2).
+        // A style names a definition through either field, judged by the one
+        // rule cad::missingNames reads (style_catalogue.hpp), so this list
+        // and the style manager's Diagnostics cannot disagree. A plain line,
+        // ByLayer and a linetype that is the style's own symbol (D8) name
+        // nothing; a model linetype and a built-in symbol shape are drawn by
+        // Katana itself, unless a loaded library defines the name, which then
+        // wins (decision D2).
         bool names = false;
         bool found = false;
         bool katanaDrawn = false;
-        for (const bool symbol : {false, true}) {
-            const std::string& name = symbol ? style.symbol : style.linetype;
-            // A linetype of ByLayer takes the layer's (decision D2): it names
-            // no definition, so there is nothing to find or to miss.
-            if (isPlainLinestyle(name) || (!symbol && katana::entity::isByLayer(name))) {
-                continue;
-            }
-            if (document.definitionFor(name) != nullptr) {
+        const std::pair<NameStatus, const std::string*> fields[] = {
+            {linetypeStatus(document, style.linetype, style.symbol), &style.linetype},
+            {symbolStatus(document, style.symbol), &style.symbol}};
+        for (const auto& [status, name] : fields) {
+            switch (status) {
+            case NameStatus::Plain:
+            case NameStatus::OwnSymbol:
+                break;
+            case NameStatus::Library:
                 names = true;
                 found = true;
-            } else if (symbol ? katana::entity::isBuiltInSymbolName(name)
-                              : document.model().linetypes.contains(name)) {
+                break;
+            case NameStatus::Katana:
                 katanaDrawn = true;
-            } else {
+                break;
+            // Kept apart, not merged into one "missing" list: a caller
+            // printing "in no loaded library" for a name the loaded library
+            // defines as a symbol sends people to load what is loaded.
+            case NameStatus::NotALinestyle:
                 names = true;
-                missing.insert(name);
+                notLinestyles.insert(*name);
+                break;
+            case NameStatus::Undefined:
+                names = true;
+                undefined.insert(*name);
+                break;
             }
         }
         coverage.named += names ? 1 : 0;
         coverage.resolved += found ? 1 : 0;
         coverage.builtIn += (katanaDrawn && !names) ? 1 : 0;
     });
-    coverage.unresolved.assign(missing.begin(), missing.end());
+    coverage.unresolved.assign(undefined.begin(), undefined.end());
+    coverage.notLinestyles.assign(notLinestyles.begin(), notLinestyles.end());
     return coverage;
 }
 

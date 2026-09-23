@@ -201,7 +201,7 @@ TEST(ToolMenus, TheWorkspaceStartsAToolInItsActivePlanViewOnly)
     EXPECT_EQ(document.model().entities.size(), 1u);
 
     EXPECT_EQ(views->startTool("draw.nothing").error().code, katana::core::ErrorCode::NotFound);
-    views->setTool(katana::qt::Tool::Select);
+    views->stopTool();
     EXPECT_EQ(views->activeToolId(), "");
     EXPECT_FALSE(views->typeIntoTool("1,1")) << "no tool: the line is the command line's";
     ASSERT_FALSE(changes.empty());
@@ -282,4 +282,103 @@ TEST(ToolMenus, AToolbarWithNoMenuStillOwnsItsFamilyDropDowns)
     ASSERT_NE(button->menu(), nullptr);
     EXPECT_EQ(button->menu()->parent(), bar);
     EXPECT_NE(std::ranges::find(actions.unplaced(), std::string("Draw")), actions.unplaced().end());
+}
+
+TEST(ToolMenus, EnterOnAnEmptyCommandLineFinishesTheRunningToolAndThenRepeatsTheLast)
+{
+    // The command line's empty Enter is the drawing's Enter. By hand: LINE,
+    // 0,0 and 10,0 typed, then Enter - one segment, so ONE line is made and
+    // the tool says so ("1 line", LineTool::finish) and starts again for the
+    // next chain; Enter at its first prompt ends it; Enter with nothing
+    // running starts the last tool, Line, again.
+    katana::cad::Document document;
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    std::vector<QString> messages;
+    views->onToolMessage = [&](const QString& message) { messages.push_back(message); };
+
+    ASSERT_TRUE(views->startTool("draw.line").ok());
+    ASSERT_TRUE(views->typeIntoTool("0,0"));
+    ASSERT_TRUE(views->typeIntoTool("10,0"));
+    EXPECT_TRUE(views->pressEnter());
+    EXPECT_EQ(document.model().entities.size(), 1u);
+    ASSERT_FALSE(messages.empty());
+    EXPECT_EQ(messages.back(), "1 line");
+    EXPECT_EQ(views->activeToolId(), "draw.line") << "Line starts again for the next chain";
+
+    EXPECT_TRUE(views->pressEnter());
+    EXPECT_EQ(views->activeToolId(), "") << "Enter at the first prompt ends it";
+    EXPECT_EQ(document.model().entities.size(), 1u);
+
+    EXPECT_TRUE(views->pressEnter());
+    EXPECT_EQ(views->activeToolId(), "draw.line") << "Enter with none running repeats it";
+}
+
+TEST(ToolMenus, TextTypedOverTheDrawingReachesTheWorkspaceOnlyWhenNoToolRuns)
+{
+    // "Type anywhere": an L typed over an idle plan view is for the command
+    // line; typed while a tool runs it is the tool's input, kept in the view.
+    katana::cad::Document document;
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    QString typed;
+    views->onTextTyped = [&](const QString& text) { typed += text; };
+    katana::qt::ViewportWidget* plan = views->activePlanView();
+    ASSERT_NE(plan, nullptr);
+
+    QKeyEvent idle(QEvent::KeyPress, Qt::Key_L, Qt::NoModifier, "l");
+    QCoreApplication::sendEvent(plan, &idle);
+    EXPECT_EQ(typed, "l");
+
+    ASSERT_TRUE(views->startTool("draw.circle").ok());
+    QKeyEvent busy(QEvent::KeyPress, Qt::Key_5, Qt::NoModifier, "5");
+    QCoreApplication::sendEvent(plan, &busy);
+    EXPECT_EQ(typed, "l") << "the tool's input never reaches the command line";
+    EXPECT_EQ(plan->typedInput(), "5");
+}
+
+TEST(ToolMenus, APlanViewTurnedIntoAnotherKindEndsItsToolAndSaysSo)
+{
+    // The widget running the tool is deleted when its view changes kind. The
+    // tool is stopped first, so the window hears it end ("") and unchecks
+    // its action; deleted with the widget, it never reported ending.
+    katana::cad::Document document;
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    std::vector<std::string> changes;
+    views->onActiveToolChanged = [&](const std::string& id) { changes.push_back(id); };
+    ASSERT_TRUE(views->startTool("draw.line").ok());
+    ASSERT_EQ(changes.back(), "draw.line");
+
+    ASSERT_TRUE(views->setViewKind(views->viewSet().activeId(), katana::cad::ViewKind::Section).ok());
+    EXPECT_EQ(changes.back(), "");
+    EXPECT_EQ(views->activeToolId(), "");
+}
+
+TEST(ToolMenus, APlanViewClosedWhileItsToolRunsEndsTheToolAndSaysSo)
+{
+    // Two plan views, Line running in the second. Closing that view (its
+    // title bar's X) deletes the widget running the tool; the tool is
+    // stopped first, so the window hears it end ("") and unchecks Line. The
+    // other plan view is left to draw in, idle.
+    katana::cad::Document document;
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    views->openView(katana::cad::ViewKind::Plan);
+    ASSERT_EQ(views->planViews().size(), 2u);
+    std::vector<std::string> changes;
+    views->onActiveToolChanged = [&](const std::string& id) { changes.push_back(id); };
+    ASSERT_TRUE(views->startTool("draw.line").ok());
+    ASSERT_EQ(changes.back(), "draw.line");
+    const katana::cad::ViewId running = views->viewSet().activeId();
+    ASSERT_EQ(views->planView(running)->activeToolId(), "draw.line");
+
+    ASSERT_TRUE(views->closeView(running).ok());
+    EXPECT_EQ(changes.back(), "");
+    EXPECT_EQ(views->activeToolId(), "");
+    EXPECT_EQ(views->planViews().size(), 1u);
 }

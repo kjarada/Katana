@@ -648,3 +648,37 @@ TEST(FormatCoverage, NamesBuiltInShapesApartFromMissingNames)
               "a shape Katana draws itself; the rest are plain lines)\n"
               "  1 name is in no loaded library: \"X\"\n");
 }
+
+TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoadedLibrary)
+{
+    // The reviewer's case: a 12da `style "CULT Bollard"` on a line, where the
+    // loaded library defines CULT Bollard, but as a `mode vertex` symbol. The
+    // line draws solid (D2), and the fix is to pick a linestyle - so saying
+    // the name is "in no loaded library" sent people looking for a library
+    // that is already loaded.
+    //
+    //   library  CULT Bollard  `mode vertex`  (the fixture's library())
+    //            WATR Main     a linestyle
+    //   styles   super  linetype CULT Bollard -> not a linestyle: drawn solid
+    //            pipe   linetype PABB Pipe    -> defined nowhere
+    //            water  linetype WATR Main    -> the library draws it
+    //
+    // By hand: 3 styles; all three name a definition; water alone resolves
+    // (1); none built in. One line each for the two reasons, in name order.
+    Document document;
+    document.setStyleLibrary(library());
+    for (const auto& [name, linetype] : {std::pair{"super", "CULT Bollard"},
+                                         std::pair{"pipe", "PABB Pipe"},
+                                         std::pair{"water", "WATR Main"}}) {
+        katana::entity::Style style;
+        style.name = name;
+        style.linetype = linetype;
+        ASSERT_TRUE(document.execute(cmd::createStyle(style)).ok()) << name;
+    }
+    EXPECT_EQ(katana::cad::formatCoverage(katana::cad::customisationCoverage(document)),
+              "1 of this drawing's 3 styles are drawn with a loaded definition (3 name one; the "
+              "rest are plain lines)\n"
+              "  1 name is in no loaded library: \"PABB Pipe\"\n"
+              "  1 name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype "
+              "naming it draws solid: \"CULT Bollard\"\n");
+}

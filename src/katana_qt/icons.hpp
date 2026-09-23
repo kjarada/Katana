@@ -135,6 +135,15 @@ enum class Icon {
     SurveyExport,
     SurveyPointManager,
     SurveyPointReport,
+    // Format (the customisation managers). Styles and Linetypes: three lines
+    // as a linetype table shows them, the accent one dashed with a symbol at
+    // its vertex. Symbol Library: a grid of plan symbols, the accent one the
+    // symbol chosen. Survey Code Manager: a field code's tag and the accent
+    // linework it becomes. Purge Unused: a broom, sweeping the accent away.
+    FormatStyles,
+    FormatSymbols,
+    FormatSurveyCodes,
+    Purge,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

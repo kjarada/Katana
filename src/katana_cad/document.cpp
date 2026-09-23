@@ -39,6 +39,9 @@ void Document::rebuildStack()
         if (!currentStyle_.empty() && !model_.styles.contains(currentStyle_)) {
             currentStyle_.clear();
         }
+        // The stack publishes only a step that succeeded, so a refused
+        // command moves nothing.
+        ++modelRevision_;
         notify();
     });
 }
@@ -158,6 +161,7 @@ void Document::newDocument()
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
     currentStyle_.clear();
+    ++modelRevision_;
     notify();
 }
 
@@ -192,6 +196,10 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
     currentStyle_.clear();
+    // Even when the project opened is the drawing already shown: the
+    // history, selection and current layer went, and a view cannot know the
+    // tables are the same without comparing them.
+    ++modelRevision_;
     if (logger_ != nullptr) {
         logger_->info("storage", "project opened",
                       {{"entities", std::to_string(model_.entities.size())}});

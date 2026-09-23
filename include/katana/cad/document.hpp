@@ -125,6 +125,14 @@ class Document {
     // nothing but speed.
     [[nodiscard]] const katana::geometry::SpatialIndex& spatialIndex() const { return index_; }
     [[nodiscard]] const katana::commands::CommandStack& history() const { return *stack_; }
+    // Counts up by one for every command executed, undone or redone, and for
+    // every new or opened drawing; never down, and never for anything else -
+    // a selection, the current layer or style, a save, the metadata, a
+    // library or a survey map (those two have their own generations). "Has
+    // the drawing changed since I last looked" is then one comparison, where
+    // the history's counts could not tell "undo, then a new command" from
+    // nothing, nor a reopened project from the drawing it replaced.
+    [[nodiscard]] std::uint64_t modelRevision() const { return modelRevision_; }
 
     // ---- editing -------------------------------------------------------------
     [[nodiscard]] katana::core::Status execute(katana::commands::CommandPtr command);
@@ -193,6 +201,7 @@ class Document {
     katana::entity::SurveyMap surveyMap_;
     std::uint64_t libraryGeneration_ = 0;
     std::uint64_t surveyMapGeneration_ = 0;
+    std::uint64_t modelRevision_ = 0;
     katana::geometry::SpatialIndex index_;
     std::unique_ptr<katana::commands::CommandStack> stack_;
     std::unique_ptr<katana::storage::ProjectStore> store_;

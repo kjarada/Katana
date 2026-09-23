@@ -69,7 +69,7 @@ endif()
 
 # The whole main window with a 12d customisation loaded into it: the two
 # libraries and the mapfile read, resolved against each other, and reported.
-# This is the path the File > Load 12d Customisation menu item takes, so what
+# This is the path the Format > Load 12d Customisation menu item takes, so what
 # ctest exercises is what a person gets (PLAN.MD 20.3). It runs without the
 # files when they are not in the checkout - they carry their author's licence
 # notice - and then proves only that the switch does no harm.
@@ -471,7 +471,7 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # ---- the window's wiring of the managers' foundations ----------------------
     #
-    # File > Load 12d Customisation merges (audit QT-21), through the window's
+    # Format > Load 12d Customisation merges (audit QT-21), through the window's
     # CUSTOMISE line, which runs the menu item's applyCustomisation: the
     # hand-written fixture mapfile REPLACES the map, then the symbol fixture
     # alone is MERGED in - and the map must still be there. By hand, from the
@@ -593,6 +593,141 @@ if(TARGET katana)
                          qt_a_save_that_cannot_go_ahead_leaves_the_drawing_unmodified_headless
                          qt_a_headless_new_after_an_edit_is_refused_rather_than_asked_headless
                          qt_saving_where_a_file_is_missing_keeps_it_recorded_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
+    # ---- the menus: Format's managers, Purge Unused, the tools by alias -------
+    #
+    # Each manager opened THROUGH ITS FORMAT MENU ACTION (@ is --dialog), over
+    # the hand-written fixture customisation merged onto whatever is built
+    # in; the driver says what opened, and a manager opened modally would say
+    # "(modal)" after its title, where each EXPECT wants the line to end. What each
+    # manager then shows is read back with ? (--report).
+    #
+    # Styles: two styles made on the command line, so the table lists them.
+    add_test(NAME qt_format_menu_opens_the_style_manager_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=>STYLE NEW Kerb|>STYLE NEW Water|@formatStyles|?styleTable"
+            "-DEXPECT=--dialog formatStyles opened styleManagerDialog \"Styles and Linetypes\"[\r\n]+styleTable: Kerb \\|[^;]*; Water \\|"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Symbols, searched for TEST. By hand from the fixture's head comments:
+    # its four definitions are all symbols by decision D3 - TEST Tree too,
+    # though it is not `mode vertex`, because rule TR* draws it as one - and
+    # PX* asks for TEST Missing Symbol, which nothing defines and the library
+    # lists as missing. Sorted by name, case folded, the five come together.
+    add_test(NAME qt_format_menu_opens_the_symbol_library_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=@formatSymbols|filterText=TEST|?symbolGrid"
+            "-DEXPECT=--dialog formatSymbols opened symbolLibraryDialog \"Symbol Library\"[\r\n]+symbolGrid: [^\r\n]*TEST Missing Symbol ; TEST Survey Mark ; TEST Tree ; TEST U Turn ; TEST Valve"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_symbol_library_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The code manager explaining a fixture code. By hand from
+    # test_survey.mapfile: WM01 is met by the prefix key WM* (rule #0 of the
+    # fixture, map_data), which puts it on model TEST SERVICES.
+    add_test(NAME qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=@formatSurveyCodes|testCode=WM01|?explainHeading|?explainFields"
+            "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: model \\| TEST SERVICES \\| #[0-9]+ WM\\* \\(map_data\\)"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_code_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The symbol library putting a fixture symbol on imported points: the 12
+    # points of survey_points_pnezd.csv (counted by hand, see the survey
+    # import test) imported, all selected, TEST Survey Mark chosen in the
+    # grid and Assign pressed - one new style of that name holds all 12.
+    add_test(NAME qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=@surveyImport|file=${_survey_data}/survey_points_pnezd.csv|!next|${_survey_format}|!next|!next|unit=metres|!next|!next|!import|>SELECT ALL|@formatSymbols|symbolGrid=TEST Survey Mark|?detailName|!assignToPoints|>STYLE USAGE TEST Survey Mark"
+            "-DEXPECT=Imported 12 point\\(s\\).*detailName: TEST Survey Mark[\r\n]+12 points now in style \"TEST Survey Mark\" \\(new\\), drawing \"TEST Survey Mark\"\\..*style TEST Survey Mark: used by 12 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/symbol_assign_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Format > Purge Unused (* is --trigger, the menu item in its turn). By
+    # hand: Spare is worn by nothing; Kerb is current and worn by the line;
+    # a new drawing's continuous and none are protected. So one style goes,
+    # and one UNDO brings it back. The grab is the command line, showing it.
+    add_test(NAME qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=>STYLE NEW Spare|>STYLE NEW Kerb|%PropertiesToolBar|CurrentStyleCombo=Kerb|>LINE 0,0 10,0|*formatPurge|>STYLE USAGE Spare|>UNDO|>STYLE USAGE Spare|%CommandLineDock"
+            "-DEXPECT=Purge Unused: purged 1 style, 0 linetypes and 0 hatch patterns \\(one Undo restores them\\)\\. Styles: Spare\\.[\r\n]+! [^\r\n]*Spare[^\r\n]*[\r\n]+1 undone[\r\n]+style Spare: unused"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/purge_unused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A tool started by its alias on the command line and answered there: by
+    # hand, LINE, 0,0 and 10,0, then Enter - one segment, so ONE line, which
+    # the tool reports ("1 line") before starting again for the next chain;
+    # Enter at its first prompt ends it, so LIST reaches the interpreter and
+    # finds the one entity. ">" alone is Enter on an empty command line. The
+    # menus and toolbars show it: Line's action checked while it runs, and
+    # Select again once it has ended.
+    add_test(NAME qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE|?draw.line|?toolSelect|>0,0|>10,0|>|>|?draw.line|?toolSelect|>LIST"
+            "-DEXPECT=draw.line: Line, checked[\r\n]+toolSelect: Select, unchecked[\r\n]+1 line[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked[\r\n]+1 entities[\r\n]+1  Line  layer=0  0,0 -> 10,0  length=10"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tool_by_alias_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A tool that cannot start - the only view shows a section, so there is
+    # no plan view to draw in - is left unchecked, with Select checked: the
+    # click checks a tool's action before the start is refused, and a
+    # refusal changes no tool, so nothing else would put the marks right.
+    add_test(NAME qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*viewShowsSection|*draw.line|?draw.line|?toolSelect"
+            "-DEXPECT=there is no plan view to draw in[^\r\n]*[\r\n]+draw.line: Line, unchecked[\r\n]+toolSelect: Select, checked"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/refused_tool_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Quitting while the Survey Code Manager holds unapplied rule edits: they
+    # live only in its buffer, so a headless QUIT, with nobody to ask, is
+    # refused and said - as a quit with unsaved drawing changes is - rather
+    # than the edits going with the window. By hand: the built-in map's 1,624
+    # rules and a duplicate of rule 0 make 1625 in the buffer.
+    add_test(NAME qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatSurveyCodes|!ruleDuplicate|?dirtyIndicator|>QUIT"
+            "-DEXPECT=dirtyIndicator: Unapplied edits:[^\r\n]* 1625 rules[.][\r\n]+! Unapplied Edits: the Survey Code Manager has rule edits that are not on the drawing"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quit_with_code_edits_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Every key sequence the window answers to reaches one thing: Qt
+    # disables an ambiguous shortcut for BOTH actions, so a clash is two
+    # keys that silently do nothing; and within each menu every underlined
+    # letter is one item's (--check-shortcuts).
+    add_test(NAME qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCHECK_SHORTCUTS=ON"
+            "-DEXPECT=shortcuts: [0-9]+ key sequences, each reaching one thing"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/shortcuts_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_format_menu_opens_the_style_manager_headless
+                         qt_format_menu_opens_the_symbol_library_headless
+                         qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
+                         qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
+                         qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
+                         qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
+                         qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
+                         qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
+                         qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
