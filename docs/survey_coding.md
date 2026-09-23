@@ -1063,9 +1063,10 @@ dialog edits the map. **Export Mapfile...** and **Export Code List CSV...**
 write the buffer ("Writing it back").
 
 **Closing never loses an edit unasked.** The manager is kept, hidden, between
-uses, so closing it with unapplied edits keeps them: an interactive session
-is asked Apply / Discard / Cancel, a headless one closes, keeps the buffer
-and says so in the log. Quitting asks the same question over the manager,
+uses, so its buffer outlives closing it. Closing it with unapplied edits
+(`SurveyCodeManagerDialog::reject`) asks an interactive session Apply /
+Discard / Cancel; a headless one closes, keeps the buffer and says so in the
+log. Quitting asks the same question over the manager,
 shown first (`CustomisationWorkbench::confirmClose`, run by
 `MainWindow::closeEvent` before the unsaved-drawing question, because Apply
 changes the drawing that question is about); Cancel keeps the window and the
