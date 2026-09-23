@@ -718,12 +718,10 @@ class PolygonTool final : public InteractiveTool {
                                       "polygon on an edge");
         case Step::Radius: {
             if (isOption(text, "Inscribed")) {
-                inscribed_ = true;
-                return ToolStep::next();
+                return setInscribed(true);
             }
             if (isOption(text, "Circumscribed")) {
-                inscribed_ = false;
-                return ToolStep::next();
+                return setInscribed(false);
             }
             auto radius = parseLength(text, "radius");
             if (!radius) {
@@ -764,6 +762,15 @@ class PolygonTool final : public InteractiveTool {
             step_ = Step::Sides;
             break;
         case Step::Radius:
+            // An Inscribed or Circumscribed typed since the centre is a later
+            // input than the centre, so it is the one taken back.
+            if (!modesBefore_.empty()) {
+                inscribed_ = modesBefore_.back();
+                modesBefore_.pop_back();
+                break;
+            }
+            step_ = Step::Centre;
+            break;
         case Step::EdgeStart:
             step_ = Step::Centre;
             break;
@@ -819,10 +826,21 @@ class PolygonTool final : public InteractiveTool {
         return inscribed_ ? toPoint : firstVertexFromMidpoint(toPoint, sides_);
     }
 
+    // Every I or C typed counts as an input for Undo, even one that leaves
+    // the mode as it was: Undo then takes back what was typed, rather than
+    // skipping it and throwing away the centre.
+    ToolStep setInscribed(bool inscribed)
+    {
+        modesBefore_.push_back(inscribed_);
+        inscribed_ = inscribed;
+        return ToolStep::next();
+    }
+
     ToolStep make(std::vector<Point2> vertices)
     {
         const int sides = sides_;
         step_ = Step::Sides;
+        modesBefore_.clear();
         return ToolStep::done(
             cmd::createPolyline(Polyline2{std::move(vertices), true}, attributes_),
             "polygon of " + std::to_string(sides) + " sides", true);
@@ -832,6 +850,9 @@ class PolygonTool final : public InteractiveTool {
     Step step_ = Step::Sides;
     int sides_ = kDefaultSides;
     bool inscribed_ = true;
+    // The mode before each Inscribed or Circumscribed typed at the radius
+    // prompt, latest last; Undo pops them before it gives up the centre.
+    std::vector<bool> modesBefore_;
     Point2 centre_;
     Point2 edgeStart_;
 };
