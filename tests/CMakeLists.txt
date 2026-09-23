@@ -30,6 +30,14 @@ foreach(_suite IN LISTS _suites)
     endif()
 endforeach()
 
+# The view widgets on their own, headlessly (tests/qt_widgets/). Not found by
+# the loop above: the application has no katana_qt library, so the suite
+# compiles the widgets' sources itself and is configured whenever the
+# application is.
+if(TARGET katana)
+    add_subdirectory(qt_widgets)
+endif()
+
 # A plot produced headlessly, so the PDF writing inside the Qt widget is
 # exercised by ctest and not only by hand (PLAN.MD Phase 22). The script
 # copies the sample project first: a test must never touch repository data.

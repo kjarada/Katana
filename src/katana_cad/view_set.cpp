@@ -89,6 +89,7 @@ Status ViewSet::setKind(ViewId id, ViewKind kind)
     if (kind != ViewKind::Section && kind != view->cameraKind) {
         configureCamera(view->camera, kind);
         view->cameraKind = kind;
+        view->cameraFramed = false;
     }
     return {};
 }
