@@ -182,14 +182,23 @@ struct CustomisationCoverage {
     // "manhole") or a linetype of the drawing's own, and no library defines:
     // drawn correctly, so neither missing nor counted as named (audit CAD-17).
     std::size_t builtIn = 0;
-    // The names the styles give whose drawing is a fallback, distinct and in
-    // name order: by cad::linetypeStatus and cad::symbolStatus, the rule
-    // cad::missingNames reports by (style_catalogue.hpp). So never a built-in
-    // symbol, ByLayer, a plain line or a style's own symbol as its linetype
-    // (D8); and a linetype naming only a `mode vertex` symbol IS listed, as
-    // the viewport draws it solid (D2). The styles' names only - a layer's
-    // missing linetype is in missingNames, not here.
+    // The names the styles give whose drawing is a fallback, by
+    // cad::linetypeStatus and cad::symbolStatus - the rule cad::missingNames
+    // reports by (style_catalogue.hpp) - split by its two reasons, because
+    // each asks for a different fix. So never a built-in symbol, ByLayer, a
+    // plain line or a style's own symbol as its linetype (D8). Distinct and
+    // in name order; the styles' names only - a layer's missing linetype is
+    // in missingNames, not here.
+    //
+    // Undefined: in no loaded library, so the fix is to load one that
+    // defines it. The window and CUSTOMISE print these as exactly that.
     std::vector<std::string> unresolved{};
+    // NotALinestyle: a linetype naming only a `mode vertex` definition, which
+    // the viewport draws solid (D2). The library IS loaded and does define
+    // the name, as a symbol, so the fix is to pick a linestyle instead; a
+    // name here is never in `unresolved`, since symbolStatus finds any
+    // library definition.
+    std::vector<std::string> notLinestyles{};
 };
 
 [[nodiscard]] CustomisationCoverage customisationCoverage(const Document& document);
