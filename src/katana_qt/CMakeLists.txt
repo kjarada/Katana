@@ -27,6 +27,10 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     viewport_widget.hpp
     view_workspace.cpp
     view_workspace.hpp
+    dock_chrome.cpp
+    dock_chrome.hpp
+    view_layers_popup.cpp
+    view_layers_popup.hpp
     render_view_widget.cpp
     render_view_widget.hpp
     section_view_widget.cpp

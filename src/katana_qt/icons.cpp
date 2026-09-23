@@ -223,6 +223,15 @@ const std::vector<Icon>& allIcons()
         Icon::ImportPointCloud, Icon::ExportPointCloud,
         Icon::ExportDem,    Icon::ConvertCopc,
         Icon::DatasetInfo,
+        Icon::Minimise,     Icon::Float,
+        Icon::Dock,         Icon::Maximise,
+        Icon::Restore,      Icon::Close,
+        Icon::CommandLine,  Icon::ReferenceData,
+        Icon::ViewPlan,     Icon::View3D,
+        Icon::ViewSection,  Icon::ViewElevation,
+        Icon::ViewLayersFiltered,
+        Icon::LayerNew,     Icon::LayerNewChild,
+        Icon::Rename,       Icon::ZoomTo,
         Icon::Help,         Icon::About,
     };
     return icons;
@@ -506,6 +515,124 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.stroke(circle(17.5, 17.5, 4), true);
         ink.dot(17.5, 15.6, 0.9, true);
         ink.line(17.5, 17.6, 17.5, 19.8, true, 1.4);
+        break;
+    // ---- window buttons: neutral, and heavier than the toolbar set, because
+    // they are shown at 14 px on a title bar where 1.7 units is under a pixel.
+    case Icon::Minimise:
+        ink.line(6, 17, 18, 17, false, 2.2);
+        break;
+    case Icon::Maximise:
+        ink.stroke(rectangle(5, 5, 14, 14, 1.0), false, 2.0);
+        ink.fill(rectangle(5, 5, 14, 3));
+        break;
+    case Icon::Restore:
+        // Two windows, the front one whole and the back one showing only
+        // where it is not covered - the convention every desktop uses.
+        ink.stroke(polyline({{9, 8.5}, {9, 4}, {20, 4}, {20, 15}, {16, 15}}), false, 2.0);
+        ink.stroke(rectangle(4, 9, 12, 11, 1.0), false, 2.0);
+        ink.fill(rectangle(4, 9, 12, 2.6));
+        break;
+    case Icon::Close:
+        ink.line(6.5, 6.5, 17.5, 17.5, false, 2.2);
+        ink.line(17.5, 6.5, 6.5, 17.5, false, 2.2);
+        break;
+    case Icon::Float:
+        // The main window open at one corner, and an arrow leaving through it.
+        // Dock is the same box with the arrow coming back in, so the pair
+        // reads as one control in two states.
+        ink.stroke(polyline({{11, 4}, {4, 4}, {4, 20}, {20, 20}, {20, 13}}), false, 2.0);
+        ink.line(10, 14, 20, 4, false, 2.0);
+        ink.stroke(polyline({{14, 4}, {20, 4}, {20, 10}}), false, 2.0);
+        break;
+    case Icon::Dock:
+        ink.stroke(polyline({{11, 4}, {4, 4}, {4, 20}, {20, 20}, {20, 13}}), false, 2.0);
+        ink.line(20, 4, 10, 14, false, 2.0);
+        ink.stroke(polyline({{10, 8}, {10, 14}, {16, 14}}), false, 2.0);
+        break;
+    // ---- panels
+    case Icon::CommandLine:
+        ink.stroke(rectangle(3, 5, 18, 14, 2.0));
+        ink.stroke(polyline({{7, 9.5}, {10, 12}, {7, 14.5}}), true);
+        ink.line(12, 14.5, 17, 14.5, true);
+        break;
+    case Icon::ReferenceData:
+        // An image and a scatter of points: the two kinds of reference data.
+        ink.stroke(rectangle(3, 3, 13, 11));
+        ink.stroke(polyline({{3.8, 12}, {7, 8}, {10, 10.5}, {12.5, 8.5}, {15.2, 11.5}}), true);
+        for (const QPointF& p : {QPointF(12, 18.5), QPointF(15.5, 17), QPointF(19, 18.5),
+                                 QPointF(16.5, 20.8), QPointF(20.2, 14.8), QPointF(13, 21.5)}) {
+            ink.dot(p.x(), p.y(), 1.2);
+        }
+        break;
+    // ---- what a view shows
+    case Icon::ViewPlan:
+        ink.stroke(rectangle(3, 3, 18, 18, 1.5));
+        ink.stroke(polyline({{6.5, 16.5}, {10, 9}, {14.5, 13}, {17.5, 7}}), true);
+        for (const QPointF& p :
+             {QPointF(6.5, 16.5), QPointF(10, 9), QPointF(14.5, 13), QPointF(17.5, 7)}) {
+            ink.node(p.x(), p.y());
+        }
+        break;
+    case Icon::View3D: {
+        const QPainterPath top = polyline({{12, 3}, {20, 7.5}, {12, 12}, {4, 7.5}}, true);
+        ink.fill(top, true, 90);
+        ink.stroke(polyline({{12, 3}, {20, 7.5}, {20, 16.5}, {12, 21}, {4, 16.5}, {4, 7.5}}, true));
+        ink.line(12, 12, 12, 21);
+        ink.stroke(top, true);
+        break;
+    }
+    case Icon::ViewSection:
+        // A profile on its axes: a section is a measured graph, which is what
+        // tells it apart from the Section command's cut through the ground.
+        ink.stroke(polyline({{4, 3.5}, {4, 20}, {20.5, 20}}));
+        for (const double x : {8.5, 12.5, 16.5}) {
+            ink.line(x, 20, x, 18.3, false, 1.1);
+        }
+        ink.stroke(polyline({{4, 14}, {8.5, 10}, {12.5, 13}, {16.5, 7}, {20.5, 10}}), true);
+        break;
+    case Icon::ViewElevation:
+        // A building's front: the architectural meaning of an elevation.
+        ink.line(2.5, 20, 21.5, 20);
+        ink.stroke(polyline({{5, 20}, {5, 10}, {12, 4}, {19, 10}, {19, 20}}));
+        ink.stroke(rectangle(9.5, 13, 5, 7), true);
+        break;
+    case Icon::ViewLayersFiltered:
+        // The Layers glyph moved left, and the funnel everyone reads as
+        // "filtered" in the accent: this view is not showing everything.
+        ink.stroke(polyline({{2, 16}, {8.5, 20}, {15, 16}}));
+        ink.stroke(polyline({{2, 12}, {8.5, 16}, {15, 12}}));
+        ink.stroke(polyline({{8.5, 4.5}, {15, 8.2}, {8.5, 12}, {2, 8.2}}, true));
+        ink.fill(polyline({{14.5, 2.5}, {22.5, 2.5}, {19.8, 6.5}, {19.8, 10.5}, {17.2, 11.8},
+                           {17.2, 6.5}},
+                          true),
+                 true);
+        break;
+    // ---- panel tools
+    case Icon::LayerNew:
+        ink.stroke(polyline({{2.5, 15.5}, {9.5, 19.5}, {16.5, 15.5}}));
+        ink.stroke(polyline({{9.5, 7.5}, {16.5, 11.5}, {9.5, 15.5}, {2.5, 11.5}}, true));
+        ink.line(19, 2.5, 19, 9.5, true);
+        ink.line(15.5, 6, 22.5, 6, true);
+        break;
+    case Icon::LayerNewChild:
+        ink.stroke(rectangle(3, 3, 9, 5, 1.0));
+        ink.stroke(polyline({{7, 8}, {7, 17}, {11, 17}}));
+        ink.stroke(rectangle(11, 14.5, 10, 5, 1.0), true);
+        ink.line(18.5, 3, 18.5, 10, true);
+        ink.line(15, 6.5, 22, 6.5, true);
+        break;
+    case Icon::Rename:
+        // A name field with the text cursor in it.
+        ink.stroke(rectangle(2.5, 7, 19, 10, 1.5));
+        ink.line(6, 12, 11, 12);
+        ink.line(15, 4.5, 15, 19.5, true);
+        ink.line(13, 4.5, 17, 4.5, true);
+        ink.line(13, 19.5, 17, 19.5, true);
+        break;
+    case Icon::ZoomTo:
+        ink.stroke(circle(10, 10, 6.5));
+        ink.line(14.8, 14.8, 20.5, 20.5, false, 2.6);
+        ink.stroke(rectangle(7.5, 7.5, 5, 5), true);
         break;
     case Icon::Help: {
         ink.stroke(circle(12, 12, 9));
