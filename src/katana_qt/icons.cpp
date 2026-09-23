@@ -263,6 +263,9 @@ const std::vector<Icon>& allIcons()
         Icon::SurveyConverter,
         Icon::SurveyImport, Icon::SurveyExport,
         Icon::SurveyPointManager, Icon::SurveyPointReport,
+        // Format
+        Icon::FormatStyles, Icon::FormatSymbols,
+        Icon::FormatSurveyCodes, Icon::Purge,
     };
     return icons;
 }
@@ -819,6 +822,46 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         for (const double y : {12.5, 15.5, 18.5}) {
             ink.line(6.5, y, 17.5, y, false, 1.1);
         }
+        break;
+    case Icon::FormatStyles:
+        // A linetype table's three rows: continuous, dashed, and in the
+        // accent the one the manager is for - a 12d linestyle, dashed, with
+        // a symbol (a ring) drawn at its vertex.
+        ink.line(3, 5.5, 21, 5.5);
+        ink.dashed(polyline({{3, 11.5}, {21, 11.5}}));
+        ink.dashed(polyline({{3, 18.5}, {9.8, 18.5}}), true);
+        ink.dashed(polyline({{14.2, 18.5}, {21, 18.5}}), true);
+        ink.stroke(circle(12, 18.5, 2.2), true, 1.3);
+        break;
+    case Icon::FormatSymbols:
+        // Four plan symbols in a grid, as the library shows them: a survey
+        // mark, a station, a cross and, in the accent, the one chosen.
+        drawMark(ink, 6.5, 6.5, false);
+        drawStation(ink, 17.5, 7);
+        ink.line(4, 15, 9, 20, false, 1.3);
+        ink.line(9, 15, 4, 20, false, 1.3);
+        ink.stroke(polyline({{17.5, 13.5}, {21, 17.5}, {17.5, 21.5}, {14, 17.5}}, true), true);
+        ink.dot(17.5, 17.5, 1.1, true);
+        break;
+    case Icon::FormatSurveyCodes:
+        // A field code's tag, and the linework and mark the code manager
+        // turns it into (the accent).
+        ink.stroke(polyline({{3, 4}, {13, 4}, {17, 8}, {13, 12}, {3, 12}}, true));
+        ink.dot(6, 8, 1.1);
+        ink.line(8.5, 8, 12.5, 8, false, 1.1);
+        ink.stroke(polyline({{3, 20}, {9, 16.5}, {15, 19}}), true);
+        drawMark(ink, 19.2, 17.5, true);
+        break;
+    case Icon::Purge:
+        // A broom sweeping the unused away (the accent): not Erase's bin,
+        // which deletes what is picked, where Purge clears what nothing uses.
+        ink.line(20.5, 2.5, 12.5, 11.5);
+        ink.stroke(polyline({{9.8, 9.6}, {15.2, 13.8}, {11, 20.5}, {3, 16.5}}, true));
+        ink.line(7.4, 13.3, 5.8, 17.9, false, 1.1);
+        ink.line(10.4, 15, 8.8, 19.4, false, 1.1);
+        ink.dot(16.5, 19.5, 1.3, true);
+        ink.dot(20, 17, 1.3, true);
+        ink.dot(20.5, 21, 1.3, true);
         break;
     }
     painter.restore();

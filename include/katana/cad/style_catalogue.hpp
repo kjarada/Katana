@@ -112,21 +112,68 @@ enum class NameRole { Linetype, Symbol };
 
 [[nodiscard]] std::string_view toString(NameRole role);
 
-// A name a Style or Layer uses that nothing defines.
+// What a name a Style or a Layer gives draws as - THE rule for "is this name
+// missing", read by missingNames here and by customisationCoverage
+// (survey_coding.hpp), and so by the style manager's Diagnostics, the symbol
+// library, CUSTOMISE and the window's unresolved-names log. Each once had a
+// rule of its own, and they disagreed: a linetype naming only a `mode vertex`
+// definition was "defined" to one of them while the viewport drew it solid,
+// and built-in symbol names were "in no loaded library" to another (audit
+// CAD-17). Worked out through resolveLinePattern and resolveSymbol, the
+// viewport's own answers, so a name is missing exactly when what is drawn is
+// a fallback.
+enum class NameStatus {
+    Plain,     // names nothing: "", ByLayer, "continuous", "0", "1" in any case (D4)
+    OwnSymbol, // a style's linetype that is its own symbol's name - the 12da import's
+               // pattern for a symbol string - drawn as a plain line under the symbol (D8)
+    Library,   // a loaded library definition draws it
+    Katana,    // Katana draws it itself: a model linetype, or a built-in symbol shape
+    NotALinestyle, // a linetype naming only a `mode vertex` definition: a symbol, not a
+                   // linestyle, so the line is drawn solid (D2)
+    Undefined,     // nothing defines it: drawn solid, or as the built-in shape its name suggests
+};
+
+// "plain line", "own symbol", "library", "built in", "not a linestyle", "defined nowhere".
+[[nodiscard]] std::string_view toString(NameStatus status);
+
+// What missingNames reports: a name whose drawing is a fallback.
+[[nodiscard]] constexpr bool isMissing(NameStatus status)
+{
+    return status == NameStatus::NotALinestyle || status == NameStatus::Undefined;
+}
+
+// A linetype as a Style or Layer names it. `ownSymbol` is the Style's own
+// symbol, for D8's exception; a Layer has no symbol and passes "".
+[[nodiscard]] NameStatus linetypeStatus(const Document& document, std::string_view linetype,
+                                        std::string_view ownSymbol = {});
+// A Style's symbol: Plain for "" (the viewport's plain point mark), Library,
+// Katana for a built-in shape, else Undefined. Never NotALinestyle: every
+// library definition, `mode vertex` or not, can be drawn as a symbol (D3).
+[[nodiscard]] NameStatus symbolStatus(const Document& document, std::string_view symbol);
+
+// A name a Style or Layer uses whose drawing is a fallback.
 struct MissingName {
     std::string name{};
     NameRole role = NameRole::Linetype;
-    katana::entity::Users users{}; // who names it, and the entities reaching it
+    // Who names it, and the entities reaching it. For a linetype, not the
+    // styles that name it as their own symbol (D8): those draw no pattern.
+    katana::entity::Users users{};
     // What is drawn instead: "continuous" (a solid line) for a linetype, and
     // for a symbol the built-in shape entity::builtInSymbolFor picks.
     std::string fallback{};
+    // Why: Undefined (nothing defines it), or, for a linetype only,
+    // NotALinestyle (a `mode vertex` symbol defines it, and no linestyle).
+    NameStatus status = NameStatus::Undefined;
 };
 
-// Every Style or Layer linetype and every Style symbol that is in no model
-// table, in no loaded library and not built in - linetypes first, then
-// symbols, each ascending. NOT missing: a built-in symbol name ("cross" draws
-// a cross; audit CAD-17 was reporting it), ByLayer, and the plain-line names
-// "continuous", "0" and "1" in any case (a 12d plain line; D4).
+// Every name a Style or Layer gives whose status isMissing - linetypes first,
+// then symbols, each ascending. So NOT missing: a model linetype, a library
+// linestyle, a built-in symbol name ("cross" draws a cross; audit CAD-17),
+// ByLayer, the plain-line names "continuous", "0" and "1" in any case (D4),
+// and a style's linetype that is its own symbol's name (D8), which is what
+// the 12da import writes for every symbol string. Missing, as "not a
+// linestyle": a linetype naming only a `mode vertex` definition, which the
+// viewport draws solid and a linetype picker does not offer (D2, D3).
 [[nodiscard]] std::vector<MissingName> missingNames(const Document& document);
 
 // Names that are both a model Linetype and a non-vertex library definition

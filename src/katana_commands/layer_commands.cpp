@@ -18,15 +18,12 @@ class CreateLayerCommand final : public Command {
 
     [[nodiscard]] std::string_view name() const override { return "CREATE_LAYER"; }
 
+    // The table's own rule - the path, the weight, the names it references,
+    // and that it is new - so validate() refuses what execute() would
+    // (audit MOD-09: "a//b" and a negative weight passed here and failed there).
     [[nodiscard]] Status validate(const CommandContext& context) const override
     {
-        if (layer_.name.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "layer name is empty");
-        }
-        if (context.model.layers.contains(layer_.name)) {
-            return makeError(ErrorCode::AlreadyExists, "layer already exists", layer_.name);
-        }
-        return {};
+        return context.model.layers.checkAdd(layer_);
     }
     [[nodiscard]] Status execute(CommandContext& context) override
     {
@@ -59,7 +56,7 @@ class UpdateLayerCommand final : public Command {
             return makeError(ErrorCode::CommandRejected, "layer already has these attributes",
                              after_.name);
         }
-        return {};
+        return context.model.layers.checkUpdate(after_);
     }
     [[nodiscard]] Status execute(CommandContext& context) override
     {
@@ -104,7 +101,9 @@ class DeleteLayerCommand final : public Command {
             return makeError(ErrorCode::CommandRejected, "layer still contains entities",
                              "layer=" + layerName_ + " entities=" + std::to_string(inUse));
         }
-        return {};
+        // And the table's: a layer with nested layers is refused by remove()
+        // (audit MOD-09: validate() said OK, execute() said no).
+        return context.model.layers.checkRemove(layerName_);
     }
     [[nodiscard]] Status execute(CommandContext& context) override
     {
@@ -135,6 +134,10 @@ class DeleteLayerTreeCommand final : public Command {
     explicit DeleteLayerTreeCommand(std::string name) : name_(std::move(name)) {}
 
     [[nodiscard]] std::string_view name() const override { return "DeleteLayerTree"; }
+    // A whole branch goes, every layer's colour, linetype and flags with it:
+    // at least as destructive as DELETE_LAYER of one empty leaf, which asks
+    // (command.hpp; audit MOD-08).
+    [[nodiscard]] bool isDestructive() const override { return true; }
 
     [[nodiscard]] Status validate(const CommandContext& context) const override
     {

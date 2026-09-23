@@ -41,6 +41,14 @@ as session data outside the model, the loaded 12d style library and survey map
 * Listeners are notified after anything observable changes — model, selection,
   current layer, project. Views rebuild from the document rather than tracking
   deltas.
+* `modelRevision()` counts up by one for every command executed, undone or
+  redone and for every new or opened drawing, and never for anything else - a
+  selection, the current layer or style, a save, the metadata, or the library
+  and map, which have their generations. So "has the drawing changed since I
+  last looked" is one comparison. The managers' `DocumentWatcher` reads it; it
+  used to compare a fingerprint of the history's counts and the tables' sizes,
+  which could not tell an undo followed by a new command from nothing, nor a
+  reopened project from the drawing it replaced.
 * Undo can delete the entities that are selected and the layer that is current,
   so after every command the document prunes the selection to entities that
   still exist and falls back to layer `"0"` if the current one has gone.
@@ -167,18 +175,41 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
-PDAL or 12d's files: the application's command line adds `IMPORT`, `EXPORT`,
-`INFO <file>` and `QUIT` (`MainWindow`), and `katana_cli` adds `IMPORT`,
-`EXPORT`, `REFS`, `COPC` and the survey-code verbs (`CODE`, `CODE EXPLAIN`,
-`CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK`, `CUSTOMISE [REPLACE]`;
-`docs/survey_coding.md`) - its `--help` lists them. The survey-code verbs are
-not on the application's command line; the Survey menu is.
+PDAL or 12d's files: the application's command line
+(`MainWindow::runCommandLine`) adds `IMPORT`, `EXPORT`, `INFO <file>`,
+`REFS`, `CUSTOMISE [REPLACE] <file>...`, the view verbs `ZOOM`, `GRID` and
+`SNAP`, and `QUIT`; `katana_cli` adds `IMPORT`, `EXPORT`, `REFS`, `COPC` and
+the survey-code verbs (`CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`,
+`MAPFILE CHECK`, `CUSTOMISE [REPLACE]`; `docs/survey_coding.md`) - its
+`--help` lists them. Of the survey-code verbs only `CUSTOMISE` is on the
+application's command line; the rest are the Survey Code Manager's tabs.
+
+In the application a typed line is routed before the interpreter sees it
+("The tool host" below): while a tool runs, the whole line is that tool's
+answer; a single word that is a tool's alias or id starts the tool; the same
+word with arguments (`LINE 0,0 10,0`) is still the interpreter's, which is
+what scripts and the headless checks type; and an empty line is Enter in the
+drawing.
 
 ## Desktop application
 
-`katana` (the target in `src/katana_qt`) is a `QMainWindow` with a viewport, dockable layer, property and
-command panels, and a status bar showing cursor coordinates, the active snap and
-the current layer.
+`katana` (the target in `src/katana_qt`) is a `QMainWindow` around a
+workspace of views, with dockable Layers, Properties, Command Line and
+Reference Data panels. Its menu bar reads in the order a CAD user reads it -
+File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
+(`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
+`helpMenu`). File keeps to files: the 12d customisation is loaded from Format
+and from Survey > Survey Coding, beside the managers of what it brings. The
+status bar shows a view's running readout, the current layer, the active snap
+and the cursor coordinates.
+
+The readout (`FrameStatsLabel`) is a 3D view's frame time or a section's
+station and elevation under the cursor, forwarded from whichever view raised
+it (`ViewWorkspace::onFrameStats`) and kept apart from `onStatus`, which is
+for messages, so the status bar's message never hides it. It shows the most
+recent view's readout, not only the active view's, and keeps its last text
+while a plan view is active. It has no automated test; a screenshot of a 3D
+view is what checked it.
 
 The plan viewport draws with `QPainter` and turns mouse input into commands. It
 holds no geometry of its own: it paints whatever the model contains (Rule 3).
@@ -187,11 +218,16 @@ Phase 15 draws the 3D and Elevation cells, and a Vulkan backend would replace
 that rasteriser, not this painting code (PLAN.MD Phase 15). This paragraph used
 to say the reverse.
 
-Interaction: left click picks or starts a point; dragging left-to-right is a
-window selection and right-to-left a crossing selection (shown by a solid or
-dashed rubber band); middle-drag pans; the wheel zooms about the cursor; right
-click or Esc cancels; Enter finishes a polyline and `C` closes it; Delete erases
-the selection. Shift adds to the selection and Ctrl toggles.
+Interaction: left click picks, or gives the running tool its point or its
+entity; dragging left-to-right is a window selection and right-to-left a
+crossing selection (shown by a solid or dashed rubber band); middle-drag pans;
+the wheel zooms about the cursor; Delete erases the selection. With no tool
+running, Shift adds to the selection and Ctrl toggles; Enter or Space starts
+the last tool again; Esc abandons a box and then clears the selection; and a
+right-click cancels as Esc does, since nothing is wired to the view's context
+menu (`ViewportWidget::onContextMenu`). While a tool runs, Enter, Space and a
+right-click are the tool's Enter, and Esc ends the tool first. What a tool
+does with each is "The tool host", below.
 
 Two rendering details are worth noting. Arcs and circles are tessellated in
 *model* space with a chord count chosen for a sub-quarter-pixel sagitta, so a
@@ -201,11 +237,31 @@ glyphs, so a zoomed-out drawing stays legible instead of dissolving into
 unreadable marks.
 
 Layer visibility, locking and colour are edited in the layer panel or the
-Layers dialog; each edit is a command, so it participates in undo. Choosing the
-CURRENT layer is `Document::setCurrentLayer`, deliberately not a command - it
-changes what the next drawing tool does, not the drawing (see below).
-Opening a project whose database is damaged offers to restore the newest sound
-backup.
+Layers dialog (Format > Layers..., Ctrl+L); each edit is a command, so it
+participates in undo. Choosing the CURRENT layer is
+`Document::setCurrentLayer`, deliberately not a command - it changes what the
+next drawing tool does, not the drawing (see below). Opening a project whose
+database is damaged offers to restore the newest sound backup.
+
+**The current style and the Style row (decision D9).** The Properties
+toolbar carries the style new work is drawn in (`CurrentStyleCombo`): ByLayer
+first, then the drawing's styles by name. Choosing one is
+`Document::setCurrentStyle`, session state like the current layer and so not a
+command, and the log says "New work is drawn in ...". It acts on the box's
+`currentIndexChanged`, kept out while `MainWindow::refreshStyleChoices`
+rebuilds the list, so a headless `--fill` sets it as a person's pick does. A
+current style the list does not hold is shown, marked "(not in the drawing)",
+never replaced by the first choice - the QT-02 lesson. The Properties panel
+has a Style row above its read-only table (`PropertyStyle`, editable, and
+`PropertyStyleApply`): it shows the selection's style as it is, even a name
+the drawing lacks, or "<varies>" when the selection disagrees, and Apply or
+Enter gives the selection the style typed or chosen as one undo step
+(`MainWindow::applyPropertyStyle`, `commands::setEntityStyle`). Only the
+entities that change are in that step, so applying the style already shown
+is no step at all; and nothing is applied from the box's own change signal.
+A rename or delete of the current style clears it rather than following it
+("Document", above), so the toolbar then shows ByLayer.
+`qt_current_style_and_the_style_row_headless` drives both.
 
 ## Headless front end
 
@@ -271,10 +327,18 @@ them.
 ## Failure modes
 
 Every command failure surfaces as a message in the command log and, for errors,
-the status bar; the model is untouched. Closing with unsaved changes prompts to
-save, discard or cancel. A failed save reports the error and leaves the modified
-flag set. A damaged project offers backup recovery and never deletes the
-damaged file.
+the status bar; the model is untouched. Closing the window asks twice, in this
+order (`MainWindow::closeEvent`): first the Survey Code Manager, whose
+unapplied rule edits live only in its buffer - it is shown and asks Apply /
+Discard / Cancel over the rules it is about (`CustomisationWorkbench::confirmClose`),
+first because its Apply changes the drawing the next question is about - and
+then, with unsaved changes, save, discard or cancel (`confirmDiscard`). A
+headless run has nobody to answer either, so it refuses and says why in the
+log, never discarding anything unasked: a scripted `QUIT` with unapplied code
+edits, or `NEW` after an edit, is refused, and the script can Apply or Revert
+(`applyMap`, `revertMap`), `SAVE` or `UNDO` first. A failed save reports the
+error and leaves the modified flag set. A damaged project offers backup
+recovery and never deletes the damaged file.
 
 ## Spatial indexing (Phase 18)
 
@@ -661,12 +725,29 @@ obvious on the sheet and invisible in the code.
 makes each `QAction` once - text, shortcut, icon, status tip and a tooltip
 that names the command and shows its shortcut, since an icon-only button owes
 the user its name - and the same object goes into the menu and the toolbar, so
-the two cannot drift. File, Edit, View and Terrain run along the top; Draw runs
-down the LEFT edge, where every CAD program keeps its drawing tools, because
-they are the ones reached for without looking and a strip beside the drawing is
-a shorter journey than a row above it. Every toolbar and dock has an object
-name, which is what `QMainWindow::saveState` keys a layout on. View > Panels
-brings back any dock that has been closed.
+the two cannot drift. File, Edit, Properties (the current style), View and
+Format run along the top; Survey, Terrain and GIS have a second row of their
+own (`addToolBarBreak`), because in one row they were squeezed to a button
+each behind overflow arrows. Draw and Annotate run down the LEFT edge, where
+every CAD program keeps its drawing tools, because they are the ones reached
+for without looking and a strip beside the drawing is a shorter journey than a
+row above it; Modify runs down the RIGHT edge, as in AutoCAD's classic layout,
+because one column could not hold all three without hiding the last tools
+behind an overflow arrow. Every toolbar and dock has an object name, which is
+what `QMainWindow::saveState` keys a layout on. View > Panels brings back any
+dock that has been closed.
+
+**Every key reaches one thing.** `MainWindow::shortcutClashes` gathers every
+key a person can press - each action's key sequences, any `QShortcut`, each
+menu's Alt letter and each item's underlined letter within its own menu (two
+items with one letter make the key cycle between them instead of choosing) -
+and lists those that reach more than one thing, since Qt disables an
+ambiguous shortcut for both. `katana --check-shortcuts` fails a run that has
+any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
+it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
+Library, Load 12&d Customisation, In&verse, Toggle Pe&rspective and others).
+The tool actions built from the catalogue have no underlined letters; their
+aliases are in their tooltips.
 
 **`katana --screenshot out.png`** lays the real main window out and grabs it to
 a PNG, headlessly. It exists so that the LOOK can be reviewed - in a pull
@@ -681,29 +762,50 @@ entities; and the command log opening at a third of the window's height. The
 icon, the sample with its hatch and alignment - and checks a PNG of plausible
 size comes out. It protects construction, not appearance.
 
-The same switch has grown into a headless DRIVER for dialogs, run by the
-`qt_*` tests through `tools/check_screenshot.cmake`, whose head comment is
-the reference: `--survey-dialog ACTION` opens a Survey menu dialog, `--fill
-field=text` types into a field and `--press button` clicks a button - by
-object name, which is why every field, button and tab gets one - and
-`-DDRIVE=@dialog|field=text|!button|#dock` runs such steps in order across a
-paged dialog. `-DEXPECT=<regex>` checks what the run logged, `-DCOMPARE=`
-checks the files it wrote against a reference, and `-DREFUSED=<regex>`
-requires the run to be REFUSED - exit 1, never a crash - which is how a test
-shows something is NOT offered: pressing a disabled button, or filling a
-choice the dialog does not have, fails the run instead of doing nothing.
-`docs/survey.md` has the survey import wizard's use of it. A headless run
-still never opens a modal box ("Panels refresh on the event loop" below).
+The same switch has grown into a headless DRIVER for the window, its menus
+and its dialogs, run by the `qt_*` tests through
+`tools/check_screenshot.cmake`; the usage comment at the head of
+`src/katana_qt/main.cpp` and the one above `-DDRIVE` in that script are the
+reference. Everything is found by object name, which is why every action,
+field, button and tab gets one. The steps run in the order given, with the
+event loop run between them as it runs between two things a person does:
+
+| Switch | `-DDRIVE` step | What it does |
+|---|---|---|
+| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`), else NAME + `Dialog` (the Survey dialogs); says on stderr what opened, and whether it is modal |
+| `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target |
+| `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
+| `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, or a list, grid or tree row selected by its text |
+| `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
+| `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts |
+| `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
+| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running) |
+| `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
+
+`--check-shortcuts` (`-DCHECK_SHORTCUTS=ON`) is described above, and
+`-DDIALOG=NAME` is `-DSURVEY_DIALOG` for any menu's dialog. What the
+target is at the end is what `--screenshot` grabs; steps that were all
+commands leave the window. `-DEXPECT=<regex>` checks what the run logged -
+a headless run echoes its log to stderr - `-DCOMPARE=` checks the files it
+wrote against a reference, and `-DREFUSED=<regex>` requires the run to be
+REFUSED - exit 1, never a crash - which is how a test shows something is NOT
+offered: pressing a disabled button, or filling a choice the dialog does not
+have, fails the run instead of doing nothing. `docs/survey.md` has the survey
+import wizard's use of it. A headless run still never opens a modal box
+("Panels refresh on the event loop" below): Format > Layers and Edit >
+Attributes, still modal, say so in the log and name the switch that grabs
+them (`--layer-manager`, `--attributes`), and a `QUIT` the window cannot take
+without asking is refused ("Failure modes" above).
 
 **Not done.** Settings are not persisted: toolbar positions, dock layout and
 window geometry are not saved between sessions although every object now has
 the name that would allow it (the dock chrome has the hooks, below). There is no
-light theme. The dialogs (corridor, plot) are themed but plain. Rotate,
-scale, mirror, array, trim, extend, offset, fillet and the rest now exist as
-interactive tools with icons ("Interactive tools" below), but no menu, toolbar
-or view hosts that catalogue yet, so in the application they are still
-command-line verbs. `resources/icon_sheet.png` has not been regenerated for
-the eleven Survey icons added on 2026-09-23.
+light theme. The dialogs (corridor, plot) are themed but plain. View >
+Viewport Layout's actions still have no object names (View > Active Viewport
+Shows has them: `viewShowsPlan`, `viewShows3D`, `viewShowsSection`,
+`viewShowsElevation`). `resources/icon_sheet.png` is regenerated by
+`katana_make_icons` and now carries the Survey icons and the four Format ones
+(Purge Unused is a broom, not a second bin).
 
 ## The workspace: every view is a dock, and each has its own layers (PLAN.MD 47)
 
@@ -897,9 +999,11 @@ floating panel, floating maximise across two screens. Not done: a Window
 menu; saving and restoring the layout (`minimisedNames` and `minimiseNamed`
 are the hooks, and `unmaximiseAll` must run before `saveState`); a floating
 active view left minimised during an arrange stays hidden and active, since
-only the tray button (`DockChrome::restore`) raises `onRestored`; and the
-Survey Point Manager dock (`SurveyPointsDock`) does not wear the chrome yet,
-because the chrome is not passed to `SurveyServices`.
+only the tray button (`DockChrome::restore`) raises `onRestored`. The Survey
+Point Manager dock (`SurveyPointsDock`) wears the chrome now that
+`SurveyServices::chrome` hands it over, and the workbench has the chrome
+forget the dock before deleting it; its minimise, tray and float have been
+seen only in a screenshot, with no automated test.
 
 ## Point symbols (PLAN.MD 20.2, slice 2)
 
@@ -995,10 +1099,27 @@ What follows from that:
 
 ## The layer manager, and why "move" is "rename"
 
-The dock beside the drawing is the quick view; Edit > Layers... (PLAN.MD
-20.2 slice 6) is the whole table, with the fields a dock has no room for and
-the operations that need it: move a layer under another parent, and put the
+The dock beside the drawing is the quick view; Format > Layers... (Ctrl+L,
+first on the Format menu and toolbar, where AutoCAD keeps Layer; PLAN.MD 20.2
+slice 6) is the whole table, with the fields a dock has no room for and the
+operations that need it: move a layer under another parent, and put the
 selection on a layer.
+
+`LayerManagerDialog` follows the managers' rules ("The rules a dialog or
+panel follows") and can be shown beside the drawing: it hears the Document
+through a `DocumentWatcher`, so an undo or a typed command reloads it once,
+from the event loop, keeping the selected layer and the form's unsaved edits
+when that layer did not change underneath them; New, New Child and Rename or
+Move ask for a name in a prompt row inside the dialog; a colour is typed as
+`#RRGGBB` (`layerColourText`) or picked in a colour dialog opened with
+`open()`, never `exec()`'d; and once its Document is gone it reads and changes
+nothing, every control but Close disabled the first time a person reaches for
+one. Its constructor is unchanged, and `selectedLayer()` and `selectLayer()`
+are public for a caller that opens it on a layer. The WINDOW still `exec()`s
+it from Format > Layers, so it is modal there and a headless run is told to
+use `--layer-manager` instead; showing one kept instance, as the Format
+workbench shows the other managers, is the remaining step. Selecting another
+row drops unsaved form edits without asking, as the style manager does.
 
 Moving needed no new command. A layer name is a path ("design/surface/tin1"
 - see `layer_path.hpp` for why the tree is derived from the names rather
@@ -1038,34 +1159,129 @@ the same values and must not disagree about them. A real is written with
 enough digits to read back as the same double: a level shown as 31.2 that is
 really 31.249 is a lie in survey work.
 
-## The styles and linetypes manager, and what a rename is
+## The Format menu: the customisation workbench and its three managers
 
-One dialog for the `Style` and `Linetype` tables (PLAN.MD 20.2 slice 3,
-`src/katana_qt/style_manager.cpp`), because they are one subject: a style
-names a linetype. A 12d import brings 211 styles from one file - but NOT
-their linetypes: each style's linetype is a 12d LIBRARY name, which lives in
-the session's style library, not in the model's Linetype table (this said the
-import "fills both at once"). So almost every real style names something this
-dialog's linetype list does not contain.
+The owner's requests were to "enhance the linestyle and symbol and survey
+codes managers" and to "make it professional CAD software". Format is where
+AutoCAD keeps Layer, Linetype and Text Style, and it is where the three
+managers and what goes with them now live:
 
-Three decisions worth keeping, and one claim that was not true:
+```
+Format
+  Layers...                          formatLayers        (Ctrl+L)
+  Styles and Linetypes...            formatStyles        -> styleManagerDialog
+  Symbol Library...                  formatSymbols       -> symbolLibraryDialog
+  Survey Code Manager...             formatSurveyCodes   -> surveyCodeManagerDialog
+  ---
+  Load 12d Customisation...          loadCustomisation
+  Replace Loaded Customisation...    replaceCustomisation
+  ---
+  Purge Unused...                    formatPurge
+```
 
-- **The preview was meant to draw through the drawing code, and for a 12d
-  style it does not.** It draws with `cad::qtDashPattern` and
-  `cad::symbolStrokes` - the model's dash patterns and the sixteen built-in
-  shapes - and never asks the library, so every 12d linestyle previews as a
-  solid line and every library symbol as the built-in shape its name
-  suggests. This bullet used to call the preview "evidence about what will be
-  drawn"; for a drawing made from 12d it is evidence of nothing. The shared
-  painter and thumbnails below now exist to fix it (`styleSampleDrawing` along
-  `styleSamplePath`, painted by `style_painter`), and the dialog has not been
-  moved onto them yet. It does state its scale (20 pixels to the model unit)
-  rather than picking pixels, so a 1 m dash and a 1.5 m symbol are in
-  proportion to each other.
+The Format toolbar carries Layers and the three managers. Survey > Survey
+Coding shows the same code manager, Load and Replace actions - the same
+`QAction` objects (`SurveyServices::codeManager`), so two menus cannot drift
+apart.
+
+**`CustomisationWorkbench`** (`src/katana_qt/customisation/customisation_workbench.*`)
+is built like the Survey workbench: `MainWindow::buildFormatActions` makes the
+menu and the toolbar and hands them over with `CustomisationServices` - the
+Document, the view workspace, the window's action factory and log, whether
+the session is headless (asked each time, since the window learns it after it
+is built), and the window's own Layers, Load and Replace actions. So the
+workbench never includes `main_window.hpp`, and a widget test builds it and
+drives it (`tests/qt_widgets/customisation/test_customisation_workbench.cpp`).
+It owns what the managers share: the picture cache (`DefinitionThumbnails`),
+the session's linework control codes, and the one `CustomisationContext`
+each manager is built from.
+
+- **Non-modal, one of each, kept.** A manager is made the first time it is
+  asked for and then hidden, not deleted, between uses (`QPointer` slots);
+  asking again shows and raises the same one. That is what lets the code
+  manager's unapplied edits survive closing it. Each opens on its first entry
+  - the style manager's first rows, the symbol library's first symbol, the
+  code manager's rule 0 - rather than on an empty pane.
+- **Deleted before the Document.** The dialogs hold the Document and paint
+  from the workbench's cache, and a window destroys its members BEFORE its
+  child widgets, so `~CustomisationWorkbench` deletes them itself - and the
+  window destroys the workbench before the Document.
+- **"Show me what uses it"** (`CustomisationContext::selectAndShow`) selects
+  the entities and frames them in the ACTIVE plan view only; the other views
+  keep their zoom.
+- **Found by the headless driver.** Each manager's action carries its
+  dialog's object name as its data, which is how `--dialog formatStyles`
+  finds the dialog it opened.
+- **Purge Unused** (`purgeUnused`) deletes every style, linetype and hatch
+  pattern nothing uses (`cad::planPurge`, `cad::purgeCommand`) as ONE undo
+  step, keeping the current style, and names them in the log. An interactive
+  session is asked first (the `confirm` hook, else a question box); a
+  headless one is not. `qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless`
+  purges, undoes and checks the style is back.
+- **Closing the window asks the code manager first** ("Failure modes",
+  above: `confirmClose`).
+
+Loading and replacing a customisation are `docs/survey_coding.md` ("Loading a
+customisation"): a load merges, Replace is asked for.
+
+### Styles and Linetypes
+
+One dialog for the `Style` and `Linetype` tables and the session's 12d
+linestyles (PLAN.MD 20.2 slice 3, `src/katana_qt/style_manager.cpp`), because
+they are one subject: a style names a linetype. A 12d import brings 211
+styles from one file - but NOT their linetypes: each style's linetype is a
+12d LIBRARY name, which lives in the session's style library, not in the
+model's Linetype table. So almost every real style names something the
+drawing's own linetype table does not contain, and the dialog lists both.
+
+What it shows, all from `include/katana/cad/style_manager_rows.hpp` so the
+rows, filters and bulk edit are tested below Qt:
+
+| Tab | Shows | Does |
+|---|---|---|
+| Styles | `cad::styleRows`: each style, how many entities wear it, and whether its linetype or symbol is missing; the chips All / Used / Unused / Missing and a search | a form (linetype and symbol through `NamePicker`, weight, colour or ByLayer, hatch, symbol size, description) with Save and Revert; New, Duplicate, Rename, Merge Into, Delete, Purge; Apply to Selection, Select Users, Make Current |
+| Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Select Users |
+| Diagnostics | `cad::styleDiagnostics`: `cad::missingNames`, then the D2 collisions, each with who uses it and what is drawn meanwhile | Select Users |
+
+A `StylePreview` beside each form draws the style, or the linestyle, at a
+plot scale on paper or on screen through the shared painter ("What a style
+draws" below): lines at their PRINTED size, so a `paperstyle` looks the same
+at every scale and a `worldstyle` shrinks as the scale's N grows; a symbol
+fitted to the pane on its insertion point, with a scale bar in ground metres.
+The dialog's Undo and Redo buttons are the drawing's own stack. A name is
+asked for in a prompt row inside the dialog and a purge is checked in a panel,
+never in a box, so a headless session drives every action by object name.
+
+**QT-02's rule** (audit QT-02, fixed 2026-09-24). Save used to rewrite the
+linetype and symbol of every 12d-imported style: the form's boxes were
+non-editable combos filled from the model's linetypes and the sixteen
+built-in shapes, `setCurrentText` with a 12d name was a silent no-op on them,
+and Save wrote back whatever they still showed. Now:
+
+- a form writes back only the fields a person EDITED (`cad::StyleFields`,
+  `applyEdit`) - even for one style, because a spin box cannot show every
+  stored value exactly (a weight of 0.1234, a symbol size of 0.03125), so
+  writing back what it shows would change a style nobody edited;
+- an unedited Save is no command at all (`cad::editStylesCommand`,
+  `commands::updateStyleIfChanged`), so Save is enabled whenever a style is
+  selected and Revert only when there are edits;
+- every name field keeps a name it cannot list - `NamePicker` for linetypes
+  and symbols, `kept_name_combo.hpp` for the hatch and dimension-style
+  combos;
+- selecting several styles shows `<varies>` for the fields they differ in,
+  and Save leaves those fields of each style alone unless they were edited.
+
+The Layers dialog got the same fix; commands have no `updateLayerIfChanged`,
+so its unchanged Save compares the `Layer`.
+
+Two decisions from the first version still hold:
+
 - **The table is read-only; the form edits.** Editing in the table would run
   a command from inside the table's own `itemChanged` signal - the shape of
   the crash recorded under "Panels refresh on the event loop" below. There is
-  no `itemChanged` handler here at all, so the bug cannot be written.
+  no `itemChanged` handler here at all, so the bug cannot be written. The
+  dialog's own commands do not reload it either: they record what to select
+  and the watcher's deferred reload does it, so there is one reload path.
 - **A rename is a move, not an edit of a name field.** A `NamedTable` is
   keyed by name, so `renameStyle` removes, re-adds under the new name and
   repoints every holder (entities for a style; layers and styles for a
@@ -1077,25 +1293,102 @@ Three decisions worth keeping, and one claim that was not true:
   that a second implementation of "who uses this" invites. A protected item
   ("continuous") is protected from a rename as much as from a delete -
   everything that resolves to it by name would silently change what it draws.
+  Linetypes can be renamed too: a rename onto a library name is how a drawing
+  linetype ends a D2 collision, since a model linetype cannot be MERGED into
+  a library linestyle (`commands` cannot see the library).
 
-**Save Changes still rewrites every 12d style (audit QT-02, open).** The
-linetype and symbol boxes are non-editable combo boxes filled from the
-model's linetypes and the sixteen built-in shapes; `setCurrentText` with a 12d
-name is a silent no-op on such a box, and the form then writes back whatever
-the box still shows - `continuous`, or the previous row's value - and an
-empty symbol. The layer manager has the same shape of defect. The fix is in
-the foundations below (`keepCurrent`, `updateStyleIfChanged`); the dialogs
-have not been moved onto them.
+Not done: the Linetypes tab's preview draws the STORED linetype, and only the
+pattern strip shows unsaved grid edits; the Styles table has a Preview
+picture only for a symbol or a library linestyle, not a drawing's dash
+linetype; selecting another row drops unsaved form edits without asking (a
+reload caused elsewhere keeps them); the Diagnostics summary still calls
+every missing name one "that nothing defines", although each row's "drawn
+as" says when it is "not a linestyle"; and in the dark theme the paper
+preview is a large white pane while nothing is selected, and the Colour row
+shows a disabled ByLayer button with a stray drop-down arrow.
+
+### Symbol Library
+
+AutoCAD's Blocks palette, MicroStation's cell selector and 12d's symbol
+chooser in one window (`src/katana_qt/customisation/symbol_library.*`):
+
+- **left**, a tree of groups: All, Built-in, the library's `/` groups,
+  "(ungrouped)", and "Not defined" when a name resolves to nothing;
+- **centre**, a grid of 64-pixel pictures from the shared cache, captioned
+  with the name and badged with how many entities draw it, under a filter
+  bar: a search over name, group and survey code, and the chips All / In
+  drawing / Used by codes / Missing / Vertex mode;
+- **right**, a `StylePreview` at a plot scale (the insertion point marked,
+  and a warning when it lies outside what the symbol draws), the details,
+  and the actions.
+
+What is listed is `cad::symbolLibrary`: D3's symbols (a definition is a
+symbol when it is `mode vertex`, a survey code draws it as one, a style names
+it as one, or its file is a symbol file), the built-in shapes, and every
+symbol name a style OR A SURVEY CODE gives that nothing defines, in the
+pickers' amber with the shape it is drawn as instead. The codes' names are the
+library's own addition: `cad::missingNames` looks only at styles and layers.
+
+**How big it prints.** The details say what a point wearing the symbol
+prints: "2 x 2 mm at 1:500, 1 x 1 m on the ground". `cad::symbolPrintSize`
+(`include/katana/cad/symbol_assign.hpp`) measures what `cad::symbolDrawing`
+draws - its strokes AND the space each of its texts covers, since a symbol
+that is a letter, or carries one above its mark, prints the letter too - at
+the style's size (a width in model units; 0 for the definition's own), at
+1:N. A text's size comes from a `TextExtent`: the dialog measures it with the
+preview's own font (`styleTextExtent` in `style_painter`), so the number
+agrees with the picture beside it, and without one cad estimates it
+(`estimatedTextExtent`: 0.6 of the height per character, the height tall,
+descenders not counted) - so the two can differ a little, 2.91 mm with Arial
+against 3 mm estimated for the fixture's TEST Valve. A built-in shape, or the
+stand-in for a missing name, has no size of its own at size 0: its print size
+is the viewport's plain mark, and the pane says so rather than giving a
+number.
+
+The actions, each from a button and never from the grid's own selection
+signal; each that changes the drawing is ONE undo step through
+`Document::execute`:
+
+| Button | What it does |
+|---|---|
+| Assign to Selected Points | `cad::assignSymbolToPoints`: the points among the selection move into a style that draws the symbol at the size given - one found that draws exactly that, else one made - and the log counts the points moved, already in it, not points, and not found |
+| Set on Style | the chosen style's symbol (an inline style picker; `updateStyleIfChanged`) |
+| Select Points Using | the points wearing a style that names it, selected and framed |
+| Replace in Styles | `cad::replaceSymbolInStyles`: every style naming the current symbol names the one in the inline `NamePicker`; refused while that is empty |
+| Load .4d... | `archive12d::readCustomisation`, MERGED into the session's library (D1: never a Replace from here), each file's added and replaced definitions in the log |
+| Export Selected to .4d... | `archive12d::writeStyleLibrary` of the selected library definitions |
+
+A headless session opens no file dialog: Load and Export are
+`loadLibraryFile` and `exportSelectedTo`, which take a path, and the buttons
+say in the log what to call. Not done: Assign makes a style with linetype
+ByLayer and weight 0.25, and under D8 a line later put in that style draws
+the symbol at its vertices; the grid's pictures are on the dark screen ground
+only, though the preview switches; and the dialog reloads whole (two
+`tableUsage` passes) on every command the watcher reports, not measured on a
+250,000-entity drawing.
+
+### Survey Code Manager
+
+The survey code library a surveyor codes against - 12d's mapfile editor,
+Civil 3D's description keys, TBC's feature definitions - in five tabs, each
+over one cad foundation, so the dialog decides nothing the CLI would say
+differently: Code Table (`cad::codeTable` and `cad::explainCode`, with the
+rule form), Codes in Drawing (`cad::codeCensus`), Issues
+(`cad::lintSurveyMap`), Apply Codes (`cad::applySurveyCodes`, previewed before
+it runs) and Linework (`cad::processLinework`, and the session's control
+codes). Its edits go to a BUFFER and reach the drawing only on Apply; Revert
+takes the drawing's map back; closing with unapplied edits asks. That, and
+what each tab shows, is `docs/survey_coding.md` ("The Survey Code Manager").
 
 ### What the managers stand on
 
-The owner asked on 2026-09-23 to "enhance the linestyle and symbol and survey
-codes managers". What was merged that day is the tested logic below Qt that
-those managers need, each piece reachable from the command line now; the
-dialogs are the next step. Professional managers (AutoCAD's, Civil 3D's,
-TBC's, MicroStation's, 12d's) share a vocabulary - usage counts, purge,
-merge, duplicate, a current style, pickers that browse a library with
-pictures - and each item here is one of those, in the layer that can test it.
+What was merged on 2026-09-23 is the tested logic below Qt that the managers
+above need, each piece reachable from the command line too; the dialogs of
+2026-09-24 render it and decide nothing of their own. Professional managers
+(AutoCAD's, Civil 3D's, TBC's, MicroStation's, 12d's) share a vocabulary -
+usage counts, purge, merge, duplicate, a current style, pickers that browse a
+library with pictures - and each item here is one of those, in the layer that
+can test it.
 
 - **Who uses what, in one pass** (`entity::tableUsage`,
   `include/katana/entity/table_usage.hpp`). Every style, linetype name,
@@ -1149,22 +1442,46 @@ pictures - and each item here is one of those, in the layer that can test it.
   edited back, MARKED, when the list lacks it - that, not a more complete
   list, is what stops an editor rewriting a name it could not show, which is
   QT-02. Names are case-sensitive; `filterChoices` folds case.
-- **What is wrong, listed.** `missingNames` gives every Style or Layer
-  linetype and Style symbol defined nowhere, with its users and what is drawn
-  instead - never a built-in symbol name (CAD-17), ByLayer, or the plain lines
-  `continuous`, `0` and `1`. `linetypeCollisions` gives the names both a model
-  Linetype and a non-vertex library definition hold (D2's collisions; the
-  library wins).
+- **What is wrong, listed, by one rule.** `cad::linetypeStatus` and
+  `cad::symbolStatus` say what a name a Style or Layer gives draws as, worked
+  out through `resolveLinePattern` and `resolveSymbol` - the viewport's own
+  answers - as a `NameStatus`: Plain (`""`, ByLayer, and the plain lines
+  `continuous`, `0` and `1` in any case, D4), OwnSymbol, Library, Katana (a
+  model linetype or a built-in shape), NotALinestyle or Undefined. A name is
+  missing (`isMissing`) exactly when what is drawn is a fallback: Undefined,
+  defined nowhere; or NotALinestyle, a linetype that names only a `mode
+  vertex` definition, which the viewport draws solid and a linetype picker
+  does not offer (D2, D3) - the library DOES define it, as a symbol, so the
+  fix is to pick a linestyle, not to load a library. `missingNames` gives
+  every Style or Layer linetype and Style symbol that is missing, with its
+  users, what is drawn instead and `MissingName::status`, linetypes first.
+  Never a built-in symbol name (audit CAD-17, whose fix this rule
+  finishes), ByLayer, a plain line, or a style's linetype that is its own
+  symbol's name - what the 12da import writes for every symbol string, a
+  plain line under the symbol (D8). Every list of the DRAWING's missing
+  names reads this rule: the style manager's Missing chip and Diagnostics,
+  the symbol library, `customisationCoverage` (which keeps its two reasons
+  apart; `docs/survey_coding.md`, "Saying whether it is working") and so
+  CUSTOMISE and the window's customisation log. Each once had a rule of its
+  own, and they disagreed. The names a MAPFILE's rules give are judged apart
+  - by the lint (`UnresolvedLinestyle`, `LinestyleIsVertex`) and by the
+  load's "names the mapfile asks for" line - since a rule is not a style and
+  has no style's own symbol. `NamePicker` marks the same
+  names, with one exception: an own-symbol linetype is marked "(not
+  defined)" there although `missingNames` leaves it out.
+  `linetypeCollisions` gives the names both a model Linetype and a
+  non-vertex library definition hold (D2's collisions; the library wins).
 - **A current style** (D9): `Document::setCurrentStyle`, above.
 
 All of it has command-line verbs (`STYLE USAGE`, `STYLE MERGE`,
 `LINETYPE MERGE`, `STYLE SYMBOLS`, `STYLE CURRENT`, `PURGE`; "Command
-interpreter" above). Not yet: a layer manager reading the per-layer counts in
-`TableUsage::layers`; a current style that FOLLOWS a rename; a cad-level merge
+interpreter" above). The layer halves of audits MOD-08, MOD-09 and MOD-12
+are fixed as well (2026-09-24; `docs/model.md`, "Named tables"). Not yet: a
+layer manager reading the per-layer counts in `TableUsage::layers` (it counts
+with `countOnLayer`); a current style that FOLLOWS a rename; a cad-level merge
 of a model linetype into a library linestyle (to settle a D2 collision); and
-MOD-08, MOD-09 and MOD-12 are fixed for the tables only (their layer halves
-are in `layer_commands.cpp` and `layer_path.cpp`), so the register keeps them
-open.
+the code manager's own `linestyleState` in `code_manager_support.cpp`, a
+plain / defined / wrong-kind rule that does not read `linetypeStatus`.
 
 ## What a style draws: one resolver, one painter
 
@@ -1272,9 +1589,16 @@ or eight reaches across, whichever is larger, so the pattern can be
 recognised. The caller passes DEVICE pixels, so a HiDPI picker must multiply
 by the device-pixel ratio.
 
-Not yet: the style manager's preview and every picker still use none of this;
-the 3D view draws neither symbols nor 12d linestyles; the collision flags are
-not gathered into a diagnostics list anywhere but `linetypeCollisions`.
+The managers are built on it: `StylePreview` (the style manager's and the
+symbol library's preview) paints through this painter from this resolver,
+and every `NamePicker` entry and the symbol library's grid are these
+thumbnails; the style manager's Diagnostics tab lists the collision flags
+(`cad::styleDiagnostics`). Not yet: the 3D view draws neither symbols nor 12d
+linestyles; and `NamePicker` paints every picture as it is built, the
+drawing's own linetypes' uncached on every rebuild, so the code manager, whose
+two pickers list about 800 definitions, takes about 2.4 s to build in a Debug
+build on the reference map. Painting lazily, or caching the model pictures,
+would help.
 
 ## The lead's decisions of 2026-09-23, and where each lives
 
@@ -1283,15 +1607,15 @@ listed here so a later change can find the code that carries each one.
 
 | | Decision | Where it is implemented |
 |---|---|---|
-| D1 | The 12d library and survey map are SESSION data on `cad::Document`: not undoable, not in the project. Map edits are made in an editor buffer and committed with `setSurveyMap` (Apply/Revert), and persist by EXPORT. A load MERGES by default; Replace is explicit. | `Document::setStyleLibrary`/`setSurveyMap` and the generation counters; `archive12d::mergeCustomisation` and `LoadMode`; `writeStyleLibrary`, `writeMapFile`; the CLI's `CUSTOMISE [REPLACE]` (with its own merge; the GUI still replaces, QT-21). No editor or export command yet. `docs/survey_coding.md` |
+| D1 | The 12d library and survey map are SESSION data on `cad::Document`: not undoable, not in the project. Map edits are made in an editor buffer and committed with `setSurveyMap` (Apply/Revert), and persist by EXPORT. A load MERGES by default; Replace is explicit. | `Document::setStyleLibrary`/`setSurveyMap` and the generation counters; `archive12d::mergeCustomisation` and `LoadMode`, which both front ends call (Format > Load 12d Customisation... and Replace Loaded Customisation..., `CUSTOMISE [REPLACE]` in either command line; QT-21 fixed); the Survey Code Manager's buffer, Apply and Revert, and its Export Mapfile (`writeMapFile`); the symbol library's Export Selected to .4d (`writeStyleLibrary`). No CLI export verb. `docs/survey_coding.md` |
 | D2 | A linetype name: a non-vertex library definition wins (no dash on its strokes), else a model Linetype, else solid. `ByLayer` as a Style linetype inherits the layer's. | `cad::resolveLinetype`; `entity::isByLayer`, `resolvedLinetype`; `linetypeChoices`, `linetypeCollisions`; `STYLE SET ... linetype`; 12da export's `linestyleOf` |
-| D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its file's name contains "symbol". Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `cad::classifyDefinition`, `symbolChoices`, `keepCurrent`, `filterChoices`; `LineStyle::source`; `codeTableRowMatches`; the lint's `SymbolNotSymbolCapable`. Not yet in the dialogs. |
+| D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its file's name contains "symbol". Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `cad::classifyDefinition`, `symbolChoices`, `keepCurrent`, `filterChoices`; `LineStyle::source`; `codeTableRowMatches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
 | D4 | Survey coding chooses a code's style by appearance and reuses one that draws alike; new names follow from the rules. | `cad::applySurveyCodes` (`Appearance`, `drawsAs`, `existingStyleFor`, `nameFor`) |
 | D5 | A code only the bare `*` answers is "fallback-only", not matched. | `entity::SurveyMatchKind`, `SurveyMatch::matched()`; `SurveyCodingReport::fallbackOnly`; `cad::splitStringName` |
 | D6 | No storage schema migrations this round. | Why symbol rotation, a linetype scale and true arcs in linework wait; the metadata change is a key, not a column |
 | D7 | White prints black on paper. | `cad::paperColour`, `PlotSettings::whiteToBlack`; `stylePenFor`; light-ground thumbnails |
 | D8 | A line whose style names a symbol draws it at every vertex. | `cad::symbolVertices`, `resolveLinePattern`; the viewport's `drawEntities`; `styleSampleDrawing` |
-| D9 | `Document::setCurrentStyle` feeds new work. | `Document::currentAttributes`; `STYLE CURRENT`; `PurgeOptions::keepStyles` |
+| D9 | `Document::setCurrentStyle` feeds new work. | `Document::currentAttributes`; `STYLE CURRENT`; the Properties toolbar's current style; `PurgeOptions::keepStyles`, which Purge Unused fills |
 
 ## Grading: the batter belongs to the edge, not to the bisector
 
@@ -1347,7 +1671,13 @@ modal box.** `--plot` and `--screenshot` set `MainWindow::setHeadless`, under
 which the "far from the current drawing" question keeps survey coordinates
 and says so, and every "Import failed" box (`warnUser`) becomes a line in the
 log. A scripted import of a file that did not exist used to sit on a warning
-box until the test harness killed it.
+box until the test harness killed it. Since then: a question the window would
+ask - discard unsaved changes, discard the code manager's unapplied edits - is
+refused and said rather than answered; Format > Layers and Edit > Attributes,
+still `exec()`'d, log that they are modal instead of opening; the Format
+workbench tells each manager (`CustomisationServices::headless`), so the
+symbol library and the code manager open no file dialog and the code
+manager's close asks nothing; and Purge Unused does not ask.
 
 ## A listener lives exactly as long as the thing it notifies
 
@@ -1391,9 +1721,19 @@ they are easiest to break:
   list's or table's own change signal ("The styles and linetypes manager").
 - **A view reacting to the Document defers and coalesces** its reload to the
   event loop, never rebuilding a table inside its own signal ("Panels refresh
-  on the event loop").
-- **A headless session never opens a modal box**, and every field, button and
-  tab has an object name, so tests and the headless driver can find it.
+  on the event loop"). A manager does it through a `DocumentWatcher`
+  (`customisation/document_watcher.*`), declared as its LAST member so it
+  goes first: one delivery per turn of the event loop however many
+  notifications came, saying what moved - the model (`Document::modelRevision`),
+  the library or the map (their generations), the selection, the current
+  layer or style.
+- **A manager is non-modal and kept** by the workbench that opened it (the
+  Format workbench, "The Format menu" above; the Survey workbench's dialogs),
+  so it stays open beside the drawing and a buffer of unapplied edits
+  survives hiding it.
+- **A headless session never opens a modal box**, and every action, menu,
+  field, button and tab has an object name, so tests and the headless driver
+  can find it.
 - **A dialog holding `Document&` must be deletable before the Document**, and
   a registration is owned by a `ListenerHandle` (above).
 - **Logic that can be tested below Qt lives in `katana_cad`** -
@@ -1457,7 +1797,7 @@ and large size with its name and aliases, so an icon is reviewed without
 launching the application. `tools::ToolInk` duplicates icons.cpp's private
 `Ink` while other work is changing that file; merging them is a follow-up.
 
-### The five families, and what no view hosts yet
+### The five families
 
 Thirty-six tools in five families were merged on 2026-09-23, each family one
 file (or a few) in `src/katana_cad/tools/`, each tool tested through
@@ -1508,12 +1848,134 @@ circle ("A circle has no ends, so one point cannot split it; use Break with
 two points."). Fillet and Chamfer take lines only, Join always makes a
 polyline, and a pending offset cannot itself be picked within the session.
 
-**Not hosted yet.** No menu, toolbar or view runs the catalogue: the plan
-view's own `switch` still draws, and the command line still goes to the
-interpreter. When a view hosts the tools, Esc must not simply discard a tool
-holding an `EditSession` - its pending Trim, Extend or Offset picks would be
-lost - so the host should send Enter on cancel, or the tools gain a
-commit-on-cancel. The Trim preview needs a pick aperture from the view. And
-the modify-edit tests reach `modify_edit_support.hpp` by a relative include,
-since no test include path covers `src/katana_cad/tools/`; moving the header
-to `include/katana/cad/` or adding the path would tidy it.
+The modify-edit tests reach `modify_edit_support.hpp` through an include
+path of their own (`tests/cad/CMakeLists.txt`), as the family's sources do.
+
+### The tool host: how a view runs a tool
+
+The plan view's own `switch` is gone. Every tool the view runs is a catalogue
+tool, run by a **`ToolHost`** (`src/katana_qt/tools/tool_host.*`) that sits
+between the tool, which knows nothing of Qt, and the view, which knows nothing
+of any one tool. It starts a tool with the document's current attributes
+(layer and style, D9) and the live selection, hands it what the user did - a
+snapped point, a picked entity, typed text, Enter, Esc, Undo - and when the
+tool finishes executes its ONE command through the Document. It restarts the
+tool when the tool asks (Circle, Point), and gives the tool the view's pick
+aperture in model units, so Trim's preview and picks match the zoom. It
+reports through hooks and opens nothing, so a test drives it by calling it
+(`tests/qt_widgets/tools/`). A generation count, bumped whenever a tool is
+made, remade or dropped, is how the host knows that a hook replaced the tool
+it was dealing with: a tool started from a hook was once allocated at the
+address of the one it replaced.
+
+**Esc keeps what AutoCAD keeps.** Esc ends the tool, but a tool holding work
+that its Enter only ever COMMITS - a Line or Polyline chain, the cuts of a
+Trim or Extend, Offset's copies, a run of Fillets or Chamfers - is sent Enter
+first, so Esc keeps that work as AutoCAD keeps the segments of a LINE
+(`tools::escapeKeepsWork`, a list of tool ids). Every other tool is dropped
+with nothing done, because its Enter at some step applies a DEFAULT - Move's
+"use the first point as the displacement", Join's "join what is selected" -
+which Esc must never do; Copy is dropped for that reason although its placed
+copies are collected work. A Fillet or Chamfer at a VALUE prompt (its radius,
+its distances) is first stepped back out of it: Enter there takes the prompt's
+default - at Chamfer's second distance it stores both distances for every
+later Chamfer - or, at Fillet's radius, only returns to the lines, and the
+corners a Multiple run made would go with the tool. The list stands in for a
+`cancel()` the tool interface does not have; a virtual commit-on-cancel on
+`InteractiveTool` would replace it.
+
+**A replaced drawing ends the tool.** New and Open call
+`ViewWorkspace::resetInteraction`, which ends the running tool WITHOUT
+committing anything (`ToolHost::abandon`): its picks and ids belong to the
+drawing that is going, and restarting it would read the old drawing's layer
+and selection. So does a plan view that is closed or changed into another
+kind while its tool runs (`ViewWorkspace::stopToolIn`, called by `closeView`
+before it finds the view to erase and by `buildContent`) - the view stops
+the tool while it can still say so, which is what un-checks the tool in the
+menus.
+
+**Typed input belongs to the running tool.** While a tool runs, what is typed
+over the view is kept in the view (`typedInput()`) and shown after the prompt
+in a band along the bottom of the view, until Enter or Space sends it
+(Space is a space inside a value being typed), Backspace takes a character
+back and Esc clears it. With no tool running a printable key is the start of
+a command and goes to the window's command line ("type anywhere",
+`onTextTyped`), never a Ctrl or Alt chord, which is a shortcut. On the command
+line itself (`MainWindow::runCommandLine`):
+
+- while a tool runs, the whole line is the tool's answer
+  (`ViewWorkspace::typeIntoTool`) - a point, a distance, an option - so
+  Polyline's `C` closes it where on its own `C` would start a Circle. Nothing
+  typed is transparent: `ZOOM` typed during a tool goes to the tool too;
+- with none running, a single word that is a tool's alias or its catalogue id
+  starts it (`tools::toolIdForCommand`: `L`, `line`, `TRIM`, `draw.circle.ttr`,
+  aliases case-insensitively), and the tool's action is checked in the menus
+  and toolbars as if it had been clicked; with arguments the word is the
+  interpreter's (`LINE 0,0 10,0` draws at once);
+- an empty line is Enter in the drawing (`ViewWorkspace::pressEnter`),
+  delivered as a real Return key to the plan view running a tool - or, with
+  none running, to the active plan view, which starts the last tool again -
+  so the command line and the view share one Enter path.
+
+`qt_a_tool_started_by_its_alias_draws_from_typed_points_headless` types
+`LINE`, two points and two empty Enters, and checks the line and the check
+marks.
+
+**Ctrl+Z inside a tool is the tool's.** The view claims the key at
+`ShortcutOverride`, so the window's Undo does not run, and acts on it at the
+key press, since Qt may ask more than once for one press. It steps back the
+tool's last input - the `U` inside LINE - and a tool with nothing to step
+back says so rather than undoing the drawing: the drawing's Undo is Esc and
+then Ctrl+Z.
+
+**A tool's selection step gathers.** At a step that wants objects, a plain
+click or box ADDS what it picks, as AutoCAD's "Select objects" does, and one
+with Shift or Ctrl held takes it back out; replacing the selection at each
+click, as the Select tool does, would leave only the last of several cutting
+edges picked. The picks change the DOCUMENT's selection, which the tool reads
+when Enter is pressed, so the view keeps what each click or box replaced and
+Ctrl+Z (or a typed `U`) at that step takes them back in the order they were
+made, together with any input the tool took itself (`All`).
+
+**Enter or Space repeats.** With no tool running, Enter or Space in a plan view
+starts the last tool again, as AutoCAD repeats the last command: a run of
+circles is a click on Circle and then Enter between them. The workspace keeps
+the last tool started in ANY plan view (`onRepeatTool`), so the repeat goes
+through `ViewWorkspace::startTool` like every other start.
+
+**One tool per workspace, and Esc to the busy view first.** A tool holds picks
+made in one view, so it runs in the active plan view only, and starting one
+stops, as Esc stops it, a tool running in any other plan view; it stays in the
+view it started in, where AutoCAD would carry a command across viewports. Esc
+(`ViewWorkspace::cancel`) reaches only the views running a tool or holding
+typed input for one; only when none is does every plan view abandon its box
+and clear the selection - so the first Esc ends the tool and keeps the
+selection it was started on, and the second clears it.
+
+**The menus are the catalogue.** `tools::fillToolMenus`
+(`src/katana_qt/tools/tool_menus.*`) builds the Draw, Modify and Annotate
+menus and toolbars from `cad::toolCatalog()`: one `QAction` per tool, shared by
+its menu and its toolbar and named by the tool's id (`draw.line`), with its
+family's icon, its shortcut, its tip as the status tip and a tooltip naming its
+aliases ("Line (LINE, L)"). Groups are separated in a fixed order (Lines,
+Curves, Transform, Edit, Text, Dimensions, Leaders); tools named "Family,
+Variant" ("Circle, 2 Points") are gathered into a submenu by family, and on a
+toolbar the family is ONE button that runs its first variant and drops the
+rest down. A category no menu takes is still reached by its aliases, and the
+window says so in its log at start-up. An action only asks the window to
+start its tool (`MainWindow::startTool`), which decides the view. The tool
+actions are checkable, in one exclusive group; Select (`toolSelect`, at the
+head of the Draw toolbar) is not a tool but the absence of one: it stops what
+runs, and is checked while nothing does. What is checked always follows what
+runs (`MainWindow::showRunningTool`, from `onActiveToolChanged`), including
+when a start is REFUSED - a click checks an action before its handler runs, so
+a tool that could not start, for want of a plan view, used to stay checked
+beside Select (`qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless`).
+While a tool runs its prompt is the command line's placeholder text, where the
+answer is typed.
+
+Not done: `ViewportWidget` still has the `enum class Tool` of the first eight
+tools and `setTool`, used for Select (`stopToolIn` calls it) and by
+`test_plan_view_tools.cpp`; the window and the workspace name tools by id.
+The picks of an entity step (Trim's edges, the part to cut) are not
+highlighted, and `ToolContext` carries no view's layer overrides.
