@@ -436,11 +436,18 @@ pointsByNumber(const katana::entity::Model& model, const std::string& numberProp
 // command that builds them all.
 class LineBuilder {
   public:
-    LineBuilder(const Document& document, std::string property, bool createLayers,
+    // An empty `property` means the first of codePropertyCandidates(), as it
+    // does to applySurveyCodes when no entity carries one: a line needs its
+    // code under SOME name, because that is what the rules style it by, and a
+    // property with an empty name is one the rest of Katana refuses. The name
+    // used is the report's `property`, so the two cannot disagree.
+    LineBuilder(const Document& document, const std::string& property, bool createLayers,
                 LineworkReport& report)
-        : document_(document), property_(std::move(property)), createLayers_(createLayers),
-          report_(report)
+        : document_(document),
+          property_(property.empty() ? codePropertyCandidates().front() : property),
+          createLayers_(createLayers), report_(report)
     {
+        report_.property = property_;
     }
 
     // 12d's model is Katana's layer. With none - or one that is missing and
@@ -819,7 +826,6 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
     }
     const std::string property =
         options.property.empty() ? findCodeProperty(points) : options.property;
-    report.property = property;
     NoteSink note{report.notes};
 
     // Resolved once per name rather than once per point: a survey of 30,000
@@ -988,7 +994,6 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
     const SurveyImportOptions& import = options.import;
     SurveyFeatureResult result;
     LineworkReport& report = result.report;
-    report.property = import.codeProperty;
     NoteSink note{report.notes};
 
     std::map<std::string_view, const katana::survey::SurveyPoint*> positioned;
@@ -996,6 +1001,9 @@ drawSurveyFeatures(const Document& document, const katana::survey::SurveyProject
         positioned.emplace(point.id, &point);
     }
 
+    // An import that wrote no code (an empty import.codeProperty) still
+    // gives the LINES theirs, under the first candidate name - see
+    // LineBuilder - or nothing would style them, and nothing would say so.
     LineBuilder builder(document, import.codeProperty, options.coding.createLayers, report);
     for (std::size_t index = 0; index < project.features.size(); ++index) {
         const katana::survey::SurveyFeature& feature = project.features[index];
