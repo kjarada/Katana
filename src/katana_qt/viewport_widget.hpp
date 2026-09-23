@@ -10,6 +10,7 @@
 // Rendering uses QPainter. The Vulkan renderer of Phase 15 replaces the paint
 // code, not the interaction logic.
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <map>
@@ -250,6 +251,15 @@ class ViewportWidget final : public QWidget {
     // Select tool's Ctrl toggles and its Shift adds, so neither could take a
     // whole window of picks back out.
     void gatherForTool(const QPointF& from, const QPointF& to, bool dragged, bool takeOut);
+    // Typed text for the running tool; U (or Undo) at a selection step is
+    // stepBack, so it takes back a click as Ctrl+Z does.
+    void sendTyped(const std::string& text);
+    // Ctrl+Z while a tool runs: at a selection step, the last change there
+    // (selectionSteps_); otherwise, or with none left, the tool's own undo.
+    void stepBack();
+    // selectionSteps_, emptied first if the tool it was kept for has been
+    // replaced, restarted or ended since (ToolHost::generation).
+    std::vector<std::optional<std::vector<katana::entity::EntityId>>>& selectionSteps();
     void run(katana::commands::CommandPtr command);
     void updatePrompt();
 
@@ -322,6 +332,14 @@ class ViewportWidget final : public QWidget {
     // it holds a reference to.
     tools::ToolHost tools_;
     QString typed_;
+    // What each change at the running tool's selection step replaced, for
+    // Ctrl+Z there. A click or box there changes the DOCUMENT's selection,
+    // which the tool reads at Enter (selectionNow), so the tool never sees it
+    // and cannot step it back. An entry is the selection before a click or
+    // box changed it, or nullopt for an input the tool took itself (All),
+    // which the tool steps back: one list, so both go back in the order made.
+    std::vector<std::optional<std::vector<katana::entity::EntityId>>> selectionSteps_;
+    std::uint64_t selectionStepsOf_ = 0; // the ToolHost::generation it is for
     // The tool Enter at no prompt runs again when onRepeatTool is unset; ""
     // until one has run here.
     std::string lastToolId_;
