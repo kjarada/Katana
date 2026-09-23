@@ -490,14 +490,39 @@ PlacementAdvice advisePlacement(const katana::geometry::Box2& existing,
                                   incoming.min.y - existing.max.y, 0.0});
     advice.separation = std::hypot(gapX, gapY);
 
-    // The criterion is the symptom, not an arbitrary distance: either part is
-    // "far" when showing both at once would shrink it below roughly one percent
-    // of the view, which is the point at which it stops being visible at all.
-    // A distance threshold in metres would be wrong for a site plan and wrong
+    // The criterion is the symptom, not an arbitrary distance: a part is lost
+    // when showing both at once shrinks it below roughly one percent of the
+    // view, which is the point at which it stops being visible at all. A
+    // distance threshold in metres would be wrong for a site plan and wrong
     // again for a national grid.
+    //
+    // But the loss must be the PLACEMENT's doing. This used to report any part
+    // under 1% of the combined view, which correctly placed data that is merely
+    // small always is - a single control point has no extent at all, a 10 m
+    // detail inside a 2 km site is 0.5% of it - and the default button then
+    // moved it to the drawing's corner (audit IO-02). So a part counts only if,
+    // with the gap closed, it would plainly be visible beside the other: its
+    // diagonal over kVisibleBeside of the other's, twice the invisibility line.
+    // Being lost at 1% of the combined view then needs a combined view more
+    // than twice the larger part's, which only a real gap produces. With the
+    // margin at 1x, a part barely over the line at the other's own zoom was
+    // "lost" once it overhung it by a hair: a 20 m shed 80 m off the corner of
+    // a 2 km site was reported far apart (the corner case in the tests).
+    //
+    // The larger part always clears the margin, so a drawing hidden by a
+    // distant import is reported however small the import is, one far-away
+    // point included. A part with no extent is drawn as a marker at any zoom
+    // and is never lost by its size.
     constexpr double kInvisibleFraction = 0.01;
-    const double smaller = std::min(diagonal(existing), diagonal(incoming));
-    if (smaller > together * kInvisibleFraction) {
+    constexpr double kVisibleBeside = 2.0 * kInvisibleFraction;
+    const double existingSize = diagonal(existing);
+    const double incomingSize = diagonal(incoming);
+    const auto lostByPlacement = [&](double size, double otherSize) {
+        return size > 0.0 && size <= together * kInvisibleFraction &&
+               size > otherSize * kVisibleBeside;
+    };
+    if (!lostByPlacement(existingSize, incomingSize) &&
+        !lostByPlacement(incomingSize, existingSize)) {
         return advice;
     }
 

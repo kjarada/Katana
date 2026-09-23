@@ -337,7 +337,7 @@ The required progression is:
 | 25 | AI Agent | not started |
 | 26 | Production Hardening | not started — no section of its own yet; section 43 lists it last |
 | 45 | Survey module and instrument interoperability | in progress — model, detection and the cad bridge delivered; parsers, reduction, Survey menu, wizard and Point Manager in progress |
-| 46 | The audit of 2026-09-23 — defect register | open — 141 of 142 confirmed defects outstanding, 7 of them high |
+| 46 | The audit of 2026-09-23 — defect register | open — 140 of 142 confirmed defects outstanding, 6 of them high |
 
 The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
@@ -1431,11 +1431,17 @@ like (255440, 7410850) and a drawing started from scratch sits near the origin,
 so the merge succeeds and the original content becomes a dot smaller than a
 pixel with nothing saying why.
 
-The criterion is the SYMPTOM, not a distance: either part is far when showing
-both would shrink it below 1% of the combined diagonal. A threshold in metres
-would be wrong for a site plan and wrong again for a national grid - the same
-20 km gap is far apart for two 100 m drawings (0.7% of the view) and not for two
-50 km ones (54%).
+The criterion is the SYMPTOM, not a distance: a part is lost when showing both
+would shrink it below 1% of the combined diagonal. A threshold in metres would
+be wrong for a site plan and wrong again for a national grid - the same 20 km
+gap is far apart for two 100 m drawings (0.7% of the view) and not for two
+50 km ones (54%). CORRECTED 2026-09-23 (audit IO-02): the loss must be the
+placement's doing, so a part counts only if it would plainly be visible beside
+the other with the gap closed (over 2% of the other's diagonal), and a part with
+no extent never counts. The old rule reported correctly placed data that was
+merely small - one control point, a 10 m detail inside a 2 km site - and the
+default button moved it to the drawing's corner. A far-off single point still
+reports the drawing it would hide.
 
 `IMPORT <file> LOCAL` in the CLI shifts the data so its corner meets the
 drawing's, using the `VectorImportOptions::originShift` that already existed and
@@ -3147,7 +3153,7 @@ over the bug:
 
 # 46. The audit of 2026-09-23 — the defect register
 
-**STATUS: OPEN — 141 of 142 confirmed defects outstanding.**
+**STATUS: OPEN — 140 of 142 confirmed defects outstanding.**
 
 A read-only audit of every subsystem: ten auditors, one per area, each told to
 verify the code rather than trust this plan, and every defect they reported put
@@ -3160,14 +3166,17 @@ code) are in `docs/audit/2026-09-23-findings.md`; they were not challenged, so
 each is a lead to check. The false claims it found in this plan were corrected
 in f90a1db where no pending fix changes them.
 
-A fix cites the ID (`fixes audit QT-07`), marks the entry FIXED with its commit
-in the register, and updates this table, all in the same commit.
+A fix cites the ID (`fixes audit QT-07`) in its commit message and, in the same
+commit, runs `python tools/audit_register.py <date> QT-07`, which marks the
+entry FIXED in the register and recounts this table from the register, so the
+two cannot disagree. (A commit cannot name its own hash, so the entry says
+FIXED and a date, and `git log --grep QT-07` finds the commit.)
 
 | Area | high | medium | low | open |
 |---|---|---|---|---|
 | MOD — entity model, commands, storage, selection | 1 | 3 | 12 | 16 |
 | QT — the desktop application | 2 | 10 | 15 | 27 |
-| IO — raster, vector and point-cloud interoperability | 3 | 6 | 9 | 18 |
+| IO — raster, vector and point-cloud interoperability | 2 | 6 | 9 | 17 |
 | A12 — the 12d archive and customisation | 1 | 4 | 11 | 16 |
 | CAD — the CAD engine | 0 | 5 | 13 | 18 |
 | REN — rendering and scene building | 0 | 4 | 5 | 9 |
@@ -3176,7 +3185,7 @@ in the register, and updates this table, all in the same commit.
 | SUR — survey, geodesy and survey import | 0 | 1 | 4 | 5 |
 | NET — least-squares adjustment | 0 | 1 | 2 | 3 |
 | BLD — build, tests and tooling | 0 | 3 | 9 | 12 |
-| **total** | **7** | **40** | **94** | **141** |
+| **total** | **6** | **40** | **94** | **140** |
 
 The high-severity ones, taken first:
 
@@ -3187,7 +3196,7 @@ The high-severity ones, taken first:
 * **QT-02** — Styles and Linetypes' Save Changes rewrites the linetype and
   symbol of every 12d-imported style.
 * **IO-01** — vector import discards Z and vector export writes Z = 0.
-* **IO-02** — placement advice calls small data inside a large drawing "far
+* ~~**IO-02**~~ FIXED 2026-09-23 — placement advice calls small data inside a large drawing "far
   apart", and its default button then moves it.
 * **IO-03** — a budgeted point-cloud read materialises the whole file.
 * **A12-01** — a split breakline-point string exports every point with the
