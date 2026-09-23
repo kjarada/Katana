@@ -77,7 +77,9 @@ tables. Layer `"0"` always exists and cannot be removed or renamed.
 `PropertyDatabase` holds an optional schema: a property that has been defined is
 type-checked on assignment, and one that has not is free-form.
 
-`Model` aggregates all four.
+`Model` aggregates the entities, the layers and the six named tables - styles,
+linetypes, dimension styles, hatch patterns, alignments - and the property
+schema (`model.hpp`; this said "all four" from before the tables existed).
 
 ## Command system
 
@@ -125,9 +127,14 @@ Available commands: `CREATE_POINT`/`LINE`/`CIRCLE`/`ARC`/`POLYLINE`/`TEXT`/
 `DIMENSION`/`ENTITIES`, `DELETE`, `MOVE`, `ROTATE`, `SCALE`, `MIRROR`, `COPY`,
 `ARRAY`, `TRIM`, `EXTEND`, `OFFSET`, `FILLET`, `CHAMFER`, `SET_LAYER`,
 `SET_COLOR`, `SET_STYLE`, `SET_VISIBLE`, `SET_PROPERTY`, `REMOVE_PROPERTY`,
-`SET_GEOMETRY`, `CREATE_LAYER`, `UPDATE_LAYER`, `DELETE_LAYER`. These names are
-stable identifiers and will become the vocabulary of the structured API in
-Phase 23.
+`SET_GEOMETRY`, `RENAME_PROPERTY`, `CREATE_LAYER`, `UPDATE_LAYER`,
+`DELETE_LAYER`, and the layer-tree and table commands - `DeleteLayerTree`,
+`RenameLayer`, and create / update / delete / rename for each named table (one
+template set over a `TablePolicy`, `table_commands.cpp`). The upper-case names
+are stable identifiers meant to become the vocabulary of the structured API in
+Phase 23; the layer-tree and table commands are named in CamelCase
+(`CreateLinetype`), which is an inconsistency to settle before that API is
+written, not a second convention to follow.
 
 ## Storage
 
@@ -156,8 +163,11 @@ a project remains a single file at rest, which matters on network shares.
   leaves the previous state intact. Rewriting everything is simple and correct;
   incremental saves driven by change events are a later optimisation, to be made
   only with profiling data.
-* **Exact values.** Doubles round-trip bit for bit — asserted over 500 random
-  values at survey magnitudes.
+* **Exact values.** Doubles round-trip bit for bit. For the JSON that carries
+  properties and metadata that is asserted over 500 random values at survey
+  magnitudes (`test_entity.cpp`); for geometry, which is a binary blob, it rests
+  on the blob tests' fixed list of values - this used to cite the first for
+  both.
 * **Migrations.** `PRAGMA user_version` holds the schema version. Older projects
   migrate step by step on open, after an automatic backup. Released migrations
   are append-only and are never edited. Projects written by a newer Katana are
@@ -174,9 +184,12 @@ ids unique and non-zero, layers and styles resolvable, geometry valid,
 touching the model, so opening a damaged project cannot leave a half-populated
 drawing on screen.
 
-Geometry and properties are stored as JSON text via
+Geometry is stored as a versioned binary blob (schema 3 onwards,
+`geometry_blob.cpp`), which is what made opening a 50 000-entity project 4.6x
+faster. Properties, metadata and property defaults are JSON text via
 `katana_entity/serialization.cpp`, which keeps nlohmann confined to one
-translation unit and keeps the schema readable for debugging and diffing.
+translation unit and keeps those readable for debugging and diffing. (This
+paragraph said geometry was JSON too, from before schema 3.)
 
 ## Numerical assumptions
 
@@ -217,7 +230,7 @@ have not yet been measured on a 10⁶-entity drawing.
 | Entity on a locked layer edited | `CommandRejected` |
 | Layer still in use deleted | `CommandRejected` naming the entity count |
 | Default layer removed | `CommandRejected` |
-| Command would change nothing | `CommandRejected` |
+| Command would change nothing | `CommandRejected` for an empty change set or an identical `UpdateLayer`; other no-op modifications are accepted and recorded (audit MOD-06, open) |
 | Transaction step fails | earlier steps undone, error names the step |
 | Undo/redo with empty history | `InvalidState` |
 | SQLite error | `DatabaseFailure` with SQLite's message |
