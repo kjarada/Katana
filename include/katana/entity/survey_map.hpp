@@ -21,9 +21,12 @@
 // of them. `lookup` is what combines them; see docs/survey_coding.md for how
 // ties are settled and on what evidence.
 
+#include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "katana/core/error.hpp"
@@ -147,17 +150,54 @@ struct SurveyRule {
     friend bool operator==(const SurveyRule&, const SurveyRule&) = default;
 };
 
+// How a code met the map, by the most specific key that matched it. Kept
+// apart from "matched" because the reference mapfiles carry `*` rules - 16 in
+// each pipe section alone - that every code meets, so "some rule matched" is
+// true of a typo too (audit CAD-05).
+enum class SurveyMatchKind {
+    Exact,        // a key equal to the code
+    Prefix,       // a key such as "WM*", but not the bare `*`
+    FallbackOnly, // nothing but the bare `*`
+    None,         // no rule at all
+};
+
+[[nodiscard]] const char* toString(SurveyMatchKind kind);
+
 // What a code resolves to: the rules that matched, combined.
 struct SurveyMatch {
     SurveyRule resolved{}; // `key` is the most specific key that matched
     // Every key that contributed, most specific first.
     std::vector<std::string> keys{};
+    SurveyMatchKind kind = SurveyMatchKind::None;
 
     [[nodiscard]] bool empty() const { return keys.empty(); }
+    // Whether the map has something to say about THIS code rather than about
+    // every code: a rule more specific than `*` matched, or the combination
+    // names a model, a linestyle or a symbol (the lead's decision D5). A code
+    // only `*` answers, with nothing but its attributes, is fallback-only - in
+    // practice a code nobody wrote a rule for, most often a typo.
+    [[nodiscard]] bool matched() const
+    {
+        return kind == SurveyMatchKind::Exact || kind == SurveyMatchKind::Prefix ||
+               !resolved.model.empty() || !resolved.linestyle.empty() ||
+               (resolved.symbol.has_value() && !resolved.symbol->style.empty());
+    }
 };
 
+// Besides text being text and numbers being finite: a key has no surrounding
+// whitespace (a field code never has, so such a key can match nothing a
+// surveyor types), and a model, when there is one, is a valid layer path
+// (it becomes one when the code is applied, and failing there would fail the
+// whole application over one rule).
 [[nodiscard]] katana::core::Status validate(const SurveyRule& rule);
 
+// A rule's identity is its INDEX, and its index is also its precedence: among
+// rules of equal specificity the earlier wins. So the editing calls below are
+// by index, and every one of them - add included - INVALIDATES what match()
+// and lookup() handed out before it: match() returns pointers into the rule
+// vector, and an index from matchIndices() may now name another rule. A
+// caller holding either across an edit must ask again. (A cache keys on
+// cad::Document::surveyMapGeneration, never on a SurveyRule*.)
 class SurveyMap {
   public:
     // Rules are kept in the order they were read. Several rules with one key
@@ -166,10 +206,29 @@ class SurveyMap {
     // loading a second mapfile adds to the first rather than overriding it.
     [[nodiscard]] katana::core::Status add(SurveyRule rule);
 
+    // ---- editing, by index --------------------------------------------------
+    // Each fails with InvalidArgument (a rule validate() refuses) or NotFound
+    // (an index past the end), and then leaves the map exactly as it was.
+    //
+    // A copy rather than a reference: an editor reads a rule into a form, and
+    // a reference would dangle at the first edit.
+    [[nodiscard]] katana::core::Result<SurveyRule> at(std::size_t index) const;
+    [[nodiscard]] katana::core::Status replace(std::size_t index, SurveyRule rule);
+    [[nodiscard]] katana::core::Status remove(std::size_t index);
+    // Before the rule now at `index`; `index == size()` appends.
+    [[nodiscard]] katana::core::Status insert(std::size_t index, SurveyRule rule);
+    // Afterwards the rule is AT `to`, the others keeping their relative
+    // order: [A B C D] move(0, 2) gives [B C A D]. Order is precedence, so
+    // this is how an editor says which of two equal keys wins.
+    [[nodiscard]] katana::core::Status move(std::size_t from, std::size_t to);
+
     // Every rule whose key matches, most specific first: an exact key before
     // a prefix, a longer prefix before a shorter, `*` last. Rules of equal
     // specificity keep the order they were read.
     [[nodiscard]] std::vector<const SurveyRule*> match(std::string_view code) const;
+    // The same rules as indices into rules(), in the same order - what an
+    // explanation cites, since a rule has no identity but its place.
+    [[nodiscard]] std::vector<std::size_t> matchIndices(std::string_view code) const;
     // Those rules combined: for each field, the most specific rule that says
     // anything about it wins. Attributes accumulate instead of overriding.
     [[nodiscard]] SurveyMatch lookup(std::string_view code) const;
@@ -183,8 +242,33 @@ class SurveyMap {
     // what a library must provide for this mapfile to draw.
     [[nodiscard]] std::vector<std::string> stylesReferenced() const;
 
+    // Equal when the rules are, in the same order: order is precedence, so
+    // two maps holding the same rules in another order can resolve a code
+    // differently and are not equal.
+    friend bool operator==(const SurveyMap& a, const SurveyMap& b) { return a.rules_ == b.rules_; }
+
   private:
+    // Rule indices by key, so that a lookup is a handful of hash probes - one
+    // for the exact key and one per prefix length of the code - instead of a
+    // test of every rule: applying 1,624 rules to 20,000 points was 32 million
+    // key comparisons. Derived from rules_ and rebuilt by every edit but add;
+    // each list is ascending, which is read order, which is what breaks ties.
+    struct KeyHash {
+        using is_transparent = void;
+        [[nodiscard]] std::size_t operator()(std::string_view text) const
+        {
+            return std::hash<std::string_view>{}(text);
+        }
+    };
+    using KeyIndex =
+        std::unordered_map<std::string, std::vector<std::size_t>, KeyHash, std::equal_to<>>;
+
+    void indexRule(std::size_t at);
+    void reindex();
+
     std::vector<SurveyRule> rules_{};
+    KeyIndex exact_{};    // "PABB" -> the rules keyed exactly so
+    KeyIndex prefixes_{}; // "WM" for "WM*", "" for the bare `*`
 };
 
 } // namespace katana::entity
