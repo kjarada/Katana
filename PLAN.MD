@@ -326,10 +326,10 @@ The required progression is:
 | 14 | Terrain | **done** |
 | 15 | 3D Rendering | partial — tiled multithreaded SOFTWARE renderer, camera, tiled viewports, 3D and section views; Vulkan backend outstanding |
 | 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons; civil solids on the TIN instead |
-| 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; COPC conversion and resolution queries in the engine; import-time conversion and view-driven re-query outstanding |
+| 17 | Point Clouds | partial — PDAL read/write, budgeted decimation, 2D display; COPC conversion and resolution reads, from the GIS menu and the CLI; automatic conversion and view-driven re-query outstanding |
 | 18 | Spatial Indexing | partial — sparse hash grid behind snapping, picking and box selection (50x-310x measured); no KD-tree, BVH, octree or terrain quadtree |
 | 19 | Performance Architecture | partial — `katana::core::TaskPool` drives the renderer; task graph and work stealing rejected with reasons; `compareSurfaces` 12.1 s -> 2.1 s by pairwise triangle clipping |
-| 20 | File Interoperability | partial — raster, vector, point cloud and 12d Archive import/export in GUI and CLI; no DWG/LandXML/IFC. 20.2 (12d programme) delivered bar property definitions; 20.3 (survey coding) delivered bar the library browser |
+| 20 | File Interoperability | partial — raster, vector, point cloud and 12d Archive import/export in GUI and CLI, every GDAL/PDAL capability on the GIS menu; no DWG/LandXML/IFC. 20.2 (12d programme) delivered bar property definitions; 20.3 (survey coding) delivered bar the library browser |
 | 21 | Civil Engineering | partial — sections; clothoid; alignments and profiles; corridor quantities and surface, cross-checked; parcels with bearings, area, deed wording and labels; grading engine without a GUI route; richer assemblies outstanding |
 | 22 | Drawing/Plotting | partial — Plot to PDF through the screen's own drawing code at ISO sizes and standard scales, `Layer::lineWeight` finally honoured; layouts, title blocks, annotation scaling, printing outstanding |
 | 23 | C++ Application API | reshaped — expose the existing interpreter, do not write a second one |
@@ -337,7 +337,7 @@ The required progression is:
 | 25 | AI Agent | not started |
 | 26 | Production Hardening | not started — no section of its own yet; section 43 lists it last |
 | 45 | Survey module and instrument interoperability | in progress — model, detection and the cad bridge delivered; parsers, reduction, Survey menu, wizard and Point Manager in progress |
-| 46 | The audit of 2026-09-23 — defect register | open — 133 of 142 confirmed defects outstanding, 4 of them high |
+| 46 | The audit of 2026-09-23 — defect register | open — 124 of 142 confirmed defects outstanding, 4 of them high |
 
 The delivered phases below are recorded rather than specified: their
 requirements have been met, so only what was built and where it lives is kept.
@@ -1136,10 +1136,15 @@ on a 160 000-point cloud converted inside the test, asserting the properties
 of level of detail rather than one PDAL version's counts. Record in
 `docs/interop.md`.
 
-**OUTSTANDING:** nothing ASKS the query yet. Converting on import (build
-once), and a viewport that re-queries at a resolution derived from the
-current `worldPerPixel` - the same quantity the renderer already computes -
-are the remaining work; until then the display is still one decimated sample. Building a
+**Asked by a person (2026-09-23):** GIS > Convert Point Cloud to COPC and the
+CLI's `COPC` verb convert a file, keeping its coordinate precision (the
+source's scale and offset are forwarded - audit IO-17 had them quantised to
+1 cm), and GIS > Import Point Cloud offers a point spacing for a COPC file
+(`PointCloudImportOptions::resolution`).
+**OUTSTANDING:** nothing converts on import by itself, and no viewport
+re-queries at a resolution derived from the current `worldPerPixel` - the
+same quantity the renderer already computes; until then the display is still
+the one sample it was given. Building a
 bespoke octree would duplicate, in Katana, a structure that is already in the
 file format, already in the linked library, and already an OGC standard.
 
@@ -1389,8 +1394,9 @@ only layer that may see both the external readers and the entity model - which
 is what keeps GDAL and PDAL out of `katana_cad`, so the core still builds with
 `-DKATANA_BUILD_IO=OFF`.
 
-Working, in the desktop application (File > Import / Export Vector, and a
-Reference Data panel) and in `katana_cli` (`IMPORT`, `EXPORT`, `REFS`):
+Working, in the desktop application (File > Import / Export Vector, the GIS
+menu and toolbar, and a Reference Data panel) and in `katana_cli` (`IMPORT`,
+`EXPORT`, `REFS`, `INFO`, `COPC`):
 
 | Direction | Formats |
 |---|---|
@@ -1460,6 +1466,24 @@ reasoning is in `docs/interop.md`. An adversarial review found nineteen
 defects, all fixed with regression tests; 185 hostile inputs crash nothing.
 12d Model 15's own 58 MB exports read in a quarter of a second.
 
+**The GIS menu (2026-09-23): every GDAL and PDAL capability reachable from
+the application.** A GIS menu and toolbar group the libraries' work by kind of
+data: Import Vector Data (choosing a source layer, a target layer and
+attributes), Export Vector (with its curve tolerance, layer name and
+selection), Import Raster, Export Surface as DEM (GeoTIFF, ASCII grid, IMG -
+`interop::exportSurfaceRaster`, each cell the surface's elevation at its
+centre), Import Point Cloud (budget, ASPRS class, COPC level of detail),
+Export Point Cloud (LAS, LAZ), Convert Point Cloud to COPC, and Dataset
+Information (`interop::describeSource`, which the `INFO` verb of both command
+lines prints too). Each import dialog is built from what the file holds. Surface
+From Raster now triangulates the DEM's TRUE values read through GDAL
+(`interop::readRasterElevations`; audit QT-23, QT-24), and Surface From Point
+Cloud the cloud's ground returns when it has any, saying so either way
+(`interop::surfacePoints`; QT-10). Reference data is cleared with its drawing
+(QT-17). The About box names the GDAL and PDAL versions. Driven by ctest
+through the QActions themselves (`--action`), against values worked out
+outside Katana. Record in `docs/interop.md`, "The GIS menu".
+
 Two things this taught the application. Surface From Drawing now reads
 per-vertex heights and leaves a null vertex out of the surface instead of
 triangulating it at the datum. And a headless session (`--plot`,
@@ -1502,8 +1526,10 @@ default button moved it to the drawing's corner. A far-off single point still
 reports the drawing it would hide.
 
 `IMPORT <file> LOCAL` in the CLI shifts the data so its corner lands at the
-ORIGIN (this said "meets the drawing's"; for rasters and point clouds the verb
-is broken outright, audit QT-13/QT-14, open), using the
+ORIGIN (this said "meets the drawing's"; for rasters and point clouds, which
+are reference data drawn at their own coordinates, LOCAL is refused by name -
+it used to be left on the path and fail as a missing file, audit QT-13/QT-14,
+fixed 2026-09-23), using the
 `VectorImportOptions::originShift` that already existed and
 that nothing had ever set. Verified on a 51 417-feature DXF at
 (255440, 7410850): without LOCAL the warning fires and names the separation;
@@ -3223,7 +3249,7 @@ over the bug:
 
 # 46. The audit of 2026-09-23 — the defect register
 
-**STATUS: OPEN — 133 of 142 confirmed defects outstanding.**
+**STATUS: OPEN — 124 of 142 confirmed defects outstanding.**
 
 A read-only audit of every subsystem: ten auditors, one per area, each told to
 verify the code rather than trust this plan, and every defect they reported put
@@ -3245,8 +3271,8 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 | Area | high | medium | low | open |
 |---|---|---|---|---|
 | MOD — entity model, commands, storage, selection | 0 | 0 | 12 | 12 |
-| QT — the desktop application | 2 | 10 | 15 | 27 |
-| IO — raster, vector and point-cloud interoperability | 1 | 6 | 9 | 16 |
+| QT — the desktop application | 2 | 9 | 10 | 21 |
+| IO — raster, vector and point-cloud interoperability | 1 | 6 | 6 | 13 |
 | A12 — the 12d archive and customisation | 1 | 4 | 11 | 16 |
 | CAD — the CAD engine | 0 | 5 | 13 | 18 |
 | REN — rendering and scene building | 0 | 2 | 5 | 7 |
@@ -3255,7 +3281,7 @@ FIXED and a date, and `git log --grep QT-07` finds the commit.)
 | SUR — survey, geodesy and survey import | 0 | 1 | 4 | 5 |
 | NET — least-squares adjustment | 0 | 1 | 2 | 3 |
 | BLD — build, tests and tooling | 0 | 3 | 9 | 12 |
-| **total** | **4** | **35** | **94** | **133** |
+| **total** | **4** | **34** | **86** | **124** |
 
 The high-severity ones, taken first:
 

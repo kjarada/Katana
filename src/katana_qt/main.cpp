@@ -6,6 +6,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "gis_dialogs.hpp"
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
 #include "katana/cad/plot.hpp"
@@ -22,6 +23,9 @@
 //   katana [project-directory] [data-file...] --style-manager --screenshot out.png
 //   katana [project-directory] [data-file...] --attributes --screenshot out.png
 //   katana [project-directory] [data-file...] --layer-manager --screenshot out.png
+//   katana [project-directory] [data-file...] --action NAME... --screenshot out.png
+//   katana [project-directory] --dataset-info FILE --screenshot out.png
+//   katana [project-directory] --import-options FILE --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -49,6 +53,17 @@
 // its tables, its form and its two previews - is built and painted in a test
 // rather than only by a person who opens the menu.
 //
+// --action triggers the menu item with that object name (surfaceFromRaster,
+// exportSurfaceDem, ...) after the imports, as a click does - repeatable, and
+// run in order. A command that would ask a question takes its headless
+// default or says why it cannot, so a menu command is exercised by a test
+// through the QAction a person clicks. The log is echoed to stderr in a
+// headless run, which is where the test reads what the command reported.
+//
+// --dataset-info and --import-options build GIS > Dataset Information and the
+// GIS menu's import dialog for FILE, and grab that window, as --style-manager
+// does: the description GDAL or PDAL gives of the file is read and painted.
+//
 // --screenshot lays the main window out exactly as it would appear, grabs it
 // to a PNG and exits. It exists so that the LOOK of the application can be
 // reviewed - by a person in a pull request, or by a model that cannot watch a
@@ -72,6 +87,9 @@ int main(int argc, char* argv[])
     bool styleManager = false;
     bool attributeManager = false;
     bool layerManager = false;
+    QStringList actions;
+    std::optional<QString> datasetInfo;
+    std::optional<QString> importOptions;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -98,6 +116,12 @@ int main(int argc, char* argv[])
             styleManager = true;
         } else if (argument == "--layer-manager") {
             layerManager = true;
+        } else if (argument == "--action") {
+            actions << value();
+        } else if (argument == "--dataset-info") {
+            datasetInfo = value();
+        } else if (argument == "--import-options") {
+            importOptions = value();
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -168,6 +192,35 @@ int main(int argc, char* argv[])
         window.show();
         QApplication::processEvents();
         QApplication::processEvents();
+        for (const QString& action : actions) {
+            const auto status = window.triggerAction(action);
+            if (!status) {
+                std::fprintf(stderr, "--action %s failed: %s\n", qPrintable(action),
+                             status.error().describe().c_str());
+                return 1;
+            }
+            QApplication::processEvents();
+        }
+        // The two GIS windows: built from the file, shown, grabbed. A file
+        // that cannot be described has no window to grab, and fails the run.
+        if (datasetInfo || importOptions) {
+            const std::unique_ptr<QDialog> dialog =
+                datasetInfo ? std::unique_ptr<QDialog>(window.makeDatasetInfo(*datasetInfo))
+                            : window.makeImportOptions(*importOptions);
+            if (dialog == nullptr) {
+                std::fprintf(stderr, "no dialog for %s\n",
+                             qPrintable(datasetInfo ? *datasetInfo : *importOptions));
+                return 1;
+            }
+            dialog->show();
+            QApplication::processEvents();
+            QApplication::processEvents();
+            if (!dialog->grab().save(*screenshotPath, "PNG")) {
+                std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
+                return 1;
+            }
+            return 0;
+        }
         if (toggleLayer) {
             const auto status = window.toggleLayerThroughPanel(*toggleLayer);
             if (!status) {

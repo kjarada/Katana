@@ -134,6 +134,52 @@ void drawDisk(const Ink& ink, bool withLabel)
 // The tray shared by Import and Export.
 void drawTray(const Ink& ink) { ink.stroke(polyline({{4, 14}, {4, 20}, {20, 20}, {20, 14}})); }
 
+// The three kinds of GIS data, drawn in the lower-left 15 units so that an
+// arrow fits down the right-hand side. Neutral: the data is the object, the
+// arrow is what the command does to it.
+void drawVectorGlyph(const Ink& ink)
+{
+    ink.stroke(polyline({{3, 20}, {3, 11}, {9, 7.5}, {14.5, 12.5}, {12, 20}}, true));
+    for (const QPointF& p :
+         {QPointF(3, 20), QPointF(3, 11), QPointF(9, 7.5), QPointF(14.5, 12.5), QPointF(12, 20)}) {
+        ink.node(p.x(), p.y());
+    }
+}
+
+void drawRasterGlyph(const Ink& ink)
+{
+    ink.stroke(rectangle(3, 8, 12, 12));
+    ink.line(7, 8, 7, 20, false, 1.1);
+    ink.line(11, 8, 11, 20, false, 1.1);
+    ink.line(3, 12, 15, 12, false, 1.1);
+    ink.line(3, 16, 15, 16, false, 1.1);
+    ink.fill(rectangle(3, 8, 4, 4), false, 110);
+    ink.fill(rectangle(7, 12, 4, 4), false, 110);
+    ink.fill(rectangle(11, 16, 4, 4), false, 110);
+}
+
+void drawCloudGlyph(const Ink& ink)
+{
+    for (const QPointF& p : {QPointF(4, 19.5), QPointF(8, 20), QPointF(12.5, 19), QPointF(5.5, 15.5),
+                             QPointF(10, 15.5), QPointF(14, 14.5), QPointF(4, 11.5),
+                             QPointF(8.5, 11), QPointF(12, 9)}) {
+        ink.dot(p.x(), p.y(), 1.3);
+    }
+}
+
+// The down arrow of an import and the up arrow of an export, down the right.
+void drawArrowIn(const Ink& ink)
+{
+    ink.line(18.5, 3, 18.5, 12.5, true);
+    ink.stroke(polyline({{15.5, 9.5}, {18.5, 12.5}, {21.5, 9.5}}), true);
+}
+
+void drawArrowOut(const Ink& ink)
+{
+    ink.line(18.5, 12.5, 18.5, 3, true);
+    ink.stroke(polyline({{15.5, 6}, {18.5, 3}, {21.5, 6}}), true);
+}
+
 // The curved arrow of Undo; Redo is its mirror image.
 void drawTurn(QPainter& painter, const Ink& ink, bool mirrored)
 {
@@ -173,6 +219,10 @@ const std::vector<Icon>& allIcons()
         Icon::SurfaceFromRaster, Icon::SurfaceFromDrawing,
         Icon::Section,      Icon::SectionAlignment,
         Icon::CorridorQuantities, Icon::CorridorSurface,
+        Icon::ImportVector, Icon::ImportRaster,
+        Icon::ImportPointCloud, Icon::ExportPointCloud,
+        Icon::ExportDem,    Icon::ConvertCopc,
+        Icon::DatasetInfo,
         Icon::Help,         Icon::About,
     };
     return icons;
@@ -409,6 +459,54 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.line(10.6, 6.6, 17, 9.6, true, 1.3);
         break;
     }
+    case Icon::ImportVector:
+        drawVectorGlyph(ink);
+        drawArrowIn(ink);
+        break;
+    case Icon::ImportRaster:
+        drawRasterGlyph(ink);
+        drawArrowIn(ink);
+        break;
+    case Icon::ImportPointCloud:
+        drawCloudGlyph(ink);
+        drawArrowIn(ink);
+        break;
+    case Icon::ExportPointCloud:
+        drawCloudGlyph(ink);
+        drawArrowOut(ink);
+        break;
+    case Icon::ExportDem:
+        // A surface's profile over the grid it becomes: the accent is the
+        // surface, since that is what is being written out.
+        drawRasterGlyph(ink);
+        ink.stroke(polyline({{3, 7}, {7.5, 3.5}, {11, 6}, {15, 2.5}}), true);
+        drawArrowOut(ink);
+        break;
+    case Icon::ConvertCopc:
+        // An octree seen from above: a square quartered, one quarter quartered
+        // again, points in the cells - the structure COPC writes into the file.
+        ink.stroke(rectangle(3, 3, 18, 18));
+        ink.line(12, 3, 12, 21, false, 1.1);
+        ink.line(3, 12, 21, 12, false, 1.1);
+        ink.line(16.5, 12, 16.5, 21, true, 1.1);
+        ink.line(12, 16.5, 21, 16.5, true, 1.1);
+        for (const QPointF& p : {QPointF(7.5, 7.5), QPointF(16.5, 7.5), QPointF(7.5, 16.5),
+                                 QPointF(14.25, 14.25), QPointF(18.75, 14.25),
+                                 QPointF(14.25, 18.75), QPointF(18.75, 18.75)}) {
+            ink.dot(p.x(), p.y(), 1.2, true);
+        }
+        break;
+    case Icon::DatasetInfo:
+        // A file's page, and the "i" of information beside it rather than on
+        // it, so the two never cross at 16 px.
+        ink.stroke(rectangle(3, 3, 10, 13));
+        ink.line(5.5, 7, 10.5, 7, false, 1.1);
+        ink.line(5.5, 10, 10.5, 10, false, 1.1);
+        ink.line(5.5, 13, 10.5, 13, false, 1.1);
+        ink.stroke(circle(17.5, 17.5, 4), true);
+        ink.dot(17.5, 15.6, 0.9, true);
+        ink.line(17.5, 17.6, 17.5, 19.8, true, 1.4);
+        break;
     case Icon::Help: {
         ink.stroke(circle(12, 12, 9));
         QPainterPath mark(QPointF(9, 9.6));
