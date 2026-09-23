@@ -247,4 +247,120 @@ if(TARGET katana)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+
+    # ---- the Survey menu (PLAN.MD 45 slice 9), through the actions a person clicks --
+    #
+    # Each dialog is opened by its action, filled and pressed by the object
+    # names of survey/survey_dialogs.hpp, and grabbed; what it reported is read
+    # from the log. The numbers are worked by hand, not taken from a run:
+    #
+    # Inverse (1000,5000) -> (1003,5004): a 3-4-5 triangle, 5.000 at azimuth
+    # atan2(3, 4) = 36.8698976 degrees = 36 deg 52' 11.63" (0.8698976 * 60 =
+    # 52.19386', 0.19386 * 60 = 11.63").
+    add_test(NAME qt_survey_inverse_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyInverse"
+            "-DFILL=from=1000,5000|to=1003,5004"
+            "-DPRESS=compute"
+            "-DEXPECT=Horizontal distance 5\\.000.*Azimuth 36[^0-9]+52'11\\.63"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_inverse_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Area of Selection over samples/gis/parcels.geojson, everything selected.
+    # Its outlines by the shoelace formula, from the file's coordinates:
+    #   42A (185,0) (300,0) (310,70) (200,95):
+    #     0 + 21000 + (29450 - 14000) + (0 - 17575) = 18875 -> 9437.5 m^2
+    #   42B (200,95) (310,70) (320,150) (215,165):
+    #     (14000 - 29450) + (46500 - 22400) + (52800 - 32250) + (20425 - 33000)
+    #     = 16625 -> 8312.5 m^2
+    #   the spoil heaps, 30 x 30 and 30 x 25 rectangles: 900 and 750 m^2
+    # 19 400 m^2 in all = 1.9400 ha (1 ha = 10 000 m^2). The two roads and
+    # the three control points have no area and are skipped, and said to be.
+    add_test(NAME qt_survey_area_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/samples/gis/parcels.geojson"
+            "-DSELECT_ALL=ON"
+            "-DACTIONS=surveyArea"
+            "-DEXPECT=Total  area 19400\\.000 m[^ ]* \\(1\\.9400 ha\\).*Skipped 3: a point has no area"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_area_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Forward along the same 3-4-5 direction, 5 from (1000,5000,20) with a
+    # height difference of -1: the far corner (1003,5004) at 20 - 1 = 19,
+    # added as a point named P7 on the current layer.
+    add_test(NAME qt_survey_forward_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyForward"
+            "-DFILL=from=1000,5000,20|direction=N 36d52m11.63s E|distance=5|heightDifference=-1|name=P7"
+            "-DPRESS=addPoint"
+            "-DEXPECT=New point P7  E 1003\\.000 N 5004\\.000 Z 19\\.000.*Created on layer"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_forward_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A right angle is 100 gon: 400 gon to the circle, by definition.
+    add_test(NAME qt_survey_angle_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyAngleCalculator"
+            "-DFILL=angle=90|unit=Degrees"
+            "-DPRESS=convert"
+            "-DEXPECT=100\\.00000000 gon"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_angle_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A 200 x 100 rectangle walked clockwise from A(1000,5000): north 100,
+    # east 200, south 100, west 200, turning 270 degrees (clockwise, back to
+    # forward) at every corner - with BC booked 200.100. The angles close;
+    # the figure overshoots 0.100 east: precision 600.1 / 0.1 = 1 : 6001.
+    # Bowditch moves C by -0.100 * (100 + 200.1) / 600.1 = -0.050 in E:
+    # 1200.100 - 0.050 = 1200.050. Added: B, C and D (A is the control it
+    # hangs on) and the traverse line - 4 entities.
+    add_test(NAME qt_survey_traverse_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyTraverse"
+            "-DFILL=name=Block|start=1000,5000|startMark=1000,5100|legs=A 270 100\\nB 270 200.1\\nC 270 100\\nD 270 200"
+            "-DPRESS=addToDrawing"
+            "-DEXPECT=precision 1 : 6001.*C +1200\\.100 +5100\\.000 +1200\\.050 +5100\\.000.*Added to layer 0: 4 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_traverse_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A level book reduced by hand (height of collimation): BM1 100.000 +
+    # BS 1.500 = 101.500; CP1 101.500 - 0.500 = 101.000, + 2.250 = 103.250;
+    # BM2 103.250 - 3.260 = 99.990 against its known 100.000: -0.010. The
+    # check: sum BS 3.750 - sum FS 3.760 = -0.010. Allowable 12 mm x
+    # sqrt(0.250 km) = 6 mm, which the 10 mm misclosure exceeds.
+    add_test(NAME qt_survey_level_book_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyLevelBook"
+            "-DFILL=startLevel=100|closingLevel=100|book=BM1 1.500 - -\\nA - 2.000 -\\nCP1 2.250 - 0.500 100\\nB - 1.250 -\\nBM2 - - 3.260 150|adjustment=By distance levelled"
+            "-DPRESS=reduce"
+            "-DEXPECT=sum BS 3\\.750 - sum FS 3\\.760 = -0\\.010.*Misclosure -0\\.0100 \\(computed - known\\); allowable 0\\.0060"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_level_book_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # UTM by definition (NGA.SIG.0012): zone 30's central meridian is 3 deg
+    # W, the false easting 500 000 m, the false northing 0 in the north, the
+    # scale on the central meridian 0.9996 - so (0, -3) is E 500 000, N 0.
+    add_test(NAME qt_survey_converter_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSURVEY_DIALOG=surveyCoordinateConverter"
+            "-DFILL=source=4326|target=32630|points=origin 0 -3"
+            "-DPRESS=convert"
+            "-DEXPECT=origin +0\\.000000000 -3\\.000000000 +-> +500000\\.000 0\\.000 +target k 0\\.99960000"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_converter_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
+                         qt_survey_forward_headless qt_survey_angle_headless
+                         qt_survey_traverse_headless qt_survey_level_book_headless
+                         qt_survey_converter_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 endif()
