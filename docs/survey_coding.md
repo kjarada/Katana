@@ -59,9 +59,12 @@ is that a definition is offered as a SYMBOL when any of these holds:
 
 It is offered as a LINESTYLE when it is not `mode vertex`, so a definition
 can be both, and `DefinitionKind` keeps each reason so a browser can say why
-a definition is listed where it is. The CUSTOMISE report's "157 of them
-symbols" and the window's "(157 symbols)" still count `mode vertex` alone
-(`entity::vertexStyleNames`); read them as "157 of them `mode vertex`".
+a definition is listed where it is. The counts both front ends print are D3's
+too: CUSTOMISE says "792 linestyle and symbol definitions in 71 groups: 475
+offered as symbols, 635 as linestyles (one definition can be both)", and the
+window's log "792 definitions (475 symbols)", counting the library entries
+`cad::symbolChoices` offers. They used to count `mode vertex` alone - "157 of
+them symbols" - which is not what a symbol is.
 
 ## The grammar, measured rather than assumed
 
@@ -361,8 +364,11 @@ An editor of either works on a copy - a buffer the dialog owns - and commits
 it whole with `setStyleLibrary` or `setSurveyMap` (Apply; Revert throws the
 buffer away). Each bumps `libraryGeneration()` or `surveyMapGeneration()` and
 notifies the listeners, and an edit is kept by EXPORTING it to a file - see
-"Writing it back" below - not by saving the project. No such editor exists
-yet; the foundations below are what one will stand on.
+"Writing it back" below - not by saving the project. The Survey Code Manager
+is that editor for the map ("The Survey Code Manager" below). The library has
+no editing buffer: the symbol library loads into it (merged) and exports from
+it, and the style manager edits the drawing's styles and linetypes, which are
+commands like any other.
 
 ## Loading a customisation
 
@@ -377,31 +383,41 @@ It lives beside the readers rather than in a front end because both front ends
 need it, and it needs no third-party library, so it costs `archive12d` nothing
 of the property that lets it build with `-DKATANA_BUILD_IO=OFF`.
 
-Loading the real customisation, from the command line:
+Loading the real customisation, from the command line (each long list of
+names cut short here):
 
 ```
-katana_cli -c 'CUSTOMISE REPLACE "docs/12d Refrence Files/<linestyles>.4d" ...' -c CUSTOMISE
-  <linestyles>.4d: style library, 322 definitions (1 replacing one already loaded)
-  <symbols>.4d: style library, 474 definitions (3 replacing one already loaded)
-  <detail>.mapfile: mapfile, 725 rules
-  names.4d: mapfile, 899 rules
+katana_cli -c 'CUSTOMISE REPLACE "docs/12d Refrence Files/user_linestyl_TfNSWv15.4d" ...' -c CUSTOMISE
+warning: the built-in customisation: names.4d: an <item> of <map_data> has no <key> and was skipped
+Customisation: 792 linestyles and symbols and 1624 survey code rules, built in
   warning: names.4d: an <item> of <map_data> has no <key> and was skipped
+  user_linestyl_TfNSWv15.4d: style library, 0 added, 318 replaced: "BARR Bollard", ... and 310 more
+  user_symbols_TfNSWv15.4d: style library, 0 added, 474 replaced: "BDGE Abutment Bottom Point", ... and 466 more
+  TfNSW_Survey_Detail.mapfile: mapfile, 0 added, 680 replaced (codes, once for each section): "1*", ... and 672 more
+  names.4d: mapfile, 0 added, 899 replaced (codes, once for each section): "1*", ... and 891 more
 Loaded now: 792 definitions, 1624 survey code rules
-  3 names the mapfile asks for that no loaded library defines: "Circle Single",
-  "LNMK Dividing - Separation Line S2 Multi Lane", "SBEND"
-792 linestyle and symbol definitions in 71 groups, 157 of them symbols
+  3 names the mapfile asks for that no loaded library defines: "Circle Single", "LNMK Dividing - Separation Line S2 Multi Lane", "SBEND"
+This drawing has no styles yet; IMPORT a 12d archive to see the customisation take effect.
+792 linestyle and symbol definitions in 71 groups: 475 offered as symbols, 635 as linestyles (one definition can be both)
 1624 survey code rules over 632 distinct codes
+This drawing has no styles yet; IMPORT a 12d archive to see the customisation take effect.
 ```
 
-(Run on 2026-09-24 against a build with the reference customisation compiled
-in, which is why REPLACE: loaded on top of the same files, the merge adds
-nothing and says "1624 rules were loaded already and are not added again".
-The plain lines `0` and `1` and the built-in symbol names are no longer
-listed as missing - they draw without a library. "157 of them symbols" is the
-`mode vertex` count; see "A symbol is a linestyle".)
+(Run on 2026-09-24 by `katana_cli` built from the merged branches, with the
+reference customisation compiled in - which is why every file only REPLACES
+what the built-in already holds, and why the built-in's one warning is said at
+start-up. A file's line counts the definitions it brought, or for a mapfile
+its codes once for each section they appear in, and names the first eight.
+The plain lines `0` and `1` and the built-in symbol names are not listed as
+missing: they draw without a library.)
 
-In the application it is **File > Load 12d Customisation...**, which takes
-several files at once and writes the same report into the command log.
+In the application it is **Format > Load 12d Customisation...**, and **Format >
+Replace Loaded Customisation...** for a replace - the same two actions are on
+Survey > Survey Coding - or `CUSTOMISE [REPLACE] <file>...` typed on its
+command line, or `katana --customise <file>...` at start-up. Each takes
+several files at once and writes the same report into the command log, ending
+with what the loaded customisation means for the drawing open
+("Saying whether it is working" below).
 
 Every definition read is stamped with the NAME of the file it came from
 (`LineStyle::source`, from `archive12d::sourceFileName`) - never the path, so
@@ -436,20 +452,37 @@ currentMap, loaded, LoadMode)` is the rule:
   installed by a load that did not bring one. `FileMerge` reports, per file,
   the definitions or keys it added and those it replaced.
 
-**Where the front ends stand.** Neither calls `mergeCustomisation` yet.
-`katana_cli`'s `CUSTOMISE [REPLACE] <file>...` (`runCustomise`,
-`src/katana_app/main.cpp`) merges by default and replaces only when REPLACE is
-the unquoted first word, in any case - a quoted path that begins with
-"replace" is a path. REPLACE installs only the halves the load brought. But
-its merge is its own, written before the rule above: definitions go through
-`entity::addOrReplace` (the same result), while rules are APPENDED after the
-current ones, skipping a rule the map already holds field for field - so there
-the CURRENT rule of a key keeps precedence, the opposite of
-`LoadMode::Merge`. The application's File > Load 12d Customisation still
-replaces library and map wholesale (`MainWindow::applyCustomisation`; QT-21
-stays open). Both should install `mergeCustomisation`'s result and show its
-`files`; until they do, the two front ends and the library disagree about who
-wins a field.
+**Both front ends load through it** (audit QT-21, fixed). The window's
+`MainWindow::applyCustomisation` - behind Format > Load and Replace, the typed
+`CUSTOMISE` and `--customise` - and `katana_cli`'s `CUSTOMISE [REPLACE]
+<file>...` (`runCustomise`, `src/katana_app/main.cpp`) read the files, call
+`mergeCustomisation` with the library and map loaded now and what the files
+brought, install both results
+(a kind the load did not bring comes back as it was, so a symbol file alone
+keeps the map) and print its `files`, one line each: the definitions or codes
+it added and replaced. A Replace also says what went (`removedDefinitions`,
+`removedKeys`), and a definition or rule that could not be installed is an
+error line of its own. The load then names what the mapfile asks for that no
+loaded library defines, judged against everything loaded, since a mapfile may
+name what an earlier load defined. REPLACE is a replace only as the unquoted
+first word, in any case - a quoted path that begins with "replace" is a path.
+In the window a Replace is an action of its own, never a question, so a
+headless run never meets a box.
+
+**A file named twice in one load is read once**, in both front ends
+(`cad::distinctCustomisationFiles`): read twice, every rule of it would sit in
+the map twice, since both copies are the load's and the merge keeps them all.
+Each later naming is said - "... is named twice in this load; it is read
+once". Two namings are one file when their absolute, lexically normal paths
+are equal or `std::filesystem::equivalent` says so; a pair it cannot tell
+apart is read twice, which doubles rules but never drops a file.
+
+**The built-in's faults are said** (audit A12-06, fixed). At start-up each
+front end logs `builtinCustomisation()`'s errors and warnings once - the
+reference `names.4d` has one `map_data` item with no key, so every start says
+so, the CLI on stderr - and then what it installed: "Customisation: 792
+definitions (475 symbols) and 1,624 survey code rules, built in." in the
+window's log, the numbers grouped in the user's locale.
 
 ### What the project records
 
@@ -458,10 +491,43 @@ drawing was drawn with, in load order - a record, not a reference: nothing is
 loaded from it, and a name need not exist where the project is opened. It is
 stored as one `customisation` metadata key, the names separated by line feeds
 (a Windows file name may hold `;` but not a line break), and `save()` refuses
-a name that is empty or holds a line break or a path separator. Nothing fills
-it yet: a front end should set it from `LineStyle::source` and the loaded file
-names before saving. See `docs/model.md` for the metadata keys an older build
-keeps for a newer one.
+a name that is empty or holds a line break or a path separator. See
+`docs/model.md` for the metadata keys an older build keeps for a newer one.
+
+Both front ends fill it through `include/katana/cad/customisation_record.hpp`,
+since `cad` cannot see `archive12d` and a file reaches it as a name and a kind
+(`CustomisationSource`):
+
+- **Every load is recorded** (`recordCustomisationLoad`), the built-in's files
+  first. A file loaded again moves to the end; a Replace of a kind drops the
+  earlier files of that kind, which no longer contribute.
+- **A save writes the record** (`customisationRecordToSave`): the loaded files
+  in load order - a library file only while some definition still comes from
+  it - then any definition's `LineStyle::source` no loaded file accounts for,
+  then the names the project already recorded that its OPEN found missing and
+  no load has brought since (`noteCustomisationLoaded`). This session cannot
+  judge those, so saving must not forget them, or every later open anywhere
+  would draw plain lines without a word. File > Save and Save As write it
+  (`MainWindow::recordCustomisation`); a typed `SAVE` writes it only when it
+  can save (`typedSaveHasDestination`: a directory, or none when the drawing
+  already has a project), because writing the metadata marks the drawing
+  modified and a `SAVE` that could not go ahead would leave a drawing nobody
+  touched asking to be saved.
+- **An open warns** (`customisationNotLoaded`): the recorded names that are
+  not loaded now, in the project's order, compared exactly. The window logs
+  "Warning: this project was drawn with customisation files that are not
+  loaded: ... Load them with Format > Load 12d Customisation..." and the CLI
+  prints the same warning on stderr. Not an error: the drawing opens and
+  draws, and what a missing file defined draws as a plain line until it is
+  loaded.
+
+Not done: a save that has somewhere to go but still fails (an I/O error, a
+directory `ProjectStore::create` refuses) leaves the record written and the
+drawing marked modified, because `Document::setMetadata` cannot be taken
+back; `Document::save` taking the metadata and committing it only on success
+would fix it. A library file loaded whose every definition a later file
+replaced counts as not loaded, so opening names it - a warning in excess, not
+one missed.
 
 ## Writing it back
 
@@ -513,8 +579,13 @@ character XML 1.0 cannot carry. One loss the writer cannot help:
 doubles where 0 means absent, so an explicit `<rotation>0</rotation>` goes
 out as no element; telling them apart needs `std::optional` in the model.
 
-**No front end calls either writer yet.** There is no export verb or menu
-item; the decision has its writer but not its button.
+**Where the writers are reached.** The Survey Code Manager's Export
+Mapfile... writes its BUFFER with `writeMapFile`, as UTF-16LE with a byte
+order mark as 12d writes one, and Export Code List CSV... writes
+`cad::codeListCsv` (RFC 4180, UTF-8 with no byte order mark, so Excel may
+misread a name that is not ASCII). The symbol library's Export Selected to
+.4d... writes the selected library definitions with `writeStyleLibrary`.
+`katana_cli` has no export verb for either.
 
 ## Drawing it
 
@@ -898,9 +969,10 @@ Tokens after the name are matched ignoring ASCII case - they are keypad
 keywords, and `st` means `ST` - and the first token is always the name, so a
 code `CL` is a string called CL. An empty spelling switches a control off;
 `validate(LineworkCodes)` refuses a spelling with a blank and two controls
-spelled alike. The codes live only in `LineworkOptions` for now: a survey-code
-manager will need somewhere to keep and edit them, and session data on the
-Document, like the map (D1), would fit.
+spelled alike. In the application the spellings are SESSION data kept by the
+Format workbench (`CustomisationWorkbench::lineworkCodes`), which the Survey
+Code Manager's Linework tab shows and edits and every run reads; they start as
+the defaults each session and are not remembered between sessions.
 
 **Curves are chorded.** `Polyline2` has no arc segment, and giving it one is a
 schema change deferred under D6. So each consecutive three curve points
@@ -938,35 +1010,127 @@ each line still gets its code, under `codePropertyCandidates().front()`
 code it carries. `coding.createLayers` governs every layer here, as in
 `processLinework`; `import.createLayers` is not read.
 
-Not yet reachable from either front end: there is no command, menu item or
-dialog for Process Linework or Draw Survey Features, and the survey import
-wizard does not call `drawSurveyFeatures`. When `applySurveyCodes` styles
-POINTS it still reads the whole code field, so an exact-key point with a
-control token (`PABB ST`) is unmatched there; lines are unaffected, since they
-carry only the string name.
+Process Linework is the Survey Code Manager's Linework tab, previewed before
+it runs, against the drawing's map. Draw Survey Features is not reachable from
+either front end yet - no command, menu item or dialog - and the survey
+import wizard does not call it; nor has `katana_cli` a linework verb.
+
+**A point is coded by its string name.** `applySurveyCodes` looks a POINT up
+by the string name of its field code, its linework controls left out
+(`parseFieldCode`): `PABB ST` is coded as `PABB`, and reported under `PABB`,
+so the styling a point gets and the line it joins agree. It used to read the
+whole field, which left an exact-key point with a control token unmatched.
+Any other entity's code is still looked up whole.
+
+## The Survey Code Manager
+
+Format > Survey Code Manager... (also on Survey > Survey Coding;
+`src/katana_qt/customisation/code_manager*.cpp`) is the editor D1 asked for: the
+survey code library a surveyor codes against - 12d's mapfile editor, Civil
+3D's description keys, TBC's feature definitions, Carlson's field-to-finish -
+in one non-modal dialog of five tabs, each over one of the cad foundations
+above, so the dialog decides nothing the CLI would say differently:
+
+| Tab | Over | Shows and does |
+|---|---|---|
+| Code Table (`codeTableTab`) | `cad::codeTable`, `explainCode` | a key per row with what it resolves to (layer, colour, line or point, linestyle, symbol, tinable, attributes), filtered; a code typed in `testCode` or a selected key explained field by field - the value, the rule that set it, the rules that lost - with previews of its linestyle and symbol; double-click an explained field for the rule that set it; a rule form by section, with Add, Update, Duplicate, Delete, Up and Down (earlier wins more ties) |
+| Codes in Drawing (`codesInDrawingTab`) | `cad::codeCensus` | every distinct code the drawing carries, classed matched, fallback only or unmatched against the BUFFER, so a rule being written shows against the drawing's codes before Apply; select the entities carrying one; start a new rule for an unmatched code keyed by `cad::suggestedKey` |
+| Issues (`codeIssuesTab`) | `cad::lintSurveyMap` | the lint of the buffer |
+| Apply Codes (`applyCodesTab`) | `cad::applySurveyCodes` | its report as a preview, for the selection or everything, then Execute as one undo step |
+| Linework (`lineworkTab`) | `cad::processLinework` | the session's control codes (above) and the options, previewed, then executed as one undo step |
+
+**Edits go to a BUFFER** (D1). The map is session data, not undoable, so the
+form's buttons change a copy of the drawing's map through `SurveyMap`'s own
+mutators, each refused exactly as `SurveyMap` refuses it, and nothing reaches
+the drawing until **Apply** (`setSurveyMap`). **Revert** takes the drawing's
+map back. The indicator (`dirtyIndicator`) says which: "No unapplied edits:
+these are the drawing's 1624 rules." or "Unapplied edits: Apply puts them on
+the drawing, Revert discards them. 1625 rules." A map changed from outside -
+a load, a Replace - is taken up at once while the buffer is unedited; with
+edits pending the buffer is kept, the log says so, and the edits are measured
+against the map the drawing has NOW, so undoing them all makes the buffer
+clean again. Apply Codes and Linework run against the DRAWING's map, because
+`applySurveyCodes` reads the Document and cannot be handed a buffer; while the
+buffer has unapplied edits both tabs say so (`applyDirtyNote`,
+`lineworkDirtyNote`), and Execute plans again when the drawing, the library or
+the map moved since the preview, rather than apply yesterday's answer.
+
+**Import Mapfile...** reads a mapfile - or any customisation file, as the
+loader decides by content - and merges its rules into the BUFFER for review
+before Apply, Merge by default (D1) and Replace with `importReplace` ticked;
+library definitions in the file are reported but not loaded, since this
+dialog edits the map. **Export Mapfile...** and **Export Code List CSV...**
+write the buffer ("Writing it back").
+
+**Closing never loses an edit unasked.** The manager is kept, hidden, between
+uses, so closing it with unapplied edits keeps them: an interactive session
+is asked Apply / Discard / Cancel, a headless one closes, keeps the buffer
+and says so in the log. Quitting asks the same question over the manager,
+shown first (`CustomisationWorkbench::confirmClose`, run by
+`MainWindow::closeEvent` before the unsaved-drawing question, because Apply
+changes the drawing that question is about); Cancel keeps the window and the
+edits. A headless `QUIT` with unapplied edits is refused and said - "Unapplied
+Edits: the Survey Code Manager has rule edits that are not on the drawing ...
+Apply or Revert them first." - never discarded, and a script presses `applyMap`
+or `revertMap` first. `qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless`
+duplicates a rule and quits.
+
+Every editable combo in it (colours, text size type, pipe justify and shape,
+property names) has a case-sensitive completer, so a typed name keeps its case
+(D3), and no button is a default, so Enter in a field presses nothing. The
+colour field lists `archive12d::standardColourNames()` - the names
+`standardColour` draws, from its own table, so the dialog keeps no copy of
+the table. Not done: the dialog takes about 2.4 s to build in a Debug build
+on the reference map, most of it the two pickers' pictures; its linestyle
+preview draws a linestyle small in the middle of its pane and its symbol
+preview is a blank white pane; its own `linestyleState`
+(`code_manager_support.cpp`) is a plain / defined / wrong-kind rule that does
+not read `cad::linetypeStatus` ("Saying whether it is working"); and the
+linework summary is not pluralised ("1 lines").
 
 ## Saying whether it is working
 
 "The linestyles are not showing" has several causes that look identical: no
 customisation loaded, a customisation that does not define what this drawing
-names, or a drawing whose styles are 12d's plain lines `0` and `1`. Loading
-one now reports which:
+names, a style whose linetype names a symbol, or a drawing whose styles are
+12d's plain lines `0` and `1`. Loading one now reports which. A drawing with
+one style whose linetype is `CULT Bollard`, a `mode vertex` symbol, gives
+(`katana_cli`, `IMPORT` of such a 12da and then `CUSTOMISE`, 2026-09-24):
 
 ```
-4 of this drawing's 4 styles are drawn with a loaded definition
-  (4 name one; the rest are 12d's plain lines).
+0 of this drawing's 1 styles are drawn with a loaded definition (1 name one; the rest are plain lines)
+  1 name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype naming it draws solid: "CULT Bollard"
 ```
 
-`cad::customisationCoverage` is the one place that counts it. Two kinds of
-name are not "missing" there, because they draw correctly with no library: a
-symbol Katana draws itself (`cross`, `manhole`), counted in `builtIn` rather
-than listed as unresolved (audit CAD-17), and a Style linetype of `ByLayer`,
-which names no definition at all - it takes the layer's (decision D2). The
-second was found only when the two branches met: the styles branch made
-`ByLayer` legal and the coverage, in another branch, listed it as "in no
-loaded library" until the integration commit taught it otherwise.
-`cad::missingNames` (`style_catalogue.hpp`) is the managers' list of the same
-thing for every Style and Layer name, with who uses each.
+`cad::customisationCoverage` is the one place that counts it, and it counts by
+the one rule every "missing" list reads, `cad::linetypeStatus` and
+`cad::symbolStatus` (`style_catalogue.hpp`; `docs/cad.md`, "What the managers
+stand on"). So a name is missing exactly when what is drawn is a fallback,
+never: a symbol Katana draws itself (`cross`, `manhole`), counted in `builtIn`
+rather than listed (audit CAD-17); a Style linetype of `ByLayer`, which names
+no definition at all - it takes the layer's (decision D2) - and which the
+coverage once listed as "in no loaded library" until the integration commit
+taught it otherwise; a plain line; or a style's linetype that is its own
+symbol's name, which the 12da import writes for every symbol string (D8). The
+missing names are kept apart by REASON, because each asks for a different
+fix:
+
+- `unresolved` - defined nowhere, in no loaded library: load one that defines
+  it. CUSTOMISE says "N names are in no loaded library", and so does the
+  window's log.
+- `notLinestyles` - a linetype naming only a `mode vertex` definition, which
+  the viewport draws solid (D2). The library IS loaded and defines the name,
+  as a symbol, so the fix is to choose a linestyle; telling that person the
+  name is "in no loaded library" sends them looking for a library they have.
+  `cad::formatCoverage`, which CUSTOMISE prints, gives these their own line,
+  as above; the window's log (`MainWindow::reportCustomisationCoverage`) does
+  not mention them yet, and prints only the `unresolved` line.
+
+The coverage looks at the styles' names only; a layer's missing linetype is
+in `cad::missingNames`, the managers' list of the same thing for every Style
+and Layer name, with who uses each and `MissingName::status`. The style
+manager's Diagnostics and the symbol library show it ("The Format menu" in
+`docs/cad.md`).
 
 ## The customisation is part of the program
 
@@ -984,8 +1148,8 @@ A built-in file that cannot be read costs ONLY ITSELF:
 the files before and after it brought, where one damaged file used to leave
 every drawing on plain lines without a word (audit A12-06). A person loading
 files still gets `readCustomisation`, which fails whole so they can be told.
-A12-06 stays open until the front ends LOG `builtinCustomisation().errors`
-and `.warnings`; today neither does.
+Both front ends LOG `builtinCustomisation().errors` and `.warnings` once at
+start-up, so A12-06 is fixed ("Loading a customisation" above).
 
 Two decisions worth recording:
 
@@ -1006,5 +1170,8 @@ then RE-RUN CMake (`cmake -S . -B build/release`) and rebuild to have it
 compiled in: the file list is a configure-time glob, so a plain rebuild does not
 see a new file.
 
-`File > Load 12d Customisation...` still overrides what is built in, which is
-how a site tries a new library without reissuing the application.
+Format > Load 12d Customisation... goes on top of what is built in - its
+definitions and codes take the place of the same ones, everything else is
+kept - and Format > Replace Loaded Customisation... takes the place of each
+kind it brings. That is how a site tries a new library without reissuing the
+application.
