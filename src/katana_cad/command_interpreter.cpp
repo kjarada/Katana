@@ -1,6 +1,7 @@
 #include "katana/cad/command_interpreter.hpp"
 
 #include "katana/cad/parcel.hpp"
+#include "katana/cad/survey_tools.hpp"
 
 #include "katana/entity/dimension_text.hpp"
 
@@ -154,7 +155,7 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
         {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"}, {"ST", "STYLE"},
-        {"?", "HELP"},
+        {"RADIATE", "FORWARD"}, {"?", "HELP"},
     };
     return table;
 }
@@ -303,6 +304,14 @@ Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [s
           high and low points; CLEARPROFILE name removes it
 Parcel    PARCEL id            bearings, distances, area and centroid of a closed polyline
           PARCEL id LEGAL [name]   the deed wording;  PARCEL id LABEL [height]   text labels
+Survey    INVERSE p p | INVERSE line-id   distance, azimuth, bearing; height difference,
+          slope distance and grade when both ends have an elevation
+          FORWARD p direction distance [dZ [name]]   a new point on the current layer, one
+          undo step (alias RADIATE); dZ - for none. p is E,N or E,N,Z (easting first) or a
+          point's id. direction: an azimuth 36d52m11.63s | 36:52:11.63 | 36-52-11.63 |
+          36.8699 (decimal degrees) or a bearing N36d52m11.63sE ("N 36 52 11.63 E" quoted)
+          AREA [id...]   area and perimeter of closed polylines and circles, each and in
+          total (the selection when no ids); hectares when the project unit is the metre
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           LAYER DIMSTYLE layer style   attaches one
@@ -312,7 +321,7 @@ Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id | HELP
-Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL ?)";
+Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE ?)";
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -432,6 +441,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "PARCEL") {
         return parcel(args);
+    }
+    if (verb == "INVERSE" || verb == "FORWARD" || verb == "AREA") {
+        return survey(verb, args);
     }
     if (verb == "UNDO" || verb == "REDO") {
         return undoRedo(verb, args);
@@ -1626,6 +1638,112 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
         << report->perimeter << " m, centroid " << report->centroid.x << "," << report->centroid.y
         << ", drawn " << (report->clockwise ? "clockwise" : "counter-clockwise");
     return out.str();
+}
+
+// ---- survey tools ---------------------------------------------------------------------------
+//
+// Parsing only: every number comes from survey_tools.hpp, and so does every
+// word of the reply, which is the report the Survey menu's dialogs show.
+
+CommandInterpreter::Reply CommandInterpreter::survey(const std::string& verb, const Tokens& args)
+{
+    if (verb == "INVERSE") {
+        const char* const kUsage = "INVERSE p p | INVERSE line-id   (p = E,N or E,N,Z or a point id)";
+        Result<InverseResult> result = makeError(ErrorCode::Internal, "unreached");
+        if (args.size() == 1) {
+            const auto id = parseId(args[0]);
+            if (!id) {
+                return usage(kUsage);
+            }
+            const auto ends = endsOfLine(document_, *id);
+            if (!ends) {
+                return ends.error();
+            }
+            result = computeInverse(ends->first, ends->second);
+        } else if (args.size() == 2) {
+            const auto from = parseSurveyPosition(document_, args[0]);
+            if (!from) {
+                return from.error();
+            }
+            const auto to = parseSurveyPosition(document_, args[1]);
+            if (!to) {
+                return to.error();
+            }
+            result = computeInverse(*from, *to);
+        } else {
+            return usage(kUsage);
+        }
+        if (!result) {
+            return result.error();
+        }
+        return formatInverseReport(*result);
+    }
+
+    if (verb == "FORWARD") {
+        if (args.size() < 3 || args.size() > 5) {
+            return usage("FORWARD p direction distance [dZ [name]]   (dZ - for none)");
+        }
+        ForwardInput input;
+        const auto from = parseSurveyPosition(document_, args[0]);
+        if (!from) {
+            return from.error();
+        }
+        input.from = *from;
+        const auto direction = parseSurveyDirection(args[1]);
+        if (!direction) {
+            return direction.error();
+        }
+        input.azimuth = *direction;
+        const auto distance = parseSurveyNumber(args[2], "the horizontal distance");
+        if (!distance) {
+            return distance.error();
+        }
+        input.distance = *distance;
+        // The name only ever comes fifth, so a point numbered "102" is never
+        // taken for a height difference of 102.
+        if (args.size() >= 4 && args[3] != "-") {
+            const auto dz = parseSurveyNumber(args[3], "the height difference");
+            if (!dz) {
+                return dz.error();
+            }
+            input.heightDifference = *dz;
+        }
+        if (args.size() == 5) {
+            input.name = args[4];
+        }
+        const auto result = computeForward(input);
+        if (!result) {
+            return result.error();
+        }
+        auto command = forwardPointCommand(document_, *result);
+        if (!command) {
+            return command.error();
+        }
+        return finish(document_.execute(std::move(*command)),
+                      formatForwardReport(*result) + "\n  Created on layer " +
+                          document_.currentLayer());
+    }
+
+    // AREA
+    std::vector<EntityId> ids;
+    if (args.empty()) {
+        if (auto selected = requireSelection(); !selected) {
+            return selected.error();
+        }
+        ids = document_.selection().ids();
+    }
+    for (const std::string& arg : args) {
+        const auto id = parseId(arg);
+        if (!id) {
+            return usage("AREA [id...]   (the selection when no ids)");
+        }
+        ids.push_back(*id);
+    }
+    const auto result = computeArea(document_, ids);
+    if (!result) {
+        return result.error();
+    }
+    return formatAreaReport(*result);
 }
 
 CommandInterpreter::Reply CommandInterpreter::linetype(const Tokens& args)
