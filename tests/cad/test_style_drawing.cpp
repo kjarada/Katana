@@ -359,6 +359,56 @@ TEST(StyleDrawing, AMarkBesideALineOutsideTheViewIsStillLaidWhenItReachesIntoIt)
     EXPECT_EQ(laid.drawing.strokes.back().path.vertices[1], Point2(70, 3));
 }
 
+TEST(StyleDrawing, AWholeLineInViewLaysExactlyWhatTheUnclippedLayingDoesWhenAnArcOverhangsThePen)
+{
+    // A scallop written the way 12d writes arcs - move to the centre, then
+    // arc - so the pen only ever stands at x = 0.5 while the half-circle
+    // below it runs from x = 0 (180 deg) round to x = 1 (360 deg).
+    //   length 1 / move 0.5 0 / arc 0.5 180 360
+    // Along a 10.4-long line, unclipped: repeats k = 0 .. floor(10.4 / 1) =
+    // 10, eleven of them, and repeat 10's arc covers 10 .. 11, so it starts
+    // ON the line at (10, 0) and is drawn, cut off at the end.
+    // With the whole line in view the visible stretch is all of 0 .. 10.4,
+    // and repeat k reaches it while k + 0 <= 10.4 - the arc's own low x,
+    // not the pen's 0.5, which gave floor((10.4 - 0.5) / 1) = 9 and left
+    // the last 0.4 of the line blank on screen and on the plot while the
+    // preview drew it.
+    Stroke arc;
+    arc.op = StrokeOp::Arc;
+    arc.radius = 0.5;
+    arc.startAngle = 180.0;
+    arc.endAngle = 360.0;
+    LineStyle scallop = definition({move(0.5, 0), arc});
+    scallop.length = 1.0;
+    // The same hole, from the other side: a Draw from the pen's starting
+    // place, which no Move ever stood on. "length 1 / draw 0.5 0" draws
+    // 0 .. 0.5 in every period; repeat 10 draws 10 .. 10.4.
+    LineStyle unmoved = definition({draw(0.5, 0)});
+    unmoved.length = 1.0;
+
+    const Polyline2 line{{Point2(0, 0), Point2(10.4, 0)}, false};
+    LinestyleOptions wholeLine;
+    wholeLine.visible = Box2{Point2(-5, -5), Point2(15, 5)};
+    for (const LineStyle* style : {&scallop, &unmoved}) {
+        const auto flat = katana::cad::flattenDefinition(*style);
+        const auto unclipped = katana::cad::layLinestyle(flat, line, {});
+        const auto clipped = katana::cad::layLinestyle(flat, line, wholeLine);
+        ASSERT_EQ(clipped.outcome, LinestyleLayout::Outcome::Laid);
+        EXPECT_EQ(unclipped.instances, 11u);
+        EXPECT_EQ(clipped.instances, 11u);
+        ASSERT_EQ(unclipped.drawing.strokes.size(), 11u);
+        ASSERT_EQ(clipped.drawing.strokes.size(), 11u);
+        for (std::size_t i = 0; i < clipped.drawing.strokes.size(); ++i) {
+            EXPECT_EQ(clipped.drawing.strokes[i].path.vertices,
+                      unclipped.drawing.strokes[i].path.vertices)
+                << "repeat " << i;
+        }
+        const Point2 lastStart = clipped.drawing.strokes.back().path.vertices.front();
+        EXPECT_NEAR(lastStart.x, 10.0, 1e-9);
+        EXPECT_NEAR(lastStart.y, 0.0, 1e-9);
+    }
+}
+
 TEST(StyleDrawing, APatternUnderTwoPixelsIsNotLaidSoTheCallerDrawsThePlainLine)
 {
     // A period of 10 model units: at 0.15 px a unit it is 1.5 px on screen,
