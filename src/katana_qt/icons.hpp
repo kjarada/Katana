@@ -89,6 +89,18 @@ enum class Icon {
     // Help
     Help,
     About,
+    // Survey (PLAN.MD 45 slice 9), the Survey menu's tools. Survey marks are
+    // rings with a centre dot, control stations triangles, and a thin north
+    // line with its arrowhead where a direction is measured FROM north. The
+    // accent is what the tool computes: the measured line and its angle, the
+    // new point, the area, the adjusted legs, the sight line, the conversion.
+    SurveyInverse,
+    SurveyForward,
+    SurveyArea,
+    SurveyAngle,
+    SurveyTraverse,
+    SurveyLevelBook,
+    SurveyConverter,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

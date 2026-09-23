@@ -180,6 +180,29 @@ void drawArrowOut(const Ink& ink)
     ink.stroke(polyline({{15.5, 6}, {18.5, 3}, {21.5, 6}}), true);
 }
 
+// ---- Survey marks --------------------------------------------------------------------
+//
+// A survey point: a ring with a dot at its centre, as a mark is drawn on a
+// plan. In the accent for a point the command creates.
+void drawMark(const Ink& ink, double x, double y, bool accent)
+{
+    ink.stroke(circle(x, y, 2.2), accent, 1.3);
+    ink.dot(x, y, 0.8, accent);
+}
+
+// A control or traverse station: a filled triangle, the usual plan symbol.
+void drawStation(const Ink& ink, double x, double y)
+{
+    ink.fill(polyline({{x, y - 2.8}, {x + 2.5, y + 1.6}, {x - 2.5, y + 1.6}}, true));
+}
+
+// Grid north above a mark: a thin line from `from` up to `to` with its head.
+void drawNorth(const Ink& ink, double x, double from, double to)
+{
+    ink.line(x, from, x, to, false, 1.1);
+    ink.stroke(polyline({{x - 1.7, to + 2.5}, {x, to}, {x + 1.7, to + 2.5}}), false, 1.1);
+}
+
 // The curved arrow of Undo; Redo is its mirror image.
 void drawTurn(QPainter& painter, const Ink& ink, bool mirrored)
 {
@@ -224,6 +247,11 @@ const std::vector<Icon>& allIcons()
         Icon::ExportDem,    Icon::ConvertCopc,
         Icon::DatasetInfo,
         Icon::Help,         Icon::About,
+        // Survey
+        Icon::SurveyInverse, Icon::SurveyForward,
+        Icon::SurveyArea,   Icon::SurveyAngle,
+        Icon::SurveyTraverse, Icon::SurveyLevelBook,
+        Icon::SurveyConverter,
     };
     return icons;
 }
@@ -521,6 +549,97 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         ink.dot(12, 7.6, 1.25, true);
         ink.line(12, 11.2, 12, 17.4, true);
         break;
+    // ---- Survey ------------------------------------------------------------------------
+    case Icon::SurveyInverse: {
+        // Two marks, north at the first, and what the inverse measures: the
+        // line between them and its azimuth, swept clockwise from north.
+        drawNorth(ink, 6, 15.8, 4);
+        // (6, 18) to (19, 7): unit vector (13, -11) / 17.03, trimmed by the
+        // marks' 2.2 radius at each end.
+        ink.line(7.68, 16.58, 17.32, 8.42, true);
+        QPainterPath sweep;
+        const QRectF round(-1, 11, 14, 14); // radius 7 about (6, 18)
+        sweep.arcMoveTo(round, 90.0);
+        // From north (90 degrees in Qt's anticlockwise sense) to the line,
+        // atan2(11, 13) = 40.2 degrees: 49.8 degrees clockwise.
+        sweep.arcTo(round, 90.0, -49.8);
+        ink.stroke(sweep, true, 1.3);
+        drawMark(ink, 6, 18, false);
+        drawMark(ink, 19, 7, false);
+        break;
+    }
+    case Icon::SurveyForward:
+        // From a known mark along a direction to a NEW point, which is the
+        // accent: what the command adds to the drawing.
+        drawNorth(ink, 5, 16.8, 4);
+        // (5, 19) to (18, 7): unit (13, -12) / 17.69, trimmed by 2.2 and 2.4.
+        ink.line(6.62, 17.51, 16.24, 8.63, true);
+        drawMark(ink, 5, 19, false);
+        drawMark(ink, 18, 7, true);
+        break;
+    case Icon::SurveyArea: {
+        const QPainterPath parcel =
+            polyline({{3, 19}, {5, 6}, {14, 3}, {21, 9}, {18, 20}}, true);
+        ink.fill(parcel, true, 90);
+        ink.stroke(parcel);
+        for (const QPointF& p :
+             {QPointF(3, 19), QPointF(5, 6), QPointF(14, 3), QPointF(21, 9), QPointF(18, 20)}) {
+            ink.node(p.x(), p.y());
+        }
+        break;
+    }
+    case Icon::SurveyAngle: {
+        // Two rays from a vertex, the angle between them, and the degree mark.
+        ink.line(4, 19, 21, 19);
+        ink.line(4, 19, 14, 5.4);
+        QPainterPath sweep;
+        const QRectF round(-5, 10, 18, 18); // radius 9 about (4, 19)
+        sweep.arcMoveTo(round, 0.0);
+        // The second ray's direction, atan2(13.6, 10) = 53.7 degrees.
+        sweep.arcTo(round, 0.0, 53.7);
+        ink.stroke(sweep, true);
+        ink.stroke(circle(18, 8, 2), true, 1.3);
+        break;
+    }
+    case Icon::SurveyTraverse:
+        // The legs, which the adjustment corrects, over the stations.
+        ink.stroke(polyline({{4, 18}, {10, 7}, {15, 15}, {20, 5}}), true);
+        for (const QPointF& p : {QPointF(4, 18), QPointF(10, 7), QPointF(15, 15), QPointF(20, 5)}) {
+            drawStation(ink, p.x(), p.y());
+        }
+        break;
+    case Icon::SurveyLevelBook:
+        // A level on its tripod sighting a staff: the sight line is the
+        // reading the book records.
+        ink.stroke(rectangle(2.5, 7.5, 7, 3.5, 0.8));
+        ink.line(6, 11, 3, 21, false, 1.3);
+        ink.line(6, 11, 9, 21, false, 1.3);
+        ink.dashed(polyline({{10, 9.25}, {15.5, 9.25}}), true);
+        ink.stroke(rectangle(16, 3, 5, 18));
+        for (const double y : {6.0, 10.0, 14.0, 18.0}) {
+            ink.fill(rectangle(16, y, 2.5, 2), false, 160);
+        }
+        break;
+    case Icon::SurveyConverter: {
+        // A globe and a grid, and the conversion between them both ways.
+        ink.stroke(circle(7.5, 7.5, 5));
+        ink.line(2.5, 7.5, 12.5, 7.5, false, 1.1);
+        QPainterPath meridian;
+        meridian.addEllipse(QPointF(7.5, 7.5), 2.2, 5);
+        ink.stroke(meridian, false, 1.1);
+        ink.stroke(rectangle(13, 13, 8, 8));
+        ink.line(17, 13, 17, 21, false, 1.1);
+        ink.line(13, 17, 21, 17, false, 1.1);
+        QPainterPath there(QPointF(14.5, 4.5));
+        there.quadTo(18.5, 4.5, 18.5, 10.5);
+        ink.stroke(there, true);
+        ink.stroke(polyline({{16.5, 8.5}, {18.5, 10.8}, {20.5, 8.5}}), true);
+        QPainterPath back(QPointF(10.5, 19.5));
+        back.quadTo(5.5, 19.5, 5.5, 13.5);
+        ink.stroke(back, true);
+        ink.stroke(polyline({{3.5, 15.5}, {5.5, 13.2}, {7.5, 15.5}}), true);
+        break;
+    }
     }
     painter.restore();
 }
