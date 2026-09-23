@@ -134,7 +134,9 @@ class RenderViewWidget final : public QWidget {
     double lastFrameMs_ = 0.0;
     bool sceneDirty_ = true;
     bool sceneEmpty_ = true;
-    bool framed_ = false; // the first paint frames the scene
+    // The first paint frames the scene unless the camera was framed already
+    // (ViewState::cameraFramed): the constructor sets this from the state.
+    bool framed_ = false;
     // The last frame was of an empty scene, so it framed a patch of ground
     // round the origin. The first rebuild that finds something to show frames
     // that instead: a line drawn at survey coordinates would otherwise be
