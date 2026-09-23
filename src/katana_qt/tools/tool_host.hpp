@@ -59,6 +59,9 @@ class ToolHost {
     // What relative input (@dx,dy) and the Perpendicular and Tangent snaps
     // measure from; nullopt before the tool's first point.
     [[nodiscard]] std::optional<Point2> lastPoint() const;
+    // Changes whenever a tool is made, remade for a restart, or dropped: what
+    // a caller's own state about "the tool running now" is checked against.
+    [[nodiscard]] std::uint64_t generation() const { return generation_; }
 
     // The view's pick aperture in model units, given to a tool when it starts
     // or restarts (ToolContext::pickTolerance). The view sets it from its zoom.

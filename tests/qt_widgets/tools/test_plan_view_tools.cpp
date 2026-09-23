@@ -387,6 +387,85 @@ TEST(PlanViewTools, AShiftOrCtrlClickAtAToolsSelectionStepTakesAPickBackOut)
     EXPECT_EQ(plan.document.model().entities.find(b), nullptr);
 }
 
+TEST(PlanViewTools, AClickAtAToolsSelectionStepSendsOutThePromptThatCountsIt)
+{
+    // Trim's edge prompt counts the edges from the document's selection. The
+    // command line and status bar hear the prompt only through onPrompt, so
+    // a click there must send it again. Two lines picked, none by the tool
+    // itself: "Select cutting edges" + " <use 2 edges>" (EdgeTool::prompt).
+    PlanFixture plan;
+    addLine(plan.document, Point2(0, 0), Point2(10, 0));   // through pixel (250, 150)
+    addLine(plan.document, Point2(0, 10), Point2(10, 10)); // through pixel (250, 50)
+    std::vector<QString> prompts;
+    plan.view.onPrompt = [&](const QString& text) { prompts.push_back(text); };
+    ASSERT_TRUE(plan.view.startTool("modify.trim").ok());
+    plan.press(250, 150);
+    plan.press(250, 50);
+
+    ASSERT_FALSE(prompts.empty());
+    EXPECT_EQ(prompts.back().toStdString(), "Trim: Select cutting edges <use 2 edges>");
+}
+
+TEST(PlanViewTools, CtrlZAtAToolsSelectionStepTakesBackTheLastClick)
+{
+    // The clicks changed the document's selection, which the tool reads at
+    // Enter; the tool never saw them, so its own undo would say nothing was
+    // picked while both edges stayed picked.
+    PlanFixture plan;
+    const EntityId a = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    const EntityId b = addLine(plan.document, Point2(0, 10), Point2(10, 10));
+    ASSERT_TRUE(plan.view.startTool("modify.trim").ok());
+    plan.press(250, 150);
+    plan.press(250, 50);
+
+    plan.key(Qt::Key_Z, Qt::ControlModifier);
+    EXPECT_TRUE(plan.document.selection().contains(a));
+    EXPECT_FALSE(plan.document.selection().contains(b));
+    plan.key(Qt::Key_Z, Qt::ControlModifier);
+    EXPECT_TRUE(plan.document.selection().empty());
+    EXPECT_TRUE(plan.errors.empty()) << plan.errors.front().toStdString();
+
+    plan.key(Qt::Key_Z, Qt::ControlModifier); // nothing left: the tool says so
+    EXPECT_EQ(plan.errors.size(), 1u);
+    EXPECT_TRUE(plan.view.toolActive());
+    EXPECT_EQ(plan.undoSteps(), 2u) << "the drawing is never undone under a tool";
+}
+
+TEST(PlanViewTools, UTypedAtAToolsSelectionStepTakesBackTheLastClickAsCtrlZDoes)
+{
+    PlanFixture plan;
+    const EntityId a = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    const EntityId b = addLine(plan.document, Point2(0, 10), Point2(10, 10));
+    ASSERT_TRUE(plan.view.startTool("modify.erase").ok());
+    plan.press(250, 150);
+    plan.press(250, 50);
+    plan.type("u");
+    plan.enter();
+    plan.enter(); // erases what is left picked: a
+
+    EXPECT_EQ(plan.document.model().entities.find(a), nullptr);
+    EXPECT_NE(plan.document.model().entities.find(b), nullptr);
+}
+
+TEST(PlanViewTools, CtrlZAfterATypedAllTakesBackTheAllBeforeTheClickBeforeIt)
+{
+    // Steps back in the order they were made: the click on a, then All
+    // (which the tool holds itself), so Ctrl+Z takes back All and leaves a
+    // picked, and Enter erases a alone.
+    PlanFixture plan;
+    const EntityId a = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    const EntityId b = addLine(plan.document, Point2(0, 10), Point2(10, 10));
+    ASSERT_TRUE(plan.view.startTool("modify.erase").ok());
+    plan.press(250, 150);
+    plan.type("ALL");
+    plan.enter();
+    plan.key(Qt::Key_Z, Qt::ControlModifier);
+    plan.enter();
+
+    EXPECT_EQ(plan.document.model().entities.find(a), nullptr);
+    EXPECT_NE(plan.document.model().entities.find(b), nullptr);
+}
+
 TEST(PlanViewTools, TextTypedWithNoToolRunningStillGoesToTheWindow)
 {
     PlanFixture plan;
