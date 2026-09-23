@@ -122,8 +122,12 @@ TEST(SurveyCoding, ItIsOneUndoRatherThanOnePerEntity)
         << "and takes the layer it created with them";
 }
 
-TEST(SurveyCoding, ACodeTheMapfileHasNoRuleForIsNamedRatherThanLeftLookingHandled)
+TEST(SurveyCoding, ACodeOnlyTheStarRuleAnswersIsReportedAsFallbackOnlyRatherThanAsMatched)
 {
+    // Audit CAD-05. Every code meets the `*` attribute rule, so "some rule
+    // matched" is true of a typo too. ZZ99 and ZZ98 get only the `*`
+    // attributes - no model, no linestyle, no symbol - and must be named, not
+    // counted with WM01 as codes the mapfile has a rule for.
     Document document;
     document.setSurveyMap(waterAndBollards());
     addCodedPoint(document, Point2(0, 0), "WM01");
@@ -134,10 +138,32 @@ TEST(SurveyCoding, ACodeTheMapfileHasNoRuleForIsNamedRatherThanLeftLookingHandle
     auto command = katana::cad::applySurveyCodes(document, {}, &report);
     ASSERT_TRUE(command.ok());
     EXPECT_EQ(report.coded, 3u);
-    // Every code matches the `*` rule, so all three are "matched"; what
-    // distinguishes them is that ZZ* has no model and no style to give.
-    EXPECT_EQ(report.matched, 3u);
+    EXPECT_EQ(report.matched, 1u) << "only WM01 has a rule of its own";
+    EXPECT_EQ(report.fallbackOnly, 2u);
+    EXPECT_EQ(report.fallbackOnlyCodes, (std::vector<std::string>{"ZZ98", "ZZ99"}));
+    EXPECT_TRUE(report.unmatchedCodes.empty()) << "a rule did match them: the bare `*`";
     EXPECT_EQ(report.layersCreated, (std::vector<std::string>{"SURVEY SERVICES"}));
+}
+
+TEST(SurveyCoding, ACodeNoRuleAtAllMatchesIsListedAsUnmatched)
+{
+    katana::entity::SurveyMap map;
+    SurveyRule main;
+    main.key = "WM*";
+    main.model = "SURVEY SERVICES";
+    ASSERT_TRUE(map.add(main).ok());
+    Document document;
+    document.setSurveyMap(std::move(map));
+    addCodedPoint(document, Point2(0, 0), "WM01");
+    addCodedPoint(document, Point2(1, 0), "ZZ99");
+
+    SurveyCodingReport report;
+    auto command = katana::cad::applySurveyCodes(document, {}, &report);
+    ASSERT_TRUE(command.ok());
+    EXPECT_EQ(report.coded, 2u);
+    EXPECT_EQ(report.matched, 1u);
+    EXPECT_EQ(report.fallbackOnly, 0u);
+    EXPECT_EQ(report.unmatchedCodes, (std::vector<std::string>{"ZZ99"}));
 }
 
 TEST(SurveyCoding, AnEntityWithNoCodeOrANumberForOneIsLeftAlone)
@@ -239,4 +265,452 @@ TEST(SurveyCoding, OnlyTheEntitiesAskedForAreTouched)
     EXPECT_EQ(document.model().entities.find(first)->layer, "SURVEY SERVICES");
     EXPECT_EQ(document.model().entities.find(document.model().entities.ids().back())->layer,
               katana::entity::kDefaultLayerName);
+}
+
+// ---- which style a code gets (decision D4) ----------------------------------
+
+namespace {
+
+// The shapes the reference mapfile gives these codes, cut down: every symbol
+// code ALSO has a map_data rule saying linestyle "0"; the text codes 1* and
+// 2* both say linestyle "0" in different colours; and one real linestyle is
+// used in two colours.
+katana::entity::SurveyMap realShapes()
+{
+    katana::entity::SurveyMap map;
+    const auto mapData = [&map](std::string key, std::string model, std::string colour,
+                                std::string linestyle) {
+        SurveyRule rule;
+        rule.key = std::move(key);
+        rule.model = std::move(model);
+        rule.colour = std::move(colour);
+        rule.linestyle = std::move(linestyle);
+        EXPECT_TRUE(map.add(rule).ok());
+    };
+    const auto symbol = [&map](std::string key, std::string style, double size) {
+        SurveyRule rule;
+        rule.key = std::move(key);
+        rule.section = katana::entity::SurveySection::VertexSymbol;
+        rule.symbol = katana::entity::SurveySymbol{std::move(style), "", size, 0.0, 0.0, 0.0};
+        EXPECT_TRUE(map.add(rule).ok());
+    };
+    mapData("AC*", "SURVEY DETAIL", "white", "0");
+    mapData("SV*", "SURVEY DETAIL", "red", "0");
+    mapData("1*", "SURVEY TEXT", "yellow", "0");
+    mapData("2*", "SURVEY TEXT", "cyan", "0");
+    mapData("TS*", "SURVEY DETAIL", "Green", "TOPO Timber or Scrub Scattered");
+    mapData("TD*", "SURVEY DETAIL", "Dark Green", "TOPO Timber or Scrub Scattered");
+    mapData("WM*", "SURVEY SERVICES", "sui water potable", "WATR Main");
+    symbol("AC*", "CULT Bollard", 1.5);
+    symbol("SV*", "SEWR Manhole Cover", 1.0);
+    return map;
+}
+
+// A colour table of the test's own, so that what is expected does not hang
+// on the one in archive12d, which cad may not see anyway.
+std::optional<katana::entity::Color> testColour(std::string_view name)
+{
+    using katana::entity::Color;
+    if (name == "white") {
+        return Color{255, 255, 255, 255};
+    }
+    if (name == "red") {
+        return Color{255, 0, 0, 255};
+    }
+    if (name == "yellow") {
+        return Color{255, 255, 0, 255};
+    }
+    if (name == "cyan") {
+        return Color{0, 255, 255, 255};
+    }
+    if (name == "Green") {
+        return Color{0, 255, 0, 255};
+    }
+    if (name == "Dark Green") {
+        return Color{0, 100, 0, 255};
+    }
+    return std::nullopt; // "sui water potable" is unknown here, as it is to Katana
+}
+
+SurveyCodingOptions withColours()
+{
+    SurveyCodingOptions options;
+    options.colourOf = testColour;
+    return options;
+}
+
+const katana::entity::Style& styleOf(const Document& document, EntityId id)
+{
+    static const katana::entity::Style none;
+    const auto* entity = document.model().entities.find(id);
+    if (entity == nullptr) {
+        ADD_FAILURE() << "no entity " << id;
+        return none;
+    }
+    const auto* style = document.model().styles.find(entity->style);
+    if (style == nullptr) {
+        ADD_FAILURE() << "entity " << id << " has style \"" << entity->style
+                      << "\", which does not exist";
+        return none;
+    }
+    return *style;
+}
+
+void apply(Document& document, const SurveyCodingOptions& options,
+           SurveyCodingReport* report = nullptr)
+{
+    auto command = katana::cad::applySurveyCodes(document, options, report);
+    ASSERT_TRUE(command.ok()) << command.error().describe();
+    if (*command != nullptr) {
+        ASSERT_TRUE(document.execute(std::move(*command)).ok());
+    }
+}
+
+} // namespace
+
+TEST(SurveyCodingStyles, SymbolAndTextCodesOnLinestyleZeroEachKeepTheirOwnSymbolAndColour)
+{
+    // They all say linestyle "0". Named after the linestyle, they became ONE
+    // style "0" built from whichever point came first: one symbol and one
+    // colour for all four.
+    Document document;
+    document.setSurveyMap(realShapes());
+    const EntityId bollard = addCodedPoint(document, Point2(0, 0), "AC01");
+    const EntityId manhole = addCodedPoint(document, Point2(1, 0), "SV01");
+    const EntityId yellowText = addCodedPoint(document, Point2(2, 0), "101");
+    const EntityId cyanText = addCodedPoint(document, Point2(3, 0), "201");
+
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+
+    EXPECT_FALSE(document.model().styles.contains("0")) << "\"0\" is a plain line, not a name";
+    const auto& first = styleOf(document, bollard);
+    EXPECT_EQ(first.symbol, "CULT Bollard");
+    EXPECT_EQ(first.symbolSize, 1.5);
+    EXPECT_EQ(first.linetype, katana::entity::kContinuousLinetype);
+    EXPECT_EQ(first.color, (katana::entity::Color{255, 255, 255, 255}));
+    const auto& second = styleOf(document, manhole);
+    EXPECT_EQ(second.symbol, "SEWR Manhole Cover");
+    EXPECT_EQ(second.color, (katana::entity::Color{255, 0, 0, 255}));
+    EXPECT_EQ(styleOf(document, yellowText).color, (katana::entity::Color{255, 255, 0, 255}));
+    EXPECT_EQ(styleOf(document, cyanText).color, (katana::entity::Color{0, 255, 255, 255}));
+    EXPECT_TRUE(styleOf(document, cyanText).symbol.empty());
+
+    // Named after the symbol where there is one, else "Plain". The two text
+    // codes are both plain lines with no symbol, so both want "Plain".
+    // Appearances are named in a fixed order - linestyle, symbol, size, then
+    // colour, whose identity is its RGB as "#RRGGBB" - and cyan "#00FFFF"
+    // sorts before yellow "#FFFF00", so cyan takes "Plain" and yellow gets
+    // its colour name added.
+    EXPECT_EQ(report.stylesCreated, (std::vector<std::string>{"CULT Bollard", "Plain",
+                                                              "Plain (yellow)",
+                                                              "SEWR Manhole Cover"}));
+    EXPECT_EQ(document.model().entities.find(cyanText)->style, "Plain");
+    EXPECT_EQ(document.model().entities.find(yellowText)->style, "Plain (yellow)");
+}
+
+TEST(SurveyCodingStyles, ALinestyleUsedInTwoColoursGivesTwoStylesNamedTheSameWhicheverPointComesFirst)
+{
+    // "TOPO Timber or Scrub Scattered" comes in Green and in Dark Green in
+    // each reference mapfile. In the fixed order Dark Green "#006400" sorts
+    // before Green "#00FF00", so Dark Green takes the bare name.
+    const std::string name = "TOPO Timber or Scrub Scattered";
+    for (const bool greenFirst : {true, false}) {
+        Document document;
+        document.setSurveyMap(realShapes());
+        EntityId green = 0;
+        EntityId dark = 0;
+        if (greenFirst) {
+            green = addCodedPoint(document, Point2(0, 0), "TS01");
+            dark = addCodedPoint(document, Point2(1, 0), "TD01");
+        } else {
+            dark = addCodedPoint(document, Point2(1, 0), "TD01");
+            green = addCodedPoint(document, Point2(0, 0), "TS01");
+        }
+        SurveyCodingReport report;
+        apply(document, withColours(), &report);
+
+        EXPECT_EQ(report.stylesCreated, (std::vector<std::string>{name, name + " (Green)"}))
+            << (greenFirst ? "green first" : "dark green first");
+        EXPECT_EQ(document.model().entities.find(dark)->style, name);
+        EXPECT_EQ(document.model().entities.find(green)->style, name + " (Green)");
+        EXPECT_EQ(styleOf(document, green).color, (katana::entity::Color{0, 255, 0, 255}));
+        EXPECT_EQ(styleOf(document, dark).color, (katana::entity::Color{0, 100, 0, 255}));
+        EXPECT_EQ(styleOf(document, green).linetype, name);
+    }
+}
+
+TEST(SurveyCodingStyles, RenamingACodedStyleThenApplyingCodesAgainReusesItInsteadOfMakingASecond)
+{
+    Document document;
+    document.setSurveyMap(realShapes());
+    addCodedPoint(document, Point2(0, 0), "WM01");
+    apply(document, withColours());
+    ASSERT_TRUE(document.model().styles.contains("WATR Main"));
+    ASSERT_TRUE(document.execute(cmd::renameStyle("WATR Main", "Water main")).ok());
+    const std::size_t styles = document.model().styles.size();
+
+    const EntityId later = addCodedPoint(document, Point2(1, 0), "WM02");
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+
+    EXPECT_TRUE(report.stylesCreated.empty());
+    EXPECT_EQ(report.stylesReused, (std::vector<std::string>{"Water main"}));
+    EXPECT_EQ(document.model().styles.size(), styles) << "no duplicate of the renamed style";
+    EXPECT_FALSE(document.model().styles.contains("WATR Main"));
+    EXPECT_EQ(document.model().entities.find(later)->style, "Water main");
+}
+
+TEST(SurveyCodingStyles, AnImportedStringWhoseCodeIsOnlyInItsMetadataIsCodedAndKeepsItsSymbol)
+{
+    // A 12da import records a string's name - its code, in a coded survey -
+    // as metadata "12d.name", and gives it a style named after its 12d
+    // linestyle: here a symbol style, beside the style "0" the import makes
+    // for plain strings. Reading the code from the metadata WITHOUT the
+    // appearance rule would move this point onto "0" and lose its symbol.
+    Document document;
+    document.setSurveyMap(realShapes());
+    katana::entity::Style plain;
+    plain.name = "0";
+    plain.linetype = "0";
+    plain.description = "12d linestyle";
+    ASSERT_TRUE(document.execute(cmd::createStyle(plain)).ok());
+    katana::entity::Style imported;
+    imported.name = "CULT Bollard";
+    imported.linetype = "CULT Bollard";
+    imported.symbol = "CULT Bollard";
+    imported.symbolSize = 1.5;
+    imported.description = "12d symbol";
+    ASSERT_TRUE(document.execute(cmd::createStyle(imported)).ok());
+
+    katana::entity::Entity point;
+    point.geometry = katana::entity::PointGeometry{Point2(5, 5)};
+    point.style = "CULT Bollard";
+    point.metadata.insert_or_assign("12d.name", katana::entity::PropertyValue(std::string("AC01")));
+    ASSERT_TRUE(document.execute(cmd::createEntities({point})).ok());
+    const EntityId id = document.model().entities.ids().back();
+
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+
+    EXPECT_EQ(report.property, "12d.name") << "found in the metadata";
+    EXPECT_EQ(report.coded, 1u);
+    EXPECT_EQ(report.matched, 1u);
+    const auto* entity = document.model().entities.find(id);
+    ASSERT_NE(entity, nullptr);
+    EXPECT_EQ(entity->layer, "SURVEY DETAIL");
+    EXPECT_NE(entity->style, "0");
+    EXPECT_EQ(styleOf(document, id).symbol, "CULT Bollard") << "the symbol is kept";
+    // The imported style also runs the name as a linestyle and has no
+    // colour, so it is not this appearance, and a new style is named for the
+    // colour.
+    EXPECT_EQ(entity->style, "CULT Bollard (white)");
+}
+
+TEST(SurveyCodingStyles, AStyleIsReusedOnlyWhenAllFourPartsOfTheAppearanceAgree)
+{
+    // An existing plain style in the wrong colour is not reused, and its name
+    // is not taken over either.
+    Document document;
+    document.setSurveyMap(realShapes());
+    katana::entity::Style red;
+    red.name = "Plain";
+    red.color = katana::entity::Color{255, 0, 0, 255};
+    ASSERT_TRUE(document.execute(cmd::createStyle(red)).ok());
+    katana::entity::Style yellow;
+    yellow.name = "Signs";
+    yellow.linetype = "Continuous"; // plain, in any case
+    yellow.color = katana::entity::Color{255, 255, 0, 255};
+    ASSERT_TRUE(document.execute(cmd::createStyle(yellow)).ok());
+    const EntityId yellowText = addCodedPoint(document, Point2(0, 0), "101");
+    const EntityId cyanText = addCodedPoint(document, Point2(0, 0), "201");
+
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+    EXPECT_EQ(document.model().entities.find(yellowText)->style, "Signs")
+        << "plain and yellow: reused under its own name";
+    EXPECT_EQ(document.model().entities.find(cyanText)->style, "Plain (cyan)")
+        << "\"Plain\" is red, so cyan cannot have that name";
+    EXPECT_EQ(report.stylesReused, (std::vector<std::string>{"Signs"}));
+    EXPECT_EQ(report.stylesCreated, (std::vector<std::string>{"Plain (cyan)"}));
+}
+
+// ---- what the report says -------------------------------------------------
+
+TEST(SurveyCodingReport, WithoutCreatingLayersTheStyleAndAttributesAreStillApplied)
+{
+    // Audit CAD-18: a missing layer used to abandon the whole entity.
+    Document document;
+    document.setSurveyMap(waterAndBollards());
+    const EntityId id = addCodedPoint(document, Point2(0, 0), "WM01");
+
+    SurveyCodingOptions options;
+    options.createLayers = false;
+    SurveyCodingReport report;
+    apply(document, options, &report);
+
+    const auto* entity = document.model().entities.find(id);
+    ASSERT_NE(entity, nullptr);
+    EXPECT_EQ(entity->layer, katana::entity::kDefaultLayerName) << "no layer, so it stays";
+    EXPECT_EQ(entity->style, "WATR Main");
+    EXPECT_EQ(std::get<std::string>(entity->properties.at("DepthLocation")), "Top of Pipe");
+    EXPECT_EQ(report.skippedNoLayer, 1u);
+    EXPECT_TRUE(report.layersCreated.empty());
+    EXPECT_EQ(report.changed, 1u) << "its style and a property changed";
+}
+
+TEST(SurveyCodingReport, ChangedCountsEachAlteredEntityOnceWhateverWasAltered)
+{
+    Document document;
+    document.setSurveyMap(waterAndBollards());
+    katana::entity::Layer services;
+    services.name = "SURVEY SERVICES";
+    ASSERT_TRUE(document.execute(cmd::createLayer(services)).ok());
+    const EntityId onLayer = addCodedPoint(document, Point2(0, 0), "WM01");
+    ASSERT_TRUE(document.execute(cmd::setEntityLayer({onLayer}, "SURVEY SERVICES")).ok());
+    addCodedPoint(document, Point2(1, 0), "WM02");
+
+    SurveyCodingReport report;
+    apply(document, {}, &report);
+    // Both change: the first only its style and a property (it is already on
+    // the layer), the second its layer as well. Counting layer moves alone
+    // gave 1.
+    EXPECT_EQ(report.changed, 2u);
+
+    // Everything is now as the map says, so a second pass has nothing to do.
+    SurveyCodingReport again;
+    auto second = katana::cad::applySurveyCodes(document, {}, &again);
+    ASSERT_TRUE(second.ok());
+    EXPECT_EQ(*second, nullptr);
+    EXPECT_EQ(again.changed, 0u);
+    EXPECT_EQ(again.matched, 2u) << "still matched; only nothing is left to change";
+}
+
+TEST(SurveyCodingReport, WithoutCreatingStylesAnAppearanceNoStyleHasIsCountedAndTheStyleKept)
+{
+    Document document;
+    document.setSurveyMap(waterAndBollards());
+    const EntityId id = addCodedPoint(document, Point2(0, 0), "WM01");
+    SurveyCodingOptions options;
+    options.createStyles = false;
+    SurveyCodingReport report;
+    apply(document, options, &report);
+    EXPECT_EQ(document.model().entities.find(id)->style, "");
+    EXPECT_EQ(document.model().entities.find(id)->layer, "SURVEY SERVICES");
+    EXPECT_EQ(report.skippedNoStyle, 1u);
+    EXPECT_TRUE(report.stylesCreated.empty());
+}
+
+TEST(SurveyCodingReport, AMissingDefinitionIsReportedEvenWhenTheCodeReusesAStyle)
+{
+    Document document;
+    document.setSurveyMap(waterAndBollards());
+    addCodedPoint(document, Point2(0, 0), "WM01");
+    apply(document, {});
+    addCodedPoint(document, Point2(1, 0), "WM02");
+    SurveyCodingReport report;
+    apply(document, {}, &report);
+    EXPECT_EQ(report.stylesReused, (std::vector<std::string>{"WATR Main"}));
+    EXPECT_EQ(report.missingDefinitions, (std::vector<std::string>{"WATR Main"}))
+        << "the library still does not define it";
+}
+
+TEST(SurveyCodingReport, EachDistinctCodeHasARowSayingWhatHappenedToItsEntities)
+{
+    Document document;
+    document.setSurveyMap(waterAndBollards());
+    addCodedPoint(document, Point2(0, 0), "WM01");
+    addCodedPoint(document, Point2(1, 0), "ZZ99");
+    addCodedPoint(document, Point2(2, 0), "WM01");
+    addCodedPoint(document, Point2(3, 0), "AC07");
+
+    SurveyCodingReport report;
+    apply(document, {}, &report);
+    ASSERT_EQ(report.codes.size(), 3u);
+    const auto& bollard = report.codes[0];
+    const auto& water = report.codes[1];
+    const auto& typo = report.codes[2];
+    EXPECT_EQ(bollard.code, "AC07");
+    EXPECT_EQ(water.code, "WM01");
+    EXPECT_EQ(typo.code, "ZZ99");
+
+    EXPECT_EQ(water.entities, 2u);
+    EXPECT_EQ(water.kind, katana::entity::SurveyMatchKind::Prefix);
+    EXPECT_TRUE(water.matched);
+    EXPECT_EQ(water.layersFrom, (std::vector<std::string>{std::string(katana::entity::kDefaultLayerName)}));
+    EXPECT_EQ(water.layer, "SURVEY SERVICES");
+    EXPECT_EQ(water.style, "WATR Main");
+    EXPECT_EQ(water.styleOutcome, katana::cad::SurveyStyleOutcome::Created);
+    EXPECT_EQ(water.attributesSet, (std::vector<std::string>{"DepthLocation"}));
+    EXPECT_EQ(water.attributesDeferred, (std::vector<std::string>{"Diameter"}));
+    EXPECT_EQ(water.changed, 2u);
+
+    EXPECT_EQ(typo.kind, katana::entity::SurveyMatchKind::FallbackOnly);
+    EXPECT_FALSE(typo.matched);
+    EXPECT_EQ(typo.layer, "");
+    EXPECT_EQ(typo.styleOutcome, katana::cad::SurveyStyleOutcome::None);
+    EXPECT_EQ(typo.attributesSet, (std::vector<std::string>{"DepthLocation"}))
+        << "the `*` rule does say every code gets it";
+    EXPECT_EQ(bollard.style, "CULT Bollard");
+}
+
+TEST(SurveyCodingReport, EveryEntityGetsWhatALookupOfItsOwnCodeGivesWhenCodesRepeat)
+{
+    // Decisions are made once per distinct code; this checks each entity
+    // against a lookup of its own code alone, which is the per-entity path.
+    Document document;
+    const katana::entity::SurveyMap map = realShapes();
+    document.setSurveyMap(map);
+    const std::vector<std::string> codes = {"WM01", "AC01", "TS01", "WM01", "101", "AC01",
+                                            "TD02", "WM03", "101",  "SV09", "TS01", "201"};
+    std::vector<EntityId> ids;
+    for (std::size_t i = 0; i < codes.size(); ++i) {
+        ids.push_back(addCodedPoint(document, Point2(static_cast<double>(i), 0), codes[i]));
+    }
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+
+    for (std::size_t i = 0; i < codes.size(); ++i) {
+        const auto match = map.lookup(codes[i]);
+        const auto& style = styleOf(document, ids[i]);
+        EXPECT_EQ(document.model().entities.find(ids[i])->layer, match.resolved.model) << codes[i];
+        const bool plain = katana::cad::isPlainLinestyle(match.resolved.linestyle);
+        EXPECT_EQ(style.linetype, plain ? std::string(katana::entity::kContinuousLinetype)
+                                        : match.resolved.linestyle)
+            << codes[i];
+        EXPECT_EQ(style.symbol, match.resolved.symbol ? match.resolved.symbol->style : "")
+            << codes[i];
+        EXPECT_EQ(style.color, testColour(match.resolved.colour)) << codes[i];
+    }
+    std::size_t rowsTotal = 0;
+    for (const auto& row : report.codes) {
+        rowsTotal += row.entities;
+    }
+    EXPECT_EQ(rowsTotal, codes.size());
+    // WM01 AC01 TS01 101 TD02 WM03 SV09 201 are distinct; WM01, AC01, 101
+    // and TS01 repeat: twelve entities, eight distinct codes.
+    EXPECT_EQ(report.codes.size(), 8u);
+}
+
+TEST(CustomisationCoverage, ABuiltInSymbolIsNeverListedAsUnresolved)
+{
+    // Audit CAD-17: "cross" draws through Katana's own shapes.
+    Document document;
+    katana::entity::Style style;
+    style.name = "s";
+    style.symbol = "cross";
+    ASSERT_TRUE(document.execute(cmd::createStyle(style)).ok());
+    const auto coverage = katana::cad::customisationCoverage(document);
+    EXPECT_EQ(coverage.styles, 1u);
+    EXPECT_TRUE(coverage.unresolved.empty());
+    EXPECT_EQ(coverage.named, 0u);
+    EXPECT_EQ(coverage.builtIn, 1u);
+
+    // A name nothing draws is still reported.
+    katana::entity::Style other;
+    other.name = "t";
+    other.symbol = "CULT Bollard";
+    ASSERT_TRUE(document.execute(cmd::createStyle(other)).ok());
+    EXPECT_EQ(katana::cad::customisationCoverage(document).unresolved,
+              (std::vector<std::string>{"CULT Bollard"}));
 }
