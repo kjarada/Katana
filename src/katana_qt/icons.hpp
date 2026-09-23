@@ -139,7 +139,7 @@ enum class Icon {
     // as a linetype table shows them, the accent one dashed with a symbol at
     // its vertex. Symbol Library: a grid of plan symbols, the accent one the
     // symbol chosen. Survey Code Manager: a field code's tag and the accent
-    // linework it becomes. Purge Unused: a bin, the accent what goes in it.
+    // linework it becomes. Purge Unused: a broom, sweeping the accent away.
     FormatStyles,
     FormatSymbols,
     FormatSurveyCodes,
