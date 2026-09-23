@@ -10,20 +10,27 @@
 // (entity::SurveyMap::add), so the rules already loaded would outrank every
 // rule the person had just loaded.
 //
-// Where the replacing rules go in the map does not change what any code
-// resolves to: a code matches rules most specific first, and two DIFFERENT
-// keys of equal specificity cannot both match one code (two exact keys differ,
-// and two prefixes of one length that both begin a code are the same prefix),
-// so order only ever decides between rules of the same key. They are put where
-// the rules they replace were, so an exported map still reads in the order it
-// was loaded.
+// WHERE the loaded rules go matters, but only among rules of their own key: a
+// code matches rules most specific first, and two DIFFERENT keys of equal
+// specificity cannot both match one code (two exact keys differ, and two
+// prefixes of one length that both begin a code are the same prefix). Among
+// rules of one key it matters in EVERY section, not only the replaced one,
+// because some fields are filled by more than one section: a comment by any,
+// the string's attributes by pipe_data and string_attribute_data, each
+// vertex's by vertex_pipe_data and vertex_attribute_data. So every rule the
+// load gives a key goes in AHEAD of every current rule of that key it leaves
+// standing - at the first of them - or a current pipe_data `*` DepthLocation
+// would outrank the one the person had just loaded in string_attribute_data.
+// A key the current map does not have follows, in the order it was loaded.
 
 #include "katana/archive12d/customisation.hpp"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace katana::archive12d {
 
@@ -179,30 +186,31 @@ class Merger {
             return;
         }
 
-        // Merge: each loaded group takes the place of the current rules of
-        // that group, where the first of them was; groups the current map
-        // does not have follow, in the order they were loaded.
+        // Merge: at the first current rule of a key the load gives rules
+        // for, ALL the loaded rules of that key go in, in their order; after
+        // them, the current rules of that key in sections the load did not
+        // give it. The current rules of a loaded (section, key) group are
+        // dropped - they are what was replaced.
+        std::map<std::string, std::vector<const SurveyRule*>> loadedByKey;
+        for (const SurveyRule& rule : rules) {
+            loadedByKey[rule.key].push_back(&rule);
+        }
         katana::entity::SurveyMap merged;
-        std::set<RuleGroup> placed;
-        const auto placeGroup = [&](const RuleGroup& group) {
-            for (const SurveyRule& rule : rules) {
-                if (groupOf(rule) == group) {
-                    add(merged, rule);
+        std::set<std::string> placed;
+        for (const SurveyRule& rule : currentMap_.rules()) {
+            if (const auto found = loadedByKey.find(rule.key);
+                found != loadedByKey.end() && placed.insert(rule.key).second) {
+                for (const SurveyRule* loadedRule : found->second) {
+                    add(merged, *loadedRule);
                 }
             }
-            placed.insert(group);
-        };
-        for (const SurveyRule& rule : currentMap_.rules()) {
-            const RuleGroup group = groupOf(rule);
-            if (!loaded.contains(group)) {
+            if (!loaded.contains(groupOf(rule))) {
                 add(merged, rule);
-            } else if (!placed.contains(group)) {
-                placeGroup(group);
             }
         }
         for (const SurveyRule& rule : rules) {
-            if (!placed.contains(groupOf(rule))) {
-                placeGroup(groupOf(rule));
+            if (!placed.contains(rule.key)) {
+                add(merged, rule);
             }
         }
         out_.map = std::move(merged);

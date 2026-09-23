@@ -150,7 +150,11 @@ enum class LoadMode {
     // What the load brings takes precedence, and nothing else is lost: a
     // definition replaces the current one of the same name, and the rules the
     // load gives a key in a section replace the current rules of that key in
-    // that section. Every other current definition and rule is kept.
+    // that section. Every other current definition and rule is kept - and the
+    // loaded rules of a key go AHEAD of the current rules of that key that
+    // are kept, so a field two sections fill (a comment; an attribute of one
+    // name from pipe_data and string_attribute_data, or from vertex_pipe_data
+    // and vertex_attribute_data) takes the loaded value.
     Merge,
     // What the load brings is ALL there is, of each kind it brought.
     Replace,
