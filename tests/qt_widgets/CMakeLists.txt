@@ -15,6 +15,7 @@ add_executable(katana_qt_widget_tests
     test_view_focus.cpp
     test_render_view.cpp
     test_section_view.cpp
+    test_plan_view.cpp
     ${_qt_src}/viewport_widget.cpp
     ${_qt_src}/render_view_widget.cpp
     ${_qt_src}/section_view_widget.cpp
