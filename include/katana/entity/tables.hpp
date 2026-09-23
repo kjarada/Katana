@@ -97,6 +97,13 @@ class LayerDatabase {
     // was removed in that order so an undo can put it back parents-first by
     // walking the result backwards.
     [[nodiscard]] katana::core::Result<std::vector<Layer>> removeSubtree(std::string_view name);
+    // What add(), update() and remove() would refuse, with the same error,
+    // changing nothing. The one statement of each rule: the three call them,
+    // and so does each layer command's validate(), which had restated a part
+    // and said OK to a name execute() then refused (audit MOD-09).
+    [[nodiscard]] katana::core::Status checkAdd(const Layer& layer) const;
+    [[nodiscard]] katana::core::Status checkUpdate(const Layer& layer) const;
+    [[nodiscard]] katana::core::Status checkRemove(std::string_view name) const;
     // Restores the pristine state: only the default layer.
     void reset();
 

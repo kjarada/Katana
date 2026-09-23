@@ -40,6 +40,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QStatusBar>
 #include <QTableWidget>
@@ -50,6 +51,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -60,6 +62,7 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
+#include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/archive12d/domain.hpp"
 #include "katana/gis/gdal_adapter.hpp"
@@ -92,6 +95,10 @@ constexpr int kLayerPathRole = Qt::UserRole + 1;
 // The reference data panel's columns. The Name cell carries the layer's
 // ReferenceId as user data.
 enum ReferenceColumn { kRefName = 0, kRefType, kRefDetail, kRefDisplay, kRefColumns };
+
+// What the command line shows while nothing is typed and no tool is asking.
+constexpr const char* kCommandPlaceholder =
+    "Command:  LINE  |  CIRCLE 5,5 3  |  SELECT ALL  |  HELP   (Enter repeats the last tool)";
 
 QString fromPath(const std::filesystem::path& path)
 {
@@ -174,6 +181,19 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
     return std::visit(Visitor{}, geometry);
 }
 
+// How many of the loaded library's definitions are symbols by decision D3 -
+// what the Symbol Library lists: a `mode vertex` definition, one a survey rule
+// or a style draws as a symbol, one from a symbol file. Counting `mode vertex`
+// alone called 157 of the reference library's definitions symbols and left
+// out the trees and valves its mapfiles draw as symbols without it.
+std::size_t librarySymbolCount(const katana::cad::Document& document)
+{
+    const std::vector<katana::cad::CatalogueEntry> choices = katana::cad::symbolChoices(document);
+    return static_cast<std::size_t>(std::ranges::count_if(choices, [](const auto& entry) {
+        return entry.source == katana::cad::DefinitionSource::Library;
+    }));
+}
+
 QString describeProperty(const katana::entity::PropertyValue& value)
 {
     // One definition of what a value says, in entity: the panel, the command
@@ -231,9 +251,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     buildActions();
     buildDocks();
     buildStatusBar();
+    // A category the catalogue gains that no menu here takes is still
+    // reachable by its aliases and ids on the command line; said, once the
+    // log exists, rather than left to vanish from the window.
+    for (const std::string& category : toolActions_.unplaced()) {
+        logMessage("The tool category " + QString::fromStdString(category) +
+                   " has no menu; its tools start from the command line.");
+    }
     views_->setReferenceData(&reference_);
 
-    views_->onPrompt = [this](const QString& prompt) { statusBar()->showMessage(prompt); };
+    views_->onPrompt = [this](const QString& prompt) {
+        statusBar()->showMessage(prompt);
+        // A running tool's prompt shows where its answer is typed, as
+        // AutoCAD's command line shows it.
+        if (!prompt.isEmpty() && !views_->activeToolId().empty()) {
+            commandInput_->setPlaceholderText(prompt);
+        }
+    };
     views_->onError = [this](const QString& error) { logMessage(error, true); };
     views_->onCursorMoved = [this](const katana::geometry::Point2& world,
                                       const std::optional<cad::SnapResult>& snap) {
@@ -243,12 +277,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     views_->onStatus = [this](const QString& text) { statusBar()->showMessage(text); };
     views_->onFrameStats = [this](const QString& text) { frameStatsLabel_->setText(text); };
     views_->onActiveChanged = [this] { refreshViewMenu(); };
-    views_->onToolChanged = [this](Tool tool) {
-        for (QAction* action : toolGroup_->actions()) {
-            if (action->data().toInt() == static_cast<int>(tool)) {
-                action->setChecked(true);
-            }
-        }
+    // The running tool's action checked, and Select while none runs, in the
+    // menus and on the toolbars alike: one action per tool, so they agree.
+    views_->onActiveToolChanged = [this](const std::string& id) { showRunningTool(id); };
+    // "1 line", "3 lines trimmed": what a tool did goes in the log with
+    // everything else the drawing was told.
+    views_->onToolMessage = [this](const QString& message) { logMessage(message); };
+    // Type anywhere: a letter typed over the drawing with no tool running is
+    // the start of a command, so it goes to the command line, which keeps the
+    // keyboard for the rest of the word.
+    views_->onTextTyped = [this](const QString& text) {
+        commandInput_->setFocus(Qt::ShortcutFocusReason);
+        commandInput_->insert(text);
     };
 
     views_->setSurfaces(&sceneSurfaces_);
@@ -264,7 +304,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // instead of one per command.
     documentListener_ = document_.addListener([this] { scheduleRefresh(); });
     refreshAll();
-    views_->setTool(Tool::Select);
+    views_->stopTool();
+    selectAction_->setChecked(true);
     logMessage("Katana ready. Type HELP for the command list.");
 }
 
@@ -339,7 +380,7 @@ void MainWindow::buildActions()
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
 
     QAction* customiseAction =
-        makeAction(Icon::Import, "Load 12d &Customisation...",
+        makeAction(Icon::Import, "Load 12&d Customisation...",
                    "Load 12d linestyle and symbol libraries (.4d) and mapfiles on top of what is "
                    "loaded: a file's definitions and codes take the place of the same ones, and "
                    "everything else is kept",
@@ -351,7 +392,7 @@ void MainWindow::buildActions()
     // not in their place. An action, not a question box, so that a headless
     // run never meets a box nobody can answer.
     QAction* replaceCustomisationAction =
-        makeAction(Icon::Import, "&Replace 12d Customisation...",
+        makeAction(Icon::Import, "&Replace Loaded Customisation...",
                    "Load 12d libraries and mapfiles IN PLACE of the loaded ones: a library "
                    "replaces the whole library, a mapfile the whole map; a kind the files do "
                    "not bring is kept",
@@ -359,23 +400,46 @@ void MainWindow::buildActions()
     connect(replaceCustomisationAction, &QAction::triggered, this,
             [this] { loadCustomisation(katana::archive12d::LoadMode::Replace); });
 
-    QAction* codeAction = makeAction(Icon::Import, "Apply Survey &Codes",
+    QAction* codeAction = makeAction(Icon::Import, "Appl&y Survey Codes",
                                      "Give every entity carrying a field code the model, style "
-                                     "and attributes the loaded mapfile says it should have");
+                                     "and attributes the loaded mapfile says it should have",
+                                     {}, "applySurveyCodes");
     connect(codeAction, &QAction::triggered, this, [this] { applySurveyCodes(); });
 
-    QMenu* fileMenu = menuBar()->addMenu("&File");
+    // The menu bar, in the order a CAD user reads it: the file, editing and
+    // viewing it, the three tool menus, Format for how things are drawn,
+    // then the survey, civil and GIS work, and Help. Made here, in order,
+    // and filled below; each mnemonic letter is its own (--check-shortcuts).
+    const auto topMenu = [this](const QString& title, const QString& name) {
+        QMenu* menu = menuBar()->addMenu(title);
+        menu->setObjectName(name);
+        return menu;
+    };
+    QMenu* fileMenu = topMenu("&File", "fileMenu");
+    QMenu* editMenu = topMenu("&Edit", "editMenu");
+    viewMenu_ = topMenu("&View", "viewMenu");
+    QMenu* drawMenu = topMenu("&Draw", "drawMenu");
+    QMenu* modifyMenu = topMenu("&Modify", "modifyMenu");
+    QMenu* annotateMenu = topMenu("&Annotate", "annotateMenu");
+    QMenu* formatMenu = topMenu("F&ormat", "formatMenu");
+    QMenu* surveyMenu = topMenu("&Survey", "surveyMenu");
+    QMenu* terrainMenu = topMenu("&Terrain", "terrainMenu");
+    QMenu* gisMenu = topMenu("&GIS", "gisMenu");
+    QMenu* helpMenu = topMenu("&Help", "helpMenu");
+
+    // File keeps to files: the 12d customisation is loaded from Format (and
+    // Survey > Survey Coding), where the managers of what it brings are.
     fileMenu->addActions({newAction, openAction});
     fileMenu->addSeparator();
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
     fileMenu->addActions({importAction, exportAction});
     fileMenu->addSeparator();
-    fileMenu->addActions({customiseAction, replaceCustomisationAction, codeAction});
-    fileMenu->addSeparator();
     fileMenu->addAction(plotAction);
     fileMenu->addSeparator();
-    fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
+    QAction* quitAction =
+        fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
+    quitAction->setObjectName("fileQuit");
 
     QToolBar* fileBar = makeToolBar("File", Qt::TopToolBarArea);
     fileBar->addActions({newAction, openAction, saveAction});
@@ -402,36 +466,57 @@ void MainWindow::buildActions()
         }
     });
     connect(selectAllAction, &QAction::triggered, this, [this] { selectAll(); });
+    // The selection erased at once, as Delete does in every CAD program: the
+    // interpreter's ERASE, not the Erase tool a typed ERASE starts.
     connect(eraseAction, &QAction::triggered, this, [this] {
-        commandInput_->setText("ERASE");
-        runCommandLine();
+        commandLog_->appendPlainText("> ERASE");
+        runInterpreterLine("ERASE", "ERASE");
     });
 
-    QMenu* editMenu = menuBar()->addMenu("&Edit");
     editMenu->addActions({undoAction_, redoAction_});
     editMenu->addSeparator();
     editMenu->addAction(selectAllAction);
-    editMenu->addAction("&Deselect", QKeySequence(Qt::Key_Escape), this, [this] { views_->cancel(); });
+    QAction* deselectAction = editMenu->addAction("&Deselect", QKeySequence(Qt::Key_Escape), this,
+                                                  [this] { views_->cancel(); });
+    deselectAction->setObjectName("editDeselect");
     editMenu->addAction(eraseAction);
     editMenu->addSeparator();
-    editMenu->addAction("St&yles and Linetypes...", this, [this] {
-        auto dialog = makeStyleManager();
-        dialog->showFirstRows();
-        dialog->exec();
-    });
-    editMenu->addAction("&Layers...", QKeySequence(Qt::CTRL | Qt::Key_L), this, [this] {
+    QAction* attributesAction =
+        editMenu->addAction("A&ttributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
+            // Modal, like Layers: a headless run is told how to see it.
+            if (headless_) {
+                logMessage("Attributes: the dialog is modal and a headless run opens no modal "
+                           "box; --attributes grabs it.",
+                           true);
+                return;
+            }
+            auto dialog = makeAttributeManager();
+            dialog->expandAll();
+            dialog->exec();
+            // The panel shows the same properties, so it follows the dialog.
+            refreshProperties();
+        });
+    attributesAction->setObjectName("editAttributes");
+
+    // Format > Layers. Still modal this round (it asks its questions in
+    // boxes), so a headless run - which has nobody to close a box - is told
+    // how to see it instead of being left waiting on one.
+    QAction* layersAction =
+        makeAction(Icon::Layers, "&Layers...",
+                   "The drawing's layers: colour, linetype, weight, what is on each",
+                   QKeySequence(Qt::CTRL | Qt::Key_L), "formatLayers");
+    connect(layersAction, &QAction::triggered, this, [this] {
+        if (headless_) {
+            logMessage("Layers: the dialog is modal and a headless run opens no modal box; "
+                       "--layer-manager grabs it.",
+                       true);
+            return;
+        }
         auto dialog = makeLayerManager();
         dialog->showFirstRow();
         dialog->exec();
         // The dock shows the same layers, so it follows the dialog.
         scheduleRefresh();
-    });
-    editMenu->addAction("&Attributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
-        auto dialog = makeAttributeManager();
-        dialog->expandAll();
-        dialog->exec();
-        // The panel shows the same properties, so it follows the dialog.
-        refreshProperties();
     });
 
     QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
@@ -487,7 +572,6 @@ void MainWindow::buildActions()
     snapAction_->setChecked(views_->snapEnabled());
     connect(snapAction_, &QAction::toggled, this, [this](bool on) { views_->setSnapEnabled(on); });
 
-    viewMenu_ = menuBar()->addMenu("&View");
     viewMenu_->addAction(extentsAction);
     viewMenu_->addActions({gridAction_, snapAction_});
 
@@ -513,11 +597,16 @@ void MainWindow::buildActions()
     viewBar->addSeparator();
     viewBar->addActions({gridAction_, snapAction_});
 
-    // ---- GIS ---------------------------------------------------------------------------
-    buildGisActions(exportAction);
+    // ---- Draw, Modify, Annotate ----------------------------------------------------
+    buildToolActions(*drawMenu, *modifyMenu, *annotateMenu);
+
+    // ---- Format --------------------------------------------------------------------
+    // Before Survey, whose Survey Coding section shows the code manager's
+    // action too.
+    buildFormatActions(*formatMenu, layersAction, customiseAction, replaceCustomisationAction);
 
     // ---- Survey ------------------------------------------------------------------------
-    buildSurveyActions(customiseAction, replaceCustomisationAction, codeAction);
+    buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);
 
     // ---- Terrain and civil -----------------------------------------------------------
     QAction* cloudSurface = makeAction(Icon::SurfaceFromCloud, "Surface From &Point Cloud...",
@@ -550,7 +639,6 @@ void MainWindow::buildActions()
     connect(alignmentSection, &QAction::triggered, this, &MainWindow::cutSectionAlongAlignment);
     connect(selectionSection, &QAction::triggered, this, [this] { cutSectionAlongSelection(); });
 
-    QMenu* terrainMenu = menuBar()->addMenu("&Terrain");
     terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
     terrainMenu->addSeparator();
     terrainMenu->addActions({selectionSection, alignmentSection});
@@ -564,55 +652,8 @@ void MainWindow::buildActions()
     terrainBar->addSeparator();
     terrainBar->addActions({quantities, corridor});
 
-    // ---- Draw and Modify -------------------------------------------------------------
-    // Down the LEFT edge, where every CAD program keeps its drawing tools:
-    // they are the ones reached for without looking, and a vertical strip
-    // beside the drawing is a shorter mouse journey than a row above it.
-    QMenu* drawMenu = menuBar()->addMenu("&Draw");
-    QMenu* modifyMenu = menuBar()->addMenu("&Modify");
-    QToolBar* drawBar = makeToolBar("Draw", Qt::LeftToolBarArea);
-    toolGroup_ = new QActionGroup(this);
-    toolGroup_->setExclusive(true);
-
-    struct ToolEntry {
-        Tool tool;
-        Icon icon;
-        const char* tip;
-        QKeySequence shortcut;
-    };
-    const ToolEntry tools[] = {
-        {Tool::Select, Icon::Select, "Pick entities, or drag a window or crossing box", {}},
-        {Tool::Point, Icon::Point, "Place a point", {}},
-        {Tool::Line, Icon::Line, "Draw a line between two points", {}},
-        {Tool::Polyline, Icon::Polyline, "Draw a polyline; right-click or Enter to finish", {}},
-        {Tool::Rectangle, Icon::Rectangle, "Draw a rectangle by two corners", {}},
-        {Tool::Circle, Icon::Circle, "Draw a circle by centre and radius", {}},
-        {Tool::Arc, Icon::Arc, "Draw an arc through three points", {}},
-        {Tool::Move, Icon::Move, "Move the selection by two points", {}},
-        {Tool::Copy, Icon::Copy, "Copy the selection by two points", {}},
-    };
-    for (const ToolEntry& entry : tools) {
-        QAction* action = makeAction(entry.icon, toString(entry.tool), entry.tip, entry.shortcut);
-        action->setCheckable(true);
-        action->setData(static_cast<int>(entry.tool));
-        const Tool tool = entry.tool;
-        connect(action, &QAction::triggered, this, [this, tool] { views_->setTool(tool); });
-        toolGroup_->addAction(action);
-        drawBar->addAction(action);
-        if (tool == Tool::Move || tool == Tool::Copy) {
-            modifyMenu->addAction(action);
-        } else if (tool != Tool::Select) {
-            drawMenu->addAction(action);
-        }
-        if (tool == Tool::Select || tool == Tool::Arc) {
-            drawBar->addSeparator();
-        }
-    }
-    modifyMenu->addAction(eraseAction);
-    modifyMenu->addSeparator();
-    QAction* hint = modifyMenu->addAction(
-        "Rotate, Scale, Mirror, Array, Trim, Extend, Offset, Fillet, Chamfer: command line");
-    hint->setEnabled(false);
+    // ---- GIS ---------------------------------------------------------------------------
+    buildGisActions(*gisMenu, exportAction);
 
     // ---- Help ------------------------------------------------------------------------
     QAction* reference = makeAction(Icon::Help, "&Command Reference",
@@ -640,7 +681,8 @@ void MainWindow::buildActions()
                              QString::fromStdString(katana::pointcloud::pdalVersion())));
         box.exec();
     });
-    QMenu* helpMenu = menuBar()->addMenu("&Help");
+    reference->setObjectName("helpCommandReference");
+    about->setObjectName("helpAbout");
     helpMenu->addActions({reference, about});
 }
 
@@ -648,10 +690,10 @@ void MainWindow::buildActions()
 // library and the kind of data it is for. File > Import stays the quick way
 // in - any file, default options, no questions; the imports here are the
 // considered way, and describe the file and offer its options first.
-void MainWindow::buildGisActions(QAction* exportAction)
+void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
 {
     QAction* importVector = makeAction(
-        Icon::ImportVector, "Import &Vector Data...",
+        Icon::ImportVector, "Import Vector Da&ta...",
         "Import a Shapefile, GeoPackage, GeoJSON, KML, GML, DXF or MapInfo file through GDAL, "
         "choosing its layers and where they go",
         {}, "importVectorData");
@@ -692,15 +734,14 @@ void MainWindow::buildGisActions(QAction* exportAction)
     // Sections rather than plain separators: a style that draws their titles
     // says which library each group goes through, and one that does not draws
     // the separator it would have had anyway.
-    QMenu* gisMenu = menuBar()->addMenu("&GIS");
-    gisMenu->addSection("Vector - GDAL");
-    gisMenu->addActions({importVector, exportAction});
-    gisMenu->addSection("Raster - GDAL");
-    gisMenu->addActions({importRaster, exportDem});
-    gisMenu->addSection("Point Cloud - PDAL");
-    gisMenu->addActions({importCloud, exportCloud, copc});
-    gisMenu->addSeparator();
-    gisMenu->addAction(info);
+    gisMenu.addSection("Vector - GDAL");
+    gisMenu.addActions({importVector, exportAction});
+    gisMenu.addSection("Raster - GDAL");
+    gisMenu.addActions({importRaster, exportDem});
+    gisMenu.addSection("Point Cloud - PDAL");
+    gisMenu.addActions({importCloud, exportCloud, copc});
+    gisMenu.addSeparator();
+    gisMenu.addAction(info);
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -710,8 +751,8 @@ void MainWindow::buildGisActions(QAction* exportAction)
     gisBar->addAction(info);
 }
 
-void MainWindow::buildSurveyActions(QAction* customiseAction, QAction* replaceCustomisationAction,
-                                    QAction* codeAction)
+void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
+                                    QAction* replaceCustomisationAction, QAction* codeAction)
 {
     SurveyServices services;
     services.document = &document_;
@@ -725,10 +766,98 @@ void MainWindow::buildSurveyActions(QAction* customiseAction, QAction* replaceCu
     services.loadCustomisation = customiseAction;
     services.replaceCustomisation = replaceCustomisationAction;
     services.applySurveyCodes = codeAction;
-    QMenu* surveyMenu = menuBar()->addMenu("&Survey");
+    services.codeManager = format_->codeManagerAction();
+    // A second row: the drawing's own toolbars (File to Format) fill the
+    // first, and in one row the Survey, Terrain and GIS bars were squeezed
+    // to a button each behind their overflow arrows.
+    addToolBarBreak(Qt::TopToolBarArea);
     QToolBar* surveyBar = makeToolBar("Survey", Qt::TopToolBarArea);
-    survey_ = std::make_unique<SurveyWorkbench>(*this, std::move(services), *surveyMenu,
+    survey_ = std::make_unique<SurveyWorkbench>(*this, std::move(services), surveyMenu,
                                                 *surveyBar);
+}
+
+void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
+                                    QAction* customiseAction, QAction* replaceCustomisationAction)
+{
+    CustomisationServices services;
+    services.document = &document_;
+    services.views = views_;
+    services.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                 const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    services.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    services.headless = [this] { return headless_; };
+    services.layers = layersAction;
+    services.loadCustomisation = customiseAction;
+    services.replaceCustomisation = replaceCustomisationAction;
+    QToolBar* formatBar = makeToolBar("Format", Qt::TopToolBarArea);
+    formatBar->addAction(layersAction);
+    format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
+                                                       *formatBar);
+}
+
+void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu)
+{
+    // Beside the drawing, where AutoCAD's classic layout keeps them - Draw
+    // and Annotate down the left edge, Modify down the right: they are the
+    // tools reached for without looking, and a strip beside the drawing is a
+    // shorter mouse journey than a row above it. Modify has its own edge
+    // because one column cannot hold all three without hiding the last
+    // tools behind an overflow arrow.
+    QToolBar* drawBar = makeToolBar("Draw", Qt::LeftToolBarArea);
+    QToolBar* annotateBar = makeToolBar("Annotate", Qt::LeftToolBarArea);
+    QToolBar* modifyBar = makeToolBar("Modify", Qt::RightToolBarArea);
+
+    // Select heads the Draw toolbar: not a catalogue tool but the absence
+    // of one, so it stops whatever runs. Checked while nothing does.
+    selectAction_ = makeAction(Icon::Select, "&Select",
+                               "Pick entities, or drag a window or crossing box; stops the "
+                               "running tool",
+                               {}, "toolSelect");
+    selectAction_->setCheckable(true);
+    connect(selectAction_, &QAction::triggered, this, [this] {
+        views_->stopTool();
+        // A click on it while already selecting would untick it otherwise.
+        selectAction_->setChecked(true);
+    });
+    drawBar->addAction(selectAction_);
+    drawBar->addSeparator();
+
+    tools::ToolMenuTargets targets;
+    targets.menus = {{"Draw", &drawMenu}, {"Modify", &modifyMenu}, {"Annotate", &annotateMenu}};
+    targets.toolBars = {{"Draw", drawBar}, {"Modify", modifyBar}, {"Annotate", annotateBar}};
+    toolActions_ = tools::fillToolMenus(katana::cad::toolCatalog(), targets, this,
+                                        [this](const std::string& id) { startTool(id); });
+}
+
+void MainWindow::startTool(const std::string& id)
+{
+    if (const auto started = views_->startTool(id); !started) {
+        logMessage(QString::fromStdString(started.error().describe()), true);
+        // A click on a tool's action checks it before this runs (a checkable
+        // action in an exclusive group), and a refusal changes no tool, so
+        // no onActiveToolChanged follows to put the marks right: without
+        // this the refused tool stays checked beside Select, a tool shown
+        // running that does not exist.
+        showRunningTool(views_->activeToolId());
+        return;
+    }
+    // The picks and the typed values go to the drawing from here on.
+    if (ViewportWidget* plan = views_->activePlanView()) {
+        plan->setFocus(Qt::OtherFocusReason);
+    }
+}
+
+void MainWindow::showRunningTool(const std::string& id)
+{
+    toolActions_.setActive(id);
+    selectAction_->setChecked(id.empty());
+    // The prompt belongs in the command line, where the answer is typed;
+    // with no tool running the line is the command line's own again.
+    if (id.empty()) {
+        commandInput_->setPlaceholderText(kCommandPlaceholder);
+    }
 }
 
 katana::core::Status MainWindow::triggerAction(const QString& name)
@@ -744,6 +873,78 @@ katana::core::Status MainWindow::triggerAction(const QString& name)
     }
     action->trigger();
     return {};
+}
+
+QStringList MainWindow::shortcutClashes(int* sequences) const
+{
+    // Every key a person can press to reach something here, and what each
+    // reaches: the actions' key sequences (all of them - Redo has two), any
+    // QShortcut, the Alt letter of each top-level menu, and each item's
+    // letter within its menu. A shared QAction is one object, so a menu and a
+    // toolbar showing it are not a clash.
+    std::map<QString, QStringList> owners;
+    const auto nameOf = [](const QObject& object, QString text) {
+        return object.objectName().isEmpty() ? text.remove('&') : object.objectName();
+    };
+    for (const QAction* action : findChildren<QAction*>()) {
+        for (const QKeySequence& key : action->shortcuts()) {
+            if (!key.isEmpty()) {
+                owners[key.toString(QKeySequence::PortableText)] << nameOf(*action, action->text());
+            }
+        }
+    }
+    for (const QShortcut* shortcut : findChildren<QShortcut*>()) {
+        if (!shortcut->key().isEmpty()) {
+            owners[shortcut->key().toString(QKeySequence::PortableText)]
+                << nameOf(*shortcut, "a shortcut");
+        }
+    }
+    // The letter after a single '&' ("&&" is a literal ampersand), upper case;
+    // empty for a text with none.
+    const auto mnemonic = [](const QString& text) {
+        for (qsizetype at = text.indexOf('&'); at >= 0 && at + 1 < text.size();
+             at = text.indexOf('&', at + 2)) {
+            if (text[at + 1] != '&') {
+                return text.mid(at + 1, 1).toUpper();
+            }
+        }
+        return QString();
+    };
+    // Inside an open menu its items' letters are keys too: two items with
+    // one letter make the key cycle between them instead of choosing.
+    const std::function<void(const QMenu&, const QString&)> letters =
+        [&](const QMenu& menu, const QString& path) {
+            for (const QAction* item : menu.actions()) {
+                if (item->isSeparator() || !item->isVisible()) {
+                    continue;
+                }
+                if (const QString letter = mnemonic(item->text()); !letter.isEmpty()) {
+                    owners[path + " > " + letter] << QString(item->text()).remove('&');
+                }
+                if (const QMenu* sub = item->menu()) {
+                    letters(*sub, path + " > " + QString(item->text()).remove('&'));
+                }
+            }
+        };
+    for (const QAction* top : menuBar()->actions()) {
+        const QString title = QString(top->text()).remove('&');
+        if (const QString letter = mnemonic(top->text()); !letter.isEmpty()) {
+            owners["Alt+" + letter] << "the " + title + " menu";
+        }
+        if (const QMenu* menu = top->menu()) {
+            letters(*menu, "Alt+" + mnemonic(top->text()) + " (" + title + ")");
+        }
+    }
+    if (sequences != nullptr) {
+        *sequences = static_cast<int>(owners.size());
+    }
+    QStringList clashes;
+    for (const auto& [key, names] : owners) {
+        if (names.size() > 1) {
+            clashes << key + ": " + names.join(", ");
+        }
+    }
+    return clashes;
 }
 
 void MainWindow::buildDocks()
@@ -858,13 +1059,14 @@ void MainWindow::buildDocks()
     auto* commandLayout = new QVBoxLayout(commandPanel);
     commandLayout->setContentsMargins(4, 4, 4, 4);
     commandLog_ = new QPlainTextEdit(commandPanel);
+    commandLog_->setObjectName("commandLog");
     commandLog_->setReadOnly(true);
     commandLog_->setMaximumBlockCount(2000);
     commandLog_->setFont(QFont("Consolas", 9));
     commandInput_ = new QLineEdit(commandPanel);
+    commandInput_->setObjectName("commandInput");
     commandInput_->setFont(QFont("Consolas", 10));
-    commandInput_->setPlaceholderText(
-        "Command:  LINE 0,0 10,0 @0,5   |   CIRCLE 5,5 3   |   SELECT ALL   |   HELP");
+    commandInput_->setPlaceholderText(kCommandPlaceholder);
     commandInput_->installEventFilter(this);
     commandLayout->addWidget(commandLog_);
     commandLayout->addWidget(commandInput_);
@@ -1386,25 +1588,9 @@ std::unique_ptr<AttributeManagerDialog> MainWindow::makeAttributeManager()
 
 std::unique_ptr<StyleManagerDialog> MainWindow::makeStyleManager()
 {
-    CustomisationContext context;
-    context.document = &document_;
-    context.log = [this](const QString& message, bool isError) { logMessage(message, isError); };
-    // "Select Users": select them, then frame what they cover in the active
-    // view, so a person sees where a style is used rather than a count.
-    context.selectAndShow = [this](const std::vector<katana::entity::EntityId>& ids) {
-        document_.selection().set(ids);
-        document_.notifySelectionChanged();
-        katana::geometry::Box2 bounds;
-        for (const katana::entity::EntityId id : ids) {
-            if (const katana::entity::Entity* entity = document_.model().entities.find(id)) {
-                bounds.expand(katana::entity::boundingBox(entity->geometry));
-            }
-        }
-        if (!bounds.empty()) {
-            views_->zoomTo(bounds);
-        }
-    };
-    return std::make_unique<StyleManagerDialog>(context, this);
+    // The Format menu's context: its picture cache, and "Select Users"
+    // framing what they cover in the active plan view.
+    return std::make_unique<StyleManagerDialog>(format_->context(), this);
 }
 
 void MainWindow::openProject(const QString& directory)
@@ -1478,6 +1664,12 @@ bool MainWindow::saveDocumentAs()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    // The Format managers first: the code manager's Apply puts its rules on
+    // the drawing, which the unsaved-drawing question must then see.
+    if (!format_->confirmClose()) {
+        event->ignore();
+        return;
+    }
     if (confirmDiscard()) {
         event->accept();
     } else {
@@ -1515,9 +1707,19 @@ void MainWindow::runCommandLine()
     const QString line = commandInput_->text().trimmed();
     commandInput_->clear();
     if (line.isEmpty()) {
+        // Enter on an empty command line is Enter in the drawing, as in
+        // AutoCAD: the running tool's (end a chain, take a default) or, with
+        // none running, the last tool again.
+        views_->pressEnter();
         return;
     }
     commandLog_->appendPlainText("> " + line);
+    // While a tool runs, what is typed is its answer - a point, a distance,
+    // an option - before it is anything else: Polyline's C closes it, where
+    // on its own C would start a Circle.
+    if (views_->typeIntoTool(line)) {
+        return;
+    }
     const QStringList words = line.split(' ', Qt::SkipEmptyParts);
     const QString verb = words.front().toUpper();
     const QString argument = words.size() > 1 ? words[1].toUpper() : QString();
@@ -1629,25 +1831,21 @@ void MainWindow::runCommandLine()
         }
         return;
     }
-    // A bare drawing verb starts the interactive tool, as in any CAD package.
+    // A bare tool word starts the tool, as in any CAD package: an alias
+    // (L, LINE, C, TR) or a catalogue id (draw.circle.ttr). With arguments
+    // it stays the interpreter's (LINE 0,0 10,0 draws at once), which is
+    // what scripts and the headless checks type.
     if (words.size() == 1) {
-        static const std::map<QString, Tool> tools = {
-            {"POINT", Tool::Point},   {"PO", Tool::Point},      {"LINE", Tool::Line},
-            {"L", Tool::Line},        {"PLINE", Tool::Polyline}, {"PL", Tool::Polyline},
-            {"RECT", Tool::Rectangle}, {"REC", Tool::Rectangle}, {"CIRCLE", Tool::Circle},
-            {"C", Tool::Circle},      {"ARC", Tool::Arc},        {"A", Tool::Arc},
-            {"MOVE", Tool::Move},     {"M", Tool::Move},         {"COPY", Tool::Copy},
-            {"CO", Tool::Copy},
-        };
-        if (const auto tool = tools.find(verb); tool != tools.end()) {
-            views_->setTool(tool->second);
-            if (ViewportWidget* plan = views_->activePlanView()) {
-                plan->setFocus();
-            }
+        if (const auto id = tools::toolIdForCommand(verb.toStdString())) {
+            startTool(*id);
             return;
         }
     }
+    runInterpreterLine(line, verb);
+}
 
+void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
+{
     const bool replacesDocument = verb == "NEW" || verb == "OPEN";
     if (replacesDocument && !confirmDiscard()) {
         return;
@@ -1956,9 +2154,9 @@ QString sampleOf(const std::vector<std::string>& names, std::size_t most = 8)
 //
 // A build made without one falls back to looking beside the executable, so a
 // checkout that does not carry the customisation - it is third-party material
-// under its own licence - can still be given one. File > Load 12d
-// Customisation... adds to either; File > Replace 12d Customisation... takes
-// the place of the kinds it brings.
+// under its own licence - can still be given one. Format > Load 12d
+// Customisation... adds to either; Format > Replace Loaded Customisation...
+// takes the place of the kinds it brings.
 void MainWindow::loadDefaultCustomisation()
 {
     const katana::archive12d::Customisation& built = katana::archive12d::builtinCustomisation();
@@ -1975,10 +2173,9 @@ void MainWindow::loadDefaultCustomisation()
         document_.setStyleLibrary(built.library);
         document_.setSurveyMap(built.map);
         katana::cad::recordCustomisationLoad(customisation_, sourcesOf(built), false, false);
-        logMessage("Customisation: " + grouped(built.library.size()) + " linestyles and symbols (" +
-                   grouped(katana::entity::vertexStyleNames(built.library).size()) +
-                   " symbols) and " + grouped(built.map.size()) +
-                   " survey code rules, built in.");
+        logMessage("Customisation: " + grouped(built.library.size()) + " definitions (" +
+                   grouped(librarySymbolCount(document_)) + " symbols) and " +
+                   grouped(built.map.size()) + " survey code rules, built in.");
         return;
     }
     const auto paths = katana::archive12d::findCustomisation(
@@ -2028,7 +2225,7 @@ void MainWindow::reportMissingCustomisation()
     // file defined draws as a plain line until it is loaded.
     logMessage("Warning: this project was drawn with customisation files that are not loaded: " +
                sampleOf(missing, missing.size()) +
-               ". Load them with File > Load 12d Customisation...");
+               ". Load them with Format > Load 12d Customisation...");
 }
 
 // Applying the loaded mapfile to the drawing. One undoable step, and a
@@ -2039,7 +2236,7 @@ void MainWindow::applySurveyCodes()
 {
     if (document_.surveyMap().empty()) {
         warnUser("No mapfile",
-                 "Load a 12d customisation first: File > Load 12d Customisation...");
+                 "Load a 12d customisation first: Format > Load 12d Customisation...");
         return;
     }
     katana::cad::SurveyCodingOptions options;
@@ -2141,9 +2338,8 @@ void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& pa
                                          replace && merged.mapLoaded);
     katana::cad::noteCustomisationLoaded(customisationMissingAtOpen_, sources);
     logMessage("Customisation now: " + grouped(document_.styleLibrary().size()) + " definitions (" +
-               grouped(katana::entity::vertexStyleNames(document_.styleLibrary()).size()) +
-               " symbols) and " + grouped(document_.surveyMap().size()) +
-               " survey code rules.");
+               grouped(librarySymbolCount(document_)) + " symbols) and " +
+               grouped(document_.surveyMap().size()) + " survey code rules.");
     // A customisation need not be self-contained. Naming what is missing is
     // the difference between a symbol that is plainly absent and one that is
     // silently drawn as a plain mark. Judged against everything now loaded,
@@ -3171,10 +3367,13 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
         layoutActions_.push_back(action);
     }
 
-    QMenu* kindMenu = viewMenu->addMenu("Active Viewport &Shows");
+    QMenu* kindMenu = viewMenu->addMenu("Active Viewport S&hows");
     for (const cad::ViewKind kind : {cad::ViewKind::Plan, cad::ViewKind::Model3D,
                                      cad::ViewKind::Section, cad::ViewKind::Elevation}) {
         QAction* action = kindMenu->addAction(cad::toString(kind));
+        // viewShowsPlan, viewShows3D, ...: what --trigger and DRIVE's '*'
+        // reach it by.
+        action->setObjectName(QString("viewShows") + cad::toString(kind));
         action->setCheckable(true);
         action->setData(static_cast<int>(kind));
         connect(action, &QAction::triggered, this, [this, kind] {
@@ -3200,7 +3399,7 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
             }
         });
     }
-    viewMenu->addAction("Toggle &Perspective", QKeySequence(Qt::Key_F9), this, [this] {
+    viewMenu->addAction("Toggle Pe&rspective", QKeySequence(Qt::Key_F9), this, [this] {
         RenderViewWidget* renderView = views_->activeRenderView();
         if (renderView == nullptr) {
             logMessage("No 3D viewport is open.", true);

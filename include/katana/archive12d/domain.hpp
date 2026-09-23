@@ -116,10 +116,15 @@ inline constexpr std::string_view kMetaExtraPrefix = "12d.x.";
 // as its colour; what remains of the block, and only where it is not the
 // default, is `12d.symbol.<key>`. The string's own linestyle, which 12d
 // writes on a point beside the symbol's, is kept as kMetaStringStyle when
-// the two differ so that export can put it back. On a LINE the vertices
-// have no style of their own; every block is kept as `12d.symbol.<key>`
-// holding one value per block, the way segment colours are kept, and the
-// import says the symbols are not drawn.
+// the two differ so that export can put it back. On a LINE the string's one
+// symbol block works the same way: the line takes the symbol's linestyle as
+// its style, and the symbol is drawn at EVERY vertex, as 12d draws it
+// (decision D8, cad::resolveLinePattern and cad::symbolVertices) - the
+// style's linetype, being the symbol's own name, draws a plain line under
+// it. Only a string carrying a DIFFERENT symbol per vertex, which the format
+// allows and 12d does not write, keeps every block as `12d.symbol.<key>`
+// holding one value per block, the way segment colours are kept; that one
+// is written back but not drawn, and the import says so.
 inline constexpr std::string_view kMetaSymbolPrefix = "12d.symbol.";
 // What a text annotation says that Katana's TextGeometry has no field for,
 // as `12d.text.<key>`: the slant and width factor (Katana text has neither),
@@ -299,6 +304,11 @@ fromDomain(const katana::entity::Model& model, const std::vector<ExportSurface>&
 // 12d, and the archive carries only the name, so an unknown one ("pen 025",
 // "vis concrete") is left ByLayer rather than guessed at.
 [[nodiscard]] std::optional<katana::entity::Color> standardColour(std::string_view name);
+// The 27 standard names standardColour knows, lower case, in the table's
+// order (the plain names first, then the dark and the light shades). For a
+// colour-name field to list, so that it can offer nothing standardColour
+// would not draw and needs no copy of the table of its own.
+[[nodiscard]] std::vector<std::string> standardColourNames();
 // The standard name nearest to `colour` - what export writes for an entity
 // whose colour did not come from 12d in the first place.
 [[nodiscard]] std::string nearestStandardColour(const katana::entity::Color& colour);

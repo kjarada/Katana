@@ -193,10 +193,16 @@ functionality wired. The menu (`src/katana_qt/survey/survey_workbench.*`)
 has four sections - Survey Points (Import, Export, Point Manager, Point
 Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, the
 Angle and Bearing Calculator), Traverse and Levelling (Traverse, Level Book)
-and Coordinates (the Coordinate Converter) - plus the window's two
-customisation actions under Survey Coding. `MainWindow` only makes the menu
-and toolbar and hands them over through `SurveyServices`, so the survey work
-never includes `main_window.hpp`.
+and Coordinates (the Coordinate Converter) - plus a Survey Coding section that
+shows actions the window and the Format workbench own: the Survey Code Manager,
+Load 12d Customisation, Replace Loaded Customisation and Apply Survey Codes
+(`docs/survey_coding.md`). The first three are the same `QAction` objects as
+on the Format menu (`SurveyServices::codeManager`, `loadCustomisation`,
+`replaceCustomisation`), so the two menus cannot drift; Apply Survey Codes
+(`applySurveyCodes`) is on this menu and the Survey toolbar only.
+`MainWindow` only makes the menu and toolbar - on a second toolbar row, with
+Terrain and GIS - and hands them over through `SurveyServices`, so the survey
+work never includes `main_window.hpp`.
 
 **Nothing here is new surveying** (`include/katana/cad/survey_tools.hpp`).
 Every number comes from `katana::survey` (cogo, traverse, levelling, the
@@ -273,8 +279,10 @@ at once when one is saved or deleted in the process
 
 **Driven headlessly.** Every dialog, field and button has an object name
 (listed at the head of each dialog's header), and `katana` takes
-`--survey-dialog ACTION` (repeatable), `--fill field=text`, `--press button`
-and `--survey-dock ACTION`; `--fill` runs the event loop after each fill, as
+`--dialog ACTION` (repeatable; first called `--survey-dialog`, which still
+works), `--fill field=text`, `--press button` and `--survey-dock ACTION`,
+among the other steps `docs/cad.md` tables (`--command`, `--enter`,
+`--report`, `--trigger`, `--panel`); `--fill` runs the event loop after each fill, as
 happens between two user actions, and `--press` on a disabled button fails the
 run rather than doing nothing. `tools/check_screenshot.cmake` strings these
 into `-DDRIVE=@surveyImport|file=...|!next|...|!import|#surveyPointManager|filter=CP`,
@@ -285,11 +293,16 @@ requires a refusal with `-DREFUSED=<regex>` - exit 1, never a crash, with the
 regex naming what came before the refusal so a run stopped earlier cannot
 pass. Fourteen `qt_survey_*` tests run this way.
 
-Not done: Process Linework and Draw Survey Features have no menu item, and the
-wizard does not call `drawSurveyFeatures` (`docs/survey_coding.md`); the
-Point Manager is read-only; the survey tools are not in the interactive-tool
-catalogue (`docs/cad.md`); `SurveyPointsDock` does not wear the dock chrome;
-no headless test presses Use Selection; under the offscreen platform there is
+The Point Manager dock wears the window's dock chrome - minimise to the tray,
+float, close - through `SurveyServices::chrome`, which the workbench tells to
+forget the dock before deleting it.
+
+Not done: Process Linework is reached only through the Survey Code Manager's
+Linework tab, Draw Survey Features not at all, and the wizard does not call
+`drawSurveyFeatures` (`docs/survey_coding.md`); the Point Manager is
+read-only, and its chrome has been seen only in a screenshot; the survey tools
+are not in the interactive-tool catalogue (`docs/cad.md`); no headless test
+presses Use Selection; under the offscreen platform there is
 no monospace font, so report columns look misaligned in the test PNGs; two
 headless tests write a template to the user's settings and delete it in the
 same run, so a killed point-report run leaves one behind. A name holding one

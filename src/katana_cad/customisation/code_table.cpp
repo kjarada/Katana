@@ -850,6 +850,21 @@ std::string formatCoverage(const CustomisationCoverage& coverage)
         out << "  " << counted(coverage.unresolved.size(), "name is", "names are")
             << " in no loaded library: " << joined(names) << "\n";
     }
+    // Its own line, because the library that defines these IS loaded: the
+    // fix is a linestyle in the style, not another library.
+    if (!coverage.notLinestyles.empty()) {
+        std::vector<std::string> names;
+        for (const std::string& name : coverage.notLinestyles) {
+            names.push_back(inQuotes(name));
+        }
+        out << "  "
+            << counted(coverage.notLinestyles.size(),
+                       "name is loaded as a `mode vertex` symbol, not a linestyle, so a linetype "
+                       "naming it",
+                       "names are loaded as `mode vertex` symbols, not linestyles, so a linetype "
+                       "naming one")
+            << " draws solid: " << joined(names) << "\n";
+    }
     return out.str();
 }
 
