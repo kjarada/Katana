@@ -17,6 +17,11 @@ set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
 # application, so their authors add files without editing this list.
 file(GLOB _qt_customisation_sources CONFIGURE_DEPENDS "${_qt_src}/customisation/*.cpp")
 file(GLOB _qt_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
+# The interactive tools hosted in the plan view (src/katana_qt/tools/: the host,
+# the menus built from the catalogue, the tools' icons) and their tests: globbed
+# for the same reason.
+file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
+file(GLOB _qt_tool_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
 add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
@@ -35,6 +40,8 @@ add_executable(katana_qt_widget_tests
     ${_qt_src}/icons.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
+    ${_qt_tool_sources}
+    ${_qt_tool_tests}
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
