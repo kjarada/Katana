@@ -36,7 +36,7 @@
 #include "katana/archive12d/domain.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/cad/style_drawing.hpp"
-#include "katana/cad/symbols.hpp"
+#include "katana/cad/style_resolver.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/interop/reference_data.hpp"
@@ -1029,6 +1029,33 @@ void ViewportWidget::drawEntities(QPainter& painter) const
     const auto& model = document_.model();
     const Box2 visible = state_.plan.visibleWorldBounds();
     const cad::SelectionSet& selection = document_.selection();
+    const bool plotting = paperPixelsPerMillimetre_ > 0.0;
+    const double paper = paperScale();
+
+    // How far each style's symbol reaches from the point it is put at, at
+    // this frame's scale. A symbol is culled by what it DRAWS, not by its
+    // insertion point: 12d's SSM1 draws 434 m from its point and the plot
+    // stamps up to 388 m, and culling on the point dropped every one whose
+    // point was just off screen while its strokes were in view. The index is
+    // asked for the view grown by the furthest reach, and each entity then by
+    // its own style's.
+    std::map<std::string, double, std::less<>> symbolReach;
+    double furthestReach = 0.0;
+    model.styles.forEach([&](const katana::entity::Style& style) {
+        if (style.symbol.empty()) {
+            return;
+        }
+        const Box2 box = cad::drawnExtent(cad::pointSymbolDrawing(
+            definitions_, document_.styleLibrary(), document_.libraryGeneration(), style.symbol,
+            Point2(0.0, 0.0), style.symbolSize, 0.0, paper, plainMarkHalfWidth()));
+        if (box.empty()) {
+            return;
+        }
+        const double reach = std::max({std::abs(box.min.x), std::abs(box.max.x),
+                                       std::abs(box.min.y), std::abs(box.max.y)});
+        symbolReach.emplace(style.name, reach);
+        furthestReach = std::max(furthestReach, reach);
+    });
 
     // Through the spatial index (PLAN.MD Phase 18). This runs on EVERY repaint
     // - every pan, every zoom - not just on a click, so it is the scan that
@@ -1043,7 +1070,8 @@ void ViewportWidget::drawEntities(QPainter& painter) const
     lastDrawnEntities_ = 0;
     std::vector<katana::geometry::SpatialId> scratch;
     cad::detail::forEachCandidate(
-        model, &document_.spatialIndex(), visible, scratch, [&](const Entity& entity) {
+        model, &document_.spatialIndex(), visible.inflated(furthestReach), scratch,
+        [&](const Entity& entity) {
         // The layer is resolved ONCE and the visibility rule is asked about
         // that, rather than looking it up again inside isDrawn.
         const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
@@ -1055,11 +1083,15 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         // overshoot - reaches beyond its geometry's box, which holds only the
         // measured points and the dimension line: culling on that box dropped
         // a dimension whose label alone was on screen (audit QT-25). Its
-        // query extent is exactly the drawing's box.
+        // query extent is exactly the drawing's box. A style's symbol widens
+        // the box by its reach, for the same reason.
         const bool dimension =
             std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry);
-        const Box2 drawn = dimension ? cad::detail::queryExtents(model, entity)
-                                     : katana::entity::boundingBox(entity.geometry);
+        Box2 drawn = dimension ? cad::detail::queryExtents(model, entity)
+                               : katana::entity::boundingBox(entity.geometry);
+        if (const auto reach = symbolReach.find(entity.style); reach != symbolReach.end()) {
+            drawn = drawn.inflated(reach->second);
+        }
         if (!cad::isDrawn(layer, entity, state_.layers) || !drawn.intersects(visible)) {
             return;
         }
@@ -1068,14 +1100,25 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         // and so that a named style can finally change how an entity looks -
         // Style::color was stored and validated and read by nothing.
         const auto display = katana::entity::resolveDisplay(model, entity);
+        // One answer to what the linetype NAME draws (decisions D2 and D8): a
+        // library linestyle's own strokes, a model linetype's dashes, or a
+        // plain line - never a symbol laid along the line as a pattern.
+        const cad::ResolvedLinetype pattern = cad::resolveLinePattern(
+            model, document_.styleLibrary(), display.linetype, display.symbol);
         // The selection and the fading of a locked layer are screen furniture:
         // they say what the user is working on, and a plot of a drawing
         // printed them in orange dashes and half tone (audit QT-26).
-        const bool plotting = paperPixelsPerMillimetre_ > 0.0;
-        if (!plotting && selection.contains(entity.id)) {
-            painter.setPen(QPen(kSelection, 2, Qt::DashLine));
+        const bool selected = !plotting && selection.contains(entity.id);
+        QPen entityPen; // the entity's pen WITHOUT a model linetype's dashes
+        if (selected) {
+            entityPen = QPen(kSelection, 2, Qt::DashLine);
+            painter.setPen(entityPen);
         } else {
-            QColor color = toQColor(display.color);
+            // On paper, white and near-white print black (D7): white is a new
+            // layer's colour and a third of the reference mapfile's, and it
+            // would vanish into the sheet.
+            QColor color = toQColor(plotting ? cad::paperColour(display.color, plotSettings_)
+                                             : display.color);
             if (!plotting && layer.locked) {
                 color.setAlpha(110); // locked layers, and their children, read as background
             }
@@ -1086,7 +1129,8 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             const double penWidthPixels = plotting
                                               ? display.lineWeight * paperPixelsPerMillimetre_
                                               : 1.5;
-            QPen pen(color, penWidthPixels);
+            entityPen = QPen(color, penWidthPixels);
+            QPen pen = entityPen;
             // Dashes are MODEL lengths: a 0.5 m dash stays half a metre of
             // ground at every zoom, so the pixel pattern is recomputed from
             // the view scale each frame. Qt's array is in units of PEN WIDTH,
@@ -1097,15 +1141,16 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             // the pen width, and the view scale is fixed for a whole frame.
             // Computing it per entity rebuilt the same handful of patterns
             // tens of thousands of times a frame and allocated twice for each.
-            if (const auto* linetype = model.linetypes.find(display.linetype);
-                linetype != nullptr) {
+            // Only a MODEL linetype dashes the pen: a library linestyle of the
+            // same name wins, and its strokes are drawn undashed (D2).
+            if (pattern.kind == cad::LinetypeKind::ModelLinetype) {
                 const auto key = std::make_pair(display.linetype, penWidthPixels);
                 auto cached = dashCache_.find(key);
                 if (cached == dashCache_.end()) {
                     cad::DashOptions dash;
                     dash.viewScale = state_.plan.scale;
-                    const auto pattern = cad::qtDashPattern(*linetype, dash, penWidthPixels);
-                    cached = dashCache_.emplace(key, QList<qreal>(pattern.begin(), pattern.end()))
+                    const auto dashes = cad::qtDashPattern(*pattern.linetype, dash, penWidthPixels);
+                    cached = dashCache_.emplace(key, QList<qreal>(dashes.begin(), dashes.end()))
                                  .first;
                 }
                 if (!cached->second.isEmpty()) {
@@ -1114,6 +1159,15 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             }
             painter.setPen(pen);
         }
+        // A 12d definition is painted in the entity's colour and width with
+        // a FLAT cap, so a 3 mm dash plots 3 mm rather than 3 mm and a pen
+        // width (QPen's square cap); the painter draws its dots round.
+        StylePaintTarget target;
+        target.view = state_.plan;
+        target.entityPen = entityPen;
+        target.entityPen.setCapStyle(Qt::FlatCap);
+        target.paper = plotting ? &plotSettings_ : nullptr;
+        target.entityPenOnly = selected;
         // Resolved once above and reused: resolveHatchPattern used to do a
         // second full resolveDisplay of its own, and the dimension style was
         // looked up for every entity although only a dimension can use it.
@@ -1123,22 +1177,38 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         }
         if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry);
             point != nullptr && !display.symbol.empty()) {
-            drawSymbol(painter, display.symbol, point->position, display.symbolSize);
+            drawSymbol(painter, target, display.symbol, point->position, display.symbolSize);
             return;
         }
         // A 12d linestyle IS the line, gaps and all: "move 0 0 / draw 3 0 /
         // move 5 0" is a three-unit dash followed by a two-unit gap, and a
         // fence style carries the fence as well as its ticks. So it REPLACES
         // the plain line rather than being drawn over it. Drawing both filled
-        // in every gap, which made every linestyle look continuous.
-        const auto* definition = document_.definitionFor(display.linetype);
-        const bool drawnByStyle = definition != nullptr && !definition->atVertices &&
-                                  drawLineStyle(painter, *definition, entity.geometry);
+        // in every gap, which made every linestyle look continuous. A
+        // pattern too fine to see or too long to lay is the plain line, and
+        // so is one that is not laid for any other reason: never nothing.
+        bool drawnByStyle = false;
+        if (pattern.kind == cad::LinetypeKind::LibraryDefinition) {
+            if (const auto flat = definitions_.find(document_.styleLibrary(),
+                                                    document_.libraryGeneration(),
+                                                    pattern.definition->name);
+                flat != nullptr) {
+                drawnByStyle = drawLineStyle(painter, target, *flat, entity.geometry);
+            }
+        }
         // A hatch is painted inside drawGeometry, so an entity carrying one
         // is drawn anyway and puts up with a doubled outline. A 12da never
         // brings a hatch; this is for a drawing given one in Katana.
         if (!drawnByStyle || hatch_ != nullptr) {
             drawGeometry(painter, entity.geometry);
+        }
+        // A line whose style names a symbol carries it at EVERY vertex, as a
+        // 12d string does (D8) and as the 12da import intends: a fence line's
+        // posts, a string of drill holes. The line above is drawn as well.
+        if (!display.symbol.empty()) {
+            for (const Point2& vertex : cad::symbolVertices(entity.geometry)) {
+                drawSymbol(painter, target, display.symbol, vertex, display.symbolSize);
+            }
         }
     });
 }
@@ -1190,50 +1260,6 @@ void ViewportWidget::drawMeshFootprints(QPainter& painter) const
     }
 }
 
-void ViewportWidget::drawStyleDrawing(QPainter& painter, const cad::StyleDrawing& drawing) const
-{
-    // A definition can change pen part way through - `colour "pen 035"` - and
-    // an empty pen means the entity's own colour, which is whatever the
-    // painter already carries.
-    const QPen entityPen = painter.pen();
-    for (const auto& stroke : drawing.strokes) {
-        painter.setPen(penFor(entityPen, stroke.pen));
-        if (stroke.path.vertices.size() == 1) {
-            painter.drawPoint(toScreen(stroke.path.vertices.front())); // a `dot`
-            continue;
-        }
-        QPolygonF polygon;
-        polygon.reserve(static_cast<int>(stroke.path.vertices.size()) + 1);
-        for (const auto& vertex : stroke.path.vertices) {
-            polygon << toScreen(vertex);
-        }
-        if (stroke.path.closed && !stroke.path.vertices.empty()) {
-            polygon << toScreen(stroke.path.vertices.front());
-        }
-        painter.drawPolyline(polygon);
-    }
-    for (const auto& text : drawing.texts) {
-        painter.setPen(penFor(entityPen, text.pen));
-        drawStyleText(painter, text);
-    }
-    painter.setPen(entityPen);
-}
-
-QPen ViewportWidget::penFor(const QPen& entityPen, const std::string& pen)
-{
-    if (pen.empty()) {
-        return entityPen; // 12d's "view_colour": whatever the entity is
-    }
-    QPen changed = entityPen;
-    // 12d's standard colour names, which the archive reader already knows. A
-    // pen this does not know keeps the entity's own colour rather than
-    // guessing at one.
-    if (const auto colour = katana::archive12d::standardColour(pen); colour) {
-        changed.setColor(QColor(colour->r, colour->g, colour->b));
-    }
-    return changed;
-}
-
 double ViewportWidget::paperScale() const
 {
     // Model units to one plot millimetre, which is what a `paperstyle` is
@@ -1251,57 +1277,29 @@ double ViewportWidget::paperScale() const
     return pixelsPerMillimetre / std::max(state_.plan.scale, 1e-12);
 }
 
-void ViewportWidget::drawStyleText(QPainter& painter, const cad::StyleTextMark& text) const
+double ViewportWidget::plainMarkHalfWidth() const
 {
-    if (text.text.empty() || text.height <= 0.0) {
-        return;
-    }
-    const double pixels = text.height * state_.plan.scale;
-    if (pixels < 3.0) {
-        return; // smaller than it is worth painting, and unreadable anyway
-    }
-    painter.save();
-    painter.translate(toScreen(text.at));
-    // Screen y grows downwards, so a counter-clockwise model angle turns the
-    // other way on the page.
-    painter.rotate(-text.angle * katana::math::kRadToDeg);
-    QFont font = painter.font();
-    font.setPixelSize(std::max(1, static_cast<int>(std::lround(pixels))));
-    if (!text.font.empty()) {
-        font.setFamily(QString::fromStdString(text.font));
-    }
-    painter.setFont(font);
-    const QString value = QString::fromStdString(text.text);
-    const QFontMetricsF metrics(font);
-    // 12d justifies as "vertical-horizontal": "middle-centre", "top-left".
-    // A spelling this does not know draws from the point, which is what an
-    // unjustified text already does.
-    double dx = 0.0;
-    double dy = 0.0;
-    if (text.justify.find("centre") != std::string::npos ||
-        text.justify.find("center") != std::string::npos) {
-        dx = -0.5 * metrics.horizontalAdvance(value);
-    } else if (text.justify.find("right") != std::string::npos) {
-        dx = -metrics.horizontalAdvance(value);
-    }
-    if (text.justify.find("middle") != std::string::npos) {
-        dy = 0.5 * metrics.capHeight();
-    } else if (text.justify.find("top") != std::string::npos) {
-        dy = metrics.capHeight();
-    }
-    painter.drawText(QPointF(dx, dy), value);
-    painter.restore();
+    // The plain point mark's size, in model units at the current scale, so a
+    // built-in symbol with no size of its own stays a mark and not a blob.
+    return kPointMarkerPixels / std::max(state_.plan.scale, 1e-12);
 }
 
 // A linestyle runs along whatever plan shape the entity has. An arc and a
 // circle are chorded first, because a pattern is laid by distance along a
 // path and a path is what a polyline is.
-bool ViewportWidget::drawLineStyle(QPainter& painter,
-                                   const katana::entity::LineStyle& definition,
+bool ViewportWidget::drawLineStyle(QPainter& painter, const StylePaintTarget& target,
+                                   const cad::FlatDefinition& definition,
                                    const katana::entity::Geometry& geometry) const
 {
     bool drew = false;
-    const double scale = paperScale();
+    // Only the repeats that can reach the view are laid, each exactly where
+    // it falls on the whole line; a pattern finer than two pixels or longer
+    // than the budget is not laid at all, and the caller draws the plain line
+    // (audit CAD-04: the tail of a long line used to vanish silently).
+    cad::LinestyleOptions options;
+    options.paperScale = paperScale();
+    options.viewScale = state_.plan.scale;
+    options.visible = state_.plan.visibleWorldBounds();
     // A quarter of a pixel, the same accuracy drawGeometry chords to, so a
     // pattern laid along a curve follows the curve that was drawn.
     const double chordTolerance = 0.25 / std::max(state_.plan.scale, 1e-12);
@@ -1309,11 +1307,11 @@ bool ViewportWidget::drawLineStyle(QPainter& painter,
         if (shape.vertices.size() < 2) {
             return;
         }
-        const cad::StyleDrawing drawing = cad::styleDrawing(definition, shape, scale);
-        if (drawing.empty()) {
-            return; // nothing came of it; the caller draws the plain line
+        const cad::LinestyleLayout laid = cad::styleDrawing(definition, shape, options);
+        if (laid.outcome != cad::LinestyleLayout::Outcome::Laid) {
+            return; // too fine, too long or degenerate: the caller draws the plain line
         }
-        drawStyleDrawing(painter, drawing);
+        paintStyleDrawing(painter, laid.drawing, target);
         drew = true;
     };
     std::visit(
@@ -1336,32 +1334,32 @@ bool ViewportWidget::drawLineStyle(QPainter& painter,
     return drew;
 }
 
-void ViewportWidget::drawSymbol(QPainter& painter, const std::string& symbol,
-                                const Point2& centre, double size) const
+void ViewportWidget::drawSymbol(QPainter& painter, const StylePaintTarget& target,
+                                const std::string& symbol, const Point2& centre,
+                                double size) const
 {
-    // A loaded 12d symbol library answers first; the sixteen built-in shapes
-    // are what a name falls back to (PLAN.MD 20.3).
-    if (const auto* definition = document_.definitionFor(symbol); definition != nullptr) {
-        drawStyleDrawing(painter, cad::symbolDrawing(*definition, centre, size, 0.0, paperScale()));
+    // Through the one resolver the previews use: a loaded 12d definition
+    // first, the sixteen built-in shapes after (PLAN.MD 20.3). Rotation is 0
+    // because nothing in the model carries one yet.
+    const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
+        definitions_, document_.styleLibrary(), document_.libraryGeneration(), symbol, centre,
+        size, 0.0, paperScale(), plainMarkHalfWidth());
+    if (!cad::drawnExtent(drawing).intersects(state_.plan.visibleWorldBounds())) {
+        return; // culled by what it draws, not by where it stands
+    }
+    if (cad::belowSymbolDetail(drawing, state_.plan.scale)) {
+        // Under three pixels a symbol is a smudge: a dot in its pen says a
+        // point is there, for one draw call instead of every stroke.
+        QPen dot = target.entityPen;
+        dot.setCapStyle(Qt::RoundCap);
+        dot.setWidthF(std::max(dot.widthF(), 2.0));
+        const QPen previous = painter.pen();
+        painter.setPen(dot);
+        painter.drawPoint(toScreen(centre));
+        painter.setPen(previous);
         return;
     }
-    // The style's size is the symbol's width, as 12d's is; the strokes take
-    // a half-width. A symbol with no size of its own is the plain mark's
-    // size, in model units at the current scale, so it stays a mark and not
-    // a blob.
-    const double half =
-        size > 0.0 ? 0.5 * size : kPointMarkerPixels / std::max(state_.plan.scale, 1e-12);
-    for (const auto& stroke : cad::symbolStrokes(symbol, centre, half)) {
-        QPolygonF polygon;
-        polygon.reserve(static_cast<int>(stroke.vertices.size()) + 1);
-        for (const auto& vertex : stroke.vertices) {
-            polygon << toScreen(vertex);
-        }
-        if (stroke.closed && !stroke.vertices.empty()) {
-            polygon << toScreen(stroke.vertices.front());
-        }
-        painter.drawPolyline(polygon);
-    }
+    paintStyleDrawing(painter, drawing, target);
 }
 
 void ViewportWidget::drawGeometry(QPainter& painter,
@@ -1590,6 +1588,7 @@ katana::core::Status ViewportWidget::plotToPdf(const QString& path,
     const cad::ViewTransform screen = state_.plan;
     state_.plan = sheet->view;
     paperPixelsPerMillimetre_ = sheet->pixelsPerMillimetre;
+    plotSettings_ = settings;
     painter.setRenderHint(QPainter::Antialiasing, true);
     drawEntities(painter);
     drawAlignments(painter);
