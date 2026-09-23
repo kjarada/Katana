@@ -196,6 +196,11 @@ SymbolLibraryDialog& CustomisationWorkbench::showSymbolLibrary()
     if (symbols_.isNull()) {
         symbols_ = new SymbolLibraryDialog(context(), &window_);
         symbols_->setModal(false);
+        // Opened on the first symbol, so its details and picture show what
+        // the pane is for, rather than a blank "Choose a symbol".
+        if (const std::vector<std::string> shown = symbols_->shownNames(); !shown.empty()) {
+            symbols_->selectSymbol(shown.front());
+        }
     }
     // A headless session opens no file dialog: Load and Export then say in
     // the log what to call instead.
@@ -209,6 +214,11 @@ SurveyCodeManagerDialog& CustomisationWorkbench::showCodeManager()
     if (codes_.isNull()) {
         codes_ = new SurveyCodeManagerDialog(context(), &window_);
         codes_->setModal(false);
+        // Opened on the first rule, explained and in the form, as the other
+        // managers open on their first row - not on an empty explanation.
+        if (!codes_->buffer().rules().empty()) {
+            codes_->selectRule(0);
+        }
     }
     // Interactive: file dialogs, and Apply / Discard / Cancel on closing with
     // unapplied edits. A headless session never opens either.
