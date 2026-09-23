@@ -70,6 +70,16 @@ struct PlanFixture {
                        Qt::NoButton, modifiers);
         QCoreApplication::sendEvent(&view, &up);
     }
+    // A press at one pixel and the release at another: a selection box.
+    void drag(QPointF from, QPointF to, Qt::KeyboardModifiers modifiers = Qt::NoModifier)
+    {
+        QMouseEvent down(QEvent::MouseButtonPress, from, view.mapToGlobal(from), Qt::LeftButton,
+                         Qt::LeftButton, modifiers);
+        QCoreApplication::sendEvent(&view, &down);
+        QMouseEvent up(QEvent::MouseButtonRelease, to, view.mapToGlobal(to), Qt::LeftButton,
+                       Qt::NoButton, modifiers);
+        QCoreApplication::sendEvent(&view, &up);
+    }
     void move(double x, double y)
     {
         const QPointF at(x, y);
@@ -334,6 +344,47 @@ TEST(PlanViewTools, AToolsSelectionStepGathersClicksUntilEnter)
 
     EXPECT_TRUE(plan.entities().empty());
     EXPECT_EQ(plan.undoSteps(), 3u) << "two lines, then one erase";
+}
+
+TEST(PlanViewTools, AShiftWindowAtAToolsSelectionStepTakesWhatItEnclosesBackOut)
+{
+    // AutoCAD's "Select objects": Shift with a window removes. The line
+    // (0, 0)-(10, 0) lies inside the window from pixel (180, 130) to (320,
+    // 170), model (-2, 2) to (12, -2), dragged left to right.
+    PlanFixture plan;
+    const EntityId id = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    ASSERT_TRUE(plan.view.startTool("modify.erase").ok());
+    plan.press(250, 150); // (5, 0), on the line
+    ASSERT_TRUE(plan.document.selection().contains(id));
+    plan.drag(QPointF(180, 130), QPointF(320, 170), Qt::ShiftModifier);
+
+    EXPECT_FALSE(plan.document.selection().contains(id));
+    plan.enter(); // nothing to erase: refused, and the line stays
+    EXPECT_NE(plan.document.model().entities.find(id), nullptr);
+    EXPECT_EQ(plan.undoSteps(), 1u);
+}
+
+TEST(PlanViewTools, AShiftOrCtrlClickAtAToolsSelectionStepTakesAPickBackOut)
+{
+    // Line a through pixel (250, 150), line b through (250, 50). Both are
+    // picked; Shift-clicking a takes it out, and Ctrl-clicking a again does
+    // not put it back (Ctrl no longer toggles here, it removes), so Enter
+    // erases b alone.
+    PlanFixture plan;
+    const EntityId a = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    const EntityId b = addLine(plan.document, Point2(0, 10), Point2(10, 10));
+    ASSERT_TRUE(plan.view.startTool("modify.erase").ok());
+    plan.press(250, 150);
+    plan.press(250, 50);
+    plan.press(250, 150, Qt::LeftButton, Qt::ShiftModifier);
+    EXPECT_FALSE(plan.document.selection().contains(a));
+    EXPECT_TRUE(plan.document.selection().contains(b));
+    plan.press(250, 150, Qt::LeftButton, Qt::ControlModifier);
+    EXPECT_FALSE(plan.document.selection().contains(a));
+    plan.enter();
+
+    EXPECT_NE(plan.document.model().entities.find(a), nullptr);
+    EXPECT_EQ(plan.document.model().entities.find(b), nullptr);
 }
 
 TEST(PlanViewTools, TextTypedWithNoToolRunningStillGoesToTheWindow)

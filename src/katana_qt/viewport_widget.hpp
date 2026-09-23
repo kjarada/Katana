@@ -238,6 +238,18 @@ class ViewportWidget final : public QWidget {
     void wireToolHost();
     void selectAt(const QPointF& screen, Qt::KeyboardModifiers modifiers);
     void selectInBox(const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers);
+    // What a box from `from` to `to` picks through this view's layers: what
+    // it encloses dragged left to right, what it touches right to left.
+    [[nodiscard]] std::vector<katana::entity::EntityId> pickedInBox(const QPointF& from,
+                                                                    const QPointF& to) const;
+    // A click (or, `dragged`, a box) at a running tool's selection step. It
+    // GATHERS, as AutoCAD's "Select objects" does: a plain click or box adds
+    // what it picks, and one with Shift or Ctrl held (`takeOut`) removes it.
+    // Replacing the selection at each plain click, as the Select tool does,
+    // would leave only the last of several cutting edges picked; and the
+    // Select tool's Ctrl toggles and its Shift adds, so neither could take a
+    // whole window of picks back out.
+    void gatherForTool(const QPointF& from, const QPointF& to, bool dragged, bool takeOut);
     void run(katana::commands::CommandPtr command);
     void updatePrompt();
 
