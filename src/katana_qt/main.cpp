@@ -427,7 +427,7 @@ int main(int argc, char* argv[])
     katana::qt::MainWindow window;
     window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
-    // --customise on the command line is merged in next, as File > Load 12d
+    // --customise on the command line is merged in next, as Format > Load 12d
     // Customisation would, and so is loaded when a project is opened: its
     // record of what it was drawn with is compared with what is loaded.
     window.loadDefaultCustomisation();
