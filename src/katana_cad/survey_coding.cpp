@@ -39,9 +39,13 @@ struct Appearance {
     double symbolSize = 0.0;
     // What colourOf made of the rule's colour name, or nothing.
     std::optional<Color> colour{};
-    // The name, when there is one: a name the callback does not know is the
-    // ONLY thing that tells "sui water potable" from "sui electricity", so
-    // then it is part of the appearance; a known one is only its label.
+    // The name, when there is one. A name the callback does not know is the
+    // only thing that tells "sui water potable" from "sui electricity", so
+    // it keeps two such codes apart when styles are CREATED for them - each
+    // gets its own, carrying its name. It does not change how either DRAWS:
+    // with no RGB both draw with no colour of their own, which is why reuse
+    // (existingStyleFor) does not ask for the name. A known name is only a
+    // label for its RGB.
     std::string colourName{};
 
     // The colour's identity: its RGB when that is known (so "White" and
@@ -63,10 +67,10 @@ struct Appearance {
     }
 };
 
-// Whether an existing style draws exactly this appearance. Only the four
-// parts of an appearance are compared - a weight or a description someone
-// changed on a coded style does not stop it being reused, and neither does a
-// new name, which is the point.
+// Whether an existing style draws exactly this appearance. Only what is drawn
+// is compared - a weight or a description someone changed on a coded style
+// does not stop it being reused, and neither does a new name, which is the
+// point.
 [[nodiscard]] bool drawsAs(const Style& style, const Appearance& appearance)
 {
     const bool lineMatches = appearance.linestyle.empty() ? isPlainLinestyle(style.linetype)
@@ -75,14 +79,31 @@ struct Appearance {
         style.symbolSize != appearance.symbolSize) {
         return false;
     }
-    if (appearance.colour) {
-        return style.color == appearance.colour;
+    // A colour name with no RGB draws as no colour at all, whatever the name:
+    // a 12da import's "WATR Main" (no colour, description "12d linestyle")
+    // draws exactly as the style coding would make for "sui water potable".
+    // Asking for the name here too made coding duplicate every such style
+    // whose description was not that name.
+    return appearance.colour ? style.color == appearance.colour : !style.color.has_value();
+}
+
+// The colour names in the map that colourOf has no RGB for. A style made by
+// coding for one of these has no colour and carries the name as its
+// description - the only mark of which colour it was made for.
+[[nodiscard]] std::set<std::string> unknownColourNames(const katana::entity::SurveyMap& map,
+                                                       const SurveyCodingOptions& options)
+{
+    std::set<std::string> asked;
+    std::set<std::string> unknown;
+    for (const katana::entity::SurveyRule& rule : map.rules()) {
+        if (rule.colour.empty() || !asked.insert(rule.colour).second) {
+            continue;
+        }
+        if (!options.colourOf || !options.colourOf(rule.colour)) {
+            unknown.insert(rule.colour);
+        }
     }
-    // An unknown colour name has no RGB, so a style made for it has none
-    // either and keeps the name in its description - the same as the 12da
-    // import does.
-    return !style.color.has_value() &&
-           (appearance.colourName.empty() || style.description == appearance.colourName);
+    return unknown;
 }
 
 // The appearance a combined rule gives, or nothing when it says nothing
@@ -109,19 +130,33 @@ struct Appearance {
     return appearance;
 }
 
-// The style an existing drawing already has for an appearance: the first in
-// name order, so which one is chosen does not depend on how the table was
-// filled.
+// The style an existing drawing already has for an appearance. Of those that
+// draw it, one whose description is the appearance's colour name comes first:
+// that is the style an earlier pass made for it, so applying codes again
+// keeps each code on its own style even when several draw alike. Otherwise the
+// first in name order, so the choice never depends on how the table was
+// filled - except that, for a colour with no RGB, a style described by ANOTHER
+// unknown colour name of the map is that colour's style, not this one's. The
+// map decides that set, not the entities being coded, so a code added later
+// gets the style a fresh drawing would give it rather than borrowing its
+// neighbour's.
 [[nodiscard]] const Style* existingStyleFor(const katana::entity::Model& model,
-                                            const Appearance& appearance)
+                                            const Appearance& appearance,
+                                            const std::set<std::string>& unknownColours)
 {
-    const Style* found = nullptr;
+    const Style* own = nullptr;
+    const Style* other = nullptr;
     model.styles.forEach([&](const Style& style) {
-        if (found == nullptr && drawsAs(style, appearance)) {
-            found = &style;
+        if (!drawsAs(style, appearance)) {
+            return;
+        }
+        if (style.description == appearance.colourName) {
+            own = own != nullptr ? own : &style;
+        } else if (appearance.colour.has_value() || !unknownColours.contains(style.description)) {
+            other = other != nullptr ? other : &style;
         }
     });
-    return found;
+    return own != nullptr ? own : other;
 }
 
 // The name a new style for this appearance takes: the linestyle, else the
@@ -365,8 +400,10 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
     const auto taken = [&](const std::string& name) {
         return model.styles.contains(name) || planned.contains(name);
     };
+    const std::set<std::string> unknownColours =
+        choices.empty() ? std::set<std::string>{} : unknownColourNames(map, options);
     for (auto& [identity, choice] : choices) {
-        if (const Style* existing = existingStyleFor(model, choice.appearance)) {
+        if (const Style* existing = existingStyleFor(model, choice.appearance, unknownColours)) {
             choice.name = existing->name;
             choice.outcome = SurveyStyleOutcome::Reused;
             continue;

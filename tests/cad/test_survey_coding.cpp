@@ -535,6 +535,131 @@ TEST(SurveyCodingStyles, AStyleIsReusedOnlyWhenAllFourPartsOfTheAppearanceAgree)
     EXPECT_EQ(report.stylesCreated, (std::vector<std::string>{"Plain (cyan)"}));
 }
 
+TEST(SurveyCodingStyles, AnImportedStyleWithNoColourIsReusedForACodeWhoseColourNameHasNoRgb)
+{
+    // The import-then-code path: a 12da import gives a string a style named
+    // after its linestyle, with no colour and the description "12d
+    // linestyle". WM* says "sui water potable", which testColour (like
+    // Katana) has no RGB for, so the code draws as WATR Main with no colour -
+    // exactly what the imported style draws. Matching the colour NAME against
+    // the description made a second, identical "WATR Main (sui water
+    // potable)" and moved the string onto it.
+    Document document;
+    document.setSurveyMap(realShapes());
+    katana::entity::Style imported;
+    imported.name = "WATR Main";
+    imported.linetype = "WATR Main";
+    imported.description = "12d linestyle";
+    ASSERT_TRUE(document.execute(cmd::createStyle(imported)).ok());
+    katana::entity::Entity point;
+    point.geometry = katana::entity::PointGeometry{Point2(5, 5)};
+    point.style = "WATR Main";
+    point.metadata.insert_or_assign("12d.name", katana::entity::PropertyValue(std::string("WM01")));
+    ASSERT_TRUE(document.execute(cmd::createEntities({point})).ok());
+    const EntityId id = document.model().entities.ids().back();
+    const std::size_t styles = document.model().styles.size();
+
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+
+    EXPECT_TRUE(report.stylesCreated.empty());
+    EXPECT_EQ(report.stylesReused, (std::vector<std::string>{"WATR Main"}));
+    EXPECT_EQ(document.model().styles.size(), styles) << "no duplicate of the imported style";
+    EXPECT_EQ(document.model().entities.find(id)->style, "WATR Main");
+    EXPECT_EQ(document.model().entities.find(id)->layer, "SURVEY SERVICES") << "still coded";
+    ASSERT_EQ(report.codes.size(), 1u);
+    EXPECT_EQ(report.codes[0].styleOutcome, katana::cad::SurveyStyleOutcome::Reused);
+}
+
+TEST(SurveyCodingStyles, RenamingACodedStyleAndRewritingItsDescriptionThenApplyingAgainMakesNoDuplicate)
+{
+    // Coding writes the colour name into the description because it has no
+    // RGB for it. Someone renames the style AND describes it in their own
+    // words; it still draws as the code says, so it is still the code's
+    // style.
+    Document document;
+    document.setSurveyMap(realShapes());
+    const EntityId first = addCodedPoint(document, Point2(0, 0), "WM01");
+    apply(document, withColours());
+    ASSERT_TRUE(document.model().styles.contains("WATR Main"));
+    ASSERT_TRUE(document.execute(cmd::renameStyle("WATR Main", "Water")).ok());
+    katana::entity::Style edited = *document.model().styles.find("Water");
+    edited.description = "potable water main";
+    ASSERT_TRUE(document.execute(cmd::updateStyle(edited)).ok());
+    const std::size_t styles = document.model().styles.size();
+
+    const EntityId later = addCodedPoint(document, Point2(1, 0), "WM02");
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+
+    EXPECT_TRUE(report.stylesCreated.empty());
+    EXPECT_EQ(report.stylesReused, (std::vector<std::string>{"Water"}));
+    EXPECT_EQ(document.model().styles.size(), styles) << "no second WATR Main";
+    EXPECT_FALSE(document.model().styles.contains("WATR Main"));
+    EXPECT_EQ(document.model().entities.find(first)->style, "Water") << "not moved off it";
+    EXPECT_EQ(document.model().entities.find(later)->style, "Water");
+}
+
+TEST(SurveyCodingStyles, AStyleMadeForOneUnknownColourIsNotTakenByAnotherWhateverTheOrderOfCoding)
+{
+    // WM* and WR* draw alike in Katana - WATR Main with no RGB for either
+    // colour - but they are different 12d colours, and a fresh drawing gives
+    // each its own style. By hand: appearances are named in a fixed order,
+    // and "sui water potable" sorts before "sui water recycled" ('p' < 'r'),
+    // so potable takes the bare "WATR Main" and recycled, finding it taken,
+    // gets " (sui water recycled)". Coding WM01 first and WR01 in a later
+    // pass must end the same way, not put WR01 on potable's style.
+    auto withRecycled = [] {
+        katana::entity::SurveyMap map = realShapes();
+        SurveyRule recycled;
+        recycled.key = "WR*";
+        recycled.model = "SURVEY SERVICES";
+        recycled.colour = "sui water recycled";
+        recycled.linestyle = "WATR Main";
+        EXPECT_TRUE(map.add(recycled).ok());
+        return map;
+    };
+    for (const bool inTwoPasses : {false, true}) {
+        Document document;
+        document.setSurveyMap(withRecycled());
+        const EntityId potable = addCodedPoint(document, Point2(0, 0), "WM01");
+        if (inTwoPasses) {
+            apply(document, withColours());
+        }
+        const EntityId recycled = addCodedPoint(document, Point2(1, 0), "WR01");
+        apply(document, withColours());
+
+        const char* how = inTwoPasses ? "in two passes" : "in one";
+        EXPECT_EQ(document.model().entities.find(potable)->style, "WATR Main") << how;
+        EXPECT_EQ(document.model().entities.find(recycled)->style,
+                  "WATR Main (sui water recycled)")
+            << how;
+        EXPECT_EQ(styleOf(document, recycled).description, "sui water recycled") << how;
+    }
+}
+
+TEST(SurveyCodingStyles, OfTwoStylesThatDrawACodeAlikeTheOneDescribedByItsColourNameIsReused)
+{
+    // "A water" is first in name order and draws WM* just as well, but
+    // "Water main" carries WM*'s colour name - it is the style an earlier
+    // pass made for this code - so applying codes again keeps it there.
+    Document document;
+    document.setSurveyMap(realShapes());
+    for (const auto& [name, description] :
+         {std::pair{"A water", "12d linestyle"}, std::pair{"Water main", "sui water potable"}}) {
+        katana::entity::Style style;
+        style.name = name;
+        style.linetype = "WATR Main";
+        style.description = description;
+        ASSERT_TRUE(document.execute(cmd::createStyle(style)).ok());
+    }
+    const EntityId id = addCodedPoint(document, Point2(0, 0), "WM01");
+    SurveyCodingReport report;
+    apply(document, withColours(), &report);
+    EXPECT_EQ(document.model().entities.find(id)->style, "Water main");
+    EXPECT_EQ(report.stylesReused, (std::vector<std::string>{"Water main"}));
+}
+
 // ---- what the report says -------------------------------------------------
 
 TEST(SurveyCodingReport, WithoutCreatingLayersTheStyleAndAttributesAreStillApplied)
