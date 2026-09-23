@@ -146,7 +146,8 @@ void collectTree(const QTreeWidgetItem* item, const QString& prefix, QStringList
 
 QTreeWidgetItem* treeItem(QTreeWidget& tree, const QString& text)
 {
-    const QList<QTreeWidgetItem*> found = tree.findItems(text, Qt::MatchExactly | Qt::MatchRecursive);
+    const QList<QTreeWidgetItem*> found =
+        tree.findItems(text, Qt::MatchExactly | Qt::MatchRecursive);
     return found.isEmpty() ? nullptr : found.front();
 }
 
@@ -240,13 +241,15 @@ TEST(SymbolLibrary, TheMissingChipListsAStylesUndefinedSymbolWithItsFallback)
     const QString pitTip = grid->model()->index(0, 0).data(Qt::ToolTipRole).toString();
     EXPECT_TRUE(pitTip.contains(QStringLiteral("Not defined - drawn as the built-in \"manhole\"")))
         << pitTip.toStdString();
-    EXPECT_TRUE(grid->model()->index(0, 0).data(katana::qt::SymbolGridModel::kMissingRole).toBool());
+    EXPECT_TRUE(
+        grid->model()->index(0, 0).data(katana::qt::SymbolGridModel::kMissingRole).toBool());
 
     ASSERT_TRUE(dialog.selectSymbol("OLD Pit Lid"));
     EXPECT_EQ(labelText(dialog, "detailMissing"),
               QStringLiteral("Not defined - drawn as the built-in \"manhole\" until a library "
                              "defines it"));
-    EXPECT_EQ(labelText(dialog, "detailStyles"), QStringLiteral("Old Pits - 0 entities in the drawing"));
+    EXPECT_EQ(labelText(dialog, "detailStyles"),
+              QStringLiteral("Old Pits - 0 entities in the drawing"));
     ASSERT_TRUE(dialog.selectSymbol("TEST Missing Symbol"));
     EXPECT_TRUE(labelText(dialog, "detailMissing").contains(QStringLiteral("\"circle\"")));
     EXPECT_EQ(labelText(dialog, "detailCodes"), QStringLiteral("PX* (size 1, yellow)"));
@@ -274,7 +277,9 @@ TEST(SymbolLibrary, AssignToSelectedPointsIsOneUndoStepAndASecondAssignReusesThe
 
     // One step: the style made and the two points moved; the line left.
     EXPECT_EQ(fixture.document.history().undoCount(), steps + 1);
-    const auto styleOf = [&](EntityId id) { return fixture.document.model().entities.find(id)->style; };
+    const auto styleOf = [&](EntityId id) {
+        return fixture.document.model().entities.find(id)->style;
+    };
     EXPECT_EQ(styleOf(p1), "TEST Survey Mark");
     EXPECT_EQ(styleOf(p2), "TEST Survey Mark");
     EXPECT_EQ(styleOf(line), "");
@@ -356,7 +361,8 @@ TEST(SymbolLibrary, LoadingMergesIntoTheLibraryAndLogsWhatEachFileAddedAndReplac
     katana::entity::StyleLibrary library = fixture.document.styleLibrary();
     katana::entity::LineStyle ownTree;
     ownTree.name = "TEST Tree";
-    ownTree.strokes = {katana::entity::Stroke{.op = katana::entity::StrokeOp::Draw, .point = {1.0, 0.0}}};
+    ownTree.strokes = {
+        katana::entity::Stroke{.op = katana::entity::StrokeOp::Draw, .point = {1.0, 0.0}}};
     ASSERT_TRUE(library.add(ownTree).ok());
     fixture.document.setStyleLibrary(std::move(library));
     SymbolLibraryDialog dialog(fixture.context);
@@ -421,7 +427,8 @@ TEST(SymbolLibrary, ExportWritesOnlyTheSelectedLibraryDefinitionsAndNamesTheRest
               (std::vector<std::string>{"TEST Survey Mark", "TEST Valve"}));
     EXPECT_EQ(*read.value().library.find("TEST Valve"),
               [&] {
-                  katana::entity::LineStyle valve = *fixture.document.styleLibrary().find("TEST Valve");
+                  katana::entity::LineStyle valve =
+                      *fixture.document.styleLibrary().find("TEST Valve");
                   valve.source.clear(); // a file does not hold its own name
                   return valve;
               }());
@@ -437,8 +444,8 @@ TEST(SymbolLibrary, TheGridsSelectionAndCurrentSymbolSurviveAReloadAndAFilter)
     SymbolLibraryDialog dialog(fixture.context);
     ASSERT_TRUE(dialog.selectSymbol("TEST Survey Mark"));
     QListView* grid = child<QListView>(dialog, "symbolGrid");
-    grid->selectionModel()->select(
-        grid->model()->index(dialog.gridModel().rowOf("TEST Valve"), 0), QItemSelectionModel::Select);
+    grid->selectionModel()->select(grid->model()->index(dialog.gridModel().rowOf("TEST Valve"), 0),
+                                   QItemSelectionModel::Select);
     ASSERT_EQ(dialog.selectedNames(),
               (std::vector<std::string>{"TEST Survey Mark", "TEST Valve"}));
 
