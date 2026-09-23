@@ -30,6 +30,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,6 +48,20 @@ struct ProjectMetadata {
     std::string createdUtc{};       // ISO 8601; filled in by create()
     std::string modifiedUtc{};      // ISO 8601; refreshed by save()
     std::string applicationVersion{};
+    // The 12d customisation the drawing was drawn with: the NAMES of the
+    // linestyle, symbol and map files that were loaded, in load order - never
+    // their paths, because a project travels between machines and a path
+    // says whose disk it was made on. A record, not a reference: nothing is
+    // loaded from it, and a name here need not exist where the project is
+    // opened. Stored as one `customisation` key with the names separated by
+    // line feeds, which is why save() refuses a name that is empty or holds
+    // a line break or a path separator.
+    std::vector<std::string> customisation{};
+    // Keys a NEWER Katana wrote that this one does not read, kept and written
+    // back as they were, so opening and saving a project in an older build
+    // does not strip what a newer one recorded. Never a key this build reads:
+    // save() refuses one, rather than let it overwrite the field.
+    std::map<std::string, std::string> unknownKeys{};
 
     friend bool operator==(const ProjectMetadata&, const ProjectMetadata&) = default;
 };

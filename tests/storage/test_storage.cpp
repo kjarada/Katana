@@ -6,6 +6,7 @@
 #include <set>
 
 #include <filesystem>
+#include <map>
 #include <fstream>
 #include <string>
 #include <utility>
@@ -1482,4 +1483,113 @@ TEST_F(ProjectStoreRoundTrip, AFailedConsumingLoadAlsoLeavesTheCallersModelUntou
 
     EXPECT_EQ(existing.entities.ids(), idsBefore);
     EXPECT_EQ(existing.layers.all(), layersBefore);
+}
+
+// ---- metadata ----------------------------------------------------------------------
+
+namespace {
+
+// The metadata rows as the file holds them, read past the store.
+std::map<std::string, std::string> metadataRows(const fs::path& database)
+{
+    std::map<std::string, std::string> rows;
+    auto db = SqliteDatabase::open(database);
+    EXPECT_TRUE(db.ok());
+    if (!db) {
+        return rows;
+    }
+    auto select = db->prepare("SELECT key, value FROM metadata");
+    EXPECT_TRUE(select.ok());
+    while (select) {
+        const auto more = select->step();
+        EXPECT_TRUE(more.ok());
+        if (!more || !*more) {
+            break;
+        }
+        rows.emplace(select->columnText(0), select->columnText(1));
+    }
+    return rows;
+}
+
+} // namespace
+
+TEST_F(ProjectStoreRoundTrip, AMetadataKeyANewerBuildWroteSurvivesOpenSaveSave)
+{
+    const Model model = sampleModel();
+    ProjectMetadata metadata;
+    metadata.name = "Forward";
+    {
+        auto store = ProjectStore::create(projectDir(), metadata);
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    }
+    // What a newer Katana would have written beside the keys this one knows.
+    {
+        auto db = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(db.ok());
+        ASSERT_TRUE(db->execute("INSERT INTO metadata VALUES ('symbol_rotation_mode', 'north')").ok());
+    }
+
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok());
+    auto opened = store->load();
+    ASSERT_TRUE(opened.ok());
+    EXPECT_EQ(opened->metadata.unknownKeys,
+              (std::map<std::string, std::string>{{"symbol_rotation_mode", "north"}}))
+        << "read, and kept to be written back";
+    // Saved twice, as a session does: the second save is the one a table
+    // that is not emptied first would fail on.
+    ASSERT_TRUE(store->save(captureModel(model, opened->metadata)).ok());
+    ASSERT_TRUE(store->save(captureModel(model, opened->metadata)).ok());
+    // And saved by a caller that never looked at the metadata it loaded: the
+    // key is still not this build's to delete.
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+
+    const auto again = store->load();
+    ASSERT_TRUE(again.ok());
+    EXPECT_EQ(again->metadata.unknownKeys,
+              (std::map<std::string, std::string>{{"symbol_rotation_mode", "north"}}));
+    EXPECT_EQ(again->metadata.name, "Forward");
+    // 9 keys this build writes + the 1 it does not know = 10 rows, each once.
+    EXPECT_EQ(metadataRows(projectDir() / "project.db").size(), 10u);
+}
+
+TEST_F(ProjectStoreRoundTrip, TheCustomisationAProjectWasDrawnWithRoundTrips)
+{
+    const Model model = sampleModel();
+    ProjectMetadata metadata;
+    // A name may hold anything a file name can - a semicolon, spaces,
+    // non-ASCII - and the order is the load order, not name order.
+    metadata.customisation = {"user_symbols_ÿ.4d", "linestyles; v2.4d", "survey codes.mapfile"};
+    auto store = ProjectStore::create(projectDir(), metadata);
+    ASSERT_TRUE(store.ok());
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok());
+    EXPECT_EQ(contents->metadata.customisation, metadata.customisation);
+    EXPECT_TRUE(contents->metadata.unknownKeys.empty()) << "customisation is a key this build knows";
+
+    metadata.customisation.clear();
+    ASSERT_TRUE(store->save(captureModel(model, metadata)).ok());
+    EXPECT_TRUE(store->load()->metadata.customisation.empty()) << "an empty list, not one empty name";
+}
+
+TEST_F(ProjectStoreRoundTrip, MetadataThatWouldNotReadBackAsItWasIsRefused)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok());
+    const Model model = sampleModel();
+    const auto refused = [&](const ProjectMetadata& metadata) {
+        const auto status = store->save(captureModel(model, metadata));
+        return !status.ok() && status.error().code == ErrorCode::InvalidArgument;
+    };
+    for (const char* name : {"", "C:/Customisation/user.4d", "folder\\user.4d", "two\nnames.4d"}) {
+        ProjectMetadata metadata;
+        metadata.customisation = {name};
+        EXPECT_TRUE(refused(metadata)) << "\"" << name << "\"";
+    }
+    ProjectMetadata shadowing;
+    shadowing.unknownKeys = {{"name", "Not the name"}};
+    EXPECT_TRUE(refused(shadowing)) << "an unknown key may not overwrite a field";
 }
