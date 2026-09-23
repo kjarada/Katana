@@ -167,6 +167,11 @@ class ViewportWidget final : public QWidget {
     // What a running tool reports that is not an error: "3 lines", "2
     // selected", a measurement. Refusals go to onError.
     std::function<void(const QString& message)> onToolMessage;
+    // Enter or Space with no tool running in this view: repeat the last tool.
+    // Set by whoever keeps one tool running per workspace (ViewWorkspace),
+    // which knows the last tool the user ran in ANY view and stops one still
+    // running in another. Unset, the view starts the last tool it ran itself.
+    std::function<void()> onRepeatTool;
     // Raised when the user clicks into this view or moves the keyboard focus
     // into it, so the workspace can make it the active one; not when Qt moves
     // the focus itself (view_focus.hpp, focusChoosesView). It can be raised
@@ -305,7 +310,8 @@ class ViewportWidget final : public QWidget {
     // it holds a reference to.
     tools::ToolHost tools_;
     QString typed_;
-    // The tool Enter at no prompt runs again; "" until one has run.
+    // The tool Enter at no prompt runs again when onRepeatTool is unset; ""
+    // until one has run here.
     std::string lastToolId_;
     mutable std::size_t lastPreviewCount_ = 0;
     Point2 cursorWorld_; // after snapping

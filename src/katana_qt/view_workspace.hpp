@@ -280,8 +280,9 @@ class ViewWorkspace final : public QMainWindow {
     void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
-    // Forwards a plan view's tool hooks to this workspace's.
-    void wireTools(ViewportWidget& plan);
+    // Forwards a plan view's tool hooks to this workspace's, and sends the
+    // view's Enter-repeat (onRepeatTool) through startTool as view `id`.
+    void wireTools(ViewportWidget& plan, katana::cad::ViewId id);
 
     katana::cad::Document& document_;
     // Owned by the main window, which deletes its children in the order it
@@ -297,6 +298,9 @@ class ViewWorkspace final : public QMainWindow {
     katana::cad::SceneOptions options_{};
 
     Tool tool_ = Tool::Select;
+    // The last tool started in any plan view, which Enter at no prompt in any
+    // of them repeats; "" until one has run.
+    std::string lastToolId_;
     bool gridVisible_ = true;
     bool snapEnabled_ = true;
     katana::cad::SnapModes snapModes_ = katana::cad::kDefaultSnapModes;
