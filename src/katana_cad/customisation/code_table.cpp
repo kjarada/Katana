@@ -248,13 +248,20 @@ CodeExplanation explainCode(const SurveyMap& map, std::string_view code,
     const std::vector<SurveyRule>& rules = map.rules();
 
     // The first rule, most specific first, that sets a field is the one
-    // lookup took it from.
+    // lookup took it from; any later one saying otherwise is overruled.
     for (const FieldSpec& spec : fieldSpecs()) {
+        CodeFieldSource* source = nullptr;
         for (const std::size_t index : out.rules) {
             const SurveyRule& rule = rules[index];
-            if (spec.sets(rule)) {
-                out.fields.push_back({spec.name, spec.text(rule), index, rule.key, rule.section});
-                break;
+            if (!spec.sets(rule)) {
+                continue;
+            }
+            std::string value = spec.text(rule);
+            if (source == nullptr) {
+                source = &out.fields.emplace_back(CodeFieldSource{
+                    spec.name, std::move(value), index, rule.key, rule.section, {}});
+            } else if (value != source->value) {
+                source->overruled.push_back({index, rule.key, rule.section, std::move(value)});
             }
         }
     }
@@ -672,6 +679,10 @@ std::string formatCodeExplanation(const CodeExplanation& explanation)
     for (const CodeFieldSource& field : explanation.fields) {
         out << "  " << field.field << ": " << field.value << "  <- "
             << ruleRef(field.rule, field.key, field.section) << "\n";
+        for (const CodeFieldSource::Overruled& other : field.overruled) {
+            out << "    overruled: " << other.value << "  <- "
+                << ruleRef(other.rule, other.key, other.section) << "\n";
+        }
     }
     if (!explanation.linestyle.name.empty()) {
         out << "  linestyle " << inQuotes(explanation.linestyle.name) << ": ";

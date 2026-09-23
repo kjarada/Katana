@@ -307,6 +307,35 @@ TEST(ExplainCode, IsPrintedAsOneTextNamingEachRule)
     EXPECT_EQ(katana::cad::formatCodeExplanation(explain(referenceShapes(), "wm01")), expected);
 }
 
+TEST(ExplainCode, ALaterRuleSayingSomethingElseIsShownAsOverruled)
+{
+    // The two built-in mapfiles disagree on `hide` for 190 keys; a shorter
+    // prefix can disagree with a longer one. A later rule saying the SAME is
+    // not shown: nothing was decided against it.
+    SurveyMap map;
+    SurveyRule shown = vertexSymbol("AC*", "CULT Bollard", 1.5);
+    shown.hide = false;
+    SurveyRule hidden = shown;
+    hidden.hide = true;
+    ASSERT_TRUE(map.add(shown).ok());                                          // 0
+    ASSERT_TRUE(map.add(hidden).ok());                                         // 1
+    ASSERT_TRUE(map.add(mapData("A*", "SURVEY DETAIL", "red", "")).ok());      // 2
+    ASSERT_TRUE(map.add(mapData("AC*", "SURVEY DETAIL", "white", "")).ok());   // 3
+
+    // By hand: AC* (0, 1, 3) before A* (2). model: 3, and 2 agrees. colour:
+    // 3 white, 2 red. hide: 0 no, 1 yes. symbol: 0, and 1 agrees.
+    EXPECT_EQ(katana::cad::formatCodeExplanation(explain(map, "AC01")),
+              "Code \"AC01\": prefix match, matched\n"
+              "  model: SURVEY DETAIL  <- rule #3 AC* (map_data)\n"
+              "  colour: white  <- rule #3 AC* (map_data)\n"
+              "    overruled: red  <- rule #2 A* (map_data)\n"
+              "  hide: no  <- rule #0 AC* (vertex_symbol_data)\n"
+              "    overruled: yes  <- rule #1 AC* (vertex_symbol_data)\n"
+              "  symbol: CULT Bollard, size 1.5  <- rule #0 AC* (vertex_symbol_data)\n"
+              "  symbol \"CULT Bollard\": defined, mode vertex\n"
+              "  colour \"white\": #FFFFFF\n");
+}
+
 // ---- the map as a table of codes ------------------------------------------------
 
 TEST(CodeTable, HasOneRowPerDistinctKeyInKeyOrderWithItsRulesAndSections)
