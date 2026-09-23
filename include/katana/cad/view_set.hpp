@@ -57,9 +57,20 @@ struct ViewState {
     // view turned into a section and back finds its orbit where it left it;
     // only arriving at a kind the camera was NOT set up for resets it.
     ViewKind cameraKind = ViewKind::Plan;
+    // True once a 3D or elevation view has framed `camera` on something it
+    // draws. The widget is rebuilt on every change of kind, and a new one
+    // frames at its first paint unless this says the camera already has been:
+    // that frame resets the target and the distance, so a trip through a
+    // section kept only the angle of the orbit. setKind clears it whenever it
+    // points the camera afresh, because a camera pointed afresh has framed
+    // nothing yet.
+    bool cameraFramed = false;
     ViewTransform plan;            // Plan: pan and zoom
-    // False until the plan view has framed the drawing once; a plan view
-    // frames itself on its first resize and never again unless asked.
+    // False until the plan view has been framed once. The plan widget frames
+    // at its first paint, not its first resize, because a dock's first resize
+    // may be provisional; and until the user pans or zooms it refits that
+    // frame on every resize, so setting this true stops the first frame but
+    // not the refit of a later Zoom Extents or zoom-to.
     bool planFramed = false;
     // Layers this view hides on top of the document's own visibility.
     LayerOverrides layers;
@@ -98,7 +109,7 @@ class ViewSet {
     // its new kind. Reconfigures the camera only for a model kind it was not
     // already set up for (ViewState::cameraKind): a 3D view's orbit is not
     // reset by choosing 3D again, nor by a trip through Section and back.
-    // NotFound for an unknown id.
+    // Reconfiguring clears cameraFramed. NotFound for an unknown id.
     [[nodiscard]] katana::core::Status setKind(ViewId id, ViewKind kind);
 
     // NotFound, and nothing changes, for an unknown id: activating some other

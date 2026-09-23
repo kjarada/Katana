@@ -67,8 +67,14 @@ function(katana_register_tests target)
             ${CMAKE_COMMAND} -E env --modify
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
     endif()
+    # The default 5 s discovery timeout is too short for the first run after the
+    # build has redeployed the GDAL/PDAL runtime: loading freshly copied DLLs can
+    # take longer than that (they are scanned on first load), and the suite then
+    # fails to LIST even though every case passes on the next run. Listing
+    # normally takes a tenth of a second, so a minute costs nothing.
     gtest_discover_tests(${target}
         DISCOVERY_MODE PRE_TEST
+        DISCOVERY_TIMEOUT 60
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}"
     )
 endfunction()

@@ -1,6 +1,7 @@
 #include "viewport_widget.hpp"
 
 #include "theme.hpp"
+#include "view_focus.hpp"
 
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/dashing.hpp"
@@ -22,7 +23,6 @@
 #include <QMarginsF>
 #include <QContextMenuEvent>
 #include <QCursor>
-#include <QFocusEvent>
 #include <QFont>
 #include <QFontMetrics>
 #include <QKeyEvent>
@@ -145,6 +145,11 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
         state_.plan.scale = kInitialScale;
     }
     documentListener_ = document_.addListener([this] { update(); });
+    activateOnFocus(*this, [this] {
+        if (onActivated) {
+            onActivated();
+        }
+    });
 }
 
 QPointF ViewportWidget::toScreen(const Point2& world) const
@@ -696,18 +701,6 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
         return;
     }
     QWidget::keyPressEvent(event);
-}
-
-void ViewportWidget::focusInEvent(QFocusEvent* event)
-{
-    QWidget::focusInEvent(event);
-    // A keyboard move into this view - Tab, a shortcut, a floating view's
-    // window being brought forward - makes it the view the menus act on, as a
-    // click does. Not the focus a closing menu gives back: that is the view
-    // the menu was opened over, not a choice of view.
-    if (onActivated && event->reason() != Qt::PopupFocusReason) {
-        onActivated();
-    }
 }
 
 void ViewportWidget::contextMenuEvent(QContextMenuEvent* event)

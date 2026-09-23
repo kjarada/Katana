@@ -120,7 +120,8 @@ class ViewportWidget final : public QWidget {
         onCursorMoved;
     std::function<void(Tool tool)> onToolChanged;
     // Raised when the user clicks into this view or moves the keyboard focus
-    // into it, so the workspace can make it the active one. It can be raised
+    // into it, so the workspace can make it the active one; not when Qt moves
+    // the focus itself (view_focus.hpp, focusChoosesView). It can be raised
     // twice for one click (the press, then the focus it gives); the workspace
     // ignores re-activating the active view.
     std::function<void()> onActivated;
@@ -147,7 +148,6 @@ class ViewportWidget final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
-    void focusInEvent(QFocusEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 
   private:
