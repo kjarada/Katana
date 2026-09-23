@@ -495,13 +495,14 @@ void SymbolLibraryDialog::reload()
     if (!alive()) {
         return;
     }
+    const std::vector<std::string> selected = selectedNames();
     rebuilding_ = true;
     model_->setEntries(katana::cad::symbolLibrary(*document_));
     rebuildTree();
     rebuildStyles();
     replaceWith_->refresh();
     rebuilding_ = false;
-    applyFilter();
+    applyFilter(selected);
 }
 
 void SymbolLibraryDialog::rebuildTree()
@@ -590,7 +591,9 @@ void SymbolLibraryDialog::rebuildStyles()
     }
 }
 
-void SymbolLibraryDialog::applyFilter()
+void SymbolLibraryDialog::applyFilter() { applyFilter(selectedNames()); }
+
+void SymbolLibraryDialog::applyFilter(const std::vector<std::string>& selected)
 {
     SymbolFilter filter;
     filter.text = filterBar_->text();
@@ -607,7 +610,7 @@ void SymbolLibraryDialog::applyFilter()
     countLabel_->setText(QStringLiteral("%1 of %2 symbols")
                              .arg(grouped(static_cast<std::uint64_t>(model_->rowCount())),
                                   grouped(model_->entries().size())));
-    restoreCurrent();
+    restoreCurrent(selected);
 }
 
 void SymbolLibraryDialog::updateChipCounts()
@@ -621,22 +624,32 @@ void SymbolLibraryDialog::updateChipCounts()
     }
 }
 
-void SymbolLibraryDialog::restoreCurrent()
+void SymbolLibraryDialog::restoreCurrent(const std::vector<std::string>& selected)
 {
     const int row = model_->rowOf(current_);
+    // The selection an export or a reload found, where it is still shown -
+    // or, when the current symbol was not part of it, that symbol alone.
+    const bool keepSelection = std::ranges::find(selected, current_) != selected.end();
+    QItemSelection selection;
+    for (const std::string& name : keepSelection ? selected : std::vector<std::string>{current_}) {
+        if (const int at = model_->rowOf(name); at >= 0) {
+            selection.select(model_->index(at), model_->index(at));
+        }
+    }
+    const bool wasRebuilding = rebuilding_;
+    rebuilding_ = true;
+    grid_->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+    if (row >= 0) {
+        grid_->selectionModel()->setCurrentIndex(model_->index(row), QItemSelectionModel::NoUpdate);
+    }
+    rebuilding_ = wasRebuilding;
     if (row < 0) {
         // Filtered away: nothing is current, so no action can reach a
         // symbol the person can no longer see.
         current_.clear();
-        showDetails();
-        return;
+    } else {
+        grid_->scrollTo(model_->index(row));
     }
-    const bool wasRebuilding = rebuilding_;
-    rebuilding_ = true;
-    grid_->selectionModel()->setCurrentIndex(model_->index(row),
-                                             QItemSelectionModel::ClearAndSelect);
-    rebuilding_ = wasRebuilding;
-    grid_->scrollTo(model_->index(row));
     showDetails();
 }
 
@@ -676,7 +689,7 @@ bool SymbolLibraryDialog::selectSymbol(std::string_view name)
         rebuilding_ = false;
     }
     current_ = std::string(name);
-    applyFilter();
+    applyFilter({});
     return !current_.empty();
 }
 

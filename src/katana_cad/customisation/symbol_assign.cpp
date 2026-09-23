@@ -84,10 +84,25 @@ SymbolUsers symbolUsers(const Document& document, std::string_view name)
 std::vector<SymbolLibraryEntry> symbolLibrary(const Document& document)
 {
     const katana::entity::SurveyMap& map = document.surveyMap();
+    // Every code by the symbol it draws, in one pass over the rules: asking
+    // symbolCodes per entry is a pass per entry - 800 definitions over
+    // 1,600 rules on every reload.
+    std::map<std::string, std::vector<SymbolCode>, std::less<>> codesOf;
+    for (const katana::entity::SurveyRule& rule : map.rules()) {
+        if (isSymbolRule(rule)) {
+            codesOf[rule.symbol->style].push_back(
+                SymbolCode{rule.key, rule.symbol->size, rule.symbol->colour, rule.comment});
+        }
+    }
+    const auto codesFor = [&](std::string_view name) {
+        const auto found = codesOf.find(name);
+        return found == codesOf.end() ? std::vector<SymbolCode>{} : found->second;
+    };
+
     std::vector<SymbolLibraryEntry> entries;
     for (CatalogueEntry& choice : symbolChoices(document)) {
         SymbolLibraryEntry entry;
-        entry.codes = symbolCodes(map, choice.name);
+        entry.codes = codesFor(choice.name);
         entry.entry = std::move(choice);
         entries.push_back(std::move(entry));
     }
@@ -126,7 +141,7 @@ std::vector<SymbolLibraryEntry> symbolLibrary(const Document& document)
         missing.emplace(name, std::move(entry));
     }
     for (auto& [name, entry] : missing) {
-        entry.codes = symbolCodes(map, name);
+        entry.codes = codesFor(name);
         entries.push_back(std::move(entry));
     }
 
