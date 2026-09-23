@@ -5,16 +5,16 @@
 #include <utility>
 
 #include "katana/archive12d/reader.hpp"
+#include "katana/core/xml.hpp"
 #include "text_utilities.hpp"
-#include "xml.hpp"
 
 namespace katana::archive12d {
 
 namespace {
 
-using detail::XmlNode;
 using katana::core::ErrorCode;
 using katana::core::makeError;
+using katana::core::XmlNode;
 using katana::entity::SurveyAttribute;
 using katana::entity::SurveyPipe;
 using katana::entity::SurveyRule;
@@ -64,7 +64,7 @@ class MapReader {
 
     katana::core::Result<MapFileRead> run()
     {
-        auto document = detail::readXml(text_);
+        auto document = katana::core::readXml(text_);
         if (!document) {
             return document.error();
         }

@@ -94,6 +94,7 @@ set(KATANA_MODULES
     katana_storage
     katana_geodesy
     katana_survey
+    katana_surveyio
     katana_terrain
     katana_archive12d
     katana_render

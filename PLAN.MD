@@ -1836,8 +1836,8 @@ code's treatment is the UNION of the aspects that match it:
 3. **The mapfile reader. DELIVERED.** `entity::SurveyMap` and `SurveyRule`
    (`include/katana/entity/survey_map.hpp`) are the table;
    `archive12d::readMapFile` (`include/katana/archive12d/map_file.hpp`) reads
-   it, on a small strict XML reader written for the purpose
-   (`src/katana_archive12d/xml.cpp`) rather than a linked one, so this module
+   it, on a small strict XML reader (`katana::core::readXml`,
+   `include/katana/core/xml.hpp`) rather than a linked one, so this module
    keeps its no-third-party-dependency property and stays under the sanitizer
    job. `readMapFileInto` loads several mapfiles as one customisation.
 
@@ -2913,3 +2913,114 @@ The long-term objective is therefore:
 ```
 
 **Build the deterministic C++ engine first. Add intelligence only after the engine exposes reliable, structured commands.**
+
+# 45. Survey module and instrument interoperability
+
+**STATUS: IN PROGRESS.** Requested by the user on 2026-09-23, and taking
+precedence over the remainder of section 20.2 in `CLAUDE.md` section 5.2's
+ordering until it is delivered.
+
+A Survey menu, a Point Manager, an import wizard, and a Survey Data Exchange
+subsystem that reads field data from Leica, Trimble and Topcon instruments and
+data collectors into the drawing.
+
+## 45.1 What already existed, and what this programme is therefore NOT
+
+The brief asked for fifteen phases. Four of them were already built, and this is
+recorded here so that nobody builds them a second time:
+
+* **The survey calculation engine exists.** `katana::survey` has `cogo.hpp`
+  (inverse, forward, polygon area and perimeter, slope-to-horizontal reduction,
+  trigonometric height difference), `traverse.hpp` (computation, misclosure and
+  adjustment), `angles.hpp`, `leveling.hpp`, `least_squares.hpp`,
+  `network_adjustment.hpp`, `error_propagation.hpp` and `statistics.hpp`. The
+  brief's "Phase 3 - survey calculation engine" is a wiring job, not a build.
+* **A normalized survey model exists** in `survey/data_model.hpp`: `SurveyPoint`
+  and four observation kinds, with the conventions stated at the top of the file
+  (metres, **radians**, azimuths clockwise in [0, 2*pi), ordered containers so no
+  result depends on hashing). What it lacked was provenance, stations, a project
+  aggregate, and the calculated-versus-observed distinction. Those are 45.2.
+* **Coordinate reference systems exist.** `katana::geodesy` has
+  `coordinate_reference_system.hpp`, `coordinate_transformer.hpp`, `units.hpp`,
+  `ellipsoid.hpp`, `geodesic.hpp` and `grid_factors.hpp`, with PROJ kept behind
+  `src/` (Rule 4). The brief's "Phase 11" is wiring, and the wizard's job is to
+  refuse to transform rather than to implement a transformation.
+* **A strict XML reader exists.** It was private to `archive12d`; LandXML does
+  not get a second one, so it was promoted to `core` as `katana::core::readXml`
+  (`include/katana/core/xml.hpp`). It refuses a doctype, an undefined entity and
+  nesting past `kXmlMaxDepth`, and those three refusals are security properties
+  rather than simplifications: a doctype is the entity-expansion and
+  external-entity entry point, and the reader recurses, so past the cap the
+  answer must be an error and not a blown stack.
+
+## 45.2 Architecture, decided before any of it was written
+
+**A new `surveyio` layer**, registered in `tools/check_layering.cmake` as
+allowed `core;math;geometry;survey`. It parses manufacturer formats into
+`katana::survey` values and nothing else.
+
+* **`cad` may NOT see `surveyio`**, exactly as it may not see `interop` or
+  `archive12d`. This is the structural answer to the brief's section 7 - "do not
+  make the CAD application internally dependent on Leica, Trimble or Topcon
+  structures". `app`/`qt` own the parsers; `cad` only ever sees
+  `katana::survey`, which it is already allowed to see. A Leica type cannot
+  reach the drawing even by accident, because the layering test fails the build.
+* **`geodesy` is deliberately absent from `surveyio`'s allowed list.** A parser
+  records the coordinate system a file *declares* - a name, an EPSG code, or
+  explicitly "unknown" - and transforms nothing. Transformation is an act the
+  user authorises in the wizard with both systems named. Making it structurally
+  impossible in the parser is stronger than remembering not to do it.
+* **Only the file NAME of a source is stored, never a path the file supplied.**
+  The same rule the 12da reader follows for `ref_data`: a file must not be able
+  to choose what gets read.
+
+## 45.3 Slices
+
+| # | Slice | Status |
+|---|---|---|
+| 1 | The XML reader promoted from `archive12d` to `core`, with the tests it never had | **DELIVERED** |
+| 2 | Model: provenance, `SurveyStation`, `SurveyProject`, calculated-vs-observed | **DELIVERED** |
+| 3 | `surveyio` scaffolding: format descriptors, a self-registering format registry, and detection that cannot silently guess | **DELIVERED** |
+| 4 | Generic ASCII/CSV import and export, with column mapping and saved templates | pending |
+| 5 | LandXML import and export | pending |
+| 6 | Leica: GSI-8 and GSI-16, and ASCII/CSV | pending |
+| 7 | Trimble: JobXML, CSV/ASCII, LandXML | pending |
+| 8 | Topcon: documented observation formats, CSV/ASCII | pending |
+| 9 | The Survey menu and its commands | pending |
+| 10 | The import wizard, six steps, with validation and a warning/error report | pending |
+| 11 | Point Manager with source column and filtering | pending |
+| 12 | Instrument profiles, and import history undoable as one transaction | pending |
+| 13 | Reports: point, observation, import, traverse | pending |
+| 14 | The compatibility matrix, stating format AND version actually supported | pending |
+
+## 45.4 The proprietary-format rule, as it will be applied
+
+The brief forbids guessing undocumented binary structures and forbids claiming
+support because of a file extension. This programme applies that as follows, and
+the UI carries it:
+
+* A format is implemented only when its structure is publicly documented or can
+  be validated against a specification. Every format the UI offers names its
+  parser variant - "Leica GSI-16" - not its manufacturer.
+* A `FormatDescriptor` states what a format can carry (points, observations,
+  stations), whether import and export are supported, and the parser version.
+  The UI shows that record. There is no "all Leica files supported" anywhere.
+* Detection returns a RANKED list with an explicit uncertain outcome that a
+  caller cannot ignore. An unknown file is never handed to an incompatible
+  parser.
+* Test fixtures are constructed FROM specifications. No proprietary sample data.
+
+## 45.5 Numbers that must not be guessed
+
+Two failure modes in this area silently corrupt survey data rather than failing,
+and both are called out here because a test that does not target them will pass
+over the bug:
+
+* **GSI encodes the decimal position in the word, not as a decimal point.** A
+  parser that reads the data block as a plain integer produces coordinates wrong
+  by orders of magnitude, and they look plausible. Every GSI test asserts a
+  value worked out by hand from the specification.
+* **Coordinate ORDER differs between families.** LandXML `CgPoint` content and
+  Trimble exports are northing-first; much else is easting-first. Where the
+  order is genuinely ambiguous in a file, the importer asks. It never guesses,
+  because a transposed survey is a survey that looks fine and is wrong.

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <initializer_list>
+#include <set>
 #include <utility>
 
 #include "katana/math/numerics.hpp"
@@ -152,7 +153,119 @@ std::string valueProblem(const Observation& observation)
         observation);
 }
 
+// A point id set, ordered so that the first error reported for a bad project is
+// the same one on every run (PLAN.MD section 35 and the ordering convention at
+// the top of data_model.hpp).
+using PointIdSet = std::set<std::string, std::less<>>;
+
+Status missingPoint(std::string_view pointId, std::string context)
+{
+    return makeError(ErrorCode::NotFound,
+                     "point '" + std::string(pointId) + "' is not in the project",
+                     std::move(context));
+}
+
+Status checkProjectObservation(const Observation& observation, const PointIdSet& points,
+                               const std::string& context)
+{
+    if (Status status = validateObservation(observation); !status.ok()) {
+        return status;
+    }
+    for (const std::string& id : referencedPoints(observation)) {
+        if (!points.contains(id)) {
+            return missingPoint(id, context + ": " + describe(observation));
+        }
+    }
+    return {};
+}
+
 } // namespace
+
+// ---- Provenance ----------------------------------------------------------------
+
+std::string sourceFileName(std::string_view supplied)
+{
+    const std::size_t cut = supplied.find_last_of("/\\:");
+    const std::string_view name =
+        cut == std::string_view::npos ? supplied : supplied.substr(cut + 1);
+    if (name == "." || name == "..") {
+        return {};
+    }
+    return std::string(name);
+}
+
+std::string describeSource(const SourceRecord& source)
+{
+    if (!source.known()) {
+        return "unknown source";
+    }
+    std::string text = source.fileName.empty() ? std::string("<unnamed file>") : source.fileName;
+    if (source.recordNumber != 0) {
+        text += " record " + std::to_string(source.recordNumber);
+    }
+    std::string format = source.manufacturer;
+    for (const std::string* part : {&source.format, &source.formatVersion}) {
+        if (part->empty()) {
+            continue;
+        }
+        format += format.empty() ? *part : " " + *part;
+    }
+    if (!format.empty()) {
+        text += " (" + format + ")";
+    }
+    return text;
+}
+
+const char* toString(CoordinateSource source)
+{
+    switch (source) {
+    case CoordinateSource::Unknown:
+        return "unknown";
+    case CoordinateSource::FieldObserved:
+        return "field observed";
+    case CoordinateSource::Calculated:
+        return "calculated";
+    case CoordinateSource::Entered:
+        return "entered";
+    }
+    return "unknown";
+}
+
+const char* toString(LinearUnit unit)
+{
+    switch (unit) {
+    case LinearUnit::Unknown:
+        return "unknown";
+    case LinearUnit::Metres:
+        return "metres";
+    case LinearUnit::Feet:
+        return "feet";
+    case LinearUnit::UsSurveyFeet:
+        return "US survey feet";
+    case LinearUnit::Links:
+        return "links";
+    }
+    return "unknown";
+}
+
+const char* toString(AngularUnit unit)
+{
+    switch (unit) {
+    case AngularUnit::Unknown:
+        return "unknown";
+    case AngularUnit::Radians:
+        return "radians";
+    case AngularUnit::DecimalDegrees:
+        return "decimal degrees";
+    case AngularUnit::DegreesMinutesSeconds:
+        return "degrees, minutes and seconds";
+    case AngularUnit::Gons:
+        return "gons";
+    case AngularUnit::Mils:
+        return "mils";
+    }
+    return "unknown";
+}
 
 std::string observationKindName(const Observation& observation)
 {
@@ -206,6 +319,16 @@ Observation normalizedObservation(Observation observation)
     return observation;
 }
 
+const SourceRecord& observationSource(const Observation& observation)
+{
+    return std::visit([](const auto& o) -> const SourceRecord& { return o.source; }, observation);
+}
+
+void setObservationSource(Observation& observation, SourceRecord source)
+{
+    std::visit([&source](auto& o) { o.source = std::move(source); }, observation);
+}
+
 // ---- ControlPoint ------------------------------------------------------------
 
 ControlPoint ControlPoint::fixedHorizontal(std::string pointId)
@@ -248,6 +371,111 @@ ControlPoint ControlPoint::weightedVertical(std::string pointId, double sigma)
     control.pointId = std::move(pointId);
     control.elevation = ControlComponent{ControlConstraint::Weighted, sigma};
     return control;
+}
+
+// ---- Declared coordinate system --------------------------------------------------
+
+DeclaredCoordinateSystem DeclaredCoordinateSystem::named(std::string name)
+{
+    DeclaredCoordinateSystem system;
+    system.unknown = name.empty(); // a blank declaration declares nothing
+    system.name = std::move(name);
+    return system;
+}
+
+DeclaredCoordinateSystem DeclaredCoordinateSystem::epsg(int code, std::string name)
+{
+    DeclaredCoordinateSystem system = named(std::move(name));
+    // EPSG dataset codes are positive integers; 0 is the "none given" marker of
+    // the field itself, so a file stating 0 has stated nothing usable.
+    if (code > 0) {
+        system.epsgCode = code;
+        system.unknown = false;
+    }
+    return system;
+}
+
+// ---- SurveyProject ---------------------------------------------------------------
+
+Status validateProject(const SurveyProject& project)
+{
+    PointIdSet points;
+    for (const SurveyPoint& point : project.points) {
+        if (point.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a point has an empty id",
+                             describeSource(point.source));
+        }
+        if (!points.insert(point.id).second) {
+            return makeError(ErrorCode::AlreadyExists, "duplicate point id '" + point.id + "'",
+                             describeSource(point.source));
+        }
+        if (std::string reason = checkFinite({{"northing", point.northing},
+                                              {"easting", point.easting},
+                                              {"elevation", point.elevation}});
+            !reason.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "point '" + point.id + "': " + reason,
+                             describeSource(point.source));
+        }
+    }
+
+    PointIdSet stationIds;
+    for (const SurveyStation& station : project.stations) {
+        const Station& setup = station.setup;
+        if (setup.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a station has an empty id",
+                             describeSource(station.source));
+        }
+        if (!stationIds.insert(setup.id).second) {
+            return makeError(ErrorCode::AlreadyExists, "duplicate station id '" + setup.id + "'",
+                             describeSource(station.source));
+        }
+        if (!points.contains(setup.pointId)) {
+            return missingPoint(setup.pointId, "station " + setup.id);
+        }
+        if (std::string reason = checkFinite({{"instrument height", setup.instrumentHeight}});
+            !reason.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "station " + setup.id + ": " + reason,
+                             describeSource(station.source));
+        }
+        if (!station.backsightPointId.empty() && !points.contains(station.backsightPointId)) {
+            return missingPoint(station.backsightPointId, "backsight of station " + setup.id);
+        }
+        if (station.backsightAzimuth && !std::isfinite(*station.backsightAzimuth)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "station " + setup.id + ": backsight azimuth is not finite",
+                             describeSource(station.source));
+        }
+        for (const Observation& observation : station.observations) {
+            if (Status status =
+                    checkProjectObservation(observation, points, "station " + setup.id);
+                !status.ok()) {
+                return status;
+            }
+        }
+    }
+
+    for (const Observation& observation : project.observations) {
+        if (Status status = checkProjectObservation(observation, points, "project observation");
+            !status.ok()) {
+            return status;
+        }
+    }
+
+    for (const SurveyFeature& feature : project.features) {
+        const std::string label =
+            "'" + (feature.name.empty() ? feature.code : feature.name) + "'";
+        if (feature.pointIds.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "feature " + label + " names no points",
+                             describeSource(feature.source));
+        }
+        for (const std::string& pointId : feature.pointIds) {
+            if (!points.contains(pointId)) {
+                return missingPoint(pointId, "feature " + label);
+            }
+        }
+    }
+
+    return {};
 }
 
 } // namespace katana::survey
