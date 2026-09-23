@@ -342,6 +342,7 @@ the `layering` test:
 ```
 core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> cad -> app -> qt
                             geodesy, survey (beside geometry)
+                            surveyio (survey + geometry; seen only by app and qt)
                             gis, pointcloud (GDAL/PDAL) -> interop
 ```
 

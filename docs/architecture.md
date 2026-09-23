@@ -15,10 +15,18 @@ consumers of it, never participants in it.
 Dependencies run one way, lowest first:
 
 ```
-core → math → geometry → { geodesy, survey, terrain, entity } → commands
-     → storage → cad → { qt, app }
-io  → core
+core → math → geometry → { terrain, render, entity } → commands → storage → cad → app → qt
+              geodesy, survey              beside geometry (they see core and math)
+              surveyio                     survey + geometry; seen only by app and qt
+              archive12d                   terrain + entity; seen by interop, app, qt
+              gis, pointcloud → interop    the GDAL/PDAL adapters (katana_io) and import/export
 ```
+
+`cad` may see neither `interop` nor `surveyio` nor `archive12d`: the
+application core builds without GDAL and PDAL (`-DKATANA_BUILD_IO=OFF`), and no
+instrument format's or 12d's own types can reach the drawing. This diagram
+used to show `io` and nothing above `cad` but `qt` and `app`; the exact lists
+are in the layering check and nowhere else.
 
 A module may include headers from the layers it is listed as depending on in
 [`tools/check_layering.cmake`](../tools/check_layering.cmake), and from nowhere
