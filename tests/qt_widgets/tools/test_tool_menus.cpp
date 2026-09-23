@@ -357,3 +357,28 @@ TEST(ToolMenus, APlanViewTurnedIntoAnotherKindEndsItsToolAndSaysSo)
     EXPECT_EQ(changes.back(), "");
     EXPECT_EQ(views->activeToolId(), "");
 }
+
+TEST(ToolMenus, APlanViewClosedWhileItsToolRunsEndsTheToolAndSaysSo)
+{
+    // Two plan views, Line running in the second. Closing that view (its
+    // title bar's X) deletes the widget running the tool; the tool is
+    // stopped first, so the window hears it end ("") and unchecks Line. The
+    // other plan view is left to draw in, idle.
+    katana::cad::Document document;
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    views->openView(katana::cad::ViewKind::Plan);
+    ASSERT_EQ(views->planViews().size(), 2u);
+    std::vector<std::string> changes;
+    views->onActiveToolChanged = [&](const std::string& id) { changes.push_back(id); };
+    ASSERT_TRUE(views->startTool("draw.line").ok());
+    ASSERT_EQ(changes.back(), "draw.line");
+    const katana::cad::ViewId running = views->viewSet().activeId();
+    ASSERT_EQ(views->planView(running)->activeToolId(), "draw.line");
+
+    ASSERT_TRUE(views->closeView(running).ok());
+    EXPECT_EQ(changes.back(), "");
+    EXPECT_EQ(views->activeToolId(), "");
+    EXPECT_EQ(views->planViews().size(), 1u);
+}
