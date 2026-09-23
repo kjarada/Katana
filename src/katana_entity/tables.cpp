@@ -536,6 +536,13 @@ Status validate(const Linetype& linetype)
                              linetype.name);
         }
     }
+    // Every string that reaches the model is UTF-8 (entity.hpp); a
+    // description that is not cannot be saved, and the save would fail far
+    // from here without naming the linetype (audit MOD-12).
+    if (!isValidUtf8(linetype.description)) {
+        return makeError(ErrorCode::InvalidArgument, "linetype description is not valid UTF-8",
+                         linetype.name);
+    }
     if (linetype.pattern.empty()) {
         return {}; // continuous
     }
@@ -779,6 +786,15 @@ Status validate(const Style& style)
     if (!isValidUtf8(style.symbol)) {
         return makeError(ErrorCode::InvalidArgument, "symbol name is not valid UTF-8",
                          style.name);
+    }
+    // The linetype is resolved when drawn, like the symbol, and for the same
+    // reason is not checked against a table: a 12d linestyle lives in the
+    // library, not the model. "ByLayer" (display.hpp) is accepted like any
+    // other name - it is what a style that inherits its layer's linetype
+    // says. Only the encoding is checked, as it is for every string here.
+    if (!isValidUtf8(style.linetype) || !isValidUtf8(style.hatchPattern)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "linetype or hatch pattern name is not valid UTF-8", style.name);
     }
     if (!(std::isfinite(style.symbolSize) && style.symbolSize >= 0.0)) {
         return makeError(ErrorCode::InvalidArgument,
