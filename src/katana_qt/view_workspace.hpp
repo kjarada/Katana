@@ -108,9 +108,13 @@ class ViewWorkspace final : public QMainWindow {
     // A new view of `kind`, splitting the active view into equal halves -
     // side by side when the active view is wider than it is tall, stacked
     // when it is taller - or on its own when no view is docked. A maximised
-    // view is restored first. Activates it when `activate` is true.
+    // view is restored first. Activates it when `activate` is true, and also
+    // when the active view is hidden (minimised), so that the view the menus
+    // act on is never one the user cannot see while another shows.
     katana::cad::ViewState& openView(katana::cad::ViewKind kind, bool activate = true);
     // Closes a view: its dock and widget are deleted and its state dropped.
+    // When it was the active view, the one activated in its place is one the
+    // user can see, never a minimised view or a tab page left behind another.
     // NotFound for an id that is not open.
     [[nodiscard]] katana::core::Status closeView(katana::cad::ViewId id);
     // Changes what a view shows, keeping its dock where it is and the rest of
@@ -239,8 +243,13 @@ class ViewWorkspace final : public QMainWindow {
     void installChrome(View& view);
     // Marks the active view's title bar and unmarks the rest.
     void updateActiveMarks();
-    // After `hidden` was minimised: when it was the active view, activates a
-    // view that is still showing, if there is one.
+    // Where the user can see it: not hidden, and floating or within this
+    // window (a tab page behind another is parked outside it).
+    [[nodiscard]] bool onScreen(const View& view) const;
+    // After `hidden` was hidden (minimised) while it was the active view:
+    // activates a view on screen, or, when none is yet, raises a parked tab
+    // page to be the current one and activates that. Nothing when no other
+    // view is open and unhidden.
     void activateShowingInsteadOf(katana::cad::ViewId hidden);
     // The Layers button's icon and tooltip say whether the view hides anything.
     void updateLayersButton(const View& view);
