@@ -5,6 +5,8 @@
 
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QCoreApplication>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QStyle>
 #include <QTimer>
@@ -146,6 +148,13 @@ const ViewWorkspace::View* ViewWorkspace::find(ViewId id) const
 
 void ViewWorkspace::buildContent(View& view, ViewState& state)
 {
+    // A tool running in a plan view that is about to be deleted is stopped
+    // first, as Esc stops it: deleted with its widget it would never report
+    // that it ended, and the menu and toolbar would go on showing it
+    // checked with nothing running.
+    if (view.plan != nullptr && view.plan->toolActive()) {
+        view.plan->setTool(Tool::Select);
+    }
     QWidget* old = view.widget();
     view.plan = nullptr;
     view.render = nullptr;
@@ -810,12 +819,6 @@ bool ViewWorkspace::showSection(katana::cad::Section section)
 
 void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
 {
-    plan.onToolChanged = [this](Tool tool) {
-        tool_ = tool;
-        if (onToolChanged) {
-            onToolChanged(tool);
-        }
-    };
     plan.onActiveToolChanged = [this](const std::string& toolId) {
         if (!toolId.empty()) {
             lastToolId_ = toolId;
@@ -844,6 +847,11 @@ void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
             onToolMessage(message);
         } else if (onStatus) {
             onStatus(message);
+        }
+    };
+    plan.onTextTyped = [this](const QString& text) {
+        if (onTextTyped) {
+            onTextTyped(text);
         }
     };
 }
@@ -888,19 +896,35 @@ bool ViewWorkspace::typeIntoTool(const QString& text)
     return false;
 }
 
-void ViewWorkspace::setTool(Tool tool)
+void ViewWorkspace::stopTool()
 {
-    if (tool == Tool::Select) {
-        for (ViewportWidget* plan : planViews()) {
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
             plan->setTool(Tool::Select);
         }
-        tool_ = Tool::Select;
-        return;
     }
-    const Status started = startTool(toolId(tool));
-    if (!started && onError) {
-        onError(QString::fromStdString(started.error().describe()));
+}
+
+bool ViewWorkspace::pressEnter()
+{
+    ViewportWidget* target = nullptr;
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
+            target = plan;
+            break;
+        }
     }
+    if (target == nullptr) {
+        target = activePlanView();
+    }
+    if (target == nullptr) {
+        return false;
+    }
+    // Delivered as the key itself, so the command line's Enter and the
+    // drawing's are one path and cannot come to mean different things.
+    QKeyEvent press(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(target, &press);
+    return true;
 }
 
 void ViewWorkspace::setGridVisible(bool visible)

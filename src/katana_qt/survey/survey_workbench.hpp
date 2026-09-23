@@ -18,7 +18,8 @@
 //                           Angle and Bearing Calculator...
 //   Traverse and Levelling  Traverse..., Level Book...
 //   Coordinates             Coordinate Converter...
-//   Survey Coding           the window's two customisation actions
+//   Survey Coding           the window's customisation actions and the
+//                           Format menu's Survey Code Manager
 // Each action's object name (surveyImport, surveyExport, surveyPointManager,
 // surveyPointReport, surveyInverse, surveyForward, surveyArea,
 // surveyAngleCalculator, surveyTraverse, surveyLevelBook,
@@ -75,6 +76,10 @@ struct SurveyServices {
     QAction* loadCustomisation = nullptr;
     QAction* replaceCustomisation = nullptr;
     QAction* applySurveyCodes = nullptr;
+    // The Format menu's Survey Code Manager (CustomisationWorkbench), shown
+    // under Survey Coding as well: where a surveyor looks for the code
+    // library. The same object again.
+    QAction* codeManager = nullptr;
 };
 
 class SurveyWorkbench {

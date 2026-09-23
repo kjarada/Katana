@@ -101,14 +101,18 @@ endif()
 if(SELECT_ALL)
     list(APPEND extra --select-all)
 endif()
-# -DSURVEY_DIALOG=<action name> opens that Survey menu dialog through its
-# action and grabs IT (--survey-dialog). -DFILL=<field>=<text>[|<field>=<text>...]
+# -DSURVEY_DIALOG=<action name> (or -DDIALOG=, the same for any menu's
+# dialog: formatStyles, formatSymbols, formatSurveyCodes) opens that dialog
+# through its action and grabs IT (--dialog). -DFILL=<field>=<text>[|<field>=<text>...]
 # types into its fields - '|' between them, because commas and blanks belong
 # to the values (E,N and N 45 E) and a CMake list does not survive `cmake -D`;
 # "\n" in a text is a line break, so a field book fits - and
 # -DPRESS=<button>[,<button>...] clicks its buttons, in order, after the fills.
+if(DEFINED DIALOG AND NOT DEFINED SURVEY_DIALOG)
+    set(SURVEY_DIALOG "${DIALOG}")
+endif()
 if(DEFINED SURVEY_DIALOG)
-    list(APPEND extra --survey-dialog "${SURVEY_DIALOG}")
+    list(APPEND extra --dialog "${SURVEY_DIALOG}")
     if(DEFINED FILL)
         string(REPLACE "|" ";" _fills "${FILL}")
         foreach(_fill IN LISTS _fills)
@@ -123,33 +127,45 @@ if(DEFINED SURVEY_DIALOG)
     endif()
 endif()
 
-# -DDRIVE=<step>[|<step>...] drives survey dialogs and docks step by step, in
+# -DDRIVE=<step>[|<step>...] drives dialogs and docks step by step, in
 # order, for a paged dialog that has to be filled between presses (the import
 # wizard) or a run that uses several: "@NAME" opens the dialog of action NAME
-# (--survey-dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
+# (--dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
 # "%NAME" makes the window's own dock or toolbar NAME the target (--panel),
-# ">TEXT" runs TEXT on the command line (--command), "!BUTTON" presses a
-# button, and anything else is a FIELD=TEXT fill. '|' between steps, for
-# FILL's reason.
+# ">TEXT" runs TEXT on the command line (--command) and ">" alone is Enter on
+# an empty command line (--enter), "?WIDGET" prints what the target's WIDGET
+# shows (--report), "!BUTTON" presses a button, and anything else is a
+# FIELD=TEXT fill. '|' between steps, for FILL's reason.
 if(DEFINED DRIVE)
     string(REPLACE "|" ";" _steps "${DRIVE}")
     foreach(_step IN LISTS _steps)
         string(SUBSTRING "${_step}" 0 1 _sigil)
         string(SUBSTRING "${_step}" 1 -1 _rest)
         if(_sigil STREQUAL "@")
-            list(APPEND extra --survey-dialog "${_rest}")
+            list(APPEND extra --dialog "${_rest}")
         elseif(_sigil STREQUAL "#")
             list(APPEND extra --survey-dock "${_rest}")
         elseif(_sigil STREQUAL "%")
             list(APPEND extra --panel "${_rest}")
+        elseif(_sigil STREQUAL ">" AND _rest STREQUAL "")
+            # An empty argument does not survive a CMake list, so Enter on
+            # an empty command line is a switch of its own.
+            list(APPEND extra --enter)
         elseif(_sigil STREQUAL ">")
             list(APPEND extra --command "${_rest}")
+        elseif(_sigil STREQUAL "?")
+            list(APPEND extra --report "${_rest}")
         elseif(_sigil STREQUAL "!")
             list(APPEND extra --press "${_rest}")
         else()
             list(APPEND extra --fill "${_step}")
         endif()
     endforeach()
+endif()
+# -DCHECK_SHORTCUTS=ON fails the run when two of the window's actions or
+# menus share a key sequence (--check-shortcuts).
+if(CHECK_SHORTCUTS)
+    list(APPEND extra --check-shortcuts)
 endif()
 # -DCOMPARE=<reference>|<file>[|<file>...]: every file the run writes must
 # hold exactly the reference's text, line ends aside (git may check the
