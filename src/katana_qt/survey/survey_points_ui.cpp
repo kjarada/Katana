@@ -156,7 +156,9 @@ SurveyExportDialog::SurveyExportDialog(SurveyDialogContext context, QWidget* par
     scope_ = addChoice("Points:", "scope", {"All survey points", "Selected survey points"},
                        "Which survey points to write");
     template_ = addChoice("Saved template:", "template", {}, "A layout saved earlier");
-    fillTemplateChoice(*template_);
+    // Kept current as templates are saved and deleted - in the import wizard,
+    // while this dialog is open or hidden - not filled once here.
+    keepTemplateChoiceCurrent(*template_);
     QStringList presets{"(presets)"};
     for (const surveyio::ColumnPreset preset : surveyio::allColumnPresets()) {
         presets << surveyio::toString(preset);
@@ -228,6 +230,14 @@ SurveyExportDialog::SurveyExportDialog(SurveyDialogContext context, QWidget* par
     });
     addVerb("Export", "export", [this] { return exportPoints(); });
     resize(620, 560);
+}
+
+void SurveyExportDialog::showEvent(QShowEvent* event)
+{
+    // Saves and deletes in this Katana refill the list as they happen; this
+    // catches a template another Katana saved into the settings meanwhile.
+    fillTemplateChoice(*template_);
+    SurveyToolDialog::showEvent(event);
 }
 
 Result<std::string> SurveyExportDialog::exportPoints()
