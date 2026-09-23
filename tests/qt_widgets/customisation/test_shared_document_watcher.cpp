@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -129,6 +130,31 @@ TEST(DocumentWatcher, AnUndoFollowedByANewCommandInOneTurnIsAModelChange)
 
     ASSERT_EQ(seen.calls.size(), 1U);
     EXPECT_TRUE(seen.calls.back().model);
+}
+
+TEST(DocumentWatcher, ReopeningAnUnchangedProjectFromAFreshDrawingIsAModelChange)
+{
+    // The fingerprint's blind spot, gone with Document::modelRevision: an
+    // empty drawing saved as a project and reopened has no history before
+    // or after, the same size of every table and the same project directory
+    // - and it is still a new drawing, whose views must reload.
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "katana-qt-watcher-reopen" / "same.katana";
+    std::filesystem::remove_all(directory.parent_path());
+    Deliveries seen;
+    {
+        // Its own scope: Windows will not delete the project's open database.
+        Document document;
+        ASSERT_TRUE(document.saveAs(directory).ok());
+        DocumentWatcher watcher(document, seen.callback());
+
+        const auto opened = document.open(directory);
+        ASSERT_TRUE(opened.ok()) << opened.error().describe();
+        runEventLoopTurn();
+    }
+    ASSERT_EQ(seen.calls.size(), 1U);
+    EXPECT_TRUE(seen.calls.back().model);
+    std::filesystem::remove_all(directory.parent_path());
 }
 
 TEST(DocumentWatcher, ADocumentDestroyedWithADeliveryQueuedIsNeverReadAndNothingIsDelivered)
