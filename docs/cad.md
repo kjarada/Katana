@@ -126,8 +126,12 @@ validated, atomic and undoable, and nothing bypasses the model.
 Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `DIM`), modification on the selection (`MOVE`, `COPY`, `ROTATE`, `SCALE`,
 `MIRROR`, `ARRAY`, `ERASE`), editing (`OFFSET`, `TRIM`, `EXTEND`, `FILLET`,
-`CHAMFER`), `SELECT`, `LAYER`, attributes (`CHLAYER`, `COLOR`, `PROP`), `UNDO`,
-`REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`.
+`CHAMFER`), `SELECT`, `LAYER`, the tables (`LINETYPE`, `DIMSTYLE`, `HATCH`,
+`STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
+`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`. Aliases include
+`LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. Each front end adds a few
+verbs of its own (README, "Running"). This list lacked the tables and civil
+verbs until the audit of 2026-09-23.
 
 ## Desktop application
 
@@ -135,10 +139,12 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 command panels, and a status bar showing cursor coordinates, the active snap and
 the current layer.
 
-The viewport draws with `QPainter` and turns mouse input into commands. It holds
-no geometry of its own: it paints whatever the model contains (Rule 3), and the
-Vulkan renderer of Phase 15 will replace the painting code without touching the
-interaction logic.
+The plan viewport draws with `QPainter` and turns mouse input into commands. It
+holds no geometry of its own: it paints whatever the model contains (Rule 3).
+It is NOT on the `render::DrawList` path: the tiled software rasteriser of
+Phase 15 draws the 3D and Elevation cells, and a Vulkan backend would replace
+that rasteriser, not this painting code (PLAN.MD Phase 15). This paragraph used
+to say the reverse.
 
 Interaction: left click picks or starts a point; dragging left-to-right is a
 window selection and right-to-left a crossing selection (shown by a solid or
@@ -153,8 +159,10 @@ millions. Text below three pixels tall is drawn as a baseline stroke rather than
 glyphs, so a zoomed-out drawing stays legible instead of dissolving into
 unreadable marks.
 
-Layer visibility, locking, colour and current-layer selection are edited
-directly in the layer table; each edit is a command, so it participates in undo.
+Layer visibility, locking and colour are edited in the layer panel or the
+Layers dialog; each edit is a command, so it participates in undo. Choosing the
+CURRENT layer is `Document::setCurrentLayer`, deliberately not a command - it
+changes what the next drawing tool does, not the drawing (see below).
 Opening a project whose database is damaged offers to restore the newest sound
 backup.
 
@@ -182,10 +190,12 @@ must not mutate the document re-entrantly.
 
 ## Performance
 
-Drawing is O(n) in entities per frame, with bounding-box culling against the
-visible world bounds. Picking and snapping are O(n) with a bounding-box
-pre-filter; snapping's intersection mode is O(k²) in the curves that survive the
-filter, which is small because the filter is an aperture a few pixels wide.
+Drawing, picking and snapping ask the spatial index (Phase 18, "Spatial
+indexing" below) for the entities near the view or the cursor, with an exact
+bounding-box test after it; snapping's intersection mode is O(k²) in the curves
+that survive, which is small because the filter is an aperture a few pixels
+wide. (This paragraph said all three were O(n) scans awaiting the index for
+some time after the index was in use.)
 
 That last clause is load-bearing, and it used not to hold. The pre-filter works
 on whole ENTITIES, so a 3000-vertex surveyed string near the cursor contributed
@@ -638,9 +648,12 @@ only operations (rotate, scale, mirror, array, trim, extend, offset, fillet).
 
 ## Point symbols (PLAN.MD 20.2, slice 2)
 
-A point is drawn with the symbol its *style* names - `Style::symbol`, one of
-`entity::symbolNames()` (circle, square, triangle, diamond, cross, plus,
-tick, star, dot, ring, tree, pole, manhole, arrow, flag, target) - at
+A point is drawn with the symbol its *style* names - `Style::symbol`. Since
+20.3 slice 5 that is any name, resolved at draw time against the loaded 12d
+library first and against the sixteen built-in shapes of `entity::symbolNames()`
+(circle, square, triangle, diamond, cross, plus, tick, star, dot, ring, tree,
+pole, manhole, arrow, flag, target) after, `builtInSymbolFor` guessing a shape
+from a descriptive name last - at
 `Style::symbolSize`, which is the symbol's width in model units, or 0 for the
 viewport's own mark. `cad::symbolStrokes(name, centre, halfWidth, rotation)`
 is the one definition of what each shape looks like: plain polylines in

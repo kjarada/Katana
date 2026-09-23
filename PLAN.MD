@@ -2030,6 +2030,14 @@ OUTSTANDING, not blocking:
 - a library BROWSER - the groups tree with a preview of each definition - is
   not built, so the 792 definitions can be used but not looked through (in
   progress 2026-09-23).
+- a mapfile symbol's `rotation`, `offset` (across the string) and `raise` are
+  parsed into `entity::SurveySymbol` and then dropped: `applySurveyCodes`
+  carries only the style and size, `Style` has no rotation, and the viewport
+  draws every symbol at 0. Found by the audit of 2026-09-23 (the docs said the
+  rotation was applied). Not blocking because the reference customisation
+  sets all three to nothing: counted over both of its mapfiles (decoded from
+  UTF-16), 401 `<symbol_data>` rules, and every `rotation`, `offset` and
+  `raise` in them is zero or empty - so no drawing made from it is affected.
 
 Struck from this list, with the reason: "a project does not remember which
 customisation it was drawn with" stopped being true of the ordinary case when

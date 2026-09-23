@@ -178,8 +178,9 @@ library also uses. What makes a file a mapfile is that it contains a
 ## How a code resolves
 
 A key is either exact (`PABB`) or a prefix (`WM*`). Measured over both
-mapfiles: 1,364 distinct keys, and **not one** uses a wildcard anywhere but at
-the end. A key of any other shape is refused rather than matched
+mapfiles: 632 distinct keys in 1,624 rules (the CLI's own count below; this
+said 1,364 until the audit of 2026-09-23), and **not one** uses a wildcard
+anywhere but at the end. A key of any other shape is refused rather than matched
 approximately - putting a code in the wrong model is worse than reporting that
 a rule could not be used.
 
@@ -312,7 +313,9 @@ The viewport resolves a name against the loaded library first and the sixteen
 built-in shapes after:
 
 - a point whose style names a definition is drawn with that definition's
-  strokes, at the style's size and the symbol's rotation;
+  strokes, at the style's size and UNROTATED: a mapfile symbol's `rotation`,
+  `offset` and `raise` are read into `SurveySymbol` and not yet applied (PLAN.MD
+  20.3, outstanding - the reference mapfiles set all three to zero);
 - a line whose style's `linetype` names a definition has that definition laid
   ALONG it, in addition to the line itself - a 12d linestyle is strokes on the
   line, not a dash pattern cut out of it, so the ticks of a fence style sit on
@@ -429,7 +432,7 @@ katana_cli
   -c 'CUSTOMISE "…/<linestyles>.4d" "…/<symbols>.4d" "…/<detail>.mapfile"'
   -c 'POINT 0,0' -c 'SELECT ALL' -c 'PROP SET code WM01 text' -c 'CODE' -c 'LIST'
 
-  2 entities carry a "code", 2 of them codes the mapfile has a rule for
+  1 entities carry a "code", 1 of them codes the mapfile has a rule for
   Applied: 1 layers and 1 styles created. UNDO puts it all back.
   1  Point  layer=SURVEY SERVICES  at 0,0
 ```
@@ -508,8 +511,10 @@ so there is no second way for the two to disagree.
 **The generated source is never committed.** The customisation is third-party
 material under its own licence and is not in this repository, so a checkout
 without it generates an EMPTY table and Katana draws plain lines - exactly as
-12d does without one. Drop a customisation into `docs/12d Refrence Files` and
-rebuild to have it compiled in.
+12d does without one. Drop a customisation into `docs/12d Refrence Files`,
+then RE-RUN CMake (`cmake -S . -B build/release`) and rebuild to have it
+compiled in: the file list is a configure-time glob, so a plain rebuild does not
+see a new file.
 
 `File > Load 12d Customisation...` still overrides what is built in, which is
 how a site tries a new library without reissuing the application.
