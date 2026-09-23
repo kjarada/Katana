@@ -1964,8 +1964,8 @@ toolbar the family is ONE button that runs its first variant and drops the
 rest down. A category no menu takes is still reached by its aliases, and the
 window says so in its log at start-up. An action only asks the window to
 start its tool (`MainWindow::startTool`), which decides the view. The tool
-actions sit in one exclusive group with Select (`toolSelect`, at the head of
-the Draw toolbar), which is not a tool but the absence of one: it stops what
+actions are checkable, in one exclusive group; Select (`toolSelect`, at the
+head of the Draw toolbar) is not a tool but the absence of one: it stops what
 runs, and is checked while nothing does. What is checked always follows what
 runs (`MainWindow::showRunningTool`, from `onActiveToolChanged`), including
 when a start is REFUSED - a click checks an action before its handler runs, so
