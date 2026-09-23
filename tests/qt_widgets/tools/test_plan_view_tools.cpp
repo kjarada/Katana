@@ -387,3 +387,18 @@ TEST(PlanViewTools, TheLayerNewWorkIsDrawnOnIsTheDocumentsCurrentLayer)
     ASSERT_EQ(made.size(), 1u);
     EXPECT_EQ(made.front()->layer, "Kerbs");
 }
+
+TEST(PlanViewTools, EnterAtNoPromptRepeatsTheLastTool)
+{
+    PlanFixture plan;
+    ASSERT_TRUE(plan.view.startTool("draw.line").ok());
+    plan.press(200, 150);
+    plan.press(300, 150);
+    plan.enter(); // the line; Line starts again
+    plan.enter(); // Enter at its first prompt ends it
+    ASSERT_FALSE(plan.view.toolActive());
+
+    plan.enter();
+    EXPECT_EQ(plan.view.activeToolId(), "draw.line");
+    EXPECT_EQ(plan.entities().size(), 1u) << "repeating a tool draws nothing by itself";
+}
