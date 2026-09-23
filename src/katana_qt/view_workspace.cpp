@@ -907,7 +907,17 @@ void ViewWorkspace::setSnapModes(katana::cad::SnapModes modes)
 
 void ViewWorkspace::cancel()
 {
+    // Esc ends a running tool (or takes back what was typed for it) before
+    // anything else, and only the views busy with one hear it: another view
+    // clearing the selection at the same key press would take away the
+    // selection the tool was started on, where AutoCAD's second Esc does.
+    std::vector<ViewportWidget*> busy;
     for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive() || !plan->typedInput().isEmpty()) {
+            busy.push_back(plan);
+        }
+    }
+    for (ViewportWidget* plan : busy.empty() ? planViews() : busy) {
         plan->cancel();
     }
 }

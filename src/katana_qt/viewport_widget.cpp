@@ -262,6 +262,7 @@ void ViewportWidget::wireToolHost()
         }
     };
     tools_.onStarted = [this](const std::string& id) {
+        lastToolId_ = id;
         if (onActiveToolChanged) {
             onActiveToolChanged(id);
         }
@@ -794,6 +795,19 @@ void ViewportWidget::keyPressEvent(QKeyEvent* event)
     switch (event->key()) {
     case Qt::Key_Escape:
         cancel();
+        return;
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+    case Qt::Key_Space:
+        // Enter or Space at no prompt repeats the last tool, as AutoCAD
+        // repeats the last command: drawing a run of circles is a click on
+        // Circle and then Enter between them.
+        if (!lastToolId_.empty()) {
+            const auto repeated = startTool(lastToolId_);
+            if (!repeated && onError) {
+                onError(QString::fromStdString(repeated.error().describe()));
+            }
+        }
         return;
     case Qt::Key_Delete:
         if (!document_.selection().empty()) {

@@ -192,6 +192,9 @@ class ViewWorkspace final : public QMainWindow {
     [[nodiscard]] bool snapEnabled() const { return snapEnabled_; }
     void setSnapModes(katana::cad::SnapModes modes);
     [[nodiscard]] katana::cad::SnapModes snapModes() const { return snapModes_; }
+    // Esc: the plan views running a tool (or holding typed input for one)
+    // cancel it; when none is, every plan view cancels (clears its box and
+    // the selection).
     void cancel();
     // Every plan view, floating and minimised ones included: the clicks
     // collected anywhere belong to the drawing that is going away.

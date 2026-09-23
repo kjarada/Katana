@@ -16,6 +16,7 @@
 #include <QToolButton>
 
 #include "katana/cad/interactive_tool.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "tools/tool_menus.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
@@ -204,4 +205,29 @@ TEST(ToolMenus, TheWorkspaceStartsAToolInItsActivePlanViewOnly)
     ASSERT_FALSE(changes.empty());
     EXPECT_EQ(changes.front(), "draw.circle");
     EXPECT_EQ(changes.back(), "");
+}
+
+TEST(ToolMenus, EscInTheWorkspaceEndsTheToolBeforeItClearsTheSelection)
+{
+    // Two plan views, a Move running in one on a selection. The first Esc
+    // ends the Move and nothing else - the other view must not clear the
+    // selection at the same key press - and the second clears it.
+    katana::cad::Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(katana::geometry::Point2(0, 0),
+                                                          katana::geometry::Point2(10, 0)))
+                    .ok());
+    document.selection().add(document.lastCreatedEntities().front());
+    QMainWindow window;
+    auto* views = new katana::qt::ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    views->openView(katana::cad::ViewKind::Plan);
+    ASSERT_EQ(views->planViews().size(), 2u);
+    ASSERT_TRUE(views->startTool("modify.move").ok());
+
+    views->cancel();
+    EXPECT_EQ(views->activeToolId(), "");
+    EXPECT_FALSE(document.selection().empty());
+    views->cancel();
+    EXPECT_TRUE(document.selection().empty());
 }
