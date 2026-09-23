@@ -66,8 +66,11 @@ struct ViewState {
     // nothing yet.
     bool cameraFramed = false;
     ViewTransform plan;            // Plan: pan and zoom
-    // False until the plan view has framed the drawing once; a plan view
-    // frames itself on its first resize and never again unless asked.
+    // False until the plan view has been framed once. The plan widget frames
+    // at its first paint, not its first resize, because a dock's first resize
+    // may be provisional; and until the user pans or zooms it refits that
+    // frame on every resize, so setting this true stops the first frame but
+    // not the refit of a later Zoom Extents or zoom-to.
     bool planFramed = false;
     // Layers this view hides on top of the document's own visibility.
     LayerOverrides layers;
