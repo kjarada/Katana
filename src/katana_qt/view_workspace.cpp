@@ -176,7 +176,7 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
                 onCursorMoved(world, snap);
             }
         };
-        wireTools(*plan);
+        wireTools(*plan, id);
         plan->onActivated = [this, id] { activate(id); };
         view.plan = plan;
         break;
@@ -798,7 +798,7 @@ bool ViewWorkspace::showSection(katana::cad::Section section)
     return true;
 }
 
-void ViewWorkspace::wireTools(ViewportWidget& plan)
+void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
 {
     plan.onToolChanged = [this](Tool tool) {
         tool_ = tool;
@@ -806,9 +806,27 @@ void ViewWorkspace::wireTools(ViewportWidget& plan)
             onToolChanged(tool);
         }
     };
-    plan.onActiveToolChanged = [this](const std::string& id) {
+    plan.onActiveToolChanged = [this](const std::string& toolId) {
+        if (!toolId.empty()) {
+            lastToolId_ = toolId;
+        }
         if (onActiveToolChanged) {
-            onActiveToolChanged(id);
+            onActiveToolChanged(toolId);
+        }
+    };
+    // Through startTool, not the view's own: a view starting a tool itself
+    // would leave one running in another view, and then the workspace's
+    // activeToolId and typeIntoTool would find whichever view comes first.
+    // The view Enter was pressed in becomes the active one, so it is where
+    // the tool runs.
+    plan.onRepeatTool = [this, id] {
+        if (lastToolId_.empty()) {
+            return;
+        }
+        activate(id);
+        const std::string toolId = lastToolId_; // startTool's hooks rewrite it
+        if (const Status started = startTool(toolId); !started && onError) {
+            onError(QString::fromStdString(started.error().describe()));
         }
     };
     plan.onToolMessage = [this](const QString& message) {
