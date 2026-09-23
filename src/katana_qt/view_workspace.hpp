@@ -276,6 +276,12 @@ class ViewWorkspace final : public QMainWindow {
     // Builds the widget for the state's kind and puts it in the dock, deleting
     // what the dock held before.
     void buildContent(View& view, katana::cad::ViewState& state);
+    // Stops the tool running in `view`'s plan view, as Esc stops it, when it
+    // runs one. Called before that widget is deleted - the view changing kind
+    // (buildContent) or closing (closeView) - because a ViewportWidget
+    // deleted mid-tool never reports that its tool ended, and the window
+    // would go on showing the tool's action checked with nothing running.
+    void stopToolIn(const View& view);
     void activate(katana::cad::ViewId id);
     void updateTitle(const View& view);
     [[nodiscard]] ViewContext contextFor() const;
