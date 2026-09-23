@@ -68,8 +68,12 @@ class RenderViewWidget final : public QWidget {
     // hidden in this view left it, and that an edit reached this view.
     [[nodiscard]] std::size_t lastSceneLineCount() const { return list_.lines.size(); }
     // True when the last scene built had nothing to show - no drawn entity,
-    // surface or mesh, only the grid. The view then says so on screen.
+    // surface or mesh, only the grid. What the framing goes by.
     [[nodiscard]] bool sceneEmpty() const { return sceneEmpty_; }
+    // True when the last paint told the user there is nothing to show and
+    // what would put something there: only for an empty scene of a drawing
+    // with nothing in it, and only where the view had room to say it.
+    [[nodiscard]] bool emptyMessageShown() const { return emptyMessageShown_; }
 
     // Rebuilds the draw list on the next paint. The view calls it itself on
     // every document change (it listens to the document it is given); call it
@@ -91,9 +95,9 @@ class RenderViewWidget final : public QWidget {
     [[nodiscard]] double lastFrameMilliseconds() const { return lastFrameMs_; }
     [[nodiscard]] const katana::render::RenderStats& lastStats() const { return stats_; }
 
-    // Raised when this view is clicked or the keyboard focus moves into it, so
-    // the workspace can make it active; the workspace ignores re-activating
-    // the active view.
+    // Raised when this view is clicked or the user moves the keyboard focus
+    // into it (view_focus.hpp), so the workspace can make it active; the
+    // workspace ignores re-activating the active view.
     std::function<void()> onActivated;
     // Messages the user must see: a failure, never a statistic.
     std::function<void(const QString&)> onStatus;
@@ -112,14 +116,18 @@ class RenderViewWidget final : public QWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
-    void focusInEvent(QFocusEvent* event) override;
 
   private:
     void rebuildIfNeeded();
     // Registers with the context's document, or ends the registration when
     // there is none; a no-op when it is the document already listened to.
     void listenTo(katana::cad::Document* document);
-    void drawEmptyMessage(QPainter& painter) const;
+    // True when the document has no entity or alignment and the view has no
+    // surface or mesh: nothing that any layer could be hiding.
+    [[nodiscard]] bool drawingIsEmpty() const;
+    // False when the view is too small to hold the message, which is then
+    // left out.
+    bool drawEmptyMessage(QPainter& painter) const;
 
     ViewContext context_;
     katana::cad::ViewState& state_;
@@ -135,7 +143,10 @@ class RenderViewWidget final : public QWidget {
     double lastFrameMs_ = 0.0;
     bool sceneDirty_ = true;
     bool sceneEmpty_ = true;
-    bool framed_ = false; // the first paint frames the scene
+    bool emptyMessageShown_ = false;
+    // The first paint frames the scene unless the camera was framed already
+    // (ViewState::cameraFramed): the constructor sets this from the state.
+    bool framed_ = false;
     // The last frame was of an empty scene, so it framed a patch of ground
     // round the origin. The first rebuild that finds something to show frames
     // that instead: a line drawn at survey coordinates would otherwise be
