@@ -154,7 +154,7 @@ expectation was taken from the code under test proves nothing.
 `docs/` holds a document per major subsystem covering purpose, architecture,
 API, numerical assumptions, threading, performance and failure modes:
 [architecture](docs/architecture.md), [geometry](docs/geometry.md),
-[model](docs/model.md), [storage](docs/storage.md), [cad](docs/cad.md),
+[model](docs/model.md), [storage](docs/storage.md), [cad](docs/cad.md), [render](docs/render.md),
 [terrain](docs/terrain.md), [interop](docs/interop.md), [survey](docs/survey.md),
 [survey coding](docs/survey_coding.md) and [performance](docs/performance.md),
 plus the [audit register](docs/audit/2026-09-23-defects.md) and its
