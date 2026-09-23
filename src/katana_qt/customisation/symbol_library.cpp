@@ -62,14 +62,20 @@ QString text(const std::string& value)
     return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
 }
 
-QString inQuotes(const std::string& value) { return QLatin1Char('"') + text(value) + QLatin1Char('"'); }
+QString inQuotes(const std::string& value)
+{
+    return QLatin1Char('"') + text(value) + QLatin1Char('"');
+}
 
 QString pathText(const std::filesystem::path& path)
 {
     return QString::fromStdU16String(path.filename().u16string());
 }
 
-QString describe(const katana::core::Error& error) { return QString::fromStdString(error.describe()); }
+QString describe(const katana::core::Error& error)
+{
+    return QString::fromStdString(error.describe());
+}
 
 // A length as a person reads it: at most three decimals, no trailing zeros,
 // so 2 mm is "2" and a quarter metre "0.25".
@@ -105,7 +111,8 @@ QString listOf(const std::vector<std::string>& names, std::size_t shown = 40)
 
 QString plural(std::size_t count, const char* one, const char* many)
 {
-    return QStringLiteral("%1 %2").arg(grouped(count), QString::fromLatin1(count == 1 ? one : many));
+    return QStringLiteral("%1 %2").arg(grouped(count),
+                                       QString::fromLatin1(count == 1 ? one : many));
 }
 
 QString unitsText(katana::entity::StyleUnits units)
@@ -123,7 +130,8 @@ QString unitsText(katana::entity::StyleUnits units)
 
 QString unitSuffix(katana::entity::StyleUnits units)
 {
-    return units == katana::entity::StyleUnits::Paper ? QStringLiteral(" mm") : QStringLiteral(" m");
+    return units == katana::entity::StyleUnits::Paper ? QStringLiteral(" mm")
+                                                      : QStringLiteral(" m");
 }
 
 // Why D3 lists a definition that is not `mode vertex` as a symbol.
@@ -142,7 +150,8 @@ QString modeText(const katana::cad::CatalogueEntry& entry)
     if (entry.kind.fromSymbolFile) {
         reasons << QStringLiteral("its file is a symbol file");
     }
-    return QStringLiteral("along a line; a symbol because %1").arg(reasons.join(QStringLiteral(", ")));
+    return QStringLiteral("along a line; a symbol because %1")
+        .arg(reasons.join(QStringLiteral(", ")));
 }
 
 QString contentText(const LineStyle& definition)
@@ -250,7 +259,8 @@ void SymbolLibraryDialog::buildUi()
     load_->setToolTip(QStringLiteral(
         "Merge a 12d library into this session's: its definitions are added, or replace "
         "those of the same name; nothing else is removed"));
-    export_ = new QPushButton(icon(Icon::Export), QStringLiteral("Export Selected to .4d..."), this);
+    export_ =
+        new QPushButton(icon(Icon::Export), QStringLiteral("Export Selected to .4d..."), this);
     export_->setObjectName(QStringLiteral("exportSelected"));
     export_->setToolTip(QStringLiteral("Write the selected library symbols to a 12d .4d file"));
     toolbar->addWidget(load_);
@@ -289,7 +299,8 @@ void SymbolLibraryDialog::buildUi()
     grid_->setTextElideMode(Qt::ElideMiddle);
     grid_->setIconSize(QSize(SymbolGridModel::kPictureSize, SymbolGridModel::kPictureSize));
     // Room for a two-line caption under the picture.
-    grid_->setGridSize(QSize(SymbolGridModel::kPictureSize + 44, SymbolGridModel::kPictureSize + 40));
+    grid_->setGridSize(
+        QSize(SymbolGridModel::kPictureSize + 44, SymbolGridModel::kPictureSize + 40));
     grid_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     grid_->setModel(model_);
     countLabel_ = new QLabel(centre);
@@ -381,7 +392,8 @@ void SymbolLibraryDialog::buildUi()
     size_->setSpecialValueText(QStringLiteral("Own size"));
     size_->setToolTip(QStringLiteral("The symbol's width on the ground; Own size draws it as "
                                      "its definition says"));
-    assign_ = new QPushButton(icon(Icon::Point), QStringLiteral("Assign to Selected Points"), actions);
+    assign_ =
+        new QPushButton(icon(Icon::Point), QStringLiteral("Assign to Selected Points"), actions);
     assign_->setObjectName(QStringLiteral("assignToPoints"));
     targetStyle_ = new QComboBox(actions);
     targetStyle_->setObjectName(QStringLiteral("targetStyle"));
@@ -393,7 +405,8 @@ void SymbolLibraryDialog::buildUi()
     replace_->setObjectName(QStringLiteral("replaceInStyles"));
     replace_->setToolTip(QStringLiteral(
         "Every style drawing this symbol draws the one chosen beside instead (one undo step)"));
-    selectUsing_ = new QPushButton(icon(Icon::ZoomTo), QStringLiteral("Select Points Using"), actions);
+    selectUsing_ =
+        new QPushButton(icon(Icon::ZoomTo), QStringLiteral("Select Points Using"), actions);
     selectUsing_->setObjectName(QStringLiteral("selectPointsUsing"));
     grid->addWidget(new QLabel(QStringLiteral("Size"), actions), 0, 0);
     grid->addWidget(size_, 0, 1);
@@ -568,11 +581,12 @@ void SymbolLibraryDialog::rebuildTree()
         made[path] = add(parent, text(leaf), count, SymbolGroupFilter::Kind::Group, path);
     }
     if (ungrouped > 0) {
-        add(nullptr, QStringLiteral("(ungrouped)"), ungrouped, SymbolGroupFilter::Kind::Ungrouped, {});
+        add(nullptr, QStringLiteral("(ungrouped)"), ungrouped, SymbolGroupFilter::Kind::Ungrouped,
+            {});
     }
     if (missing > 0) {
-        QTreeWidgetItem* item =
-            add(nullptr, QStringLiteral("Not defined"), missing, SymbolGroupFilter::Kind::Missing, {});
+        QTreeWidgetItem* item = add(nullptr, QStringLiteral("Not defined"), missing,
+                                    SymbolGroupFilter::Kind::Missing, {});
         item->setForeground(0, kUndefinedNameColour);
     }
     tree_->expandAll();
@@ -617,10 +631,10 @@ void SymbolLibraryDialog::updateChipCounts()
 {
     const QStringList& labels = chipLabels();
     for (int index = 0; index < labels.size(); ++index) {
-        filterBar_->setChipLabel(index, QStringLiteral("%1 (%2)").arg(
-                                            labels[index],
-                                            grouped(static_cast<std::uint64_t>(
-                                                model_->countFor(static_cast<SymbolChip>(index))))));
+        const auto chip = static_cast<SymbolChip>(index);
+        const auto count = static_cast<std::size_t>(model_->countFor(chip));
+        filterBar_->setChipLabel(index,
+                                 QStringLiteral("%1 (%2)").arg(labels[index], grouped(count)));
     }
 }
 
@@ -705,7 +719,8 @@ std::vector<std::string> SymbolLibraryDialog::shownNames() const
 std::vector<std::string> SymbolLibraryDialog::selectedNames() const
 {
     QModelIndexList rows = grid_->selectionModel()->selectedIndexes();
-    std::ranges::sort(rows, [](const QModelIndex& a, const QModelIndex& b) { return a.row() < b.row(); });
+    std::ranges::sort(rows,
+                      [](const QModelIndex& a, const QModelIndex& b) { return a.row() < b.row(); });
     std::vector<std::string> names;
     for (const QModelIndex& index : rows) {
         if (const SymbolLibraryEntry* entry = model_->entryAt(index.row()); entry != nullptr) {
@@ -827,11 +842,12 @@ void SymbolLibraryDialog::updatePrintSize()
             showFilledRows();
             return;
         }
-        print_->setText(QStringLiteral("%1 mm at %2, %3 m on the ground")
-                            .arg(number(printed->paperWidth) + times() + number(printed->paperHeight),
-                                 scale,
-                                 number(printed->groundWidth) + times() +
-                                     number(printed->groundHeight)));
+        const QString paper =
+            number(printed->paperWidth) + times() + number(printed->paperHeight);
+        const QString ground =
+            number(printed->groundWidth) + times() + number(printed->groundHeight);
+        print_->setText(
+            QStringLiteral("%1 mm at %2, %3 m on the ground").arg(paper, scale, ground));
         const katana::geometry::Point2 origin = definition->origin;
         QString originText = QStringLiteral("(%1, %2)").arg(number(origin.x), number(origin.y));
         if (!printed->insertionInside) {
@@ -847,8 +863,9 @@ void SymbolLibraryDialog::updatePrintSize()
     // its own: without one it is the viewport's plain mark, a screen size.
     const QString prefix = entry->entry.missing ? QStringLiteral("As its stand-in: ") : QString();
     if (size > 0.0) {
+        const QString paper = number(size * 1000.0 / denominator);
         print_->setText(prefix + QStringLiteral("%1 mm across at %2, %3 m on the ground")
-                                     .arg(number(size * 1000.0 / denominator), scale, number(size)));
+                                     .arg(paper, scale, number(size)));
     } else {
         print_->setText(prefix + QStringLiteral("the plain point mark's screen size; give it a "
                                                 "size to fix what it prints"));
@@ -893,7 +910,8 @@ bool SymbolLibraryDialog::assignToSelectedPoints()
     auto assignment = katana::cad::assignSymbolToPoints(*document_, document_->selection().ids(),
                                                         current_, size_->value());
     if (!assignment) {
-        log(QStringLiteral("Assign %1 to points: %2").arg(inQuotes(current_), describe(assignment.error())),
+        log(QStringLiteral("Assign %1 to points: %2")
+                .arg(inQuotes(current_), describe(assignment.error())),
             true);
         return false;
     }
@@ -904,7 +922,8 @@ bool SymbolLibraryDialog::assignToSelectedPoints()
                     .arg(done.notPoints == 1 ? QStringLiteral("1 selected entity is")
                                              : QStringLiteral("%1 selected entities are")
                                                    .arg(grouped(done.notPoints)),
-                         done.notPoints == 1 ? QStringLiteral("it was") : QStringLiteral("they were"));
+                         done.notPoints == 1 ? QStringLiteral("it was")
+                                             : QStringLiteral("they were"));
     }
     if (!done.command) {
         log(QStringLiteral("%1 already in style %2, which draws %3: nothing to change.%4")
@@ -914,13 +933,15 @@ bool SymbolLibraryDialog::assignToSelectedPoints()
         return false;
     }
     if (const auto status = document_->execute(std::move(done.command)); !status) {
-        log(QStringLiteral("Assign %1 to points: %2").arg(inQuotes(current_), describe(status.error())),
+        log(QStringLiteral("Assign %1 to points: %2")
+                .arg(inQuotes(current_), describe(status.error())),
             true);
         return false;
     }
     log(QStringLiteral("%1 now in style %2%3, drawing %4.%5")
             .arg(plural(done.points, "point", "points"), inQuotes(done.style),
-                 done.createsStyle ? QStringLiteral(" (new)") : QString(), inQuotes(current_), left),
+                 done.createsStyle ? QStringLiteral(" (new)") : QString(), inQuotes(current_),
+                 left),
         false);
     return true;
 }
@@ -944,7 +965,8 @@ bool SymbolLibraryDialog::setOnStyle(const std::string& style)
     changed.symbol = current_;
     auto command = katana::commands::updateStyleIfChanged(model, std::move(changed));
     if (!command) {
-        log(QStringLiteral("Style %1 already draws %2").arg(inQuotes(style), inQuotes(current_)), false);
+        log(QStringLiteral("Style %1 already draws %2").arg(inQuotes(style), inQuotes(current_)),
+            false);
         return false;
     }
     if (const auto status = document_->execute(std::move(command)); !status) {
@@ -1004,8 +1026,8 @@ bool SymbolLibraryDialog::replaceInStyles(const std::string& replacement)
         return false;
     }
     log(QStringLiteral("Replaced %1 with %2 in %3: %4")
-            .arg(inQuotes(current_), inQuotes(replacement), plural(styles.size(), "style", "styles"),
-                 listOf(styles)),
+            .arg(inQuotes(current_), inQuotes(replacement),
+                 plural(styles.size(), "style", "styles"), listOf(styles)),
         false);
     return true;
 }
@@ -1085,7 +1107,8 @@ bool SymbolLibraryDialog::exportSelectedTo(const std::filesystem::path& path)
     options.comments = {"Symbols exported from Katana's symbol library"};
     const auto written = katana::archive12d::writeStyleLibrary(document_->styleLibrary(), options);
     if (!written) {
-        log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(written.error())), true);
+        log(QStringLiteral("Export to %1: %2").arg(pathText(path), describe(written.error())),
+            true);
         return false;
     }
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
