@@ -24,9 +24,9 @@
 // The note follows the last segment: to the right of the end when the line
 // arrives heading right (or straight up or down, within the geometric
 // tolerance), to the left when it arrives heading left, its first line
-// centred on the end. When the last segment is
-// more than 15 degrees off horizontal a horizontal hook line one arrowhead
-// long is added first, as AutoCAD does, so the note never hangs off a slope.
+// centred on the end. When the last segment is more than 15 degrees off
+// horizontal a horizontal hook line one arrowhead long is added first, as
+// AutoCAD does, so the note never hangs off a slope.
 // Left of the end, each line is right-aligned by its ESTIMATED width
 // (annotate_common.hpp): the model has no font metrics, so the right edge is
 // where a 0.6-aspect font would put it.
