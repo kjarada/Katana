@@ -22,8 +22,9 @@
 // Open two strokes, Tick one, Dot a circle, None nothing.
 //
 // The note follows the last segment: to the right of the end when the line
-// arrives heading right (or straight up or down), to the left when it arrives
-// heading left, its first line centred on the end. When the last segment is
+// arrives heading right (or straight up or down, within the geometric
+// tolerance), to the left when it arrives heading left, its first line
+// centred on the end. When the last segment is
 // more than 15 degrees off horizontal a horizontal hook line one arrowhead
 // long is added first, as AutoCAD does, so the note never hangs off a slope.
 // Left of the end, each line is right-aligned by its ESTIMATED width
@@ -97,7 +98,11 @@ std::vector<Geometry> leaderShapes(std::vector<Point2> vertices,
 {
     std::vector<Geometry> shapes;
     const Vec2 last = vertices.back() - vertices[vertices.size() - 2];
-    const bool rightward = last.x >= 0.0;
+    // Straight up or down goes right, and "straight" is within the geometric
+    // tolerance: a segment typed as @10<270 ends 1.8e-15 left of vertical,
+    // because cos(3 pi / 2) is not 0 in binary, and must not send the note to
+    // the other side from the same segment typed as @10<-90 or @0,-10.
+    const bool rightward = !(last.x < -tol::kGeometric);
     if (!lines.empty() && style.arrowSize > tol::kGeometric &&
         std::atan2(std::abs(last.y), std::abs(last.x)) > kHookAngle) {
         vertices.push_back(vertices.back() + Vec2(rightward ? style.arrowSize : -style.arrowSize, 0.0));
