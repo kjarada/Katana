@@ -13,11 +13,12 @@ using katana::core::Status;
 
 bool escapeKeepsWork(std::string_view toolId)
 {
-    // Each checked against the tool's enter(): with nothing collected it ends
-    // the tool with no command, and otherwise it commits what was collected,
-    // at every step Esc can reach. Copy is NOT here although its placed copies
-    // are collected work, because at its second-point prompt with none placed
-    // yet Enter copies by the base point as a displacement.
+    // Each checked against the tool's enter(): at every step Esc can reach,
+    // Enter commits what was collected, ends with nothing, or only moves the
+    // tool on a step (Trim's edges, Offset's distance), which cancel() then
+    // drops. Copy is NOT here although its placed copies are collected work,
+    // because at its second-point prompt with none placed yet Enter copies by
+    // the base point as a displacement.
     static constexpr std::array<std::string_view, 7> kKeep = {
         "draw.line",     "draw.polyline", "modify.trim",   "modify.extend",
         "modify.offset", "modify.fillet", "modify.chamfer",
