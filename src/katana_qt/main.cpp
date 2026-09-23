@@ -1,5 +1,11 @@
+#include <QAbstractButton>
 #include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialog>
 #include <QFileInfo>
+#include <QLineEdit>
+#include <QPlainTextEdit>
 
 #include <cstdio>
 #include <optional>
@@ -12,6 +18,69 @@
 #include "katana/cad/plot.hpp"
 #include "theme.hpp"
 #include "main_window.hpp"
+
+namespace {
+
+// --survey-dialog: the dialog NAME's action opens, found by the object name
+// the workbench gives it (the action's plus "Dialog"). nullptr, said on
+// stderr, for an unknown action or one that opens no dialog.
+QDialog* openSurveyDialog(katana::qt::MainWindow& window, const QString& name)
+{
+    if (const auto status = window.triggerAction(name); !status) {
+        std::fprintf(stderr, "--survey-dialog %s failed: %s\n", qPrintable(name),
+                     status.error().describe().c_str());
+        return nullptr;
+    }
+    QApplication::processEvents();
+    auto* dialog = window.findChild<QDialog*>(name + "Dialog");
+    if (dialog == nullptr) {
+        std::fprintf(stderr, "--survey-dialog: %s opened no dialog named %sDialog\n",
+                     qPrintable(name), qPrintable(name));
+    }
+    return dialog;
+}
+
+// --fill FIELD=TEXT. False, said on stderr, for a field the dialog does not
+// have or a value it cannot take - a test that fills nothing must not pass.
+bool fillField(QDialog& dialog, const QString& assignment)
+{
+    const qsizetype equals = assignment.indexOf('=');
+    if (equals <= 0) {
+        std::fprintf(stderr, "--fill needs FIELD=TEXT, not %s\n", qPrintable(assignment));
+        return false;
+    }
+    const QString name = assignment.left(equals);
+    QString text = assignment.mid(equals + 1);
+    auto* widget = dialog.findChild<QWidget*>(name);
+    if (auto* line = qobject_cast<QLineEdit*>(widget)) {
+        line->setText(text);
+        return true;
+    }
+    if (auto* box = qobject_cast<QPlainTextEdit*>(widget)) {
+        box->setPlainText(text.replace("\\n", "\n"));
+        return true;
+    }
+    if (auto* choice = qobject_cast<QComboBox*>(widget)) {
+        const int index = choice->findText(text);
+        if (index < 0) {
+            std::fprintf(stderr, "--fill: %s has no choice '%s'\n", qPrintable(name),
+                         qPrintable(text));
+            return false;
+        }
+        choice->setCurrentIndex(index);
+        return true;
+    }
+    if (auto* check = qobject_cast<QCheckBox*>(widget); check != nullptr &&
+                                                         (text == "on" || text == "off")) {
+        check->setChecked(text == "on");
+        return true;
+    }
+    std::fprintf(stderr, "--fill: the dialog has no field %s that takes '%s'\n",
+                 qPrintable(name), qPrintable(text));
+    return false;
+}
+
+} // namespace
 
 // Usage:
 //   katana [project-directory] [data-file...]
@@ -26,6 +95,9 @@
 //   katana [project-directory] [data-file...] --action NAME... --screenshot out.png
 //   katana [project-directory] --dataset-info FILE --screenshot out.png
 //   katana [project-directory] --import-options FILE --screenshot out.png
+//   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
+//                 --survey-dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
+//                 --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
 // arguments are imported by extension, so a session can be set up from the
@@ -64,6 +136,20 @@
 // GIS menu's import dialog for FILE, and grab that window, as --style-manager
 // does: the description GDAL or PDAL gives of the file is read and painted.
 //
+// --select-all selects every entity on an unlocked layer, as Edit > Select
+// All does, before the actions run - for a command that acts on the selection
+// (surveyArea).
+//
+// --survey-dialog opens a Survey menu dialog THROUGH ITS ACTION (surveyInverse,
+// surveyTraverse, ...), as a click does, and grabs that dialog instead of the
+// window. --fill types TEXT into the dialog's field with object name FIELD - a
+// line, a text box (where "\n" is a line break, so a field book fits on a
+// command line), a choice by its item text, or a check box by on/off - and
+// --press clicks the button with object name BUTTON, in order, after every
+// fill. The names are listed in survey/survey_dialogs.hpp. What a pressed verb
+// reports goes to the log, and so to stderr, where a test reads it: a dialog
+// is driven the way a person drives it, not through a side door.
+//
 // --screenshot lays the main window out exactly as it would appear, grabs it
 // to a PNG and exits. It exists so that the LOOK of the application can be
 // reviewed - by a person in a pull request, or by a model that cannot watch a
@@ -90,6 +176,10 @@ int main(int argc, char* argv[])
     QStringList actions;
     std::optional<QString> datasetInfo;
     std::optional<QString> importOptions;
+    bool selectEverything = false;
+    std::optional<QString> surveyDialog;
+    QStringList fills;
+    QStringList presses;
     long long attributeEntity = 0;
     bool fit = true;
     katana::cad::PlotSettings settings;
@@ -122,6 +212,14 @@ int main(int argc, char* argv[])
             datasetInfo = value();
         } else if (argument == "--import-options") {
             importOptions = value();
+        } else if (argument == "--select-all") {
+            selectEverything = true;
+        } else if (argument == "--survey-dialog") {
+            surveyDialog = value();
+        } else if (argument == "--fill") {
+            fills << value();
+        } else if (argument == "--press") {
+            presses << value();
         } else if (argument == "--attributes") {
             attributeManager = true;
             // An optional entity id: with one entity selected the manager
@@ -192,6 +290,9 @@ int main(int argc, char* argv[])
         window.show();
         QApplication::processEvents();
         QApplication::processEvents();
+        if (selectEverything) {
+            window.selectAll();
+        }
         for (const QString& action : actions) {
             const auto status = window.triggerAction(action);
             if (!status) {
@@ -200,6 +301,34 @@ int main(int argc, char* argv[])
                 return 1;
             }
             QApplication::processEvents();
+        }
+        if (surveyDialog) {
+            QDialog* dialog = openSurveyDialog(window, *surveyDialog);
+            if (dialog == nullptr) {
+                return 1;
+            }
+            for (const QString& fill : fills) {
+                if (!fillField(*dialog, fill)) {
+                    return 1;
+                }
+            }
+            for (const QString& press : presses) {
+                auto* button = dialog->findChild<QAbstractButton*>(press);
+                if (button == nullptr) {
+                    std::fprintf(stderr, "--press: %s has no button %s\n",
+                                 qPrintable(*surveyDialog), qPrintable(press));
+                    return 1;
+                }
+                button->click();
+                QApplication::processEvents();
+            }
+            QApplication::processEvents();
+            QApplication::processEvents();
+            if (!dialog->grab().save(*screenshotPath, "PNG")) {
+                std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
+                return 1;
+            }
+            return 0;
         }
         // The two GIS windows: built from the file, shown, grabbed. A file
         // that cannot be described has no window to grab, and fails the run.

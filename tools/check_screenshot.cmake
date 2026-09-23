@@ -96,6 +96,32 @@ endif()
 if(DEFINED IMPORT_OPTIONS)
     list(APPEND extra --import-options "${IMPORT_OPTIONS}")
 endif()
+# -DSELECT_ALL=ON selects every entity before the actions run (--select-all),
+# for a command that acts on the selection (surveyArea).
+if(SELECT_ALL)
+    list(APPEND extra --select-all)
+endif()
+# -DSURVEY_DIALOG=<action name> opens that Survey menu dialog through its
+# action and grabs IT (--survey-dialog). -DFILL=<field>=<text>[|<field>=<text>...]
+# types into its fields - '|' between them, because commas and blanks belong
+# to the values (E,N and N 45 E) and a CMake list does not survive `cmake -D`;
+# "\n" in a text is a line break, so a field book fits - and
+# -DPRESS=<button>[,<button>...] clicks its buttons, in order, after the fills.
+if(DEFINED SURVEY_DIALOG)
+    list(APPEND extra --survey-dialog "${SURVEY_DIALOG}")
+    if(DEFINED FILL)
+        string(REPLACE "|" ";" _fills "${FILL}")
+        foreach(_fill IN LISTS _fills)
+            list(APPEND extra --fill "${_fill}")
+        endforeach()
+    endif()
+    if(DEFINED PRESS)
+        string(REPLACE "," ";" _presses "${PRESS}")
+        foreach(_press IN LISTS _presses)
+            list(APPEND extra --press "${_press}")
+        endforeach()
+    endif()
+endif()
 
 execute_process(
     COMMAND "${APP}" "${copy}" ${extra} --screenshot "${OUTPUT}"
@@ -128,6 +154,10 @@ endif()
 # The GIS dialogs are small forms and a page of text: kilobytes of PNG when
 # they paint, a few hundred bytes of flat background when they do not.
 if(DEFINED DATASET_INFO OR DEFINED IMPORT_OPTIONS)
+    set(floor 4000)
+endif()
+# So are the survey dialogs: a form, a report pane and a row of buttons.
+if(DEFINED SURVEY_DIALOG)
     set(floor 4000)
 endif()
 file(SIZE "${OUTPUT}" size)

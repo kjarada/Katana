@@ -241,7 +241,7 @@ TEST(SurveyTools, TheInverseOfAThreeFourFiveTriangleIsFiveAtAzimuth36d52m11s63)
     EXPECT_TRUE(contains(report, "Bearing N 36\xC2\xB0" "52'11.63\" E")) << report;
     // Back azimuth: 36°52'11.63" + 180°.
     EXPECT_TRUE(contains(report, "back azimuth 216\xC2\xB0" "52'11.63\"")) << report;
-    EXPECT_TRUE(contains(report, "No height difference")) << report;
+    EXPECT_TRUE(contains(report, "No height difference: neither end has an elevation")) << report;
 }
 
 TEST(SurveyTools, DueNorthIsAzimuthZeroSoEastingAndNorthingAreNotTransposed)
@@ -471,7 +471,35 @@ TEST(SurveyTools, ClosedOutlinesAndCirclesAreMeasuredEachAndInTotal)
     const std::string report = formatAreaReport(*result);
     // 5000 + 314.159265... = 5314.159 m^2 = 0.5314 ha.
     EXPECT_TRUE(contains(report, "Total  area 5314.159 m\xC2\xB2 (0.5314 ha)")) << report;
-    EXPECT_TRUE(contains(report, "Skipped " + std::to_string(line))) << report;
+    EXPECT_TRUE(contains(report, "Skipped 1: a line has no area - " + std::to_string(line)))
+        << report;
+    EXPECT_TRUE(contains(report, "Skipped 1: an open polyline has no area - " +
+                                     std::to_string(open)))
+        << report;
+}
+
+TEST(SurveyTools, SkippedEntitiesAreCountedByReasonAndTheirIdsListedUpToADozen)
+{
+    // Fourteen points and one rectangle: the points are one group of 14, of
+    // which the first 12 ids are listed and "and 2 more" says the rest.
+    Document document;
+    std::vector<EntityId> ids;
+    for (int i = 0; i < 14; ++i) {
+        ids.push_back(addPoint(document, Point2(i, 0), {}));
+    }
+    ids.push_back(addEntity(document, cmd::createPolyline(katana::geometry::Polyline2{
+                                          {Point2(0, 0), Point2(1, 0), Point2(1, 1)}, true})));
+    const auto result = computeArea(document, ids);
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->skipped.size(), 14u);
+    std::string listed = std::to_string(ids[0]);
+    for (std::size_t i = 1; i < 12; ++i) {
+        listed += ", " + std::to_string(ids[i]);
+    }
+    const std::string report = formatAreaReport(*result);
+    EXPECT_TRUE(contains(report, "Skipped 14: a point has no area - " + listed + " and 2 more"))
+        << report;
+    EXPECT_FALSE(contains(report, std::to_string(ids[12]) + ",")) << report;
 }
 
 TEST(SurveyTools, NothingWithAnAreaIsAnErrorThatSaysWhy)

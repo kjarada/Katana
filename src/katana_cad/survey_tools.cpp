@@ -101,7 +101,8 @@ std::vector<std::string_view> fields(std::string_view line)
     std::vector<std::string_view> out;
     std::size_t start = 0;
     while (start < line.size()) {
-        while (start < line.size() && (katana::core::isAsciiSpace(line[start]) || line[start] == ',')) {
+        while (start < line.size() &&
+               (katana::core::isAsciiSpace(line[start]) || line[start] == ',')) {
             ++start;
         }
         std::size_t end = start;
@@ -124,6 +125,13 @@ std::string lineContext(std::size_t lineNumber, std::string_view line)
 const Entity* findEntity(const Document& document, EntityId id)
 {
     return document.model().entities.find(id);
+}
+
+// An entity's type as words in a sentence: "a line", "an arc", "a text".
+std::string withArticle(katana::entity::EntityType type)
+{
+    const std::string name = katana::core::lowered(katana::entity::toString(type));
+    return (name.find_first_of("aeiou") == 0 ? "an " : "a ") + name;
 }
 
 std::string nameOf(const Entity& entity)
@@ -235,8 +243,8 @@ Result<SurveyPosition> positionOfPoint(const Document& document, EntityId id)
     const auto* point = std::get_if<katana::entity::PointGeometry>(&entity->geometry);
     if (point == nullptr) {
         return makeError(ErrorCode::InvalidArgument,
-                         "a survey position must be a point entity; this is a " +
-                             std::string(katana::entity::toString(entity->type())),
+                         "a survey position must be a point entity; this is " +
+                             withArticle(entity->type()),
                          std::to_string(id));
     }
     SurveyPosition position;
@@ -266,8 +274,8 @@ Result<std::pair<SurveyPosition, SurveyPosition>> endsOfLine(const Document& doc
         kind = "polyline ";
     } else {
         return makeError(ErrorCode::InvalidArgument,
-                         "the two ends of a line or of an open polyline are needed; this is a " +
-                             std::string(katana::entity::toString(entity->type())),
+                         "the two ends of a line or of an open polyline are needed; this is " +
+                             withArticle(entity->type()),
                          std::to_string(id));
     }
     const auto heights = katana::entity::heightsOf(entity->properties, vertices.size());
@@ -380,9 +388,14 @@ std::string formatInverseReport(const InverseResult& result)
                 "   slope distance " + fixed(*result.slopeDistance, 3) + "   grade " +
                 signedFixed(*result.grade * 100.0, 3) + " %";
     } else {
-        // Said, not left out: a missing line reads as "flat".
-        const SurveyPosition& missing = result.from.elevation ? result.to : result.from;
-        text += "\n  No height difference: " + missing.label() + " has no elevation";
+        // Said, not left out: a missing line reads as "flat". Naming one end
+        // when neither has a height would suggest the other has one.
+        if (!result.from.elevation && !result.to.elevation) {
+            text += "\n  No height difference: neither end has an elevation";
+        } else {
+            const SurveyPosition& missing = result.from.elevation ? result.to : result.from;
+            text += "\n  No height difference: " + missing.label() + " has no elevation";
+        }
     }
     return text;
 }
@@ -433,7 +446,8 @@ std::string formatForwardReport(const ForwardResult& result)
     }
     text += "\n  New point" + (input.name.empty() ? std::string{} : " " + input.name) + "  " +
             coordinateText(result.point);
-    text += result.elevation ? " Z " + fixed(*result.elevation, 3) : std::string("  (no elevation)");
+    text += result.elevation ? " Z " + fixed(*result.elevation, 3)
+                             : std::string("  (no elevation)");
     return text;
 }
 
@@ -488,9 +502,7 @@ Result<AreaResult> computeArea(const Document& document, const std::vector<Entit
         }
         const auto* polyline = std::get_if<katana::geometry::Polyline2>(&entity->geometry);
         if (polyline == nullptr) {
-            result.skipped.push_back(
-                {id, "a " + std::string(katana::entity::toString(entity->type())) +
-                         " has no area"});
+            result.skipped.push_back({id, withArticle(entity->type()) + " has no area"});
             continue;
         }
         if (!polyline->closed) {
@@ -554,8 +566,27 @@ std::string formatAreaReport(const AreaResult& result)
     }
     text += "  Total  area " + area(result.totalArea) + "   perimeter " +
             fixed(result.totalPerimeter, 3) + " " + lengthUnit;
+    // Grouped by reason, in the order met: Area of Selection over a whole
+    // drawing would otherwise print a line for every point in it. Every
+    // skipped entity is counted; the ids are listed up to a dozen.
+    std::vector<std::pair<std::string, std::vector<EntityId>>> skips;
     for (const AreaSkip& skip : result.skipped) {
-        text += "\n  Skipped " + std::to_string(skip.id) + ": " + skip.reason;
+        auto group = std::find_if(skips.begin(), skips.end(),
+                                  [&](const auto& g) { return g.first == skip.reason; });
+        if (group == skips.end()) {
+            group = skips.insert(skips.end(), {skip.reason, {}});
+        }
+        group->second.push_back(skip.id);
+    }
+    constexpr std::size_t kIdsShown = 12;
+    for (const auto& [reason, ids] : skips) {
+        text += "\n  Skipped " + std::to_string(ids.size()) + ": " + reason + " - ";
+        for (std::size_t i = 0; i < ids.size() && i < kIdsShown; ++i) {
+            text += (i == 0 ? "" : ", ") + std::to_string(ids[i]);
+        }
+        if (ids.size() > kIdsShown) {
+            text += " and " + std::to_string(ids.size() - kIdsShown) + " more";
+        }
     }
     if (!result.metres) {
         text += "\n  No hectares: they are defined only for a drawing in metres";
@@ -1055,7 +1086,8 @@ Result<LevelBookResult> computeLevelBook(const LevelBookSpec& spec)
     result.misclosure = result.run.misclosure;
     if (allDistances) {
         result.totalDistance = result.run.totalDistance;
-        auto allowable = survey::allowableLevelMisclosure(spec.allowanceK, result.run.totalDistance);
+        auto allowable =
+            survey::allowableLevelMisclosure(spec.allowanceK, result.run.totalDistance);
         if (!allowable) {
             return allowable.error();
         }
