@@ -57,6 +57,7 @@
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/archive12d/domain.hpp"
@@ -1198,9 +1199,25 @@ std::unique_ptr<AttributeManagerDialog> MainWindow::makeAttributeManager()
 
 std::unique_ptr<StyleManagerDialog> MainWindow::makeStyleManager()
 {
-    return std::make_unique<StyleManagerDialog>(
-        document_, [this](const QString& message, bool isError) { logMessage(message, isError); },
-        this);
+    CustomisationContext context;
+    context.document = &document_;
+    context.log = [this](const QString& message, bool isError) { logMessage(message, isError); };
+    // "Select Users": select them, then frame what they cover in the active
+    // view, so a person sees where a style is used rather than a count.
+    context.selectAndShow = [this](const std::vector<katana::entity::EntityId>& ids) {
+        document_.selection().set(ids);
+        document_.notifySelectionChanged();
+        katana::geometry::Box2 bounds;
+        for (const katana::entity::EntityId id : ids) {
+            if (const katana::entity::Entity* entity = document_.model().entities.find(id)) {
+                bounds.expand(katana::entity::boundingBox(entity->geometry));
+            }
+        }
+        if (!bounds.empty()) {
+            views_->zoomTo(bounds);
+        }
+    };
+    return std::make_unique<StyleManagerDialog>(context, this);
 }
 
 void MainWindow::openProject(const QString& directory)
