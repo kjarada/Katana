@@ -112,8 +112,8 @@ Status refuseIfUsed(const katana::entity::Users& users, std::string_view noun)
                      users.describe());
 }
 
-// Before-images of everything a merge repoints, so its undo puts back
-// exactly the holders it moved - and not the ones that already named the
+// Before-images of everything a merge or a rename repoints, so its undo puts
+// back exactly the holders it moved - and not the ones that already named the
 // target before it ran.
 struct HolderImages {
     std::vector<katana::entity::Layer> layers;
@@ -424,6 +424,12 @@ template <typename T> class DeleteItemCommand final : public Command {
 // the name field: a NamedTable is keyed by name, so a rename is a move, and
 // remove+add keeps the table's own validation of the new name rather than a
 // second copy of those rules here.
+//
+// Undo is NOT the reverse rename. The new name may already have holders the
+// table does not know of - a style naming a 12d library linestyle, entities
+// wearing a style that is "not in the style table" - and repointing every
+// holder of the new name back would move those too. So undo puts back the
+// before-images of what execute() moved, as MergeItemCommand does.
 template <typename T> class RenameItemCommand final : public Command {
   public:
     RenameItemCommand(std::string from, std::string to)
@@ -454,36 +460,58 @@ template <typename T> class RenameItemCommand final : public Command {
     }
     [[nodiscard]] Status execute(CommandContext& context) override
     {
-        return move(context.model, from_, to_);
-    }
-    [[nodiscard]] Status undo(CommandContext& context) override
-    {
-        return move(context.model, to_, from_);
-    }
-    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
-
-  private:
-    static Status move(katana::entity::Model& model, const std::string& from,
-                       const std::string& to)
-    {
-        auto removed = TablePolicy<T>::table(model).remove(from);
+        katana::entity::Model& model = context.model;
+        // Taken before anything moves: these, and only these, are what
+        // undo puts back.
+        holders_ = TablePolicy<T>::holders(model, from_);
+        auto removed = TablePolicy<T>::table(model).remove(from_);
         if (!removed) {
             return removed.error();
         }
         T item = std::move(*removed);
-        item.name = to;
+        item.name = to_;
+        if (auto status = TablePolicy<T>::table(model).add(item); !status) {
+            item.name = from_;
+            (void)TablePolicy<T>::table(model).add(std::move(item));
+            return status;
+        }
+        Status status = TablePolicy<T>::repoint(model, from_, to_);
+        if (status) {
+            // The guard and the repoint read the same references, so
+            // anything still naming `from` is a bug to report, not a holder
+            // to leave pointing at nothing.
+            status = TablePolicy<T>::inUse(model, from_);
+        }
+        if (!status) {
+            (void)rollBack(model); // execute() leaves the model as it found it
+            return status;
+        }
+        return {};
+    }
+    [[nodiscard]] Status undo(CommandContext& context) override { return rollBack(context.model); }
+    [[nodiscard]] Status redo(CommandContext& context) override { return execute(context); }
+
+  private:
+    // The item goes back under its old name first, so the holders put back
+    // after it name something that exists at every step.
+    Status rollBack(katana::entity::Model& model)
+    {
+        auto renamed = TablePolicy<T>::table(model).remove(to_);
+        if (!renamed) {
+            return renamed.error();
+        }
+        T item = std::move(*renamed);
+        item.name = from_;
         if (auto status = TablePolicy<T>::table(model).add(std::move(item)); !status) {
             return status;
         }
-        if (auto status = TablePolicy<T>::repoint(model, from, to); !status) {
-            return status;
-        }
-        return TablePolicy<T>::inUse(model, from);
+        return restoreHolders(model, holders_);
     }
 
     std::string from_;
     std::string to_;
     std::string name_;
+    HolderImages holders_{};
 };
 
 // Repoint every holder of `from` to `into`, then delete `from`: what a rename
