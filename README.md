@@ -10,27 +10,28 @@ and the command line are two thin front ends over the same engine.
 
 ## Status
 
+The authoritative record is the roadmap table in [PLAN.MD](PLAN.MD) section 5;
+this is a summary of it.
+
 | Phase | Subject | State |
 |---|---|---|
-| 01 | Build system, tests, sanitizers, static analysis | done |
-| 02 | Mathematical foundation | done |
-| 03 | Basic geometry | done |
-| 04 | Geometry algorithms | done |
-| 05 | Entity system | done |
-| 06 | Command system, transactions, undo/redo | done |
-| 07 | Project storage (SQLite) | done — schema 3 stores geometry as a binary blob; opening a 50k-entity project is 4.6× faster |
-| 08 | Basic 2D CAD application (Qt 6) | done |
-| 09 | Professional 2D CAD | partial — editing, snapping, nested layers, resolved appearance, linetypes, dimension styles, point symbols and a styles/linetypes manager done; splines, hatches and blocks outstanding |
+| 01 | Build system, tests, sanitizers, static analysis | done (the CI workflow was deleted in an unrelated commit and is being restored) |
+| 02–08 | Maths, geometry, algorithms, entities, commands/undo, SQLite storage, the Qt 6 application | done |
+| 09 | Professional 2D CAD | partial — editing, snapping, nested layers, resolved appearance, linetypes, dimension styles, hatching, point symbols and a styles/linetypes manager done; authoring splines and blocks outstanding |
 | 10–13 | Survey data model, coordinate systems, survey calculations, least squares | done |
 | 14 | Terrain engine | done |
 | 15 | 3D rendering | partial — tiled multithreaded software renderer, orbit camera, tiled viewports, 3D and cross-section views; Vulkan backend outstanding |
-| 16 | 3D CAD (Open CASCADE) | not started |
-| 17 | Point clouds | partial — LAS/LAZ read/write, budgeted decimation, 2D display; no out-of-core LOD |
-| 18 | Spatial indexing | partial — sparse hash grid behind snapping, picking, box selection and viewport repaint (50×–310× measured); no KD-tree, BVH, octree or terrain quadtree |
-| 19 | Performance architecture | partial — deterministic `TaskPool` drives the renderer; no task graph, no SIMD |
-| 20 | File interoperability | partial — raster, vector, point cloud and 12d Archive (.12da/.12daz) import/export in the GUI and the CLI, every element of the 12d format accounted for, 12d linestyles as styles and 12d point symbols drawn from them; no DWG/LandXML/IFC |
-| 21 | Civil engineering | partial — profiles and cross sections with exact surface-break sampling; alignments, corridors, parcels, grading outstanding |
-| 22–26 | Plotting, application API, Python AI layer, AI agent, hardening | not started |
+| 16 | 3D CAD | reshaped — Open CASCADE rejected with reasons in the plan; civil solids on the TIN instead |
+| 17 | Point clouds | partial — LAS/LAZ read and write, budgeted decimation, 2D display, COPC in the engine; out-of-core level of detail outstanding |
+| 18 | Spatial indexing | partial — sparse hash grid behind snapping, picking, box selection and repaint (50×–310× measured); no KD-tree, BVH, octree or terrain quadtree |
+| 19 | Performance architecture | partial — deterministic `TaskPool` drives the renderer; task graph and work stealing rejected with reasons |
+| 20 | File interoperability | partial — vector (with heights), raster and point-cloud import and 12d Archive (.12da/.12daz) import/export in the GUI and CLI; vector export too; raster and point-cloud export only in the library; no DWG or IFC |
+| 21 | Civil engineering | partial — sections, clothoids, alignments and profiles, corridor quantities and surface, parcels; grading without a GUI route; richer assemblies outstanding |
+| 22 | Drawing and plotting | partial — Plot to PDF at ISO sizes and standard scales; layouts and title blocks outstanding |
+| 23 | Application API | reshaped — expose the existing command interpreter rather than write a second one |
+| 24–26 | Python AI layer, AI agent, production hardening | not started |
+| 45 | Survey data exchange: Leica, Trimble, Topcon, LandXML, CSV | in progress — model, detection and the drawing bridge done; parsers, reduction and the Survey menu being merged |
+| 46 | The audit of 2026-09-23 | [142 confirmed defects](docs/audit/2026-09-23-defects.md), being fixed area by area |
 
 1353 tests pass in Debug and Release, including the architectural layering check, a headless plot to PDF, a headless build of the main window, a headless click on a layer's visibility box and a headless import of surveyed points drawn with their symbols.
 
@@ -83,7 +84,10 @@ katana_cli drawing.kcs                   # run a script
 katana_cli -c "RECT 0,0 30,20" -c "SAVE site.katana"
 ```
 
-Both accept the same command language — `HELP` lists it. Points may be absolute
+Both run the same command interpreter — `HELP` lists its verbs — and each adds a
+few of its own: the command line adds `IMPORT`, `EXPORT`, `REFS`, `CODE` and
+`CUSTOMISE`, the desktop application's command line adds `ZOOM`, `GRID` and
+`SNAP` (and reaches the others through its menus). Points may be absolute
 (`12.5,40`), relative (`@3,4`) or polar (`@5<30`).
 
 ## Architecture
@@ -95,22 +99,30 @@ type (PLAN.MD Rule 4). Both rules are enforced by
 `layering` test on every `ctest`.
 
 ```
-core        Result<T>/Error, structured logging          —
-math        Vec/Mat/Quaternion/Transform, tolerances     core
+core        Result<T>/Error, logging, text, XML, tasks   —
+math        Vec/Mat/Transform, tolerances, unit ratios   core
 geometry    2D/3D primitives, intersection, polygons,    math
             offset/trim/extend/fillet/chamfer
-geodesy     CRS and transformations                      math    [PROJ]
-survey      survey model, traverse, levelling, LSQ       math    [Eigen]
+geodesy     CRS and transformations                      math     [PROJ]
+survey      survey model, traverse, levelling, LSQ       math     [Eigen]
+surveyio    Leica/Trimble/Topcon/LandXML/CSV parsers     survey, geometry
 terrain     TIN, contours, volumes, tiles                geometry [CGAL]
+render      camera, draw lists, software rasteriser      geometry
 entity      entities, layers, styles, properties         geometry [nlohmann]
 commands    commands, change sets, transactions, undo    entity
-storage     SQLite persistence, migrations, recovery     entity  [SQLite]
-cad         document, selection, snapping, view,         commands, storage
-            command interpreter
-io          raster/vector/point-cloud adapters           core    [GDAL, PDAL]
-qt          desktop application                          cad     [Qt 6]
-app         katana_cli                                   cad
+storage     SQLite persistence, migrations, recovery     entity, survey [SQLite]
+archive12d  the 12d Archive format and customisation     terrain, entity
+cad         document, selection, snapping, view,         commands, storage,
+            command interpreter, scene, survey bridge    render, survey, geodesy
+gis, pointcloud  raster/vector/point-cloud adapters      core     [GDAL, PDAL]
+interop     import/export over the adapters and 12d      commands, archive12d, gis
+app         katana_cli                                   cad, interop, surveyio
+qt          desktop application                          app      [Qt 6]
 ```
+
+`cad` may see neither `interop` nor `surveyio`, so the application core builds
+without GDAL and PDAL and no instrument format's types can reach the drawing.
+[tools/check_layering.cmake](tools/check_layering.cmake) holds the exact lists.
 
 Third-party libraries in brackets are confined to that module's `.cpp` files
 behind Katana's own interfaces.
@@ -123,9 +135,11 @@ Three rules shape most of the design:
   anything, apply atomically, and undo from recorded before-images rather than
   by recomputing an inverse. This is also the interface the AI layer will get,
   which is why it is narrow and validated.
-* **Tolerances are centralised.** Every comparison uses a named, documented
-  tolerance from [`numerics.hpp`](include/katana/math/numerics.hpp). There are
-  no ad-hoc epsilons.
+* **Tolerances are centralised.** Comparisons use a named, documented
+  tolerance from [`numerics.hpp`](include/katana/math/numerics.hpp). This README
+  used to say there were no ad-hoc epsilons; the audit of 2026-09-23 found a
+  dozen local ones in the CAD engine (corridor, grading, section, the
+  interpreter), which are being replaced.
 
 ## Testing
 
@@ -140,7 +154,11 @@ expectation was taken from the code under test proves nothing.
 `docs/` holds a document per major subsystem covering purpose, architecture,
 API, numerical assumptions, threading, performance and failure modes:
 [architecture](docs/architecture.md), [geometry](docs/geometry.md),
-[model](docs/model.md), [cad](docs/cad.md), [interop](docs/interop.md).
+[model](docs/model.md), [storage](docs/storage.md), [cad](docs/cad.md),
+[terrain](docs/terrain.md), [interop](docs/interop.md), [survey](docs/survey.md),
+[survey coding](docs/survey_coding.md) and [performance](docs/performance.md),
+plus the [audit register](docs/audit/2026-09-23-defects.md) and its
+[other findings](docs/audit/2026-09-23-findings.md).
 
 ## Importing and exporting data
 
