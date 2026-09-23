@@ -190,6 +190,9 @@ class EditSession {
                                                       const Point2& at);
 
 // ---- the tools (one file each; registered in modify_edit.cpp) ----------------------
+//
+// Every one edits the drawing, so each needs `context.document`; the plan view
+// always gives it, and ToolDriver does.
 
 using ToolPtr = std::unique_ptr<InteractiveTool>;
 using Defaults = std::shared_ptr<EditDefaults>;
