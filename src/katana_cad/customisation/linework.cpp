@@ -173,9 +173,11 @@ void appendCurve(Shape& shape, const std::vector<const Candidate*>& points, std:
         shape.add(points[last]->at, points[last]->height);
         return;
     }
-    ++shape.curves;
     // Each consecutive three points define an arc; a segment left over at the
-    // end lies on the arc through the last three.
+    // end lies on the arc through the last three. The curve counts as one
+    // only if some piece of it was chorded: points in a straight line are
+    // joined straight, and the report must not call that a curve.
+    bool curved = false;
     auto piece = [&](std::size_t a, std::size_t b, std::size_t c, std::size_t segmentFrom) {
         const auto arc =
             katana::geometry::Arc2::throughPoints(points[a]->at, points[b]->at, points[c]->at);
@@ -188,6 +190,8 @@ void appendCurve(Shape& shape, const std::vector<const Candidate*>& points, std:
         }
         if (!arc) {
             note(*points[a], LineworkNoteKind::CurveCollinear);
+        } else {
+            curved = true;
         }
     };
     std::size_t k = first;
@@ -199,6 +203,9 @@ void appendCurve(Shape& shape, const std::vector<const Candidate*>& points, std:
             piece(last - 2, last - 1, last, last - 1);
             k = last;
         }
+    }
+    if (curved) {
+        ++shape.curves;
     }
 }
 
@@ -228,12 +235,17 @@ void appendCurve(Shape& shape, const std::vector<const Candidate*>& points, std:
                 return shape;
             }
             // The third point is on the first side: a line, not an area.
-            note(*points.back(), LineworkNoteKind::RectangleShape, "no width");
+            note(*points.back(), LineworkNoteKind::RectangleShape, "no width: drawn open");
             shape.closed = false;
         } else {
-            note(*points.back(), LineworkNoteKind::RectangleShape,
-                 std::to_string(points.size()) + " points");
+            // Not three points, so there is no rectangle to construct; the
+            // points themselves are the best account of the area, closed
+            // when they can enclose one. The detail says which, because the
+            // note is what tells the surveyor what became of their RECT.
             shape.closed = points.size() >= 3;
+            note(*points.back(), LineworkNoteKind::RectangleShape,
+                 std::to_string(points.size()) +
+                     (shape.closed ? " points: drawn closed through them" : " points: drawn open"));
         }
     }
     if (shape.closed && points.size() < 3) {
@@ -264,9 +276,15 @@ void appendCurve(Shape& shape, const std::vector<const Candidate*>& points, std:
         }
     }
     if (open) {
-        note(*points[*open], LineworkNoteKind::CurveUnterminated);
+        // Taken to end at the string's last point, as the likeliest place the
+        // surveyor meant; begun ON that point, there is nothing to curve.
         if (*open + 1 < points.size()) {
+            note(*points[*open], LineworkNoteKind::CurveUnterminated,
+                 "taken to end at the string's last point");
             curves.emplace_back(*open, points.size() - 1);
+        } else {
+            note(*points[*open], LineworkNoteKind::CurveUnterminated,
+                 "begun on the string's last point: nothing curved");
         }
     }
 
@@ -754,13 +772,15 @@ std::string_view toString(LineworkNoteKind kind)
     case LineworkNoteKind::CurveCollinear:
         return "curve points in a straight line, drawn straight";
     case LineworkNoteKind::CurveUnterminated:
-        return "curve never ended, curved to the end of the string";
+        return "curve never ended"; // the detail says what was drawn instead
     case LineworkNoteKind::CurveEndWithoutStart:
         return "curve end with no curve begun";
     case LineworkNoteKind::CloseTooShort:
         return "closing a string of two points, drawn open";
     case LineworkNoteKind::RectangleShape:
-        return "a rectangle needs three points with width, drawn as a line";
+        // Whether the points were then drawn open or closed depends on how
+        // many there were, so the detail says which.
+        return "a rectangle needs three points with width: none constructed";
     case LineworkNoteKind::DuplicatePointNumber:
         return "two points of one string share a number";
     case LineworkNoteKind::NoRuleForName:
@@ -797,7 +817,10 @@ katana::core::Result<LineworkResult> processLinework(const Document& document,
     if (!(std::isfinite(options.chordTolerance) && options.chordTolerance > 0.0)) {
         return makeError(ErrorCode::InvalidArgument,
                          "the chord tolerance must be a positive distance",
-                         "chordTolerance=" + std::to_string(options.chordTolerance));
+                         // Exact, and the same in every locale: std::to_string
+                         // would print 1e-9 as "0.000000".
+                         "chordTolerance=" +
+                             katana::core::formatExactReal(options.chordTolerance));
     }
 
     const katana::entity::Model& model = document.model();
