@@ -29,9 +29,12 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/snapping.hpp"
 #include "katana/cad/style_drawing.hpp"
+#include "katana/cad/style_resolver.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/cad/view_transform.hpp"
 #include "katana/interop/reference_data.hpp"
+
+#include "customisation/style_painter.hpp"
 
 class QPainter;
 class QPen;
@@ -189,20 +192,24 @@ class ViewportWidget final : public QWidget {
     // mutable because drawing does not change the document.
     mutable std::map<std::pair<std::string, double>, QList<qreal>> dashCache_;
     void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
-    // A 12d definition's strokes and texts, honouring the pen changes in it.
-    void drawStyleDrawing(QPainter& painter, const katana::cad::StyleDrawing& drawing) const;
-    void drawStyleText(QPainter& painter, const katana::cad::StyleTextMark& text) const;
-    // Draws the definition along the entity's plan shape. FALSE when nothing
-    // came of it, so the caller knows to draw the plain line instead - a
-    // 12d linestyle replaces the line rather than decorating it.
-    [[nodiscard]] bool drawLineStyle(QPainter& painter,
-                                     const katana::entity::LineStyle& definition,
+    // Draws the definition along the entity's plan shape through the shared
+    // style painter. FALSE when no pattern was laid - too fine, too long or
+    // nothing to lay it along - so the caller draws the plain line instead:
+    // a 12d linestyle replaces the line rather than decorating it.
+    [[nodiscard]] bool drawLineStyle(QPainter& painter, const StylePaintTarget& target,
+                                     const katana::cad::FlatDefinition& definition,
                                      const katana::entity::Geometry& geometry) const;
-    [[nodiscard]] static QPen penFor(const QPen& entityPen, const std::string& pen);
     // Model units to one plot millimetre, which is what a `paperstyle` uses.
     [[nodiscard]] double paperScale() const;
-    void drawSymbol(QPainter& painter, const std::string& symbol, const Point2& centre,
-                    double size) const;
+    // The plain point mark's half-width in model units at the current scale.
+    [[nodiscard]] double plainMarkHalfWidth() const;
+    void drawSymbol(QPainter& painter, const StylePaintTarget& target, const std::string& symbol,
+                    const Point2& centre, double size) const;
+    // Flattened 12d definitions, kept between frames and keyed on the
+    // document's library generation, so thousands of coded points do not
+    // re-flatten their symbol every frame. Mutable because painting is
+    // logically const.
+    mutable katana::cad::DefinitionCache definitions_;
     void drawMeshFootprints(QPainter& painter) const;
     // `height` in model units; `rotation` in radians, counter-clockwise.
     // Fills a closed polyline with the hatch pattern resolved for the entity
@@ -265,6 +272,8 @@ class ViewportWidget final : public QWidget {
     // where a line weight has no paper to be millimetres of and every line
     // is a hairline. Set by plotToPdf for the duration of the plot only.
     double paperPixelsPerMillimetre_ = 0.0;
+    // The plot's settings while plotting, for the paper colour rule (D7).
+    katana::cad::PlotSettings plotSettings_{};
 
     // Converting RGBA bytes to a QImage, and a classification to a colour, are
     // both far too expensive to redo for every frame of a pan. Both are cached
