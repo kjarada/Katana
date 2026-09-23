@@ -909,8 +909,8 @@ class RotateTool final : public SelectionTool {
         auto command = now.copy
                            ? duplicated("ROTATE", ids(), {Mat3::rotationAbout(now.base, radians)})
                            : cmd::rotateEntities(ids(), now.base, radians);
-        return ToolStep::done(std::move(command),
-                              counted(ids().size()) + (now.copy ? " copied rotated" : " rotated"));
+        const std::string what = now.copy ? " copied and rotated" : " rotated";
+        return ToolStep::done(std::move(command), counted(ids().size()) + what);
     }
 
     History<State> state_;
@@ -1141,8 +1141,8 @@ class ScaleTool final : public SelectionTool {
         auto command =
             now.copy ? duplicated("SCALE", ids(), {Mat3::scalingAbout(now.base, factor, factor)})
                      : cmd::scaleEntities(ids(), now.base, factor);
-        return ToolStep::done(std::move(command),
-                              counted(ids().size()) + (now.copy ? " copied scaled" : " scaled"));
+        const std::string what = now.copy ? " copied and scaled" : " scaled";
+        return ToolStep::done(std::move(command), counted(ids().size()) + what);
     }
 
     History<State> state_;
