@@ -273,6 +273,13 @@ otherwise fill this context with files rather than conclusions.
 
 Practicalities, each learnt the expensive way:
 
+- **An agent's `isolation: "worktree"` branches from `origin/main`, not from
+  local HEAD.** Measured 2026-09-23: eight worktrees created one commit after
+  a local commit all sat on the older, pushed one, so every unpushed commit -
+  including the fixes and records a brief tells the agent to use - was
+  missing. Either push first (the owner's call) or have each agent run
+  `git worktree add .claude/worktrees/<name> -b <name> main` from the main
+  checkout itself and work only there.
 - **A new worktree is missing everything gitignored.** Copy
   `third_party/_cache` into it before configuring (without it configure tries
   to download GoogleTest), and copy `docs/12d Refrence Files` in when the work
