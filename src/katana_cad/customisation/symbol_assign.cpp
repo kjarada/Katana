@@ -259,14 +259,6 @@ const Style* findSymbolStyle(const katana::entity::Model& model, std::string_vie
     return first;
 }
 
-std::string freeStyleName(const katana::entity::Model& model, std::string_view base)
-{
-    std::string name(base);
-    for (std::size_t suffix = 2; model.styles.contains(name); ++suffix) {
-        name = std::string(base) + " " + std::to_string(suffix);
-    }
-    return name;
-}
 
 katana::core::Result<SymbolAssignment>
 assignSymbolToPoints(const Document& document, const std::vector<EntityId>& ids,

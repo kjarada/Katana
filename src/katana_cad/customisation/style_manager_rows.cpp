@@ -367,14 +367,6 @@ std::vector<katana::entity::EntityId> entitiesUsing(const katana::entity::Model&
     return ids;
 }
 
-std::string freeStyleName(const katana::entity::Model& model, std::string_view base)
-{
-    std::string name(base);
-    for (int suffix = 2; model.styles.contains(name); ++suffix) {
-        name = std::string(base) + " " + std::to_string(suffix);
-    }
-    return name;
-}
 
 std::string freeLinetypeName(const Document& document, std::string_view base)
 {
