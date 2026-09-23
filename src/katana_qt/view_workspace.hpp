@@ -34,14 +34,20 @@
 
 #include <QDockWidget>
 #include <QMainWindow>
+#include <QPointer>
 
+#include "dock_chrome.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/cad/viewport_layout.hpp"
 #include "render_view_widget.hpp"
 #include "section_view_widget.hpp"
 #include "viewport_widget.hpp"
 
+class QToolButton;
+
 namespace katana::qt {
+
+class ViewLayersPopup;
 
 // A view's dock. Closing it closes the VIEW (the panels only hide), and it is
 // asked for rather than done inside the close event: the close may come from
@@ -72,14 +78,43 @@ class ViewWorkspace final : public QMainWindow {
     ViewWorkspace(const ViewWorkspace&) = delete;
     ViewWorkspace& operator=(const ViewWorkspace&) = delete;
 
+    // ---- chrome: title bars, the tray, maximise, per-view layers --------------
+    // Gives every open and future view the main window's title bar: its kind
+    // switcher, its Layers button, Zoom Extents and the window buttons, with
+    // the active view's bar marked. The chrome belongs to the main window,
+    // which shares it with its panels so that one tray holds everything
+    // minimised. Without one (a workspace built on its own) the views keep
+    // Qt's plain title bar.
+    void setChrome(DockChrome* chrome);
+    [[nodiscard]] DockChrome* chrome() const { return chrome_; }
+
+    // What the per-view Layers popup reads: the document's layer tree and the
+    // window's reference layers (null until the window supplies them).
+    [[nodiscard]] katana::cad::Document& document() const { return document_; }
+    [[nodiscard]] katana::interop::ReferenceData* referenceData() const { return reference_; }
+
+    // Opens the Layers popup of a view under its Layers button - or under its
+    // title bar when it has no chrome. Null for an id that is not open. The
+    // popup deletes itself when it closes.
+    ViewLayersPopup* showLayersPopup(katana::cad::ViewId id);
+    // How many layers and reference layers a view hides that still exist:
+    // what its Layers button reports. 0 for an id that is not open.
+    [[nodiscard]] std::size_t hiddenCount(katana::cad::ViewId id) const;
+
     // ---- views ---------------------------------------------------------------
     [[nodiscard]] katana::cad::ViewSet& viewSet() { return views_; }
     [[nodiscard]] const katana::cad::ViewSet& viewSet() const { return views_; }
 
-    // A new view of `kind`, docked beside the active view, or on its own when
-    // none is docked. Activates it when `activate` is true.
+    // A new view of `kind`, splitting the active view into equal halves -
+    // side by side when the active view is wider than it is tall, stacked
+    // when it is taller - or on its own when no view is docked. A maximised
+    // view is restored first. Activates it when `activate` is true, and also
+    // when the active view is hidden (minimised), so that the view the menus
+    // act on is never one the user cannot see while another shows.
     katana::cad::ViewState& openView(katana::cad::ViewKind kind, bool activate = true);
     // Closes a view: its dock and widget are deleted and its state dropped.
+    // When it was the active view, the one activated in its place is one the
+    // user can see, never a minimised view or a tab page left behind another.
     // NotFound for an id that is not open.
     [[nodiscard]] katana::core::Status closeView(katana::cad::ViewId id);
     // Changes what a view shows, keeping its dock where it is and the rest of
@@ -95,7 +130,10 @@ class ViewWorkspace final : public QMainWindow {
     // Re-docks the open views into a preset arrangement (cad::dockSplits),
     // opening views of the default kinds when fewer are docked than the preset
     // has places. Extra docked views are tabbed onto the last place; floating
-    // views stay where the user put them.
+    // views stay where the user put them. A docked view that was minimised
+    // takes its place in the arrangement and leaves the tray - the user asked
+    // for the arrangement, and a second 3D view opened while the first sat
+    // minimised would be a duplicate. A maximised view is restored first.
     void arrange(katana::cad::LayoutKind kind);
 
     [[nodiscard]] ViewDock* dockFor(katana::cad::ViewId id) const;
@@ -144,6 +182,9 @@ class ViewWorkspace final : public QMainWindow {
     // Frames the ACTIVE view only, as the View menu and the Z command mean it;
     // one view's zoom is not another's business.
     void zoomExtents();
+    // Frames one view, whether active or not: its title bar's Zoom Extents
+    // button. NotFound for an id that is not open.
+    [[nodiscard]] katana::core::Status zoomExtents(katana::cad::ViewId id);
     // Frames every view: after New, Open and an import, when all of them are
     // looking at a drawing that has just changed under them.
     void zoomExtentsAll();
@@ -156,7 +197,8 @@ class ViewWorkspace final : public QMainWindow {
     // window of its own, so update() on this widget no longer reaches it.
     void repaintViews();
     // Repaints one view after its own hidden layers or references changed:
-    // not a document change, so no listener hears it.
+    // not a document change, so no listener hears it. Also what keeps the
+    // view's Layers button saying whether the view hides anything.
     void viewLayersChanged(katana::cad::ViewId id);
     // Drops per-view hidden layers that name no layer any more (after a delete
     // or a rename), in every view. See LayerOverrides::pruneMissing.
@@ -182,6 +224,10 @@ class ViewWorkspace final : public QMainWindow {
         ViewportWidget* plan = nullptr;
         RenderViewWidget* render = nullptr;
         SectionViewWidget* section = nullptr;
+        // The chrome's bar and the view's own tools on it; null without chrome.
+        DockTitleBar* titleBar = nullptr;
+        QToolButton* kindButton = nullptr;
+        QToolButton* layersButton = nullptr;
         [[nodiscard]] QWidget* widget() const;
     };
 
@@ -193,8 +239,27 @@ class ViewWorkspace final : public QMainWindow {
     void activate(katana::cad::ViewId id);
     void updateTitle(const View& view);
     [[nodiscard]] ViewContext contextFor() const;
+    // Puts the chrome's title bar on a view's dock with the view's own tools.
+    void installChrome(View& view);
+    // Marks the active view's title bar and unmarks the rest.
+    void updateActiveMarks();
+    // Where the user can see it: not hidden, and floating or within this
+    // window (a tab page behind another is parked outside it).
+    [[nodiscard]] bool onScreen(const View& view) const;
+    // After `hidden` was hidden (minimised) while it was the active view:
+    // activates a view on screen, the first in the order opened; when none
+    // is by geometry (a window not yet laid out), the first unhidden view,
+    // raised so that it is the current page of its tab group. Nothing when no
+    // other view is open and unhidden.
+    void activateShowingInsteadOf(katana::cad::ViewId hidden);
+    // The Layers button's icon and tooltip say whether the view hides anything.
+    void updateLayersButton(const View& view);
 
     katana::cad::Document& document_;
+    // Owned by the main window, which deletes its children in the order it
+    // made them; a QPointer so that this workspace, whose destructor still
+    // deletes docks the chrome watches, does not depend on that order.
+    QPointer<DockChrome> chrome_;
     katana::cad::ViewSet views_;
     std::vector<View> docks_;
 
