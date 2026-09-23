@@ -302,7 +302,8 @@ const char* toString(SurveyStyleOutcome outcome)
 CustomisationCoverage customisationCoverage(const Document& document)
 {
     CustomisationCoverage coverage;
-    std::set<std::string> missing;
+    std::set<std::string> undefined;
+    std::set<std::string> notLinestyles;
     // forEach rather than all(): all() returns the whole style table by
     // value, and this only reads it.
     document.model().styles.forEach([&](const Style& style) {
@@ -332,10 +333,16 @@ CustomisationCoverage customisationCoverage(const Document& document)
             case NameStatus::Katana:
                 katanaDrawn = true;
                 break;
+            // Kept apart, not merged into one "missing" list: a caller
+            // printing "in no loaded library" for a name the loaded library
+            // defines as a symbol sends people to load what is loaded.
             case NameStatus::NotALinestyle:
+                names = true;
+                notLinestyles.insert(*name);
+                break;
             case NameStatus::Undefined:
                 names = true;
-                missing.insert(*name);
+                undefined.insert(*name);
                 break;
             }
         }
@@ -343,7 +350,8 @@ CustomisationCoverage customisationCoverage(const Document& document)
         coverage.resolved += found ? 1 : 0;
         coverage.builtIn += (katanaDrawn && !names) ? 1 : 0;
     });
-    coverage.unresolved.assign(missing.begin(), missing.end());
+    coverage.unresolved.assign(undefined.begin(), undefined.end());
+    coverage.notLinestyles.assign(notLinestyles.begin(), notLinestyles.end());
     return coverage;
 }
 
