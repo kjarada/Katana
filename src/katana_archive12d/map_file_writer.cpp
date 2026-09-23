@@ -11,9 +11,13 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #include "katana/core/text.hpp"
 
@@ -40,6 +44,43 @@ constexpr std::array<SurveySection, 9> kSectionOrder{
     SurveySection::Map,        SurveySection::VertexSymbol,    SurveySection::Tinable,
     SurveySection::VertexTextStyle, SurveySection::Pipe,       SurveySection::VertexPipe,
     SurveySection::SegmentPipe, SurveySection::StringAttribute, SurveySection::VertexAttribute};
+
+[[nodiscard]] std::size_t rankOf(SurveySection section)
+{
+    return static_cast<std::size_t>(
+        std::find(kSectionOrder.begin(), kSectionOrder.end(), section) - kSectionOrder.begin());
+}
+
+// Which pass of the sections each rule is written in.
+//
+// Among rules of ONE key the earlier wins a field both fill, and some fields
+// are filled by more than one section - a comment by any, the string's
+// attributes by pipe_data and string_attribute_data, each vertex's by
+// vertex_pipe_data and vertex_attribute_data. So a rule may never be written
+// ahead of an earlier rule of its own key, and when 12d's section order would
+// put it there it goes in a further pass of the sections instead. Rules of
+// DIFFERENT keys may pass each other freely: no code matches two different
+// keys of one specificity, so their order never decides anything.
+//
+// Comparing with the key's latest rule is enough, because along a key's
+// rules (pass, section rank) only ever grows.
+[[nodiscard]] std::vector<std::size_t> passesOf(const std::vector<SurveyRule>& rules)
+{
+    std::map<std::string, std::pair<std::size_t, std::size_t>, std::less<>> latest;
+    std::vector<std::size_t> passes;
+    passes.reserve(rules.size());
+    for (const SurveyRule& rule : rules) {
+        const std::size_t rank = rankOf(rule.section);
+        std::size_t pass = 0;
+        if (const auto found = latest.find(rule.key); found != latest.end()) {
+            const auto [latestPass, latestRank] = found->second;
+            pass = rank < latestRank ? latestPass + 1 : latestPass;
+        }
+        latest[rule.key] = {pass, rank};
+        passes.push_back(pass);
+    }
+    return passes;
+}
 
 // As in the .4d writer: the shortest plain decimal that reads back exactly.
 [[nodiscard]] std::string number(double value)
@@ -110,23 +151,32 @@ class Writer {
             }
             close(2, "comments");
         }
-        for (const SurveySection section : kSectionOrder) {
-            const auto& rules = map.rules();
-            if (std::none_of(rules.begin(), rules.end(),
-                             [section](const SurveyRule& r) { return r.section == section; })) {
-                continue;
-            }
-            const std::string name = katana::entity::toString(section);
-            open(2, name);
-            for (const SurveyRule& rule : rules) {
-                if (rule.section != section) {
-                    continue;
+        // A map whose every key is in 12d's order - one mapfile as 12d
+        // writes it - needs one pass, and is written with each section once.
+        const auto& rules = map.rules();
+        const std::vector<std::size_t> passes = passesOf(rules);
+        const std::size_t passCount =
+            passes.empty() ? 0 : *std::max_element(passes.begin(), passes.end()) + 1;
+        for (std::size_t pass = 0; pass < passCount; ++pass) {
+            for (const SurveySection section : kSectionOrder) {
+                const std::string name = katana::entity::toString(section);
+                bool opened = false;
+                for (std::size_t i = 0; i < rules.size(); ++i) {
+                    if (passes[i] != pass || rules[i].section != section) {
+                        continue;
+                    }
+                    if (!opened) {
+                        open(2, name);
+                        opened = true;
+                    }
+                    if (auto status = item(rules[i]); !status) {
+                        return status.error();
+                    }
                 }
-                if (auto status = item(rule); !status) {
-                    return status.error();
+                if (opened) {
+                    close(2, name);
                 }
             }
-            close(2, name);
         }
         close(1, "map_file");
         out_ += "</xml12d>";

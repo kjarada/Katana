@@ -73,9 +73,19 @@ struct MapFileWriteOptions {
 // Sections are written in 12d's order - map_data, vertex_symbol_data,
 // tinable_data, vertex_textstyle_data, the three pipe sections, then the two
 // attribute sections - and within a section the rules keep the order they
-// have in the map, which among rules of one key is the order that decides
-// which wins. Grouping by section is the only reordering, and it moves rules
-// only relative to rules of OTHER sections. A value the map does not have is
+// have in the map. Among rules of ONE key that order decides every field more
+// than one section fills (a comment; an attribute of one name from pipe_data
+// and string_attribute_data, or from vertex_pipe_data and vertex_attribute_
+// data), so a rule is never written ahead of an earlier rule of its own key:
+// when 12d's order would put it there - as it would in a map made by loading
+// two mapfiles, or by merging a load into the current map - the sections are
+// written again, in the same order, for the rules that must follow, and
+// readMapFile reads a repeated section in turn. Rules of DIFFERENT keys may
+// be regrouped, which no code can tell: none matches two different keys of
+// one specificity. So every code resolves after a round trip exactly as it
+// did before, and a map whose every key is in 12d's order - one mapfile as
+// 12d writes it - comes back rule for rule, each section written once. A
+// value the map does not have is
 // written as no element at all, never as a 0: an empty `<rotation/>` and a
 // rotation of 0 read the same, but a size of 0 and no size do not mean the
 // same thing to a person reading the file.
