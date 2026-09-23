@@ -5,6 +5,7 @@
 #include <format>
 #include <map>
 #include <memory>
+#include <set>
 #include <span>
 #include <utility>
 
@@ -481,6 +482,42 @@ bool isMetreUnit(std::string_view linearUnit)
            unit == "m";
 }
 
+namespace {
+
+// The skipped entities grouped by reason, in the order the reasons are met,
+// each as "N: reason - id, id, ..." with at most a dozen ids and "and M more"
+// for the rest. The report and the nothing-has-an-area error both print these:
+// Area of Selection over a whole drawing of points would otherwise put a line,
+// or one error thousands of entries long, in the log for every point in it.
+// Every skipped entity is still counted.
+std::vector<std::string> skippedByReason(const std::vector<AreaSkip>& skipped)
+{
+    std::vector<std::pair<std::string, std::vector<EntityId>>> groups;
+    for (const AreaSkip& skip : skipped) {
+        auto group = std::find_if(groups.begin(), groups.end(),
+                                  [&](const auto& g) { return g.first == skip.reason; });
+        if (group == groups.end()) {
+            group = groups.insert(groups.end(), {skip.reason, {}});
+        }
+        group->second.push_back(skip.id);
+    }
+    constexpr std::size_t kIdsShown = 12;
+    std::vector<std::string> out;
+    for (const auto& [reason, ids] : groups) {
+        std::string text = std::to_string(ids.size()) + ": " + reason + " - ";
+        for (std::size_t i = 0; i < ids.size() && i < kIdsShown; ++i) {
+            text += (i == 0 ? "" : ", ") + std::to_string(ids[i]);
+        }
+        if (ids.size() > kIdsShown) {
+            text += " and " + std::to_string(ids.size() - kIdsShown) + " more";
+        }
+        out.push_back(std::move(text));
+    }
+    return out;
+}
+
+} // namespace
+
 Result<AreaResult> computeArea(const Document& document, const std::vector<EntityId>& ids)
 {
     if (ids.empty()) {
@@ -490,7 +527,15 @@ Result<AreaResult> computeArea(const Document& document, const std::vector<Entit
     AreaResult result;
     result.linearUnit = document.metadata().linearUnit;
     result.metres = isMetreUnit(result.linearUnit);
+    // AREA passes typed ids straight through, and an id typed twice would add
+    // its outline to the total twice. Each entity is measured once; the repeat
+    // is reported as skipped rather than dropped without a word.
+    std::set<EntityId> seen;
     for (const EntityId id : ids) {
+        if (!seen.insert(id).second) {
+            result.skipped.push_back({id, "listed more than once"});
+            continue;
+        }
         const Entity* entity = findEntity(document, id);
         if (entity == nullptr) {
             return makeError(ErrorCode::NotFound, "no entity with that id", std::to_string(id));
@@ -525,8 +570,8 @@ Result<AreaResult> computeArea(const Document& document, const std::vector<Entit
     }
     if (result.items.empty()) {
         std::string reasons;
-        for (const AreaSkip& skip : result.skipped) {
-            reasons += (reasons.empty() ? "" : "; ") + std::to_string(skip.id) + ": " + skip.reason;
+        for (const std::string& group : skippedByReason(result.skipped)) {
+            reasons += (reasons.empty() ? "skipped " : "; skipped ") + group;
         }
         return makeError(ErrorCode::InvalidGeometry,
                          "none of these is a closed polyline or a circle", reasons);
@@ -566,27 +611,8 @@ std::string formatAreaReport(const AreaResult& result)
     }
     text += "  Total  area " + area(result.totalArea) + "   perimeter " +
             fixed(result.totalPerimeter, 3) + " " + lengthUnit;
-    // Grouped by reason, in the order met: Area of Selection over a whole
-    // drawing would otherwise print a line for every point in it. Every
-    // skipped entity is counted; the ids are listed up to a dozen.
-    std::vector<std::pair<std::string, std::vector<EntityId>>> skips;
-    for (const AreaSkip& skip : result.skipped) {
-        auto group = std::find_if(skips.begin(), skips.end(),
-                                  [&](const auto& g) { return g.first == skip.reason; });
-        if (group == skips.end()) {
-            group = skips.insert(skips.end(), {skip.reason, {}});
-        }
-        group->second.push_back(skip.id);
-    }
-    constexpr std::size_t kIdsShown = 12;
-    for (const auto& [reason, ids] : skips) {
-        text += "\n  Skipped " + std::to_string(ids.size()) + ": " + reason + " - ";
-        for (std::size_t i = 0; i < ids.size() && i < kIdsShown; ++i) {
-            text += (i == 0 ? "" : ", ") + std::to_string(ids[i]);
-        }
-        if (ids.size() > kIdsShown) {
-            text += " and " + std::to_string(ids.size() - kIdsShown) + " more";
-        }
+    for (const std::string& group : skippedByReason(result.skipped)) {
+        text += "\n  Skipped " + group;
     }
     if (!result.metres) {
         text += "\n  No hectares: they are defined only for a drawing in metres";
@@ -1230,6 +1256,19 @@ Status requireHorizontal(const geodesy::CoordinateReferenceSystem& crs)
                      crsTitle(crs));
 }
 
+// How many of a converter line's label fields read as a coordinate of the
+// source system: an angle for a geographic one (parseSurveyAngle, which takes
+// decimal degrees too, so "-33" and "-33:51:24.5" both count) and a number for
+// a projected one.
+std::size_t coordinateLikeFields(std::span<const std::string_view> label, bool geographic)
+{
+    return static_cast<std::size_t>(
+        std::ranges::count_if(label, [geographic](std::string_view field) {
+            return geographic ? parseSurveyAngle(field).ok()
+                              : katana::core::parseFiniteDouble(field).has_value();
+        }));
+}
+
 } // namespace
 
 Result<CoordinateConversion> convertCoordinates(std::string_view source, std::string_view target,
@@ -1288,9 +1327,22 @@ Result<CoordinateConversion> convertCoordinates(std::string_view source, std::st
                                  : "a point is '[label] easting northing'",
                              context);
         }
-        CoordinateConversionRow row;
         // Everything before the two coordinates is the label, so a point name
-        // with a blank in it survives.
+        // with a blank in it survives. But blanks also separate the fields of
+        // a D M S angle typed as "-33 51 24.5", and taking the last two fields
+        // as the coordinates then turns the rest into a label and reports a
+        // point far from the one meant, without complaint. A point name holds
+        // at most one number ("102", "CP 1"); a label with two or more is an
+        // angle typed with blanks, or a coordinate too many (E N height).
+        if (coordinateLikeFields(std::span(parts).first(parts.size() - 2),
+                                 conversion.sourceGeographic) >= 2) {
+            return makeError(ErrorCode::ParseFailure,
+                             "two or more numbers before the last two fields: write an angle "
+                             "without blanks inside it (-33:51:24.5 or -33d51m24.5s) and give "
+                             "only the two coordinates, no height",
+                             context);
+        }
+        CoordinateConversionRow row;
         for (std::size_t k = 0; k + 2 < parts.size(); ++k) {
             row.label += (row.label.empty() ? "" : " ") + std::string(parts[k]);
         }
@@ -1417,6 +1469,11 @@ Result<std::string> conversionLinesForSelection(const Document& document, std::s
         // makes; a name carrying either would come back cut short.
         std::replace(label.begin(), label.end(), '#', '_');
         std::replace(label.begin(), label.end(), ',', '_');
+        // Nor may it hold two numbers apart ("STN 3 4"): convertCoordinates
+        // refuses that as an angle typed with blanks. Joined, it is one field.
+        if (coordinateLikeFields(fields(label), crs->isGeographic()) >= 2) {
+            std::replace_if(label.begin(), label.end(), katana::core::isAsciiSpace, '_');
+        }
         lines += label + " " + katana::core::formatExactReal(position.point.x) + " " +
                  katana::core::formatExactReal(position.point.y) + "\n";
     }

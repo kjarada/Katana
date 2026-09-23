@@ -735,7 +735,8 @@ SurveyConverterDialog::SurveyConverterDialog(SurveyDialogContext context, QWidge
           "Converts coordinates between two coordinate systems named by EPSG code (4326, "
           "28356, ...) through PROJ, with the grid scale factor and convergence on each "
           "projected side. One point per line: [label] easting northing for a projected system, "
-          "[label] latitude longitude for a geographic one. A datum change PROJ could only do "
+          "[label] latitude longitude for a geographic one, an angle written without blanks "
+          "inside it (-33:51:24.5 or -33d51m24.5s). A datum change PROJ could only do "
           "approximately is refused. It reports; it does NOT move anything in the drawing - "
           "converting drawing entities is not part of this tool - and heights are not converted.",
           parent)
