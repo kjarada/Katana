@@ -524,8 +524,8 @@ QWidget* SurveyImportWizard::buildOptionsPage()
     layout->addLayout(form);
     layout->addWidget(mutedLabel(
         "Refusing is the default: an import of ids the drawing already has is more often the "
-        "wrong file than a wanted update. Survey codes need a loaded 12d mapfile (Format > Load "
-        "12d Customisation) and are applied to the imported points only, as their own undoable "
+        "wrong file than a wanted update. Survey codes need a loaded survey code file (Format > "
+        "Load Customisation) and are applied to the imported points only, as their own undoable "
         "step.",
         page));
     layout->addStretch(1);

@@ -67,9 +67,9 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
-# The whole main window with a 12d customisation loaded into it: the two
-# libraries and the mapfile read, resolved against each other, and reported.
-# This is the path the Format > Load 12d Customisation menu item takes, so what
+# The whole main window with a customisation loaded into it: the two
+# libraries and the survey code file read, resolved against each other, and
+# reported. This is the path the Format > Load Customisation menu item takes, so what
 # ctest exercises is what a person gets (PLAN.MD 20.3). It runs without the
 # files when they are not in the checkout - they carry their author's licence
 # notice - and then proves only that the switch does no harm.
@@ -79,7 +79,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_headless.png"
-            "-DCUSTOMISE_DIR=${PROJECT_SOURCE_DIR}/docs/12d Refrence Files"
+            "-DCUSTOMISE_DIR=${KATANA_CUSTOMISATION_DIR}"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_customisation_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
@@ -137,8 +137,8 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
-    # The styles and linetypes manager (PLAN.MD 20.2 slice 3), opened over a
-    # 12d import so that its tables hold real linestyles and symbols. What it
+    # The styles and linetypes manager (PLAN.MD 20.2 slice 3), opened over an
+    # archive import so that its tables hold real linestyles and symbols. What it
     # protects is that the dialog builds, lays out and PAINTS - its tables,
     # its form, its two previews - which is otherwise only ever checked by a
     # person opening the menu.
@@ -471,9 +471,9 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # ---- the window's wiring of the managers' foundations ----------------------
     #
-    # Format > Load 12d Customisation merges (audit QT-21), through the window's
+    # Format > Load Customisation merges (audit QT-21), through the window's
     # CUSTOMISE line, which runs the menu item's applyCustomisation: the
-    # hand-written fixture mapfile REPLACES the map, then the symbol fixture
+    # hand-written fixture survey code file REPLACES the map, then the symbol fixture
     # alone is MERGED in - and the map must still be there. By hand, from the
     # fixtures' head comments: test_survey.mapfile has 11 rules, and
     # test_symbols.4d 4 definitions, all named TEST ..., which no other
@@ -615,6 +615,20 @@ if(TARGET katana)
             "-DEXPECT=--dialog formatStyles opened styleManagerDialog \"Styles and Linetypes\"[\r\n]+styleTable: Kerb \\|[^;]*; Water \\|"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same manager's Linetypes page (managerTabs, filled as a click on
+    # its tab does) narrowed to the fixture's group Test/Lines. By hand from
+    # test_linestyles.4d's head comment: that group holds TEST Dashed Kerb, a
+    # paper linestyle, and TEST Gate, a two-point one, and nothing else. The
+    # Kerb chosen, the details pane explains its kind in the general words.
+    add_test(NAME qt_the_style_manager_lists_a_library_group_s_linestyles_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=@formatStyles|managerTabs=Linetypes|linetypeGroup=Test/Lines|linetypeTable=TEST Dashed Kerb|?linetypeTable|?libraryDetails"
+            "-DEXPECT=linetypeTable: TEST Dashed Kerb \\| Library \\| Test/Lines \\| paper \\|[^;\r\n]*; TEST Gate \\| Library \\| Test/Lines \\| two-point \\|[^;\r\n]*[\r\n]+libraryDetails: TEST Dashed Kerb Group: Test/Lines File: test_linestyles\\.4d Kind: Paper linestyle: millimetres on the plot, the same at every scale[^\r\n]*Library linestyles belong to the session's customisation and are read-only here\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_linetypes_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Symbols, searched for TEST. By hand from the fixture's head comments:
     # its four definitions are all symbols by decision D3 - TEST Tree too,
     # though it is not `mode vertex`, because rule TR* draws it as one - and
@@ -631,7 +645,8 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The code manager explaining a fixture code. By hand from
     # test_survey.mapfile: WM01 is met by the prefix key WM* (rule #0 of the
-    # fixture, map_data), which puts it on model TEST SERVICES.
+    # fixture, map_data), which puts it on the layer TEST SERVICES (the
+    # rule's model field).
     add_test(NAME qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -641,6 +656,49 @@ if(TARGET katana)
             "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: model \\| TEST SERVICES \\| #[0-9]+ WM\\* \\(map_data\\)"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_code_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # What Format says in the real window, in general words: every item of
+    # the menu with its status tip (?formatMenu) - the window's own Load and
+    # Replace Loaded Customisation among the managers' - the log of a
+    # customisation loaded and of each manager opened, and none of it names
+    # another program's formats (FORBID, in either case). The widget tests
+    # walk the managers' own texts (qt_widgets.GeneralTexts.*).
+    add_test(NAME qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=?formatMenu|@formatStyles|@formatSymbols|@formatSurveyCodes"
+            "-DEXPECT=test_survey\\.mapfile: survey code file, [0-9,]+ added[^\r\n]*[\r\n].*formatMenu: Format: Layers\\.\\.\\. \\[[^\r\n]*Styles and Linetypes\\.\\.\\. \\[[^\r\n]*library linestyles[^\r\n]*Load Customisation\\.\\.\\. \\[Load linestyle and symbol libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)[^\r\n]*Replace Loaded Customisation\\.\\.\\. \\[[^\r\n]*[\r\n].*opened surveyCodeManagerDialog"
+            "-DFORBID=12[dD]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_texts_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # FORBID holds the application to what it SAYS, not to where the run
+    # lives. Here the output - and so the empty project the log says it
+    # could not open - is in a folder named as a worktree for the archive
+    # work might be: the log prints that path (EXPECT), and the check passes.
+    add_test(NAME qt_a_forbidden_word_in_the_run_s_own_paths_is_not_held_against_it_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%CommandLineDock"
+            "-DEXPECT=Open Failed[^\r\n]*worktree_12da_export"
+            "-DFORBID=12[dD]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/worktree_12da_export/forbid_paths_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Only the path is set aside: the rest of the line that holds it is still
+    # read. Forbidding the words that line opens with fails the run, and the
+    # failure names them (PASS_REGULAR_EXPRESSION, set below).
+    add_test(NAME qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%CommandLineDock"
+            "-DFORBID=Open Failed"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/worktree_12da_export/forbid_beside_a_path_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "the run reported /Open Failed/ \\(\"Open Failed\"\\), its own paths aside")
     # The symbol library putting a fixture symbol on imported points: the 12
     # points of survey_points_pnezd.csv (counted by hand, see the survey
     # import test) imported, all selected, TEST Survey Mark chosen in the
@@ -733,8 +791,12 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/shortcuts_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_format_menu_opens_the_style_manager_headless
+                         qt_the_style_manager_lists_a_library_group_s_linestyles_headless
                          qt_format_menu_opens_the_symbol_library_headless
                          qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
+                         qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
+                         qt_a_forbidden_word_in_the_run_s_own_paths_is_not_held_against_it_headless
+                         qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
                          qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
                          qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
                          qt_format_layers_opens_beside_the_drawing_and_follows_it_headless

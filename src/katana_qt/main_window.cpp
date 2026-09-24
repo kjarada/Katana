@@ -380,10 +380,10 @@ void MainWindow::buildActions()
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
 
     QAction* customiseAction =
-        makeAction(Icon::Import, "Load 12&d Customisation...",
-                   "Load 12d linestyle and symbol libraries (.4d) and mapfiles on top of what is "
-                   "loaded: a file's definitions and codes take the place of the same ones, and "
-                   "everything else is kept",
+        makeAction(Icon::Import, "Loa&d Customisation...",
+                   "Load linestyle and symbol libraries (.4d) and survey code files (.mapfile) "
+                   "on top of what is loaded: a file's definitions and codes take the place of "
+                   "the same ones, and everything else is kept",
                    {}, "loadCustomisation");
     connect(customiseAction, &QAction::triggered, this,
             [this] { loadCustomisation(katana::archive12d::LoadMode::Merge); });
@@ -393,16 +393,16 @@ void MainWindow::buildActions()
     // run never meets a box nobody can answer.
     QAction* replaceCustomisationAction =
         makeAction(Icon::Import, "&Replace Loaded Customisation...",
-                   "Load 12d libraries and mapfiles IN PLACE of the loaded ones: a library "
-                   "replaces the whole library, a mapfile the whole map; a kind the files do "
-                   "not bring is kept",
+                   "Load libraries and survey code files IN PLACE of the loaded ones: a "
+                   "library replaces the whole library, a survey code file every survey code; "
+                   "a kind the files do not bring is kept",
                    {}, "replaceCustomisation");
     connect(replaceCustomisationAction, &QAction::triggered, this,
             [this] { loadCustomisation(katana::archive12d::LoadMode::Replace); });
 
     QAction* codeAction = makeAction(Icon::Import, "Appl&y Survey Codes",
-                                     "Give every entity carrying a field code the model, style "
-                                     "and attributes the loaded mapfile says it should have",
+                                     "Give every entity carrying a field code the layer, style "
+                                     "and attributes the loaded survey codes say it should have",
                                      {}, "applySurveyCodes");
     connect(codeAction, &QAction::triggered, this, [this] { applySurveyCodes(); });
 
@@ -427,7 +427,7 @@ void MainWindow::buildActions()
     QMenu* gisMenu = topMenu("&GIS", "gisMenu");
     QMenu* helpMenu = topMenu("&Help", "helpMenu");
 
-    // File keeps to files: the 12d customisation is loaded from Format (and
+    // File keeps to files: the customisation is loaded from Format (and
     // Survey > Survey Coding), where the managers of what it brings are.
     fileMenu->addActions({newAction, openAction});
     fileMenu->addSeparator();
@@ -1745,7 +1745,7 @@ void MainWindow::runCommandLine()
         return;
     }
     // CUSTOMISE [REPLACE] <file>..., as katana_cli has it and for the same
-    // reason (katana_cad may not see the 12d readers): the files are merged
+    // reason (katana_cad may not see the library readers): the files are merged
     // into what is loaded, or with REPLACE - an unquoted first word - take
     // the place of the kinds they bring. A quoted path may hold spaces.
     if (verb == "CUSTOMISE" || verb == "CUSTOMIZE") {
@@ -2145,17 +2145,13 @@ QString sampleOf(const std::vector<std::string>& names, std::size_t most = 8)
 
 } // namespace
 
-// Loading a 12d customisation: the linestyle library, the symbol library and
-// the mapfile. Several files at once, because they are useless apart - and
-// WHICH is which is decided by looking inside each one, since `.4d` is the
-// extension of both a style library and a mapfile (docs/survey_coding.md).
 // The customisation that is PART OF THIS BUILD. Nothing is found, loaded or
 // configured: its linestyles, symbols and survey codes are compiled in, so a
 // survey drawing is drawn with them from the moment it is opened.
 //
 // A build made without one falls back to looking beside the executable, so a
 // checkout that does not carry the customisation - it is third-party material
-// under its own licence - can still be given one. Format > Load 12d
+// under its own licence - can still be given one. Format > Load
 // Customisation... adds to either; Format > Replace Loaded Customisation...
 // takes the place of the kinds it brings.
 void MainWindow::loadDefaultCustomisation()
@@ -2186,12 +2182,18 @@ void MainWindow::loadDefaultCustomisation()
     }
 }
 
+// Loading a customisation: the linestyle library, the symbol library and
+// the survey code file. Several files at once, because they are useless
+// apart - and WHICH is which is decided by looking inside each one, since
+// `.4d` is the extension of both a style library and a survey code file
+// (docs/survey_coding.md).
 void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
 {
     const bool replace = mode == katana::archive12d::LoadMode::Replace;
     const QStringList chosen = QFileDialog::getOpenFileNames(
-        this, replace ? "Replace 12d Customisation" : "Load 12d Customisation", QString(),
-        "12d customisation (*.4d *.mapfile);;All files (*)");
+        this, replace ? "Replace Loaded Customisation" : "Load Customisation", QString(),
+        "Customisation files (*.4d *.mapfile);;Style and symbol libraries (*.4d);;"
+        "Survey code files (*.mapfile);;All files (*)");
     if (chosen.isEmpty()) {
         logMessage("Loading a customisation was cancelled.");
         return;
@@ -2226,18 +2228,18 @@ void MainWindow::reportMissingCustomisation()
     // file defined draws as a plain line until it is loaded.
     logMessage("Warning: this project was drawn with customisation files that are not loaded: " +
                sampleOf(missing, missing.size()) +
-               ". Load them with Format > Load 12d Customisation...");
+               ". Load them with Format > Load Customisation...");
 }
 
-// Applying the loaded mapfile to the drawing. One undoable step, and a
+// Applying the loaded survey codes to the drawing. One undoable step, and a
 // report - including which property the codes were read from, because "no
 // entity carries a code" and "they carry it under another name" are
 // different problems and look identical from the outside (PLAN.MD 20.3).
 void MainWindow::applySurveyCodes()
 {
     if (document_.surveyMap().empty()) {
-        warnUser("No mapfile",
-                 "Load a 12d customisation first: Format > Load 12d Customisation...");
+        warnUser("No survey codes",
+                 "Load a survey code file first: Format > Load Customisation...");
         return;
     }
     katana::cad::SurveyCodingOptions options;
@@ -2256,7 +2258,7 @@ void MainWindow::applySurveyCodes()
     }
     logMessage(grouped(report.coded) + " entities carry a \"" +
                QString::fromStdString(report.property) + "\", " + grouped(report.matched) +
-               " of them codes the mapfile has a rule for.");
+               " of them codes the loaded survey codes have a rule for.");
     if (!report.unmatchedCodes.empty()) {
         logMessage(grouped(report.unmatchedCodes.size()) + " codes have no rule, starting with \"" +
                    QString::fromStdString(report.unmatchedCodes.front()) + "\"");
@@ -2303,8 +2305,11 @@ void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& pa
     const bool replace = mode == katana::archive12d::LoadMode::Replace;
     for (const katana::archive12d::FileMerge& file : merged.files) {
         const bool map = file.kind == katana::archive12d::CustomisationFile::MapFile;
+        // The window's own words for the two kinds, not the reader's name
+        // for its format: this line is read by a person, who knows them as
+        // a style library and a survey code file.
         QString line = (file.name.empty() ? QString("(no file)") : QString::fromStdString(file.name)) +
-                       ": " + QString::fromStdString(katana::archive12d::toString(file.kind)) +
+                       ": " + (map ? QString("survey code file") : QString("style library")) +
                        ", " + grouped(file.added.size()) + " added, " +
                        grouped(file.replaced.size()) + " replaced" +
                        (map ? " (codes, once for each section)" : "");
@@ -2354,26 +2359,28 @@ void MainWindow::applyCustomisation(const std::vector<std::filesystem::path>& pa
     }
     if (!missing.empty()) {
         logMessage(grouped(missing.size()) +
-                   " names the mapfile asks for are in no loaded library: " + sampleOf(missing));
+                   " names the survey codes ask for are in no loaded library: " +
+                   sampleOf(missing));
     }
     reportCustomisationCoverage();
 }
 
 // What the loaded customisation means for THIS drawing. Without it, "the
 // linestyles are not showing" is indistinguishable from "this drawing's
-// styles are 12d's plain lines" and from "nothing is loaded at all".
+// styles are plain continuous lines" and from "nothing is loaded at all".
 void MainWindow::reportCustomisationCoverage()
 {
     const katana::cad::CustomisationCoverage coverage =
         katana::cad::customisationCoverage(document_);
     if (coverage.styles == 0) {
-        logMessage("This drawing has no styles yet; import a 12d archive to see the "
+        logMessage("This drawing has no styles yet; import a drawing or survey that carries "
+                   "styles, or make one in Format > Styles and Linetypes, to see the "
                    "customisation take effect.");
         return;
     }
     logMessage(grouped(coverage.resolved) + " of this drawing's " + grouped(coverage.styles) +
                " styles are drawn with a loaded definition (" + grouped(coverage.named) +
-               " name one; the rest are 12d's plain lines).");
+               " name one; the rest are plain continuous lines).");
     if (!coverage.unresolved.empty()) {
         logMessage(grouped(coverage.unresolved.size()) +
                    " names are in no loaded library, starting with \"" +

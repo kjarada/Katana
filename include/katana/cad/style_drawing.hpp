@@ -1,6 +1,6 @@
 #pragma once
 
-// A 12d linestyle or symbol definition -> plain geometry (PLAN.MD 20.3,
+// A library linestyle or symbol definition -> plain geometry (PLAN.MD 20.3,
 // slice 2).
 //
 // `entity::LineStyle` says what a definition IS; this says where its strokes
@@ -12,7 +12,7 @@
 //
 // Two ways to place a definition, and the definition itself says which:
 //
-//   * `atVertices` (12d's `mode vertex`) makes it a SYMBOL: the strokes are
+//   * `atVertices` (the file's `mode vertex`) makes it a SYMBOL: the strokes are
 //     put at a point, scaled and rotated. `symbolDrawing`.
 //   * otherwise it is a LINESTYLE: the strokes repeat along a polyline, with
 //     the definition's +x running along the line and its +y to the left.
@@ -41,8 +41,8 @@ namespace katana::cad {
 
 struct StyleStroke {
     katana::geometry::Polyline2 path{};
-    // The 12d colour name in force, from a `colour` command. EMPTY means the
-    // entity's own colour, which is what 12d's "view_colour" asks for.
+    // The colour name in force, from a `colour` command. EMPTY means the
+    // entity's own colour, which is what "view_colour" asks for.
     std::string pen{};
 };
 
@@ -51,7 +51,7 @@ struct StyleTextMark {
     std::string text{};
     double height = 0.0;  // model units
     double angle = 0.0;   // radians counter-clockwise, the line's direction included
-    std::string justify{}; // 12d's spelling: "middle-centre", "top-left"
+    std::string justify{}; // the file's spelling: "middle-centre", "top-left"
     std::string font{};
     double widthFactor = 1.0;
     std::string pen{};
@@ -130,7 +130,7 @@ struct FlatDefinition {
 [[nodiscard]] FlatDefinition flattenDefinition(const katana::entity::LineStyle& style);
 
 // A definition placed at a point. `size` is the width the definition is
-// scaled to - a 12d symbol `size`, which is a WIDTH the way Style::symbolSize
+// scaled to - a library symbol's `size`, which is a WIDTH the way Style::symbolSize
 // is - or 0 to use the definition at its own scale. `rotation` is radians
 // counter-clockwise.
 [[nodiscard]] StyleDrawing symbolDrawing(const FlatDefinition& flat,

@@ -2,7 +2,7 @@
 // (include/katana/cad/style_resolver.hpp): the viewport, the plot and every
 // preview ask here, so these are the rules all of them draw by.
 //
-// Every definition is built inline; nothing depends on the gitignored 12d
+// Every definition is built inline; nothing depends on the gitignored
 // reference files. Expected values are worked by hand in the comments.
 
 #include <gtest/gtest.h>
@@ -104,7 +104,7 @@ TEST(StyleResolver, ALibraryDefinitionBeatsTheBuiltInShapeOfTheSameName)
 TEST(StyleResolver, AnUnknownSymbolFallsBackToABuiltInShapeAndSaysSo)
 {
     const StyleLibrary empty;
-    // "SEWR Manhole Cover" is a real 12d name no library here defines; its
+    // "SEWR Manhole Cover" is a real library name no library here defines; its
     // words suggest the manhole, and the caller is told it is a guess.
     const auto guessed = katana::cad::resolveSymbol(empty, "SEWR Manhole Cover");
     EXPECT_EQ(guessed.kind, SymbolKind::BuiltInFallback);
@@ -178,9 +178,9 @@ TEST(StyleResolver, AVertexSymbolIsNeverALinePattern)
 
 TEST(StyleResolver, ALineWhoseLinetypeNamesItsOwnSymbolIsAPlainLine)
 {
-    // What the 12da import writes for a symbol string: name, linetype and
+    // What an archive import writes for a symbol string: name, linetype and
     // symbol all the symbol's name. The definition is NOT `mode vertex` - as
-    // 147 of the symbols the reference mapfiles use are not - and it used to
+    // 147 of the symbols the reference survey code files use are not - and it used to
     // be laid along the line as a pattern.
     const StyleLibrary library =
         libraryOf({definition("CULT Fence Post", {move(0, 0), draw(0, 1)})});
@@ -371,4 +371,31 @@ TEST(StyleResolver, AVertexSymbolGoesOnEveryVertexOfALineAndNowhereOnACircle)
     EXPECT_TRUE(
         katana::cad::symbolVertices(Geometry{katana::geometry::Circle2{Point2(0, 0), 1.0}})
             .empty());
+}
+
+// A drawing saved before the built-in customisation was given general names
+// still names the definitions that were renamed. The lookup every drawing path
+// shares tries the exact name first and asks the rename table only when that
+// misses: "Brand X" (invented; the table holds its hash) finds "X", while a
+// library that itself holds "Brand X" - a person's own definition - keeps it.
+TEST(StyleResolver, ADefinitionNamedAsItWasBeforeTheRenameIsFoundUnderItsNameNow)
+{
+    const std::vector<katana::cad::RenamedDefinition> renamed{
+        {katana::cad::sourceNameHash("Brand X"), "X"}};
+
+    StyleLibrary renamedOnly;
+    ASSERT_TRUE(renamedOnly.add(definition("X", {move(0, 0), draw(1, 0)})).ok());
+    const LineStyle* found = katana::cad::findDefinition(renamedOnly, "Brand X", renamed);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->name, "X");
+    EXPECT_EQ(katana::cad::findDefinition(renamedOnly, "X", renamed), found);
+
+    StyleLibrary both = renamedOnly;
+    ASSERT_TRUE(both.add(definition("Brand X", {move(0, 0), draw(0, 1)})).ok());
+    const LineStyle* own = katana::cad::findDefinition(both, "Brand X", renamed);
+    ASSERT_NE(own, nullptr);
+    EXPECT_EQ(own->name, "Brand X");
+
+    EXPECT_EQ(katana::cad::findDefinition(renamedOnly, "Other", renamed), nullptr);
+    EXPECT_EQ(katana::cad::findDefinition(renamedOnly, "", renamed), nullptr);
 }

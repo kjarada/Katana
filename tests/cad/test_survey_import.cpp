@@ -133,7 +133,7 @@ TEST(SurveyImport, ThePointKeepsItsNumberCodeDescriptionAndHeight)
     EXPECT_DOUBLE_EQ(realProperty(*entity, katana::entity::kElevationProperty), 42.125);
 }
 
-// The height goes in the property the 12d import writes and the surface builder
+// The height goes in the property the archive import writes and the surface builder
 // reads. A second name for it would build every drawing's surface flat.
 TEST(SurveyImport, TheHeightUsesTheSamePropertyTheSurfaceBuilderReads)
 {

@@ -1047,7 +1047,7 @@ TEST_F(ProjectStoreMigration, AStylesDescriptionAndSymbolSurviveSavingTwiceAndAn
     Model model = sampleModel();
     katana::entity::Style marked;
     marked.name = "TOPO Natural Surface Point";
-    marked.description = "12d colour: shade 48";
+    marked.description = "colour: shade 48";
     marked.symbol = "cross";
     marked.symbolSize = 1.5;
     ASSERT_TRUE(model.styles.add(marked).ok());

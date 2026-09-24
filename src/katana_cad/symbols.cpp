@@ -107,7 +107,7 @@ std::vector<Polyline2> symbolStrokes(std::string_view symbol, const Point2& cent
 {
     // Exact first, then the shape the name's words suggest. Katana used to
     // store the GUESS on the style and throw the real name away, which meant
-    // a loaded 12d symbol library could never be matched against it. The real
+    // a loaded symbol library could never be matched against it. The real
     // name is kept now, so the guess belongs here - at the last moment, when
     // nothing better has answered.
     Unit unit = unitShape(symbol);

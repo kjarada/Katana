@@ -299,7 +299,7 @@ using LinetypeDatabase = NamedTable<Linetype, LinetypePolicy>;
 // kNoSymbol draws the plain point mark of the viewport.
 inline constexpr std::string_view kNoSymbol = "";
 // The symbols Katana draws with no library loaded. NOT the set of names a
-// style may use: a loaded 12d symbol library adds hundreds more, so this is
+// style may use: a loaded symbol library adds hundreds more, so this is
 // what a chooser offers, not what validation allows.
 [[nodiscard]] const std::vector<std::string_view>& symbolNames();
 [[nodiscard]] bool isBuiltInSymbolName(std::string_view name);
@@ -307,8 +307,8 @@ inline constexpr std::string_view kNoSymbol = "";
 // linestyle with "Manhole" in it is drawn as a manhole rather than as
 // nothing. Always one of symbolNames(); "circle" when nothing matches.
 //
-// It lives here because the two layers that need it - the 12d reader, which
-// records real 12d names, and the drawing code, which has to put something
+// It lives here because the two layers that need it - the archive reader,
+// which records real library names, and the drawing code, which has to put something
 // on the page for a name no loaded library defines - cannot see each other.
 [[nodiscard]] std::string_view builtInSymbolFor(std::string_view name);
 
@@ -321,20 +321,20 @@ struct Style {
     // "none": a style that says nothing about hatching must not override a
     // layer that does.
     std::string hatchPattern{};
-    // What the style is for, or where it came from: a 12d linestyle arrives
-    // with its 12d colour name here, so a colour Katana has no RGB for is
+    // What the style is for, or where it came from: a library linestyle
+    // arrives with its colour name here, so a colour Katana has no RGB for is
     // still known by name. Appended last, as every field is, so the storage
     // columns keep their order.
     std::string description{};
     // How a POINT in this style is drawn: a name RESOLVED when it is drawn,
-    // against the loaded 12d symbol library first and symbolNames() after,
+    // against the loaded symbol library first and symbolNames() after,
     // or kNoSymbol for the viewport's plain mark. Not a closed set - see
-    // validate() - because a library brings hundreds of its own. A 12d vertex
-    // symbol is a linestyle drawn at a vertex, which is why the symbol lives
+    // validate() - because a library brings hundreds of its own. A library's
+    // vertex symbol is a linestyle drawn at a vertex, which is why the symbol lives
     // on the style and not on the point: "the style of a point" and "the
     // style of a line" are one thing.
     std::string symbol{kNoSymbol};
-    // The symbol's width in model units - a 12d symbol `size` - or 0 for the
+    // The symbol's width in model units - a library symbol's `size` - or 0 for the
     // viewport's default mark size.
     double symbolSize = 0.0;
 

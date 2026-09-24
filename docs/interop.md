@@ -414,8 +414,8 @@ than the zip (`UT5527 Appin Rd V5.12daz` holds `Appin Rd V5.12da`). So the
 importer does not predict the member's name; it takes the one member that is
 a `.12da`, and refuses an archive with two rather than guess.
 
-The same module holds 12d's CUSTOMISATION - the `.4d` linestyle and symbol
-libraries and the mapfile: their readers, their writers (`writeStyleLibrary`,
+The same module holds the CUSTOMISATION - the `.4d` linestyle and symbol
+libraries and the survey code file (`.mapfile`): their readers, their writers (`writeStyleLibrary`,
 `writeMapFile`), the loader that tells them apart by content, and
 `mergeCustomisation`, which loads one on top of another. None of that is the
 archive format, and it is recorded in `docs/survey_coding.md`.
@@ -543,8 +543,8 @@ The mapping is documented in full at the head of
   missing ones in the same transaction as the layers, so an import is still
   one undo step. A 12da says nothing about what a linestyle looks like, so a
   new style's LINETYPE is the 12d linestyle's own name, at the default weight
-  and described as "12d linestyle": a loaded 12d library draws it by that
-  name, and with none loaded the name resolves to nothing and the line is
+  and described as "library linestyle": a loaded style library draws it by
+  that name, and with none loaded the name resolves to nothing and the line is
   solid (`docs/cad.md`, "What a style draws"). This bullet used to say a new
   style was "continuous", which is what the import once wrote - and why no
   imported line ever drew its linestyle (`docs/survey_coding.md`, "The import
@@ -560,7 +560,7 @@ The mapping is documented in full at the head of
   the symbol's. A string with ONE symbol block - a one-vertex point, or a
   line of any length - takes that symbol as its whole appearance: its `style`
   becomes a style named after the symbol's linestyle, whose `symbol` is the
-  REAL 12d name and whose `symbolSize` is the block's size (described "12d
+  REAL 12d name and whose `symbolSize` is the block's size (described "library
   symbol"), and the symbol's colour is the entity's colour. The name is kept,
   not a guess at a shape: a loaded symbol library draws it, and only when
   nothing defines the name does the viewport fall back to the built-in shape
@@ -600,7 +600,7 @@ The mapping is documented in full at the head of
   `symbol` - never the style's own name (`domain_export.cpp`,
   `linestyleOf`). Import makes the two the same, so this changed nothing
   until someone renamed a style in Katana, at which point export used to
-  rename the linestyle 12d draws to one no 12d library defines. A ByLayer
+  rename the linestyle 12d draws to one no loaded library defines. A ByLayer
   entity - no style, or a style whose linetype is `ByLayer` (decision D2) -
   writes its LAYER's linetype. Katana's `continuous` goes out as `1`, 12d's
   default solid linestyle (manual 1.4.3), since 12d has no linestyle called

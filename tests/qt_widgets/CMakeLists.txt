@@ -12,7 +12,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
 # The customisation managers' shared pieces (the style painter the plan view
-# now draws 12d linestyles and symbols with, the thumbnails, the pickers) and
+# now draws library linestyles and symbols with, the thumbnails, the pickers) and
 # their dialogs, with the tests written for them: globbed, as they are in the
 # application, so their authors add files without editing this list.
 file(GLOB _qt_customisation_sources CONFIGURE_DEPENDS "${_qt_src}/customisation/*.cpp")
@@ -49,7 +49,7 @@ add_executable(katana_qt_widget_tests
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
-# katana_archive12d: the style painter names 12d pens through its colour table.
+# katana_archive12d: the style painter names library pens through its colour table.
 target_link_libraries(katana_qt_widget_tests PRIVATE
     katana_cad katana_interop katana_render katana_archive12d Qt6::Widgets GTest::gtest)
 katana_target_defaults(katana_qt_widget_tests)

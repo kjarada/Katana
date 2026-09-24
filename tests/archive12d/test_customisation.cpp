@@ -1,10 +1,12 @@
-// Loading a whole 12d customisation from files (PLAN.MD 20.3, slice 6).
+// Loading a whole customisation from files (PLAN.MD 20.3, slice 6), and the
+// customisation compiled into the build.
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
+#include <map>
 #include <string>
 
 #include "katana/archive12d/customisation.hpp"
@@ -73,7 +75,7 @@ TEST(Customisation, LibrariesAndMapfilesLoadTogetherWhateverOrderTheyAreGivenIn)
 
 TEST(Customisation, AFileThatCannotBeReadFailsTheLoadAndNamesIt)
 {
-    const auto notEither = writeTemporary("nonsense.4d", "this is not a 12d file at all");
+    const auto notEither = writeTemporary("nonsense.4d", "this is not a customisation file at all");
     const auto result = a12::readCustomisation({notEither});
     ASSERT_FALSE(result.ok());
     EXPECT_NE(result.error().describe().find("nonsense.4d"), std::string::npos)
@@ -125,11 +127,11 @@ TEST(Customisation, TheWholeReferenceCustomisationLoadsFromItsFiles)
     EXPECT_TRUE(shape->atVertices) << "a symbol is a linestyle drawn at a vertex";
 
     // A customisation need not be self-contained, and this one is not: five
-    // of the 426 names its mapfiles reference are defined by neither library
-    // - 12d's built-in plain lines "0" and "1", two symbols from 12d's own
-    // standard library, and one linestyle that is simply missing. Reporting
-    // them is the point: a name with nothing behind it draws plainly, and a
-    // person needs to know which.
+    // of the 426 names its survey code files reference are defined by neither
+    // library - the plain continuous lines "0" and "1", two symbols it expects
+    // a standard library to supply, and one linestyle that is simply missing.
+    // Reporting them is the point: a name with nothing behind it draws
+    // plainly, and a person needs to know which.
     EXPECT_EQ(loaded->unresolvedStyles().size(), 5u);
     const auto missing = loaded->unresolvedStyles();
     EXPECT_NE(std::find(missing.begin(), missing.end(), "0"), missing.end());
@@ -147,8 +149,8 @@ TEST(Customisation, ACustomisationIsFoundBesideTheApplicationWithoutBeingNamed)
     ASSERT_GE(places.size(), 2u);
     EXPECT_EQ(places[0], std::filesystem::path("/opt/katana/share/katana/customisation"));
 
-    // Nothing there is not an error: Katana then draws plain lines, as 12d
-    // does without a customisation.
+    // Nothing there is not an error: Katana then draws the plain continuous
+    // line.
     EXPECT_TRUE(a12::findCustomisation("/no/such/place/katana.exe").empty());
 }
 
@@ -175,4 +177,76 @@ TEST(Customisation, WhatIsFoundIsDecidedByLookingInsideEachFileNotByItsName)
     EXPECT_EQ(loaded->map.size(), 1u);
 
     std::filesystem::remove_all(directory.parent_path());
+}
+
+// ---- the customisation compiled into the build -------------------------------------------------
+//
+// These SKIP in a build made without one: it is third-party material under its
+// own licence, and the suite must stay green without it.
+
+namespace {
+
+bool builtInCustomisationPresent()
+{
+    const a12::Customisation& built = a12::builtinCustomisation();
+    return !built.files.empty() || !built.errors.empty();
+}
+
+} // namespace
+
+// Its files have general names, and are read in this order: the style
+// libraries' later file wins a definition both give (the symbol library, after
+// the linestyles), and the survey code files' earlier one wins a field both
+// give (survey_codes.mapfile, before the names file). Every definition says
+// which of the two libraries it came from.
+TEST(Customisation, TheBuiltInCustomisationIsFourGenerallyNamedFilesInLoadOrder)
+{
+    if (!builtInCustomisationPresent()) {
+        GTEST_SKIP() << "this build has no customisation compiled in";
+    }
+    const a12::Customisation& built = a12::builtinCustomisation();
+    EXPECT_TRUE(built.errors.empty()) << built.errors.front();
+    std::vector<std::string> names;
+    std::vector<a12::CustomisationFile> kinds;
+    for (const a12::LoadedFile& file : built.files) {
+        names.push_back(file.path.filename().string());
+        kinds.push_back(file.kind);
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"linestyles.4d", "survey_codes.mapfile",
+                                               "survey_codes_names.mapfile", "symbols.4d"}));
+    EXPECT_EQ(kinds, (std::vector<a12::CustomisationFile>{
+                         a12::CustomisationFile::StyleLibrary, a12::CustomisationFile::MapFile,
+                         a12::CustomisationFile::MapFile, a12::CustomisationFile::StyleLibrary}));
+    std::size_t elsewhere = 0;
+    built.library.forEach([&](const katana::entity::LineStyle& style) {
+        elsewhere += style.source == "linestyles.4d" || style.source == "symbols.4d" ? 0 : 1;
+    });
+    EXPECT_EQ(elsewhere, 0u) << "every definition comes from one of the two libraries";
+}
+
+// A group path says what a definition is (Survey/DRAIN, Design/LNMK). A word
+// put in front of most of them says only whose the customisation was, and is
+// not wanted: no first word - up to the first blank - may begin the group path
+// of more than half the built-in definitions. Nothing here names such a word;
+// the test finds it if there is one.
+TEST(Customisation, NoWordBeginsTheGroupPathOfMostBuiltInDefinitions)
+{
+    if (!builtInCustomisationPresent()) {
+        GTEST_SKIP() << "this build has no customisation compiled in";
+    }
+    const a12::Customisation& built = a12::builtinCustomisation();
+    std::map<std::string, std::size_t> firstWords;
+    std::size_t grouped = 0;
+    built.library.forEach([&](const katana::entity::LineStyle& style) {
+        if (style.group.empty()) {
+            return;
+        }
+        ++grouped;
+        ++firstWords[style.group.substr(0, style.group.find(' '))];
+    });
+    ASSERT_GT(grouped, 0u) << "the built-in definitions are grouped";
+    for (const auto& [word, count] : firstWords) {
+        EXPECT_LE(count * 2, grouped)
+            << "\"" << word << "\" begins " << count << " of " << grouped << " group paths";
+    }
 }

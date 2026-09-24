@@ -75,8 +75,8 @@ void makeColourField(QComboBox* box)
     box->setInsertPolicy(QComboBox::NoInsert);
     box->addItem(QString());
     // archive12d's own table, so the field offers exactly the names
-    // standardColour draws. A person may still type any other name: 12d
-    // defines colours per project, and a map's "sui water potable" is kept
+    // standardColour draws. A person may still type any other name: a
+    // project may define its own colours, and a map's "sui water potable" is kept
     // as written.
     for (const std::string& name : katana::archive12d::standardColourNames()) {
         const auto rgb = katana::archive12d::standardColour(name);

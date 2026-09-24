@@ -3,7 +3,7 @@
 // The styles and linetypes manager.
 //
 // One window for what decides how a line or a point is drawn: the drawing's
-// styles, its own dash linetypes and the session's 12d linestyles, with a
+// styles, its own dash linetypes and the session's library linestyles, with a
 // Diagnostics tab for the names nothing defines and the names two sources
 // define (decision D2's collisions). Everything it changes goes through the
 // ordinary commands, so every edit made here is on the same undo stack as one

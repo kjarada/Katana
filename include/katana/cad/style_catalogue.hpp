@@ -14,10 +14,11 @@
 //
 //   A library definition is offered as a SYMBOL if any of: it is `mode
 //   vertex`; a VertexSymbol rule of the survey map names it; a Style::symbol
-//   names it; its source file's name contains "symbol" in any case (12d's
-//   own user_symbols_*.4d). It is offered as a LINESTYLE if it is not `mode
-//   vertex`. It may be both: most symbols the reference mapfiles use are not
-//   `mode vertex`, which is why atVertices alone cannot decide.
+//   names it; its source file's name contains "symbol" in any case (symbol
+//   libraries are conventionally named *symbols*.4d). It is offered as a
+//   LINESTYLE if it is not `mode vertex`. It may be both: most symbols the
+//   reference survey code files use are not `mode vertex`, which is why
+//   atVertices alone cannot decide.
 //
 //   A picker never relies on its list being complete: keepCurrent puts the
 //   value being edited back, marked, when the list lacks it. That - not a
@@ -40,7 +41,7 @@ namespace katana::cad {
 
 enum class DefinitionSource {
     ModelLinetype, // a dash pattern in the model's Linetype table
-    Library,       // a 12d definition in the Document's StyleLibrary
+    Library,       // a library definition in the Document's StyleLibrary
     BuiltIn,       // one of Katana's own: a built-in symbol shape, or ByLayer
     Undefined,     // nothing defines it: a current value keepCurrent put back
 };
@@ -124,7 +125,7 @@ enum class NameRole { Linetype, Symbol };
 // a fallback.
 enum class NameStatus {
     Plain,     // names nothing: "", ByLayer, "continuous", "0", "1" in any case (D4)
-    OwnSymbol, // a style's linetype that is its own symbol's name - the 12da import's
+    OwnSymbol, // a style's linetype that is its own symbol's name - an archive import's
                // pattern for a symbol string - drawn as a plain line under the symbol (D8)
     Library,   // a loaded library definition draws it
     Katana,    // Katana draws it itself: a model linetype, or a built-in symbol shape
@@ -171,7 +172,7 @@ struct MissingName {
 // linestyle, a built-in symbol name ("cross" draws a cross; audit CAD-17),
 // ByLayer, the plain-line names "continuous", "0" and "1" in any case (D4),
 // and a style's linetype that is its own symbol's name (D8), which is what
-// the 12da import writes for every symbol string. Missing, as "not a
+// an archive import writes for every symbol string. Missing, as "not a
 // linestyle": a linetype naming only a `mode vertex` definition, which the
 // viewport draws solid and a linetype picker does not offer (D2, D3).
 [[nodiscard]] std::vector<MissingName> missingNames(const Document& document);

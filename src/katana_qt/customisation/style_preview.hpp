@@ -1,6 +1,6 @@
 #pragma once
 
-// A picture of what a style, a 12d linestyle or a 12d symbol draws, at a
+// A picture of what a style, a library linestyle or a library symbol draws, at a
 // plot scale, on paper or on the screen - the preview pane of the style
 // manager and the symbol library.
 //
@@ -25,15 +25,15 @@
 // SCALE. Lines are shown at their PRINTED size: a plot millimetre is
 // kPixelsPerPaperMillimetre pixels (a 96-dpi screen), and the model units one
 // plot millimetre covers are N / 1000 at 1:N (paperScale) - Katana drawings
-// are in METRES. So a 12d `paperstyle` looks the same at every scale while a
-// `worldstyle` or a model linetype shrinks as N grows, which is exactly what
+// are in METRES. So a paper linestyle looks the same at every scale while a
+// world linestyle or a model linetype shrinks as N grows, which is exactly what
 // choosing a scale is for. A symbol is fitted to the pane instead (at 96 dpi
 // a 3 mm symbol would be 11 pixels), centred on its insertion point; the
 // scale still sizes a paper symbol on the ground, and the scale bar, always
 // in ground metres, says how big it is.
 //
 // GROUND. Paper is white, and a white or near-white pen prints black there
-// (cad::paperColour, decision D7) - the entity pen and every 12d pen. The
+// (cad::paperColour, decision D7) - the entity pen and every library pen. The
 // screen is the viewport's dark ground. With no colour of its own (ByLayer)
 // the entity pen is a new layer's white: white on screen, black on paper.
 //
