@@ -2,8 +2,10 @@
 //
 // Fixtures are hand-built from the TDS Raw Data Record Specification (Survey
 // Pro 3.6) and the Carlson SurvCE RW5 format 3.03; gnss.rw5 is made of the
-// SurvCE document's own sample records. Every expected value is worked below
-// from the record text, not taken from the reader's output.
+// SurvCE 3.03 document's own sample records, and survce250_us_feet.rw5 is the
+// sample job printed in Carlson's "SurvCE Version 2.50 Raw File records". Every
+// expected value is worked below from the record text, not taken from the
+// reader's output.
 
 #include <gtest/gtest.h>
 
