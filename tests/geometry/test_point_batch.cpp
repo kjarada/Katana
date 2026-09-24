@@ -184,12 +184,16 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
 {
     // expand() replaces its running minimum only by something strictly less,
     // and -0 < +0 is false, so of the zeros the first one met stays. x runs
-    // 1, -0, 2, 3, 4, 5, +0, 6, 7: the minimum is the -0 at place 1, even
-    // though the AVX2 path meets the +0 at place 6 in another lane first.
+    // 1, 2, 3, -0, +0, 5, 6, 7, 8: the minimum is the -0 at place 3.
+    //
+    // The places are chosen against the AVX2 path, which keeps one running
+    // minimum per lane - point i in lane i mod 4 - and folds the lanes 0 to 3
+    // at the end: it meets the +0 at place 4 (lane 0) before the -0 at place 3
+    // (lane 3), so a kernel that merely folded would answer +0.
+    const double xs[] = {1.0, 2.0, 3.0, -0.0, 0.0, 5.0, 6.0, 7.0, 8.0};
     std::vector<Point2> points;
-    const double xs[] = {1.0, -0.0, 2.0, 3.0, 4.0, 5.0, 0.0, 6.0, 7.0};
     for (const double x : xs) {
-        points.emplace_back(x, -x); // y: the maximum is -(-0) = +0 at place 1
+        points.emplace_back(x, -x); // y: the maximum is -(-0) = +0 at place 3
     }
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
@@ -202,7 +206,7 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
         EXPECT_FALSE(std::signbit(box.max.y)) << katana::core::toString(level);
     }
     // And the other way round: +0 first.
-    std::swap(points[1], points[6]);
+    std::swap(points[3], points[4]);
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
             continue;
