@@ -1,0 +1,20 @@
+1.0                 COMPACT RINEX FORMAT                    CRINEX VERS   / TYPE
+RNX2CRX ver.4.1.0                       12-Sep-24 12:00     CRINEX PROG / DATE
+     2.11           OBSERVATION DATA    M (MIXED)           RINEX VERSION / TYPE
+katana fixture      hand built          20240912 120000 UTC PGM / RUN BY / DATE
+synthetic, from RINEX 2.11 tables A1 and A2                 COMMENT
+TEST                                                        MARKER NAME
+12345M001                                                   MARKER NUMBER
+A SURVEYOR          KATANA TESTS                            OBSERVER / AGENCY
+5001234             LEICA GR50          4.50/7.000          REC # / TYPE / VERS
+7654321             LEIAR20         LEIM                    ANT # / TYPE
+ -4646000.1234  2553000.5678 -3534000.9012                  APPROX POSITION XYZ
+        1.5230        0.0010       -0.0020                  ANTENNA: DELTA H/E/N
+     1     1                                                WAVELENGTH FACT L1/2
+     7    C1    L1    L2    P2    D1    S1    S2            # / TYPES OF OBSERV
+    30.000                                                  INTERVAL
+  2024     9    12    10     0    0.0000000     GPS         TIME OF FIRST OBS
+  2024     9    12    10     2    0.0000000     GPS         TIME OF LAST OBS
+    18                                                      LEAP SECONDS
+                                                            END OF HEADER
+&24  9 12 10  0  0.0000000  0 14G01G02G03G04G05G06G07G08G09R01R02R03R04R05
