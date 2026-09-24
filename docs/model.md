@@ -5,7 +5,8 @@ drawing data, the only way to change it, and how it is persisted.
 
 ## Purpose
 
-The domain model is the single source of truth (PLAN.MD Rule 3). The renderer,
+The domain model is the single source of truth (Rule 3,
+`docs/architecture.md`). The renderer,
 the property panel and the command line all read from it and none of them keeps
 a private copy that could drift. Every modification goes through a command, so
 every modification is validated, atomic, undoable and observable — including,
@@ -77,9 +78,10 @@ tables. Layer `"0"` always exists and cannot be removed or renamed.
 `PropertyDatabase` holds an optional schema: a property that has been defined is
 type-checked on assignment, and one that has not is free-form.
 
-`Model` aggregates the entities, the layers and the six named tables - styles,
-linetypes, dimension styles, hatch patterns, alignments - and the property
-schema (`model.hpp`; this said "all four" from before the tables existed).
+`Model` aggregates the entities, the six name-keyed tables - layers, styles,
+linetypes, dimension styles, hatch patterns and alignments - and the property
+schema (`model.hpp`; this said "all four" from before the tables existed, and
+then named five of the six).
 
 ## Command system
 
@@ -132,8 +134,8 @@ Available commands: `CREATE_POINT`/`LINE`/`CIRCLE`/`ARC`/`POLYLINE`/`TEXT`/
 `RenameLayer`, and create / update / delete / rename / merge / duplicate for
 each named table, plus `PurgeTables` (one template set over a `TablePolicy`,
 `table_commands.cpp`; see "Named tables" below). The upper-case names
-are stable identifiers meant to become the vocabulary of the structured API in
-Phase 23; the layer-tree and table commands are named in CamelCase
+are stable identifiers meant to become the vocabulary of the structured application
+API (Rule 2); the layer-tree and table commands are named in CamelCase
 (`CreateLinetype`), which is an inconsistency to settle before that API is
 written, not a second convention to follow.
 
@@ -192,6 +194,30 @@ faster. Properties, metadata and property defaults are JSON text via
 translation unit and keeps those readable for debugging and diffing. (This
 paragraph said geometry was JSON too, from before schema 3.)
 
+### The tables, and the migration that made each
+
+`kMigrations` in `src/katana_storage/project_store.cpp` is the schema's
+history and its reference: each entry's comment says why the change was made
+and why no existing row needed repairing. The file is marked as a Katana
+project by `PRAGMA application_id` ("KTNA") and versioned by
+`PRAGMA user_version`. At schema 9 it holds fourteen tables:
+
+| Migration | Adds |
+|---|---|
+| 1 | `metadata` (key and value), `layers`, `styles`, `property_definitions`, `entities` (indexed by layer and by type) |
+| 2 | `relationships` between entities (indexed both ways) |
+| 3 | `entities.geometry_blob`: geometry as a binary blob, beside the old JSON column, which a load falls back to and a save converts |
+| 4 | `linetypes` and `linetype_elements` (the dashes in order, a row each) |
+| 5 | `dimension_styles`, and the layer column naming one |
+| 6 | `hatch_patterns` and `hatch_families`, and the layer and style columns naming one |
+| 7 | `alignments` and `alignment_pis`: the PI definition only; the elements are solved on load |
+| 8 | `alignment_pvis`: an alignment's design profile |
+| 9 | a style's `description`, `symbol` and `symbol_size` |
+
+A new table or column is a new entry at the end, never an edit of a released
+one, and each default is chosen so that a project written before it draws
+exactly as it did.
+
 ### Metadata a newer build wrote
 
 The `metadata` table is key and value, and it is the one table `save` does not
@@ -237,12 +263,11 @@ the store, and rebuilds the stack when the document is replaced.
 
 Entity lookup, insertion and removal are O(log n); `bounds()` and layer queries
 are O(n). `std::map` was chosen for ordering and simplicity, not for speed; the
-plan requires profiling before optimisation, and the structure-of-arrays layout
-contemplated in PLAN.MD §33 is a Phase 19 decision to be taken with measurements
-in hand. Save and load are O(n) in entities with one prepared statement reused
+rules require profiling before optimisation (Rule 6), and a structure-of-arrays
+layout is a decision to be taken with measurements in hand. Save and load are O(n) in entities with one prepared statement reused
 across rows.
 
-Against PLAN.MD §32's targets, the operations in this layer — command execution,
+Against the performance targets (`docs/architecture.md`), the operations in this layer — command execution,
 undo/redo — are far below the 100 ms and 50 ms budgets at drafting scale; they
 have not yet been measured on a 10⁶-entity drawing.
 
@@ -333,12 +358,13 @@ under a name that claims full coverage:
 
 ### Then
 
-Update the `static_assert` count, this document, `PLAN.MD` and `README.md`.
+Update the `static_assert` count and this document, in the same commit as the
+new kind (`docs/index.md` says which other documents a change reaches).
 
 ## Layer visibility and lock: one rule, asked everywhere
 
 A layer is shown when it and every ancestor is visible, and locked when it or
-any ancestor is locked (PLAN.MD 5.1). The rule has one implementation,
+any ancestor is locked (nested layers, plan item 5.1). The rule has one implementation,
 `LayerDatabase::resolve`, and every consumer goes through it - `cad::isDrawn`
 and `cad::isSelectable`, which the viewport, the plot, picking, box selection,
 snapping, the 3D scene, sections and Surface From Drawing ask, and the
