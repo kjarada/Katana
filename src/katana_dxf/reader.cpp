@@ -2268,6 +2268,7 @@ Result<DxfImport> readDxf(std::string_view bytes, const ImportOptions& options)
     if (!(options.curveTolerance > 0.0) || !std::isfinite(options.curveTolerance)) {
         return makeError(ErrorCode::InvalidArgument, "the curve tolerance must be positive");
     }
+    // The sentinel every binary DXF begins with: the format's own bytes.
     if (bytes.starts_with("AutoCAD Binary DXF")) {
         return makeError(ErrorCode::Unsupported,
                          "binary DXF is not read; save the drawing as ASCII DXF");
