@@ -20,8 +20,8 @@ using katana::core::makeError;
 
 // A style library's first real content is a block header - `worldstyle "..."`
 // - and the files open with a wall of `//` comments, so looking for the
-// keyword anywhere is what tells them apart. A mapfile is XML and says
-// <map_file>.
+// keyword anywhere is what tells them apart. A survey code file (a mapfile)
+// is XML and says <map_file>.
 [[nodiscard]] bool looksLikeStyleLibrary(std::string_view text)
 {
     for (const std::string_view keyword : {"worldstyle", "paperstyle", "twoptstyle"}) {
@@ -36,7 +36,7 @@ using katana::core::makeError;
 
 const char* toString(CustomisationFile kind)
 {
-    return kind == CustomisationFile::MapFile ? "mapfile" : "style library";
+    return kind == CustomisationFile::MapFile ? "survey code file" : "style library";
 }
 
 katana::core::Result<CustomisationFile> customisationKind(std::string_view text)
@@ -48,7 +48,7 @@ katana::core::Result<CustomisationFile> customisationKind(std::string_view text)
         return CustomisationFile::StyleLibrary;
     }
     return makeError(ErrorCode::InvalidArgument,
-                     "this is neither a 12d mapfile nor a linestyle or symbol library");
+                     "this is neither a survey code file nor a linestyle or symbol library");
 }
 
 std::vector<std::string> Customisation::unresolvedStyles() const
@@ -104,8 +104,9 @@ customisationSearchPath(const std::filesystem::path& executable)
     const std::filesystem::path bin =
         executable.has_parent_path() ? executable.parent_path() : std::filesystem::current_path(ignored);
     places.push_back(bin.parent_path() / "share" / "katana" / "customisation");
-    // A development tree: bin is <source>/build/<config>/bin.
-    places.push_back(bin.parent_path().parent_path().parent_path() / "docs" / "12d Refrence Files");
+    // A development tree: bin is <source>/build/<config>/bin, and the source
+    // keeps its customisation where the build compiles it in from by default.
+    places.push_back(bin.parent_path().parent_path().parent_path() / "resources" / "customisation");
     return places;
 }
 
