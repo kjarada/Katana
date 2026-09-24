@@ -6,7 +6,7 @@
 // Direct3D 11 backend compiles it with d3dcompiler_47.dll - part of every
 // Windows 10 and 11 install - when the pipeline is created. No build-time
 // tool and no package: the price is Direct3D 11 only, and a compile on the
-// first frame (measured 28-121 ms, map_accel).
+// first frame (docs/gpu.md, "Measurements", BM_GpuStartUp).
 //
 // LATER: precompiled shaders. Qt's `qsb` tool (package qt6-shadertools, not
 // installed; the owner has not approved adding it) turns one Vulkan-style GLSL

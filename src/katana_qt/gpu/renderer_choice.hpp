@@ -6,7 +6,7 @@
 // The software rasteriser is not going away. It is the only renderer that
 // works under Qt's offscreen platform, where every test and every headless
 // screenshot runs (QRhiWidget reports renderFailed there for every graphics
-// API - measured, map_accel); it is the bit-exact reference the GPU is tested
+// API; GpuSceneView's offscreen test shows it); it is the bit-exact reference the GPU is tested
 // against; and it is what a machine whose GPU or driver misbehaves falls back
 // to. So a view that can host both asks this function, once when it is built
 // and again whenever something below changes, and follows the answer.
