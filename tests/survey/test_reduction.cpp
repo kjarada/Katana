@@ -431,12 +431,14 @@ TEST(Reduction, TheFacePairOfTheOwnersNeuralSurveyEngineMeansToItsValues)
     EXPECT_NEAR(*zenith->reduced, 1.39985, 1e-12);
 }
 
-TEST(Reduction, ASetupWhoseBacksightALaterSetupRadiatesIsOrientedOnItAfterAll)
+namespace {
+
+// S1 stands on A but backsights P1, which nothing has placed yet; S2 on B
+// radiates P1 (azimuth B -> A is 180, reading 0 on A, P1 at reading 90 is
+// azimuth 270, 50 m: P1 = N 1100, E 950). S1 is then oriented on P1:
+// azimuth A -> P1 = atan2(-50, 100) = 333 26 05.8, and radiates Q.
+SurveyProject laterBacksight()
 {
-    // S1 stands on A but backsights P1, which nothing has placed yet; S2 on
-    // B radiates P1 (azimuth B -> A is 180, reading 0 on A, P1 at reading 90
-    // is azimuth 270, 50 m: P1 = N 1100, E 950). S1 is then oriented on P1:
-    // azimuth A -> P1 = atan2(-50, 100) = 333 26 05.8, and radiates Q.
     SurveyProject project;
     project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
     project.points.push_back(point("B", 1100.0, 1000.0, 50.0));
@@ -448,20 +450,133 @@ TEST(Reduction, ASetupWhoseBacksightALaterSetupRadiatesIsOrientedOnItAfterAll)
     project.stations.push_back(setup("S2", "B", 1.5, "A",
                                      {Shot{"A", 1, Face::Left, deg(0), deg(90), 100.0, 1.5},
                                       Shot{"P1", 2, Face::Left, deg(90), deg(90), 50.0, 1.5}}));
-    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
-    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
-    const ComputedPoint* p1 = findPoint(*outcome, "P1");
+    return project;
+}
+
+// P1 and Q where laterBacksight() puts them. Q: azimuth 333 26 05.8 + 90 =
+// 63 26 05.8 from A, 20 m: N = 1000 + 20 cos(63.434949) = 1008.944272,
+// E = 1000 + 20 sin(63.434949) = 1017.888544.
+void expectLaterBacksightCoordinates(const ReductionOutcome& outcome)
+{
+    const ComputedPoint* p1 = findPoint(outcome, "P1");
     ASSERT_NE(p1, nullptr);
-    EXPECT_NEAR(p1->northing, 1100.0, 1e-9);
-    EXPECT_NEAR(p1->easting, 950.0, 1e-9);
-    // Q: azimuth 333 26 05.8 + 90 = 63 26 05.8 from A, 20 m:
-    //   N = 1000 + 20 cos(63.434949) = 1008.944272, E = 1000 + 20 sin = 1017.888544.
-    const ComputedPoint* q = findPoint(*outcome, "Q");
+    EXPECT_NEAR(p1->northing, 1100.0, 1e-6);
+    EXPECT_NEAR(p1->easting, 950.0, 1e-6);
+    const ComputedPoint* q = findPoint(outcome, "Q");
     ASSERT_NE(q, nullptr);
     EXPECT_NEAR(q->northing, 1008.944272, 1e-6);
     EXPECT_NEAR(q->easting, 1017.888544, 1e-6);
-    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
-    for (const ReportMessage& warning : outcome->report.warnings) {
-        EXPECT_EQ(warning.text.find("cannot be oriented"), std::string::npos) << warning.text;
+}
+
+std::size_t warningsWith(const ReductionReport& report, const std::string& words)
+{
+    std::size_t count = 0;
+    for (const ReportMessage& warning : report.warnings) {
+        count += warning.text.find(words) != std::string::npos ? 1 : 0;
     }
+    return count;
+}
+
+} // namespace
+
+TEST(Reduction, ASetupWhoseBacksightALaterSetupRadiatesIsOrientedOnItAfterAll)
+{
+    const auto outcome = reduceAndAdjust(laterBacksight(), bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    expectLaterBacksightCoordinates(*outcome);
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    EXPECT_EQ(warningsWith(outcome->report, "cannot be oriented"), 0U);
+}
+
+TEST(Reduction, ACircleSetOnABacksightWithNoPositionYetWaitsForTheBacksightsCoordinates)
+{
+    // As above, but the file records the circle set on each backsight,
+    // 0 00 00, as a controller does whether or not it is a grid azimuth. S1's
+    // circle must not stand in for the azimuth A -> P1 while a later setup can
+    // still place P1: taken at once it would put P1 at N 1111.803 E 1000 and
+    // Q at N 1000 E 1020, and S2's P1 would be a 51 m "check".
+    SurveyProject project = laterBacksight();
+    project.stations[0].backsightAzimuth = 0.0;
+    project.stations[1].backsightAzimuth = 0.0;
+
+    const auto radiated = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(radiated.ok()) << radiated.error().describe();
+    expectLaterBacksightCoordinates(*radiated);
+    // S1 oriented on P1's coordinates: 333 26 05.8 - reading 0.
+    ASSERT_TRUE(radiated->report.setups[0].orientationCorrection.has_value());
+    EXPECT_NEAR(*radiated->report.setups[0].orientationCorrection, std::atan2(-50.0, 100.0),
+                1e-12);
+    // Nothing was checked against a wrong position, and no circle was used.
+    EXPECT_TRUE(radiated->report.misclosures.empty());
+    EXPECT_EQ(warningsWith(radiated->report, "circle"), 0U);
+
+    // The network, A and B held: P1 from S2's angle and distance and S1's
+    // distance (111.803399 against sqrt(100^2 + 50^2) = 111.8033989, a
+    // 0.1 micrometre residual), with no azimuth from a circle among them.
+    ReductionSettings settings = bareSettings();
+    settings.method = AdjustmentMethod::Network;
+    settings.control = {ControlSelection{ControlPoint::fixedHorizontal("A")},
+                        ControlSelection{ControlPoint::fixedHorizontal("B")}};
+    const auto adjusted = reduceAndAdjust(project, settings, {});
+    ASSERT_TRUE(adjusted.ok()) << adjusted.error().describe();
+    expectLaterBacksightCoordinates(*adjusted);
+    ASSERT_EQ(adjusted->report.adjustments.size(), 1U);
+    const AdjustmentReport& network = adjusted->report.adjustments[0];
+    ASSERT_TRUE(network.varianceFactor.has_value());
+    EXPECT_LT(*network.varianceFactor, 1e-6);
+    for (const ReportResidual& residual : network.residuals) {
+        EXPECT_EQ(residual.observation.find("circle"), std::string::npos) << residual.observation;
+    }
+}
+
+TEST(Reduction, ASetupWhoseBacksightNothingPlacesIsOrientedOnTheCircleAsSetAndTheReportSaysSo)
+{
+    // S1 on A backsights RO, which no coordinates and no other setup give.
+    // The circle set on RO, 30 00 00, is then the only orientation there is:
+    //   orientation = 30 - reading 0 on RO = 30;
+    //   Q at reading 90 is azimuth 120, 20 m:
+    //     N = 1000 + 20 cos 120 = 990, E = 1000 + 20 sin 120 = 1017.320508;
+    //   RO at reading 0 is azimuth 30, 100 m:
+    //     N = 1000 + 100 cos 30 = 1086.602540, E = 1000 + 100 sin 30 = 1050.
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
+    project.unpositionedPoints.push_back(unpositioned("RO"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    project.stations.push_back(setup("S1", "A", 1.5, "RO",
+                                     {Shot{"RO", 1, Face::Left, deg(0), deg(90), 100.0, 1.5},
+                                      Shot{"Q", 2, Face::Left, deg(90), deg(90), 20.0, 1.5}}));
+    project.stations[0].backsightAzimuth = deg(30);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 990.0, 1e-9);
+    EXPECT_NEAR(q->easting, 1017.320508, 1e-6);
+    const ComputedPoint* ro = findPoint(*outcome, "RO");
+    ASSERT_NE(ro, nullptr);
+    EXPECT_NEAR(ro->northing, 1086.602540, 1e-6);
+    EXPECT_NEAR(ro->easting, 1050.0, 1e-9);
+    EXPECT_NEAR(*outcome->report.setups[0].orientationCorrection, deg(30), 1e-12);
+    EXPECT_EQ(warningsWith(outcome->report,
+                           "Setup S1: its backsight has no position, so its directions were "
+                           "oriented on the circle reading set on the backsight"),
+              1U);
+}
+
+TEST(Reduction, ASetupTriedAgainForItsBacksightSaysEachThingOnce)
+{
+    // laterBacksight() with no heights and distances reduced to the geoid:
+    // S1 is reduced once while P1 has no position and again once S2 has
+    // placed it. "Its point A has no height" is one sentence, not two. (With
+    // no height nothing is reduced, so the coordinates stay the ones above.)
+    SurveyProject project = laterBacksight();
+    project.points[0].elevation.reset();
+    project.points[1].elevation.reset();
+    ReductionSettings settings = bareSettings();
+    settings.heightReduction = HeightReduction::Geoid;
+    const auto outcome = reduceAndAdjust(project, settings, {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    EXPECT_EQ(warningsWith(outcome->report, "Setup S1: its point A has no height"), 1U);
+    EXPECT_EQ(warningsWith(outcome->report, "Setup S2: its point B has no height"), 1U);
+    expectLaterBacksightCoordinates(*outcome);
 }

@@ -993,7 +993,8 @@ Status adjustAsNetwork(Engine& engine)
                 source, nullptr});
         }
     }
-    for (const Observation& observation : engine.raw.observations) {
+    for (std::size_t i = 0; i < engine.raw.observations.size(); ++i) {
+        const Observation& observation = engine.raw.observations[i];
         const auto points = referencedPoints(observation);
         const bool isLevel = std::holds_alternative<LevelDifferenceObservation>(observation);
         const auto& among = isLevel ? levelPresent : present;
@@ -1018,16 +1019,24 @@ Status adjustAsNetwork(Engine& engine)
                 source, nullptr});
         } else if (const auto* global = std::get_if<GnssGlobalPositionObservation>(&observation);
                    global && horizontal) {
-            // Converted in the seeding pass; enters as a grid position.
+            // Converted in the seeding pass; enters as a grid position, each
+            // occupation with its own value and precision. A point that is
+            // control or keyed in keeps what it went in with, as in radiation.
             const Position* position = engine.find(global->point);
-            if (position != nullptr && position->origin == PositionOrigin::Gnss) {
-                const double sigma = position->sigmaNorthing.value_or(apriori.gnssHorizontal);
-                horizontalInputs.observations.push_back(NetworkObservation{
-                    GnssPositionObservation{global->point, position->northing, position->easting,
-                                            position->height.value_or(0.0), sigma, sigma,
-                                            position->sigmaHeight.value_or(apriori.gnssVertical),
-                                            source},
-                    "GNSS position " + global->point, source, nullptr});
+            const std::optional<GlobalGridPosition>& converted = engine.globalPositions[i];
+            if (converted && position != nullptr && position->origin == PositionOrigin::Gnss) {
+                NetworkObservation entry{
+                    GnssPositionObservation{global->point, converted->northing, converted->easting,
+                                            converted->height.value_or(0.0),
+                                            converted->sigmaHorizontal, converted->sigmaHorizontal,
+                                            converted->sigmaVertical, source},
+                    "GNSS position " + global->point +
+                        (source.recordNumber != 0
+                             ? " (record " + std::to_string(source.recordNumber) + ")"
+                             : std::string{}),
+                    source, nullptr};
+                entry.row = converted->row;
+                horizontalInputs.observations.push_back(std::move(entry));
             }
         }
     }
