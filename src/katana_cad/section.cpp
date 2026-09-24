@@ -9,7 +9,10 @@
 #include <variant>
 
 #include "katana/cad/selection.hpp"
+#include "katana/cad/spatial_query.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/intersection.hpp"
+#include "katana/geometry/spatial_index.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad {
@@ -296,19 +299,78 @@ Result<Section> extractSection(const Polyline2& alignment,
             section.crossings.push_back(std::move(crossing));
         };
 
+        // Bounding-box rejection before any intersection is computed. The
+        // search used to intersect every alignment segment with every segment
+        // of every entity in the model; a box test is four comparisons, and
+        // on a real drawing almost every pair fails it.
+        //
+        // The boxes are grown by a margin because intersect() accepts a
+        // crossing within kGeometric of BOTH curves: a crossing point can lie
+        // up to kGeometric outside either exact box, so exact boxes could
+        // reject a pair that intersect() would have reported. Ten times the
+        // tolerance covers that and the rounding of the point itself; a
+        // generous margin costs nothing, a tight one would lose crossings.
+        const double margin = 10.0 * tol::kGeometric;
+        std::vector<Box2> alongBoxes;
+        alongBoxes.reserve(cleaned.segmentCount());
+        Box2 reach;
+        for (std::size_t s = 0; s < cleaned.segmentCount(); ++s) {
+            alongBoxes.push_back(cleaned.segment(s).boundingBox().inflated(margin));
+            reach.expand(alongBoxes.back());
+        }
+
         katana::geometry::IntersectionResult hit;
-        model->entities.forEach([&](const Entity& entity) {
+        const auto visit = [&](const Entity& entity) {
+            const auto* polyline = std::get_if<Polyline2>(&entity.geometry);
+            // Text, points and dimensions carry no plan curve and cross
+            // nothing (appendCrossings); leaving them out here also spares
+            // them the box computation.
+            if (polyline == nullptr && !std::holds_alternative<Segment2>(entity.geometry) &&
+                !std::holds_alternative<katana::geometry::Circle2>(entity.geometry) &&
+                !std::holds_alternative<katana::geometry::Arc2>(entity.geometry)) {
+                return;
+            }
             // The document rule: a section is cut once and shared, so it must
             // not depend on which view was active. A view that hides a layer
             // drops that layer's crossings when it paints them.
             if (!isDrawn(*model, entity, kNoLayerOverrides)) {
                 return; // what the plan hides is not on the section either
             }
+            const Box2 extent = katana::entity::boundingBox(entity.geometry);
+            if (!extent.intersects(reach)) {
+                return;
+            }
             for (std::size_t s = 0; s < cleaned.segmentCount(); ++s) {
+                if (!extent.intersects(alongBoxes[s])) {
+                    continue;
+                }
                 const Segment2 along = cleaned.segment(s);
-                if (const auto* polyline = std::get_if<Polyline2>(&entity.geometry)) {
+                if (polyline != nullptr) {
+                    // A long alignment's box covers most of the drawing, so
+                    // for it the box test rejects little. The sharper test:
+                    // an edge with both ends on the same side of the
+                    // alignment's line, each further than the margin from it,
+                    // cannot come within kGeometric of it. The cross product
+                    // is the distance times the segment's length, hence the
+                    // scaled threshold; its rounding (about 1e-16 of the
+                    // product of two lengths) is far inside the margin.
+                    const katana::geometry::Vec2 direction = along.delta();
+                    const double across = margin * direction.length();
+                    const auto side = [&](const Point2& p) {
+                        return direction.cross(p - along.start);
+                    };
                     for (std::size_t i = 0; i < polyline->segmentCount(); ++i) {
-                        const auto piece = intersect(along, polyline->segment(i));
+                        const Segment2 edge = polyline->segment(i);
+                        if (!edge.boundingBox().intersects(alongBoxes[s])) {
+                            continue;
+                        }
+                        const double sideStart = side(edge.start);
+                        const double sideEnd = side(edge.end);
+                        if ((sideStart > across && sideEnd > across) ||
+                            (sideStart < -across && sideEnd < -across)) {
+                            continue;
+                        }
+                        const auto piece = intersect(along, edge);
                         if (piece.kind != katana::geometry::IntersectionKind::Points) {
                             continue;
                         }
@@ -326,7 +388,27 @@ Result<Section> extractSection(const Polyline2& alignment,
                     record(entity, s, along, hit.points[k]);
                 }
             }
-        });
+        };
+
+        // Entities in ascending id either way - the index returns its ids
+        // sorted, and the model walks its map in key order - so the crossings
+        // reach the stable sort below in the same order and ties at one
+        // station keep the same order with or without the index.
+        const katana::geometry::SpatialIndex* index = options.spatialIndex;
+        if (index != nullptr && detail::worthIndexing(*index, reach)) {
+            std::vector<katana::geometry::SpatialId> ids;
+            index->query(reach, ids);
+            for (const katana::geometry::SpatialId id : ids) {
+                // A stale id (an index that outlived its entity) is skipped:
+                // a narrower answer, never a dangling reference.
+                if (const Entity* entity =
+                        model->entities.find(static_cast<katana::entity::EntityId>(id))) {
+                    visit(*entity);
+                }
+            }
+        } else {
+            model->entities.forEach(visit);
+        }
         std::stable_sort(section.crossings.begin(), section.crossings.end(),
                          [](const SectionCrossing& a, const SectionCrossing& b) {
                              return a.station < b.station;

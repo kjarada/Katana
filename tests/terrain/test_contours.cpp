@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <vector>
 
+#include "katana/core/task_pool.hpp"
 #include "katana/geometry/polygon.hpp"
 #include "katana/terrain/contours.hpp"
 #include "terrain_test_support.hpp"
@@ -357,4 +360,77 @@ TEST_F(RoughGround, ContoursStayOnTheSurfaceAndOpenOnesEndOnItsRim)
     }
     EXPECT_GT(open, 0u);
     EXPECT_GT(rings, 0u);
+}
+
+// ---- parallel tracing: identical at any thread count -------------------------------------
+
+TEST(Contours, AreIdenticalOnOneThreadAndOnMany)
+{
+    // Rolling ground over 200 m with 3000 random points and a 0.1 m interval:
+    // some forty levels with open contours, rings and several pieces per
+    // level, so levels really are traced on different threads, and the
+    // chunks of levels differ with the thread count while the answer must
+    // not.
+    Random random(23);
+    std::vector<Point3> points;
+    const auto height = [](double x, double y) {
+        return 12.0 + 1.5 * std::sin(x * 0.07) * std::cos(y * 0.05) + 0.004 * x;
+    };
+    for (int i = 0; i < 3000; ++i) {
+        const double x = random.real(0.0, 200.0);
+        const double y = random.real(0.0, 200.0);
+        points.emplace_back(x, y, height(x, y));
+    }
+    const TinSurface surface = buildFromPoints(std::move(points));
+    ASSERT_FALSE(surface.empty());
+
+    katana::core::TaskPool inlineOnly(0);
+    const auto serial = contours(surface, 0.1, 0.0, 5, &inlineOnly);
+    ASSERT_TRUE(serial.ok()) << serial.error().describe();
+    ASSERT_GT(serial.value().size(), 40u);
+
+    const auto sameBits = [](double a, double b) {
+        return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
+    };
+    for (const std::size_t workers : {1u, 3u, 15u}) {
+        katana::core::TaskPool pool(workers);
+        const auto parallel = contours(surface, 0.1, 0.0, 5, &pool);
+        ASSERT_TRUE(parallel.ok()) << parallel.error().describe();
+        SCOPED_TRACE(workers);
+        ASSERT_EQ(parallel.value().size(), serial.value().size());
+        for (std::size_t i = 0; i < serial.value().size(); ++i) {
+            const Contour& a = serial.value()[i];
+            const Contour& b = parallel.value()[i];
+            ASSERT_TRUE(sameBits(a.elevation, b.elevation)) << "contour " << i;
+            ASSERT_EQ(a.major, b.major) << "contour " << i;
+            ASSERT_EQ(a.line.closed, b.line.closed) << "contour " << i;
+            ASSERT_EQ(a.line.vertices.size(), b.line.vertices.size()) << "contour " << i;
+            for (std::size_t v = 0; v < a.line.vertices.size(); ++v) {
+                ASSERT_TRUE(sameBits(a.line.vertices[v].x, b.line.vertices[v].x) &&
+                            sameBits(a.line.vertices[v].y, b.line.vertices[v].y))
+                    << "contour " << i << " vertex " << v;
+            }
+        }
+    }
+}
+
+TEST(Contours, StayInAscendingLevelOrderWhenTracedInParallel)
+{
+    // The documented order - levels ascending - is what joining the per-level
+    // lists in level order has to keep, whichever thread finished first.
+    Random random(29);
+    std::vector<Point3> points;
+    for (int i = 0; i < 2000; ++i) {
+        const double x = random.real(0.0, 100.0);
+        const double y = random.real(0.0, 100.0);
+        points.emplace_back(x, y, 0.3 * x + 0.1 * y); // 0 to 40 m
+    }
+    const TinSurface surface = buildFromPoints(std::move(points));
+    katana::core::TaskPool pool(7);
+    const auto lines = contours(surface, 0.5, 0.0, 5, &pool);
+    ASSERT_TRUE(lines.ok()) << lines.error().describe();
+    ASSERT_GT(lines.value().size(), 50u);
+    for (std::size_t i = 1; i < lines.value().size(); ++i) {
+        EXPECT_LE(lines.value()[i - 1].elevation, lines.value()[i].elevation) << i;
+    }
 }
