@@ -585,14 +585,23 @@ void Gts7Reader::measurement(std::string_view word, const Fields& f, std::size_t
     const survey::Pointing pointing{builder_.nextPointing(), face};
     bool any = false;
     if (horizontal) {
-        builder_.addStationObservation(survey::HorizontalDirectionObservation{
-            at, target_, wrapToCircle(*horizontal), precision.direction, builder_.source(n),
-            pointing});
+        auto& observation = builder_.stationObservation<survey::HorizontalDirectionObservation>(n);
+        observation.at = at;
+        observation.to = target_;
+        observation.direction = wrapToCircle(*horizontal);
+        observation.sigma = precision.direction;
+        observation.pointing = pointing;
         any = true;
     }
     if (zenith) {
-        builder_.addStationObservation(survey::ZenithAngleObservation{
-            at, target_, *zenith, precision.zenith, hi, th, builder_.source(n), pointing});
+        auto& observation = builder_.stationObservation<survey::ZenithAngleObservation>(n);
+        observation.from = at;
+        observation.to = target_;
+        observation.angle = *zenith;
+        observation.sigma = precision.zenith;
+        observation.instrumentHeight = hi;
+        observation.targetHeight = th;
+        observation.pointing = pointing;
         any = true;
     }
     const auto distance = [&](double value, survey::DistanceKind kind) {
@@ -601,7 +610,7 @@ void Gts7Reader::measurement(std::string_view word, const Fields& f, std::size_t
                                  " m read as no distance measured");
             return;
         }
-        survey::DistanceObservation observation;
+        auto& observation = builder_.stationObservation<survey::DistanceObservation>(n);
         observation.from = at;
         observation.to = target_;
         observation.distance = value;
@@ -609,9 +618,7 @@ void Gts7Reader::measurement(std::string_view word, const Fields& f, std::size_t
         observation.kind = kind;
         observation.instrumentHeight = hi;
         observation.targetHeight = th;
-        observation.source = builder_.source(n);
         observation.pointing = pointing;
-        builder_.addStationObservation(std::move(observation));
     };
     if (slope) {
         distance(*slope, survey::DistanceKind::Slope);
@@ -622,15 +629,14 @@ void Gts7Reader::measurement(std::string_view word, const Fields& f, std::size_t
         any = true;
     }
     if (rise) {
-        survey::LevelDifferenceObservation difference;
-        difference.from = at;
-        difference.to = target_;
-        difference.heightDifference = *rise + hi - th;
-        difference.sigma = std::hypot(precision.heightMeasurement, precision.heightMeasurement);
-        difference.length = flat.value_or(0.0) > 0.0 ? *flat : 0.0;
-        difference.source = builder_.source(n);
-        if (std::isfinite(difference.heightDifference)) {
-            builder_.addStationObservation(difference);
+        const double heightDifference = *rise + hi - th;
+        if (std::isfinite(heightDifference)) {
+            auto& difference = builder_.stationObservation<survey::LevelDifferenceObservation>(n);
+            difference.from = at;
+            difference.to = target_;
+            difference.heightDifference = heightDifference;
+            difference.sigma = std::hypot(precision.heightMeasurement, precision.heightMeasurement);
+            difference.length = flat.value_or(0.0) > 0.0 ? *flat : 0.0;
             any = true;
         } else {
             builder_.warn(n, "the vertical distance and heights do not add up to a finite "
