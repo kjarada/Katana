@@ -95,7 +95,8 @@ class MapReader {
             const auto items = section.childrenNamed("item");
             if (!which) {
                 count(section.name, false);
-                warn("<" + section.name + "> is not a section this mapfile reader knows; its " +
+                warn("<" + section.name +
+                     "> is not a section this survey code file reader knows; its " +
                      std::to_string(items.size()) + " rules were not read");
                 continue;
             }
@@ -225,8 +226,9 @@ class MapReader {
         rule.section = section;
         rule.key = item.childText("key");
         if (rule.key.empty()) {
-            // `names.4d` ends with an <item> holding only a <group>. It names
-            // no code, so there is nothing it could ever apply to.
+            // The second survey code file of the built-in customisation ends
+            // with an <item> holding only a <group>. It names no code, so
+            // there is nothing it could ever apply to.
             if (!item.children.empty()) {
                 warn("an <item> of <" + sectionName + "> has no <key> and was skipped");
             }
@@ -241,7 +243,7 @@ class MapReader {
             count(field.name, known);
             if (!known) {
                 warn("rule \"" + rule.key + "\" of <" + sectionName + ">: <" + field.name +
-                     "> is not a field this mapfile reader knows");
+                     "> is not a field this survey code file reader knows");
             }
         }
         rule.comment = item.childText("comment");

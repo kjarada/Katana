@@ -79,7 +79,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/customisation_headless.png"
-            "-DCUSTOMISE_DIR=${PROJECT_SOURCE_DIR}/docs/12d Refrence Files"
+            "-DCUSTOMISE_DIR=${KATANA_CUSTOMISATION_DIR}"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_customisation_headless PROPERTIES
         ENVIRONMENT_MODIFICATION
