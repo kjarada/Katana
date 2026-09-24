@@ -978,6 +978,14 @@ Status ProjectStore::save(const ProjectContents& contents)
     if (auto status = validateContents(contents); !status) {
         return status;
     }
+    if (!contents.surveyJobs.empty()) {
+        // Placeholder until the survey job table exists (ProjectContents::
+        // surveyJobs): a project saved without its jobs would lose the raw
+        // data behind every imported survey without a word.
+        return makeError(ErrorCode::Unsupported,
+                         "this build cannot save survey jobs yet, so the project was not saved",
+                         std::to_string(contents.surveyJobs.size()) + " survey job(s)");
+    }
     SqliteDatabase& database = impl_->database;
     auto transaction = SqliteTransaction::begin(database);
     if (!transaction) {
