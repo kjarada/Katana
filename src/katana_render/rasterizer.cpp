@@ -143,8 +143,9 @@ namespace {
 
 // Below this many vertices a range is transformed one vertex at a time: the
 // AVX2 kernel takes four a step and hands the rest back, and for a handful the
-// call is the whole cost. Measured with BM_RenderGroundFramed (docs/performance.md,
-// "SIMD: the software rasteriser").
+// call is the whole cost. Ranges are 4096 vertices but for a list's last, so
+// this only decides small lists; measured, the kernel is 2-12% off a frame
+// (docs/performance.md, "SIMD: the software rasteriser").
 constexpr std::size_t kTransformBatchMinimum = 16;
 
 } // namespace
@@ -913,14 +914,14 @@ namespace {
 
 // Where a triangle's box in a tile holds fewer pixels than this, the fill
 // visits every pixel of the box, as it always did. From here it first bounds
-// each row to the pixels that can be inside (rowSpans), and from
-// kKernelMinimumPixels takes the AVX2 kernel. A dense TIN framed whole is
-// fractions of a pixel a triangle, where any setup is pure cost; a surface seen
-// from inside it, or a line across the view, is hundreds of pixels a box.
-// Measured with BM_RenderTriangles (docs/performance.md, "SIMD: the software
-// rasteriser").
-constexpr long kSpanMinimumPixels = 32;
-constexpr long kKernelMinimumPixels = 32;
+// each row to the pixels that can be inside (rowSpans) and, on AVX2, shades
+// them eight at a time. A dense TIN framed whole is fractions of a pixel a
+// triangle, where the double setup is pure cost: with no cutoff the framed
+// 1.05M-triangle grid took 23% longer. A surface seen from inside it, or a
+// line across the view, is hundreds of pixels a box. 16 and 64 measured alike
+// on the dense frames, 16 a little faster on the near ones (docs/performance.md,
+// "SIMD: the software rasteriser").
+constexpr long kBoundedFillMinimumPixels = 16;
 
 } // namespace
 
@@ -1065,7 +1066,7 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
                     // accept is (see "conservative coverage").
                     const long boxPixels =
                         static_cast<long>(maxX - minX + 1) * static_cast<long>(maxY - minY + 1);
-                    if (boxPixels < kSpanMinimumPixels) {
+                    if (boxPixels < kBoundedFillMinimumPixels) {
                         for (int y = minY; y <= maxY; ++y) {
                             spans[2 * static_cast<std::size_t>(y - minY)] = minX;
                             spans[2 * static_cast<std::size_t>(y - minY) + 1] = maxX;
@@ -1076,7 +1077,7 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
                             continue;
                         }
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-                        if (kernel && boxPixels >= kKernelMinimumPixels) {
+                        if (kernel) {
                             // Eight pixels a step, each shaded to the bits of
                             // the loop below; where the whole box is inside,
                             // without the edge tests.
