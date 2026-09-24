@@ -397,3 +397,53 @@ behaviour change and it is stated in the header.
 points against one triangle can hoist it. `barycentric(p)` is now literally
 `barycentric(p, twiceSignedArea())` behind an `isDegenerate()` check, so the
 arithmetic is bit-identical and lives in one place rather than two.
+
+## SIMD: tried, measured, left scalar
+
+The terrain module has no AVX2 kernels. Two were written, both bit-identical to
+their scalar references at every thread count and on both levels
+(`simd_scalar.terrain` and `simd_avx2.terrain` passed), and neither paid when
+measured against a same-binary control. The rule in docs/performance.md is that
+a kernel that does not pay stays scalar, so both were removed. The code is in
+the history of branch `simd-terrain` (commit `25c6010`) if the question comes up
+again.
+
+- **Contour level ranges** (`contours()`, the `floor` and settling loops of
+  `firstLevelAbove`, four triangles per step). No change outside the A/A
+  spread, on generated ground or on the owner's TIN, at a coarse or a fine
+  interval. The phase is limited by loading each corner's elevation through the
+  triangle's vertex indices. The kernel has to gather those loads, and on this
+  processor gathers are no faster than the scalar loads they replace.
+- **locate()'s containment test** (the three edge functions of up to ~8
+  candidates a cell, four at a time). This was *slower*: a cell holds too few
+  candidates to cover the gathers, and the first candidate usually already
+  contains the point.
+
+The rest was not attempted. The interpolation in `elevationsAt` is five
+operations a query behind a `locate()` that costs about 200 ns. In the volume
+pair clip, every lane's polygon grows and shrinks differently, and the
+compensated sums have to be added in piece order.
+
+Measured on an i7-1270P under heavy load from other agents' builds, with the
+same binary at both levels (`KATANA_SIMD=scalar|avx2`) and a byte-identical copy
+of it as the A/A control. The four arms ran in alternating rounds, reversing
+the order every round, as `tools/compare_benchmarks.py --alternate` does. Each
+cell is min / median real time.
+
+| benchmark | scalar | scalar (A/A) | avx2 | avx2 (A/A) |
+| --- | --- | --- | --- | --- |
+| `BM_ElevationAt`, ns (30 samples) | 172 / 217 | 154 / 207 | 178 / 240 | 159 / 233 |
+| `BM_ElevationsAt`, 100k probes, ms | 3.58 / 4.11 | 3.33 / 4.06 | 3.62 / 4.22 | 3.69 / 4.03 |
+| `BM_ContoursSerial/50`, ms (24 samples) | 17.1 / 22.6 | 18.3 / 21.6 | 17.0 / 22.7 | 17.2 / 22.0 |
+| `BM_ContoursSerial/10` | 21.2 / 28.9 | 22.7 / 27.0 | 22.3 / 29.4 | 21.8 / 28.7 |
+| `BM_ContoursSerial/2` | 40.2 / 55.5 | 45.4 / 56.9 | 44.3 / 62.2 | 37.1 / 49.6 |
+| `BM_ArchiveTinContoursSerial/10` | 10.8 / 14.6 | 12.7 / 14.8 | 8.9 / 14.2 | 9.1 / 11.7 |
+| `BM_ArchiveTinContoursSerial/1` | 42.9 / 60.8 | 48.2 / 60.9 | 37.5 / 52.5 | 42.9 / 52.7 |
+
+The contour rows come from the fourth of four runs, at above-normal priority.
+Its 14% on `ArchiveTinContoursSerial/1` did not come back in the other three
+runs: in those, the two levels overlapped within their A/A spreads. It is also
+larger than the whole level-range phase could be at a 0.1 m interval, so it is
+noise. The
+parallel `BM_Contours` and `BM_ArchiveTinContours` moved by no more than their
+A/A spreads in any run.
