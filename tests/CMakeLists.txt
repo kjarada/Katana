@@ -139,6 +139,39 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
+    # An archive of TINs alone (four tin blocks, SOUTH WEST to NORTH EAST, and
+    # no strings) and one of point clouds alone (two las_cloud_data strings,
+    # SITE SCAN and ROAD SCAN). Neither brings a layer, style, entity or
+    # alignment, so the import's drawing transaction is empty; the stack
+    # refuses an empty one, and the import used to stop there with "Import
+    # failed" before adding the surfaces or the clouds. EXPECT names the
+    # summary, and for the TINs a surface line (logged as each surface is
+    # added), so the run must get past the transaction to pass.
+    add_test(NAME qt_import_tin_only_archive_adds_its_surfaces_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
+            "-DEXPECT=Imported 0 entities, 4 surfaces from multiple_tins[.]12da.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_tin_only_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_import_tin_only_archive_adds_its_surfaces_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    add_test(NAME qt_import_cloud_only_archive_adds_its_clouds_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/las_point_cloud.12da"
+            "-DEXPECT=Imported 0 entities, 2 point clouds from las_point_cloud[.]12da"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_cloud_only_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_import_cloud_only_archive_adds_its_clouds_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
     # Point symbols painted from their styles (PLAN.MD 20.2 slice 2), into a
     # directory that is NOT a project: "Open Failed" was a modal box, which in
     # a headless run is a hang the TIMEOUT below catches.
