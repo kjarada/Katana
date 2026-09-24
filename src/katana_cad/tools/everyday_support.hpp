@@ -55,13 +55,21 @@ using katana::geometry::Vec2;
 
 // ---- the drawing -------------------------------------------------------------------
 
+// How near a point entity a pick must be to BE that point in a report: a
+// thousandth of a drawing unit, a millimetre in a drawing in metres. A snap
+// lands on the point exactly, and coordinates typed from a report printed to
+// three decimals are within half a thousandth on each axis (0.0007 in all).
+// Not the view's pick aperture: at a zoom where the aperture is ten metres,
+// a click that missed a point was reported as the point - its number, its
+// coordinates, its height - which a surveyor would take for a measurement
+// to the mark (seen on a real survey import).
+inline constexpr double kPointCoincidence = 0.001;
+
 // Where a pick landed, for a survey report: the point entity there - its
 // number and its height, so an inverse between two survey points reports
 // their height difference - or the bare coordinates. A point entity counts
-// when it is within `tolerance` of `at` (a snap puts the pick exactly on
-// it); the nearest wins, the lower id on a tie.
-[[nodiscard]] SurveyPosition positionAt(const Document* document, const Point2& at,
-                                        double tolerance);
+// within kPointCoincidence of `at`; the nearest wins, the lower id on a tie.
+[[nodiscard]] SurveyPosition positionAt(const Document* document, const Point2& at);
 
 // The selection an asking tool ends with (List, Reverse, Select Similar, the
 // targets of Match Properties): single picks the view handed to entity(),
