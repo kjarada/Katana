@@ -20,7 +20,7 @@
 //   * A line's or point's depthBias is NOT carried. It is a constant in NDC
 //     depth, sized for the software path's standard-Z buffer, and applied to
 //     a reversed-Z float buffer it would pull a line metres towards the eye
-//     (the x-ray defect, map_view3d). The GPU pushes filled triangles back by a
+//     (the x-ray defect). The GPU pushes filled triangles back by a
 //     slope-scaled polygon offset instead (gpu_renderer.cpp, kFillSlopeBias),
 //     which is what lets an edge lying in a surface win without letting a line
 //     behind a building show through it.
@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "katana/math/primitives.hpp"
+#include "katana/pointcloud/point_cloud_engine.hpp"
 #include "katana/render/draw_list.hpp"
 
 namespace katana::qt::gpu {
@@ -140,5 +141,13 @@ void packPointCloud(const std::vector<katana::math::Vec3>& positions,
                     const std::vector<katana::render::Rgba>& colors,
                     katana::render::Rgba fallbackColor, const katana::math::Vec3& origin,
                     std::size_t budget, PointCloudData& out);
+
+// The same for a cloud as the point-cloud engine reads it, relative to the
+// centre of its bounds (the points' own box when the bounds are empty): each
+// point in its own colour when it has one, `fallbackColor` otherwise. Reads
+// the engine's 40-byte points in place - no copy of the positions first,
+// which for two million points would be 48 MB.
+void packPointCloud(const katana::pointcloud::PointCloud& cloud,
+                    katana::render::Rgba fallbackColor, std::size_t budget, PointCloudData& out);
 
 } // namespace katana::qt::gpu

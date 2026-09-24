@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "gpu/scene_origin.hpp"
+#include "gpu/shader_compiler.hpp"
 #include "gpu/shader_library.hpp"
 #include "gpu_test_support.hpp"
 
@@ -615,8 +616,9 @@ TEST_P(GpuRender, SerializedShadersDrawWhatTheRuntimeShadersDraw)
     if (!runtime) {
         GTEST_SKIP() << skipReason;
     }
+    // The default library's shaders - bytecode, as a .qsb for Direct3D holds.
     auto table = katana::qt::gpu::SerializedShaderLibrary::serialize(
-        katana::qt::gpu::runtimeHlslShaders());
+        katana::qt::gpu::compiledHlslShaders());
     ASSERT_TRUE(table.ok()) << table.error().describe();
     const katana::qt::gpu::SerializedShaderLibrary serialized(std::move(*table));
     katana::qt::gpu::OffscreenOptions options;
@@ -647,4 +649,53 @@ TEST(SerializedShaderLibrary, ReportsABlobThatDoesNotDeserialize)
     auto stages = library.program(katana::qt::gpu::Program::Triangles, Expansion::GeometryShader);
     ASSERT_FALSE(stages.ok());
     EXPECT_NE(stages.error().describe().find("do not deserialize"), std::string::npos);
+}
+
+// The default library compiles the HLSL itself (shader_compiler.hpp); QRhi
+// compiling the same source must draw the same frame.
+TEST_P(GpuRender, BytecodeCompiledHereDrawsWhatQRhiCompilingTheSourceDraws)
+{
+    constexpr int kWidth = 96;
+    constexpr int kHeight = 72;
+    auto compiled = device(kWidth, kHeight);
+    if (!compiled) {
+        GTEST_SKIP() << skipReason;
+    }
+    katana::qt::gpu::OffscreenOptions options;
+    options.shaders = &katana::qt::gpu::runtimeHlslShaders();
+    auto fromSource = makeGpu(kWidth, kHeight, GetParam(), skipReason, options);
+    ASSERT_NE(fromSource, nullptr) << skipReason;
+
+    const DrawList list = site(Vec3());
+    const Camera camera = siteCamera(Vec3(), kWidth, kHeight);
+    compiled->renderer().setDrawList(list);
+    fromSource->renderer().setDrawList(list);
+    const Image a = render(*compiled, camera, blackBackground());
+    const Image b = render(*fromSource, camera, blackBackground());
+    const auto result = compare(a, b, kWidth, kHeight, kBlack, 128);
+    SCOPED_TRACE(describe(result));
+    EXPECT_GT(result.coveredA, 1000u);
+    // The same source; if the two compilers' flags differ, the same arithmetic
+    // may be ordered differently and move a vertex by a float's last bit,
+    // which flips only a pixel whose centre lies exactly on an edge.
+    EXPECT_LE(result.differingPixels, 4u);
+}
+
+TEST(ShaderCompiler, EveryStageOfBothExpansionsCompiles)
+{
+    for (const Expansion expansion :
+         {Expansion::GeometryShader, Expansion::Instanced}) {
+        auto status = katana::qt::gpu::precompileHlslShaders(expansion);
+        EXPECT_TRUE(status.ok()) << (status.ok() ? "" : status.error().describe());
+    }
+}
+
+TEST(ShaderCompiler, ReportsACompileErrorWithTheCompilersOwnMessage)
+{
+    auto result = katana::qt::gpu::compileHlsl(
+        "float4 main() : SV_Target { return undefinedColour; }", QShader::FragmentStage);
+    ASSERT_FALSE(result.ok());
+    const std::string message = result.error().describe();
+    EXPECT_NE(message.find("did not compile"), std::string::npos) << message;
+    EXPECT_NE(message.find("undefinedColour"), std::string::npos) << message;
 }

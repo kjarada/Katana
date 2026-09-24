@@ -122,7 +122,7 @@ OffscreenGpu::create(int width, int height, const OffscreenOptions& options)
     if (auto status = p.renderer.initialise(p.rhi.get(), p.pass.get(), p.sampleCount,
                                              options.shaders != nullptr
                                                  ? *options.shaders
-                                                 : runtimeHlslShaders(),
+                                                 : compiledHlslShaders(),
                                              options.expansion);
         !status) {
         return status.error();

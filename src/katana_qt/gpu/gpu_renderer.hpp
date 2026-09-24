@@ -34,6 +34,7 @@
 #include "katana/core/error.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
+#include "shader_compiler.hpp"
 #include "shader_library.hpp"
 
 class QRhi;
@@ -105,7 +106,7 @@ class GpuRenderer {
     // rather than drawing nothing.
     [[nodiscard]] katana::core::Status
     initialise(QRhi* rhi, QRhiRenderPassDescriptor* pass, int sampleCount,
-               const ShaderLibrary& shaders = runtimeHlslShaders(),
+               const ShaderLibrary& shaders = compiledHlslShaders(),
                Expansion preferred = Expansion::GeometryShader);
     // Drops every GPU resource (the QRhi is going away, or the target format
     // changed). The packed scene is kept and re-uploaded after initialise().

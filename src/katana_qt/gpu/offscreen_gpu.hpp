@@ -6,7 +6,7 @@
 // QRhiWidget cannot render under Qt's offscreen platform - every Katana test
 // and headless screenshot runs there - but QRhi itself can: Direct3D 11 needs
 // no window to render into a texture, on the real GPU or on WARP, Windows'
-// software Direct3D device (measured, map_accel). This class is that: a QRhi
+// software Direct3D device (tests/gpu runs on both). This class is that: a QRhi
 // of its own, a multisampled colour buffer resolved into a texture, a 32-bit
 // float depth texture, and a synchronous frame with an optional read-back and
 // the GPU's own timestamp for the frame. The tests compare its pixels with the
@@ -41,7 +41,7 @@ struct OffscreenOptions {
     // How lines and points are widened; the renderer falls back to Instanced
     // on a device without a geometry stage (GpuRenderer::initialise).
     Expansion expansion = Expansion::GeometryShader;
-    // Where the shaders come from; null for runtimeHlslShaders(). Must
+    // Where the shaders come from; null for compiledHlslShaders(). Must
     // outlive create().
     const ShaderLibrary* shaders = nullptr;
 };

@@ -43,6 +43,7 @@
 #include <QGuiApplication>
 
 #include "gpu/offscreen_gpu.hpp"
+#include "gpu/shader_compiler.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/scene.hpp"
 #include "katana/commands/command_stack.hpp"
@@ -384,6 +385,110 @@ void BM_GpuSceneLinesBy(benchmark::State& state)
 }
 BENCHMARK(BM_GpuSceneLinesBy)
     ->ArgsProduct({{0, 1}, {0, 1}})
+    ->UseManualTime()
+    ->Unit(benchmark::kMillisecond);
+
+// What a 3D view pays when it starts: a Direct3D 11 device, the render
+// target, and the pipelines. 0: HLSL source, which QRhi compiles for every new
+// device; 1: the default, bytecode compiled once per process
+// (shader_compiler.hpp) - warmed before timing, as a host that precompiles at
+// start-up would have it.
+void BM_GpuStartUp(benchmark::State& state)
+{
+    const bool fromSource = state.range(0) == 0;
+    OffscreenOptions options;
+    options.device = GpuDevice::Hardware;
+    options.shaders = fromSource ? &katana::qt::gpu::runtimeHlslShaders()
+                                 : &katana::qt::gpu::compiledHlslShaders();
+    if (!fromSource && !katana::qt::gpu::precompileHlslShaders()) {
+        state.SkipWithError("the shaders did not compile");
+        return;
+    }
+    for (auto _ : state) {
+        auto gpu = OffscreenGpu::create(kWidth, kHeight, options);
+        if (!gpu) {
+            state.SkipWithError(gpu.error().describe());
+            return;
+        }
+        benchmark::DoNotOptimize(gpu->get());
+    }
+}
+BENCHMARK(BM_GpuStartUp)->Arg(0)->Arg(1)->Iterations(5)->UseRealTime()->Unit(
+    benchmark::kMillisecond);
+
+// The compile itself, cold: every stage the default expansion draws with.
+void BM_GpuShaderCompile(benchmark::State& state)
+{
+    using katana::qt::gpu::Program;
+    for (auto _ : state) {
+        for (const Program program : katana::qt::gpu::kAllPrograms) {
+            for (const QShader::Stage stage :
+                 {QShader::VertexStage, QShader::GeometryStage, QShader::FragmentStage}) {
+                const char* source =
+                    katana::qt::gpu::hlslSource(program, Expansion::GeometryShader, stage);
+                if (*source == '\0') {
+                    continue;
+                }
+                auto bytecode = katana::qt::gpu::compileHlsl(source, stage);
+                if (!bytecode) {
+                    state.SkipWithError(bytecode.error().describe());
+                    return;
+                }
+                benchmark::DoNotOptimize(bytecode->data());
+            }
+        }
+    }
+}
+BENCHMARK(BM_GpuShaderCompile)->Iterations(5)->UseRealTime()->Unit(benchmark::kMillisecond);
+
+// Point clouds, which the software path does not draw in 3D at all: n
+// points in random order (a fixed linear congruential sequence, so every run
+// draws the same cloud) over bench_render's ground, as 2 px round sprites.
+// Random order is the worst case for the GPU's caches; a file read in scan or
+// tile order is kinder.
+void BM_GpuCloud(benchmark::State& state)
+{
+    const auto count = static_cast<std::size_t>(state.range(0));
+    std::vector<Vec3> positions;
+    positions.reserve(count);
+    std::uint64_t seed = 0x9E3779B97F4A7C15ull;
+    const auto next = [&seed] {
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        return static_cast<double>(seed >> 11) / static_cast<double>(1ull << 53);
+    };
+    for (std::size_t i = 0; i < count; ++i) {
+        const double x = (next() - 0.5) * kGridSize;
+        const double y = (next() - 0.5) * kGridSize;
+        positions.emplace_back(x, y, 3.0 * std::sin(x * 0.01) * std::cos(y * 0.013));
+    }
+    katana::qt::gpu::PointCloudData cloud;
+    katana::qt::gpu::packPointCloud(positions, {}, rgba(200, 220, 255), Vec3(), 0, cloud);
+    const DrawList& grid = ground(256); // only its box: the cloud covers the same ground
+    const Camera camera = framedCamera(grid.bounds());
+
+    auto gpu = hardwareGpu(state, 4, Expansion::GeometryShader);
+    if (!gpu) {
+        return;
+    }
+    gpu->renderer().setPointCloud(std::move(cloud));
+    for (int warm = 0; warm < 3; ++warm) {
+        if (!gpu->renderFrame(camera)) {
+            state.SkipWithError("GPU frame failed");
+            return;
+        }
+    }
+    for (auto _ : state) {
+        if (!gpu->renderFrame(camera)) {
+            state.SkipWithError("GPU frame failed");
+            return;
+        }
+        state.SetIterationTime(gpu->lastGpuMilliseconds() * 1.0e-3);
+    }
+    state.counters["points"] = static_cast<double>(count);
+}
+BENCHMARK(BM_GpuCloud)
+    ->Arg(1000000)
+    ->Arg(2000000)
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
 

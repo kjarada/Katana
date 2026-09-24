@@ -110,3 +110,38 @@ TEST(PackPointCloud, ThinsEvenlyThroughTheSourceOrderToStayWithinTheBudget)
     packPointCloud(positions, {}, rgba(1, 2, 3), Vec3(), 0, cloud);
     EXPECT_EQ(cloud.points.size(), 10u);
 }
+
+TEST(PackPointCloud, TakesTheEnginesPointsInTheirOwnColourAboutTheCentreOfTheirBounds)
+{
+    katana::pointcloud::PointCloud source;
+    // Four points of a survey-coordinate cloud; the second has no colour.
+    const double x0 = 300000.0;
+    const double y0 = 6250000.0;
+    source.points = {
+        {x0 + 0.0, y0 + 0.0, 10.0, 0.0, 2, 200, 10, 20, true},
+        {x0 + 4.0, y0 + 0.0, 12.0, 0.0, 2, 0, 0, 0, false},
+        {x0 + 4.0, y0 + 8.0, 14.0, 0.0, 2, 30, 40, 50, true},
+        {x0 + 0.0, y0 + 8.0, 16.0, 0.0, 2, 60, 70, 80, true},
+    };
+    source.bounds = {x0, y0, 10.0, x0 + 4.0, y0 + 8.0, 16.0};
+    PointCloudData cloud;
+    // Budget 2 of 4: every ceil(4 / 2) = 2nd point - the first and the third.
+    packPointCloud(source, rgba(9, 9, 9), 2, cloud);
+    // The centre of the bounds: (x0 + 2, y0 + 4, 13).
+    EXPECT_EQ(cloud.origin, Vec3(x0 + 2.0, y0 + 4.0, 13.0));
+    ASSERT_EQ(cloud.points.size(), 2u);
+    EXPECT_EQ(cloud.points[0].x, -2.0f);
+    EXPECT_EQ(cloud.points[0].y, -4.0f);
+    EXPECT_EQ(cloud.points[0].z, -3.0f);
+    EXPECT_EQ(cloud.points[0].color, rgba(200, 10, 20));
+    EXPECT_EQ(cloud.points[1].x, 2.0f);
+    EXPECT_EQ(cloud.points[1].y, 4.0f);
+    EXPECT_EQ(cloud.points[1].z, 1.0f);
+    EXPECT_EQ(cloud.points[1].color, rgba(30, 40, 50));
+    EXPECT_EQ(cloud.sourceCount, 4u);
+
+    // All of them: the uncoloured one takes the fallback.
+    packPointCloud(source, rgba(9, 9, 9), 0, cloud);
+    ASSERT_EQ(cloud.points.size(), 4u);
+    EXPECT_EQ(cloud.points[1].color, rgba(9, 9, 9));
+}
