@@ -3557,6 +3557,8 @@ void startSurfaceJob(katana::qt::JobRunner& runner, bool headless, const QString
     // Written by the job before its completion is posted and read on the GUI
     // thread after it is delivered; the post orders the two.
     auto notes = std::make_shared<QStringList>();
+    // For the headless report: how much of the pause was the Apply step.
+    auto applySeconds = std::make_shared<double>(0.0);
     if (headless) {
         runner.resetEventLoopPause();
     }
@@ -3590,7 +3592,8 @@ void startSurfaceJob(katana::qt::JobRunner& runner, bool headless, const QString
                 addSurface(std::move(result->surface));
             });
         },
-        [title, notes, log](const katana::qt::JobReport& report) {
+        [title, notes, applySeconds, log](const katana::qt::JobReport& report) {
+            *applySeconds = report.applySeconds;
             for (const QString& note : *notes) {
                 log(note, false);
             }
@@ -3611,9 +3614,11 @@ void startSurfaceJob(katana::qt::JobRunner& runner, bool headless, const QString
         });
     if (headless) {
         runner.waitFor(id);
-        log(QString("%1: the event loop paused for at most %2 ms while it ran.")
+        log(QString("%1: the event loop paused for at most %2 ms while it ran (adding the "
+                    "result: %3 ms).")
                 .arg(title)
-                .arg(runner.longestEventLoopPause() * 1000.0, 0, 'f', 0),
+                .arg(runner.longestEventLoopPause() * 1000.0, 0, 'f', 0)
+                .arg(*applySeconds * 1000.0, 0, 'f', 0),
             false);
     }
 }
