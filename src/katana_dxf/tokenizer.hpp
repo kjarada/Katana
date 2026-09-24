@@ -5,7 +5,7 @@
 // SPEED IS THE DESIGN. A DXF is two lines per pair, and a survey drawing is
 // millions of pairs, so nothing here allocates: a pair's value is a view into
 // the file, found with memchr, and a number is parsed only when an entity
-// asks for it, with std::from_chars - the way the 12d archive reader does it
+// asks for it, with std::from_chars - the way the archive12d reader does it
 // (docs/performance.md). GDAL's reader built a feature per entity; this
 // builds nothing.
 
