@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <functional>
 #include <string>
 #include <unordered_set>
@@ -701,13 +702,24 @@ Status adjustAsNetwork(Engine& engine)
             inNetwork.insert(angle.from);
         }
     }
+    // Ids of points no position names yet (a levelled point with no
+    // horizontal position): owned here, since the network holds views.
+    std::deque<std::string> ownedIds;
+    const auto viewOf = [&](const std::string& id) -> std::string_view {
+        if (const auto it = engine.positions.find(id); it != engine.positions.end()) {
+            return it->first;
+        }
+        if (const auto it = engine.filePoints.find(id); it != engine.filePoints.end()) {
+            return it->first;
+        }
+        ownedIds.push_back(id);
+        return ownedIds.back();
+    };
     for (const Observation& observation : engine.raw.observations) {
         for (const std::string& id : referencedPoints(observation)) {
-            inNetwork.insert(engine.positions.count(id) ? engine.positions.find(id)->first
-                                                         : std::string_view{});
+            inNetwork.insert(viewOf(id));
         }
     }
-    inNetwork.erase(std::string_view{});
     std::unordered_set<std::string_view> sideShots;
     for (const auto& [id, setup] : observedFrom) {
         (void)setup;
@@ -734,11 +746,30 @@ Status adjustAsNetwork(Engine& engine)
         levelInputs.points.push_back(point);
         present.insert(id);
     }
+    // The level network needs no horizontal position: a point the horizontal
+    // network cannot take still takes part in the heights.
+    std::vector<std::string_view> unplaced;
     for (const std::string_view id : inNetwork) {
-        if (present.count(id) == 0 && observedFrom.count(id) != 0) {
+        if (present.count(id) == 0) {
+            unplaced.push_back(id);
+        }
+    }
+    std::sort(unplaced.begin(), unplaced.end());
+    std::unordered_set<std::string_view> levelPresent = present;
+    for (const std::string_view id : unplaced) {
+        SurveyPoint point;
+        point.id = id;
+        if (const auto it = engine.filePoints.find(id); it != engine.filePoints.end()) {
+            point.northing = it->second->northing;
+            point.easting = it->second->easting;
+            point.elevation = it->second->elevation;
+        }
+        levelInputs.points.push_back(point);
+        levelPresent.insert(id);
+        if (horizontal && observedFrom.count(id) != 0) {
             engine.warn("Point " + std::string(id) +
                         " has no approximate position (none of its setups could be oriented), "
-                        "so it was left out of the network.");
+                        "so it was left out of the horizontal network.");
         }
     }
     if (horizontalInputs.points.size() * 2 > kMaxNetworkUnknowns) {
@@ -750,15 +781,14 @@ Status adjustAsNetwork(Engine& engine)
                              "or a traverse.");
     }
     for (const ControlSelection& selection : settings.control) {
-        if (present.count(selection.point.pointId) == 0) {
-            continue;
-        }
         ControlPoint control = selection.point;
-        if (control.northing.constraint != ControlConstraint::Free ||
-            control.easting.constraint != ControlConstraint::Free) {
+        if (present.count(selection.point.pointId) != 0 &&
+            (control.northing.constraint != ControlConstraint::Free ||
+             control.easting.constraint != ControlConstraint::Free)) {
             horizontalInputs.control.push_back(control);
         }
-        if (control.elevation.constraint != ControlConstraint::Free) {
+        if (levelPresent.count(selection.point.pointId) != 0 &&
+            control.elevation.constraint != ControlConstraint::Free) {
             levelInputs.control.push_back(control);
         }
     }
@@ -775,11 +805,9 @@ Status adjustAsNetwork(Engine& engine)
     };
     for (std::size_t s = 0; s < stations.size(); ++s) {
         const SetupState& state = engine.setups[s];
-        if (!state.positioned) {
-            continue;
-        }
         const SurveyStation& station = stations[s];
         const std::string& at = station.setup.pointId;
+        const bool horizontalHere = horizontal && state.positioned && present.count(at) != 0;
 
         // The reference direction: the backsight, else the first network target.
         std::string_view reference;
@@ -813,7 +841,7 @@ Status adjustAsNetwork(Engine& engine)
             if (distance > 0.0) {
                 referenceSigma = std::hypot(referenceSigma, centring / distance);
             }
-            if (state.orientationAssumed && state.orientation && horizontal) {
+            if (state.orientationAssumed && state.orientation && horizontalHere) {
                 // The circle was set on a backsight with no position: the set
                 // orientation is the only one this setup has.
                 horizontalInputs.observations.push_back(NetworkObservation{
@@ -826,11 +854,12 @@ Status adjustAsNetwork(Engine& engine)
 
         for (const std::size_t p : state.pointings) {
             const ReducedPointing& pointing = engine.pointings[p];
-            if (pointing.rejected || present.count(pointing.target) == 0) {
+            if (pointing.rejected) {
                 continue;
             }
+            const bool horizontalTarget = horizontalHere && present.count(pointing.target) != 0;
             const SourceRecord source = pointing.source ? *pointing.source : station.source;
-            if (horizontal && pointing.direction && referenceDirection &&
+            if (horizontalTarget && pointing.direction && referenceDirection &&
                 pointing.target != reference) {
                 const double distance = pointing.gridDistance.value_or(0.0);
                 double sigma = std::hypot(pointing.sigmaDirection, referenceSigma);
@@ -845,7 +874,7 @@ Status adjustAsNetwork(Engine& engine)
                                                sigma, source},
                     label(s, "angle", reference, pointing.target), source, &pointing});
             }
-            if (horizontal && pointing.gridDistance) {
+            if (horizontalTarget && pointing.gridDistance) {
                 DistanceObservation distance;
                 distance.from = at;
                 distance.to = pointing.target;
@@ -856,7 +885,8 @@ Status adjustAsNetwork(Engine& engine)
                 horizontalInputs.observations.push_back(NetworkObservation{
                     distance, label(s, "distance", {}, pointing.target), source, &pointing});
             }
-            if (levels && pointing.heightDifference && pointing.slope && pointing.zenith) {
+            if (levels && pointing.heightDifference && pointing.slope && pointing.zenith &&
+                levelPresent.count(at) != 0 && levelPresent.count(pointing.target) != 0) {
                 const double s2 = std::cos(*pointing.zenith) * pointing.sigmaDistance;
                 const double z2 = *pointing.slope * std::sin(*pointing.zenith) * pointing.sigmaZenith;
                 const double sigma = std::sqrt(s2 * s2 + z2 * z2 +
@@ -894,8 +924,10 @@ Status adjustAsNetwork(Engine& engine)
     }
     for (const Observation& observation : engine.raw.observations) {
         const auto points = referencedPoints(observation);
+        const bool isLevel = std::holds_alternative<LevelDifferenceObservation>(observation);
+        const auto& among = isLevel ? levelPresent : present;
         const bool allPresent = std::all_of(points.begin(), points.end(), [&](const std::string& id) {
-            return present.count(id) != 0;
+            return among.count(id) != 0;
         });
         if (!allPresent) {
             continue;
@@ -933,7 +965,20 @@ Status adjustAsNetwork(Engine& engine)
     // ---- adjust ----
     const double scale = ellipseConfidenceScale(settings.confidenceLevel).valueOr(0.0);
     std::unordered_set<std::string_view> adjustedIds;
-    if (horizontal) {
+    bool runHorizontal = horizontal;
+    bool runLevels = levels;
+    if (horizontal && levels) {
+        // Both asked for: a half with nothing to adjust is skipped, and said so.
+        if (horizontalInputs.observations.empty() && !levelInputs.observations.empty()) {
+            runHorizontal = false;
+            engine.warn("No horizontal observations to adjust; only the heights were adjusted.");
+        } else if (levelInputs.observations.empty() && !horizontalInputs.observations.empty()) {
+            runLevels = false;
+            engine.warn("No height differences to adjust; only the horizontal network was "
+                        "adjusted.");
+        }
+    }
+    if (runHorizontal) {
         AdjustmentReport report;
         const auto result = adjustWithOutliers<HorizontalAdjustmentResult>(
             engine, horizontalInputs, "network least squares (horizontal)",
@@ -964,7 +1009,7 @@ Status adjustAsNetwork(Engine& engine)
         }
         engine.report.adjustments.push_back(std::move(report));
     }
-    if (levels) {
+    if (runLevels) {
         AdjustmentReport report;
         const auto result = adjustWithOutliers<LevelAdjustmentResult>(
             engine, levelInputs, "network least squares (levels)",
@@ -979,7 +1024,21 @@ Status adjustAsNetwork(Engine& engine)
         for (const AdjustedElevation& elevation : result->elevations) {
             Position* position = engine.find(elevation.pointId);
             if (position == nullptr) {
-                continue;
+                const auto file = engine.filePoints.find(elevation.pointId);
+                if (file == engine.filePoints.end()) {
+                    engine.warn("Point " + elevation.pointId + " was levelled to " +
+                                formatNumber(elevation.elevation, 4) +
+                                " m but has no horizontal position, so it cannot be drawn.");
+                    continue;
+                }
+                // A levelled height on the file's horizontal position.
+                Position levelled;
+                levelled.northing = file->second->northing;
+                levelled.easting = file->second->easting;
+                levelled.origin = PositionOrigin::Computed;
+                levelled.method = ComputationMethod::NetworkLeastSquares;
+                engine.place(file->first, levelled);
+                position = engine.find(file->first);
             }
             position->height = elevation.elevation;
             position->sigmaHeight = elevation.sigma;

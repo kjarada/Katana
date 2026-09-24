@@ -980,17 +980,27 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
     }
 
     // ---- per pointing: factors, azimuth, position ----
+    // Per target, the means of what this setup measured to it. Directions
+    // and distances are meaned apart, so a file that does not group a shot's
+    // observations into one pointing still radiates.
     struct Accumulator {
         std::string_view target;
-        double northing = 0.0;
-        double easting = 0.0;
-        std::size_t count = 0;
-        double height = 0.0;
-        std::size_t heightCount = 0;
+        double firstAzimuth = 0.0;
+        double azimuthOffsets = 0.0; // sum of (azimuth - first), wrapped
+        std::size_t azimuthCount = 0;
         double distance = 0.0;
+        std::size_t distanceCount = 0;
         double heightDifference = 0.0;
+        std::size_t heightCount = 0;
     };
     std::vector<Accumulator> radiated;
+    std::unordered_map<std::string_view, std::size_t> radiatedSlot;
+    std::optional<double> geoid;
+    if ((settings.heightReduction == HeightReduction::Ellipsoid ||
+         settings.gridScale == GridScale::FromProjection) &&
+        context.geoidSeparation && !settings.useCombinedFactor) {
+        geoid = context.geoidSeparation(here.northing, here.easting);
+    }
     bool warnedHeight = false;
     bool warnedGeoid = false;
     bool warnedScale = false;
@@ -1020,125 +1030,127 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
         }
 
         pointing.gridDistance.reset();
-        if (!pointing.horizontal) {
-            continue;
-        }
-        double distance = *pointing.horizontal;
-        const auto factor = [&](CorrectionKind kind, double value, std::string note) {
-            for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
-                correct(engine, pointing.distanceRows[i], kind, distance * (value - 1.0), value,
-                        note);
-            }
-            distance *= value;
-        };
-        if (settings.useCombinedFactor) {
-            factor(CorrectionKind::CombinedFactor, settings.combinedFactor, {});
-        } else {
-            std::optional<double> geoid;
-            const bool needGeoid =
-                settings.heightReduction == HeightReduction::Ellipsoid ||
-                settings.gridScale == GridScale::FromProjection;
-            if (needGeoid && context.geoidSeparation) {
-                geoid = context.geoidSeparation(here.northing, here.easting);
-            }
-            if (settings.heightReduction != HeightReduction::None) {
-                if (!here.height) {
-                    if (!warnedHeight) {
-                        warnedHeight = true;
-                        engine.warn("Setup " + station.setup.id + ": its point " +
-                                        station.setup.pointId +
-                                        " has no height, so its distances were not reduced for "
-                                        "height.",
-                                    station.source);
-                    }
-                } else {
-                    double height =
-                        *here.height + instrumentHeight + 0.5 * pointing.measuredVertical;
-                    bool ok = true;
-                    if (settings.heightReduction == HeightReduction::Ellipsoid) {
-                        if (geoid) {
-                            height += *geoid;
-                        } else {
-                            ok = false;
-                            if (!warnedGeoid) {
-                                warnedGeoid = true;
-                                engine.warn("Setup " + station.setup.id +
-                                                ": the drawing gives no geoid separation there, so "
-                                                "its distances were not reduced to the ellipsoid.",
-                                            station.source);
+        if (pointing.horizontal) {
+            double distance = *pointing.horizontal;
+            const auto factor = [&](CorrectionKind kind, double value, std::string note) {
+                for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
+                    correct(engine, pointing.distanceRows[i], kind, distance * (value - 1.0), value,
+                            note);
+                }
+                distance *= value;
+            };
+            if (settings.useCombinedFactor) {
+                factor(CorrectionKind::CombinedFactor, settings.combinedFactor, {});
+            } else {
+                if (settings.heightReduction != HeightReduction::None) {
+                    if (!here.height) {
+                        if (!warnedHeight) {
+                            warnedHeight = true;
+                            engine.warn("Setup " + station.setup.id + ": its point " +
+                                            station.setup.pointId +
+                                            " has no height, so its distances were not reduced for "
+                                            "height.",
+                                        station.source);
+                        }
+                    } else {
+                        double height =
+                            *here.height + instrumentHeight + 0.5 * pointing.measuredVertical;
+                        bool ok = true;
+                        if (settings.heightReduction == HeightReduction::Ellipsoid) {
+                            if (geoid) {
+                                height += *geoid;
+                            } else {
+                                ok = false;
+                                if (!warnedGeoid) {
+                                    warnedGeoid = true;
+                                    engine.warn("Setup " + station.setup.id +
+                                                    ": the drawing gives no geoid separation there, so "
+                                                    "its distances were not reduced to the ellipsoid.",
+                                                station.source);
+                                }
                             }
                         }
+                        if (ok) {
+                            factor(CorrectionKind::HeightReduction,
+                                   heightReductionFactor(height, settings.earthRadius),
+                                   "h " + formatNumber(height, 1) + " m");
+                        }
                     }
-                    if (ok) {
-                        factor(CorrectionKind::HeightReduction,
-                               heightReductionFactor(height, settings.earthRadius),
-                               "h " + formatNumber(height, 1) + " m");
+                }
+                if (settings.gridScale == GridScale::Fixed) {
+                    factor(CorrectionKind::GridScale, settings.fixedGridScaleFactor, "fixed");
+                } else if (settings.gridScale == GridScale::FromProjection) {
+                    double northing = here.northing;
+                    double easting = here.easting;
+                    const char* where = "at setup";
+                    if (pointing.azimuth) {
+                        northing += 0.5 * distance * std::cos(*pointing.azimuth);
+                        easting += 0.5 * distance * std::sin(*pointing.azimuth);
+                        where = "at mid-point";
+                    }
+                    double ellipsoidal = here.height.value_or(0.0) + geoid.value_or(0.0);
+                    if (pointing.heightDifference) {
+                        ellipsoidal += 0.5 * *pointing.heightDifference;
+                    }
+                    const std::optional<double> scale =
+                        context.gridScaleFactor(northing, easting, ellipsoidal);
+                    if (scale && std::isfinite(*scale) && *scale > 0.0) {
+                        factor(CorrectionKind::GridScale, *scale, where);
+                    } else if (!warnedScale) {
+                        warnedScale = true;
+                        engine.warn("Setup " + station.setup.id +
+                                        ": the drawing's projection gives no scale factor there, so "
+                                        "its distances were not reduced to grid.",
+                                    station.source);
                     }
                 }
             }
-            if (settings.gridScale == GridScale::Fixed) {
-                factor(CorrectionKind::GridScale, settings.fixedGridScaleFactor, "fixed");
-            } else if (settings.gridScale == GridScale::FromProjection) {
-                double northing = here.northing;
-                double easting = here.easting;
-                const char* where = "at setup";
-                if (pointing.azimuth) {
-                    northing += 0.5 * distance * std::cos(*pointing.azimuth);
-                    easting += 0.5 * distance * std::sin(*pointing.azimuth);
-                    where = "at mid-point";
-                }
-                double ellipsoidal = here.height.value_or(0.0) + geoid.value_or(0.0);
-                if (pointing.heightDifference) {
-                    ellipsoidal += 0.5 * *pointing.heightDifference;
-                }
-                const std::optional<double> scale =
-                    context.gridScaleFactor(northing, easting, ellipsoidal);
-                if (scale && std::isfinite(*scale) && *scale > 0.0) {
-                    factor(CorrectionKind::GridScale, *scale, where);
-                } else if (!warnedScale) {
-                    warnedScale = true;
-                    engine.warn("Setup " + station.setup.id +
-                                    ": the drawing's projection gives no scale factor there, so "
-                                    "its distances were not reduced to grid.",
-                                station.source);
-                }
+            pointing.gridDistance = distance;
+            for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
+                setReduced(engine, pointing.distanceRows[i], distance);
             }
-        }
-        pointing.gridDistance = distance;
-        for (std::size_t i = 0; i < pointing.distanceRowCount; ++i) {
-            setReduced(engine, pointing.distanceRows[i], distance);
         }
 
-        if (!pointing.azimuth) {
-            continue;
-        }
         if (reradiate != nullptr && reradiate->count(pointing.target) == 0 &&
             pointing.target != backsight) {
             continue;
         }
-        auto it = std::find_if(radiated.begin(), radiated.end(), [&](const Accumulator& a) {
-            return a.target == pointing.target;
-        });
-        if (it == radiated.end()) {
-            radiated.push_back(Accumulator{pointing.target});
-            it = radiated.end() - 1;
+        if (!pointing.azimuth && !pointing.gridDistance && !pointing.heightDifference) {
+            continue;
         }
-        it->northing += distance * std::cos(*pointing.azimuth);
-        it->easting += distance * std::sin(*pointing.azimuth);
-        it->distance += distance;
-        ++it->count;
+        const auto [slot, inserted] = radiatedSlot.try_emplace(pointing.target, radiated.size());
+        if (inserted) {
+            radiated.push_back(Accumulator{pointing.target});
+        }
+        Accumulator& a = radiated[slot->second];
+        if (pointing.azimuth) {
+            if (a.azimuthCount == 0) {
+                a.firstAzimuth = *pointing.azimuth;
+            }
+            a.azimuthOffsets += normalizeAngleSigned(*pointing.azimuth - a.firstAzimuth);
+            ++a.azimuthCount;
+        }
+        if (pointing.gridDistance) {
+            a.distance += *pointing.gridDistance;
+            ++a.distanceCount;
+        }
         if (pointing.heightDifference) {
-            it->heightDifference += *pointing.heightDifference;
-            ++it->heightCount;
+            a.heightDifference += *pointing.heightDifference;
+            ++a.heightCount;
         }
     }
 
     // ---- place or check ----
     for (const Accumulator& a : radiated) {
-        const double count = static_cast<double>(a.count);
+        if (a.azimuthCount == 0 || a.distanceCount == 0) {
+            continue; // an angle or a distance alone positions nothing
+        }
+        const double count = static_cast<double>(a.distanceCount);
+        const double azimuth =
+            a.firstAzimuth + a.azimuthOffsets / static_cast<double>(a.azimuthCount);
         Position computed;
-        computed.northing = here.northing + a.northing / count;
-        computed.easting = here.easting + a.easting / count;
+        computed.northing = here.northing + a.distance / count * std::cos(azimuth);
+        computed.easting = here.easting + a.distance / count * std::sin(azimuth);
         if (here.height && a.heightCount > 0) {
             computed.height = *here.height + a.heightDifference / static_cast<double>(a.heightCount);
         }
