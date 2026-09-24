@@ -409,7 +409,7 @@ struct MetadataRecord {
     std::string_view label;
     std::string_view key;
 };
-constexpr std::array<MetadataRecord, 22> kMetadataRecords{{
+constexpr std::array<MetadataRecord, 21> kMetadataRecords{{
     {"SIGNAL STRENGTH UNIT", "signal strength unit"},
     {"RCV CLOCK OFFS APPL", "receiver clock offset applied"},
     {"SYS / DCBS APPLIED", "differential code biases applied"},
@@ -431,7 +431,6 @@ constexpr std::array<MetadataRecord, 22> kMetadataRecords{{
     {"ANTENNA: ZERODIR AZI", "antenna zero direction azimuth"},
     {"ANTENNA: ZERODIR XYZ", "antenna zero direction"},
     {"CENTER OF MASS: XYZ", "centre of mass (vehicle)"},
-    {"MARKER TYPE", "marker type"},
 }};
 
 // ---- The reader --------------------------------------------------------------------
@@ -959,11 +958,13 @@ bool ObservationReader::readSatelliteV3(std::string_view line, std::size_t recor
         return false;
     }
     const char system = line[0];
-    const std::string satellite(line.substr(0, 3));
+    // Only built into warnings: the common path must not touch the heap.
+    const std::string_view satellite = line.substr(0, 3);
     const int number = (line[1] == ' ' ? 0 : (line[1] - '0') * 10) + (line[2] - '0');
     const ObservationTypes& types = typesV3_[static_cast<std::size_t>(system - 'A')];
     if (types.declared == 0) {
-        warn(record, "satellite " + satellite + ": the header declares no observation types for " +
+        warn(record, std::string("satellite ") + std::string(satellite) +
+                         ": the header declares no observation types for " +
                          rinex::systemName(system));
         return false;
     }
@@ -971,20 +972,21 @@ bool ObservationReader::readSatelliteV3(std::string_view line, std::size_t recor
     std::string_view values = line.substr(3);
     if (values.size() > fields) {
         if (!isBlank(values.substr(fields))) {
-            warn(record, "satellite " + satellite + " has more than the " +
-                             std::to_string(types.declared) +
+            warn(record, std::string("satellite ") + std::string(satellite) +
+                             " has more than the " + std::to_string(types.declared) +
                              " observations the header declares for " + rinex::systemName(system));
             return false;
         }
         values = values.substr(0, fields);
     }
     if (!onlyObservationCharacters(values)) {
-        warn(record, "satellite " + satellite +
+        warn(record, std::string("satellite ") + std::string(satellite) +
                          " holds characters an observation field (F14.3, I1, I1) cannot");
         return false;
     }
     if (number == 0) {
-        warn(record, "satellite " + satellite + ": there is no satellite number 0");
+        warn(record, std::string("satellite ") + std::string(satellite) +
+                         ": there is no satellite number 0");
         return false;
     }
     if (counted) {
@@ -1421,6 +1423,9 @@ void ObservationReader::finish()
             "the reference frame of the approximate position: the file does not state one "
             "(RINEX 2 calls it WGS 84, RINEX 3 and 4 recommend ITRS)");
     }
+    // One line per marker, however many of its sessions lack a position.
+    std::sort(unplaced.begin(), unplaced.end());
+    unplaced.erase(std::unique(unplaced.begin(), unplaced.end()), unplaced.end());
     for (const std::string& marker : unplaced) {
         result_.notCarried.push_back("a position for " + marker);
     }
