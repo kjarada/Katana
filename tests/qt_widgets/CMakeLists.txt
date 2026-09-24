@@ -28,6 +28,7 @@ add_executable(katana_qt_widget_tests
     test_render_view.cpp
     test_section_view.cpp
     test_plan_view.cpp
+    test_plan_painter.cpp
     test_view_chrome.cpp
     ${_qt_src}/viewport_widget.cpp
     ${_qt_src}/plan_painter.cpp

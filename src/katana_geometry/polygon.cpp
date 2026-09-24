@@ -205,8 +205,9 @@ std::optional<Segment2> clip(const Segment2& segment, const Box2& box)
 }
 
 void clipPolyline(const std::vector<Point2>& vertices, bool closed, const Box2& box,
-                  PolylineRuns& runs)
+                  PolylineRuns& runs, PolylineClip mode)
 {
+    const bool whole = mode == PolylineClip::WholeSegments;
     runs.clear();
     const std::size_t count = vertices.size();
     if (count < 2 || box.empty()) {
@@ -251,6 +252,16 @@ void clipPolyline(const std::vector<Point2>& vertices, bool closed, const Box2& 
         }
         if (outside) {
             close();
+            continue;
+        }
+        if (whole) {
+            // The segment as it is; a run carries on through every vertex
+            // between two segments that meet the box.
+            if (!open) {
+                runs.points.push_back(a);
+                open = true;
+            }
+            runs.points.push_back(b);
             continue;
         }
         const Point2 start = enter == 0.0 ? a : Point2(a.x + enter * dx, a.y + enter * dy);

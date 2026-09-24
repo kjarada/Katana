@@ -199,6 +199,27 @@ TEST(PolygonClipPolyline, ALineThatLeavesAndComesBackIsTwoRunsWithCrossingsOnThe
     EXPECT_EQ(run(runs, 1), (std::vector<Point2>{Point2(8, 10), Point2(8, 5), Point2(10, 5)}));
 }
 
+TEST(PolygonClipPolyline, KeptWholeASegmentThatMeetsTheBoxKeepsBothItsVertices)
+{
+    // The line of the test above, with segments kept whole: (-5,5)-(5,5)
+    // and (5,5)-(5,15) meet the box and make one run of their three
+    // vertices; (5,15)-(8,15) misses it and ends the run; (8,15)-(8,5) and
+    // (8,5)-(15,5) meet it and make the second. Every point is a vertex.
+    const std::vector<Point2> line{Point2(-5, 5), Point2(5, 5),  Point2(5, 15),
+                                   Point2(8, 15), Point2(8, 5), Point2(15, 5)};
+    PolylineRuns runs;
+    clipPolyline(line, false, Box2(Point2(0, 0), Point2(10, 10)), runs,
+                 PolylineClip::WholeSegments);
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(run(runs, 0), (std::vector<Point2>{Point2(-5, 5), Point2(5, 5), Point2(5, 15)}));
+    EXPECT_EQ(run(runs, 1), (std::vector<Point2>{Point2(8, 15), Point2(8, 5), Point2(15, 5)}));
+    // A segment across the box with both ends outside is kept, whole.
+    clipPolyline({Point2(-10, 5), Point2(20, 5), Point2(20, 40)}, false,
+                 Box2(Point2(0, 0), Point2(10, 10)), runs, PolylineClip::WholeSegments);
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(run(runs, 0), (std::vector<Point2>{Point2(-10, 5), Point2(20, 5)}));
+}
+
 TEST(PolygonClipPolyline, ASegmentCrossingTheBoxWithBothEndsOutsideIsARunOfItsTwoCrossings)
 {
     // (-10,5)-(20,5) across the box (0,0)-(10,10): enters at t = 1/3, leaves
