@@ -697,6 +697,201 @@ TEST(SurveyJobReadjustCommand, AJobPointMovedByHandAndThenHeldFromTheDrawingStay
     }
 }
 
+namespace {
+
+// The survey point entity whose `property` reads `value`.
+const Entity* entityWith(const Document& document, std::string_view property,
+                         std::string_view value)
+{
+    const Entity* found = nullptr;
+    document.model().entities.forEach([&](const Entity& entity) {
+        const auto field = entity.properties.find(property);
+        if (field != entity.properties.end() && katana::entity::toString(field->second) == value) {
+            found = &entity;
+        }
+    });
+    return found;
+}
+
+// An import drawn with every drawing option away from its default: a layer
+// per field code, and the point's fields under other property names.
+SurveyJobImport importDrawnPerCode()
+{
+    SurveyJobImport request = importRequest();
+    request.importOptions.layerPerCode = true;
+    request.importOptions.pointNumberProperty = "ptno";
+    request.importOptions.codeProperty = "fieldcode";
+    request.importOptions.descriptionProperty = "remark";
+    request.importOptions.recordSource = false;
+    return request;
+}
+
+// Every point the fake reduction computes has code PEG, so with a layer per
+// code each one belongs on survey/day1/PEG, numbered under "ptno".
+void expectDrawnPerCode(const Document& document, std::string_view pointId)
+{
+    SCOPED_TRACE(std::string(pointId));
+    const Entity* entity = entityWith(document, "ptno", pointId);
+    if (entity == nullptr) { // drawn under the default name: find it to show where it went
+        entity = entityWith(document, "point", pointId);
+    }
+    ASSERT_NE(entity, nullptr);
+    EXPECT_EQ(entity->layer, "survey/day1/PEG");
+    EXPECT_EQ(entity->properties.count("point"), 0U);
+    ASSERT_EQ(entity->properties.count("fieldcode"), 1U);
+    EXPECT_EQ(katana::entity::toString(entity->properties.at("fieldcode")), "PEG");
+}
+
+SurveyJobReadjustment readjustmentOf(const Document& document, HandEditPolicy policy)
+{
+    SurveyJobReadjustment request;
+    request.jobId = document.surveyJobs().front().id;
+    request.settings = document.surveyJobs().front().settings;
+    request.handEdits = policy;
+    return request;
+}
+
+} // namespace
+
+// The job's later points belong with its first ones: a point a re-adjustment
+// computes for the first time, and one deleted by hand that Overwrite draws
+// again, go where and as the import put the others - on the PEG layer, so
+// switching that layer off hides all of the job's pegs, not just the first.
+TEST(SurveyJobReadjustCommand, APointDrawnByAReadjustmentIsDrawnAsTheImportDrewTheOthers)
+{
+    Document document;
+    auto fake = std::make_shared<FakeReduction>();
+    fake->points = {{"101", {6'250'000.0, 300'000.0, 10.0}}};
+    ASSERT_TRUE(document
+                    .execute(std::make_unique<ImportSurveyJobCommand>(
+                        document, importDrawnPerCode(), reductionOf(fake)))
+                    .ok());
+    expectDrawnPerCode(document, "101");
+
+    // A new point...
+    fake->points["102"] = {6'250'010.0, 300'020.0, 11.0};
+    int reads = 0;
+    auto first = std::make_unique<ReadjustSurveyJobCommand>(
+        document, readjustmentOf(document, HandEditPolicy::Keep),
+        readerFor(&reads, document.surveyJobs().front().sourceBytes), reductionOf(fake));
+    auto* firstRaw = first.get();
+    const auto added = document.execute(std::move(first));
+    ASSERT_TRUE(added.ok()) << added.error().describe();
+    EXPECT_EQ(firstRaw->changes().created, std::vector<std::string>{"102"});
+    expectDrawnPerCode(document, "102");
+
+    // ...and a deleted one drawn again.
+    ASSERT_TRUE(
+        document.execute(katana::commands::deleteEntities({entityWith(document, "ptno", "101")->id}))
+            .ok());
+    auto second = std::make_unique<ReadjustSurveyJobCommand>(
+        document, readjustmentOf(document, HandEditPolicy::Overwrite),
+        readerFor(&reads, document.surveyJobs().front().sourceBytes), reductionOf(fake));
+    auto* secondRaw = second.get();
+    const auto redrawn = document.execute(std::move(second));
+    ASSERT_TRUE(redrawn.ok()) << redrawn.error().describe();
+    EXPECT_EQ(secondRaw->changes().created, std::vector<std::string>{"101"});
+    expectDrawnPerCode(document, "101");
+}
+
+// The drawing options are part of the job, so they are saved with it: a
+// re-adjustment in a later session draws as the import did too.
+TEST(SurveyJobReadjustCommand, TheImportsDrawingOptionsSurviveSavingAndOpening)
+{
+    const fs::path root = fs::temp_directory_path() / "katana-cad-tests" / "survey-job-options";
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
+    fs::create_directories(root);
+    auto fake = std::make_shared<FakeReduction>();
+    fake->points = {{"101", {6'250'000.0, 300'000.0, 10.0}}};
+    {
+        Document document;
+        ASSERT_TRUE(document
+                        .execute(std::make_unique<ImportSurveyJobCommand>(
+                            document, importDrawnPerCode(), reductionOf(fake)))
+                        .ok());
+        ASSERT_TRUE(document.saveAs(root / "site.katana").ok());
+    }
+    Document reopened;
+    const auto opened = reopened.open(root / "site.katana");
+    ASSERT_TRUE(opened.ok()) << opened.error().describe();
+    fake->points["102"] = {6'250'010.0, 300'020.0, 11.0};
+    int reads = 0;
+    const auto status = reopened.execute(std::make_unique<ReadjustSurveyJobCommand>(
+        reopened, readjustmentOf(reopened, HandEditPolicy::Keep),
+        readerFor(&reads, reopened.surveyJobs().front().sourceBytes), reductionOf(fake)));
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    expectDrawnPerCode(reopened, "101");
+    expectDrawnPerCode(reopened, "102");
+    fs::remove_all(root, ignored);
+}
+
+// The options come back from a project file, which may be damaged or edited
+// by hand: each malformed form ends the run before the reduction, with a
+// sentence naming the job, and changes nothing - never a guess at the options.
+TEST(SurveyJobReadjustCommand, DrawingOptionsThatCannotBeReadEndTheRunAndChangeNothing)
+{
+    const std::vector<std::pair<std::string, ErrorCode>> cases = {
+        {"layer-per-code=true\n", ErrorCode::ParseFailure},            // no version line
+        {"katana-survey-import-options=x\n", ErrorCode::ParseFailure}, // not a number
+        {"katana-survey-import-options=0\n", ErrorCode::ParseFailure},
+        {"katana-survey-import-options=1\nlayer-per-code\n", ErrorCode::ParseFailure},
+        {"katana-survey-import-options=1\nlayer-per-code=maybe\n", ErrorCode::ParseFailure},
+        {"katana-survey-import-options=1\ncode-property=%4\n", ErrorCode::ParseFailure},
+        {"katana-survey-import-options=1\ncode-property=%G1\n", ErrorCode::ParseFailure},
+        {std::string("\0\xff\r\n=", 5), ErrorCode::ParseFailure},
+        {"katana-survey-import-options=2\nlayer-per-code=true\n", ErrorCode::Unsupported},
+    };
+    for (const auto& [text, code] : cases) {
+        SCOPED_TRACE(text);
+        Document document;
+        auto fake = std::make_shared<FakeReduction>();
+        const std::string id = importThreePoints(document, fake);
+        SurveyJobAccess::jobs(document).front().importOptions = text;
+        const SurveyJob before = document.surveyJobs().front();
+        const auto revision = document.modelRevision();
+        const int calls = fake->calls;
+        int reads = 0;
+        const auto status = document.execute(std::make_unique<ReadjustSurveyJobCommand>(
+            document, readjustmentOf(document, HandEditPolicy::Overwrite),
+            readerFor(&reads, before.sourceBytes), reductionOf(fake)));
+        ASSERT_FALSE(status.ok());
+        EXPECT_EQ(status.error().code, code);
+        EXPECT_NE(status.error().message.find(id), std::string::npos) << status.error().message;
+        EXPECT_EQ(fake->calls, calls) << "refused before the reduction";
+        EXPECT_EQ(document.surveyJobs().front(), before);
+        EXPECT_EQ(document.modelRevision(), revision);
+    }
+}
+
+// A key a later build added is skipped, as the reduction settings' is, and
+// the rest still apply. A property name holding a line break and a '%' comes
+// back as it was: the text form encodes them.
+TEST(SurveyJobReadjustCommand, ADrawingOptionALaterBuildAddedIsSkippedAndTheRestStillApply)
+{
+    Document document;
+    auto fake = std::make_shared<FakeReduction>();
+    fake->points = {{"101", {6'250'000.0, 300'000.0, 10.0}}};
+    SurveyJobImport request = importDrawnPerCode();
+    request.importOptions.pointNumberProperty = "pt%\nno";
+    ASSERT_TRUE(document
+                    .execute(std::make_unique<ImportSurveyJobCommand>(document, request,
+                                                                      reductionOf(fake)))
+                    .ok());
+    ASSERT_NE(entityWith(document, "pt%\nno", "101"), nullptr);
+    SurveyJobAccess::jobs(document).front().importOptions += "label-height=2.5\n";
+
+    fake->points["102"] = {6'250'010.0, 300'020.0, 11.0};
+    int reads = 0;
+    const auto status = document.execute(std::make_unique<ReadjustSurveyJobCommand>(
+        document, readjustmentOf(document, HandEditPolicy::Keep),
+        readerFor(&reads, document.surveyJobs().front().sourceBytes), reductionOf(fake)));
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    const Entity* p102 = entityWith(document, "pt%\nno", "102");
+    ASSERT_NE(p102, nullptr);
+    EXPECT_EQ(p102->layer, "survey/day1/PEG");
+}
+
 TEST(SurveyJobReadjustCommand, AReaderOrReductionThatFailsChangesNothing)
 {
     Document document;

@@ -65,8 +65,10 @@ reductionContextFor(const Document& document);
 
 struct SurveyJobImport {
     // Everything the job keeps except what the command fills: `id` (assigned,
-    // never reused), `createdEntities`, and the report fields. `settings` is
-    // what the reduction runs with; `layer` must equal importOptions.layer.
+    // never reused), `createdEntities`, `placedPoints`, `importOptions` (from
+    // importOptions below, so a re-adjustment draws a new point as these
+    // were drawn) and the report fields. `settings` is what the reduction
+    // runs with; `layer` must equal importOptions.layer.
     SurveyJob job;
     // The project as the reader returned it from job.sourceBytes.
     katana::survey::SurveyProject raw;
