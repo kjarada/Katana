@@ -665,3 +665,90 @@ is 4-6x faster than main.
 - **Surfacing the level.** A command-line or About line saying which level
   is in force would let a person see it; today only `simdSelection()` and a
   refused override's stderr line do.
+
+## SIMD: the software rasteriser (2026-09-24)
+
+The CPU rasteriser draws every headless frame and every 3D view without a
+GPU. Four changes, all in `src/katana_render/rasterizer.cpp` and the kernel
+file `src/katana_render/simd/raster_avx2.cpp`. None of them changes a pixel.
+
+- **Tiles a triangle cannot reach are not binned.** A triangle whose box
+  spans several 64 px tiles is tested at each tile's corners and left out of
+  the tiles it cannot touch. A 1 px line corner to corner of a 640 x 480 view
+  went from 160 bin entries to at most 34.
+- **Rows are bounded before the fill.** A box of 64 pixels or more in a tile
+  is first cut, row by row, to the pixels whose centres can be inside. The
+  edge values step along the row in closed form. They are not re-derived for
+  every pixel of the box.
+- **Eight pixels a step on AVX2** (`katana_avx2_shade_rows`): coverage, depth
+  and perspective-correct colour, lane by lane in the scalar order. Where the
+  corner test shows that the whole box is inside, the edge tests are skipped.
+- **Four vertices a step in the transform** (`katana_avx2_transform_vertices`):
+  the matrix in double, the clip codes, and the projection of every vertex
+  that needs no clipping. That projection now happens once per vertex in stage
+  1. It used to happen once per triangle corner in stage 2.
+
+**Why skipping pixels cannot change the frame.** The fill decides coverage
+in float. The skips are decided on the exact edge functions, in double,
+with a margin M = 256 u (R^2 + 1), where u = 2^-24 and R is the largest
+vertex-to-pixel distance. The float error can be bounded at about
+55 u R^2 (the derivation is at "conservative coverage" in the source). So a
+pixel is skipped only where the float test would reject it, and the edge
+tests are dropped only where it would accept it. The frames were also
+checked directly. The ten frames of `test_rasterizer_simd.cpp`, including
+3,000 triangles of every size from a fixed seed, hash the same, colour and
+depth, as main's `rasterizer.cpp` compiled from `git show main:`, at both
+levels. The tests compare the scalar and AVX2 levels on 0, 1, 3 and 7
+workers, and `simd_scalar.render` / `simd_avx2.render` run the whole suite
+at each level.
+
+**The cutoff is measured.** With no cutoff, the double setup made the framed
+1.05M-triangle grid (0.27 pixels a triangle) 23% slower, as the earlier
+std::simd experiment had found. A cutoff of 16 cost the 131k grid 4%. At 64
+no dense frame moved outside the A/A spread, and the near frames kept almost
+all of the gain. `BM_RenderTriangleSize` tiles the view with triangles of one
+size. In that isolated, serial benchmark the kernel wins from about 8 px legs
+(33.9 vs 76.3 ms), and at 256 px legs it is 5.8x faster (7.9 vs 45.6 ms).
+
+**Two regressions found and fixed on the way.** In the first version, dense
+frames were 8-12% slower on both levels. Toggling each change in one binary
+found two causes. First, a one-tile triangle was binned through `binBox`,
+which floored its box a second time: four `floorf` calls, which are real
+calls on baseline x86-64, for every triangle. Second, the bounded fill,
+inlined into the tile loop, slowed the loop that every small box takes. Now
+the one-tile case pushes its bin entry directly, the pixel is one
+always-inline `shadePixel` shared by both loops, and the bounded fill is out
+of line.
+
+**Measured** on the i7-1270P, Release, 16 threads unless serial. Main and a
+copy of main (A/A) were interleaved with this branch at each level, 4 rounds
+x 3 repetitions (6 for the second archive). The figures are real time in ms,
+min / median. The archives are the owner's, at 1600 x 1000 through
+`cad::renderLayers` (`BM_ArchiveFrame`, `KATANA_BENCH_FRAME_12DA`).
+
+| benchmark | main | main (A/A) | AVX2 | scalar |
+|---|---|---|---|---|
+| Test 4 with Tin.12da | 19.16 / 21.02 | 18.77 / 20.56 | 17.30 / 18.78 | 18.14 / 19.58 |
+| plot_PW_example_data.12da | 19.15 / 19.74 | 18.59 / 20.23 | 15.26 / 16.64 | 15.81 / 16.16 |
+| RenderGroundWithin/256 | 9.09 / 9.38 | 8.84 / 9.44 | 3.89 / 4.12 | 7.86 / 8.17 |
+| RenderGroundWithin/724 | 15.35 / 16.19 | 15.59 / 16.36 | 10.21 / 10.55 | 13.83 / 14.25 |
+| SceneLayersFrame/512 | 20.53 / 22.24 | 21.30 / 24.34 | 18.65 / 20.29 | 19.89 / 22.01 |
+| RenderGroundFramed/724 | 20.96 / 21.75 | 21.57 / 22.66 | 21.56 / 22.62 | 20.93 / 22.63 |
+| SceneFrame/512 | 17.04 / 17.66 | 17.02 / 18.24 | 17.45 / 18.26 | 16.86 / 17.70 |
+
+The eye inside the ground is 2.3x faster at 131k triangles and 1.5x at 1.05M.
+The Test 4 frame is 10% faster and the plot_PW frame 20% faster. Most of
+the plot_PW gain holds at the scalar level too, because it comes from binning
+its long strings only where they are drawn. The dense framed grids and
+the synthetic scene frame are unchanged within the A/A spread, which is 2-5%.
+
+**What did not pay.**
+- **Row bounds without the kernel.** At the scalar level, and on these
+  frames, they measured inside the A/A spread. They are kept because they
+  are what the kernel runs on, and they pay on slivers and lines.
+- **The transform kernel.** Measured in one binary with it on and off, it
+  took 12% off the Test 4 frame. Elsewhere the difference was inside the A/A
+  spread.
+- **Dense TINs.** The frame is capped by setup and binning, as the earlier
+  measurement said. The remaining lever there is the scene representation,
+  which is in `scene.cpp`, not the rasteriser.
