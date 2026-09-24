@@ -1,7 +1,7 @@
 # Storage — which database, and why
 
-*Decision record. PLAN.MD §32 (performance targets), §33 (memory), Rule 6
-(profile before optimising).*
+*Decision record. The performance targets and Rule 6 (profile before
+optimising) are in `docs/architecture.md`.*
 
 ## The question
 
@@ -94,7 +94,8 @@ would be trading a solved problem for an unbounded one, to save 289 ms on a
 
 Not the project database — the **analytical** store, which does not exist yet:
 
-- point clouds at 10⁸–10⁹ points (PLAN.MD Phase 17's out-of-core half),
+- point clouds at 10⁸–10⁹ points (the out-of-core half of the point-cloud
+  work; `docs/interop.md`),
 - survey observations and adjustment residuals queried across jobs,
 - anything answering "every point in this polygon below this elevation,
   grouped by classification".
@@ -174,7 +175,7 @@ which no database change would touch. Measure that split first.
 
 ```sh
 cmake --build build/release --target katana_benchmarks
-./build/release/benchmarks/katana_benchmarks.exe \
+./build/release/bin/benchmarks/katana_benchmarks.exe \
     --benchmark_filter="ProjectSave|ProjectOpen|GeometryJson" --benchmark_min_time=0.3s
 ```
 
