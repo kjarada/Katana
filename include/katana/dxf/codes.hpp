@@ -4,6 +4,7 @@
 // so that the reader and the writer cannot disagree about them - and exposed
 // so that tests check them against values worked out by hand.
 
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -39,6 +40,21 @@ inline constexpr int kColourForeground = 7;
 
 // Group 420: 0x00RRGGBB.
 [[nodiscard]] katana::entity::Color trueColour(long value);
+
+// ---- angles ------------------------------------------------------------------
+
+// A DXF angle is in degrees; the reader turns one into radians by this one
+// multiplication, and the writer's exactDegrees is chosen against it.
+inline constexpr double kRadiansPerDegree = std::numbers::pi / 180.0;
+
+// Degrees that the reader turns back into exactly `radians`. The nearest
+// double to radians * 180 / pi does not always survive the multiplication
+// back; a neighbour a unit or two in the last place away usually does, and is
+// then the one written, so that a text's rotation goes out and comes back
+// the same double. Not always: some radians no degrees reach, since below a
+// power of two the products are spaced more widely than the doubles. The
+// nearest then, which is never further off than the answer given.
+[[nodiscard]] double exactDegrees(double radians);
 
 // ---- lineweight --------------------------------------------------------------
 

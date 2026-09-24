@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <numbers>
 #include <string>
 
 #include "katana/dxf/codes.hpp"
@@ -144,4 +146,24 @@ TEST(DxfCodes, EncodedTextIsAsciiThatReadsBackAsTheOriginal)
     for (const std::string sample : {"R\u00E9sum\u00E9 \u00B0 \u00B1 \u2205 100%", "\u6E2C\u91CF"}) {
         EXPECT_EQ(dxf::plainText(dxf::encodeText(sample)), sample);
     }
+}
+
+TEST(DxfCodes, ExactDegreesNeverReadBackWorseThanTheNearestAndOftenExactly)
+{
+    // The reader multiplies by pi/180. Not every double is the product of a
+    // double and pi/180 - below a power of two the products are spaced more
+    // widely than the doubles - so exactness cannot always be had; but the
+    // degrees chosen never read back further off than the nearest degrees
+    // would, and read back exactly more often. Across a turn in 10 000 steps:
+    int exact = 0;
+    int nearestExact = 0;
+    for (int i = 0; i < 10000; ++i) {
+        const double radians = 2.0 * std::numbers::pi * static_cast<double>(i) / 10000.0;
+        const double chosen = dxf::exactDegrees(radians) * dxf::kRadiansPerDegree;
+        const double nearest = radians * (180.0 / std::numbers::pi) * dxf::kRadiansPerDegree;
+        EXPECT_LE(std::abs(chosen - radians), std::abs(nearest - radians)) << i;
+        exact += chosen == radians ? 1 : 0;
+        nearestExact += nearest == radians ? 1 : 0;
+    }
+    EXPECT_GT(exact, nearestExact);
 }

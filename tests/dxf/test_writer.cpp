@@ -263,18 +263,41 @@ TEST(DxfWriter, LinetypesAreWrittenAndReadBack)
     EXPECT_EQ(found->linetype, "kerb dash");
 }
 
-TEST(DxfWriter, EntityColoursAreTheNearestIndexedColour)
+TEST(DxfWriter, AColourNoIndexIsGoesOutAsTheNearestAndComesBackExact)
+{
+    // (250,5,5) is no indexed colour; the nearest is 1, red, which is what
+    // every other program draws. The colour itself rides along as extended
+    // data, so it comes back to Katana as it went out - for an entity and for
+    // a layer alike.
+    katana::entity::Model model;
+    ASSERT_TRUE(model.layers.add(katana::entity::Layer{.name = "Kerb", .color = rgb(10, 200, 30)}).ok());
+    Entity entity;
+    entity.geometry = Segment2{Point2(0.0, 0.0), Point2(1.0, 0.0)};
+    entity.layer = "Kerb";
+    entity.color = rgb(250, 5, 5);
+    ASSERT_TRUE(model.entities.add(entity).ok());
+    const std::string text = written(model);
+    EXPECT_NE(text.find(" 62\n1\n"), std::string::npos);
+    EXPECT_NE(text.find("1000\ncolour\n1000\n#FA0505\n"), std::string::npos);
+    const auto back = dxf::readDxf(text);
+    ASSERT_TRUE(back.ok());
+    EXPECT_EQ(back->entities.front().color, rgb(250, 5, 5));
+    const auto kerb = std::find_if(back->layers.begin(), back->layers.end(),
+                                   [](const auto& layer) { return layer.name == "Kerb"; });
+    ASSERT_NE(kerb, back->layers.end());
+    EXPECT_EQ(kerb->color, rgb(10, 200, 30));
+}
+
+TEST(DxfWriter, AnIndexedColourNeedsNoExtendedData)
 {
     katana::entity::Model model;
     Entity entity;
     entity.geometry = Segment2{Point2(0.0, 0.0), Point2(1.0, 0.0)};
-    entity.color = rgb(250, 5, 5); // nearest index 1, red
+    entity.color = rgb(255, 0, 0); // index 1 exactly
     ASSERT_TRUE(model.entities.add(entity).ok());
     const std::string text = written(model);
-    EXPECT_NE(text.find(" 62\n1\n"), std::string::npos);
-    const auto back = dxf::readDxf(text);
-    ASSERT_TRUE(back.ok());
-    EXPECT_EQ(back->entities.front().color, rgb(255, 0, 0));
+    EXPECT_EQ(text.find("1000\ncolour\n"), std::string::npos);
+    EXPECT_EQ(dxf::readDxf(text)->entities.front().color, rgb(255, 0, 0));
 }
 
 TEST(DxfWriter, TextWithALineBreakIsOneTextALine)
@@ -373,4 +396,45 @@ TEST(DxfWriter, WritingToAFileReplacesItWhole)
     ASSERT_TRUE(back.ok());
     EXPECT_EQ(back->entities.size(), 1u);
     std::filesystem::remove(path);
+}
+
+TEST(DxfWriter, AClosedPolylineThatRepeatsItsFirstVertexComesBackAsItWas)
+{
+    // The real drawing this module was measured on holds one: 19 vertices,
+    // closed, the last the first again. Dropped as redundant, it was the only
+    // one of 27 886 entities not to come back as it went out.
+    katana::entity::Model model;
+    const Polyline2 ring{{Point2(0.0, 0.0), Point2(4.0, 0.0), Point2(4.0, 3.0), Point2(0.0, 0.0)},
+                         true};
+    add(model, ring);
+    const auto back = roundTrip(model);
+    ASSERT_EQ(back.entities.size(), 1u);
+    EXPECT_EQ(std::get<Polyline2>(back.entities[0].geometry), ring);
+}
+
+TEST(DxfWriter, HeightsKnownAtOnlySomeVerticesGoOutInPlanAndComeBackWithTheirGaps)
+{
+    // No height is not zero: written at Z 0, the gap would be a false level
+    // the moment a surface is built from the file. So the polyline and the
+    // line go out flat, their heights beside them, and come back as they were.
+    katana::entity::Model model;
+    add(model, Polyline2{{Point2(0.0, 0.0), Point2(10.0, 0.0), Point2(10.0, 10.0)}, false}, "0",
+        {31.25, std::nullopt, 32.5});
+    add(model, Segment2{Point2(0.0, 0.0), Point2(5.0, 0.0)}, "0", {std::nullopt, 12.0});
+    auto out = dxf::writeDxf(model);
+    ASSERT_TRUE(out.ok());
+    EXPECT_EQ(records(out->text, "POLYLINE"), 0u); // no 3D polyline: it would need every Z
+    EXPECT_EQ(records(out->text, "LWPOLYLINE"), 1u);
+    EXPECT_NE(out->text.find("1000\n31.25 null 32.5\n"), std::string::npos);
+    ASSERT_FALSE(out->warnings.empty());
+    const auto back = dxf::readDxf(out->text);
+    ASSERT_TRUE(back.ok());
+    ASSERT_EQ(back->entities.size(), 2u);
+    const auto polyline = katana::entity::heightsOf(back->entities[0].properties, 3);
+    EXPECT_EQ(polyline[0], 31.25);
+    EXPECT_FALSE(polyline[1].has_value());
+    EXPECT_EQ(polyline[2], 32.5);
+    const auto line = katana::entity::heightsOf(back->entities[1].properties, 2);
+    EXPECT_FALSE(line[0].has_value());
+    EXPECT_EQ(line[1], 12.0);
 }

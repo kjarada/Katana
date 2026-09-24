@@ -225,6 +225,10 @@ class Writer {
     void writePolyline(const Entity& entity, const Polyline2& polyline);
     void writeText(const Entity& entity, const katana::entity::TextGeometry& text);
     void writeDimension(const Entity& entity, const katana::entity::DimensionGeometry& dimension);
+    // Ends the entity begun last with this module's extended data where it
+    // has something the entity's groups could not hold: heights known at
+    // only some vertices (`partial`), a colour no index is.
+    void finish(const std::vector<std::optional<double>>* partial = nullptr);
     void textLine(const Entity& entity, const Point2& position, std::string_view line,
                   double height, double rotation, double z, const Point2* centre = nullptr);
     void line(const Entity& entity, const Point2& from, const Point2& to);
@@ -243,7 +247,9 @@ class Writer {
     // The table records in the order they are written, with their DXF names.
     std::vector<std::pair<const katana::entity::Linetype*, std::string>> linetypes_;
     std::vector<std::pair<const katana::entity::Layer*, std::string>> layers_;
-    std::size_t nullHeights_ = 0;
+    std::size_t partialHeights_ = 0;
+    // The entity begun last has a colour no index is exactly.
+    std::optional<katana::entity::Color> exactColour_;
     std::size_t lastColourKey_ = 0;
     int lastColourIndex_ = kColourForeground;
     bool haveLastColour_ = false;
@@ -493,11 +499,20 @@ void Writer::writeTables()
                                                   : std::string_view("Continuous"));
         integer(370, nearestLineweight(layer->lineWeight));
         handle(390, kPlotStylePlaceholder);
-        // The path, where the name could not hold it, for this reader to
-        // take back: other programs pass extended data by without reading it.
-        if (name != layer->name) {
+        // The path, where the name could not hold it, and the colour, where
+        // no index is it, for this reader to take back: other programs pass
+        // extended data by without reading it.
+        const bool exact = indexedColour(colour) == layer->color;
+        if (name != layer->name || !exact) {
             text(1001, kApplicationName);
-            text(1000, encodeText(layer->name));
+            if (name != layer->name) {
+                text(1000, kExtendedPath);
+                text(1000, encodeText(layer->name));
+            }
+            if (!exact) {
+                text(1000, kExtendedColour);
+                text(1000, layer->color.toHex());
+            }
         }
         ++result_.layersWritten;
     }
@@ -735,6 +750,7 @@ std::string_view Writer::layerOf(const Entity& entity)
 std::uint64_t Writer::begin(std::string_view type, const Entity& entity, std::string_view subclass,
                             std::uint64_t owner)
 {
+    exactColour_.reset();
     const std::uint64_t own = nextHandle();
     text(0, type);
     handle(5, own);
@@ -751,6 +767,9 @@ std::uint64_t Writer::begin(std::string_view type, const Entity& entity, std::st
             haveLastColour_ = true;
         }
         integer(62, lastColourIndex_);
+        if (indexedColour(lastColourIndex_) != colour) {
+            exactColour_ = colour;
+        }
     }
     if (const auto linetype = entity.metadata.find(kMetaLinetype);
         linetype != entity.metadata.end()) {
@@ -786,6 +805,7 @@ void Writer::line(const Entity& entity, const Point2& from, const Point2& to)
     begin("LINE", entity, "AcDbLine");
     point(10, from);
     point(11, to);
+    finish();
 }
 
 void Writer::textLine(const Entity& entity, const Point2& position, std::string_view lineText,
@@ -795,9 +815,14 @@ void Writer::textLine(const Entity& entity, const Point2& position, std::string_
     point(10, position, z);
     real(40, height);
     text(1, encodeText(lineText));
-    double degrees = std::fmod(rotation * kDegreesPerRadian, 360.0);
-    if (degrees < 0.0) {
-        degrees += 360.0;
+    // The degrees that read back as exactly this rotation, where it is a
+    // turn or less, as every drawn text's is.
+    double degrees = exactDegrees(rotation);
+    if (degrees < 0.0 || degrees >= 360.0) {
+        degrees = std::fmod(degrees, 360.0);
+        if (degrees < 0.0) {
+            degrees += 360.0;
+        }
     }
     if (degrees != 0.0) {
         real(50, degrees);
@@ -807,6 +832,7 @@ void Writer::textLine(const Entity& entity, const Point2& position, std::string_
         point(11, *centre, z);
     }
     text(100, "AcDbText");
+    finish();
 }
 
 void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry& geometry)
@@ -835,23 +861,78 @@ void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry&
     }
 }
 
+// This module's extended data, under its registered application: what the
+// entity's own groups cannot hold, for this reader to take back. Other
+// programs pass it by.
+//
+// HEIGHTS known at some vertices and not others: the entity itself goes in
+// plan, because the format has no "no height" and a vertex written at Z 0
+// would be a false level - a surface built from the file would dive to the
+// datum there. The list is the `elevations` property's text ("31.25 null
+// 32.5"), in pieces of at most 250 characters, since R2000 holds an extended
+// data string to 255.
+//
+// A COLOUR that no index is: R2000 has no true colour, so the entity carries
+// the nearest index for everyone else and its own colour here.
+void Writer::finish(const std::vector<std::optional<double>>* partial)
+{
+    if (partial == nullptr && !exactColour_) {
+        return;
+    }
+    text(1001, kApplicationName);
+    if (partial != nullptr) {
+        text(1000, kExtendedHeights);
+        text(1002, "{");
+        std::string piece;
+        for (const auto& height : *partial) {
+            std::string token = "null";
+            if (height) {
+                char buffer[32];
+                const auto [end, error] = std::to_chars(buffer, buffer + sizeof(buffer), *height);
+                (void)error;
+                token.assign(buffer, static_cast<std::size_t>(end - buffer));
+            }
+            if (!piece.empty() && piece.size() + 1 + token.size() > 250) {
+                text(1000, piece);
+                piece.clear();
+            }
+            if (!piece.empty()) {
+                piece.push_back(' ');
+            }
+            piece += token;
+        }
+        if (!piece.empty()) {
+            text(1000, piece);
+        }
+        text(1002, "}");
+        ++partialHeights_;
+    }
+    if (exactColour_) {
+        text(1000, kExtendedColour);
+        text(1000, exactColour_->toHex());
+        exactColour_.reset();
+    }
+}
+
 void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
 {
     const std::size_t count = polyline.vertices.size();
     const auto heights = heightsOf(entity, count);
     bool anyHeight = false;
+    bool everyHeight = true;
     bool oneHeight = true;
     for (const auto& height : heights) {
         anyHeight = anyHeight || height.has_value();
+        everyHeight = everyHeight && height.has_value();
         oneHeight = oneHeight && height.has_value() && *height == heights.front().value_or(0.0);
     }
-    if (!anyHeight || oneHeight) {
+    if (!anyHeight || oneHeight || !everyHeight) {
         // Every vertex at one height, or none: an LWPOLYLINE, with the closed
         // flag. Never a HATCH - a closed boundary is a line, not a fill.
         begin("LWPOLYLINE", entity, "AcDbPolyline");
         integer(90, static_cast<std::int64_t>(count));
         integer(70, polyline.closed ? 1 : 0);
-        if (anyHeight && heights.front().value_or(0.0) != 0.0) {
+        if (oneHeight && anyHeight && *heights.front() != 0.0) {
             real(38, *heights.front());
         }
         for (const Point2& vertex : polyline.vertices) {
@@ -859,6 +940,7 @@ void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
             real(20, vertex.y + shift_.y);
             extents_.expand(Point2(vertex.x + shift_.x, vertex.y + shift_.y));
         }
+        finish(anyHeight && !everyHeight ? &heights : nullptr);
         return;
     }
     // Heights that differ: a 3D polyline, the only kind with a Z per vertex.
@@ -868,13 +950,11 @@ void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
     real(20, 0.0);
     real(30, 0.0);
     integer(70, 8 | (polyline.closed ? 1 : 0));
+    finish(); // on the POLYLINE, before its vertices
     for (std::size_t i = 0; i < count; ++i) {
         begin("VERTEX", entity, "AcDbVertex", owner);
         text(100, "AcDb3dPolylineVertex");
-        if (!heights[i]) {
-            ++nullHeights_;
-        }
-        point(10, polyline.vertices[i], heights[i].value_or(0.0));
+        point(10, polyline.vertices[i], *heights[i]);
         integer(70, 32);
     }
     const std::uint64_t end = nextHandle();
@@ -943,11 +1023,16 @@ void Writer::writeEntity(const Entity& entity)
                 const double z = heightsOf(entity, 1).front().value_or(0.0);
                 begin("POINT", entity, "AcDbPoint");
                 point(10, shape.position, z);
+                finish();
             } else if constexpr (std::is_same_v<T, Segment2>) {
                 const auto heights = heightsOf(entity, 2);
+                // One end's height without the other's: in plan, with the
+                // heights beside it (finish says why).
+                const bool both = heights[0].has_value() && heights[1].has_value();
                 begin("LINE", entity, "AcDbLine");
-                point(10, shape.start, heights[0].value_or(0.0));
-                point(11, shape.end, heights[1].value_or(0.0));
+                point(10, shape.start, both ? *heights[0] : 0.0);
+                point(11, shape.end, both ? *heights[1] : 0.0);
+                finish(!both && (heights[0] || heights[1]) ? &heights : nullptr);
             } else if constexpr (std::is_same_v<T, Arc2>) {
                 const double z = heightsOf(entity, 1).front().value_or(0.0);
                 const bool full = std::abs(shape.sweep) >= 2.0 * std::numbers::pi - 1e-12;
@@ -969,6 +1054,7 @@ void Writer::writeEntity(const Entity& entity)
                     real(50, start);
                     real(51, end);
                 }
+                finish();
                 const double r = shape.radius;
                 extents_.expand(Point2(shape.center.x + shift_.x - r, shape.center.y + shift_.y - r));
                 extents_.expand(Point2(shape.center.x + shift_.x + r, shape.center.y + shift_.y + r));
@@ -977,6 +1063,7 @@ void Writer::writeEntity(const Entity& entity)
                 begin("CIRCLE", entity, "AcDbCircle");
                 point(10, shape.center, z);
                 real(40, shape.radius);
+                finish();
                 const double r = shape.radius;
                 extents_.expand(Point2(shape.center.x + shift_.x - r, shape.center.y + shift_.y - r));
                 extents_.expand(Point2(shape.center.x + shift_.x + r, shape.center.y + shift_.y + r));
@@ -1038,10 +1125,12 @@ Result<DxfExport> Writer::run()
     writeObjects();
     std::string objects = std::move(body_);
 
-    if (nullHeights_ != 0) {
-        result_.warnings.push_back(std::to_string(nullHeights_) +
-                                   " polyline vertices with no height were written at Z 0 (a 3D "
-                                   "polyline has a height at every vertex)");
+    if (partialHeights_ != 0) {
+        result_.warnings.push_back(
+            std::to_string(partialHeights_) +
+            " entities with heights at only some vertices were written in plan, since the "
+            "format has no \"no height\" and Z 0 would be a false level; their heights go "
+            "beside them as extended data, which Katana reads back");
     }
     std::string out = header();
     out.reserve(out.size() + tables.size() + blocks.size() + entities.size() + objects.size() + 8);

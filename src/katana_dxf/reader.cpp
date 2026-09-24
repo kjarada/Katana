@@ -45,7 +45,9 @@ using detail::trimmedValue;
 
 namespace {
 
-constexpr double kDegrees = std::numbers::pi / 180.0;
+// The one conversion of a file's degrees; exactDegrees (codes.hpp) is chosen
+// against it.
+constexpr double kDegrees = kRadiansPerDegree;
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
 // A text a person reads is one line; MTEXT's default line pitch is five thirds
 // of the text height.
@@ -232,11 +234,60 @@ struct Common {
     bool invisible = false;
     bool paperSpace = false;
     Vec3 extrusion{0.0, 0.0, 1.0};
+    // Extended data: the application it belongs to, the word of this
+    // module's that the values now follow, and what they said - the heights
+    // list joined from its pieces (see kExtendedHeights), the colour.
+    std::string_view application;
+    std::string_view extendedWord;
+    std::string heights;
+    std::optional<Color> exactColour;
+
+    // The heights this module's writer put beside the entity, for `count`
+    // vertices; empty when there are none, or not that many.
+    [[nodiscard]] std::vector<std::optional<double>> extendedHeights(std::size_t count) const
+    {
+        if (heights.empty()) {
+            return {};
+        }
+        PropertyMap list;
+        list.emplace(std::string(katana::entity::kElevationsProperty), heights);
+        auto parsed = katana::entity::heightsOf(list, count);
+        const bool any = std::any_of(parsed.begin(), parsed.end(),
+                                     [](const auto& height) { return height.has_value(); });
+        return any ? parsed : std::vector<std::optional<double>>{};
+    }
 
     // True when the pair was one of these.
     bool take(const Pair& pair)
     {
         switch (pair.code) {
+        case 1001:
+            application = trimmedValue(pair.value);
+            extendedWord = {};
+            return true;
+        case 1000:
+            if (application == kApplicationName) {
+                const std::string_view value = trimmedValue(pair.value);
+                if (value == kExtendedHeights || value == kExtendedColour) {
+                    extendedWord = value;
+                    if (value == kExtendedHeights) {
+                        heights.clear();
+                    }
+                } else if (extendedWord == kExtendedHeights) {
+                    if (!heights.empty()) {
+                        heights.push_back(' ');
+                    }
+                    heights.append(value);
+                } else if (extendedWord == kExtendedColour) {
+                    if (const auto parsed = Color::fromHex(value)) {
+                        exactColour = *parsed;
+                    }
+                    extendedWord = {};
+                }
+            }
+            return true;
+        case 1002:
+            return true;
         case 8:
             layer = trimmedValue(pair.value);
             return true;
@@ -604,7 +655,9 @@ void Reader::readLayer(const Record& record)
     std::string_view linetype;
     std::optional<int> weight;
     std::string_view xdataApplication;
+    std::string_view xdataWord;
     std::optional<std::string> katanaPath;
+    std::optional<Color> exactColour;
     for (const Pair& pair : record.pairs) {
         switch (pair.code) {
         case 2:
@@ -633,12 +686,24 @@ void Reader::readLayer(const Record& record)
             break;
         case 1001:
             xdataApplication = trimmedValue(pair.value);
+            xdataWord = {};
             break;
         case 1000:
-            if (xdataApplication == kApplicationName && !katanaPath) {
-                const std::string path = plainText(pair.value);
-                if (katana::entity::validateLayerPath(path)) {
-                    katanaPath = path;
+            if (xdataApplication == kApplicationName) {
+                const std::string_view value = trimmedValue(pair.value);
+                if (xdataWord.empty() && (value == kExtendedPath || value == kExtendedColour)) {
+                    xdataWord = value;
+                } else if (xdataWord == kExtendedPath) {
+                    const std::string path = plainText(pair.value);
+                    if (katana::entity::validateLayerPath(path)) {
+                        katanaPath = path;
+                    }
+                    xdataWord = {};
+                } else if (xdataWord == kExtendedColour) {
+                    if (const auto parsed = Color::fromHex(value)) {
+                        exactColour = *parsed;
+                    }
+                    xdataWord = {};
                 }
             }
             break;
@@ -666,6 +731,9 @@ void Reader::readLayer(const Record& record)
     }
     if (rgb) {
         layer.color = trueColour(*rgb);
+    }
+    if (exactColour) {
+        layer.color = *exactColour;
     }
     layer.locked = (flags & 4) != 0;
     if (!linetype.empty() && !equalsUpper(linetype, "CONTINUOUS") &&
@@ -863,6 +931,9 @@ const std::string& Reader::layerPath(std::string_view dxfName)
 
 std::optional<Color> Reader::colourOf(const Common& common) const
 {
+    if (common.exactColour) {
+        return common.exactColour; // this module's own record of it
+    }
     if (common.trueColour) {
         return trueColour(*common.trueColour);
     }
@@ -913,8 +984,9 @@ void Reader::emit(Entity entity, const Common& common, Sink& sink,
         katana::entity::setHeights(entity.properties, *heights);
     }
     const bool fromInsert = common.layer.empty() || common.layer == "0";
-    const bool byBlock = !common.trueColour && common.colour && *common.colour == kColourByBlock;
-    if (!byBlock && !(common.colour && *common.colour == kColourByLayer)) {
+    const bool byBlock = !common.trueColour && !common.exactColour && common.colour &&
+                         *common.colour == kColourByBlock;
+    if (!byBlock && (common.exactColour || !(common.colour && *common.colour == kColourByLayer))) {
         entity.color = colourOf(common);
     }
     entity.visible = !common.invisible;
@@ -1030,7 +1102,9 @@ void Reader::convertLine(const Record& record, Sink& sink)
         return;
     }
     entity.geometry = Segment2{start, end};
-    if (z1 != 0.0 || z2 != 0.0) {
+    if (const auto extended = common.extendedHeights(2); !extended.empty()) {
+        emit(std::move(entity), common, sink, &extended);
+    } else if (z1 != 0.0 || z2 != 0.0) {
         const std::vector<std::optional<double>> heights{z1, z2};
         emit(std::move(entity), common, sink, &heights);
     } else {
@@ -1234,15 +1308,10 @@ void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD
         warn(std::string(kind) + " not imported: it has no vertices");
         return;
     }
-    // A closed polyline whose last vertex repeats its first says so twice;
-    // once is Katana's form, and the repeat would be a segment of no length.
-    if (closed && vertices.size() > 2) {
-        const Vertex& first = vertices.front();
-        const Vertex& lastVertex = vertices.back();
-        if (first.x == lastVertex.x && first.y == lastVertex.y && lastVertex.bulge == 0.0) {
-            vertices.pop_back();
-        }
-    }
+    // The vertices are kept as the file has them - a closed polyline whose
+    // last vertex repeats its first included - so that what was written is
+    // what comes back: the real drawing this was measured on has one such,
+    // and dropping the repeat made it the only entity of 27 886 to differ.
     std::vector<Point2> points;
     std::vector<std::optional<double>> heights;
     points.reserve(vertices.size());
@@ -1280,11 +1349,18 @@ void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD
             point = frame.apply(point);
         }
     }
+    // Heights this module's writer kept beside a polyline it had to write in
+    // plan, since some of its vertices had none - one a vertex, so only
+    // where no arc added any.
+    const auto extended = common.extendedHeights(count);
+    const bool useExtended = !extended.empty() && points.size() == count;
     Entity entity;
     entity.geometry = Polyline2{std::move(points), closed};
     // A 3D polyline's heights are data even where they are zero; a 2D one's
     // elevation of zero is only the plan.
-    if (threeD || anyHeight) {
+    if (useExtended) {
+        emit(std::move(entity), common, sink, &extended);
+    } else if (threeD || anyHeight) {
         emit(std::move(entity), common, sink, &heights);
     } else {
         emit(std::move(entity), common, sink);

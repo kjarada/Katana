@@ -227,6 +227,28 @@ Color trueColour(long value)
                static_cast<int>(value & 0xFF));
 }
 
+double exactDegrees(double radians)
+{
+    constexpr double kDegreesPerRadian = 180.0 / std::numbers::pi;
+    const double nearest = radians * kDegreesPerRadian;
+    if (!std::isfinite(nearest) || nearest * kRadiansPerDegree == radians) {
+        return nearest;
+    }
+    double above = nearest;
+    double below = nearest;
+    for (int step = 0; step < 8; ++step) {
+        above = std::nextafter(above, std::numeric_limits<double>::infinity());
+        if (above * kRadiansPerDegree == radians) {
+            return above;
+        }
+        below = std::nextafter(below, -std::numeric_limits<double>::infinity());
+        if (below * kRadiansPerDegree == radians) {
+            return below;
+        }
+    }
+    return nearest;
+}
+
 int nearestLineweight(double millimetres)
 {
     static constexpr std::array<int, 24> kWeights{0,  5,  9,  13, 15, 18,  20,  25,
