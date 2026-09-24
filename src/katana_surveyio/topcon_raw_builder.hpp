@@ -85,7 +85,13 @@ class RawProjectBuilder {
         target.recordNumber = record;
     }
 
-    // A warning about a record that WAS read (in part or in full).
+    // A warning about a record that WAS read (in part or in full). The
+    // first kListedWarnings are listed; past them each is counted and
+    // finish() says how many more there were. A file of a hundred million
+    // unreadable lines (1 GiB is readSurvey's cap) would otherwise become
+    // gigabytes of warnings - the program stops answering while it
+    // allocates, which the size cap exists to prevent.
+    static constexpr std::size_t kListedWarnings = 10000;
     void warn(std::size_t record, std::string message);
     // A record that was not imported: a warning and one more skipped record.
     void skip(std::size_t record, std::string message);
@@ -190,6 +196,8 @@ class RawProjectBuilder {
     // 0 is an empty slot; otherwise index + 1. Kept at most half full.
     std::vector<std::uint32_t> pointSlots_;
     std::uint32_t lastPoint_ = kNotFound; // the point entry() found or made last
+    std::size_t unlistedWarnings_ = 0;
+    std::size_t firstUnlistedRecord_ = 0;
     IdIndex stationIndex_;
     IdIndex occupations_; // setups begun on each point
     IdIndex featureIndex_;

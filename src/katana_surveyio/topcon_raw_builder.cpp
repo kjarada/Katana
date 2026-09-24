@@ -143,7 +143,13 @@ survey::SourceRecord RawProjectBuilder::source(std::size_t record) const
 
 void RawProjectBuilder::warn(std::size_t record, std::string message)
 {
-    result_.warnings.push_back(ReadWarning{fileName_, record, std::move(message)});
+    if (result_.warnings.size() < kListedWarnings) {
+        result_.warnings.push_back(ReadWarning{fileName_, record, std::move(message)});
+        return;
+    }
+    if (unlistedWarnings_++ == 0) {
+        firstUnlistedRecord_ = record;
+    }
 }
 
 void RawProjectBuilder::skip(std::size_t record, std::string message)
@@ -369,6 +375,14 @@ void RawProjectBuilder::addStationNote(std::string_view note)
 
 ReadResult RawProjectBuilder::finish()
 {
+    if (unlistedWarnings_ > 0) {
+        result_.warnings.push_back(ReadWarning{
+            fileName_, 0,
+            std::to_string(unlistedWarnings_) + " more warnings, from record " +
+                std::to_string(firstUnlistedRecord_) + " on, are not listed: only the first " +
+                std::to_string(kListedWarnings) + " are. The records they are about are "
+                "still counted as read or skipped"});
+    }
     survey::SurveyProject& project = result_.project;
     std::size_t positioned = 0;
     for (const PointEntry& point : points_) {

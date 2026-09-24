@@ -306,6 +306,27 @@ TEST(TopconRw5, RecordsKatanaDoesNotImportAreWarnedByNumberAndCounted)
     EXPECT_EQ(result.recordsRead, 9u);
 }
 
+TEST(TopconRw5, PastTenThousandWarningsTheRestAreCountedInOneWarningNotListed)
+{
+    // Two good records, then 25,000 of a type the specification does not
+    // define: lines 3 to 25,002. The first 10,000 (lines 3 to 10,002) are
+    // listed; the other 15,000, from line 10,003, are one closing warning.
+    std::string bytes = "MO,AD0,UN1,SF1.0,EC0,EO0.0,AU0\nSP,PN1,N 1.0,E 2.0,EL3.0\n";
+    for (int line = 0; line < 25000; ++line) {
+        bytes += "ZZ,XX1\n";
+    }
+    const auto result = topcon_test::read(kRw5, bytes, "noisy.rw5");
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsRead, 2u);
+    EXPECT_EQ(result->recordsSkipped, 25000u);
+    ASSERT_EQ(result->warnings.size(), 10001u);
+    EXPECT_EQ(result->warnings[9999].record, 10002u);
+    EXPECT_EQ(result->warnings.back().record, 0u);
+    EXPECT_NE(result->warnings.back().message.find("15000 more warnings, from record 10003 on"),
+              std::string::npos)
+        << result->warnings.back().message;
+}
+
 TEST(TopconRw5, GnssPositionsAreGeodeticInWgs84FromDegreesMinutesSeconds)
 {
     const ReadResult result = readFixture("gnss.rw5");
