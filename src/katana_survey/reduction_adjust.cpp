@@ -129,6 +129,7 @@ void reradiate(Engine& engine, const std::unordered_set<std::string_view>& targe
             orientAndRadiate(engine, s, &targets);
         }
     }
+    radiateGnssVectors(engine, &targets);
 }
 
 // ---- Traverse ------------------------------------------------------------------------
@@ -460,6 +461,9 @@ struct NetworkObservation {
     SourceRecord source;
     const ReducedPointing* pointing = nullptr;
     PointingPart part = PointingPart::Direction;
+    // For an observation that is not part of a pointing (a GNSS vector): the
+    // report row a rejection marks.
+    std::optional<std::size_t> row{};
 };
 
 struct OutlierVerdict {
@@ -638,8 +642,10 @@ adjustWithOutliers(Engine& engine, const NetworkInputs& inputs, const std::strin
             lastRows.clear();
             if (const ReducedPointing* pointing = inputs.observations[observationIndex].pointing) {
                 lastRows = partRows(*pointing, inputs.observations[observationIndex].part);
-                markRows(engine, lastRows, true, reason);
+            } else if (const auto rowIndex = inputs.observations[observationIndex].row) {
+                lastRows = {*rowIndex};
             }
+            markRows(engine, lastRows, true, reason);
             lastRejected = observationIndex;
             engine.warn(rejected.observation + " " + reason + "; the adjustment was run again "
                                                               "without it.",
@@ -756,8 +762,26 @@ Status adjustAsNetwork(Engine& engine)
         return ownedIds.back();
     };
     for (const Observation& observation : engine.raw.observations) {
+        // GNSS vectors take part through engine.vectors: a rover reached by
+        // one vector only is a side shot like a point shot from one setup.
+        if (std::holds_alternative<GnssBaselineObservation>(observation) ||
+            std::holds_alternative<GnssGeocentricBaselineObservation>(observation)) {
+            continue;
+        }
         for (const std::string& id : referencedPoints(observation)) {
             inNetwork.insert(viewOf(id));
+        }
+    }
+    for (std::size_t v = 0; v < engine.vectors.size(); ++v) {
+        const GridVector& vector = engine.vectors[v];
+        if (engine.report.observations[vector.row].rejected) {
+            continue;
+        }
+        inNetwork.insert(vector.from);
+        // A vector is a setup of its own for the side-shot rule.
+        const auto [it, inserted] = observedFrom.try_emplace(vector.to, stations.size() + v);
+        if (!inserted && it->second != stations.size() + v) {
+            inNetwork.insert(vector.to);
         }
     }
     std::unordered_set<std::string_view> sideShots;
@@ -980,8 +1004,7 @@ Status adjustAsNetwork(Engine& engine)
             levelInputs.observations.push_back(NetworkObservation{
                 *level, "levelled height difference " + level->from + " -> " + level->to, source,
                 nullptr});
-        } else if (horizontal && (std::holds_alternative<GnssBaselineObservation>(observation) ||
-                                  std::holds_alternative<GnssPositionObservation>(observation) ||
+        } else if (horizontal && (std::holds_alternative<GnssPositionObservation>(observation) ||
                                   (std::holds_alternative<DistanceObservation>(observation) &&
                                    std::get<DistanceObservation>(observation).kind ==
                                        DistanceKind::Horizontal))) {
@@ -1002,6 +1025,36 @@ Status adjustAsNetwork(Engine& engine)
                                             source},
                     "GNSS position " + global->point, source, nullptr});
             }
+        }
+    }
+
+    for (const GridVector& vector : engine.vectors) {
+        if (engine.report.observations[vector.row].rejected) {
+            continue;
+        }
+        const SourceRecord source = vector.source ? *vector.source : SourceRecord{};
+        const std::string vectorLabel =
+            "GNSS vector " + std::string(vector.from) + " -> " + std::string(vector.to);
+        if (horizontal && present.count(vector.from) != 0 && present.count(vector.to) != 0) {
+            NetworkObservation entry{
+                GnssBaselineObservation{std::string(vector.from), std::string(vector.to),
+                                        vector.deltaNorthing, vector.deltaEasting,
+                                        vector.deltaHeight.value_or(0.0), vector.sigmaNorthing,
+                                        vector.sigmaEasting, vector.sigmaHeight, source},
+                vectorLabel, source, nullptr};
+            entry.row = vector.row;
+            horizontalInputs.observations.push_back(std::move(entry));
+        }
+        if (levels && vector.deltaHeight && levelPresent.count(vector.from) != 0 &&
+            levelPresent.count(vector.to) != 0) {
+            NetworkObservation entry{
+                LevelDifferenceObservation{std::string(vector.from), std::string(vector.to),
+                                           *vector.deltaHeight, vector.sigmaHeight,
+                                           std::hypot(vector.deltaNorthing, vector.deltaEasting),
+                                           source},
+                vectorLabel + " (height)", source, nullptr};
+            entry.row = vector.heightRow;
+            levelInputs.observations.push_back(std::move(entry));
         }
     }
 

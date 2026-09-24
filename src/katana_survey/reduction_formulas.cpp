@@ -120,6 +120,72 @@ double heightReductionFactor(double meanHeight, double earthRadius)
     return earthRadius / (earthRadius + meanHeight);
 }
 
+GeocentricCoordinate geocentricFromGeodetic(const GeodeticCoordinate& geodetic)
+{
+    const double e2 = kGrs80Flattening * (2.0 - kGrs80Flattening);
+    const double sinLatitude = std::sin(geodetic.latitude);
+    const double cosLatitude = std::cos(geodetic.latitude);
+    // Radius of curvature in the prime vertical.
+    const double nu = kGrs80SemiMajor / std::sqrt(1.0 - e2 * sinLatitude * sinLatitude);
+    const double h = geodetic.ellipsoidalHeight;
+    return GeocentricCoordinate{(nu + h) * cosLatitude * std::cos(geodetic.longitude),
+                                (nu + h) * cosLatitude * std::sin(geodetic.longitude),
+                                (nu * (1.0 - e2) + h) * sinLatitude};
+}
+
+GeodeticCoordinate geodeticFromGeocentric(const GeocentricCoordinate& geocentric)
+{
+    const double a = kGrs80SemiMajor;
+    const double f = kGrs80Flattening;
+    const double b = a * (1.0 - f);
+    const double e2 = f * (2.0 - f);
+    const double ep2 = e2 / (1.0 - e2);
+    const double p = std::hypot(geocentric.x, geocentric.y);
+    GeodeticCoordinate geodetic;
+    geodetic.longitude = std::atan2(geocentric.y, geocentric.x);
+    // Bowring: iterate on the parametric latitude.
+    double beta = std::atan2(geocentric.z * a, p * b);
+    double latitude = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        const double sinBeta = std::sin(beta);
+        const double cosBeta = std::cos(beta);
+        latitude = std::atan2(geocentric.z + ep2 * b * sinBeta * sinBeta * sinBeta,
+                              p - e2 * a * cosBeta * cosBeta * cosBeta);
+        beta = std::atan((1.0 - f) * std::tan(latitude));
+    }
+    geodetic.latitude = latitude;
+    const double sinLatitude = std::sin(latitude);
+    const double nu = a / std::sqrt(1.0 - e2 * sinLatitude * sinLatitude);
+    // Near the poles p / cos(latitude) loses its digits; the z form does not.
+    geodetic.ellipsoidalHeight = std::abs(latitude) < 0.25 * kPi
+                                     ? p / std::cos(latitude) - nu
+                                     : geocentric.z / sinLatitude - nu * (1.0 - e2);
+    return geodetic;
+}
+
+LocalVariances localVariances(const GnssCovariance3& c, const GeodeticCoordinate& at)
+{
+    const double sinLatitude = std::sin(at.latitude);
+    const double cosLatitude = std::cos(at.latitude);
+    const double sinLongitude = std::sin(at.longitude);
+    const double cosLongitude = std::cos(at.longitude);
+    const double rows[3][3] = {
+        {-sinLatitude * cosLongitude, -sinLatitude * sinLongitude, cosLatitude}, // north
+        {-sinLongitude, cosLongitude, 0.0},                                      // east
+        {cosLatitude * cosLongitude, cosLatitude * sinLongitude, sinLatitude},   // up
+    };
+    const double matrix[3][3] = {{c.xx, c.xy, c.xz}, {c.xy, c.yy, c.yz}, {c.xz, c.yz, c.zz}};
+    double variances[3] = {};
+    for (int r = 0; r < 3; ++r) {
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                variances[r] += rows[r][i] * matrix[i][j] * rows[r][j];
+            }
+        }
+    }
+    return LocalVariances{variances[0], variances[1], variances[2]};
+}
+
 double normalQuantile(double probability)
 {
     // Solved on the tail that holds the probability, so that 1 - 1e-9 is not

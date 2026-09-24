@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <optional>
 
+#include "katana/survey/data_model.hpp"
+
 namespace katana::survey::detail {
 
 // ---- Atmospheric correction ----------------------------------------------------------
@@ -88,6 +90,32 @@ struct SlopeReduction {
 // R / (R + h): a horizontal distance at mean height h above the datum, taken
 // down to the datum.
 [[nodiscard]] double heightReductionFactor(double meanHeight, double earthRadius);
+
+// ---- GNSS: global coordinates ----------------------------------------------------------
+//
+// A receiver's global values are on the GRS80 ellipsoid (WGS 84 differs from
+// it by 0.1 mm in the semi-minor axis). Only what the reduction itself needs:
+// the drawing's projection comes in through ReductionContext.
+inline constexpr double kGrs80SemiMajor = 6378137.0;
+inline constexpr double kGrs80Flattening = 1.0 / 298.257222101;
+
+// Latitude, longitude (radians) and ellipsoidal height to X, Y, Z.
+[[nodiscard]] GeocentricCoordinate geocentricFromGeodetic(const GeodeticCoordinate& geodetic);
+
+// X, Y, Z to latitude and longitude (radians) and ellipsoidal height, by
+// Bowring's iteration (converged to 1e-12 rad in three steps anywhere near
+// the earth's surface). Undefined at the centre of the earth.
+[[nodiscard]] GeodeticCoordinate geodeticFromGeocentric(const GeocentricCoordinate& geocentric);
+
+// The local north, east and up variances of an X/Y/Z covariance at the
+// latitude and longitude of `at`: R C R^T with R the rows north, east, up.
+struct LocalVariances {
+    double north = 0.0;
+    double east = 0.0;
+    double up = 0.0;
+};
+[[nodiscard]] LocalVariances localVariances(const GnssCovariance3& covariance,
+                                            const GeodeticCoordinate& at);
 
 // ---- Distributions for the outlier tests -------------------------------------------------
 

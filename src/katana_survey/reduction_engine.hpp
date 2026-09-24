@@ -102,6 +102,24 @@ struct RecordedAngle {
     std::size_t row = 0;
 };
 
+// A GNSS vector in grid terms: a grid baseline as the file gave it, or a
+// geocentric one converted through the context (reduction_gnss.cpp).
+struct GridVector {
+    std::string_view from;
+    std::string_view to;
+    double deltaNorthing = 0.0;
+    double deltaEasting = 0.0;
+    // Mark to mark; absent when an antenna height could not be reduced.
+    std::optional<double> deltaHeight{};
+    double sigmaNorthing = 0.0;
+    double sigmaEasting = 0.0;
+    double sigmaHeight = 0.0;
+    std::size_t row = 0;                  // the vector's report row
+    std::optional<std::size_t> heightRow{}; // its height difference row
+    SourceRecord const* source = nullptr;
+    bool radiated = false; // placed its far end, or checked it
+};
+
 // Per setup, after phase B.
 struct SetupState {
     bool positioned = false;
@@ -120,6 +138,7 @@ struct Engine {
     std::vector<ReducedPointing> pointings;
     std::vector<RecordedAngle> angles;
     std::vector<SetupState> setups;
+    std::vector<GridVector> vectors;
 
     std::unordered_map<std::string_view, Position> positions;
     // The order points were first positioned in: the order of the output.
@@ -208,6 +227,21 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
 // when none has a direction.
 [[nodiscard]] std::optional<double> meanDirection(const Engine& engine, std::size_t setupIndex,
                                                   std::string_view target);
+
+// ---- reduction_gnss.cpp ------------------------------------------------------------
+
+// Turns the file's GNSS vectors into grid vectors: a grid baseline as it is,
+// a geocentric one through the context at its base's global position.
+// `rows[i]` is the report row of raw.observations[i]. A vector that cannot be
+// converted is rejected on its row with the reason, never dropped.
+void convertGnssVectors(Engine& engine, const std::vector<std::size_t>& rows);
+
+// Places the far end of every vector whose base has a position, following
+// chains; a far end already positioned becomes a check. With `reradiate`
+// (after an adjustment moved the bases) only those targets are placed again.
+// Returns whether anything was placed.
+bool radiateGnssVectors(Engine& engine,
+                        const std::unordered_set<std::string_view>* reradiate = nullptr);
 
 // ---- reduction_adjust.cpp ----------------------------------------------------------
 
