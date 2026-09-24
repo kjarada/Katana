@@ -582,6 +582,14 @@ class GsiReader {
         if (!value) {
             return std::nullopt;
         }
+        // Counted apart from angles: a file that writes its own points in
+        // lengths and leaves a few to the unit digit has probably lost a
+        // character in those few (finish() names them).
+        if (value->explicitPoint) {
+            ++pointedLengths_;
+        } else {
+            unpointedLengths_.add(block.record, word.data);
+        }
         double metres = value->explicitPoint ? value->value
                                              : value->value / kPowersOfTen[static_cast<std::size_t>(
                                                                   decimals)];
@@ -1627,6 +1635,8 @@ class GsiReader {
     // apart, as `levelling_`, before a word reaches this table.
     std::array<Tally, 100> unread_{};
     Tally explicitPoints_;
+    std::size_t pointedLengths_ = 0; // length words with a written decimal point
+    Tally unpointedLengths_;         // ... and without one, as the specification has them
     Tally oddWidth_;
     Tally feet_;
     Tally mixedLinearUnits_;
@@ -1728,6 +1738,22 @@ ReadResult GsiReader::finish()
                "), which the GSI specification places by the unit digit instead; the values "
                "were read as written";
     });
+    if (unpointedLengths_.count < pointedLengths_) {
+        // Both readings of such a word are guesses but one: the unit digit's
+        // is the specification's, and it is the one taken. A real export has
+        // been seen with two such words among some 1,500 that write a point,
+        // each far from its neighbours, so the person is told where to look.
+        once(unpointedLengths_, [&] {
+            return plural(unpointedLengths_.count, "length word leaves",
+                          "length words leave") +
+                   " the decimal point to the unit digit (the first " +
+                   shown(unpointedLengths_.example) + ") where the file's other " +
+                   std::to_string(pointedLengths_) +
+                   " write one: they were read by the unit digit, as the specification says, "
+                   "but a file that mixes the two forms may have lost a point or a digit there; "
+                   "check those values";
+        });
+    }
     once(heightTextAsCode_, [&] {
         return plural(heightTextAsCode_.count, "block has", "blocks have") +
                " text where a height belongs (the first " + shown(heightTextAsCode_.example) +
