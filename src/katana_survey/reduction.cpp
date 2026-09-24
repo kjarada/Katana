@@ -808,6 +808,7 @@ void reduceSetup(Engine& engine, std::size_t setupIndex, std::vector<Shot>& shot
         std::vector<std::size_t> lefts;
         std::vector<std::size_t> rights;
         std::vector<std::size_t> singles;
+        std::vector<std::size_t> unknowns;
         for (const std::size_t i : indices) {
             if (settings.faces == FaceHandling::Separate) {
                 singles.push_back(i);
@@ -816,8 +817,38 @@ void reduceSetup(Engine& engine, std::size_t setupIndex, std::vector<Shot>& shot
             } else if (shots[i].face == Face::Right) {
                 rights.push_back(i);
             } else {
-                singles.push_back(i);
+                unknowns.push_back(i);
             }
+        }
+        // A file that does not state the face: two readings of one target
+        // half a turn apart can only be the two faces, and meaning them as
+        // one face would put the target in the wrong direction. The first
+        // reading's side is taken as face left.
+        std::optional<double> firstReading;
+        bool opposite = false;
+        for (const std::size_t i : unknowns) {
+            if (shots[i].direction) {
+                if (!firstReading) {
+                    firstReading = shots[i].direction->direction;
+                } else if (std::abs(normalizeAngleSigned(shots[i].direction->direction -
+                                                         *firstReading)) > kHalfPi) {
+                    opposite = true;
+                }
+            }
+        }
+        for (const std::size_t i : unknowns) {
+            if (!opposite || !shots[i].direction) {
+                singles.push_back(i);
+                continue;
+            }
+            const bool right = std::abs(normalizeAngleSigned(shots[i].direction->direction -
+                                                             *firstReading)) > kHalfPi;
+            shots[i].face = right ? Face::Right : Face::Left;
+            (right ? rights : lefts).push_back(i);
+        }
+        if (opposite) {
+            engine.warnSetup(station, "the file does not state the faces; readings of one target "
+                                      "half a turn apart were taken as face left and face right.");
         }
         std::size_t pairs = 0;
         if (settings.faces == FaceHandling::Average) {

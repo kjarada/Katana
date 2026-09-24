@@ -375,3 +375,28 @@ TEST(Reduction, TheExcludeOutsideToleranceSettingSurvivesTheTextForm)
     ASSERT_TRUE(older.ok());
     EXPECT_FALSE(older->faceTolerances.excludeOutside);
 }
+
+TEST(Reduction, ReadingsHalfATurnApartWithNoStatedFaceArePairedAsTheTwoFaces)
+{
+    // The two-setup job with every face erased: 100 00 01 and 280 00 01 to
+    // P1 must still mean to 100 00 01 (azimuth 90 00 00), not to 190 00 01.
+    SurveyProject project = twoSetups();
+    for (SurveyStation& station : project.stations) {
+        for (Observation& observation : station.observations) {
+            std::visit(
+                [](auto& o) {
+                    if constexpr (requires { o.pointing; }) {
+                        o.pointing.face = Face::Unknown;
+                    }
+                },
+                observation);
+        }
+    }
+    const auto outcome = reduceAndAdjust(project, ReductionSettings{}, {});
+    ASSERT_TRUE(outcome.ok());
+    const ComputedPoint* p1 = findPoint(*outcome, "P1");
+    ASSERT_NE(p1, nullptr);
+    EXPECT_NEAR(p1->northing, 1000.0, 1e-9);
+    EXPECT_NEAR(p1->easting, 1050.0, 1e-9);
+    EXPECT_EQ(outcome->report.facePairs.size(), 4U);
+}
