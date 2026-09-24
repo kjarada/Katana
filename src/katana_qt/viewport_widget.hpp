@@ -69,6 +69,13 @@ class ViewportWidget final : public QWidget {
     // painter as the screen, on paper. Fails as that does.
     [[nodiscard]] katana::core::Status plotToPdf(const QString& path,
                                                  const katana::cad::PlotSettings& settings);
+    // `settings` fitted to what this view draws (drawnBounds, as Zoom Extents
+    // frames it): the first standard scale the drawing fits the printable
+    // area at, centred on it; the sheet otherwise as given. What Plot's Fit
+    // plots. Fails with InvalidArgument when the view draws nothing, and
+    // with whatever cad::fitScale refuses.
+    [[nodiscard]] katana::core::Result<katana::cad::PlotSettings>
+    fittedPlot(katana::cad::PlotSettings settings) const;
 
     // `state` belongs to the workspace's ViewSet and outlives this widget: it
     // is what survives when the view changes kind or its dock floats, so the

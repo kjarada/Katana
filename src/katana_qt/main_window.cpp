@@ -4157,18 +4157,13 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
                                        "no plan viewport to plot from");
     }
     if (fitToDrawing) {
-        // What this view draws - its layers, reference layers, meshes and
-        // alignments - as Zoom Extents frames it. The index's bounds never
-        // shrink, count every arc's whole circle and hidden layers, and miss
-        // alignments (audit QT-12, GEO-01).
-        const katana::geometry::Box2 extent = view->drawnBounds();
-        auto fitted = cad::fitScale(extent, settings);
+        // Fitted by the view to what it draws, as Zoom Extents frames it
+        // (ViewportWidget::fittedPlot, where the widget tests check it).
+        auto fitted = view->fittedPlot(settings);
         if (!fitted) {
             return fitted.error();
         }
-        settings.scaleDenominator = *fitted;
-        settings.center = katana::geometry::Point2(0.5 * (extent.min.x + extent.max.x),
-                                                   0.5 * (extent.min.y + extent.max.y));
+        settings = *fitted;
     } else {
         settings.center = view->viewTransform().center;
     }

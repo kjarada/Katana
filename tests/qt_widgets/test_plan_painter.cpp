@@ -20,6 +20,7 @@
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "plan_painter.hpp"
 #include "widget_harness.hpp"
 
@@ -123,6 +124,33 @@ long long ink(const QImage& image)
         }
     }
     return total;
+}
+
+// How many separate runs of ink lie along rows `y - 1` to `y + 1`, read
+// column by column: a column is ink when any of the three rows is.
+int runsAlong(const QImage& image, int y, QRgb background)
+{
+    int runs = 0;
+    bool inRun = false;
+    for (int x = 0; x < image.width(); ++x) {
+        bool inked = false;
+        for (int row = y - 1; row <= y + 1; ++row) {
+            inked = inked || image.pixel(x, row) != background;
+        }
+        runs += inked && !inRun ? 1 : 0;
+        inRun = inked;
+    }
+    return runs;
+}
+
+// How many rows from `y` downwards in column `x` are ink without a break.
+int inkRowsDownFrom(const QImage& image, int x, int y, QRgb background)
+{
+    int rows = 0;
+    while (y + rows < image.height() && image.pixel(x, y + rows) != background) {
+        ++rows;
+    }
+    return rows;
 }
 
 PlanPaintOptions paperOptions(const PlotSettings& settings, double pixelsPerMillimetre)
@@ -313,6 +341,91 @@ TEST(PlanPainter, ASolidHatchIsOpaqueOnPaperAndTranslucentOnScreen)
     const QImage screen = painted(model, frame, PlanPaintOptions{}, kBlack);
     EXPECT_NEAR(qRed(screen.pixel(50, 50)), 90, 1);
     EXPECT_EQ(qGreen(screen.pixel(50, 50)), 0);
+}
+
+TEST(PlanPainter, HatchLinesOnPaperAreThirteenHundredthsOfAMillimetreWideAtEveryResolution)
+{
+    // An 80 x 80 square about the origin, hatched with horizontal lines 20
+    // units apart, in black on white paper at 1 px a unit. Down the middle
+    // column, rows 20 to 79 are exactly three spacings, so they hold exactly
+    // three lines' worth of ink wherever the family's offset puts them (a
+    // line the window cuts is made up by its neighbour's missing share), and
+    // well clear of the boundary at rows 10 and 90 and its 0.25 mm pen. The
+    // column's darkness over 255 is a line's width in pixels, three times:
+    // kHatchLinePaperMillimetres = 0.13 mm is 0.13 * 20 = 2.6 px at 20 px/mm
+    // and 5.2 px at 40 px/mm. A hairline is one device pixel at both - 0.05
+    // mm on a 508 dpi plot and half that at 1016.
+    Model model;
+    katana::entity::HatchPattern lines;
+    lines.name = "rule";
+    lines.families = {katana::entity::HatchLineFamily{0.0, 20.0, 5.0}};
+    ASSERT_TRUE(model.hatchPatterns.add(lines));
+    katana::entity::Layer layer;
+    layer.name = "ruled";
+    layer.color = katana::entity::Color{0, 0, 0, 255};
+    layer.hatchPattern = "rule";
+    ASSERT_TRUE(model.layers.add(layer));
+    add(model, entityOf(Polyline2{{Point2(-40, -40), Point2(40, -40), Point2(40, 40), Point2(-40, 40)},
+                                  true},
+                        "ruled"));
+    PlotSettings settings;
+    const auto lineWidth = [&](double pixelsPerMillimetre) {
+        const QImage image = painted(model, frameOf(100.0, 100.0, 1.0, Point2(0.0, 0.0)),
+                                     paperOptions(settings, pixelsPerMillimetre), kWhite);
+        double darkness = 0.0;
+        for (int y = 20; y < 80; ++y) {
+            darkness += (255.0 - qGray(image.pixel(50, y))) / 255.0;
+        }
+        return darkness / 3.0;
+    };
+    EXPECT_NEAR(lineWidth(20.0), 2.6, 0.3);
+    EXPECT_NEAR(lineWidth(40.0), 5.2, 0.3);
+}
+
+TEST(PlanPainter, TheAlignmentOverlayOnPaperIsMillimetresOfPaperAtEveryResolution)
+{
+    // A straight alignment from (-60, 0) to (60, 0) plotted twice: at 4 px/mm
+    // through a frame of 1 px a unit, and at 8 px/mm through one of 2 px a
+    // unit - the same sheet at twice the resolution. With k = 1 and 2 the
+    // centreline lies along row 50k and the key stations are the ends,
+    // 0+000 at column 20k and 0+120 at 140k.
+    //
+    // The end tick is kAlignmentTickPaperMillimetres = 1.5 mm either side of
+    // the centreline: 6 px below it at 4 px/mm and 12 px at 8 px/mm, plus
+    // half the 0.25 mm tick pen's square cap (0.5 and 1 px) and a pixel of
+    // antialiasing - rows 50k down to 56 or 57 at k = 1, and to 112 or 113
+    // at k = 2. Nothing else is below the line there: the station's label is
+    // above it, and the alignment's name is at the start. A tick of 6 screen
+    // pixels is the same 7 rows at both.
+    //
+    // Everything else scales the same way - the 0.5 mm centreline, the
+    // 2.5 mm labels and the gap between them - so at twice the resolution
+    // the overlay is the same picture twice the size: four times the ink,
+    // within an eighth for the antialiased edges and the glyphs' rasterising
+    // at two sizes. Sized in screen pixels, only the centreline's length
+    // doubled: about twice the ink.
+    Model model;
+    katana::entity::Alignment road;
+    road.name = "A";
+    road.horizontal.pis = {katana::geometry::AlignmentPI{Point2(-60.0, 0.0)},
+                           katana::geometry::AlignmentPI{Point2(60.0, 0.0)}};
+    ASSERT_TRUE(model.alignments.add(road));
+    PlotSettings settings;
+    const auto sheet = [&](double k) {
+        return painted(model, frameOf(160.0 * k, 100.0 * k, k, Point2(0.0, 0.0)),
+                       paperOptions(settings, 4.0 * k), kWhite);
+    };
+    const QImage coarse = sheet(1.0);
+    const QImage fine = sheet(2.0);
+    const int coarseTick = inkRowsDownFrom(coarse, 140, 50, kWhite);
+    const int fineTick = inkRowsDownFrom(fine, 280, 100, kWhite);
+    EXPECT_GE(coarseTick, 6);
+    EXPECT_LE(coarseTick, 8);
+    EXPECT_GE(fineTick, 12);
+    EXPECT_LE(fineTick, 14);
+    const double ratio = static_cast<double>(ink(fine)) / static_cast<double>(ink(coarse));
+    EXPECT_GT(ratio, 3.5);
+    EXPECT_LT(ratio, 4.5);
 }
 
 TEST(PlanPainter, TextOnPaperIsSetAtItsFractionalHeightFromOneCachedFont)
@@ -556,6 +669,108 @@ TEST(PlanView, ASelectionChangedWithoutANotificationIsStillDrawn)
     document.selection().set(document.lastCreatedEntities());
     katana::qt::test::paint(view);
     EXPECT_EQ(view.drawingPaintCount(), first + 1);
+}
+
+TEST(PlanView, APlotFittedToTheDrawingFitsWhatTheViewDrawsAndNotEveryEntity)
+{
+    // Audit QT-12 / GEO-01, worked by hand. Drawn: a line (0, 0)-(100, 50)
+    // and an alignment (0, 0)-(300, 0), which is in no entity's bounds. Not
+    // drawn: a stray (5000, 5000)-(5010, 5010) on a layer this view hides.
+    // What the view draws is x 0..300, y 0..50.
+    //
+    // A3 landscape less 10 mm margins is 400 x 277 mm. 300 m across needs
+    // 1 : 300 000 / 400 = 1 : 750 and 50 m up 1 : 50 000 / 277 = 1 : 181, so
+    // the first standard scale is 1 : 1000, about the middle (150, 25).
+    // The spatial index's bounds - the hidden stray in, the alignment out -
+    // are 0..5010 both ways: 1 : 5 010 000 / 277 = 1 : 18 087, so 1 : 20 000
+    // about (2505, 2505), a sheet with the drawing a dot in its corner.
+    katana::cad::Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(100.0, 50.0)))
+            .ok());
+    katana::entity::Layer far;
+    far.name = "far";
+    ASSERT_TRUE(document.execute(katana::commands::createLayer(far)).ok());
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(5000.0, 5000.0),
+                                                          Point2(5010.0, 5010.0)))
+                    .ok());
+    ASSERT_TRUE(
+        document.execute(katana::commands::setEntityLayer(document.lastCreatedEntities(), "far"))
+            .ok());
+    katana::entity::Alignment road;
+    road.name = "road";
+    road.horizontal.pis = {katana::geometry::AlignmentPI{Point2(0.0, 0.0)},
+                           katana::geometry::AlignmentPI{Point2(300.0, 0.0)}};
+    ASSERT_TRUE(document.execute(katana::commands::createAlignment(road)).ok());
+    katana::cad::ViewSet views;
+    katana::cad::ViewState& state = views.add(katana::cad::ViewKind::Plan);
+    state.layers.hide("far");
+    katana::qt::ViewportWidget view(document, state);
+
+    PlotSettings settings; // A3 landscape, 10 mm margins, 300 dpi
+    settings.scaleDenominator = 500.0;
+    const auto fitted = view.fittedPlot(settings);
+    ASSERT_TRUE(fitted.ok()) << fitted.error().describe();
+    EXPECT_EQ(fitted->scaleDenominator, 1000.0);
+    EXPECT_NEAR(fitted->center.x, 150.0, 1e-9);
+    EXPECT_NEAR(fitted->center.y, 25.0, 1e-9);
+    // The sheet is the one asked for.
+    EXPECT_EQ(fitted->paper, katana::cad::PaperSize::A3);
+    EXPECT_TRUE(fitted->landscape);
+    EXPECT_EQ(fitted->dpi, 300.0);
+
+    // A view that draws nothing has nothing to fit, and says so.
+    state.layers.hide("0");
+    ASSERT_TRUE(document.execute(katana::commands::deleteAlignment("road")).ok());
+    EXPECT_FALSE(view.fittedPlot(settings).ok());
+}
+
+// ---- what the cache keeps across paints ------------------------------------------------
+
+TEST(PlanPainter, ALinetypeEditedBetweenTwoPaintsSharingACacheIsDrawnWithItsNewDashes)
+{
+    // A segment x = -85 to 85 at 1 px a unit in a view 200 px wide about the
+    // origin runs from column 15 to 185 along row 20, on a layer whose model
+    // linetype is 20 on, 20 off: dashes over columns 15-35, 55-75, 95-115,
+    // 135-155 and 175-185 (the last cut short by the end), five runs of ink
+    // (a square cap adds at most 0.75 px to each end, and the gaps are 20
+    // px). The linetype is then edited to 10 on, 10 off - what the Style
+    // Manager's updateLinetype does to the model - and painted again through
+    // the SAME cache at the same scale: 15-25, 35-45, ..., 175-185, nine
+    // runs. (170 is not a whole number of either period, so no dash begins
+    // at the very end, where a cosmetic pen's last pixel would draw one.) A
+    // dash pattern kept by the linetype's name drew the old five until the
+    // view was zoomed, and a second plot at the same scale printed them.
+    Model model;
+    katana::entity::Linetype fence;
+    fence.name = "fence";
+    fence.pattern = {katana::entity::LinetypeElement{20.0}, katana::entity::LinetypeElement{-20.0}};
+    ASSERT_TRUE(model.linetypes.add(fence));
+    katana::entity::Layer layer;
+    layer.name = "fences";
+    layer.color = katana::entity::Color{255, 255, 255, 255};
+    layer.linetype = "fence";
+    ASSERT_TRUE(model.layers.add(layer));
+    add(model, entityOf(Segment2{Point2(-85.0, 0.0), Point2(85.0, 0.0)}, "fences"));
+    const PlanFrame frame = frameOf(200.0, 40.0, 1.0, Point2(0.0, 0.0));
+    for (const bool thin : {false, true}) {
+        PlanPaintOptions options;
+        options.thinLines = thin;
+        PlanPaintCache kept;
+        fence.pattern = {katana::entity::LinetypeElement{20.0},
+                         katana::entity::LinetypeElement{-20.0}};
+        ASSERT_TRUE(model.linetypes.update(fence));
+        EXPECT_EQ(runsAlong(painted(model, frame, options, kBlack, nullptr, &kept), 20, kBlack), 5)
+            << "thin " << thin;
+        fence.pattern = {katana::entity::LinetypeElement{10.0},
+                         katana::entity::LinetypeElement{-10.0}};
+        ASSERT_TRUE(model.linetypes.update(fence));
+        const QImage again = painted(model, frame, options, kBlack, nullptr, &kept);
+        EXPECT_EQ(runsAlong(again, 20, kBlack), 9) << "thin " << thin;
+        // And exactly what a cache that never saw the old pattern paints.
+        EXPECT_TRUE(again == painted(model, frame, options)) << "thin " << thin;
+    }
 }
 
 // ---- off the GUI thread ----------------------------------------------------------------

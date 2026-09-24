@@ -1167,6 +1167,23 @@ katana::core::Status ViewportWidget::plotToPdf(const QString& path,
                          plotCache_, title);
 }
 
+katana::core::Result<cad::PlotSettings> ViewportWidget::fittedPlot(cad::PlotSettings settings) const
+{
+    // What this view draws - its layers, reference layers, meshes and
+    // alignments - and not the spatial index's bounds, which never shrink,
+    // count every arc's whole circle and hidden layers, and miss alignments
+    // (audit QT-12, GEO-01).
+    const Box2 extent = drawnBounds();
+    auto fitted = cad::fitScale(extent, settings);
+    if (!fitted) {
+        return fitted.error();
+    }
+    settings.scaleDenominator = *fitted;
+    settings.center =
+        Point2(0.5 * (extent.min.x + extent.max.x), 0.5 * (extent.min.y + extent.max.y));
+    return settings;
+}
+
 void ViewportWidget::drawPreview(QPainter& painter) const
 {
     lastPreviewCount_ = 0;

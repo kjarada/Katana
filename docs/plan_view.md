@@ -66,7 +66,6 @@ work on a snapshot or hold edits off.
 | Kept | Keyed on | Why |
 |---|---|---|
 | Flattened library definitions | the library generation | thousands of coded points would otherwise flatten their symbol every frame |
-| Dash patterns | linetype, pen width; dropped when the view scale changes | a dash is a model length, so its pixel pattern follows the scale |
 | Fonts | on screen one per whole pixel size; on paper one font, scaled | making a `QFont` by family name per label was a measurable part of a frame |
 | Raster images, point-cloud colours | the reference layer's id (and colour mode) | converting tens of megabytes of RGBA per repaint |
 | Symbol sprites | symbol, pen, size, quarter-pixel phase; all dropped when the scale, paper scale, device ratio or library generation changes | see below |
@@ -79,6 +78,14 @@ Per paint, not kept (the tables they read can change between paints):
   linestyle - is worked out once per distinct layer, style and own colour,
   and reused by every entity that shares it. The generated survey drawing
   (below) has 87 such combinations for 27 600 entities.
+* **Dash patterns.** A model linetype's pixel pattern, per linetype and pen
+  width. It is the linetype's contents at this scale, and those can change
+  between two paints with nothing a cache could key on: the Style Manager's
+  `updateLinetype`, its undo, a delete and re-create under the same name.
+  Kept across paints by name, they drew the old dashes until the view was
+  zoomed, and a second plot at the same scale printed them. They are worked
+  out at display resolution, once per distinct display a paint, so keeping
+  them longer saved a few dozen small vectors a frame at most.
 * **Stamp extents.** A symbol's reach and whether it is under three pixels
   (then drawn as a dot) are the same wherever it is put, so they are worked
   out once per symbol and size, and a stamp that is culled or blitted from a
@@ -141,12 +148,12 @@ the grid are screen furniture and are not turned yet.
 * **The dpi is a double** (audit QT-27): the writer gets the nearest whole
   resolution and the painter the scale to the exact one, so a sheet at
   300.9 dpi is drawn at 1 : 1000 and not 1 : 1003.
-* **Fit fits what the view draws** (`ViewportWidget::drawnBounds`, the same
-  `planDrawnBounds` Zoom Extents frames): its layers, reference layers, meshes
-  and alignments - not the spatial index's bounds, which never shrink, count
-  every arc's whole circle and hidden layers, and miss alignments (audit QT-12,
-  GEO-01). The site-plan sample's A3 plot is now centred with its alignment on
-  the sheet.
+* **Fit fits what the view draws** (`ViewportWidget::fittedPlot`, over the
+  same `planDrawnBounds` Zoom Extents frames): its layers, reference layers,
+  meshes and alignments - not the spatial index's bounds, which never shrink,
+  count every arc's whole circle and hidden layers, and miss alignments (audit
+  QT-12, GEO-01). The site-plan sample's A3 plot is now centred with its
+  alignment on the sheet.
 * **`fitScale` takes a line with no height** (audit CAD-15): the zero
   dimension asks nothing of the sheet. A single point still has no scale.
 * **Title and creator** are set: the project's name and Katana.
@@ -291,12 +298,16 @@ drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
 ## Tests
 
 * `tests/qt_widgets/test_plan_painter.cpp` - turned frames (culling box,
-  entities in turned corners), the plot's frame and margin clip, paper marks
-  in millimetres, the opaque solid hatch, fractional paper text from one font,
-  the PDF resolution, clipping against the whole line, one resolution per
-  display, thin and hairline widths, sprites on screen and vector on paper,
-  and the kept drawing (a mouse move keeps it; a command, a zoom, a hidden
-  layer and a silent selection change repaint it).
+  entities in turned corners), the plot's frame and margin clip, the paper
+  marks in millimetres at two resolutions each (the point cross, the hatch
+  lines' 0.13 mm, and the alignment overlay's tick and its ink as a whole),
+  the opaque solid hatch, fractional paper text from one font, the PDF
+  resolution, Fit (a hidden layer's stray and an alignment beyond the
+  entities, worked by hand), clipping against the whole line, one resolution
+  per display, thin and hairline widths, sprites on screen and vector on
+  paper, a linetype edited between two paints through one cache, and the
+  kept drawing (a mouse move keeps it; a command, a zoom, a hidden layer and
+  a silent selection change repaint it).
 * `tests/geometry/test_polygon.cpp` `PolygonClipPolyline.*` - the clipper, in
   both modes, by hand and as a property over random lines.
 * `tests/cad/test_plot.cpp` `Plot.ALineWithNoHeightFitsOnItsLengthAlone`.
