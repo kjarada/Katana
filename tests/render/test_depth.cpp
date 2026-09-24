@@ -19,6 +19,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
+#include <string>
 #include <vector>
 
 #include "katana/core/task_pool.hpp"
@@ -54,16 +56,18 @@ std::size_t countPixels(const Framebuffer& fb, Rgba color)
     return static_cast<std::size_t>(std::count(fb.color().begin(), fb.color().end(), color));
 }
 
-// A flat rectangle at height z cut into n x n cells, as a surface is: one
-// big triangle across a kilometre would test the barycentric rounding of a
-// shape no TIN has.
+// A rectangle cut into n x n cells, as a surface is: one big triangle across
+// a kilometre would test the barycentric rounding of a shape no TIN has. At
+// height z + slopeX * x + slopeY * y: flat unless a slope is given.
 void addPlane(DrawList& list, double x0, double y0, double x1, double y1, double z, int n,
-              Rgba color)
+              Rgba color, double slopeX = 0.0, double slopeY = 0.0)
 {
     const auto base = static_cast<katana::render::VertexIndex>(list.positions.size());
     for (int j = 0; j <= n; ++j) {
         for (int i = 0; i <= n; ++i) {
-            list.addVertex(Vec3(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * j / n, z), color);
+            const double x = x0 + (x1 - x0) * i / n;
+            const double y = y0 + (y1 - y0) * j / n;
+            list.addVertex(Vec3(x, y, z + slopeX * x + slopeY * y), color);
         }
     }
     const auto at = [base, n](int i, int j) {
@@ -107,6 +111,9 @@ void append(DrawList& to, const DrawList& from)
     }
     for (const auto& l : from.lines) {
         to.addLine(base + l.a, base + l.b, l.width, l.depthBias);
+    }
+    for (const auto& p : from.points) {
+        to.addPoint(base + p.a, p.size, p.depthBias);
     }
 }
 
@@ -366,4 +373,195 @@ TEST(RenderDepth, WithTheEyeInsideTheSceneSurfacesAKilometreAwayStillSeparate)
     DrawList both = ground;
     append(both, design);
     EXPECT_EQ(countPixels(render(both, camera), kDesign), alone);
+}
+
+namespace {
+
+// The scene's own point size (SceneOptions::pointSize); the bias is the
+// linework's, kEntityBias.
+constexpr float kPointSize = 5.0f;
+constexpr Rgba kPoint = rgba(250, 250, 0);
+
+// A 400 m site rising 5% to the east and 2% to the north, the slope the
+// review measured on, and 20 x 20 survey points lying exactly on it.
+struct SlopedSite {
+    DrawList ground;
+    DrawList points;
+    katana::math::AABB bounds;
+
+    SlopedSite()
+    {
+        addPlane(ground, 0.0, 0.0, 400.0, 400.0, 0.0, 40, kGround, 0.05, 0.02);
+        for (int j = 0; j < 20; ++j) {
+            for (int i = 0; i < 20; ++i) {
+                const double x = 10.0 + 20.0 * i;
+                const double y = 10.0 + 20.0 * j;
+                points.addPoint(points.addVertex(Vec3(x, y, 0.05 * x + 0.02 * y), kPoint),
+                                kPointSize, kEntityBias);
+            }
+        }
+        bounds = ground.bounds();
+    }
+};
+
+// Renders `passes` one after another into one buffer, as the 3D view draws
+// its layers.
+Framebuffer renderPasses(std::initializer_list<const DrawList*> passes, const Camera& camera)
+{
+    auto target = Framebuffer::create(camera.viewportWidth(), camera.viewportHeight());
+    EXPECT_TRUE(target.ok());
+    TaskPool pool(0);
+    RenderOptions options;
+    options.background = kBackground;
+    options.pool = &pool;
+    Rasterizer rasterizer;
+    for (const DrawList* list : passes) {
+        EXPECT_TRUE(rasterizer.render(*list, camera, *target, options).ok());
+        options.clear = false;
+    }
+    return std::move(*target);
+}
+
+} // namespace
+
+TEST(RenderDepth, SurveyPointsLyingOnASlopedSurfaceAreDrawnWhole)
+{
+    // A point is a 5 x 5 square at ONE depth, its centre's. Tested pixel by
+    // pixel against the surface it lies on, it lost its lower rows: seen at
+    // elevation e, a row k pixels below the centre looks at ground about
+    // k / tan(e) footprints nearer. The surface is pushed back by one pixel
+    // of its own slope and the point pulled 1.5 footprints, so the row two
+    // down is covered once 1 / tan(e) > 1.5 (e below 0.59 rad; the slope
+    // facing the eye steepens it at the iso view's 0.61) and the row one
+    // down too below 0.3 rad. Decided at its centre, whose pixel centre is
+    // at most half a pixel of slope from the point's own, a point is drawn
+    // whole: in the surface's list or in a later pass.
+    const SlopedSite site;
+    DrawList together = site.ground;
+    append(together, site.points);
+    for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
+        for (double elevation : {0.61, 0.25, 0.12}) {
+            SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " at " +
+                         std::to_string(elevation));
+            Camera camera;
+            camera.setViewportSize(1200, 800);
+            camera.setProjection(projection);
+            camera.setStandardView(StandardView::IsoSouthWest);
+            camera.setOrientation(camera.azimuth(), elevation);
+            ASSERT_TRUE(camera.frame(site.bounds));
+
+            const std::size_t alone = countPixels(render(site.points, camera), kPoint);
+            ASSERT_GT(alone, 2000u) << "the points are not in view, so this proves nothing";
+            EXPECT_EQ(countPixels(render(together, camera), kPoint), alone);
+            EXPECT_EQ(countPixels(renderPasses({&site.ground, &site.points}, camera), kPoint),
+                      alone);
+        }
+    }
+}
+
+TEST(RenderDepth, APointOnTheGroundBehindABuildingIsHidden)
+{
+    // The middle of the line in ALineOnTheGroundBehindABuildingIsHidden,
+    // (0, 30, 0): the ray from the eye to it meets the building's south face
+    // at z = 13 (worked there). Deciding a point at its centre must not let
+    // it through, in the building's list or in a later pass.
+    DrawList building;
+    addBox(building, Vec3(-20.0, -20.0, 0.0), Vec3(20.0, 20.0, 25.0), kBuilding);
+    DrawList point;
+    point.addPoint(point.addVertex(Vec3(0.0, 30.0, 0.0), kPoint), kPointSize, kEntityBias);
+    DrawList together = building;
+    append(together, point);
+
+    for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
+        SCOPED_TRACE(static_cast<int>(projection));
+        Camera camera;
+        camera.setViewportSize(640, 480);
+        camera.setProjection(projection);
+        camera.setStandardView(StandardView::Front); // looking north
+        camera.setOrientation(camera.azimuth(), 0.25);
+        camera.setTarget(Vec3(0.0, 0.0, 10.0));
+        camera.setDistance(200.0);
+        camera.setOrthographicHeight(120.0);
+        katana::math::AABB bounds = building.bounds();
+        bounds.expand(point.bounds());
+        ASSERT_TRUE(camera.fitDepthRange(bounds));
+
+        ASSERT_EQ(countPixels(render(point, camera), kPoint), 25u)
+            << "the point is not in view, so its being hidden proves nothing";
+        EXPECT_EQ(countPixels(render(together, camera), kPoint), 0u);
+        EXPECT_EQ(countPixels(renderPasses({&building, &point}, camera), kPoint), 0u);
+    }
+}
+
+TEST(RenderDepth, OfTwoOverlappingPointsTheNearerIsOnTopWhicheverIsDrawnFirst)
+{
+    // Seen from above in an orthographic view 100 m high on 500 px, a metre
+    // is 5 px and the target (0, 0) is the pixel corner (250, 250). A point
+    // at x = 0.25 m is centred on 251.25 and covers the pixels whose centres
+    // are in [248.75, 253.75): 249..253; one at x = -0.15 m covers 247..251.
+    // Both at y = 0.05 m cover the same five rows, so they share 3 x 5 = 15
+    // pixels (a quarter pixel off the grid, so no rounding moves a square).
+    // Those go to the nearer, higher point in either order: it shows all 25,
+    // the lower one the other 10.
+    constexpr Rgba kNear = rgba(0, 250, 250);
+    constexpr Rgba kFar = rgba(250, 0, 250);
+    for (bool nearFirst : {true, false}) {
+        SCOPED_TRACE(nearFirst);
+        DrawList list;
+        const auto nearPoint = [&] {
+            list.addPoint(list.addVertex(Vec3(0.25, 0.05, 10.0), kNear), kPointSize, kEntityBias);
+        };
+        const auto farPoint = [&] {
+            list.addPoint(list.addVertex(Vec3(-0.15, 0.05, 0.0), kFar), kPointSize, kEntityBias);
+        };
+        if (nearFirst) {
+            nearPoint();
+            farPoint();
+        } else {
+            farPoint();
+            nearPoint();
+        }
+        Camera camera;
+        camera.setViewportSize(500, 500);
+        camera.setProjection(Projection::Orthographic);
+        camera.setStandardView(StandardView::Top);
+        camera.setTarget(Vec3(0.0, 0.0, 5.0));
+        camera.setOrthographicHeight(100.0);
+        ASSERT_TRUE(camera.fitDepthRange(list.bounds()));
+        const Framebuffer seen = render(list, camera);
+        EXPECT_EQ(countPixels(seen, kNear), 25u);
+        EXPECT_EQ(countPixels(seen, kFar), 10u);
+    }
+}
+
+TEST(RenderDepth, APassThatWritesNoDepthIsCoveredByWhateverIsDrawnAfterIt)
+{
+    // The grid and the surface edges are drawn so (cad::renderLayers): a
+    // pass with depthWrite off draws its colour where the test passes and
+    // leaves the depth buffer as it found it, so a surface 5 cm BEHIND it,
+    // drawn next, is tested against the cleared buffer and covers every
+    // pixel it draws alone.
+    const Overlap scene(0.05); // the design 5 cm above the ground
+    const Camera camera = framedCamera(scene.bounds, Projection::Perspective);
+    const std::size_t alone = countPixels(render(scene.ground, camera), kGround);
+    ASSERT_GT(alone, 10000u);
+
+    auto target = Framebuffer::create(camera.viewportWidth(), camera.viewportHeight());
+    ASSERT_TRUE(target.ok());
+    TaskPool pool(0);
+    RenderOptions options;
+    options.background = kBackground;
+    options.pool = &pool;
+    options.depthWrite = false;
+    Rasterizer rasterizer;
+    ASSERT_TRUE(rasterizer.render(scene.design, camera, *target, options).ok());
+    EXPECT_GT(countPixels(*target, kDesign), 10000u);
+    EXPECT_TRUE(std::all_of(target->depth().begin(), target->depth().end(),
+                            [](float depth) { return depth == 0.0f; }))
+        << "the pass wrote depth";
+    options.depthWrite = true;
+    options.clear = false;
+    ASSERT_TRUE(rasterizer.render(scene.ground, camera, *target, options).ok());
+    EXPECT_EQ(countPixels(*target, kGround), alone);
+    EXPECT_EQ(countPixels(*target, kDesign), 0u);
 }

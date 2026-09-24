@@ -34,10 +34,10 @@
 //
 // DETERMINISM (Rule 7). The chunk count in stage 2 is a function of the
 // primitive count alone, never of the number of cores, so the order in which a
-// tile visits its primitives is identical on every machine. With a
-// strictly-less depth test that makes the frame reproducible bit for bit -
-// asserted by a test that renders the same scene with 0, 1, 3 and 7 worker
-// threads and compares the buffers.
+// tile visits its primitives is identical on every machine. With a strict
+// depth test (reversed Z: strictly greater) that makes the frame reproducible
+// bit for bit - asserted by a test that renders the same scene with 0, 1, 3
+// and 7 worker threads and compares the buffers.
 //
 // SCRATCH is owned by the Rasterizer and reused, so a viewport redrawing at
 // 60 Hz allocates on the first frame and never again (PLAN.MD section 33).
@@ -67,6 +67,13 @@ struct RenderOptions {
     bool backfaceCull = false;
     // Clears colour and depth first. Off lets a caller compose several passes.
     bool clear = true;
+    // Off draws colour wherever the depth test passes but leaves the depth
+    // buffer as it was, so nothing drawn after is tested against this pass
+    // and, within it, what is drawn later covers what was drawn earlier. For
+    // what must never hide the model: the grid under it, and a surface's
+    // edges, which linework draped on that surface has to cross unbroken
+    // (cad::renderLayers).
+    bool depthWrite = true;
     // null uses TaskPool::shared(). A single-threaded pool renders the same
     // pixels; pass one to make a test independent of the machine.
     katana::core::TaskPool* pool = nullptr;
@@ -127,6 +134,9 @@ class Rasterizer {
         float z = 0.0f;
         float half = 0.5f; // half the square's side, in pixels
         Rgba color = 0;
+        // Decided once, at the centre, after every triangle of the pass
+        // (rasteriseTiles): a point is drawn whole or not at all.
+        bool visible = false;
     };
 
     // How a line's or a point's depth bias (pixel footprints towards the eye)
@@ -143,7 +153,9 @@ class Rasterizer {
     void buildScreenPrimitives(const DrawList& list, const Framebuffer& target,
                                const RenderOptions& options, katana::core::TaskPool& pool);
     void binPrimitives(const Framebuffer& target, katana::core::TaskPool& pool);
-    void rasteriseTiles(Framebuffer& target, katana::core::TaskPool& pool);
+    void rasteriseTiles(Framebuffer& target, const RenderOptions& options,
+                        katana::core::TaskPool& pool);
+    void rasterisePoints(Framebuffer& target, bool depthWrite, katana::core::TaskPool& pool);
 
     DepthPull depthPull_;
 

@@ -632,7 +632,8 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
 
 // ---- stage 3: rasterise ---------------------------------------------------------
 
-void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
+void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& options,
+                                TaskPool& pool)
 {
     const std::size_t tiles = target.tileCount();
     tileStats_.assign(tiles, RenderStats{});
@@ -640,6 +641,7 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
     Rgba* const colorBase = target.color().data();
     float* const depthBase = target.depth().data();
     const int stride = target.width();
+    const bool depthWrite = options.depthWrite;
 
     pool.parallelFor(0, tiles, [&](std::size_t tileIndex) {
         const TileRect rect = target.tile(tileIndex);
@@ -654,37 +656,7 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
         for (const Chunk& chunk : chunks_) {
             for (const std::uint32_t tag : chunk.tileBins[tileIndex]) {
                 if ((tag & kPointTag) != 0u) {
-                    const ScreenPoint& p = chunk.points[tag & ~kPointTag];
-                    // The pixels whose CENTRES lie in [c - h, c + h): exactly
-                    // size x size for a whole size wherever the point falls.
-                    // Pixel i's centre is i + 0.5, so i runs from
-                    // ceil(c - h - 0.5) to ceil(c + h - 0.5) - 1; ceil(v) is
-                    // -floor(-v), which keeps the conversion clamped. It drew
-                    // floor(c - h)..floor(c + h), one pixel too many on each
-                    // axis (audit REN-10).
-                    const auto ceilIn = [](float v, int lo, int hi) {
-                        return -pixelFloor(-v, -hi, -lo);
-                    };
-                    const int x0 = ceilIn(p.x - p.half - 0.5f, rect.x0, rect.x1);
-                    const int x1 = ceilIn(p.x + p.half - 0.5f, rect.x0, rect.x1) - 1;
-                    const int y0 = ceilIn(p.y - p.half - 0.5f, rect.y0, rect.y1);
-                    const int y1 = ceilIn(p.y + p.half - 0.5f, rect.y0, rect.y1) - 1;
-                    for (int y = y0; y <= y1; ++y) {
-                        Rgba* row = colorBase + static_cast<std::size_t>(y) *
-                                                    static_cast<std::size_t>(stride);
-                        float* depthRow = depthBase + static_cast<std::size_t>(y) *
-                                                          static_cast<std::size_t>(stride);
-                        for (int x = x0; x <= x1; ++x) {
-                            // Reversed Z: nearer is larger, and the cleared
-                            // 0 (the far plane) loses to anything in range.
-                            if (p.z > depthRow[x] && p.z <= 1.0f) {
-                                depthRow[x] = p.z;
-                                row[x] = p.color;
-                                ++stats.fragments;
-                            }
-                        }
-                    }
-                    continue;
+                    continue; // points go last, whole or not at all (rasterisePoints)
                 }
 
                 const ScreenTriangle& t = chunk.triangles[tag];
@@ -775,8 +747,131 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
                             color = t.color[0];
                         }
 
-                        depthRow[x] = depth;
+                        if (depthWrite) {
+                            depthRow[x] = depth;
+                        }
                         row[x] = color;
+                        ++stats.fragments;
+                    }
+                }
+            }
+        }
+    });
+
+    rasterisePoints(target, depthWrite, pool);
+}
+
+// ---- points -----------------------------------------------------------------------
+
+// A point is a size x size square at ONE depth, its centre's. Tested pixel by
+// pixel, a point lying on a surface lost its lower rows to it: seen at
+// elevation e, the surface under a row k pixels below the centre is nearer
+// than the centre by about k / tan(e) pixel footprints, which neither the
+// surface's one-pixel slope push nor the point's 1.5-footprint pull covers
+// once k > 1 - 6% of the pixels of draped survey points at the iso view, 20%
+// at 0.25 rad. Pulling points further would show them through the walls in
+// front of them instead. So a point is decided ONCE, at the pixel of its
+// square nearest its centre, and then drawn whole.
+//
+// By then everything drawn before it is final: the earlier passes, and every
+// triangle and line of this one, since points come last in the primitive
+// stream and so last in every tile (buildScreenPrimitives). The decision
+// reads a finished depth buffer, the fill is tile by tile in index order, and
+// the frame is the same on any number of threads (Rule 7). Between two points
+// of the pass the nearer still wins pixel by pixel.
+void Rasterizer::rasterisePoints(Framebuffer& target, bool depthWrite, TaskPool& pool)
+{
+    const bool anyPoints = std::any_of(chunks_.begin(), chunks_.end(),
+                                       [](const Chunk& chunk) { return !chunk.points.empty(); });
+    if (!anyPoints) {
+        return;
+    }
+    const int width = target.width();
+    const int height = target.height();
+    Rgba* const colorBase = target.color().data();
+    float* const depthBase = target.depth().data();
+
+    // The pixels whose CENTRES lie in [c - h, c + h): exactly size x size for
+    // a whole size wherever the point falls. Pixel i's centre is i + 0.5, so
+    // i runs from ceil(c - h - 0.5) to ceil(c + h - 0.5) - 1; ceil(v) is
+    // -floor(-v), which keeps the conversion clamped. It drew floor(c - h)..
+    // floor(c + h), one pixel too many on each axis (audit REN-10).
+    const auto ceilIn = [](float v, int lo, int hi) { return -pixelFloor(-v, -hi, -lo); };
+
+    pool.parallelFor(0, chunks_.size(), [&](std::size_t chunkIndex) {
+        for (ScreenPoint& p : chunks_[chunkIndex].points) {
+            const int x0 = ceilIn(p.x - p.half - 0.5f, 0, width);
+            const int x1 = ceilIn(p.x + p.half - 0.5f, 0, width) - 1;
+            const int y0 = ceilIn(p.y - p.half - 0.5f, 0, height);
+            const int y1 = ceilIn(p.y + p.half - 0.5f, 0, height) - 1;
+            if (x0 > x1 || y0 > y1) {
+                p.visible = false; // no pixel of it on the image
+                continue;
+            }
+            // floor(c) is always one of the square's pixels (its centre is
+            // within half a pixel of c, and h >= 0.5); clamped into the part
+            // on the image when the centre is off it.
+            const int cx = pixelFloor(p.x, x0, x1);
+            const int cy = pixelFloor(p.y, y0, y1);
+            const float under = depthBase[static_cast<std::size_t>(cy) *
+                                              static_cast<std::size_t>(width) +
+                                          static_cast<std::size_t>(cx)];
+            // Reversed Z: strictly nearer, and not past the near plane; NaN
+            // fails both.
+            p.visible = p.z > under && p.z <= 1.0f;
+        }
+    });
+
+    constexpr int kTile = Framebuffer::kTileSize;
+    pool.parallelFor(0, target.tileCount(), [&](std::size_t tileIndex) {
+        const TileRect rect = target.tile(tileIndex);
+        if (rect.empty()) {
+            return;
+        }
+        RenderStats& stats = tileStats_[tileIndex];
+        // Which pixels of this tile a point of this pass has drawn: there the
+        // nearer point wins; anywhere else the centre has decided.
+        std::array<std::uint8_t, static_cast<std::size_t>(kTile) * kTile> drawn;
+        bool drawnCleared = false;
+        for (const Chunk& chunk : chunks_) {
+            if (chunk.points.empty()) {
+                continue;
+            }
+            for (const std::uint32_t tag : chunk.tileBins[tileIndex]) {
+                if ((tag & kPointTag) == 0u) {
+                    continue;
+                }
+                const ScreenPoint& p = chunk.points[tag & ~kPointTag];
+                if (!p.visible) {
+                    continue;
+                }
+                if (!drawnCleared) {
+                    drawn.fill(0u);
+                    drawnCleared = true;
+                }
+                const int x0 = ceilIn(p.x - p.half - 0.5f, rect.x0, rect.x1);
+                const int x1 = ceilIn(p.x + p.half - 0.5f, rect.x0, rect.x1) - 1;
+                const int y0 = ceilIn(p.y - p.half - 0.5f, rect.y0, rect.y1);
+                const int y1 = ceilIn(p.y + p.half - 0.5f, rect.y0, rect.y1) - 1;
+                for (int y = y0; y <= y1; ++y) {
+                    Rgba* row = colorBase + static_cast<std::size_t>(y) *
+                                                static_cast<std::size_t>(width);
+                    float* depthRow = depthBase + static_cast<std::size_t>(y) *
+                                                      static_cast<std::size_t>(width);
+                    std::uint8_t* drawnRow =
+                        drawn.data() + static_cast<std::size_t>(y - rect.y0) * kTile;
+                    for (int x = x0; x <= x1; ++x) {
+                        std::uint8_t& mine = drawnRow[x - rect.x0];
+                        // Without depth writes the pass is painted in order,
+                        // as its triangles are.
+                        if (depthWrite && mine != 0u && !(p.z > depthRow[x])) {
+                            continue;
+                        }
+                        mine = 1u;
+                        if (depthWrite) {
+                            depthRow[x] = p.z;
+                        }
+                        row[x] = p.color;
                         ++stats.fragments;
                     }
                 }
@@ -859,7 +954,7 @@ Result<RenderStats> Rasterizer::render(const DrawList& list, const Camera& camer
     depthPull_ = depthPullFor(camera);
     transformVertices(list, camera, pool);
     buildScreenPrimitives(list, target, options, pool);
-    rasteriseTiles(target, pool);
+    rasteriseTiles(target, options, pool);
 
     RenderStats total;
     total.vertices = list.positions.size();
