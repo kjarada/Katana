@@ -1,7 +1,9 @@
 #include "xml_pull.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <charconv>
+#include <cstring>
 #include <cstdint>
 #include <optional>
 
@@ -427,8 +429,27 @@ std::size_t LineCounter::lineAt(std::size_t offset)
         countedTo_ = 0;
         line_ = 1;
     }
-    line_ += static_cast<std::size_t>(std::count(doc_.begin() + static_cast<std::ptrdiff_t>(countedTo_),
-                                                 doc_.begin() + static_cast<std::ptrdiff_t>(offset), '\n'));
+    // Eight bytes at a time: a byte of x is zero exactly where the text has
+    // a line feed, and the classic zero-byte test marks each such byte's top
+    // bit without carrying into its neighbours. A reader asks once per
+    // record, so this runs over the whole file.
+    const char* p = doc_.data() + countedTo_;
+    const char* const end = doc_.data() + offset;
+    constexpr std::uint64_t kOnes = 0x0101010101010101ull;
+    constexpr std::uint64_t kLow7 = 0x7F7F7F7F7F7F7F7Full;
+    std::size_t lines = 0;
+    while (end - p >= 8) {
+        std::uint64_t word = 0;
+        std::memcpy(&word, p, sizeof word);
+        const std::uint64_t x = word ^ (kOnes * static_cast<unsigned char>('\n'));
+        const std::uint64_t zeroBytes = ~(((x & kLow7) + kLow7) | x | kLow7);
+        lines += static_cast<std::size_t>(std::popcount(zeroBytes));
+        p += 8;
+    }
+    for (; p < end; ++p) {
+        lines += *p == '\n' ? 1 : 0;
+    }
+    line_ += lines;
     countedTo_ = offset;
     return line_;
 }
