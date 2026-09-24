@@ -36,6 +36,10 @@
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
+namespace katana::geometry {
+class SpatialIndex;
+}
+
 namespace katana::cad {
 
 using katana::geometry::Point2;
@@ -89,6 +93,14 @@ struct SectionOptions {
     // Caps the number of samples per surface so that a 20 km alignment at a
     // 1 mm interval fails cleanly instead of exhausting memory.
     std::size_t maximumSamples = 2'000'000;
+    // The model's spatial index keyed by EntityId - Document::spatialIndex()
+    // - when the caller has one. The crossing search then asks it for the
+    // entities near the alignment instead of walking the whole model, which
+    // is what makes a short cross section through a large drawing cheap. The
+    // crossings are the same with or without it (test_section.cpp holds both
+    // paths to one hand-worked answer); without it every entity is visited
+    // and rejected by its bounding box before any intersection is computed.
+    const katana::geometry::SpatialIndex* spatialIndex = nullptr;
 };
 
 // A named surface to cut. The pointer must outlive the call; nothing is copied.
