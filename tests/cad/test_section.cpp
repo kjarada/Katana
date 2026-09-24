@@ -659,3 +659,45 @@ TEST(CadSection, ACrossingWithinToleranceOfTheAlignmentSurvivesTheBoxTest)
         EXPECT_NEAR(section->crossings[0].station, 20.0, 1e-9);
     }
 }
+
+TEST(CadSection, APolylineEdgeWithinToleranceOfTheAlignmentSurvivesTheSideTest)
+{
+    // The polyline form of the test above, which is the path with the second
+    // reject: both ends of the edge (20, 10) - (20, 50 - 5e-8) lie below the
+    // alignment y = 50, one of them by only 5e-8, inside kGeometric. The side
+    // test must keep it, and intersect() then reports the crossing at x = 20.
+    // A diagonal alignment is added so the side test runs on a line that is
+    // not axis-aligned too: (0, 0) - (100, 100) against an edge ending 5e-8
+    // (perpendicular) short of it at (70, 70).
+    katana::entity::Model model;
+    ASSERT_TRUE(model.layers.ensure("0").ok());
+    const auto fence = addOn(model, lineFrom({Point2(20, 10), Point2(20, 50.0 - 5e-8)}));
+    const double offset = 5e-8 / std::sqrt(2.0);
+    const auto spur =
+        addOn(model, lineFrom({Point2(90, 50), Point2(70.0 + offset, 70.0 - offset)}));
+
+    SectionOptions options;
+    options.interval = 10.0;
+    const auto across =
+        extractSection(lineFrom({Point2(0, 50), Point2(100, 50)}), {}, &model, options);
+    ASSERT_TRUE(across.ok()) << across.error().describe();
+    // The spur, from (90, 50) on the line itself, crosses it there too:
+    // stations 20 (the fence) and 90 (the spur's start).
+    ASSERT_EQ(across->crossings.size(), 2u);
+    EXPECT_EQ(across->crossings[0].entity, fence);
+    EXPECT_NEAR(across->crossings[0].station, 20.0, 1e-9);
+    EXPECT_EQ(across->crossings[1].entity, spur);
+    EXPECT_NEAR(across->crossings[1].station, 90.0, 1e-9);
+
+    // Along the diagonal y = x: the fence (x = 20, y 10 to 50) crosses it
+    // at (20, 20), station 20 * sqrt(2); the spur's end at (70, 70), 5e-8
+    // off it, is at station 70 * sqrt(2).
+    const auto diagonal =
+        extractSection(lineFrom({Point2(0, 0), Point2(100, 100)}), {}, &model, options);
+    ASSERT_TRUE(diagonal.ok()) << diagonal.error().describe();
+    ASSERT_EQ(diagonal->crossings.size(), 2u);
+    EXPECT_EQ(diagonal->crossings[0].entity, fence);
+    EXPECT_NEAR(diagonal->crossings[0].station, 20.0 * std::sqrt(2.0), 1e-9);
+    EXPECT_EQ(diagonal->crossings[1].entity, spur);
+    EXPECT_NEAR(diagonal->crossings[1].station, 70.0 * std::sqrt(2.0), 1e-6);
+}
