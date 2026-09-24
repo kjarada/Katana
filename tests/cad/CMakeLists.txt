@@ -7,7 +7,7 @@ file(GLOB _cad_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR
 
 katana_add_test_suite(cad
     LIBS katana_cad
-    SOURCES test_cad.cpp test_indexed_queries.cpp test_dashing.cpp test_dimension_draw.cpp test_section.cpp test_viewport_layout.cpp test_scene.cpp test_hatching.cpp test_corridor.cpp test_grading.cpp test_parcel.cpp test_plot.cpp test_symbols.cpp test_style_drawing.cpp test_survey_coding.cpp test_survey_import.cpp test_layer_inheritance.cpp test_layer_overrides.cpp test_view_set.cpp test_survey_tools.cpp
+    SOURCES test_cad.cpp test_indexed_queries.cpp test_dashing.cpp test_dimension_draw.cpp test_section.cpp test_viewport_layout.cpp test_scene.cpp test_hatching.cpp test_corridor.cpp test_grading.cpp test_parcel.cpp test_plot.cpp test_symbols.cpp test_style_drawing.cpp test_survey_coding.cpp test_survey_import.cpp test_layer_inheritance.cpp test_layer_overrides.cpp test_view_set.cpp test_survey_tools.cpp test_document_index.cpp test_document_changes.cpp
         ${_cad_tool_tests}
         ${_cad_customisation_tests}
 )

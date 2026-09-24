@@ -11,9 +11,23 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Status;
 
+namespace {
+
+// A new or opened drawing: everything but the customisation, which a new or
+// an open keeps (DocumentChange::Replaced).
+constexpr std::uint32_t kReplaced = DocumentChange::Replaced | DocumentChange::Entities |
+                                    DocumentChange::Selection | DocumentChange::kTables |
+                                    DocumentChange::CurrentAttributes | DocumentChange::History |
+                                    DocumentChange::Saved | DocumentChange::Metadata;
+
+} // namespace
+
 Document::Document(katana::core::Logger* logger) : logger_(logger)
 {
     rebuildStack();
+    // The tables' revisions start wherever constructing them left them; the
+    // first command must not report every table as changed.
+    rememberTables();
 }
 
 Document::~Document() = default;
@@ -25,25 +39,63 @@ void Document::rebuildStack()
     stack_.reset();
     stack_ = std::make_unique<katana::commands::CommandStack>(model_, logger_);
     stack_->addListener([this](const katana::commands::CommandEvent& event) {
-        // The index is maintained from the per-entity changes the command
-        // reported rather than rebuilt: a single click on a 250 000-entity
-        // drawing must not pay for a whole rebuild.
         applyToSpatialIndex(event.changes);
+        std::uint32_t parts = DocumentChange::History | tablesChanged();
+        if (!event.changes.empty()) {
+            parts |= DocumentChange::Entities;
+        }
         // Undo can delete selected entities and the current layer.
-        pruneSelection();
+        if (pruneSelection()) {
+            parts |= DocumentChange::Selection;
+        }
         if (!model_.layers.contains(currentLayer_)) {
             currentLayer_ = std::string(katana::entity::kDefaultLayerName);
+            parts |= DocumentChange::CurrentAttributes;
         }
         // And the current style: a delete, merge or rename of it - or the
         // undo of its creation - must not leave new work naming nothing.
         if (!currentStyle_.empty() && !model_.styles.contains(currentStyle_)) {
             currentStyle_.clear();
+            parts |= DocumentChange::CurrentAttributes;
         }
         // The stack publishes only a step that succeeded, so a refused
         // command moves nothing.
         ++modelRevision_;
-        notify();
+        notify(DocumentChange{.parts = parts, .entities = event.changes});
     });
+}
+
+std::uint32_t Document::tablesChanged()
+{
+    const TableRevisions now{
+        .layers = model_.layers.revision(),
+        .styles = model_.styles.revision(),
+        .linetypes = model_.linetypes.revision(),
+        .dimensionStyles = model_.dimensionStyles.revision(),
+        .hatchPatterns = model_.hatchPatterns.revision(),
+        .alignments = model_.alignments.revision(),
+        .properties = model_.properties.revision(),
+    };
+    std::uint32_t parts = 0;
+    const auto compare = [&](std::uint64_t before, std::uint64_t after, DocumentChange::Part part) {
+        if (before != after) {
+            parts |= part;
+        }
+    };
+    compare(tablesSeen_.layers, now.layers, DocumentChange::Layers);
+    compare(tablesSeen_.styles, now.styles, DocumentChange::Styles);
+    compare(tablesSeen_.linetypes, now.linetypes, DocumentChange::Linetypes);
+    compare(tablesSeen_.dimensionStyles, now.dimensionStyles, DocumentChange::DimensionStyles);
+    compare(tablesSeen_.hatchPatterns, now.hatchPatterns, DocumentChange::HatchPatterns);
+    compare(tablesSeen_.alignments, now.alignments, DocumentChange::Alignments);
+    compare(tablesSeen_.properties, now.properties, DocumentChange::PropertyDefinitions);
+    tablesSeen_ = now;
+    return parts;
+}
+
+void Document::rememberTables()
+{
+    (void)tablesChanged();
 }
 
 void Document::rebuildSpatialIndex()
@@ -56,17 +108,53 @@ void Document::rebuildSpatialIndex()
                                            detail::queryExtents(model_, entity)});
     });
     index_.rebuild(entries);
+    indexChosenFor_ = model_.entities.size();
 }
 
+// WHEN THE INDEX IS REBUILT RATHER THAN UPDATED.
+//
+// Incrementally, the index is only ever as good as the cell size it was last
+// given, and the cell size is chosen by a rebuild alone. An index that has
+// never been rebuilt keeps the default one-unit cell, so a 12 km survey
+// imported into a new drawing was filed into 722,715 buckets with 4,889 boxes
+// on the oversized list every query scans: the import's execute took about a
+// second against 28 ms for the create itself, and every snap, pick and
+// repaint was 36x slower until the project was reopened - opening being the
+// one thing that rebuilt it.
+//
+// So a command rebuilds the index when either
+//   * it touched at least a tenth of the drawing (kBulkFraction), or
+//   * the drawing has grown to twice the size the cell was chosen for - an
+//     empty drawing's cell was chosen for none, so its first command always
+//     rebuilds.
+// Neither is ever true of the ordinary click on a drawing of any size, which
+// stays an O(1) insert. A rebuild costs O(n); the first rule fires only when
+// the command itself was already a tenth of that, and the second only after
+// n/2 entities were added since the last rebuild, so neither can make a
+// sequence of commands cost more than a constant factor over the edits in it.
 void Document::applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent>& changes)
 {
+    if (changes.empty()) {
+        return; // a table-only command: nothing the index holds moved
+    }
+    // One in ten: see "when the index is rebuilt" above.
+    constexpr std::size_t kBulkFraction = 10;
+    const std::size_t entities = model_.entities.size();
+    const bool bulk = changes.size() * kBulkFraction >= entities || entities >= 2 * indexChosenFor_;
+    const bool cleared =
+        std::ranges::any_of(changes, [](const katana::entity::ChangeEvent& change) {
+            return change.kind == katana::entity::ChangeKind::Cleared;
+        });
+    if (bulk || cleared) {
+        // After a Cleared the data is about to be different altogether, and a
+        // rebuild re-chooses the cell for it.
+        rebuildSpatialIndex();
+        return;
+    }
     for (const katana::entity::ChangeEvent& change : changes) {
         switch (change.kind) {
         case katana::entity::ChangeKind::Cleared:
-            // Everything went at once; a full rebuild also re-chooses the cell
-            // size, which is right because the data is about to be different.
-            rebuildSpatialIndex();
-            return;
+            break; // handled above, before any incremental update
         case katana::entity::ChangeKind::EntityRemoved:
             index_.remove(static_cast<katana::geometry::SpatialId>(change.id));
             break;
@@ -112,7 +200,7 @@ std::vector<katana::entity::EntityId> Document::lastCreatedEntities() const
 
 void Document::notifySelectionChanged()
 {
-    notify();
+    notify(DocumentChange::Selection);
 }
 
 Status Document::setCurrentLayer(const std::string& name)
@@ -126,7 +214,7 @@ Status Document::setCurrentLayer(const std::string& name)
                          name);
     }
     currentLayer_ = name;
-    notify();
+    notify(DocumentChange::CurrentAttributes);
     return {};
 }
 
@@ -137,7 +225,7 @@ Status Document::setCurrentStyle(const std::string& name)
     }
     if (name != currentStyle_) {
         currentStyle_ = name;
-        notify();
+        notify(DocumentChange::CurrentAttributes);
     }
     return {};
 }
@@ -162,7 +250,8 @@ void Document::newDocument()
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
     currentStyle_.clear();
     ++modelRevision_;
-    notify();
+    rememberTables();
+    notify(kReplaced);
 }
 
 Status Document::open(const std::filesystem::path& projectDirectory)
@@ -204,7 +293,8 @@ Status Document::open(const std::filesystem::path& projectDirectory)
         logger_->info("storage", "project opened",
                       {{"entities", std::to_string(model_.entities.size())}});
     }
-    notify();
+    rememberTables();
+    notify(kReplaced);
     return {};
 }
 
@@ -227,7 +317,7 @@ Status Document::save()
         logger_->info("storage", "project saved",
                       {{"entities", std::to_string(model_.entities.size())}});
     }
-    notify();
+    notify(DocumentChange::Saved);
     return {};
 }
 
@@ -250,7 +340,8 @@ Status Document::saveAs(const std::filesystem::path& projectDirectory)
     store_ = std::make_unique<katana::storage::ProjectStore>(std::move(*store));
     stack_->markSaved();
     metadataModified_ = false;
-    notify();
+    // The name and the creation time above may have been filled in.
+    notify(DocumentChange::Saved | DocumentChange::Metadata);
     return {};
 }
 
@@ -272,14 +363,18 @@ void Document::setMetadata(katana::storage::ProjectMetadata metadata)
     if (metadata != metadata_) {
         metadata_ = std::move(metadata);
         metadataModified_ = true;
-        notify();
+        notify(DocumentChange::Metadata);
     }
 }
 
 struct Document::ListenerHandle::Registry {
+    // Exactly one of the two is set. Both are kept rather than the plain one
+    // wrapped in a ChangeListener, which would cost an allocation per call
+    // wherever a caller copies it.
     struct Entry {
         std::uint64_t id;
-        Listener listener;
+        Listener plain;
+        ChangeListener typed;
     };
     std::vector<Entry> entries;
     std::uint64_t nextId = 1;
@@ -300,16 +395,26 @@ Document::ListenerHandle Document::addListener(Listener listener)
         listeners_ = std::make_shared<ListenerHandle::Registry>();
     }
     const std::uint64_t id = listeners_->nextId++;
-    listeners_->entries.push_back({id, std::move(listener)});
+    listeners_->entries.push_back({id, std::move(listener), {}});
     return ListenerHandle(listeners_, id);
 }
 
-void Document::pruneSelection()
+Document::ListenerHandle Document::addListener(ChangeListener listener)
 {
-    selection_.prune(model_.entities);
+    if (!listeners_) {
+        listeners_ = std::make_shared<ListenerHandle::Registry>();
+    }
+    const std::uint64_t id = listeners_->nextId++;
+    listeners_->entries.push_back({id, {}, std::move(listener)});
+    return ListenerHandle(listeners_, id);
 }
 
-void Document::notify()
+bool Document::pruneSelection()
+{
+    return selection_.prune(model_.entities);
+}
+
+void Document::notify(const DocumentChange& change)
 {
     if (!listeners_) {
         return;
@@ -324,8 +429,13 @@ void Document::notify()
     for (const std::uint64_t id : ids) {
         const auto found = std::find_if(listeners_->entries.begin(), listeners_->entries.end(),
                                         [id](const auto& entry) { return entry.id == id; });
-        if (found != listeners_->entries.end()) {
-            found->listener();
+        if (found == listeners_->entries.end()) {
+            continue;
+        }
+        if (found->typed) {
+            found->typed(change);
+        } else if (found->plain) {
+            found->plain();
         }
     }
 }
@@ -334,14 +444,14 @@ void Document::setStyleLibrary(katana::entity::StyleLibrary library)
 {
     library_ = std::move(library);
     ++libraryGeneration_;
-    notify();
+    notify(DocumentChange::StyleLibrary);
 }
 
 void Document::setSurveyMap(katana::entity::SurveyMap map)
 {
     surveyMap_ = std::move(map);
     ++surveyMapGeneration_;
-    notify();
+    notify(DocumentChange::SurveyMap);
 }
 
 const katana::entity::LineStyle* Document::definitionFor(std::string_view name) const

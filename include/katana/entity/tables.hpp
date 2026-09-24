@@ -7,6 +7,7 @@
 // thread-safe. Cross-table rules (e.g. "a layer in use cannot be removed") are
 // enforced by commands, which can see every table.
 
+#include <cstdint>
 #include <map>
 #include <utility>
 #include <optional>
@@ -144,6 +145,11 @@ class LayerDatabase {
     [[nodiscard]] bool effectivelyVisible(std::string_view name) const;
     [[nodiscard]] bool effectivelyLocked(std::string_view name) const;
 
+    // Counts up by one for every change that succeeds and never down: what
+    // the Document compares, before and after a command, to say whether the
+    // layers changed (NamedTable::revision says why a counter).
+    [[nodiscard]] std::uint64_t revision() const { return revision_; }
+
   private:
     // A layer with its inherited state. `shown` and `locked` are derived, and
     // kept current by every member that changes the table, so a reader asks
@@ -166,6 +172,7 @@ class LayerDatabase {
     descendantRange(std::string_view name);
 
     Nodes layers_;
+    std::uint64_t revision_ = 0;
 };
 
 // ---- dimension styles -----------------------------------------------------------
@@ -462,7 +469,11 @@ class PropertyDatabase {
   public:
     [[nodiscard]] katana::core::Status define(PropertyDefinition definition);
     [[nodiscard]] katana::core::Result<PropertyDefinition> undefine(std::string_view name);
-    void reset() { definitions_.clear(); }
+    void reset()
+    {
+        definitions_.clear();
+        ++revision_;
+    }
 
     [[nodiscard]] const PropertyDefinition* find(std::string_view name) const;
     [[nodiscard]] std::vector<PropertyDefinition> all() const; // ascending by name
@@ -471,8 +482,13 @@ class PropertyDatabase {
     [[nodiscard]] katana::core::Status validate(std::string_view name,
                                                 const PropertyValue& value) const;
 
+    // Counts up by one for every change that succeeds and never down
+    // (NamedTable::revision says why).
+    [[nodiscard]] std::uint64_t revision() const { return revision_; }
+
   private:
     std::map<std::string, PropertyDefinition, std::less<>> definitions_;
+    std::uint64_t revision_ = 0;
 };
 
 } // namespace katana::entity

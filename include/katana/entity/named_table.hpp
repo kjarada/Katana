@@ -32,6 +32,7 @@
 // depend on that: the project store writes tables in that order, and a stable
 // order is what makes a saved file diffable.
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
@@ -61,6 +62,7 @@ template <class T, class Policy> class NamedTable {
     {
         items_.clear();
         Policy::seed(items_);
+        ++revision_;
     }
 
     [[nodiscard]] katana::core::Status add(T item)
@@ -75,6 +77,7 @@ template <class T, class Policy> class NamedTable {
         }
         std::string name = item.name;
         items_.emplace(std::move(name), std::move(item));
+        ++revision_;
         return {};
     }
 
@@ -95,6 +98,7 @@ template <class T, class Policy> class NamedTable {
             return status;
         }
         found->second = item;
+        ++revision_;
         return {};
     }
 
@@ -114,6 +118,7 @@ template <class T, class Policy> class NamedTable {
         }
         T removed = std::move(found->second);
         items_.erase(found);
+        ++revision_;
         return removed;
     }
 
@@ -160,8 +165,16 @@ template <class T, class Policy> class NamedTable {
     [[nodiscard]] std::size_t size() const { return items_.size(); }
     [[nodiscard]] bool empty() const { return items_.empty(); }
 
+    // Counts up by one for every change that succeeds - add, update, remove,
+    // reset - and never down. A table has no observer of its own, so this is
+    // how the Document tells which tables a command touched (it compares
+    // them before and after) without a copy of every table to compare with.
+    // A copy or move carries it along; only a change moves it.
+    [[nodiscard]] std::uint64_t revision() const { return revision_; }
+
   private:
     NamedMap<T> items_;
+    std::uint64_t revision_ = 0;
 };
 
 } // namespace katana::entity
