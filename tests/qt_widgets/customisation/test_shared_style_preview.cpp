@@ -1,4 +1,4 @@
-// StylePreview: a style, a 12d linestyle or a 12d symbol painted at a plot
+// StylePreview: a style, a library linestyle or a library symbol painted at a plot
 // scale on paper or on the screen. The pictures are read back pixel by pixel
 // and compared with what was worked out by hand from the definitions.
 

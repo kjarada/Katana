@@ -120,11 +120,11 @@ QString unitsText(katana::entity::StyleUnits units)
 {
     switch (units) {
     case katana::entity::StyleUnits::World:
-        return QStringLiteral("worldstyle: metres on the ground");
+        return QStringLiteral("World units: metres on the ground");
     case katana::entity::StyleUnits::Paper:
-        return QStringLiteral("paperstyle: millimetres on the plot");
+        return QStringLiteral("Paper units: millimetres on the plot");
     case katana::entity::StyleUnits::TwoPoint:
-        return QStringLiteral("twoptstyle: stretched between two points");
+        return QStringLiteral("Two-point: stretched between two points");
     }
     return {};
 }
@@ -258,12 +258,13 @@ void SymbolLibraryDialog::buildUi()
     load_ = new QPushButton(icon(Icon::Import), QStringLiteral("Load .4d..."), this);
     load_->setObjectName(QStringLiteral("loadLibrary"));
     load_->setToolTip(QStringLiteral(
-        "Merge a 12d library into this session's: its definitions are added, or replace "
-        "those of the same name; nothing else is removed"));
+        "Merge a style or symbol library (.4d) into this session's: its definitions are "
+        "added, or replace those of the same name; nothing else is removed"));
     export_ =
         new QPushButton(icon(Icon::Export), QStringLiteral("Export Selected to .4d..."), this);
     export_->setObjectName(QStringLiteral("exportSelected"));
-    export_->setToolTip(QStringLiteral("Write the selected library symbols to a 12d .4d file"));
+    export_->setToolTip(
+        QStringLiteral("Write the selected library symbols to a symbol library (.4d)"));
     toolbar->addWidget(load_);
     toolbar->addWidget(export_);
     toolbar->addStretch(1);
@@ -1165,8 +1166,8 @@ void SymbolLibraryDialog::loadClicked()
         return;
     } else {
         const QString chosen = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Load a 12d library"), {},
-            QStringLiteral("12d libraries (*.4d);;All files (*)"));
+            this, QStringLiteral("Load a Style or Symbol Library"), {},
+            QStringLiteral("Style and symbol libraries (*.4d);;All files (*)"));
         path = std::filesystem::path(chosen.toStdU16String());
     }
     if (!path.empty()) {
@@ -1186,9 +1187,9 @@ void SymbolLibraryDialog::exportClicked()
         return;
     } else {
         const QString chosen = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Export symbols to a 12d library"),
-            QStringLiteral("user_symbols_export.4d"),
-            QStringLiteral("12d libraries (*.4d);;All files (*)"));
+            this, QStringLiteral("Export Symbols to a Symbol Library"),
+            QStringLiteral("symbols_export.4d"),
+            QStringLiteral("Style and symbol libraries (*.4d);;All files (*)"));
         path = std::filesystem::path(chosen.toStdU16String());
     }
     if (!path.empty()) {

@@ -97,7 +97,7 @@ class MainWindow final : public QMainWindow {
     // click on that box crashed the application and nothing had tested it.
     [[nodiscard]] katana::core::Status toggleLayerThroughPanel(const QString& layer);
 
-    // Loads a 12d customisation - linestyle and symbol libraries, mapfiles -
+    // Loads a customisation - linestyle and symbol libraries, survey code files -
     // ON TOP OF what is loaded (archive12d::mergeCustomisation; the lead's
     // D1), or in place of the loaded kinds it brings with LoadMode::Replace,
     // and reports what each file added and replaced into the message log.
@@ -374,7 +374,7 @@ class MainWindow final : public QMainWindow {
     QComboBox* propertyStyle_ = nullptr;
     QToolButton* propertyStyleApply_ = nullptr;
     QComboBox* currentStyle_ = nullptr;
-    // The 12d customisation files loaded this session, in load order: what a
+    // The customisation files loaded this session, in load order: what a
     // save records in the project (cad/customisation_record.hpp).
     std::vector<katana::cad::CustomisationSource> customisation_;
     // The files the last open found the project recorded but not loaded, less

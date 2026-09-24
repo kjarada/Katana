@@ -1,7 +1,7 @@
 #pragma once
 
 // The survey code manager: the feature-code library a surveyor codes against
-// - 12d's mapfile editor, Civil 3D's description keys, TBC's feature
+// - a survey code file editor, Civil 3D's description keys, TBC's feature
 // definition manager, Carlson's field-to-finish - in one non-modal dialog.
 //
 // Five tabs, each over one cad foundation, so the dialog decides nothing the
@@ -123,8 +123,8 @@ class SurveyCodeManagerDialog : public QDialog {
     [[nodiscard]] katana::core::Status importMapfile(
         const std::filesystem::path& path,
         katana::archive12d::LoadMode mode = katana::archive12d::LoadMode::Merge);
-    // The buffer as a 12d mapfile, UTF-16LE with a byte order mark as 12d
-    // writes one.
+    // The buffer as a survey code file (.mapfile), UTF-16LE with a byte
+    // order mark, as the format's own writers write one.
     [[nodiscard]] katana::core::Status exportMapfile(const std::filesystem::path& path) const;
     // The buffer's code list (cad::codeListCsv), UTF-8.
     [[nodiscard]] katana::core::Status exportCodeList(const std::filesystem::path& path) const;
