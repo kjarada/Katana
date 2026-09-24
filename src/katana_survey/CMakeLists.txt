@@ -14,5 +14,11 @@ add_library(katana_survey STATIC
     least_squares.cpp
     network_adjustment.cpp
 )
+# The reduction (reduction*.cpp) is globbed so that the files implementing it -
+# corrections, pairing, the adjustment driver, the report renderers - can be
+# added and the placeholder reduction_stub.cpp removed without editing this
+# list. CONFIGURE_DEPENDS re-globs on the next build.
+file(GLOB _survey_reduction_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/reduction*.cpp")
+target_sources(katana_survey PRIVATE ${_survey_reduction_sources})
 katana_target_defaults(katana_survey)
 target_link_libraries(katana_survey PUBLIC katana_math PRIVATE Eigen3::Eigen)

@@ -29,6 +29,7 @@
 // Threading: a ProjectStore belongs to one thread.
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -37,6 +38,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/storage/survey_job.hpp"
 
 namespace katana::storage {
 
@@ -90,6 +92,13 @@ struct ProjectContents {
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
     katana::entity::EntityId nextEntityId = 1;
+    // The survey jobs (survey_job.hpp), in the order they were created. Saved
+    // and loaded in the same transaction as the entities they created, so a
+    // job can never name entities a crash left unsaved. Schema version 10.
+    // save() refuses a job without an id, two jobs of one id, and a job too
+    // large for the database (ProjectStore::checkSurveyJobSize); a project
+    // from before schema 10 loads with none.
+    std::vector<SurveyJob> surveyJobs{};
 };
 
 [[nodiscard]] ProjectContents captureModel(const katana::entity::Model& model,
@@ -132,8 +141,35 @@ class ProjectStore {
     // 6: hatch patterns, and Layer/Style::hatchPattern (Phase 09).
     // 7: alignments, stored as their PI definitions (Phase 21).
     // 8: design profiles on alignments, as PVIs (Phase 21).
-    static constexpr int kCurrentSchemaVersion = 9;
+    // 9: a style's description and point symbol.
+    // 10: survey jobs - the raw bytes of each imported field file and its
+    //     siblings, its reduction settings, report and placed points.
+    static constexpr int kCurrentSchemaVersion = 10;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
+
+    // The most bytes one survey job may take in a project: its own row (the
+    // field file, its names, settings, report and packed point lists) and,
+    // separately, each file kept with it. SQLite refuses a string, a BLOB or
+    // a row over its SQLITE_MAX_LENGTH - 1,000,000,000 bytes by default, and
+    // as MSYS2 builds it - while a reader accepts a field file of up to 1 GiB
+    // (surveyio::kMaxSurveyFileBytes). Without this a job could be imported
+    // that no save could write, and every later save of the whole project
+    // would fail. A round figure, well under the library's limit; save() also
+    // honours the connection's own limit, should a build of SQLite have a
+    // lower one.
+    static constexpr std::uint64_t kMaxSurveyJobBytes = 900'000'000;
+
+    // The bytes `job` takes in its own row: every column's content, without
+    // the few bytes of SQLite's record header.
+    [[nodiscard]] static std::uint64_t surveyJobRowBytes(const SurveyJob& job);
+
+    // InvalidArgument, with a sentence naming the job's field file and saying
+    // what to do instead, when the job's row or one of its files' rows would
+    // be over `limit` bytes. The survey job commands call it before they
+    // change anything; save() calls it for every job, so a job too large is
+    // refused before a byte is written, not by SQLite halfway through.
+    [[nodiscard]] static katana::core::Status
+    checkSurveyJobSize(const SurveyJob& job, std::uint64_t limit = kMaxSurveyJobBytes);
 
     // Creates the directory layout and an empty database. Fails if a project
     // already exists there.

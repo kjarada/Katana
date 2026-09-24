@@ -307,6 +307,11 @@ Result<int> SqliteDatabase::userVersion()
     return static_cast<int>(*value);
 }
 
+std::int64_t SqliteDatabase::lengthLimit() const
+{
+    return sqlite3_limit(impl_->connection, SQLITE_LIMIT_LENGTH, -1); // -1: read, not set
+}
+
 Status SqliteDatabase::setUserVersion(int version)
 {
     return execute("PRAGMA user_version = " + std::to_string(version));

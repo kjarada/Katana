@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/cad/selection.hpp"
@@ -285,6 +286,22 @@ class Document {
     // isModified() honest the way any other command does.
     [[nodiscard]] katana::core::Status setSheetSet(const plotting::SheetSet& sheets,
                                                    std::string stepName = "SET_SHEETS");
+    // ---- survey jobs (cad/survey_job.hpp) --------------------------------------
+    //
+    // The field files imported as jobs, in id order, kept so their reduction
+    // and adjustment can be revisited. Changed ONLY by the survey job
+    // commands, which are undoable - there is deliberately no setter; the
+    // commands come in through SurveyJobAccess. Saved with the project
+    // (storage::ProjectContents::surveyJobs); cleared by newDocument() and
+    // replaced by open().
+    [[nodiscard]] const std::vector<katana::storage::SurveyJob>& surveyJobs() const
+    {
+        return surveyJobs_;
+    }
+    // nullptr when there is no job with that id.
+    [[nodiscard]] const katana::storage::SurveyJob* findSurveyJob(std::string_view id) const;
+    // Counts every change to the job list, for a panel that lists the jobs.
+    [[nodiscard]] std::uint64_t surveyJobsGeneration() const { return surveyJobsGeneration_; }
 
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
@@ -298,7 +315,11 @@ class Document {
     [[nodiscard]] ListenerHandle addListener(ChangeListener listener);
 
   private:
+    friend class SurveyJobAccess;
+
     void rebuildStack();
+    // The model, the metadata and the survey jobs into `store` in one save.
+    [[nodiscard]] katana::core::Status saveContents(katana::storage::ProjectStore& store);
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();
     // The index after one command: incremental for an ordinary edit, a
@@ -353,6 +374,8 @@ class Document {
     // a pointer instead of parsing the set again.
     struct SheetCache;
     mutable std::shared_ptr<const SheetCache> sheetCache_;
+    std::vector<katana::storage::SurveyJob> surveyJobs_;
+    std::uint64_t surveyJobsGeneration_ = 0;
 };
 
 } // namespace katana::cad
