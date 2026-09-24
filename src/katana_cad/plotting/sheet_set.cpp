@@ -219,23 +219,36 @@ std::string automaticTitle(const Viewport& viewport)
 
 std::string sheetScaleText(const Sheet& sheet)
 {
-    const Viewport* main = nullptr;
-    for (const Viewport& viewport : sheet.viewports) {
-        if (isScaled(viewport.kind) &&
-            (main == nullptr || tilingRank(viewport.kind) < tilingRank(main->kind))) {
-            main = &viewport;
+    // Plans and sections first; a key plan only when there is neither - an
+    // inset key plan is at its own, smaller scale by design, and a key-plan
+    // sheet is still drawn to one.
+    const auto reported = [&sheet](const auto& counts) -> std::string {
+        const Viewport* main = nullptr;
+        for (const Viewport& viewport : sheet.viewports) {
+            if (counts(viewport.kind) &&
+                (main == nullptr || tilingRank(viewport.kind) < tilingRank(main->kind))) {
+                main = &viewport;
+            }
         }
-    }
-    if (main == nullptr) {
-        return "N.T.S.";
-    }
-    const std::string text = scaleText(*main);
-    for (const Viewport& viewport : sheet.viewports) {
-        if (isScaled(viewport.kind) && scaleText(viewport) != text) {
-            return "AS SHOWN";
+        if (main == nullptr) {
+            return {};
         }
+        const std::string text = scaleText(*main);
+        for (const Viewport& viewport : sheet.viewports) {
+            if (counts(viewport.kind) && scaleText(viewport) != text) {
+                return "AS SHOWN";
+            }
+        }
+        return text;
+    };
+    if (std::string text = reported(isScaled); !text.empty()) {
+        return text;
     }
-    return text;
+    if (std::string text = reported([](ViewportKind kind) { return kind == ViewportKind::KeyPlan; });
+        !text.empty()) {
+        return text;
+    }
+    return "N.T.S.";
 }
 
 std::map<std::string, std::string, std::less<>>

@@ -191,6 +191,7 @@ TEST(SheetGenerators, TheGridsKeyPlanOutlinesEveryTileAtAScaleThatHoldsThemAll)
     ASSERT_TRUE(sheets.ok());
     const Sheet& key = sheets->front();
     EXPECT_EQ(key.name, "KEY PLAN");
+    EXPECT_EQ(sheetScaleText(key), "1:2000");
     ASSERT_EQ(key.viewports.size(), 1u);
     const Viewport& view = key.viewports.front();
     EXPECT_EQ(view.kind, ViewportKind::KeyPlan);

@@ -228,7 +228,10 @@ project contributes; `fieldContextFor(document, plotDate)` builds it, so
 
 **The scale** is that of the main viewport: the lowest tiling rank among the
 viewports drawn to scale (plans and sections).
-- If the scaled viewports disagree, it is `AS SHOWN`.
+- If those viewports disagree, it is `AS SHOWN`.
+- A key plan inset beside a plan is at its own, smaller scale by design and
+  does not make the sheet `AS SHOWN`. On a sheet with no plan or section (a
+  key-plan sheet) the key plan's scale is the sheet's.
 - If nothing on the sheet is drawn to scale, it is `N.T.S.`.
 - A section always states both scales, `H 1:500 V 1:50`, even when they are
   equal. A lone 1:500 leaves the reader to assume the vertical, and that is
