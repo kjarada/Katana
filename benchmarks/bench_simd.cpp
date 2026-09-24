@@ -51,7 +51,8 @@ class LevelScope {
     LevelScope(benchmark::State& state, int level)
     {
 #if defined(KATANA_BENCH_SIMD_LAYER)
-        const auto previous = katana::core::setSimdLevel(static_cast<katana::core::SimdLevel>(level));
+        const auto previous =
+            katana::core::setSimdLevel(static_cast<katana::core::SimdLevel>(level));
         if (!previous) {
             state.SkipWithError(previous.error().message.c_str());
             ok_ = false;
@@ -258,7 +259,8 @@ void BM_TransformPoints2Batch(benchmark::State& state, int level)
     }
     auto points = points2();
     const Point2 centre(308192.0, 6233616.0);
-    const Mat3 m = Mat3::translation(centre) * Mat3::rotation(1e-6) * Mat3::translation(centre * -1.0);
+    const Mat3 m =
+        Mat3::translation(centre) * Mat3::rotation(1e-6) * Mat3::translation(centre * -1.0);
     for (auto _ : state) {
 #if defined(KATANA_BENCH_SIMD_LAYER)
         katana::geometry::transformPoints(m, points);
@@ -284,7 +286,7 @@ void BM_BoundsOfPoints2(benchmark::State& state, int level)
     const auto points = points2();
     for (auto _ : state) {
 #if defined(KATANA_BENCH_SIMD_LAYER)
-        const Box2 box = katana::geometry::boundsOf(points);
+        Box2 box = katana::geometry::boundsOf(points);
 #else
         Box2 box;
         for (const Point2& p : points) {
@@ -307,7 +309,7 @@ void BM_BoundsOfPoints3(benchmark::State& state, int level)
     const auto points = points3();
     for (auto _ : state) {
 #if defined(KATANA_BENCH_SIMD_LAYER)
-        const AABB box = katana::geometry::boundsOf(points);
+        AABB box = katana::geometry::boundsOf(points);
 #else
         AABB box;
         for (const Vec3& p : points) {

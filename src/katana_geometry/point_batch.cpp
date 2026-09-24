@@ -31,7 +31,8 @@ constexpr std::size_t kSimdMinimum = 8;
 
 [[nodiscard]] bool useAvx2(std::size_t count)
 {
-    return count >= kSimdMinimum && katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+    return count >= kSimdMinimum &&
+           katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
 }
 
 // Where a coordinate's extreme is zero, WHICH zero the sequential loop kept

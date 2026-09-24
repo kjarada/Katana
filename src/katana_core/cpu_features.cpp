@@ -58,8 +58,8 @@ SimdSelection decide()
     if (chosen) {
         selection.active = *chosen;
         if (*chosen != selection.detected) {
-            selection.note = std::string("KATANA_SIMD=") + requested + " in force; the processor supports " +
-                             toString(selection.detected);
+            selection.note = std::string("KATANA_SIMD=") + requested +
+                             " in force; the processor supports " + toString(selection.detected);
         }
         return selection;
     }
@@ -109,11 +109,13 @@ Result<SimdLevel> chooseSimdLevel(std::string_view requested, SimdLevel detected
         level = SimdLevel::Avx2;
     } else {
         return makeError(ErrorCode::InvalidArgument,
-                         "'" + std::string(requested) + "' is not a SIMD level; use scalar or avx2");
+                         "'" + std::string(requested) +
+                             "' is not a SIMD level; use scalar or avx2");
     }
     if (level > detected) {
         return makeError(ErrorCode::InvalidArgument,
-                         std::string(toString(level)) + " was asked for but this processor supports only " +
+                         std::string(toString(level)) +
+                             " was asked for but this processor supports only " +
                              toString(detected));
     }
     return level;

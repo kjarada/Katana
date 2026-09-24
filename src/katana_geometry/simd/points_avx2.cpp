@@ -98,8 +98,13 @@ extern "C" void katana_avx2_transform_points2(const double* m, double* points, s
         double* p = points + 2 * i;
         const __m256d v0 = _mm256_loadu_pd(p);
         const __m256d v1 = _mm256_loadu_pd(p + 4);
-        const __m256d r0 = add(add(mul(byX, _mm256_movedup_pd(v0)), mul(byY, _mm256_permute_pd(v0, 0b1111))), offset);
-        const __m256d r1 = add(add(mul(byX, _mm256_movedup_pd(v1)), mul(byY, _mm256_permute_pd(v1, 0b1111))), offset);
+        // movedup gives x0 x0 | x1 x1, permute 0b1111 gives y0 y0 | y1 y1.
+        const __m256d x0 = _mm256_movedup_pd(v0);
+        const __m256d y0 = _mm256_permute_pd(v0, 0b1111);
+        const __m256d x1 = _mm256_movedup_pd(v1);
+        const __m256d y1 = _mm256_permute_pd(v1, 0b1111);
+        const __m256d r0 = add(add(mul(byX, x0), mul(byY, y0)), offset);
+        const __m256d r1 = add(add(mul(byX, x1), mul(byY, y1)), offset);
         _mm256_storeu_pd(p, r0);
         _mm256_storeu_pd(p + 4, r1);
     }
