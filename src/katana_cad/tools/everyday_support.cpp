@@ -84,17 +84,14 @@ std::string counted(std::size_t count, std::string_view one, std::string_view ma
 
 // ---- the drawing -------------------------------------------------------------------
 
-SurveyPosition positionAt(const Document* document, const Point2& at, double tolerance)
+SurveyPosition positionAt(const Document* document, const Point2& at)
 {
     SurveyPosition bare;
     bare.point = at;
     if (document == nullptr) {
         return bare;
     }
-    // A snap lands exactly on the point; the tolerance is for a pick the
-    // view did not snap, and never less than a hair, so a typed coordinate
-    // equal to a point's still finds it.
-    const double radius = std::max(tolerance, katana::math::tolerance::kGeometric);
+    const double radius = kPointCoincidence;
     std::vector<katana::geometry::SpatialId> near;
     document->spatialIndex().query(at, radius, near);
     std::optional<EntityId> best;

@@ -10,9 +10,10 @@
 // object's Area are the survey tools' own computation and wording
 // (survey_tools.hpp: computeInverse, computeArea and their formatters), so the
 // Survey menu's Inverse and this tool cannot describe one pair of points two
-// ways. A pick that lands on a survey point (a snap puts it exactly there)
-// speaks for that point: its number, and its height, so a distance between two
-// levelled points reports their height difference.
+// ways. A pick ON a survey point (a snap puts it exactly there; see
+// everyday::kPointCoincidence) speaks for that point: its number, and its
+// height, so a distance between two levelled points reports their height
+// difference. A pick merely near one is only its coordinates.
 //
 // Distance, Area, ID Point and Angle start again when they have answered, as
 // AutoCAD's MEASUREGEOM does, so a run of measurements is a run of picks; Esc
@@ -88,7 +89,7 @@ void addBand(ToolFeedback& feedback, const Point2& from, const Point2& cursor)
 class DistanceTool final : public InteractiveTool {
   public:
     explicit DistanceTool(const ToolContext& context)
-        : document_(context.document), tolerance_(context.pickTolerance)
+        : document_(context.document)
     {
     }
 
@@ -104,8 +105,8 @@ class DistanceTool final : public InteractiveTool {
             first_ = at;
             return ToolStep::next();
         }
-        const auto inverse = computeInverse(positionAt(document_, *first_, tolerance_),
-                                            positionAt(document_, at, tolerance_));
+        const auto inverse = computeInverse(positionAt(document_, *first_),
+                                            positionAt(document_, at));
         if (!inverse) {
             return ToolStep::rejected(asSentence(inverse.error().message));
         }
@@ -134,7 +135,6 @@ class DistanceTool final : public InteractiveTool {
 
   private:
     const Document* document_ = nullptr;
-    double tolerance_ = 0.0;
     std::optional<Point2> first_;
 };
 
@@ -303,7 +303,7 @@ class AreaTool final : public InteractiveTool {
 class IdPointTool final : public InteractiveTool {
   public:
     explicit IdPointTool(const ToolContext& context)
-        : document_(context.document), tolerance_(context.pickTolerance)
+        : document_(context.document)
     {
     }
 
@@ -312,7 +312,7 @@ class IdPointTool final : public InteractiveTool {
 
     ToolStep point(const Point2& at) override
     {
-        const SurveyPosition position = positionAt(document_, at, tolerance_);
+        const SurveyPosition position = positionAt(document_, at);
         if (!position.entity) {
             return ToolStep::done(nullptr, coordinates(at), true);
         }
@@ -332,7 +332,6 @@ class IdPointTool final : public InteractiveTool {
 
   private:
     const Document* document_ = nullptr;
-    double tolerance_ = 0.0;
 };
 
 // ---- Angle -------------------------------------------------------------------------
@@ -344,7 +343,7 @@ class IdPointTool final : public InteractiveTool {
 class AngleTool final : public InteractiveTool {
   public:
     explicit AngleTool(const ToolContext& context)
-        : document_(context.document), tolerance_(context.pickTolerance)
+        : document_(context.document)
     {
     }
 
@@ -376,7 +375,7 @@ class AngleTool final : public InteractiveTool {
         const double clockwise = katana::survey::normalizeAzimuth(second - first);
         const double other = clockwise > 0.0 ? 2.0 * katana::math::kPi - clockwise : 0.0;
         std::string text =
-            "Angle at " + positionAt(document_, vertex, tolerance_).label() + "\n";
+            "Angle at " + positionAt(document_, vertex).label() + "\n";
         text += "  Included angle " + degrees(std::min(clockwise, other)) + "\n";
         text += "  Turned clockwise from the first arm to the second " + degrees(clockwise) +
                 "   the other way " + degrees(other) + "\n";
@@ -415,7 +414,6 @@ class AngleTool final : public InteractiveTool {
 
   private:
     const Document* document_ = nullptr;
-    double tolerance_ = 0.0;
     std::vector<Point2> points_; // the vertex, then the first arm's point
 };
 
