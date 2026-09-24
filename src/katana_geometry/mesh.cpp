@@ -3,6 +3,7 @@
 #include <cmath>
 #include <string>
 
+#include "katana/geometry/point_batch.hpp"
 #include "katana/geometry/polygon.hpp"
 
 namespace katana::geometry {
@@ -24,14 +25,7 @@ std::optional<Triangle3> TriangleMesh::triangle(std::size_t index) const
     return Triangle3{vertices[face[0]], vertices[face[1]], vertices[face[2]]};
 }
 
-katana::math::AABB TriangleMesh::bounds() const
-{
-    katana::math::AABB box;
-    for (const Point3& vertex : vertices) {
-        box.expand(vertex);
-    }
-    return box;
-}
+katana::math::AABB TriangleMesh::bounds() const { return boundsOf(vertices); }
 
 double TriangleMesh::area() const
 {
