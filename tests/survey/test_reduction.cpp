@@ -430,3 +430,38 @@ TEST(Reduction, TheFacePairOfTheOwnersNeuralSurveyEngineMeansToItsValues)
     EXPECT_NEAR(*direction->reduced, 1.00025, 1e-12); // oriented on B: reading 0 is azimuth 0
     EXPECT_NEAR(*zenith->reduced, 1.39985, 1e-12);
 }
+
+TEST(Reduction, ASetupWhoseBacksightALaterSetupRadiatesIsOrientedOnItAfterAll)
+{
+    // S1 stands on A but backsights P1, which nothing has placed yet; S2 on
+    // B radiates P1 (azimuth B -> A is 180, reading 0 on A, P1 at reading 90
+    // is azimuth 270, 50 m: P1 = N 1100, E 950). S1 is then oriented on P1:
+    // azimuth A -> P1 = atan2(-50, 100) = 333 26 05.8, and radiates Q.
+    SurveyProject project;
+    project.points.push_back(point("A", 1000.0, 1000.0, 50.0));
+    project.points.push_back(point("B", 1100.0, 1000.0, 50.0));
+    project.unpositionedPoints.push_back(unpositioned("P1"));
+    project.unpositionedPoints.push_back(unpositioned("Q"));
+    project.stations.push_back(setup("S1", "A", 1.5, "P1",
+                                     {Shot{"P1", 1, Face::Left, deg(0), deg(90), 111.803399, 1.5},
+                                      Shot{"Q", 2, Face::Left, deg(90), deg(90), 20.0, 1.5}}));
+    project.stations.push_back(setup("S2", "B", 1.5, "A",
+                                     {Shot{"A", 1, Face::Left, deg(0), deg(90), 100.0, 1.5},
+                                      Shot{"P1", 2, Face::Left, deg(90), deg(90), 50.0, 1.5}}));
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* p1 = findPoint(*outcome, "P1");
+    ASSERT_NE(p1, nullptr);
+    EXPECT_NEAR(p1->northing, 1100.0, 1e-9);
+    EXPECT_NEAR(p1->easting, 950.0, 1e-9);
+    // Q: azimuth 333 26 05.8 + 90 = 63 26 05.8 from A, 20 m:
+    //   N = 1000 + 20 cos(63.434949) = 1008.944272, E = 1000 + 20 sin = 1017.888544.
+    const ComputedPoint* q = findPoint(*outcome, "Q");
+    ASSERT_NE(q, nullptr);
+    EXPECT_NEAR(q->northing, 1008.944272, 1e-6);
+    EXPECT_NEAR(q->easting, 1017.888544, 1e-6);
+    ASSERT_TRUE(outcome->report.setups[0].orientationCorrection.has_value());
+    for (const ReportMessage& warning : outcome->report.warnings) {
+        EXPECT_EQ(warning.text.find("cannot be oriented"), std::string::npos) << warning.text;
+    }
+}
