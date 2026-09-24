@@ -344,6 +344,185 @@ TEST(InteropExport, ADrawingCanBeWrittenToDxfAndKeepsItsLayers)
     }
 }
 
+namespace {
+
+// One entity of a DXF file's ENTITIES section: its type, and the group 70
+// flags where it has them (bit 1 of an LWPOLYLINE's is "closed").
+struct DxfEntity {
+    std::string type;
+    int flags = 0;
+};
+
+// Read by hand rather than through GDAL: the question is what a CAD program
+// finds in the file, and GDAL's reader would answer with its own reading of it.
+std::vector<DxfEntity> dxfEntities(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    std::vector<std::string> lines;
+    for (std::string line; std::getline(in, line);) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+            line.pop_back();
+        }
+        const auto first = line.find_first_not_of(' ');
+        lines.push_back(first == std::string::npos ? std::string{} : line.substr(first));
+    }
+    std::vector<DxfEntity> entities;
+    bool inEntities = false;
+    for (std::size_t i = 0; i + 1 < lines.size(); i += 2) {
+        const std::string& code = lines[i];
+        const std::string& value = lines[i + 1];
+        if (code == "2" && value == "ENTITIES") {
+            inEntities = true;
+        } else if (inEntities && code == "0" && value == "ENDSEC") {
+            break;
+        } else if (inEntities && code == "0") {
+            entities.push_back({value, 0});
+        } else if (inEntities && code == "70" && !entities.empty()) {
+            entities.back().flags = std::stoi(value);
+        }
+    }
+    return entities;
+}
+
+} // namespace
+
+TEST(InteropExport, ClosedPolylinesAndCirclesGoToDxfAsClosedPolylinesNotSolidHatches)
+{
+    // GDAL's DXF writer turns a polygon into a HATCH with a SOLID fill by
+    // default, and the exporter hands it closed polylines and circles as
+    // polygons - so every parcel reached a CAD program as a filled shape.
+    const TempDir dir("dxf-closed");
+    const auto path = dir.file("parcels.dxf");
+
+    Entity parcel = closedSquare(20.0);
+    Entity tree;
+    tree.geometry = katana::geometry::Circle2{Point2(50, 50), 5.0};
+    Entity fence;
+    Polyline2 fenceLine;
+    fenceLine.vertices = {Point2(0, 30), Point2(10, 35), Point2(20, 30)};
+    fence.geometry = fenceLine;
+    Model model = modelWith({parcel, tree, fence});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_EQ(written->featuresWritten, 3u);
+
+    const auto entities = dxfEntities(path);
+    ASSERT_EQ(entities.size(), 3u);
+    int closed = 0;
+    int open = 0;
+    for (const DxfEntity& entity : entities) {
+        EXPECT_NE(entity.type, "HATCH") << "a closed shape was written as a filled solid";
+        EXPECT_EQ(entity.type, "LWPOLYLINE");
+        ((entity.flags & 1) != 0 ? closed : open) += 1;
+    }
+    EXPECT_EQ(closed, 2) << "the parcel and the tree are closed";
+    EXPECT_EQ(open, 1) << "the fence is not";
+
+    // And back: the parcel is a closed square again, its four corners and no
+    // repeat of the first. By hand: the ring written is (0,0) (20,0) (20,20)
+    // (0,20) (0,0), and the repeat is what the closed flag stands for.
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    int squares = 0;
+    for (const Entity& entity : read->entities) {
+        const auto* polyline = std::get_if<Polyline2>(&entity.geometry);
+        if (polyline != nullptr && polyline->vertices.size() == 4) {
+            ++squares;
+            EXPECT_TRUE(polyline->closed);
+            EXPECT_EQ(std::abs(polyline->area()), 400.0);
+        }
+    }
+    EXPECT_EQ(squares, 1);
+}
+
+TEST(InteropImport, ADxfCircleIsImportedAsAClosedPolylineOnTheCircle)
+{
+    // GDAL reads a CIRCLE as a line string that repeats its first point; taken
+    // as it came, that was an OPEN polyline with a seam where it began.
+    const TempDir dir("dxf-circle");
+    const auto path = dir.file("tree.dxf");
+    {
+        std::ofstream out(path);
+        out << "  0\nSECTION\n  2\nENTITIES\n"
+               "  0\nCIRCLE\n  8\nTREES\n 10\n5.0\n 20\n7.0\n 30\n0.0\n 40\n0.6\n"
+               "  0\nENDSEC\n  0\nEOF\n";
+    }
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 1u);
+    const auto* polyline = std::get_if<Polyline2>(&read->entities.front().geometry);
+    ASSERT_NE(polyline, nullptr);
+    EXPECT_TRUE(polyline->closed);
+    ASSERT_GE(polyline->vertices.size(), 3u);
+    EXPECT_NE(polyline->vertices.front(), polyline->vertices.back())
+        << "the closed flag stands for the repeat, which is not kept as well";
+    for (const Point2& vertex : polyline->vertices) {
+        EXPECT_NEAR(std::hypot(vertex.x - 5.0, vertex.y - 7.0), 0.6, 1e-9);
+    }
+}
+
+TEST(InteropImport, OnlyALineThatEndsWhereItBeganIsClosed)
+{
+    // The other side of the rule above: a line that ends elsewhere stays
+    // open, and a line there and back (three points, ends equal) is not a
+    // ring at all.
+    const TempDir dir("geojson-open");
+    const auto path = dir.file("lines.geojson");
+    {
+        std::ofstream out(path);
+        out << R"({"type":"FeatureCollection","features":[
+{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[0,0],[10,0],[10,5]]}},
+{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[0,0],[10,0],[0,0]]}},
+{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[0,0],[10,0],[10,5],[0,0]]}}
+]})";
+    }
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 3u);
+    const auto* open = std::get_if<Polyline2>(&read->entities[0].geometry);
+    const auto* thereAndBack = std::get_if<Polyline2>(&read->entities[1].geometry);
+    const auto* triangle = std::get_if<Polyline2>(&read->entities[2].geometry);
+    ASSERT_NE(open, nullptr);
+    ASSERT_NE(thereAndBack, nullptr);
+    ASSERT_NE(triangle, nullptr);
+    EXPECT_FALSE(open->closed);
+    EXPECT_FALSE(thereAndBack->closed);
+    EXPECT_EQ(thereAndBack->vertices.size(), 3u);
+    EXPECT_TRUE(triangle->closed);
+    ASSERT_EQ(triangle->vertices.size(), 3u);
+    // By hand: half of base 10 times height 5.
+    EXPECT_EQ(std::abs(triangle->area()), 25.0);
+}
+
+TEST(InteropExport, AGeoPackageOfThousandsOfEntitiesHoldsEveryOne)
+{
+    // Written in one transaction now rather than one per feature; the count
+    // read back is what shows the transaction was committed, not rolled back
+    // or left open.
+    const TempDir dir("gpkg-many");
+    const auto path = dir.file("points.gpkg");
+    std::vector<Entity> entities;
+    for (int i = 0; i < 5000; ++i) {
+        Entity entity;
+        entity.geometry = katana::entity::PointGeometry{Point2(i, 2.0 * i)};
+        entities.push_back(std::move(entity));
+    }
+    const Model model = modelWith(std::move(entities));
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    EXPECT_EQ(written->featuresWritten, 5000u);
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 5000u);
+    const auto* last = std::get_if<katana::entity::PointGeometry>(&read->entities.back().geometry);
+    ASSERT_NE(last, nullptr);
+    EXPECT_EQ(last->position, Point2(4999.0, 9998.0));
+}
+
 TEST(InteropExport, TextAndDimensionsAreSkippedAndCounted)
 {
     const TempDir dir("skipped");

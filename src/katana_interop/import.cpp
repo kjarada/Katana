@@ -323,7 +323,22 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                 Vertices vertices = distinctVertices(feature.geometry.parts.front(),
                                                      feature.geometry.hasZ, options.originShift);
                 heightsLost += vertices.heightsLost;
-                const std::vector<Point2>& points = vertices.points;
+                std::vector<Point2>& points = vertices.points;
+                // A line that ends where it began is a closed one. GDAL reads a
+                // DXF CIRCLE, and a closed LWPOLYLINE, as a line string that
+                // repeats its first point, and taken as it came a circle was
+                // an OPEN polyline with a seam: no area, no hatch, and
+                // Explode or Offset treating it as a path with two ends. As a
+                // polygon ring does, the repeat becomes the `closed` flag.
+                // Four points at least: three with the ends equal are a line
+                // there and back, which encloses nothing.
+                bool closed = false;
+                if (points.size() >= 4 && points.front() == points.back()) {
+                    points.pop_back();
+                    heightsLost += vertices.heights.back() != vertices.heights.front() ? 1u : 0u;
+                    vertices.heights.pop_back();
+                    closed = true;
+                }
                 if (points.size() < 2) {
                     ++result.featuresSkipped;
                     break;
@@ -339,7 +354,7 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                 } else {
                     Polyline2 polyline;
                     polyline.vertices = points;
-                    polyline.closed = false;
+                    polyline.closed = closed;
                     makeEntity(std::move(polyline), vertices.heights);
                 }
                 break;
