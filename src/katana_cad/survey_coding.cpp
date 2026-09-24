@@ -101,7 +101,7 @@ struct Appearance {
         return false;
     }
     // A colour name with no RGB draws as no colour at all, whatever the name:
-    // a 12da import's "WATR Main" (no colour, description "12d linestyle")
+    // an archive import's "WATR Main" (no colour, the import's description)
     // draws exactly as the style coding would make for "sui water potable".
     // Asking for the name here too made coding duplicate every such style
     // whose description was not that name.
@@ -241,7 +241,7 @@ const std::vector<std::string>& codePropertyCandidates()
 {
     static const std::vector<std::string> candidates = {
         "code",     // a survey file's own field code
-        "12d.name", // a 12da string's name, which is what a coded survey puts there
+        "12d.name", // an archive string's name, which is what a coded survey puts there
         "Code",     "CODE", "feature_code",
     };
     return candidates;
@@ -278,7 +278,7 @@ std::string findCodeProperty(const katana::entity::Model& model,
 
 bool isPlainLinestyle(std::string_view name)
 {
-    // Folded because 12d's own names are compared without regard to case,
+    // Folded because library names are compared without regard to case,
     // and "Continuous" in a hand-written mapfile means what "continuous" does.
     const std::string word = lowered(name);
     return word.empty() || word == "0" || word == "1" || word == katana::entity::kContinuousLinetype;
@@ -458,16 +458,16 @@ applySurveyCodes(const Document& document, const SurveyCodingOptions& options,
         style.name = choice.name;
         // The linestyle and the symbol are NAMES resolved when they are
         // drawn, against the loaded library. Recording a name the library
-        // does not define is deliberate: it is what 12d says this is, and it
+        // does not define is deliberate: it is what the rules say this is, and it
         // draws plainly until a library defines it.
         style.linetype = choice.appearance.linestyle.empty()
                              ? std::string(katana::entity::kContinuousLinetype)
                              : choice.appearance.linestyle;
         style.symbol = choice.appearance.symbol;
         style.symbolSize = choice.appearance.symbolSize;
-        // The 12d colour name is kept whatever Katana makes of it, so a
-        // colour this build has no RGB for is still known by name - the same
-        // thing the 12da import does.
+        // The colour name is kept whatever Katana makes of it, so a colour
+        // this build has no RGB for is still known by name - the same thing
+        // an archive import does.
         style.description = choice.appearance.colourName;
         style.color = choice.appearance.colour;
         if (auto status = katana::entity::validate(style); !status) {

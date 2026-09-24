@@ -468,7 +468,7 @@ class LineBuilder {
         report_.property = property_;
     }
 
-    // 12d's model is Katana's layer. With none - or one that is missing and
+    // A rule's model is Katana's layer. With none - or one that is missing and
     // may not be created - the line stays with its points, on `fallback`.
     // Deciding is not creating: a layer is created only if a line goes on it.
     [[nodiscard]] katana::core::Result<std::string>

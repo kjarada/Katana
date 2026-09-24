@@ -1,6 +1,6 @@
 #pragma once
 
-// Small pictures of 12d definitions for the pickers and browsers: the symbol
+// Small pictures of library definitions for the pickers and browsers: the symbol
 // library, a style's symbol and linestyle choosers, the survey-code manager.
 //
 // Every picture is painted through the one style painter (style_painter.hpp)
@@ -64,7 +64,7 @@ class DefinitionThumbnails {
 
     // A picture `size` device pixels across, on `ground`. The ink follows the
     // ground: on a light ground the picture is "on paper" - the entity pen is
-    // black and a white 12d pen prints black (cad::paperColour, decision D7) -
+    // black and a white library pen prints black (cad::paperColour, decision D7) -
     // and on a dark ground it is the screen, with a light entity pen. An
     // empty size gives a null image.
     [[nodiscard]] DefinitionThumbnail thumbnail(const katana::entity::StyleLibrary& library,

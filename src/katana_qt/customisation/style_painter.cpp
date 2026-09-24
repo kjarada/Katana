@@ -50,7 +50,7 @@ QPen stylePenFor(const QPen& entityPen, const std::string& pen,
                  const katana::cad::PlotSettings* paper)
 {
     if (pen.empty()) {
-        return entityPen; // 12d's "view_colour": whatever the entity is
+        return entityPen; // "view_colour" in a library: whatever the entity is
     }
     const auto colour = katana::archive12d::standardColour(pen);
     if (!colour) {
@@ -87,7 +87,7 @@ namespace {
 }
 
 // Where the baseline starts, relative to the anchor, in unrotated pixels.
-// 12d justifies as "vertical-horizontal": "middle-centre", "top-left". A
+// A library justifies as "vertical-horizontal": "middle-centre", "top-left". A
 // spelling this does not know draws from the point, which is what an
 // unjustified text already does.
 [[nodiscard]] QPointF justifiedOrigin(const QFontMetricsF& metrics, const QString& value,

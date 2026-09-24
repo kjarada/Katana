@@ -32,7 +32,16 @@ add_library(katana_archive12d STATIC
 # The source is GENERATED, never committed - the customisation is third-party
 # material under its own licence and is not in this repository, and a checkout
 # without it generates an empty table (see tools/embed_customisation.py).
-set(_customisation "${PROJECT_SOURCE_DIR}/docs/12d Refrence Files")
+#
+# Its files are read from KATANA_CUSTOMISATION_DIR, git-ignored in the source
+# tree by default, in name order: the style libraries linestyles.4d and
+# symbols.4d, and the survey code files survey_codes.mapfile and
+# survey_codes_names.mapfile (the second read after the first, whose rules win
+# a field they both give). A cache variable, so a build can be pointed at a
+# customisation kept elsewhere without moving it.
+set(KATANA_CUSTOMISATION_DIR "${PROJECT_SOURCE_DIR}/resources/customisation" CACHE PATH
+    "Directory of the customisation compiled into the build (style libraries and survey code files); empty or absent builds none")
+set(_customisation "${KATANA_CUSTOMISATION_DIR}")
 set(_embedded "${CMAKE_CURRENT_BINARY_DIR}/builtin_customisation.cpp")
 file(GLOB _customisation_files "${_customisation}/*")
 add_custom_command(
@@ -41,7 +50,7 @@ add_custom_command(
             "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/embed_customisation.py"
             "${_embedded}" "${_customisation}"
     DEPENDS "${PROJECT_SOURCE_DIR}/tools/embed_customisation.py" ${_customisation_files}
-    COMMENT "Embedding the 12d customisation"
+    COMMENT "Embedding the built-in customisation"
     VERBATIM)
 target_sources(katana_archive12d PRIVATE "${_embedded}")
 target_include_directories(katana_archive12d PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

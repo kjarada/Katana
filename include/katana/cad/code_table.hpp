@@ -10,7 +10,7 @@
 // the two used to disagree about what applying codes had done.
 //
 // Library definitions and colours come in through callbacks, as they do for
-// applySurveyCodes: 12d's colour names are known to archive12d, which cad may
+// applySurveyCodes: the standard colour names are known to archive12d, which cad may
 // not see, and a caller holding a Document passes definitionFor.
 
 #include <cstddef>
@@ -30,7 +30,7 @@ namespace katana::cad {
 
 // The library definition of a name, or nullptr (Document::definitionFor).
 using DefinitionLookup = std::function<const katana::entity::LineStyle*(std::string_view)>;
-// A 12d colour name's RGB, or nullopt for a name it does not know.
+// A standard colour name's RGB, or nullopt for a name it does not know.
 using ColourLookup = std::function<std::optional<katana::entity::Color>(std::string_view)>;
 // Whether Katana draws a symbol of this name without a library
 // (entity::isBuiltInSymbolName).
@@ -65,7 +65,7 @@ struct CodeFieldSource {
 // What a linestyle or symbol name resolves to.
 struct CodeDefinition {
     std::string name{};       // as the rules give it; empty when they give none
-    bool plain = false;       // a linestyle that is 12d's plain line: "0", "1", "continuous"
+    bool plain = false;       // the plain continuous line: "0", "1", "continuous"
     bool defined = false;     // the library has a definition of this name
     bool vertexMode = false;  // ... and it is `mode vertex`
     bool builtIn = false;     // a symbol no library defines but Katana draws itself

@@ -832,8 +832,9 @@ std::string formatCoverage(const CustomisationCoverage& coverage)
 {
     std::ostringstream out;
     if (coverage.styles == 0) {
-        out << "This drawing has no styles yet; IMPORT a 12d archive to see the customisation "
-               "take effect.\n";
+        out << "This drawing has no styles yet; import a drawing or survey that carries "
+               "styles, or make one in Format > Styles and Linetypes or with STYLE NEW, to "
+               "see the customisation take effect.\n";
         return out.str();
     }
     out << coverage.resolved << " of this drawing's " << coverage.styles

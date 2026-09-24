@@ -63,7 +63,7 @@ struct StyleManagerRows : ::testing::Test {
         const Stroke move5{StrokeOp::Move, katana::geometry::Point2(5.0, 0.0)};
         for (LineStyle style : {
                  definition("LS Paper Kerb", StyleUnits::Paper, false, 4.0, {move0, draw3},
-                            "Roads/Kerbs", "user_linestyl_test.4d"),
+                            "Roads/Kerbs", "linestyles_test.4d"),
                  definition("LS World Fence", StyleUnits::World, false, 0.0,
                             {move0, draw3, move5}),
                  definition("LS Gate", StyleUnits::TwoPoint, false, 0.0, {move0, draw3}),
@@ -347,7 +347,7 @@ TEST_F(StyleManagerRows, EachLinetypeRowSaysWhatDrawsItAndOneRepeatOfIt)
     EXPECT_EQ(kerb.kind, LinetypeRowKind::Paper);
     EXPECT_DOUBLE_EQ(kerb.period, 4.0) << "the file's length, in plot millimetres";
     EXPECT_EQ(kerb.group, "Roads/Kerbs");
-    EXPECT_EQ(kerb.sourceFile, "user_linestyl_test.4d");
+    EXPECT_EQ(kerb.sourceFile, "linestyles_test.4d");
     EXPECT_EQ(kerb.users.styles, Strings{"Kerb"});
     EXPECT_EQ(kerb.users.entities, 2U);
 

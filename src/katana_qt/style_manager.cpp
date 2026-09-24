@@ -126,13 +126,14 @@ QString kindExplained(LinetypeRowKind kind)
     case LinetypeRowKind::Dash:
         return QStringLiteral("a dash pattern in model units, saved with the drawing");
     case LinetypeRowKind::Paper:
-        return QStringLiteral("12d paperstyle: millimetres on the plot, the same at every scale");
+        return QStringLiteral("Paper linestyle: millimetres on the plot, the same at every "
+                              "scale");
     case LinetypeRowKind::World:
-        return QStringLiteral("12d worldstyle: model units, the same on the ground at every "
+        return QStringLiteral("World linestyle: model units, the same on the ground at every "
                               "scale");
     case LinetypeRowKind::TwoPoint:
-        return QStringLiteral("12d twoptstyle: stretched between the two points it is drawn "
-                              "across");
+        return QStringLiteral("Two-point linestyle: stretched between the two points it is "
+                              "drawn across");
     }
     return {};
 }
@@ -359,7 +360,7 @@ class PatternStrip final : public QWidget {
     std::vector<double> lengths_{};
 };
 
-// The standard colours a style colour menu offers, 12d's names for them.
+// The standard colours a style colour menu offers, by the standard colour names.
 struct NamedColour {
     const char* name;
     Color colour;
@@ -1175,7 +1176,7 @@ struct StyleManagerDialog::Impl {
                                    "linestyle is what is drawn; rename or merge the drawing's "
                                    "to end the clash.<br>");
         }
-        text += QStringLiteral("<br><i>Library linestyles belong to the session's 12d "
+        text += QStringLiteral("<br><i>Library linestyles belong to the session's "
                                "customisation and are read-only here.</i>");
         libraryDetails->setText(text);
     }

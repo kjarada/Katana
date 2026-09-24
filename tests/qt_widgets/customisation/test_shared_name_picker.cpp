@@ -176,7 +176,7 @@ TEST(NamePicker, ANameDefinedNowhereSurvivesSetAndCurrentNameByteForByte)
 {
     PickerFixture fixture;
     NamePicker picker(fixture.context, NameRole::Symbol, false);
-    // A 12d name as a library in another office might spell it: two spaces,
+    // A library name as a library in another office might spell it: two spaces,
     // a trailing space, UTF-8 "e acute", and a byte (0xFF) that is not UTF-8
     // at all - which a round trip through QString would turn into U+FFFD.
     const std::string name = std::string("Pit  Grated \xC3\xA9 (SW)\xFF ");
@@ -293,7 +293,7 @@ TEST(NamePicker, SettingAndRefreshingNeverFireOnNameChosenAndTypingDoes)
         last = name;
     };
     picker.setCurrentName("DASHED");
-    picker.setCurrentName("Unknown 12d");
+    picker.setCurrentName("Unknown Name");
     picker.refresh();
     fixture.document.setStyleLibrary({});
     picker.refresh();
@@ -424,7 +424,7 @@ TEST(NamePicker, EnterOnATypedNameWithNothingHighlightedInThePopupChoosesIt)
     picker.onNameChosen = [&chosen](const std::string& name) { chosen.push_back(name); };
     ASSERT_TRUE(window.focusPicker());
 
-    // "Kerb", a new 12d name, is part of "TEST Dashed Kerb" and of nothing
+    // "Kerb", a new library name, is part of "TEST Dashed Kerb" and of nothing
     // else listed (ByLayer, DASHED), so the popup opens on that one name.
     picker.lineEdit()->clear();
     typeText(picker.lineEdit(), QStringLiteral("Kerb"));
@@ -443,7 +443,7 @@ TEST(NamePicker, EnterOnATypedNameWithNothingHighlightedInThePopupChoosesIt)
 
 // The same review: the picker marked every linetype name it did not list
 // as "(not defined)", including the names cad::missingNames deliberately
-// never reports - 12d's and DXF's plain line ("1", "0", "continuous" in any
+// never reports - the plain continuous line ("1", "0", "continuous" in any
 // case; D4) and ByLayer in another spelling (entity::isByLayer folds case).
 // A 12da import names "1" for every plain string, so the style manager
 // would have marked every one of them in amber while its Missing chip,
@@ -451,11 +451,11 @@ TEST(NamePicker, EnterOnATypedNameWithNothingHighlightedInThePopupChoosesIt)
 TEST(NamePicker, PlainLineNamesAreNeitherMarkedNorMissingAndAMissingNameIsBoth)
 {
     PickerFixture fixture;
-    // Styles naming each plain spelling, one naming a genuinely missing 12d
+    // Styles naming each plain spelling, one naming a genuinely missing library
     // linestyle, and one naming the fixture's listed library linestyle.
     const std::vector<std::pair<std::string, std::string>> styles = {
-        {"plain 12d", "1"},        {"plain zero", "0"},    {"dxf", "Continuous"},
-        {"shouted", "CONTINUOUS"}, {"inherit", "BYLAYER"}, {"old", "Old 12d Kerb"},
+        {"plain one", "1"},        {"plain zero", "0"},    {"dxf", "Continuous"},
+        {"shouted", "CONTINUOUS"}, {"inherit", "BYLAYER"}, {"old", "Old Survey Kerb"},
         {"kerb", "TEST Dashed Kerb"}};
     for (const auto& [name, linetype] : styles) {
         katana::entity::Style style;
@@ -464,18 +464,18 @@ TEST(NamePicker, PlainLineNamesAreNeitherMarkedNorMissingAndAMissingNameIsBoth)
         ASSERT_TRUE(fixture.document.execute(katana::commands::createStyle(style)).ok());
     }
     // The cad side, worked out from missingNames' rule (style_catalogue.hpp):
-    // of these only "Old 12d Kerb" is in no table and no library and is not a
+    // of these only "Old Survey Kerb" is in no table and no library and is not a
     // plain-line name.
     const std::vector<katana::cad::MissingName> missing =
         katana::cad::missingNames(fixture.document);
     ASSERT_EQ(missing.size(), 1U);
-    EXPECT_EQ(missing.front().name, "Old 12d Kerb");
+    EXPECT_EQ(missing.front().name, "Old Survey Kerb");
 
     NamePicker picker(fixture.context, NameRole::Linetype, true);
     for (const auto& [styleName, linetype] : styles) {
         SCOPED_TRACE(linetype);
         picker.setCurrentName(linetype);
-        const bool reported = linetype == "Old 12d Kerb";
+        const bool reported = linetype == "Old Survey Kerb";
         EXPECT_EQ(picker.currentIsDefined(), !reported);
         // Kept byte for byte either way: "BYLAYER" is not rewritten to the
         // listed "ByLayer", nor "Continuous" to anything.
@@ -491,10 +491,10 @@ TEST(NamePicker, PlainLineNamesAreNeitherMarkedNorMissingAndAMissingNameIsBoth)
                   reported);
     }
 
-    // And each tooltip says what is drawn: a plain line, or - for ByLayer in
+    // And each tooltip says what is drawn: the plain continuous line, or - for ByLayer in
     // any spelling on a Style - the layer's linetype, not a solid line.
     picker.setCurrentName("1");
-    EXPECT_TRUE(picker.toolTip().contains(QStringLiteral("plain line")));
+    EXPECT_TRUE(picker.toolTip().contains(QStringLiteral("the plain continuous line")));
     picker.setCurrentName("BYLAYER");
     EXPECT_TRUE(picker.toolTip().contains(QStringLiteral("layer's linetype")));
     EXPECT_FALSE(picker.toolTip().contains(QStringLiteral("solid line")));

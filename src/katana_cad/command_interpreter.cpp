@@ -301,7 +301,7 @@ Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] |
 Style     STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new
           STYLE DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]
           fields: linetype weight colour hatch symbol symbolsize description; APPLY - = ByLayer
-          linetype takes a model linetype, a loaded 12d linestyle or ByLayer (the layer's)
+          linetype takes a model linetype, a loaded library linestyle or ByLayer (the layer's)
 Purge     PURGE [STYLES|LINETYPES|HATCHES|ALL]   deletes what nothing uses, as one undo step
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
           SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
@@ -400,7 +400,7 @@ std::string restOfLine(const std::vector<std::string>& args, std::size_t from)
 
 // The one answer to "may a style or a layer be given this linetype name":
 // a model linetype, or a loaded library definition drawn along a line - the
-// same two places the viewport resolves it in (D2). A 12d linestyle used to
+// same two places the viewport resolves it in (D2). A library linestyle used to
 // be refused here although the model and the viewport both take one (audit
 // CAD-06). A vertex symbol is refused BY NAME, because it is never drawn as
 // a line pattern (D8) and "does not exist" would be untrue.
@@ -670,7 +670,7 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
     static constexpr const char* kUsage =
         "STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new |"
         " DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]\n"
-        "  fields: linetype (a model linetype, a 12d linestyle or ByLayer), weight (mm),\n"
+        "  fields: linetype (a model linetype, a library linestyle or ByLayer), weight (mm),\n"
         "  colour (#RRGGBB or bylayer), hatch, symbol,\n"
         "  symbolsize (model units, 0 for the default mark), description\n"
         "  APPLY sets the style of the selection; APPLY - clears it (ByLayer)";
@@ -678,7 +678,7 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
         return usage(kUsage);
     }
     const std::string& name = args[1];
-    // A 12d style name has spaces in it ("TOPO Natural Surface Point"), and
+    // A library style name has spaces in it ("TOPO Natural Surface Point"), and
     // STYLE NEW TOPO Natural Surface Point used to make a style called
     // "TOPO" and drop the rest without a word. Everything but SET, whose
     // description takes the rest of the line, now says so.
@@ -793,24 +793,24 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
         } else if (field == "SYMBOL") {
             // A library symbol's name has spaces in it - "CULT Bollard" -
             // so the rest of the line is the name, as DESCRIPTION does.
-            std::string name12d;
+            std::string symbolName;
             for (std::size_t i = 3; i < args.size(); ++i) {
-                name12d += (i > 3 ? " " : "") + args[i];
+                symbolName += (i > 3 ? " " : "") + args[i];
             }
-            if (name12d == "-") {
+            if (symbolName == "-") {
                 changed.symbol.clear();
             } else {
                 // The model itself accepts any name, because a project can be
                 // opened before its library is loaded (see entity::validate).
                 // A person TYPING one should still be told about a typo, which
                 // is the same courtesy HATCH above pays.
-                if (!katana::entity::isBuiltInSymbolName(name12d) &&
-                    document_.definitionFor(name12d) == nullptr) {
+                if (!katana::entity::isBuiltInSymbolName(symbolName) &&
+                    document_.definitionFor(symbolName) == nullptr) {
                     return makeError(ErrorCode::NotFound,
                                      "no symbol of that name is built in or in the loaded library",
-                                     name12d);
+                                     symbolName);
                 }
-                changed.symbol = name12d;
+                changed.symbol = symbolName;
             }
         } else if (field == "SYMBOLSIZE") {
             const auto size = parseNumber(value);
@@ -2213,7 +2213,7 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
         if (args.size() < 3 || args.size() > 4) {
             return usage(kPropUsage);
         }
-        // The type is guessed from the value unless it is stated. 12d
+        // The type is guessed from the value unless it is stated. Survey code
         // attributes are typed, and "2" as text is not 2 as an integer.
         auto value = args.size() == 4 ? typedPropertyValue(args[3], args[2])
                                       : katana::core::Result<katana::entity::PropertyValue>(
