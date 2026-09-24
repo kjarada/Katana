@@ -1244,9 +1244,9 @@ void ViewportWidget::drawEntities(QPainter& painter) const
 
     // How far each style's symbol reaches from the point it is put at, at
     // this frame's scale. A symbol is culled by what it DRAWS, not by its
-    // insertion point: a reference library's SSM1 draws 434 m from its point
-    // and the plot stamps up to 388 m, and culling on the point dropped every one whose
-    // point was just off screen while its strokes were in view. The index is
+    // insertion point: one library symbol draws 434 m from its point and the
+    // plot stamps up to 388 m, and culling on the point dropped every one
+    // whose point was just off screen while its strokes were in view. The index is
     // asked for the view grown by the furthest reach, and each entity then by
     // its own style's.
     std::map<std::string, double, std::less<>> symbolReach;
@@ -1413,8 +1413,8 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             drawGeometry(painter, entity.geometry);
         }
         // A line whose style names a symbol carries it at EVERY vertex (D8),
-        // as the archive import intends: a fence line's
-        // posts, a string of drill holes. The line above is drawn as well.
+        // as the archive import intends: a fence line's posts, a string of
+        // drill holes. The line above is drawn as well.
         if (!display.symbol.empty()) {
             for (const Point2& vertex : cad::symbolVertices(entity.geometry)) {
                 drawSymbol(painter, target, display.symbol, vertex, display.symbolSize);
@@ -1472,7 +1472,7 @@ void ViewportWidget::drawMeshFootprints(QPainter& painter) const
 
 double ViewportWidget::paperScale() const
 {
-    // Model units to one plot millimetre, which is what a `paperstyle` is
+    // Model units to one plot millimetre, which is what a paper linestyle is
     // measured in. Dividing by the view scale is what makes such a mark keep
     // its size on the PAGE as you zoom, which is the whole point of one.
     //

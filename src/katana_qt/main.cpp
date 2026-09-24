@@ -67,16 +67,36 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // rows (their columns joined by " | ", the rows by " ; "). A NAME that is no
 // widget there may be one of the window's actions - a menu item or a tool -
 // reported as its text and whether it is checked, so a test can see which
-// tool the menus and toolbars show running. False, said, for neither.
+// tool the menus and toolbars show running. One of the window's menus
+// (formatMenu), found whatever the target, is its title and its items, each
+// with the status tip it shows - the window makes an item's tooltip from the
+// two - so a test can read everything a menu says without opening it. False,
+// said, for none of these.
 bool reportWidget(const QWidget& target, const QWidget& window, const QString& name)
 {
-    const auto* widget = target.findChild<QWidget*>(name);
+    const QWidget* widget = target.findChild<QWidget*>(name);
+    if (widget == nullptr) {
+        widget = window.findChild<QMenu*>(name);
+    }
     QString text;
     const auto* action = widget == nullptr ? window.findChild<QAction*>(name) : nullptr;
     if (action != nullptr) {
         text = QString(action->text()).remove('&') +
                (action->isCheckable() ? (action->isChecked() ? ", checked" : ", unchecked")
                                       : QString());
+    } else if (const auto* menu = qobject_cast<const QMenu*>(widget)) {
+        QStringList items;
+        for (const QAction* item : menu->actions()) {
+            if (item->isSeparator()) {
+                continue;
+            }
+            QString line = QString(item->text()).remove('&');
+            if (!item->statusTip().isEmpty()) {
+                line += " [" + item->statusTip() + "]";
+            }
+            items << line;
+        }
+        text = QString(menu->title()).remove('&') + ": " + items.join(" ; ");
     } else if (const auto* label = qobject_cast<const QLabel*>(widget)) {
         text = QTextDocumentFragment::fromHtml(label->text()).toPlainText();
     } else if (const auto* line = qobject_cast<const QLineEdit*>(widget)) {
@@ -98,7 +118,8 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
         }
         text = rows.join(" ; ");
     } else {
-        std::fprintf(stderr, "--report: there is no label, field, text, list or action %s\n",
+        std::fprintf(stderr,
+                     "--report: there is no label, field, text, list, action or menu %s\n",
                      qPrintable(name));
         return false;
     }

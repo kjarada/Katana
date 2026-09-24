@@ -24,7 +24,7 @@ using katana::qt::StylePreview;
 namespace {
 
 // The fixture's 'TEST Dashed Kerb' (tests/archive12d/data/customisation/
-// test_linestyles.4d), written out here: a paperstyle with a 4 mm period, a
+// test_linestyles.4d), written out here: a paper linestyle with a 4 mm period, a
 // 1.5 mm dash, a 0.5 mm gap, a 1 mm dash and a 1 mm gap.
 katana::entity::LineStyle dashedKerb()
 {
@@ -115,7 +115,7 @@ TEST(StylePreview, APaperLinestyleWithGapsIsPaintedWithItsGapsNotSolid)
     //   drawing area 400 x (160 - 24 bar) = 400 x 136; usable 376 x 112 after
     //   12-pixel margins; the sample is w wide and w/4 high, so 376 pixels
     //   wide (4 x 112 = 448 would not fit across). Printed size: 96/25.4 =
-    //   3.7795 pixels per plot mm, whatever the scale, for a paperstyle.
+    //   3.7795 pixels per plot mm, whatever the scale, for a paper linestyle.
     //   The sample's start, model (0, 0), is at the usable area's left edge,
     //   x = 12, and its bottom edge, y = 136/2 + 376/8 = 68 + 47 = 115.
     //   Along the straight run (0.45 x 376 = 169 pixels) each 4 mm period is

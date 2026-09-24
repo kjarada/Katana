@@ -280,7 +280,7 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] bool drawLineStyle(QPainter& painter, const StylePaintTarget& target,
                                      const katana::cad::FlatDefinition& definition,
                                      const katana::entity::Geometry& geometry) const;
-    // Model units to one plot millimetre, which is what a `paperstyle` uses.
+    // Model units to one plot millimetre, which is what a paper linestyle uses.
     [[nodiscard]] double paperScale() const;
     // The plain point mark's half-width in model units at the current scale.
     [[nodiscard]] double plainMarkHalfWidth() const;

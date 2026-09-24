@@ -326,13 +326,13 @@ TEST(SymbolLibrary, TheDetailsPaneStatesTheSurveyMarksPrintSizeWorkedByHandAt1To
     ASSERT_NE(scale, nullptr);
     scale->setCurrentIndex(scale->findData(500));
 
-    // A worldstyle cross of 1 m strokes (-0.5..0.5 each way) with a 0.3 m
+    // A world-units cross of 1 m strokes (-0.5..0.5 each way) with a 0.3 m
     // circle inside: 1 x 1 m on the ground. At 1:500 a plot millimetre is
     // 0.5 m, so it prints 1 / 0.5 = 2 mm each way.
     EXPECT_EQ(labelText(dialog, "detailPrint"),
               QStringLiteral("2 × 2 mm at 1:500, 1 × 1 m on the ground"));
     EXPECT_EQ(labelText(dialog, "detailExtent"), QStringLiteral("1 × 1 m"));
-    EXPECT_EQ(labelText(dialog, "detailUnits"), QStringLiteral("World units: metres on the ground"));
+    EXPECT_EQ(labelText(dialog, "detailUnits"), QStringLiteral("World: metres on the ground"));
     EXPECT_EQ(labelText(dialog, "detailMode"),
               QStringLiteral("vertex: drawn at each vertex of a string"));
     EXPECT_EQ(labelText(dialog, "detailOrigin"), QStringLiteral("(0, 0)"));

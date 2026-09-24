@@ -2145,10 +2145,6 @@ QString sampleOf(const std::vector<std::string>& names, std::size_t most = 8)
 
 } // namespace
 
-// Loading a customisation: the linestyle library, the symbol library and
-// the survey code file. Several files at once, because they are useless apart - and
-// WHICH is which is decided by looking inside each one, since `.4d` is the
-// extension of both a style library and a mapfile (docs/survey_coding.md).
 // The customisation that is PART OF THIS BUILD. Nothing is found, loaded or
 // configured: its linestyles, symbols and survey codes are compiled in, so a
 // survey drawing is drawn with them from the moment it is opened.
@@ -2186,13 +2182,18 @@ void MainWindow::loadDefaultCustomisation()
     }
 }
 
+// Loading a customisation: the linestyle library, the symbol library and
+// the survey code file. Several files at once, because they are useless
+// apart - and WHICH is which is decided by looking inside each one, since
+// `.4d` is the extension of both a style library and a survey code file
+// (docs/survey_coding.md).
 void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
 {
     const bool replace = mode == katana::archive12d::LoadMode::Replace;
     const QStringList chosen = QFileDialog::getOpenFileNames(
         this, replace ? "Replace Loaded Customisation" : "Load Customisation", QString(),
         "Customisation files (*.4d *.mapfile);;Style and symbol libraries (*.4d);;"
-        "Survey code files (*.mapfile *.map *.xml);;All files (*)");
+        "Survey code files (*.mapfile);;All files (*)");
     if (chosen.isEmpty()) {
         logMessage("Loading a customisation was cancelled.");
         return;

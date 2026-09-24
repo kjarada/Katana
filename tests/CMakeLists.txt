@@ -631,7 +631,8 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The code manager explaining a fixture code. By hand from
     # test_survey.mapfile: WM01 is met by the prefix key WM* (rule #0 of the
-    # fixture, map_data), which puts it on model TEST SERVICES.
+    # fixture, map_data), which puts it on the layer TEST SERVICES (the
+    # rule's model field).
     add_test(NAME qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -640,6 +641,22 @@ if(TARGET katana)
             "-DDRIVE=@formatSurveyCodes|testCode=WM01|?explainHeading|?explainFields"
             "-DEXPECT=--dialog formatSurveyCodes opened surveyCodeManagerDialog \"Survey Code Manager\"[\r\n]+explainHeading: WM01: matched - met by the prefix key WM\\*[^\r\n]*[\r\n]+explainFields: model \\| TEST SERVICES \\| #[0-9]+ WM\\* \\(map_data\\)"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_code_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # What Format says in the real window, in general words: every item of
+    # the menu with its status tip (?formatMenu) - the window's own Load and
+    # Replace Loaded Customisation among the managers' - the log of a
+    # customisation loaded and of each manager opened, and none of it names
+    # another program's formats (FORBID, in either case). The widget tests
+    # walk the managers' own texts (qt_widgets.GeneralTexts.*).
+    add_test(NAME qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=?formatMenu|@formatStyles|@formatSymbols|@formatSurveyCodes"
+            "-DEXPECT=test_survey\\.mapfile: survey code file, [0-9,]+ added[^\r\n]*[\r\n].*formatMenu: Format: Layers\\.\\.\\. \\[[^\r\n]*Styles and Linetypes\\.\\.\\. \\[[^\r\n]*library linestyles[^\r\n]*Load Customisation\\.\\.\\. \\[Load linestyle and symbol libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)[^\r\n]*Replace Loaded Customisation\\.\\.\\. \\[[^\r\n]*[\r\n].*opened surveyCodeManagerDialog"
+            "-DFORBID=12[dD]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_texts_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The symbol library putting a fixture symbol on imported points: the 12
     # points of survey_points_pnezd.csv (counted by hand, see the survey
@@ -735,6 +752,7 @@ if(TARGET katana)
     set_tests_properties(qt_format_menu_opens_the_style_manager_headless
                          qt_format_menu_opens_the_symbol_library_headless
                          qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
+                         qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
                          qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
                          qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
                          qt_format_layers_opens_beside_the_drawing_and_follows_it_headless
