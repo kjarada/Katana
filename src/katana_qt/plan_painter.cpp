@@ -20,6 +20,7 @@
 #include <QPainterPath>
 #include <QPdfWriter>
 #include <QPolygonF>
+#include <QRect>
 #include <QTransform>
 
 #include "customisation/style_painter.hpp"
@@ -29,6 +30,7 @@
 #include "katana/cad/hatching.hpp"
 #include "katana/cad/spatial_query.hpp"
 #include "katana/cad/style_drawing.hpp"
+#include "katana/core/task_pool.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/alignment.hpp"
@@ -521,15 +523,18 @@ void PlanPainter::drawPointClouds()
             continue;
         }
 
-        // Per-point colour depends only on the layer and its mode, so it is
-        // computed once and cached; only the projection is redone per frame.
+        // The display copy depends only on the layer's points and colour mode,
+        // so it is built once; only the projection is redone per frame. (A
+        // layer whose points were replaced under the same id is caught by its
+        // count; invalidateReferences() is the rule for anything else.)
         auto cached = std::find_if(cache_.clouds_.begin(), cache_.clouds_.end(),
-                                   [&cloud](const PlanPaintCache::CloudColours& entry) {
-                                       return entry.id == cloud.id && entry.mode == cloud.colorMode;
+                                   [&cloud](const PlanPaintCache::CloudDisplay& entry) {
+                                       return entry.id == cloud.id && entry.mode == cloud.colorMode &&
+                                              entry.splat.sourceCount == cloud.points.size();
                                    });
         if (cached == cache_.clouds_.end()) {
             // Drop any stale entry for this layer whose mode has changed.
-            std::erase_if(cache_.clouds_, [&cloud](const PlanPaintCache::CloudColours& entry) {
+            std::erase_if(cache_.clouds_, [&cloud](const PlanPaintCache::CloudDisplay& entry) {
                 return entry.id == cloud.id;
             });
 
@@ -547,67 +552,52 @@ void PlanPainter::drawPointClouds()
                 maximum = cloud.bounds.maxZ;
             }
 
-            PlanPaintCache::CloudColours entry;
-            entry.id = cloud.id;
-            entry.mode = cloud.colorMode;
-            entry.colours.reserve(cloud.points.size());
+            std::vector<std::uint32_t> colours;
+            colours.reserve(cloud.points.size());
             for (const auto& point : cloud.points) {
                 const katana::interop::Rgb rgb =
                     katana::interop::colorForPoint(point, cloud.colorMode, minimum, maximum);
-                entry.colours.push_back(qRgb(rgb.r, rgb.g, rgb.b));
+                colours.push_back(qRgb(rgb.r, rgb.g, rgb.b));
             }
+            PlanPaintCache::CloudDisplay entry;
+            entry.id = cloud.id;
+            entry.mode = cloud.colorMode;
+            entry.splat = katana::geometry::buildSplatCloud(
+                &cloud.points.front().x, &cloud.points.front().y,
+                sizeof(katana::pointcloud::PointCloudPoint), cloud.points.size(), colours.data(),
+                katana::core::TaskPool::shared());
             cache_.clouds_.push_back(std::move(entry));
             cached = std::prev(cache_.clouds_.end());
         }
 
         // Splat into an image rather than calling QPainter per point: a
         // QPainter::drawPoint costs microseconds, which at two million points is
-        // seconds per frame. Writing pixels directly is a handful of
-        // instructions each and keeps panning interactive.
-        QImage layer(width, height, QImage::Format_ARGB32_Premultiplied);
-        layer.fill(::Qt::transparent);
-        auto* bits = reinterpret_cast<QRgb*>(layer.bits());
-        const int stride = static_cast<int>(layer.bytesPerLine() / sizeof(QRgb));
-
-        const double s = view_.scale;
-        const double halfWidth = 0.5 * width;
-        const double halfHeight = 0.5 * height;
-        const int radius = std::max(0, static_cast<int>(cloud.pointSize) - 1);
-
-        for (std::size_t i = 0; i < cloud.points.size(); ++i) {
-            const auto& point = cloud.points[i];
-            const double sx = halfWidth + (point.x - view_.center.x) * s;
-            const double sy = halfHeight - (point.y - view_.center.y) * s;
-            // Reject before the cast: converting a coordinate far outside int
-            // range is undefined behaviour, and panning a UTM-scale cloud when
-            // zoomed in produces exactly such values.
-            if (!(sx > -1.0e6 && sx < 1.0e6 && sy > -1.0e6 && sy < 1.0e6)) {
-                continue;
-            }
-            const int px = static_cast<int>(sx);
-            const int py = static_cast<int>(sy);
-            if (px < 0 || py < 0 || px >= width || py >= height) {
-                continue;
-            }
-            const QRgb color = cached->colours[i] | 0xff000000u;
-            if (radius == 0) {
-                bits[py * stride + px] = color;
-                continue;
-            }
-            for (int oy = -radius; oy <= radius; ++oy) {
-                const int y = py + oy;
-                if (y < 0 || y >= height) {
-                    continue;
-                }
-                for (int ox = -radius; ox <= radius; ++ox) {
-                    const int x = px + ox;
-                    if (x >= 0 && x < width) {
-                        bits[y * stride + x] = color;
-                    }
-                }
-            }
+        // seconds per frame. The image is the cache's, reused frame to frame;
+        // the splat clears and fills only the rows the cloud can reach, in
+        // bands across the task pool, and only those rows are composited.
+        QImage& layer = cache_.cloudLayer_;
+        if (layer.width() != width || layer.height() != height) {
+            layer = QImage(width, height, QImage::Format_ARGB32_Premultiplied);
         }
-        painter_.drawImage(0, 0, layer);
+        katana::geometry::SplatView splatView;
+        splatView.centre = view_.center;
+        splatView.scale = view_.scale;
+        splatView.width = width;
+        splatView.height = height;
+        splatView.radius = std::max(0, static_cast<int>(cloud.pointSize) - 1);
+        splatView.pointBudget = options_.cloudPointBudget;
+        // Opaque colours: qRgb's alpha is already 0xff, so a written pixel is
+        // valid premultiplied ARGB and an unwritten one is transparent.
+        const katana::geometry::SplatStats splat = katana::geometry::splatCloud(
+            cached->splat, splatView, reinterpret_cast<std::uint32_t*>(layer.bits()),
+            static_cast<std::size_t>(layer.bytesPerLine()) / sizeof(std::uint32_t),
+            katana::core::TaskPool::shared());
+        stats_.cloudPointsInView += splat.pointsInView;
+        stats_.cloudPointsDrawn += splat.pointsDrawn;
+        if (splat.rowEnd > splat.rowBegin) {
+            const QRect rows(0, splat.rowBegin, width, splat.rowEnd - splat.rowBegin);
+            painter_.drawImage(rows.topLeft(), layer, rows);
+        }
     }
 }
 
