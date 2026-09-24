@@ -17,11 +17,11 @@ the same operations without duplicating logic.
 
 `Document` owns the `Model`, the `CommandStack`, the current `ProjectStore`, the
 selection, the current layer, the current style and the project metadata - and,
-as session data outside the model, the loaded 12d style library and survey map
+as session data outside the model, the loaded style library and survey map
 (decision D1; `docs/survey_coding.md`).
 
 * The CURRENT STYLE (decision D9, `setCurrentStyle`) is what new work is drawn
-  in - AutoCAD's CELTYPE, or a current point style - so a symbol or a 12d
+  in - AutoCAD's CELTYPE, or a current point style - so a symbol or a library
   linestyle can be drawn WITH, not only applied afterwards. Empty means
   ByLayer and is the default. `currentAttributes()` hands the current layer
   and style to every drawing tool and verb. It is refused for a style the
@@ -164,7 +164,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 
 | Verb | What it does |
 |---|---|
-| `STYLE SET <s> linetype <name>` | takes a model linetype, a loaded 12d linestyle or `ByLayer` (the layer's; decision D2) - it used to refuse library names the viewport draws |
+| `STYLE SET <s> linetype <name>` | takes a model linetype, a loaded library linestyle or `ByLayer` (the layer's; decision D2) - it used to refuse library names the viewport draws |
 | `STYLE SYMBOLS [filter]` | the symbols a style may name: the built-in shapes and the library's symbols (D3), filtered with case folded |
 | `STYLE USAGE [name]` | how many entities wear each style, or who uses one, flagging a name worn but not in the table (`entity::tableUsage`) |
 | `STYLE MERGE <from> <into>` | moves everything wearing `from` onto `into` and deletes `from`, one undo step |
@@ -175,7 +175,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
-PDAL or 12d's files: the application's command line
+PDAL or the archive and customisation readers: the application's command line
 (`MainWindow::runCommandLine`) adds `IMPORT`, `EXPORT`, `INFO <file>`,
 `REFS`, `CUSTOMISE [REPLACE] <file>...`, the view verbs `ZOOM`, `GRID` and
 `SNAP`, and `QUIT`; `katana_cli` adds `IMPORT`, `EXPORT`, `REFS`, `COPC` and
@@ -198,7 +198,7 @@ workspace of views, with dockable Layers, Properties, Command Line and
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
-`helpMenu`). File keeps to files: the 12d customisation is loaded from Format
+`helpMenu`). File keeps to files: the customisation is loaded from Format
 and from Survey > Survey Coding, beside the managers of what it brings. The
 status bar shows a view's running readout, the current layer, the active snap
 and the cursor coordinates.
@@ -745,7 +745,7 @@ and lists those that reach more than one thing, since Qt disables an
 ambiguous shortcut for both. `katana --check-shortcuts` fails a run that has
 any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
-Library, Load 12&d Customisation, In&verse, Toggle Pe&rspective and others).
+Library, Loa&d Customisation, In&verse, Toggle Pe&rspective and others).
 The tool actions built from the catalogue have no underlined letters; their
 aliases are in their tooltips.
 
@@ -775,11 +775,11 @@ event loop run between them as it runs between two things a person does:
 | `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`), else NAME + `Dialog` (the Survey dialogs); says on stderr what opened, and whether it is modal |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
-| `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, or a list, grid or tree row selected by its text |
+| `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
 | `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
-| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running) |
+| `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 
 `--check-shortcuts` (`-DCHECK_SHORTCUTS=ON`) is described above, and
@@ -790,7 +790,15 @@ a headless run echoes its log to stderr - `-DCOMPARE=` checks the files it
 wrote against a reference, and `-DREFUSED=<regex>` requires the run to be
 REFUSED - exit 1, never a crash - which is how a test shows something is NOT
 offered: pressing a disabled button, or filling a choice the dialog does not
-have, fails the run instead of doing nothing. `docs/survey.md` has the survey
+have, fails the run instead of doing nothing. `-DFORBID=<regex>` fails a run
+whose output matches it at all, which is how a test holds what the
+application SAYS to a vocabulary (the Format menu and the customisation log
+name no other program: `qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless`).
+It is matched after the run's own paths - the copy, the output, the project,
+the customisation folder, the work folder, the application's folder and the
+checkout - are replaced by `<path>`, so where a checkout or worktree sits
+cannot fail it; the rest of a line that holds a path is still read, and a
+failure prints the text that was checked. `docs/survey.md` has the survey
 import wizard's use of it. A headless run still never opens a modal box
 ("Panels refresh on the event loop" below): Format > Layers and Edit >
 Attributes, still modal, say so in the log and name the switch that grabs
@@ -1008,7 +1016,7 @@ seen only in a screenshot, with no automated test.
 ## Point symbols (PLAN.MD 20.2, slice 2)
 
 A point is drawn with the symbol its *style* names - `Style::symbol`. Since
-20.3 slice 5 that is any name, resolved at draw time against the loaded 12d
+20.3 slice 5 that is any name, resolved at draw time against the loaded style
 library first and against the sixteen built-in shapes of `entity::symbolNames()`
 (circle, square, triangle, diamond, cross, plus, tick, star, dot, ring, tree,
 pole, manhole, arrow, flag, target) after, `builtInSymbolFor` guessing a shape
@@ -1020,10 +1028,10 @@ model units, so the viewport, a plotter and a preview paint the same thing.
 A circle is 24 chords, fixed: a symbol is small on any output and the eye
 cannot tell 24 chords from a circle at that size.
 
-Why the symbol is on the style and not on the entity: 12d Model, which is
-where survey points with symbols come from, defines a symbol as a linestyle
-drawn at a vertex, so "the style of a point" and "the style of a line" are
-one table there; keeping them one table here means one manager, one
+Why the symbol is on the style and not on the entity: the survey
+customisations that points with symbols come from define a symbol as a
+linestyle drawn at a vertex, so "the style of a point" and "the style of a
+line" are one table there; keeping them one table here means one manager, one
 assignment command (`STYLE APPLY`) and one answer to "what does this point
 look like". **Rejected:** a `symbol` field on `Entity` - a second place an
 appearance can come from, and 27 000 surveyed points would each carry a
@@ -1031,7 +1039,7 @@ copy of what their style already says. **Rejected:** glyphs from a font or
 SVG - a symbol has to plot as vectors at any scale and be picked by its
 geometry, which strokes give for free.
 
-Size is a width, not a radius, because that is what 12d's `size` is and
+Size is a width, not a radius, because that is what a library symbol's `size` is and
 what a user types (`STYLE SET s symbolsize 1.5` is a 1.5 m manhole); the
 viewport halves it for the strokes. A size of 0 draws a built-in shape at
 the plain mark's pixel size, so a style that never got a size is still a
@@ -1052,15 +1060,15 @@ out would otherwise lay out every stroke of every one.
 **Symbols on lines are drawn (decision D8).** This section used to end "Not
 drawn, by decision rather than omission: a symbol on the vertices of a line",
 while the 12da import's comment said the opposite and meant it. The lead
-decided for 12d's behaviour: a line whose style names a symbol draws it at
+decided for what a survey drawing shows: a line whose style names a symbol draws it at
 EVERY vertex (`cad::symbolVertices`: every vertex of a polyline, both ends of
 a segment or an arc, a point's own position; a circle has none and a text or
-dimension is not a line), as 12d draws a fence's posts or a string of drill
-holes. The symbol's name is never also used as a pattern along the line
+dimension is not a line), as a survey drawing shows a fence's posts or a
+string of drill holes. The symbol's name is never also used as a pattern along the line
 (`resolveLinePattern`), so a style whose linetype names its own symbol - what
 the 12da import writes - is a plain line with the symbols on it. Still not
 drawn: a point symbol's rotation, since `Style` has no field for one and a new
-field is a storage migration, deferred (decision D6); and symbols and 12d
+field is a storage migration, deferred (decision D6); and symbols and library
 linestyles in the 3D view, which draws neither.
 
 ## A mesh is not a surface
@@ -1173,7 +1181,7 @@ Format
   Symbol Library...                  formatSymbols       -> symbolLibraryDialog
   Survey Code Manager...             formatSurveyCodes   -> surveyCodeManagerDialog
   ---
-  Load 12d Customisation...          loadCustomisation
+  Load Customisation...              loadCustomisation
   Replace Loaded Customisation...    replaceCustomisation
   ---
   Purge Unused...                    formatPurge
@@ -1226,11 +1234,11 @@ customisation"): a load merges, Replace is asked for.
 
 ### Styles and Linetypes
 
-One dialog for the `Style` and `Linetype` tables and the session's 12d
+One dialog for the `Style` and `Linetype` tables and the session's library
 linestyles (PLAN.MD 20.2 slice 3, `src/katana_qt/style_manager.cpp`), because
-they are one subject: a style names a linetype. A 12d import brings 211
+they are one subject: a style names a linetype. An archive import brings 211
 styles from one file - but NOT their linetypes: each style's linetype is a
-12d LIBRARY name, which lives in the session's style library, not in the
+LIBRARY name, which lives in the session's style library, not in the
 model's Linetype table. So almost every real style names something the
 drawing's own linetype table does not contain, and the dialog lists both.
 
@@ -1253,9 +1261,9 @@ asked for in a prompt row inside the dialog and a purge is checked in a panel,
 never in a box, so a headless session drives every action by object name.
 
 **QT-02's rule** (audit QT-02, fixed 2026-09-24). Save used to rewrite the
-linetype and symbol of every 12d-imported style: the form's boxes were
+linetype and symbol of every archive-imported style: the form's boxes were
 non-editable combos filled from the model's linetypes and the sixteen
-built-in shapes, `setCurrentText` with a 12d name was a silent no-op on them,
+built-in shapes, `setCurrentText` with a library name was a silent no-op on them,
 and Save wrote back whatever they still showed. Now:
 
 - a form writes back only the fields a person EDITED (`cad::StyleFields`,
@@ -1309,8 +1317,8 @@ shows a disabled ByLayer button with a stray drop-down arrow.
 
 ### Symbol Library
 
-AutoCAD's Blocks palette, MicroStation's cell selector and 12d's symbol
-chooser in one window (`src/katana_qt/customisation/symbol_library.*`):
+AutoCAD's Blocks palette, MicroStation's cell selector and a civil package's
+symbol chooser in one window (`src/katana_qt/customisation/symbol_library.*`):
 
 - **left**, a tree of groups: All, Built-in, the library's `/` groups,
   "(ungrouped)", and "Not defined" when a name resolves to nothing;
@@ -1369,8 +1377,8 @@ only, though the preview switches; and the dialog reloads whole (two
 
 ### Survey Code Manager
 
-The survey code library a surveyor codes against - 12d's mapfile editor,
-Civil 3D's description keys, TBC's feature definitions - in five tabs, each
+The survey code library a surveyor codes against - Civil 3D's description
+keys, TBC's feature definitions - in five tabs, each
 over one cad foundation, so the dialog decides nothing the CLI would say
 differently: Code Table (`cad::codeTable` and `cad::explainCode`, with the
 rule form), Codes in Drawing (`cad::codeCensus`), Issues
@@ -1385,7 +1393,7 @@ what each tab shows, is `docs/survey_coding.md` ("The Survey Code Manager").
 What was merged on 2026-09-23 is the tested logic below Qt that the managers
 above need, each piece reachable from the command line too; the dialogs of
 2026-09-24 render it and decide nothing of their own. Professional managers
-(AutoCAD's, Civil 3D's, TBC's, MicroStation's, 12d's) share a vocabulary -
+(AutoCAD's, Civil 3D's, TBC's, MicroStation's) share a vocabulary -
 usage counts, purge, merge, duplicate, a current style, pickers that browse a
 library with pictures - and each item here is one of those, in the layer that
 can test it.
@@ -1396,7 +1404,7 @@ can test it.
   that reach it. "Reaches" is `resolveDisplay`'s chain, read through the same
   two functions it reads (`resolvedLinetype`, `resolvedHatchPattern`), so an
   entity is counted against exactly the linetype it is drawn with. Names are
-  kept whether or not a table defines them: a 12d linestyle a style names is
+  kept whether or not a table defines them: a library linestyle a style names is
   not in the model, and a name nothing defines is exactly what a manager has
   to show. One pass for all rows, because a pass per row would be 800 styles
   over 250 000 entities. Three readers must not disagree and all read it: the
@@ -1463,9 +1471,9 @@ can test it.
   the symbol library, `customisationCoverage` (which keeps its two reasons
   apart; `docs/survey_coding.md`, "Saying whether it is working") and so
   CUSTOMISE and the window's customisation log. Each once had a rule of its
-  own, and they disagreed. The names a MAPFILE's rules give are judged apart
+  own, and they disagreed. The names a survey code file's rules give are judged apart
   - by the lint (`UnresolvedLinestyle`, `LinestyleIsVertex`) and by the
-  load's "names the mapfile asks for" line - since a rule is not a style and
+  load's "names the survey codes ask for" line - since a rule is not a style and
   has no style's own symbol. `NamePicker` marks the same
   names, with one exception: an own-symbol linetype is marked "(not
   defined)" there although `missingNames` leaves it out.
@@ -1487,7 +1495,7 @@ plain / defined / wrong-kind rule that does not read `linetypeStatus`.
 
 A name reaches the drawing from `Style::linetype`, `Layer::linetype` or
 `Style::symbol`, and two tables can hold it: the model's Linetype table (DXF
-dashes, saved in the project) and the session's 12d style library (strokes,
+dashes, saved in the project) and the session's style library (strokes,
 texts and pens). Until 2026-09-23 the viewport looked in both with no rule for
 which won, the preview looked in one, and the 3D view in the other.
 `include/katana/cad/style_resolver.hpp` is now the one answer, for the
@@ -1501,7 +1509,7 @@ viewport, the plot and every preview and thumbnail:
   library that happens to reuse one of its names. `ByLayer` on a style is
   resolved to the layer's linetype before this is asked.
 - **A symbol name.** The library definition, of either kind (most symbols the
-  reference mapfile uses are not `mode vertex`), else a built-in shape - its
+  reference survey code file uses are not `mode vertex`), else a built-in shape - its
   own name's, or the one its words suggest, and the caller is told which.
 - **Symbols on lines (decision D8)**: at every vertex, and the symbol's name
   never laid as a pattern - `resolveLinePattern`, "Point symbols" above.
@@ -1541,7 +1549,7 @@ either. Now:
   such misses before that fix and none after; it was not committed, and
   `StyleDrawing` has a test per case.
 
-12d writes some arcs with a negative radius; the sign is not a side, and a
+The reference libraries write some arcs with a negative radius; the sign is not a side, and a
 radius is taken as `|r|` (`docs/survey_coding.md`, "The grammar").
 
 **One painter** (`src/katana_qt/customisation/style_painter.*`). The
@@ -1552,9 +1560,9 @@ so drew something else. Everything the caller decides comes in a
 width and cap - a preview that guessed its own pen showed dashes one pen-width
 shorter than the plot, whose square caps grow every dash), whether this is
 paper, and `entityPenOnly` for the selection highlight, which must read as one
-colour whatever the definition's pens say. A 12d pen changes only the
+colour whatever the definition's pens say. A library pen changes only the
 colour; a name `archive12d::standardColour` does not know leaves the entity
-pen as it is rather than guessing. A one-point stroke is a 12d `dot`, painted
+pen as it is rather than guessing. A one-point stroke is a library `dot`, painted
 round whatever the cap (a flat cap draws a zero-length line as nothing). Style
 texts are clamped at 2000 px, the plain-text ceiling in
 `ViewportWidget::drawText` (a font asked for at hundreds of thousands of
@@ -1565,10 +1573,10 @@ not drawn under 3 px. The plot reaches the painter through
 **White prints black (decision D7).** `PlotSettings::whiteToBlack`, on by
 default, and `cad::paperColour`: a pen whose every channel is at least 230 of
 255 prints black, alpha kept, as AutoCAD's colour 7 does. White is what a new
-layer draws in on the dark screen and what 130 of the reference mapfile's 457
+layer draws in on the dark screen and what 130 of the reference survey code file's 457
 `map_data` rules ask for, and on white paper every such feature would vanish.
 "Light grey" (211) and "light yellow" (255, 255, 224) keep their colour. It
-applies to the entity's colour and to a 12d pen alike, and never on screen.
+applies to the entity's colour and to a library pen alike, and never on screen.
 
 **Thumbnails** (`customisation/definition_thumbnails.*`). Small pictures of a
 name as a symbol or as a linestyle along `styleSamplePath` - a straight run, a
@@ -1593,7 +1601,7 @@ The managers are built on it: `StylePreview` (the style manager's and the
 symbol library's preview) paints through this painter from this resolver,
 and every `NamePicker` entry and the symbol library's grid are these
 thumbnails; the style manager's Diagnostics tab lists the collision flags
-(`cad::styleDiagnostics`). Not yet: the 3D view draws neither symbols nor 12d
+(`cad::styleDiagnostics`). Not yet: the 3D view draws neither symbols nor library
 linestyles; and `NamePicker` paints every picture as it is built, the
 drawing's own linetypes' uncached on every rebuild, so the code manager, whose
 two pickers list about 800 definitions, takes about 2.4 s to build in a Debug
@@ -1607,7 +1615,7 @@ listed here so a later change can find the code that carries each one.
 
 | | Decision | Where it is implemented |
 |---|---|---|
-| D1 | The 12d library and survey map are SESSION data on `cad::Document`: not undoable, not in the project. Map edits are made in an editor buffer and committed with `setSurveyMap` (Apply/Revert), and persist by EXPORT. A load MERGES by default; Replace is explicit. | `Document::setStyleLibrary`/`setSurveyMap` and the generation counters; `archive12d::mergeCustomisation` and `LoadMode`, which both front ends call (Format > Load 12d Customisation... and Replace Loaded Customisation..., `CUSTOMISE [REPLACE]` in either command line; QT-21 fixed); the Survey Code Manager's buffer, Apply and Revert, and its Export Mapfile (`writeMapFile`); the symbol library's Export Selected to .4d (`writeStyleLibrary`). No CLI export verb. `docs/survey_coding.md` |
+| D1 | The style library and survey map are SESSION data on `cad::Document`: not undoable, not in the project. Map edits are made in an editor buffer and committed with `setSurveyMap` (Apply/Revert), and persist by EXPORT. A load MERGES by default; Replace is explicit. | `Document::setStyleLibrary`/`setSurveyMap` and the generation counters; `archive12d::mergeCustomisation` and `LoadMode`, which both front ends call (Format > Load Customisation... and Replace Loaded Customisation..., `CUSTOMISE [REPLACE]` in either command line; QT-21 fixed); the Survey Code Manager's buffer, Apply and Revert, and its Export Code File... (`writeMapFile`); the symbol library's Export Selected to .4d (`writeStyleLibrary`). No CLI export verb. `docs/survey_coding.md` |
 | D2 | A linetype name: a non-vertex library definition wins (no dash on its strokes), else a model Linetype, else solid. `ByLayer` as a Style linetype inherits the layer's. | `cad::resolveLinetype`; `entity::isByLayer`, `resolvedLinetype`; `linetypeChoices`, `linetypeCollisions`; `STYLE SET ... linetype`; 12da export's `linestyleOf` |
 | D3 | A library definition is a symbol if `mode vertex`, or a VertexSymbol rule names it, or a `Style::symbol` names it, or its file's name contains "symbol". Pickers always keep an unknown current name, marked (the QT-02 fix). Names are case-sensitive; search folds case. | `cad::classifyDefinition`, `symbolChoices`, `keepCurrent`, `filterChoices`; `LineStyle::source`; `codeTableRowMatches`; the lint's `SymbolNotSymbolCapable`; in the dialogs, `NamePicker` and the code manager's case-sensitive completers; the window's "(N symbols)" and CUSTOMISE's count |
 | D4 | Survey coding chooses a code's style by appearance and reuses one that draws alike; new names follow from the rules. | `cad::applySurveyCodes` (`Appearance`, `drawsAs`, `existingStyleFor`, `nameFor`) |
