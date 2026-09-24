@@ -326,6 +326,12 @@ against survey coordinates) is compared pixel for pixel.
   view - run instead of skipping. ctest never sets it, so run it by hand after
   changing `gpu_scene_view.*`; the last case can only tell the two pixel sizes
   apart on a display scaled above 100%.
+* A `QRhiWidget` that was never shown can be grabbed ONCE. Qt gives each grab
+  of such a widget a new QRhi without calling `initialize()` for it, so every
+  grab after the first reads back nothing - all zeros, about 3 s a grab on this
+  laptop - where a shown widget's grabs take 2-5 ms and read back the frame. A
+  desktop test that draws twice shows its widget first
+  (`OnTheDesktopADrawListArrivingAfterTheFirstFrameIsFramed`).
 
 ## Measurements
 
