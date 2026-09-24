@@ -95,7 +95,8 @@ class MapReader {
             const auto items = section.childrenNamed("item");
             if (!which) {
                 count(section.name, false);
-                warn("<" + section.name + "> is not a section this mapfile reader knows; its " +
+                warn("<" + section.name +
+                     "> is not a section this survey code file reader knows; its " +
                      std::to_string(items.size()) + " rules were not read");
                 continue;
             }
@@ -241,7 +242,7 @@ class MapReader {
             count(field.name, known);
             if (!known) {
                 warn("rule \"" + rule.key + "\" of <" + sectionName + ">: <" + field.name +
-                     "> is not a field this mapfile reader knows");
+                     "> is not a field this survey code file reader knows");
             }
         }
         rule.comment = item.childText("comment");

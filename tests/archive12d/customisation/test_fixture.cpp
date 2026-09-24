@@ -138,7 +138,7 @@ TEST(CustomisationFixture, TheMapfileHasTheRulesAndGapsItWasWrittenToHave)
     EXPECT_EQ(fixture.map.stylesReferenced(),
               (std::vector<std::string>{"0", "TEST Dashed Kerb", "TEST Missing Symbol",
                                         "TEST Survey Mark", "TEST Tree", "TEST Water Main"}));
-    // "0" is 12d's plain line, which no library defines; the missing symbol
+    // "0" is the plain continuous line, which no library defines; the missing symbol
     // is the rule written to name one nothing defines.
     EXPECT_EQ(fixture.unresolvedStyles(),
               (std::vector<std::string>{"0", "TEST Missing Symbol"}));

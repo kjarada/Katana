@@ -6,9 +6,10 @@
 // run by CMake), so nothing has to be found, loaded or configured at run
 // time: a Katana built with a customisation simply has it.
 //
-// A build without one - the customisation is third-party material under its
-// own licence and is not in this repository - generates an empty list, and
-// Katana then draws plain lines exactly as 12d does without one.
+// The files are those of KATANA_CUSTOMISATION_DIR (resources/customisation/
+// by default). A build without one - the customisation is third-party
+// material under its own licence and is not in this repository - generates an
+// empty list, and Katana then draws every line as the plain continuous line.
 
 #include <string_view>
 #include <vector>
