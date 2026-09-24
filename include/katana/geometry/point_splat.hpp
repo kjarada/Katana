@@ -130,7 +130,7 @@ struct PixelProjection {
 // truncated towards zero when both lie strictly inside (-1e6, 1e6), and both
 // kOffImage otherwise, NaN included. (Converting a coordinate outside int
 // range is undefined behaviour, and panning a map-grid cloud when zoomed in
-// produces exactly such values.) The AVX2 kernel from kProjectMinimum points,
+// produces exactly such values.) The AVX2 kernel from 4 points (measured),
 // bit-identical to the loop.
 void projectToPixels(const PixelProjection& projection, std::span<const float> xs,
                      std::span<const float> ys, std::span<std::int32_t> px,
