@@ -638,6 +638,25 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
             // drawn again below like any new one.
             continue;
         }
+        if (leaveOut.contains(placed.pointId)) {
+            // The new settings hold this point as control FROM THE DRAWING:
+            // the run took it where the drawing has it, so there is nothing
+            // to move it to - and it must not be deleted as "no longer
+            // computed", which would take away the mark the adjustment was
+            // just held to (and the next run would find no such point). It
+            // stays the job's, recorded where the job put it, so a hand edit
+            // remains visible as one to a later run that computes it again.
+            if (current.state == PlacedState::EditedByHand) {
+                changes.editedByHand.push_back(placed.pointId);
+                warn(plan.report, "Point " + placed.pointId +
+                                      " was moved or re-levelled by hand after the job placed it; "
+                                      "the new run holds it as control from the drawing, where it "
+                                      "now stands, so it is left there.");
+            }
+            kept.push_back(placed);
+            accountedFor.insert(placed.pointId);
+            continue;
+        }
         if (current.state == PlacedState::EditedByHand) {
             changes.editedByHand.push_back(placed.pointId);
             warn(plan.report, "Point " + placed.pointId +

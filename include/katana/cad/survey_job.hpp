@@ -168,7 +168,9 @@ struct SurveyJobChanges {
 // person has moved, re-levelled or deleted since the job placed it is found
 // by comparing the two, named in the report and in changes(), and kept or
 // overwritten as SurveyJobReadjustment::handEdits says. A new point whose id
-// a point the job did not create already has is not drawn, and said so.
+// a point the job did not create already has is not drawn, and said so. A
+// point of the job's that the new settings hold as control FROM THE DRAWING
+// is left where it stands, under either policy: the run was held to it there.
 //
 // NotFound for a job the document does not have; the reader's or the
 // reduction's own error otherwise, with nothing changed.

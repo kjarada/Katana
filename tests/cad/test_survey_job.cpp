@@ -135,6 +135,16 @@ const Entity* pointEntity(const Document& document, std::string_view id)
     return found;
 }
 
+const SurveyJobPoint* placedPoint(const SurveyJob& job, std::string_view id)
+{
+    for (const SurveyJobPoint& placed : job.placedPoints) {
+        if (placed.pointId == id) {
+            return &placed;
+        }
+    }
+    return nullptr;
+}
+
 katana::geometry::Point2 positionOf(const Entity& entity)
 {
     return std::get<katana::entity::PointGeometry>(entity.geometry).position;
@@ -566,6 +576,125 @@ TEST(SurveyJobReadjustCommand, APointNoLongerComputedIsDeletedAndANewOneIsDrawnO
     ASSERT_TRUE(document.undo().ok());
     EXPECT_TRUE(document.model().entities.contains(old103));
     EXPECT_EQ(pointEntity(document, "104"), nullptr);
+}
+
+// A control mark the job drew itself - held from the FILE at the import - and
+// then held FROM THE DRAWING by a re-adjustment. The new run took the point
+// where the drawing has it, so there is nothing to move it to; deleting it
+// would take away the very mark the adjustment was just held to, and the
+// next "Edit adjustment" with the same settings would find no CP1 to hold.
+TEST(SurveyJobReadjustCommand, AJobPointTheNewSettingsHoldFromTheDrawingIsLeftWhereItIs)
+{
+    for (const HandEditPolicy policy : {HandEditPolicy::Keep, HandEditPolicy::Overwrite}) {
+        SCOPED_TRACE(toString(policy));
+        Document document;
+        auto fake = std::make_shared<FakeReduction>();
+        fake->points = {{"CP1", {6'249'990.0, 299'990.0, 5.0}},
+                        {"201", {6'250'001.0, 300'001.0, {}}}};
+        SurveyJobImport request = importRequest();
+        request.job.settings.control.push_back(survey::ControlSelection{
+            survey::ControlPoint::fixedHorizontal("CP1"), survey::ControlOrigin::File});
+        auto import = std::make_unique<ImportSurveyJobCommand>(document, request, reductionOf(fake));
+        auto* imported = import.get();
+        ASSERT_TRUE(document.execute(std::move(import)).ok());
+        const std::string id = imported->jobId();
+        ASSERT_EQ(document.surveyJobs().front().placedPoints.size(), 2U); // CP1 is the job's
+        const Entity cp1Before = *pointEntity(document, "CP1");
+
+        SurveyJobReadjustment readjust;
+        readjust.jobId = id;
+        readjust.handEdits = policy;
+        readjust.settings = document.surveyJobs().front().settings;
+        readjust.settings.control.front().origin = survey::ControlOrigin::Drawing;
+        fake->points["201"] = {6'250'001.004, 300'001.0, {}};
+        for (int run = 1; run <= 2; ++run) { // the second run needs CP1 still on the drawing
+            SCOPED_TRACE(run);
+            auto context = reductionContextFor(document);
+            ASSERT_TRUE(context.ok()) << context.error().describe();
+            ASSERT_EQ(context->drawingPoints.size(), 2U);
+            readjust.context = *context;
+            int reads = 0;
+            auto command = std::make_unique<ReadjustSurveyJobCommand>(
+                document, readjust, readerFor(&reads, document.surveyJobs().front().sourceBytes),
+                reductionOf(fake));
+            auto* raw = command.get();
+            const auto status = document.execute(std::move(command));
+            ASSERT_TRUE(status.ok()) << status.error().describe();
+            EXPECT_TRUE(raw->changes().removed.empty());
+            EXPECT_TRUE(raw->changes().editedByHand.empty());
+            EXPECT_EQ(raw->changes().moved,
+                      run == 1 ? std::vector<std::string>{"201"} : std::vector<std::string>{});
+
+            const Entity* cp1 = pointEntity(document, "CP1");
+            ASSERT_NE(cp1, nullptr) << "the mark the adjustment was held to";
+            EXPECT_EQ(*cp1, cp1Before);
+            const SurveyJob& job = document.surveyJobs().front();
+            ASSERT_EQ(job.placedPoints.size(), 2U);
+            const SurveyJobPoint* placed = placedPoint(job, "CP1"); // still the job's, for Remove
+            ASSERT_NE(placed, nullptr);
+            EXPECT_EQ(placed->entity, cp1Before.id);
+        }
+    }
+}
+
+// The same mark, moved by hand before it is held from the drawing: the new
+// run held it where the person put it, so under either policy that is where
+// it stays - "overwrite" has no other coordinates to give it - and the report
+// says why it did not move.
+TEST(SurveyJobReadjustCommand, AJobPointMovedByHandAndThenHeldFromTheDrawingStaysWhereItWasPut)
+{
+    for (const HandEditPolicy policy : {HandEditPolicy::Keep, HandEditPolicy::Overwrite}) {
+        SCOPED_TRACE(toString(policy));
+        Document document;
+        auto fake = std::make_shared<FakeReduction>();
+        fake->points = {{"CP1", {6'249'990.0, 299'990.0, 5.0}},
+                        {"201", {6'250'001.0, 300'001.0, {}}}};
+        SurveyJobImport request = importRequest();
+        request.job.settings.control.push_back(survey::ControlSelection{
+            survey::ControlPoint::fixedHorizontal("CP1"), survey::ControlOrigin::File});
+        auto import = std::make_unique<ImportSurveyJobCommand>(document, request, reductionOf(fake));
+        auto* imported = import.get();
+        ASSERT_TRUE(document.execute(std::move(import)).ok());
+        const EntityId cp1 = pointEntity(document, "CP1")->id;
+        // The person re-marks CP1 0.25 m north: (299 990, 6 249 990.25).
+        ASSERT_TRUE(document
+                        .execute(katana::commands::moveEntities(
+                            {cp1}, katana::geometry::Vec2(0.0, 0.25)))
+                        .ok());
+
+        SurveyJobReadjustment readjust;
+        readjust.jobId = imported->jobId();
+        readjust.handEdits = policy;
+        readjust.settings = document.surveyJobs().front().settings;
+        readjust.settings.control.front().origin = survey::ControlOrigin::Drawing;
+        auto context = reductionContextFor(document);
+        ASSERT_TRUE(context.ok()) << context.error().describe();
+        readjust.context = *context;
+        int reads = 0;
+        auto command = std::make_unique<ReadjustSurveyJobCommand>(
+            document, readjust, readerFor(&reads, document.surveyJobs().front().sourceBytes),
+            reductionOf(fake));
+        auto* raw = command.get();
+        const auto status = document.execute(std::move(command));
+        ASSERT_TRUE(status.ok()) << status.error().describe();
+
+        const Entity* moved = document.model().entities.find(cp1);
+        ASSERT_NE(moved, nullptr);
+        EXPECT_EQ(positionOf(*moved), katana::geometry::Point2(299'990.0, 6'249'990.25));
+        EXPECT_TRUE(raw->changes().removed.empty());
+        EXPECT_EQ(raw->changes().editedByHand, std::vector<std::string>{"CP1"});
+        bool reported = false;
+        for (const auto& warning : raw->report()->warnings) {
+            reported = reported || (warning.text.find("Point CP1") != std::string::npos &&
+                                    warning.text.find("from the drawing") != std::string::npos);
+        }
+        EXPECT_TRUE(reported);
+        // Still recorded where the JOB put it, so the edit stays visible as
+        // one: a later run that computes CP1 again sees a hand-moved mark.
+        const SurveyJobPoint* placed = placedPoint(document.surveyJobs().front(), "CP1");
+        ASSERT_NE(placed, nullptr);
+        EXPECT_EQ(placed->northing, 6'249'990.0);
+    }
 }
 
 TEST(SurveyJobReadjustCommand, AReaderOrReductionThatFailsChangesNothing)
