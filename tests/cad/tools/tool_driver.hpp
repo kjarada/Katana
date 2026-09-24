@@ -44,6 +44,16 @@ class ToolDriver {
     ToolStep type(std::string_view text) { return apply(routeTypedInput(*tool_, text)); }
     ToolStep enter() { return apply(tool_->enter()); }
     ToolStep undo() { return apply(tool_->undo()); }
+    // Esc, as the tool host has it: what the tool's cancel() keeps is
+    // executed, and the tool ends whatever it answers.
+    ToolStep cancel()
+    {
+        ToolStep step = tool_->cancel();
+        step.restart = false;
+        ToolStep applied = apply(std::move(step));
+        finished_ = true;
+        return applied;
+    }
 
     [[nodiscard]] Document& document() { return document_; }
     [[nodiscard]] InteractiveTool& tool() { return *tool_; }
@@ -86,6 +96,10 @@ class ToolDriver {
                 const auto status = document_.execute(std::move(step.command));
                 EXPECT_TRUE(status.ok()) << status.error().describe();
                 ++executed_;
+            }
+            if (step.selection) {
+                // As the tool host leaves a selecting tool's answer.
+                document_.selection().set(*step.selection);
             }
             if (step.restart) {
                 restartTool();
