@@ -202,9 +202,9 @@ BENCHMARK_CAPTURE(BM_IsValidUtf8Names, avx2, 1)->Unit(benchmark::kMicrosecond);
 // Text in a language that is not English: runs of ASCII one to three bytes
 // long (a space, a digit, "ab") between multibyte characters, all through the
 // file. A description field in the owner's archives can be all of this. The
-// ASCII fast path must not tax it - an earlier version of isValidUtf8 entered
-// the kernel at the start of every such run and was measured 2-4x slower than
-// the plain loop on it.
+// AVX2 level must not tax it - an earlier version of isValidUtf8 entered an
+// ASCII kernel at the start of every such run and was measured 2-4x slower
+// than the plain loop on it.
 std::string repeatedTo(std::string_view unit, std::size_t bytes)
 {
     std::string text;
