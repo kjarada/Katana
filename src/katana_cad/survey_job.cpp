@@ -28,6 +28,7 @@
 #include "katana/commands/change_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/storage/project_store.hpp"
 
 namespace katana::cad {
 
@@ -42,6 +43,7 @@ using katana::core::Result;
 using katana::core::Status;
 using katana::entity::Entity;
 using katana::entity::EntityId;
+using katana::storage::ProjectStore;
 namespace survey = katana::survey;
 
 // ---- Document ----------------------------------------------------------------------
@@ -471,6 +473,14 @@ struct ImportSurveyJobCommand::State {
             return makeError(ErrorCode::InvalidArgument,
                              "no reduction was given for the survey job");
         }
+        // A job the project could never save is refused before the
+        // reduction and before anything is drawn: accepted, it would make
+        // every later save of the whole drawing fail. The reader takes files
+        // the database cannot hold (ProjectStore::kMaxSurveyJobBytes).
+        // execute() checks again once the report and point lists are added.
+        if (auto fits = ProjectStore::checkSurveyJobSize(request.job); !fits) {
+            return fits.error();
+        }
         auto outcome = reduce(request.raw, request.job.settings, request.context);
         if (!outcome) {
             return outcome.error();
@@ -559,7 +569,6 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
     // undo history, and a copy of the raw project and of every drawing point
     // there would be dead weight.
     SurveyJob job = std::move(s.request.job);
-    job.id = std::move(id);
     job.layer = s.request.importOptions.layer;
     job.createdEntities = std::move(created);
     job.placedPoints = std::move(placed);
@@ -571,6 +580,17 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
         job.importedUtc = stamp;
     }
     renderInto(job, plan.outcome.report, std::move(stamp));
+    // The whole job now, report and point lists included: validate() saw
+    // only the file. Checked before the id is given, so the sentence names
+    // the file the person chose, not an id they never saw.
+    if (auto fits = ProjectStore::checkSurveyJobSize(job); !fits) {
+        if (plan.draw != nullptr) {
+            (void)plan.draw->undo(context); // all or nothing
+        }
+        s.request.job = std::move(job); // the bytes back where they came from
+        return fits;
+    }
+    job.id = std::move(id);
 
     std::vector<SurveyJob>& jobs = SurveyJobAccess::jobs(*s.document);
     s.index = jobs.size();
@@ -1043,6 +1063,16 @@ Status ReadjustSurveyJobCommand::execute(CommandContext& context)
     plan.revision.reportCreatedUtc =
         s.request.context.createdUtc.empty() ? nowUtc() : s.request.context.createdUtc;
     plan.revision.swapWith(*job);
+    // A longer report and more points may take a job the project could just
+    // hold past what it can: refused, as the import would be, rather than
+    // left to fail every later save.
+    if (auto fits = ProjectStore::checkSurveyJobSize(*job); !fits) {
+        plan.revision.swapWith(*job); // back as it was
+        if (plan.entities != nullptr) {
+            (void)plan.entities->undo(context);
+        }
+        return fits;
+    }
     s.other = std::move(plan.revision); // now the old revision
     s.entities = std::move(plan.entities);
     s.report = std::move(plan.report);

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <format>
 #include <iterator>
 #include <ctime>
 #include <set>
@@ -1128,10 +1129,22 @@ constexpr std::uint8_t kPlacedPointsVersion = 1;
 // elevation flag and the id's length.
 constexpr std::size_t kSmallestPlacedPoint = 8 + 8 + 8 + 1 + 4;
 
+// What encodePlacedPoints writes, in bytes, without writing it: the size
+// check runs on every save and every import, and a job's list may hold a
+// hundred thousand points.
+std::uint64_t placedPointsBytes(const std::vector<SurveyJobPoint>& points)
+{
+    std::uint64_t bytes = 1 + 8; // the version byte and the count
+    for (const SurveyJobPoint& point : points) {
+        bytes += kSmallestPlacedPoint + (point.elevation ? 8U : 0U) + point.pointId.size();
+    }
+    return bytes;
+}
+
 std::string encodePlacedPoints(const std::vector<SurveyJobPoint>& points)
 {
     std::string out;
-    out.reserve(9 + points.size() * (kSmallestPlacedPoint + 16));
+    out.reserve(static_cast<std::size_t>(placedPointsBytes(points)));
     out.push_back(static_cast<char>(kPlacedPointsVersion));
     appendU64(out, points.size());
     for (const SurveyJobPoint& point : points) {
@@ -1217,9 +1230,14 @@ Result<std::vector<SurveyJobPoint>> decodePlacedPoints(std::span<const std::byte
     return points;
 }
 
+// SQLite's record header for a survey_jobs row: a varint per column and one
+// for the header's own size, at most nine bytes each for sixteen columns,
+// and the position's eight-byte integer. A kilobyte is ample.
+constexpr std::int64_t kRecordHeaderAllowance = 1024;
+
 // What save() refuses before it writes anything: a job it could not load back
-// as the same job.
-Status validateSurveyJobs(const std::vector<SurveyJob>& jobs)
+// as the same job, and one too large for the database to hold.
+Status validateSurveyJobs(const std::vector<SurveyJob>& jobs, std::uint64_t sizeLimit)
 {
     std::set<std::string_view> ids;
     for (const SurveyJob& job : jobs) {
@@ -1236,6 +1254,9 @@ Status validateSurveyJobs(const std::vector<SurveyJob>& jobs)
                 return makeError(ErrorCode::InvalidArgument,
                                  "a file kept with a survey job has no name", "job=" + job.id);
             }
+        }
+        if (auto status = ProjectStore::checkSurveyJobSize(job, sizeLimit); !status) {
+            return status;
         }
     }
     return {};
@@ -1394,12 +1415,69 @@ Result<std::vector<SurveyJob>> readSurveyJobs(SqliteDatabase& database)
 
 } // namespace
 
+std::uint64_t ProjectStore::surveyJobRowBytes(const SurveyJob& job)
+{
+    return std::uint64_t{job.id.size()} + job.name.size() + job.formatId.size() +
+           job.parserVersion.size() + job.sourceFileName.size() + job.sourceBytes.size() +
+           katana::survey::serialiseReductionSettings(job.settings).size() + job.layer.size() +
+           8 * std::uint64_t{job.createdEntities.size()} + placedPointsBytes(job.placedPoints) +
+           job.reportText.size() + job.reportHtml.size() + job.reportCreatedUtc.size() +
+           job.importedUtc.size() + job.importOptions.size();
+}
+
+Status ProjectStore::checkSurveyJobSize(const SurveyJob& job, std::uint64_t limit)
+{
+    // Named by its field file, which is what the person chose and will look
+    // for; the id exists only once the job is on the drawing's list.
+    const std::string& file = job.sourceFileName.empty() ? job.name : job.sourceFileName;
+    const std::string what =
+        job.id.empty() ? (file.empty() ? "the survey job" : file)
+                       : "survey job " + job.id + (file.empty() ? "" : " (" + file + ")");
+    const auto megabytes = [](std::uint64_t bytes) {
+        return std::format("{:.1f} MB", static_cast<double>(bytes) / 1e6);
+    };
+    constexpr std::string_view instead =
+        ". Split the survey into smaller files - fewer days, or a shorter or thinned-out "
+        "observation session - and import each one as its own job.";
+    const std::uint64_t row = surveyJobRowBytes(job);
+    if (row > limit) {
+        return makeError(ErrorCode::InvalidArgument,
+                         what + " is too large to keep in a project: with its report and point "
+                                "lists it comes to " +
+                             megabytes(row) + ", and a project keeps at most " + megabytes(limit) +
+                             " for one survey job" + std::string(instead),
+                         "job=" + job.id + " bytes=" + std::to_string(row) +
+                             " limit=" + std::to_string(limit));
+    }
+    for (const SurveyJobFile& sibling : job.siblingFiles) {
+        // Its own row in survey_job_files: the job's id, its name and its bytes.
+        const std::uint64_t bytes =
+            std::uint64_t{job.id.size()} + sibling.name.size() + sibling.bytes.size();
+        if (bytes > limit) {
+            return makeError(ErrorCode::InvalidArgument,
+                             sibling.name + ", read with " + what +
+                                 ", is too large to keep in a project: it comes to " +
+                                 megabytes(bytes) + ", and a project keeps at most " +
+                                 megabytes(limit) + " for one file" + std::string(instead),
+                             "job=" + job.id + " file=" + sibling.name +
+                                 " bytes=" + std::to_string(bytes) +
+                                 " limit=" + std::to_string(limit));
+        }
+    }
+    return {};
+}
+
 Status ProjectStore::save(const ProjectContents& contents)
 {
     if (auto status = validateContents(contents); !status) {
         return status;
     }
-    if (auto status = validateSurveyJobs(contents.surveyJobs); !status) {
+    // The job limit, or this connection's own should the SQLite it was
+    // built with have a lower one.
+    const std::int64_t library = impl_->database.lengthLimit() - kRecordHeaderAllowance;
+    const std::uint64_t jobLimit =
+        library <= 0 ? 0 : std::min(kMaxSurveyJobBytes, static_cast<std::uint64_t>(library));
+    if (auto status = validateSurveyJobs(contents.surveyJobs, jobLimit); !status) {
         return status;
     }
     SqliteDatabase& database = impl_->database;

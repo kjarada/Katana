@@ -389,3 +389,122 @@ TEST_F(SurveyJobStorage, EveryTruncationOfThePackedListsIsRefusedCleanly)
     ASSERT_TRUE(sound.ok()) << sound.error().describe();
     EXPECT_EQ(sound->surveyJobs.front(), fullJob("job-1"));
 }
+
+// Big enough to be over SQLite's own limit on a value and on a row -
+// SQLITE_MAX_LENGTH, 1,000,000,000 bytes as MSYS2 builds the library
+// (PRAGMA compile_options: MAX_LENGTH=1000000000) - and still under the
+// 1 GiB a reader accepts: a long 1 Hz multi-GNSS RINEX session. The bytes
+// are never written, so the string costs address space, not memory.
+std::string oversizedFieldFile()
+{
+    std::string bytes;
+    bytes.resize_and_overwrite(1'020'000'000, [](char*, std::size_t size) { return size; });
+    return bytes;
+}
+
+// A job too large for the database is refused before anything is written,
+// with a sentence that names its file and says what to do - never SQLite's
+// "string or blob too big" - and the project stays as it was last saved.
+TEST_F(SurveyJobStorage, AJobTooLargeForTheDatabaseIsRefusedWithASentenceAndNothingIsWritten)
+{
+    auto store = ProjectStore::create(projectDir(), {});
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+    ASSERT_TRUE(store->save(contentsWith({fullJob("job-1")})).ok());
+
+    ProjectContents contents = contentsWith({fullJob("job-1")});
+    contents.surveyJobs.push_back(fullJob("job-2"));
+    contents.surveyJobs[1].sourceBytes = oversizedFieldFile();
+    const auto file = store->save(contents);
+    ASSERT_FALSE(file.ok());
+    EXPECT_EQ(file.error().code, ErrorCode::InvalidArgument) << file.error().describe();
+    EXPECT_NE(file.error().message.find("DAY2.GSI"), std::string::npos) << file.error().message;
+    EXPECT_NE(file.error().message.find("too large"), std::string::npos) << file.error().message;
+    EXPECT_EQ(file.error().message.find("blob"), std::string::npos) << file.error().message;
+
+    // A file kept beside it has a row of its own, under the same limit.
+    contents.surveyJobs[1].sourceBytes = "small";
+    contents.surveyJobs[1].siblingFiles[0].bytes = oversizedFieldFile();
+    const auto sibling = store->save(contents);
+    ASSERT_FALSE(sibling.ok());
+    EXPECT_EQ(sibling.error().code, ErrorCode::InvalidArgument) << sibling.error().describe();
+    EXPECT_NE(sibling.error().message.find("DAY2.X01"), std::string::npos)
+        << sibling.error().message;
+    EXPECT_NE(sibling.error().message.find("too large"), std::string::npos)
+        << sibling.error().message;
+
+    const auto loaded = store->load();
+    ASSERT_TRUE(loaded.ok()) << loaded.error().describe();
+    ASSERT_EQ(loaded->surveyJobs.size(), 1U);
+    EXPECT_EQ(loaded->surveyJobs[0], fullJob("job-1"));
+}
+
+// The check counts the whole row - report and point lists as well as the file
+// - and each kept file's row on its own. At the limit is inside it.
+TEST_F(SurveyJobStorage, TheSizeCheckCountsTheWholeRowAndEachKeptFileOnItsOwn)
+{
+    SurveyJob job = fullJob("job-1");
+    const std::uint64_t row = ProjectStore::surveyJobRowBytes(job);
+    EXPECT_TRUE(ProjectStore::checkSurveyJobSize(job, row).ok());
+    const auto over = ProjectStore::checkSurveyJobSize(job, row - 1);
+    ASSERT_FALSE(over.ok());
+    EXPECT_EQ(over.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(over.error().message.find("survey job job-1 (DAY2.GSI) is too large"),
+              std::string::npos)
+        << over.error().message;
+
+    job.reportHtml.append(1000, 'x');
+    EXPECT_EQ(ProjectStore::surveyJobRowBytes(job), row + 1000);
+    // One more placed point with a height and the id "104", by the packed
+    // layout: entity 8 + northing 8 + easting 8 + height flag 1 + height 8 +
+    // id length 4 + the id 3 = 40 bytes; one more created entity, 8.
+    job.placedPoints.push_back(SurveyJobPoint{"104", 10, 1.0, 2.0, 3.0});
+    job.createdEntities.push_back(10);
+    EXPECT_EQ(ProjectStore::surveyJobRowBytes(job), row + 1000 + 40 + 8);
+
+    // A kept file's row is the job's id (5), its name (8) and its bytes, and
+    // is not part of the job's row: 2 000 bytes is over a limit the job's
+    // own row (about 1.2 kB, most of it the settings) is within.
+    SurveyJob withFile = fullJob("job-1");
+    withFile.siblingFiles[0].bytes.assign(2000, '\x01');
+    const std::uint64_t jobRow = ProjectStore::surveyJobRowBytes(withFile);
+    ASSERT_LT(jobRow, 5U + 8U + 2000U);
+    EXPECT_TRUE(ProjectStore::checkSurveyJobSize(withFile, 5 + 8 + 2000).ok());
+    const auto file = ProjectStore::checkSurveyJobSize(withFile, 5 + 8 + 1999);
+    ASSERT_FALSE(file.ok());
+    EXPECT_NE(file.error().message.find("DAY2.X01, read with survey job job-1 (DAY2.GSI), is too "
+                                        "large"),
+              std::string::npos)
+        << file.error().message;
+}
+
+// What the check counts is what SQLite stores - every column but the
+// position, byte for byte - and the limit sits under the linked library's
+// own with room for the record header.
+TEST_F(SurveyJobStorage, TheSizeCountedIsTheSizeStoredAndTheLimitIsUnderTheLibrarysOwn)
+{
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok()) << store.error().describe();
+        ASSERT_TRUE(store->save(contentsWith({fullJob("job-1")})).ok());
+    }
+    auto raw = SqliteDatabase::open(projectDir() / "project.db");
+    ASSERT_TRUE(raw.ok());
+    // length() of a BLOB is bytes; of TEXT it is characters, hence the casts.
+    auto stored = raw->prepare(
+        "SELECT length(CAST(id AS BLOB)) + length(CAST(name AS BLOB))"
+        " + length(CAST(format_id AS BLOB)) + length(CAST(parser_version AS BLOB))"
+        " + length(CAST(source_file_name AS BLOB)) + length(source_bytes)"
+        " + length(CAST(settings AS BLOB)) + length(CAST(layer AS BLOB))"
+        " + length(created_entities) + length(placed_points)"
+        " + length(CAST(report_text AS BLOB)) + length(CAST(report_html AS BLOB))"
+        " + length(CAST(report_created_utc AS BLOB)) + length(CAST(imported_utc AS BLOB))"
+        " + length(CAST(import_options AS BLOB)) FROM survey_jobs");
+    ASSERT_TRUE(stored.ok()) << stored.error().describe();
+    ASSERT_TRUE(*stored->step());
+    EXPECT_EQ(static_cast<std::uint64_t>(stored->columnInt64(0)),
+              ProjectStore::surveyJobRowBytes(fullJob("job-1")));
+
+    EXPECT_EQ(raw->lengthLimit(), 1'000'000'000) << "SQLITE_MAX_LENGTH as the library is built";
+    EXPECT_LE(ProjectStore::kMaxSurveyJobBytes + 1024,
+              static_cast<std::uint64_t>(raw->lengthLimit()));
+}

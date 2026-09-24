@@ -89,7 +89,10 @@ struct SurveyJobImport {
 //
 // validate() fails - and nothing is changed - when the reduction fails, with
 // the reduction's own error: an import whose adjustment cannot run is not
-// half-imported.
+// half-imported. A job too large for a project to keep
+// (storage::ProjectStore::checkSurveyJobSize) is refused with InvalidArgument
+// naming the file: by validate() for the file alone, before the reduction,
+// and by execute() once the report and point lists are counted too.
 class ImportSurveyJobCommand final : public katana::commands::Command {
   public:
     ImportSurveyJobCommand(Document& document, SurveyJobImport request,
@@ -174,8 +177,10 @@ struct SurveyJobChanges {
 // point of the job's that the new settings hold as control FROM THE DRAWING
 // is left where it stands, under either policy: the run was held to it there.
 //
-// NotFound for a job the document does not have; the reader's or the
-// reduction's own error otherwise, with nothing changed.
+// NotFound for a job the document does not have; InvalidArgument when the
+// job with its new report and points would be too large for a project to
+// keep; the reader's or the reduction's own error otherwise - each with
+// nothing changed.
 class ReadjustSurveyJobCommand final : public katana::commands::Command {
   public:
     ReadjustSurveyJobCommand(Document& document, SurveyJobReadjustment request,
