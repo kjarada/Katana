@@ -295,7 +295,7 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
 
     // No button is a default: QDialog makes the first auto-default button
     // its default when shown, and Enter in any field - a typed code, a layer
-    // name - would press it (Import Mapfile, or Delete). Buttons here are
+    // name - would press it (Import Code File..., or Delete). Buttons here are
     // pressed, never defaulted to.
     for (QPushButton* button : findChildren<QPushButton*>()) {
         button->setAutoDefault(false);

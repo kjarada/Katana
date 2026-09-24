@@ -672,6 +672,33 @@ if(TARGET katana)
             "-DFORBID=12[dD]"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_texts_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # FORBID holds the application to what it SAYS, not to where the run
+    # lives. Here the output - and so the empty project the log says it
+    # could not open - is in a folder named as a worktree for the archive
+    # work might be: the log prints that path (EXPECT), and the check passes.
+    add_test(NAME qt_a_forbidden_word_in_the_run_s_own_paths_is_not_held_against_it_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%CommandLineDock"
+            "-DEXPECT=Open Failed[^\r\n]*worktree_12da_export"
+            "-DFORBID=12[dD]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/worktree_12da_export/forbid_paths_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Only the path is set aside: the rest of the line that holds it is still
+    # read. Forbidding the words that line opens with fails the run, and the
+    # failure names them (PASS_REGULAR_EXPRESSION, set below).
+    add_test(NAME qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%CommandLineDock"
+            "-DFORBID=Open Failed"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/worktree_12da_export/forbid_beside_a_path_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "the run reported /Open Failed/ \\(\"Open Failed\"\\), its own paths aside")
     # The symbol library putting a fixture symbol on imported points: the 12
     # points of survey_points_pnezd.csv (counted by hand, see the survey
     # import test) imported, all selected, TEST Survey Mark chosen in the
@@ -768,6 +795,8 @@ if(TARGET katana)
                          qt_format_menu_opens_the_symbol_library_headless
                          qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
                          qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
+                         qt_a_forbidden_word_in_the_run_s_own_paths_is_not_held_against_it_headless
+                         qt_a_forbidden_word_beside_a_path_in_the_log_still_fails_the_run_headless
                          qt_the_symbol_library_puts_a_fixture_symbol_on_imported_points_headless
                          qt_purge_unused_deletes_what_nothing_uses_as_one_undo_step_headless
                          qt_format_layers_opens_beside_the_drawing_and_follows_it_headless
