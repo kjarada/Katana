@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -602,4 +603,177 @@ TEST(DxfReaderBlocks, ACircleInABlockScaledUnevenlyIsTheEllipseItDraws)
     for (const Point2& vertex : ellipse.vertices) {
         EXPECT_NEAR((vertex.x / 2.0) * (vertex.x / 2.0) + vertex.y * vertex.y, 1.0, 1e-12);
     }
+}
+
+// ---- heights --------------------------------------------------------------------
+
+namespace {
+
+// The heights of an imported entity, one a vertex (two for a line or an arc).
+std::vector<std::optional<double>> heightsOf(const Entity& entity, std::size_t count)
+{
+    return katana::entity::heightsOf(entity.properties, count);
+}
+
+bool hasNoHeight(const Entity& entity)
+{
+    return !entity.properties.contains(std::string(katana::entity::kElevationProperty)) &&
+           !entity.properties.contains(std::string(katana::entity::kElevationsProperty));
+}
+
+} // namespace
+
+TEST(DxfReaderBlocks, AnEntityDrawnAtTheBlocksZeroIsAtTheLevelOfTheInsert)
+{
+    // The survey symbol: drawn at Z 0, inserted at the point's level, 45.3.
+    // Block Z 0, times the insert's Z scale 1, plus 45.3 is 45.3 - for the
+    // point and the circle alike; the point drawn at 0.001 is at 45.301.
+    const std::string text = "  0\nSECTION\n  2\nBLOCKS\n"
+                             "  0\nBLOCK\n  2\nPT\n 10\n0\n 20\n0\n 30\n0\n"
+                             "  0\nPOINT\n 10\n0\n 20\n0\n 30\n0\n"
+                             "  0\nCIRCLE\n 10\n0\n 20\n0\n 30\n0\n 40\n0.5\n"
+                             "  0\nPOINT\n 10\n1\n 20\n0\n 30\n0.001\n"
+                             "  0\nENDBLK\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nINSERT\n  2\nPT\n 10\n100\n 20\n200\n 30\n45.3\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 3u);
+    const Entity& dot = imported->entities[0];
+    EXPECT_EQ(std::get<PointGeometry>(dot.geometry).position, Point2(100.0, 200.0));
+    EXPECT_EQ(heightsOf(dot, 1)[0], 45.3);
+    const Entity& ring = imported->entities[1];
+    EXPECT_EQ(std::get<Circle2>(ring.geometry).center, Point2(100.0, 200.0));
+    EXPECT_EQ(heightsOf(ring, 1)[0], 45.3);
+    const auto raised = heightsOf(imported->entities[2], 1)[0];
+    ASSERT_TRUE(raised.has_value());
+    EXPECT_NEAR(*raised, 45.301, 1e-12);
+}
+
+TEST(DxfReaderBlocks, AZeroLevelThroughNestedInsertsIsTheirLevelsAndAnInsertAtZeroLeavesThePlan)
+{
+    // INNER: a point and a line at Z 0. OUTER (base Z 2) inserts INNER at
+    // Z 5, so they are at 5 in OUTER. The drawing inserts OUTER at Z 100,
+    // twice the height: 5 x 2 + (100 - 2 x 2) = 106. INNER inserted straight
+    // at Z 0 stays in plan, with no level at all.
+    const std::string text = "  0\nSECTION\n  2\nBLOCKS\n"
+                             "  0\nBLOCK\n  2\nINNER\n 10\n0\n 20\n0\n 30\n0\n"
+                             "  0\nPOINT\n 10\n0\n 20\n0\n 30\n0\n"
+                             "  0\nLINE\n 10\n0\n 20\n0\n 30\n0\n 11\n1\n 21\n0\n 31\n0\n"
+                             "  0\nENDBLK\n"
+                             "  0\nBLOCK\n  2\nOUTER\n 10\n0\n 20\n0\n 30\n2\n"
+                             "  0\nINSERT\n  2\nINNER\n 10\n0\n 20\n0\n 30\n5\n"
+                             "  0\nENDBLK\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nINSERT\n  2\nOUTER\n 10\n10\n 20\n10\n 30\n100\n 43\n2\n"
+                             "  0\nINSERT\n  2\nINNER\n 10\n50\n 20\n50\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 4u);
+    EXPECT_EQ(heightsOf(imported->entities[0], 1)[0], 106.0);
+    const auto line = heightsOf(imported->entities[1], 2);
+    EXPECT_EQ(line[0], 106.0);
+    EXPECT_EQ(line[1], 106.0);
+    EXPECT_TRUE(hasNoHeight(imported->entities[2]));
+    EXPECT_TRUE(hasNoHeight(imported->entities[3]));
+}
+
+TEST(DxfReaderOcs, AnObjectSystemFacingDownPutsItsElevationAboveTheDatumNotBelow)
+{
+    // Extrusion (0,0,-1): object X is world -X, and object Z is world -Z, so
+    // the writing program puts a level of +10 as elevation -10. Every entity
+    // here is at height 10, and at the mirror in X of its object position.
+    const std::string down = "210\n0\n220\n0\n230\n-1\n";
+    const std::string text =
+        "  0\nSECTION\n  2\nBLOCKS\n"
+        "  0\nBLOCK\n  2\nDOT\n 10\n0\n 20\n0\n 30\n0\n"
+        "  0\nPOINT\n 10\n0\n 20\n0\n 30\n0\n"
+        "  0\nPOINT\n 10\n1\n 20\n0\n 30\n1\n"
+        "  0\nENDBLK\n  0\nENDSEC\n"
+        "  0\nSECTION\n  2\nENTITIES\n"
+        "  0\nCIRCLE\n  8\nC\n 10\n-100\n 20\n50\n 30\n-10\n 40\n1\n" + down +
+        "  0\nARC\n  8\nA\n 10\n-100\n 20\n60\n 30\n-10\n 40\n1\n 50\n0\n 51\n90\n" + down +
+        "  0\nLWPOLYLINE\n  8\nL\n 90\n2\n 70\n0\n 38\n-10\n 10\n1\n 20\n1\n 10\n2\n 20\n1\n" +
+        down +
+        "  0\nPOLYLINE\n  8\nP\n 66\n1\n 10\n0\n 20\n0\n 30\n-10\n 70\n0\n" + down +
+        "  0\nVERTEX\n  8\nP\n 10\n3\n 20\n3\n"
+        "  0\nVERTEX\n  8\nP\n 10\n4\n 20\n3\n"
+        "  0\nSEQEND\n"
+        "  0\nTEXT\n  8\nT\n 10\n10\n 20\n5\n 30\n-10\n 40\n1\n  1\nT\n" + down +
+        // The insert at object (-100,-50) elevation -7: world (100,-50) at
+        // height 7. Block Z runs down with it: the point drawn at block Z 1
+        // is at -(-7 + 1) = 6, one below the insert, and at world X 99.
+        "  0\nINSERT\n  8\nI\n  2\nDOT\n 10\n-100\n 20\n-50\n 30\n-7\n" + down +
+        // The plain system, for comparison: elevation 10 is height 10.
+        "  0\nCIRCLE\n  8\nU\n 10\n0\n 20\n0\n 30\n10\n 40\n1\n"
+        "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 8u);
+    const auto& e = imported->entities;
+    EXPECT_EQ(std::get<Circle2>(e[0].geometry).center, Point2(100.0, 50.0));
+    EXPECT_EQ(heightsOf(e[0], 1)[0], 10.0);
+    EXPECT_EQ(std::get<Arc2>(e[1].geometry).center, Point2(100.0, 60.0));
+    EXPECT_EQ(heightsOf(e[1], 2)[0], 10.0);
+    EXPECT_EQ(heightsOf(e[1], 2)[1], 10.0);
+    const Polyline2& lw = std::get<Polyline2>(e[2].geometry);
+    EXPECT_EQ(lw.vertices[0], Point2(-1.0, 1.0));
+    EXPECT_EQ(lw.vertices[1], Point2(-2.0, 1.0));
+    EXPECT_EQ(heightsOf(e[2], 2)[0], 10.0);
+    EXPECT_EQ(heightsOf(e[2], 2)[1], 10.0);
+    const Polyline2& two = std::get<Polyline2>(e[3].geometry);
+    EXPECT_EQ(two.vertices[0], Point2(-3.0, 3.0));
+    EXPECT_EQ(heightsOf(e[3], 2)[1], 10.0);
+    EXPECT_EQ(std::get<TextGeometry>(e[4].geometry).position, Point2(-10.0, 5.0));
+    EXPECT_EQ(heightsOf(e[4], 1)[0], 10.0);
+    EXPECT_EQ(std::get<PointGeometry>(e[5].geometry).position, Point2(100.0, -50.0));
+    EXPECT_EQ(heightsOf(e[5], 1)[0], 7.0);
+    EXPECT_EQ(std::get<PointGeometry>(e[6].geometry).position, Point2(99.0, -50.0));
+    EXPECT_EQ(heightsOf(e[6], 1)[0], 6.0);
+    EXPECT_EQ(heightsOf(e[7], 1)[0], 10.0);
+}
+
+TEST(DxfReaderMText, AnMTextFacingDownStandsAtItsWorldInsertionPoint)
+{
+    // MTEXT is not an object system entity: its point (10/20/30) and its
+    // direction (11/21/31) are world coordinates, whatever way it faces.
+    const std::string down = "210\n0\n220\n0\n230\n-1\n";
+    const std::string text =
+        "  0\nSECTION\n  2\nENTITIES\n"
+        // Bottom left (7), one line: the first baseline is the point itself,
+        // (10,5), at height 7 - not -7. With the angle only, 0 is measured
+        // in the plane facing down, whose X is world -X: the text runs
+        // toward -X, a rotation of half a turn.
+        "  0\nMTEXT\n 10\n10\n 20\n5\n 30\n7\n 40\n2\n 71\n7\n  1\nABC\n" + down +
+        // With a direction vector, it is the world direction: (0,1), a
+        // quarter turn, standing at (10,20).
+        "  0\nMTEXT\n 10\n10\n 20\n20\n 40\n2\n 71\n7\n 11\n0\n 21\n1\n 31\n0\n  1\nDEF\n" + down +
+        // Top left (1), two lines of height 3: the first baseline one height
+        // below the point, the second a pitch of 5/3 x 3 = 5 further. The
+        // text's up is still world +Y facing down - only its X is mirrored -
+        // so the baselines are at y -3 and -8.
+        "  0\nMTEXT\n 10\n0\n 20\n0\n 40\n3\n 71\n1\n  1\nG\\PH\n" + down +
+        "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 4u);
+    const Entity* abc = textSaying(*imported, "ABC");
+    ASSERT_NE(abc, nullptr);
+    const TextGeometry& first = std::get<TextGeometry>(abc->geometry);
+    EXPECT_EQ(first.position, Point2(10.0, 5.0));
+    EXPECT_EQ(std::cos(first.rotation), -1.0);
+    EXPECT_EQ(heightsOf(*abc, 1)[0], 7.0);
+    const Entity* def = textSaying(*imported, "DEF");
+    ASSERT_NE(def, nullptr);
+    const TextGeometry& second = std::get<TextGeometry>(def->geometry);
+    EXPECT_EQ(second.position, Point2(10.0, 20.0));
+    EXPECT_EQ(second.rotation, kPi / 2.0);
+    const Entity* g = textSaying(*imported, "G");
+    const Entity* h = textSaying(*imported, "H");
+    ASSERT_NE(g, nullptr);
+    ASSERT_NE(h, nullptr);
+    EXPECT_EQ(std::get<TextGeometry>(g->geometry).position, Point2(0.0, -3.0));
+    EXPECT_EQ(std::get<TextGeometry>(h->geometry).position, Point2(0.0, -8.0));
 }

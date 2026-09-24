@@ -183,6 +183,23 @@ bool isPlainExtrusion(const Vec3& normal)
     return normal.x == 0.0 && normal.y == 0.0 && normal.z > 0.0;
 }
 
+// An object coordinate system's plane is the plan's, facing up or down, when
+// its map onto the plan keeps shapes (objectToPlan of a tilted plane squashes
+// one axis). Then all of it is at one level, and that level means something.
+bool isLevel(const Vec3& normal, const Affine& frame)
+{
+    return isPlainExtrusion(normal) || frame.isSimilarity();
+}
+
+// The height of elevation `z` in a level object coordinate system: z runs
+// along the extrusion, so its height is z times the extrusion's Z - the same
+// z for the plain (0,0,1), and -z for a system facing down, (0,0,-1), in
+// which the writing program put a circle at height 10 as elevation -10.
+double heightOf(const Vec3& normal, double z)
+{
+    return z * normalised(normal).z;
+}
+
 double sweepBetween(double startDegrees, double endDegrees)
 {
     double sweep = std::fmod(endDegrees - startDegrees, 360.0);
@@ -243,7 +260,9 @@ struct Common {
     std::optional<Color> exactColour;
 
     // The heights this module's writer put beside the entity, for `count`
-    // vertices; empty when there are none, or not that many.
+    // vertices; empty when there are none, or not that many. One height
+    // alone stands for every vertex, as the `elevation` property does: it is
+    // how a level of exactly 0 goes out (see Writer::finish).
     [[nodiscard]] std::vector<std::optional<double>> extendedHeights(std::size_t count) const
     {
         if (heights.empty()) {
@@ -251,6 +270,11 @@ struct Common {
         }
         PropertyMap list;
         list.emplace(std::string(katana::entity::kElevationsProperty), heights);
+        if (heights.find(' ') == std::string::npos) {
+            if (const auto one = katana::core::parseFiniteDouble(heights)) {
+                list.emplace(std::string(katana::entity::kElevationProperty), *one);
+            }
+        }
         auto parsed = katana::entity::heightsOf(list, count);
         const bool any = std::any_of(parsed.begin(), parsed.end(),
                                      [](const auto& height) { return height.has_value(); });
@@ -360,6 +384,19 @@ struct BlockEntity {
     Entity entity;
     bool layerFromInsert = false;  // it is on layer 0
     bool colourFromInsert = false; // its colour is ByBlock
+    // Drawn at the block's Z 0, so it has no heights of its own - and is at
+    // whatever level the insert puts the block's base: a survey symbol is
+    // drawn at 0 and inserted at the point's level. False where it has
+    // heights, and where no one height means anything (a tilted plane).
+    bool atBlockZero = false;
+};
+
+// How an insert moves its block's heights: a block Z times `scale`, plus
+// `offset`. None where the insert's plane is tilted, and no one height is
+// right for what it places.
+struct HeightMap {
+    double scale = 1.0;
+    double offset = 0.0;
 };
 
 struct Block {
@@ -413,8 +450,10 @@ class Reader {
 
     // ---- conversion ----
     void convert(const Record& record, Sink& sink);
+    // `level`: without `heights`, the entity lies at Z 0 in its plane, rather
+    // than in a tilted plane where it has no one height.
     void emit(Entity entity, const Common& common, Sink& sink,
-              const std::vector<std::optional<double>>* heights = nullptr);
+              const std::vector<std::optional<double>>* heights = nullptr, bool level = true);
     void convertLine(const Record& record, Sink& sink);
     void convertPoint(const Record& record, Sink& sink);
     void convertCircle(const Record& record, Sink& sink, bool arc);
@@ -427,9 +466,9 @@ class Reader {
     void convertInsert(const Record& record, Sink& sink);
     void convertDimension(const Record& record, Sink& sink);
     void emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD, const Affine& frame,
-                      const Common& common, Sink& sink);
+                      bool level, const Common& common, Sink& sink);
     Block* buildBlock(std::string_view name, std::size_t depth, std::string_view insertKind);
-    void place(const Block& block, const Affine& transform, double zScale, double zOffset,
+    void place(const Block& block, const Affine& transform, const std::optional<HeightMap>& heights,
                const Common& insert, const PropertyMap& attributes, Sink& sink);
 
     // ---- tables ----
@@ -971,7 +1010,7 @@ bool Reader::reportFull(const Sink& sink)
 // The entity, validated, onto the sink: into the drawing with its layer and
 // colour resolved, or into a block expansion remembering what it inherits.
 void Reader::emit(Entity entity, const Common& common, Sink& sink,
-                  const std::vector<std::optional<double>>* heights)
+                  const std::vector<std::optional<double>>* heights, bool level)
 {
     if (const auto status = katana::entity::validate(entity.geometry); !status) {
         warn(std::string(sink.kind) + " not imported: " + status.error().message);
@@ -1004,7 +1043,7 @@ void Reader::emit(Entity entity, const Common& common, Sink& sink,
     }
     if (sink.block != nullptr) {
         entity.layer = std::string(common.layer.empty() ? std::string_view("0") : common.layer);
-        sink.block->push_back({std::move(entity), fromInsert, byBlock});
+        sink.block->push_back({std::move(entity), fromInsert, byBlock, heights == nullptr && level});
         return;
     }
     entity.layer = layerPath(common.layer);
@@ -1133,7 +1172,11 @@ void Reader::convertPoint(const Record& record, Sink& sink)
     }
     Entity entity;
     entity.geometry = PointGeometry{Point2(x, y)};
-    if (z != 0.0) {
+    // Z 0 is the plan, as every program writes it - unless this module's
+    // writer said beside it that 0 is the point's surveyed level.
+    if (const auto extended = common.extendedHeights(1); !extended.empty()) {
+        emit(std::move(entity), common, sink, &extended);
+    } else if (z != 0.0) {
         const std::vector<std::optional<double>> heights{z};
         emit(std::move(entity), common, sink, &heights);
     } else {
@@ -1204,7 +1247,8 @@ void Reader::convertCircle(const Record& record, Sink& sink, bool arc)
     }
     const bool plain = isPlainExtrusion(common.extrusion);
     const Affine frame = plain ? Affine{} : objectToPlan(common.extrusion, z);
-    if (!plain && !frame.isSimilarity()) {
+    const bool level = isLevel(common.extrusion, frame);
+    if (!level) {
         warn(std::string(kind) + " in a tilted plane, projected onto the plan as a chorded polyline");
     }
     // An arc that starts where it ends is read as the full turn it draws.
@@ -1218,19 +1262,30 @@ void Reader::convertCircle(const Record& record, Sink& sink, bool arc)
     auto geometry = placeCurve(curve, full, frame, options_.curveTolerance);
     Entity entity;
     entity.geometry = std::move(*geometry);
-    // The elevation of a plan circle; a tilted one has none that means anything.
-    if (z != 0.0 && (plain || frame.isSimilarity())) {
-        const std::vector<std::optional<double>> heights{z};
+    // An arc has a height at each end, which differ where it climbs, as an
+    // imported survey arc on a grade does. This module's writer puts two that
+    // differ beside the ARC, whose one Z cannot hold them, in the file's
+    // order from the start angle; a mirror reverses that order with the arc.
+    const bool twoEnds = arc && !full;
+    if (auto extended = common.extendedHeights(twoEnds ? 2 : 1); !extended.empty()) {
+        if (twoEnds && frame.determinant() < 0.0) {
+            std::swap(extended[0], extended[1]);
+        }
+        emit(std::move(entity), common, sink, &extended);
+    } else if (z != 0.0 && level) {
+        // The elevation of a level circle; a tilted one has none that means
+        // anything.
+        const std::vector<std::optional<double>> heights{heightOf(common.extrusion, z)};
         emit(std::move(entity), common, sink, &heights);
     } else {
-        emit(std::move(entity), common, sink);
+        emit(std::move(entity), common, sink, nullptr, level);
     }
 }
 
 void Reader::convertEllipse(const Record& record, Sink& sink)
 {
     Common common;
-    double cx = 0.0, cy = 0.0, mx = 1.0, my = 0.0, mz = 0.0, ratio = 1.0, start = 0.0,
+    double cx = 0.0, cy = 0.0, cz = 0.0, mx = 1.0, my = 0.0, mz = 0.0, ratio = 1.0, start = 0.0,
            end = kTwoPi;
     bool bad = false;
     for (const Pair& pair : record.pairs) {
@@ -1241,6 +1296,7 @@ void Reader::convertEllipse(const Record& record, Sink& sink)
         switch (pair.code) {
         case 10: target = &cx; break;
         case 20: target = &cy; break;
+        case 30: target = &cz; break;
         case 11: target = &mx; break;
         case 21: target = &my; break;
         case 31: target = &mz; break;
@@ -1285,11 +1341,22 @@ void Reader::convertEllipse(const Record& record, Sink& sink)
     }
     Entity entity;
     entity.geometry = Polyline2{std::move(points), full};
-    emit(std::move(entity), common, sink);
+    // The centre is in world coordinates, so its Z is the height of an
+    // ellipse that lies level; a tilted one has none.
+    const bool level = isLevel(normal, objectToPlan(normal, 0.0));
+    if (level && cz != 0.0) {
+        const std::vector<std::optional<double>> heights(
+            std::get<Polyline2>(entity.geometry).vertices.size(), cz);
+        emit(std::move(entity), common, sink, &heights);
+    } else {
+        emit(std::move(entity), common, sink, nullptr, level);
+    }
 }
 
+// The vertices' z are world heights already; `level` is false where the
+// polyline lies in a tilted plane, and they are then all 0.
 void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD,
-                          const Affine& frame, const Common& common, Sink& sink)
+                          const Affine& frame, bool level, const Common& common, Sink& sink)
 {
     const std::string_view kind = sink.kind;
     if (vertices.size() == 1) {
@@ -1300,7 +1367,7 @@ void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD
             const std::vector<std::optional<double>> heights{vertices[0].z};
             emit(std::move(entity), common, sink, &heights);
         } else {
-            emit(std::move(entity), common, sink);
+            emit(std::move(entity), common, sink, nullptr, level);
         }
         return;
     }
@@ -1363,7 +1430,7 @@ void Reader::emitPolyline(std::vector<Vertex> vertices, bool closed, bool threeD
     } else if (threeD || anyHeight) {
         emit(std::move(entity), common, sink, &heights);
     } else {
-        emit(std::move(entity), common, sink);
+        emit(std::move(entity), common, sink, nullptr, level);
     }
 }
 
@@ -1418,15 +1485,17 @@ void Reader::convertLwPolyline(const Record& record, Sink& sink)
         warn("LWPOLYLINE not imported: a coordinate is not a number");
         return;
     }
-    for (Vertex& vertex : vertices) {
-        vertex.z = elevation;
-    }
     const bool plain = isPlainExtrusion(common.extrusion);
     const Affine frame = plain ? Affine{} : objectToPlan(common.extrusion, elevation);
-    if (!plain && !frame.isSimilarity()) {
+    const bool level = isLevel(common.extrusion, frame);
+    if (!level) {
         warn("LWPOLYLINE in a tilted plane, projected onto the plan");
     }
-    emitPolyline(std::move(vertices), (flags & 1) != 0, false, frame, common, sink);
+    const double height = level ? heightOf(common.extrusion, elevation) : 0.0;
+    for (Vertex& vertex : vertices) {
+        vertex.z = height;
+    }
+    emitPolyline(std::move(vertices), (flags & 1) != 0, false, frame, level, common, sink);
 }
 
 void Reader::convertPolyline(const Record& record, Sink& sink)
@@ -1449,13 +1518,19 @@ void Reader::convertPolyline(const Record& record, Sink& sink)
         return;
     }
     const bool threeD = (flags & 8) != 0;
+    // A 3D polyline's vertices are world coordinates; a 2D one's are in its
+    // object coordinate system, at its elevation.
+    const bool plain = threeD || isPlainExtrusion(common.extrusion);
+    const Affine frame = plain ? Affine{} : objectToPlan(common.extrusion, elevation);
+    const bool level = plain || frame.isSimilarity();
+    const double height = level && !threeD ? heightOf(common.extrusion, elevation) : 0.0;
     std::vector<Vertex> vertices;
     vertices.reserve(record.childCount);
     bool bad = false;
     for (std::size_t i = 0; i < record.childCount; ++i) {
         const Record& child = record.children[i];
         Vertex vertex;
-        vertex.z = threeD ? 0.0 : elevation;
+        vertex.z = height;
         int vertexFlags = 0;
         for (const Pair& pair : child.pairs) {
             switch (pair.code) {
@@ -1494,12 +1569,10 @@ void Reader::convertPolyline(const Record& record, Sink& sink)
         warn("POLYLINE not imported: a coordinate is not a number");
         return;
     }
-    const bool plain = threeD || isPlainExtrusion(common.extrusion);
-    const Affine frame = plain ? Affine{} : objectToPlan(common.extrusion, elevation);
-    if (!plain && !frame.isSimilarity()) {
+    if (!level) {
         warn("POLYLINE in a tilted plane, projected onto the plan");
     }
-    emitPolyline(std::move(vertices), (flags & 1) != 0, threeD, frame, common, sink);
+    emitPolyline(std::move(vertices), (flags & 1) != 0, threeD, frame, level, common, sink);
 }
 
 // Where a text's left baseline is, from a justified anchor: a guess at its
@@ -1618,6 +1691,7 @@ void Reader::convertText(const Record& record, Sink& sink, bool attribute,
     }
     const bool plain = isPlainExtrusion(common.extrusion);
     const Affine frame = plain ? Affine{} : objectToPlan(common.extrusion, z);
+    const bool level = isLevel(common.extrusion, frame);
     double finalRotation = radians;
     if (!plain) {
         position = frame.apply(position);
@@ -1629,11 +1703,13 @@ void Reader::convertText(const Record& record, Sink& sink, bool attribute,
     if (properties != nullptr) {
         entity.properties = *properties;
     }
-    if (z != 0.0 && plain) {
-        const std::vector<std::optional<double>> heights{z};
+    if (const auto extended = common.extendedHeights(1); !extended.empty()) {
+        emit(std::move(entity), common, sink, &extended);
+    } else if (z != 0.0 && level) {
+        const std::vector<std::optional<double>> heights{heightOf(common.extrusion, z)};
         emit(std::move(entity), common, sink, &heights);
     } else {
-        emit(std::move(entity), common, sink);
+        emit(std::move(entity), common, sink, nullptr, level);
     }
 }
 
@@ -1700,7 +1776,8 @@ void Reader::convertMText(const Record& record, Sink& sink)
     // The direction vector, where there is one, wins over the angle: it is
     // what the writing program keeps, and the angle is derived from it.
     double radians = rotation * kDegrees;
-    if (haveDirection && (dx != 0.0 || dy != 0.0)) {
+    const bool directed = haveDirection && (dx != 0.0 || dy != 0.0);
+    if (directed) {
         radians = std::atan2(dy, dx);
     }
     std::vector<std::string_view> lines;
@@ -1726,10 +1803,36 @@ void Reader::convertMText(const Record& record, Sink& sink)
     } else if (row == 2) {
         firstBaseline = block - height;
     }
+    // MTEXT is not an object coordinate system entity: its insertion point
+    // and its direction vector are world coordinates, and the extrusion says
+    // only which way its plane faces. (Put through the object system, a text
+    // facing down landed at the mirror of where it stands, turned half a
+    // turn.) An angle given alone is measured in that plane, and its axes
+    // turn it into the world, as TEXT's is.
     const bool plainExtrusion = isPlainExtrusion(common.extrusion);
-    const Affine frame = plainExtrusion ? Affine{} : objectToPlan(common.extrusion, z);
-    const Vec2 along(std::cos(radians), std::sin(radians));
-    const Vec2 up(-along.y, along.x);
+    const Affine frame = plainExtrusion ? Affine{} : objectToPlan(common.extrusion, 0.0);
+    const bool level = isLevel(common.extrusion, frame);
+    Vec2 along(std::cos(radians), std::sin(radians));
+    Vec2 up(-along.y, along.x);
+    double finalRotation = radians;
+    if (!plainExtrusion) {
+        if (directed) {
+            // The text's up is the extrusion across its direction: to the
+            // left of it seen from above, to the right in a plane facing down.
+            if (normalised(common.extrusion).z < 0.0) {
+                up = Vec2(along.y, -along.x);
+            }
+        } else {
+            up = frame.linear(up);
+            along = frame.linear(along);
+            finalRotation = std::atan2(along.y, along.x);
+        }
+    }
+    // The insertion point's Z is a world height too, where the plane is level.
+    std::vector<std::optional<double>> heights = common.extendedHeights(1);
+    if (heights.empty() && z != 0.0 && level) {
+        heights.assign(1, z);
+    }
     for (std::size_t i = 0; i < lines.size(); ++i) {
         const std::string_view line = lines[i];
         if (katana::core::trimmed(line).empty()) {
@@ -1737,22 +1840,11 @@ void Reader::convertMText(const Record& record, Sink& sink)
         }
         const double width = kGlyphAspect * height * static_cast<double>(line.size());
         const double shift = column == 1 ? -width / 2.0 : column == 2 ? -width : 0.0;
-        Point2 position = Point2(x, y) + along * shift +
-                          up * (firstBaseline - pitch * static_cast<double>(i));
-        double finalRotation = radians;
-        if (!plainExtrusion) {
-            position = frame.apply(position);
-            const Vec2 direction = frame.linear(along);
-            finalRotation = std::atan2(direction.y, direction.x);
-        }
+        const Point2 position = Point2(x, y) + along * shift +
+                                up * (firstBaseline - pitch * static_cast<double>(i));
         Entity entity;
         entity.geometry = TextGeometry{position, std::string(line), height, finalRotation};
-        if (z != 0.0 && plainExtrusion) {
-            const std::vector<std::optional<double>> heights{z};
-            emit(std::move(entity), common, sink, &heights);
-        } else {
-            emit(std::move(entity), common, sink);
-        }
+        emit(std::move(entity), common, sink, heights.empty() ? nullptr : &heights, level);
     }
 }
 
@@ -1809,12 +1901,14 @@ void placeHeights(PropertyMap& properties, std::size_t vertices, double zScale, 
     }
 }
 
+// The heights an entity's geometry has: one a vertex, two for a line and for
+// an arc (one an end, which differ where it climbs), one for anything else.
 std::size_t vertexCount(const Geometry& geometry)
 {
     if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
         return polyline->vertices.size();
     }
-    if (std::holds_alternative<Segment2>(geometry)) {
+    if (std::holds_alternative<Segment2>(geometry) || std::holds_alternative<Arc2>(geometry)) {
         return 2;
     }
     return 1;
@@ -1878,8 +1972,9 @@ std::optional<Geometry> placeGeometry(const Geometry& geometry, const Affine& tr
     return std::visit(Visitor{transform, tolerance}, geometry);
 }
 
-void Reader::place(const Block& block, const Affine& transform, double zScale, double zOffset,
-                   const Common& insert, const PropertyMap& attributes, Sink& sink)
+void Reader::place(const Block& block, const Affine& transform,
+                   const std::optional<HeightMap>& heightMap, const Common& insert,
+                   const PropertyMap& attributes, Sink& sink)
 {
     for (const BlockEntity& item : block.expanded) {
         if (reportFull(sink)) {
@@ -1894,8 +1989,33 @@ void Reader::place(const Block& block, const Affine& transform, double zScale, d
         for (const auto& [key, value] : attributes) {
             entity.properties.emplace(key, value); // the entity's own value wins
         }
-        if (zScale != 1.0 || zOffset != 0.0) {
-            placeHeights(entity.properties, vertexCount(entity.geometry), zScale, zOffset);
+        // Its heights with the insert: an entity drawn at the block's Z 0
+        // is at the insert's level (block Z 0, scaled, plus the offset); one
+        // with heights has them scaled and raised; under a tilted insert
+        // none is right. At an offset of 0 a Z-0 entity stays one, for the
+        // insert that places this block in turn.
+        const std::size_t vertices = vertexCount(entity.geometry);
+        bool atBlockZero = false;
+        if (!heightMap) {
+            katana::entity::setHeights(entity.properties, {});
+        } else if (item.atBlockZero) {
+            if (heightMap->offset != 0.0) {
+                katana::entity::setHeights(
+                    entity.properties,
+                    std::vector<std::optional<double>>(vertices, heightMap->offset));
+            } else {
+                atBlockZero = true;
+            }
+        } else if (heightMap->scale != 1.0 || heightMap->offset != 0.0) {
+            placeHeights(entity.properties, vertices, heightMap->scale, heightMap->offset);
+        }
+        // A mirror reverses an arc, and the heights at its two ends with it.
+        if (transform.determinant() < 0.0 && std::holds_alternative<Arc2>(entity.geometry)) {
+            auto ends = katana::entity::heightsOf(entity.properties, 2);
+            if (ends[0] != ends[1]) {
+                std::swap(ends[0], ends[1]);
+                katana::entity::setHeights(entity.properties, ends);
+            }
         }
         // What the entity inherits from this insert: its layer when it is on
         // layer 0, its colour when that is ByBlock.
@@ -1922,7 +2042,7 @@ void Reader::place(const Block& block, const Affine& transform, double zScale, d
             }
             sink.block->push_back({std::move(entity), item.layerFromInsert &&
                                                           (insert.layer.empty() || insert.layer == "0"),
-                                   item.colourFromInsert && insertByBlock});
+                                   item.colourFromInsert && insertByBlock, atBlockZero});
             continue;
         }
         entity.layer = layerPath(common.layer);
@@ -2040,6 +2160,18 @@ void Reader::convertInsert(const Record& record, Sink& sink)
     Block* block = buildBlock(name, sink.depth + 1, "INSERT");
     const bool plain = isPlainExtrusion(common.extrusion);
     const Affine frame = plain ? Affine{} : objectToPlan(common.extrusion, z);
+    // The block's Z runs along the insert's extrusion: a block Z of zb is at
+    // height (z + sz (zb - base Z)) times the extrusion's Z - up for the
+    // plain one, down in an insert facing down.
+    const bool level = isLevel(common.extrusion, frame);
+    std::optional<HeightMap> heightMap;
+    if (level) {
+        const double upward = normalised(common.extrusion).z;
+        heightMap = HeightMap{
+            sz * upward, upward * (z - sz * (block != nullptr ? block->baseZ : 0.0))};
+    } else {
+        warn("INSERT in a tilted plane, projected onto the plan without heights");
+    }
     const double radians = rotation * kDegrees;
     const double cosine = std::cos(radians);
     const double sine = std::sin(radians);
@@ -2072,17 +2204,17 @@ void Reader::convertInsert(const Record& record, Sink& sink)
                     entity.geometry = PointGeometry{transform.apply(
                         block != nullptr ? block->base : Point2(0.0, 0.0))};
                     entity.properties = attributes;
-                    if (z != 0.0) {
-                        const std::vector<std::optional<double>> heights{z};
+                    if (z != 0.0 && level) {
+                        const std::vector<std::optional<double>> heights{
+                            heightOf(common.extrusion, z)};
                         emit(std::move(entity), common, sink, &heights);
                     } else {
-                        emit(std::move(entity), common, sink);
+                        emit(std::move(entity), common, sink, nullptr, level);
                     }
                 }
                 continue;
             }
-            const double zOffset = z - sz * (block != nullptr ? block->baseZ : 0.0);
-            place(*block, transform, sz, zOffset, common, attributes, sink);
+            place(*block, transform, heightMap, common, attributes, sink);
         }
     }
 }
@@ -2112,7 +2244,7 @@ void Reader::convertDimension(const Record& record, Sink& sink)
     Affine transform;
     transform.tx = -block->base.x;
     transform.ty = -block->base.y;
-    place(*block, transform, 1.0, 0.0, common, {}, sink);
+    place(*block, transform, HeightMap{}, common, {}, sink);
 }
 
 void translate(Geometry& geometry, const Vec2& shift)
