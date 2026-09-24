@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JOBFile jobName="ONE" version="5.72" product="Trimble Access" productVersion="2024.10" TimeStamp="2024-03-05T09:00:00">
+<FieldBook>
+<PointRecord ID="1"><Name>A</Name><Code>C&amp;D</Code><Method>Coordinates</Method><SurveyMethod>KeyedIn</SurveyMethod><Classification>Control</Classification><Deleted>false</Deleted><Grid><North>10</North><East>20</East><Elevation>3</Elevation></Grid></PointRecord>
+<AtmosphereRecord ID="2"><Pressure>1000</Pressure><Temperature>15</Temperature><PPM>1.5</PPM><ApplyPPMToRawDistances>false</ApplyPPMToRawDistances></AtmosphereRecord>
+<StationRecord ID="3"><StationName>A</StationName><TheodoliteHeight>1.4</TheodoliteHeight><AtmosphereID>2</AtmosphereID><ScaleFactor>1</ScaleFactor></StationRecord>
+<TargetRecord ID="4"><PrismType>MiniPrism</PrismType><PrismConstant>0.0175</PrismConstant><TargetHeight>1.3</TargetHeight></TargetRecord>
+<PointRecord ID="5"><Name>B</Name><Code>TOP</Code><Method>DirectReading</Method><Classification>BackSight</Classification><Deleted>false</Deleted><Circle><HorizontalCircle>0</HorizontalCircle><VerticalCircle>90</VerticalCircle><EDMDistance>12.5</EDMDistance><Face>Face1</Face></Circle><StationID>3</StationID><TargetID>4</TargetID></PointRecord>
+<BackBearingRecord ID="6"><StationRecordID>3</StationRecordID><BackSight>B</BackSight><Face1HorizontalCircle>0</Face1HorizontalCircle></BackBearingRecord>
+<PointRecord ID="7"><Name>C</Name><Code>TOP</Code><Method>DirectReading</Method><Classification>Normal</Classification><Deleted>false</Deleted><Circle><HorizontalCircle>45.5</HorizontalCircle><VerticalCircle>268.25</VerticalCircle><EDMDistance>30.25</EDMDistance><Face>Face2</Face></Circle><StationID>3</StationID><TargetID>4</TargetID></PointRecord>
+<PointRecord ID="8"><Name>G</Name><Method>GpsRTKQuickMark</Method><SurveyMethod>Float</SurveyMethod><Deleted>false</Deleted><ECEFDeltas><DeltaX>1</DeltaX><DeltaY>2</DeltaY><DeltaZ>3</DeltaZ></ECEFDeltas><RTK_Base>A</RTK_Base></PointRecord>
+</FieldBook>
+<Reductions><Point><ID>7</ID><Name>C</Name><Grid><North>1</North><East>2</East><Elevation>3</Elevation></Grid></Point></Reductions>
+<Environment><CoordinateSystem><SystemName>Local</SystemName></CoordinateSystem></Environment>
+</JOBFile>
