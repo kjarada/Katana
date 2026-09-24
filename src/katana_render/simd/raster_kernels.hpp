@@ -5,7 +5,7 @@
 // linkage and a katana_avx2_ prefix.
 //
 // Each entry gives exactly the bits of its scalar reference in rasterizer.cpp
-// (transformVertex and shadePixel): every lane does the reference's operations
+// (transformVertices and shadePixel): every lane does the reference's operations
 // in the reference's order, and nothing is fused.
 
 #include <cstddef>
