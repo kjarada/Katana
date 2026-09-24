@@ -306,6 +306,42 @@ TEST(TopconRw5, RecordsKatanaDoesNotImportAreWarnedByNumberAndCounted)
     EXPECT_EQ(result.recordsRead, 9u);
 }
 
+TEST(TopconRw5, NoFieldOrNoteIsDroppedWithoutAWordAndOffCentreShotsAreKept)
+{
+    const std::string bytes = "MO,AD0,UN1,SF1.0,EC0,EO0.0,AU0\n"                            // 1
+                              "OC,OP1,N 0.0,E 0.0,EL0.0\n"                                  // 2
+                              "BK,OP1,BP2,BC0.0000,--sun behind\n"                          // 3
+                              "SS,OP1,FP3,AR10.0000,AZ20.0000,ZE90.0000,SD5.000,FE12.345,QQ7\n"
+                              "OF,AR11.0000,ZE90.0000,SD5.100,--tree centre\n"              // 5
+                              "SS,OP1,FP4,AR30.0000,ZE90.0000,SD6.000,QQ8\n";               // 6
+    const auto result = topcon_test::read(kRw5, bytes, "fields.rw5");
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsRead, 6u);
+    EXPECT_EQ(result->recordsSkipped, 0u);
+    const survey::SurveyStation& station = result->project.stations.at(0);
+    // A backsight has no use for a note; it is kept with the setup.
+    EXPECT_EQ(station.metadata.at("notes"), "BK note: sun behind");
+    // AR and AZ on one shot: AR (10 00' 00") is read, AZ named, not imported.
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 4, "gives AR and also AZ"));
+    const auto direction = observationsTo<survey::HorizontalDirectionObservation>(station, "3");
+    ASSERT_EQ(direction.size(), 1u);
+    EXPECT_NEAR(direction[0].direction, dms(10, 0, 0), kAngleTolerance);
+    EXPECT_TRUE(observationsTo<survey::AzimuthObservation>(station, "3").empty());
+    // FE, the collector's foresight elevation, stays with the point.
+    EXPECT_EQ(topcon_test::unpositioned(result->project, "3")
+                  ->metadata.at("foresight elevation (collector, m)"),
+              "12.345");
+    // QQ is in no specification: warned where first met, then counted.
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 4, "field 'QQ' (value '7')"));
+    EXPECT_FALSE(topcon_test::anyWarningContains(*result, 6, "field 'QQ'"));
+    EXPECT_TRUE(topcon_test::anyWarningContains(
+        *result, 0, "'QQ' field of SS records was not imported on 2 records, the first record 4"));
+    // The off-centre shot is kept, as written, with the setup.
+    EXPECT_EQ(station.metadata.at("off-centre shot, record 5 (file units)"),
+              "AR 11.0000, ZE 90.0000, SD 5.100, note tree centre");
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 5, "not applied"));
+}
+
 TEST(TopconRw5, PastTenThousandWarningsTheRestAreCountedInOneWarningNotListed)
 {
     // Two good records, then 25,000 of a type the specification does not
