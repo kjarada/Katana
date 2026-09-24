@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
+#include "katana/core/task_pool.hpp"
 #include "katana/terrain/volume.hpp"
 #include "terrain_test_support.hpp"
 
@@ -414,4 +417,92 @@ TEST(CompareSurfaces, TheAnswerDoesNotDependOnHowTheGridBucketsTriangles)
     // the mixed-sign path of SignedIntegral is exercised on both runs.
     EXPECT_GT(here.value().cut, 1.0);
     EXPECT_GT(here.value().fill, 1.0);
+}
+
+// ---- parallel comparison: the same bits at any thread count ------------------------------
+
+namespace {
+
+// Rolling ground: two sine terms, so a design laid over it is above in some
+// places and below in others and the mixed-sign path of SignedIntegral runs
+// in many blocks, not just the all-fill one.
+std::vector<Point3> rollingPoints(std::uint32_t seed, std::size_t interior, double lift)
+{
+    Random random(seed);
+    const auto height = [lift](double x, double y) {
+        return 30.0 + lift + 1.5 * std::sin(x * 0.07) * std::cos(y * 0.05) + 0.01 * x;
+    };
+    std::vector<Point3> points;
+    for (const Point2 corner : {Point2(0, 0), Point2(200, 0), Point2(200, 200), Point2(0, 200)}) {
+        points.emplace_back(corner.x, corner.y, height(corner.x, corner.y));
+    }
+    for (std::size_t i = 0; i < interior; ++i) {
+        const double x = random.real(1.0, 199.0);
+        const double y = random.real(1.0, 199.0);
+        points.emplace_back(x, y, height(x, y));
+    }
+    return points;
+}
+
+// Bitwise, not ==: 0.0 == -0.0, and "the same result" here means the same bits.
+bool sameBits(double a, double b)
+{
+    return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
+}
+
+void expectSameBits(const SurfaceComparison& a, const SurfaceComparison& b)
+{
+    EXPECT_TRUE(sameBits(a.cut, b.cut)) << a.cut << " vs " << b.cut;
+    EXPECT_TRUE(sameBits(a.fill, b.fill)) << a.fill << " vs " << b.fill;
+    EXPECT_TRUE(sameBits(a.net, b.net)) << a.net << " vs " << b.net;
+    EXPECT_TRUE(sameBits(a.planArea, b.planArea)) << a.planArea << " vs " << b.planArea;
+    EXPECT_TRUE(sameBits(a.cutArea, b.cutArea)) << a.cutArea << " vs " << b.cutArea;
+    EXPECT_TRUE(sameBits(a.fillArea, b.fillArea)) << a.fillArea << " vs " << b.fillArea;
+    EXPECT_EQ(a.overlayTriangleCount, b.overlayTriangleCount);
+}
+
+} // namespace
+
+TEST(CompareSurfaces, GivesTheSameBitsOnOneThreadAsOnMany)
+{
+    // 4000 interior points make about 8000 triangles: some thirty of the
+    // fixed 256-triangle blocks, so the threads really do share the work and
+    // a partition that followed the thread count would show here.
+    const TinSurface existing = buildFromPoints(rollingPoints(11, 4000, 0.0));
+    const TinSurface design = buildFromPoints(rollingPoints(13, 2500, 0.3));
+    ASSERT_GT(existing.triangleCount(), 256u * 20u);
+
+    katana::core::TaskPool inlineOnly(0);
+    const auto serial = compareSurfaces(existing, design, &inlineOnly);
+    ASSERT_TRUE(serial.ok()) << serial.error().describe();
+    EXPECT_GT(serial.value().cut, 1.0); // both signs present: the ground crosses
+    EXPECT_GT(serial.value().fill, 1.0);
+    // The two surfaces share the 200 m square's corners, so the common ground
+    // is that square: 40 000 m^2, to rounding.
+    EXPECT_NEAR(serial.value().planArea, 40000.0, 1e-6);
+
+    for (const std::size_t workers : {1u, 2u, 3u, 7u, 15u}) {
+        katana::core::TaskPool pool(workers);
+        const auto parallel = compareSurfaces(existing, design, &pool);
+        ASSERT_TRUE(parallel.ok()) << parallel.error().describe();
+        SCOPED_TRACE(workers);
+        expectSameBits(serial.value(), parallel.value());
+    }
+    const auto shared = compareSurfaces(existing, design);
+    ASSERT_TRUE(shared.ok());
+    expectSameBits(serial.value(), shared.value());
+}
+
+TEST(CompareSurfaces, ASurfaceAgainstItselfIsExactlyZeroOnManyThreads)
+{
+    // The exact-zero promise of the clipper survives the split into blocks: a
+    // block of zero terms sums to exactly zero, and so do thirty of them.
+    const TinSurface surface = buildFromPoints(rollingPoints(17, 3000, 0.0));
+    katana::core::TaskPool pool(7);
+    const auto result = compareSurfaces(surface, surface, &pool);
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result.value().cut, 0.0);
+    EXPECT_EQ(result.value().fill, 0.0);
+    EXPECT_EQ(result.value().net, 0.0);
+    EXPECT_NEAR(result.value().planArea, 40000.0, 1e-6);
 }

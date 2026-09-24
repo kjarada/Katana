@@ -31,6 +31,10 @@
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
+namespace katana::core {
+class TaskPool;
+}
+
 namespace katana::terrain {
 
 struct Contour {
@@ -53,8 +57,12 @@ inline constexpr std::size_t kMaxContourLevels = 100000;
 // (majorEvery == 0: none). Fails with InvalidArgument when interval is not
 // finite and larger than tolerance::kGeometric, base is not finite, or more than
 // kMaxContourLevels levels would be needed.
+//
+// Levels are traced in parallel on `pool` (null: TaskPool::shared()), each
+// into its own list, and the lists are joined in level order: the result is
+// identical at any thread count, TaskPool(0) included (Rule 7).
 [[nodiscard]] katana::core::Result<std::vector<Contour>>
 contours(const TinSurface& surface, double interval, double base = 0.0,
-         std::size_t majorEvery = 5);
+         std::size_t majorEvery = 5, katana::core::TaskPool* pool = nullptr);
 
 } // namespace katana::terrain
