@@ -94,8 +94,10 @@ struct Sheet {
 // The smallest standard denominator at which `extent` fits inside the
 // printable area of the sheet, or the exact denominator needed when even
 // 1 : 50 000 is too large - a plot always fits; it is only the scale bar that
-// then has nothing standard to say. Fails with InvalidArgument for an empty
-// extent or a sheet with no printable area.
+// then has nothing standard to say. A line along one axis fits on its length:
+// a zero dimension asks nothing of the sheet. Fails with InvalidArgument for
+// an extent with no size in either direction (empty, or one point) or a
+// sheet with no printable area.
 [[nodiscard]] core::Result<double> fitScale(const geometry::Box2& extent,
                                             const PlotSettings& settings);
 

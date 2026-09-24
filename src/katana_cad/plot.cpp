@@ -107,7 +107,12 @@ Result<double> fitScale(const geometry::Box2& extent, const PlotSettings& settin
 {
     const double widthM = extent.max.x - extent.min.x;
     const double heightM = extent.max.y - extent.min.y;
-    if (!(widthM > 0.0) || !(heightM > 0.0) || !std::isfinite(widthM) || !std::isfinite(heightM)) {
+    // A line along one axis - a centreline, a row of points on one northing -
+    // has no height, and its zero dimension simply asks nothing of the sheet
+    // (audit CAD-15), as ViewTransform::fit treats it. A box with no size in
+    // either direction - nothing, or one point - has no scale to find.
+    if (!(widthM >= 0.0) || !(heightM >= 0.0) || !(std::max(widthM, heightM) > 0.0) ||
+        !std::isfinite(widthM) || !std::isfinite(heightM)) {
         return makeError(ErrorCode::InvalidArgument, "the drawing has no extent to fit");
     }
     auto area = printableArea(settings);

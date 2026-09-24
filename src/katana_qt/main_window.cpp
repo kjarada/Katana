@@ -575,6 +575,25 @@ void MainWindow::buildActions()
 
     viewMenu_->addAction(extentsAction);
     viewMenu_->addActions({gridAction_, snapAction_});
+    // Plan-view lines as a cosmetic pixel instead of the 1.5 px hairline:
+    // measured 5-8x cheaper to stroke (docs/plan_view.md), so on by default,
+    // with the heavier look one click away. Plots are unaffected.
+    QAction* thinLinesAction = viewMenu_->addAction("&Thin screen lines (faster)");
+    thinLinesAction->setObjectName("ThinScreenLinesAction");
+    thinLinesAction->setStatusTip(
+        "Draw plan-view lines one pixel wide, which repaints large drawings several times faster");
+    thinLinesAction->setCheckable(true);
+    thinLinesAction->setChecked(ViewportWidget::thinScreenLines());
+    connect(thinLinesAction, &QAction::toggled, this, [this](bool on) {
+        ViewportWidget::setThinScreenLines(on);
+        // Every plan view, docked or floating (a floating dock is still this
+        // window's child). By dynamic_cast: the views have no Q_OBJECT.
+        for (QWidget* widget : findChildren<QWidget*>()) {
+            if (auto* plan = dynamic_cast<ViewportWidget*>(widget)) {
+                plan->update();
+            }
+        }
+    });
 
     QMenu* snapMenu = viewMenu_->addMenu("Snap &Modes");
     for (const cad::SnapMode mode :
@@ -4138,7 +4157,11 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
                                        "no plan viewport to plot from");
     }
     if (fitToDrawing) {
-        const katana::geometry::Box2 extent = document_.spatialIndex().bounds();
+        // What this view draws - its layers, reference layers, meshes and
+        // alignments - as Zoom Extents frames it. The index's bounds never
+        // shrink, count every arc's whole circle and hidden layers, and miss
+        // alignments (audit QT-12, GEO-01).
+        const katana::geometry::Box2 extent = view->drawnBounds();
         auto fitted = cad::fitScale(extent, settings);
         if (!fitted) {
             return fitted.error();
