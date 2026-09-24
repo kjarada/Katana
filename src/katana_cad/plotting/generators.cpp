@@ -513,9 +513,10 @@ Result<std::vector<Sheet>> crossSectionSheets(const geometry::SolvedAlignment& a
                 deepest = std::max(deepest, *cut.high - *cut.low);
             }
         }
+        // Nothing sampled has no depth to exaggerate: true scale, 1.
         exaggeration = 1.0;
         for (const double candidate : kExaggerations) {
-            if (deepest * 1000.0 * candidate / scale <= cellH * kSectionFill) {
+            if (deepest > 0.0 && deepest * 1000.0 * candidate / scale <= cellH * kSectionFill) {
                 exaggeration = candidate;
             }
         }
