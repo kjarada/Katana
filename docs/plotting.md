@@ -60,7 +60,7 @@ furniture.
 
 | `Sheet` | |
 |---|---|
-| `id` | `s1`, `s2`...: stable for the sheet's life, so a match line or key plan can refer to the sheet however the sheets are reordered or renamed |
+| `id` | `s1`, `s2`...: stable for the sheet's life, so a match line or key plan can refer to the sheet however the sheets are reordered or renamed; never given to a new sheet while a mark still names it |
 | `name` | what the sheet shows (`PLAN TILE 3`, `ROAD CH 0.000 TO 172.500`) |
 | `paper`, `landscape` | ISO A0 to A4 |
 | `frame` | `a3_landscape` (the built-in frame, scaled to the paper) or empty for no frame |
@@ -244,6 +244,19 @@ viewports drawn to scale (plans and sections).
 (`markLabel`: `MATCH LINE CH 250.000 - SEE SHEET 3`), so reordering the
 sheets cannot make a mark lie.
 
+Removing a sheet cannot make one lie either. The marks that led to it still
+name its id, and `newSheetIds` counts every id a mark names as taken, so the
+next sheet added gets a new one. A mark whose sheet is gone prints its label
+alone (`MATCH LINE`), not `SEE SHEET` and the number of a stranger. Example:
+a key plan and three tiles, `s1` to `s4`. Remove `s4` and add a legend: the
+legend is sheet 4 but its id is `s5`, and the middle tile's match line reads
+`MATCH LINE`, not `MATCH LINE - SEE SHEET 4`.
+
+Ids are numbers after a prefix, and a stored set is read unchecked. New ids
+follow the highest number in use. An id too near the largest 64-bit count to
+have room after it gives the lowest free numbers instead. Nothing throws, and
+no id is given out twice.
+
 ## The sheet scale ladder
 
 The single-page plot's `kStandardScales` starts at 1:100. It is unchanged,
@@ -316,10 +329,10 @@ off.
 Each generator returns sheets. None touches a document. Each is
 deterministic: the same request gives the same sheets, compared whole in a
 test. `addSheets(document, sheets)` adds a generator's output as ONE undo
-step. It renumbers sheet and viewport ids after those the set already uses
-and moves the marks' sheet references with them (`prepareForAppend`). The
-paper is A3 landscape with the built-in frame unless a `SheetTemplate` says
-otherwise.
+step. It gives every sheet and viewport a new id (`newSheetIds`,
+`newViewportIds`) and moves the marks' sheet references with them
+(`prepareForAppend`). The paper is A3 landscape with the built-in frame
+unless a `SheetTemplate` says otherwise.
 
 **Fit to one sheet: `fitToSheet(extent)`.** This gives one plan filling the
 tiling area, centred on the extent, at the largest standard scale that holds
@@ -356,8 +369,19 @@ alignment's bearing. The first strip's match line crosses at CH 172.500.
 
 **Cross sections: `crossSectionSheets(alignment, name, {interval or stations,
 halfWidth, rows, columns, scale, exaggeration, surfaces})`.**
-- The sections are cut with `cad::sectionStations` and `crossSectionLine` on
-  the alignment's polyline.
+- The stations follow the rule of `cad::sectionStations`: every interval
+  from the start, and the end.
+- Each section is cut square to the alignment itself at its true chainage
+  (`pointAtStationOffset` either side), left to right looking along it, as
+  `crossSectionLine` draws one. It is not cut at a distance along the
+  alignment's chorded polyline. That polyline is shorter than the alignment
+  on every curve, so the end chainage fell past its end and was refused.
+- Example: east 300 m, a 100 m radius curve, then north 300 m. The road ends
+  at CH 557.0796 (200 + 100 pi / 2 + 200); its chords end at 557.0791. The
+  last of the sections every 100 m is at CH 557.0796, titled
+  `CROSS SECTION CH 557.080`.
+- A given station within 0.1 micrometre of an end is taken as the end. One
+  further out is refused.
 - They are packed rows x columns per sheet, in chainage order down each
   column and then across, and spill onto as many sheets as they need.
 - All share one scale and one exaggeration.
@@ -381,16 +405,34 @@ yorigin and the four margins (`docs/interop.md`). Each frame becomes a sheet:
 - on the ISO paper its size matches (within 2 mm, either way round);
 - its plan viewport is the frame's own window on the paper, kept inside the
   sheet's drawing area;
-- the viewport is centred where that window falls on the ground: from the
-  frame's origin, along its rotation, at its scale;
+- the viewport is centred where that window falls on the ground, at the
+  frame's scale;
 - the frame's own layer is hidden in the viewport.
 
-Frames that cannot be read (no size, not an ISO size, margins leaving
-nothing) are listed in `skipped` rather than dropped silently.
+Where the paper lies comes from the frame's OUTLINE, not from its xorigin,
+yorigin and rotation properties:
+- the outline's first corner is the paper's corner;
+- its first edge runs along the paper's bottom and gives the rotation;
+- its last corner is up the paper's left side.
 
-Example: an A3 frame at 1:1000, rotated 30 degrees, with its corner at
-(1000, 2000) and margins L23 R10 T10 B35. Its window's centre (216.5, 161) mm
-lands at (1106.9945, 2247.6801).
+The properties are the file's own. An import with an origin shift (the
+default "Shift Alongside" import and the command line's LOCAL option) moves
+the outline and leaves the properties as they were. So does a later move or
+rotation of the frame. A sheet placed from the properties showed ground
+millions of metres from the frame. Width, height, scale and margins still
+come from the properties. A mirrored frame is placed inside its outline.
+
+Frames that cannot be read are listed in `skipped` rather than dropped
+silently: no size or scale, not an ISO size, margins leaving nothing, or an
+outline that is no longer the frame's four corners.
+
+Examples:
+- An A3 frame at 1:1000, rotated 30 degrees, with its corner at (1000, 2000)
+  and margins L23 R10 T10 B35. Its window's centre (216.5, 161) mm lands at
+  (1106.9945, 2247.6801).
+- An A3 frame at 1:500 whose file puts its corner at (300000, 6200000),
+  imported with that shifted to (0, 0). Its window's centre lands at
+  (108.25, 80.5), inside the outline, not near (300108, 6200081).
 
 **The smart layout: `smartLayout(model, request)`.** A request says what to
 show, and the layout decides how to lay it out:
@@ -411,16 +453,36 @@ The rules:
   chainages per sheet as the sheet's width holds.
 - **Plan of an area.** On auto it is one sheet at the fitted scale. At a
   fixed scale it is one sheet when the area fits, and tiles with a key plan
-  when it does not.
-- **3D and legend.** These go beside a lone plan ("Main and panel right" or
-  "Main and two panels right"), and the plan's automatic scale is refitted to
-  its smaller cell. Otherwise they go on a sheet of their own.
+  when it does not. An empty area is refused.
+- **3D and legend.** These can go beside the plan, in "Main and panel right"
+  (one of them) or "Main and two panels right" (both). That needs three
+  things:
+  - the plan is the only one: a plan of an area or along the alignment, not
+    both;
+  - there is no long section;
+  - the plan, made for the narrower main cell, still shows everything asked
+    of it.
+
+  The plan is made for that cell from the start. On auto its scale is fitted
+  to the cell, and the whole plan fits there on one sheet. At a fixed scale,
+  an area must fit the cell at that scale, and an alignment must still be one
+  strip. When the plan does not fit, it keeps its whole sheet and the 3D view
+  and legend go on a sheet of their own after it. The plan is never squeezed
+  after it is made: that cut the ends off a strip, and the edges off an area.
 - **Cross sections** follow on sheets of their own.
 - **Auto** fits everything on as few sheets as it can.
 
 Examples:
 - A 300 x 200 m plan with a 3D view and a legend is one sheet: the plan at
   1:1250 in the main cell, the 3D view and legend to its right.
+- A 180 m straight road on auto with a 3D view is one sheet. The main cell of
+  "Main and panel right" is 251.1 mm wide, so the strip is at 1:750, holding
+  188 m, and the whole road is in it. At a fixed 1:500 the cell holds only
+  125.55 m. So the strip keeps the whole sheet (191 m), and the 3D view is
+  sheet 2.
+- A 180 x 100 m area at 1:500 with a legend would need 1:717 beside the
+  legend. So it keeps its whole sheet, and the legend is sheet 2. A
+  100 x 80 m area needs 1:398 and shares its sheet with the legend.
 - A 1000 m road at 1:500, plan and profile, with cross sections every
   100 m, is eight sheets: six plan-and-profile sheets (191 m each), then two
   of cross sections (eleven sections, eight to a sheet).
@@ -525,6 +587,25 @@ The A/A control moved by 1-11%. The JSON went from 300,942 bytes to 125,652
 (0.42x). What an edit still pays is one write of the whole set. A drag in the
 editor should therefore commit once, on release; it should not commit on
 every mouse move.
+
+The review fixes changed how the generators append their output and cut
+cross sections. The smart layout no longer copies the sheets made so far
+into a set for each append, `prepareForAppend` no longer copies the set once
+per sheet it numbers, and each cross section is built on the alignment. The
+same benchmarks were run again, twice, the fixed build against two copies of
+the build before it (`--alternate 4`, then `--alternate 6`). Ratios of
+medians, fixed over before:
+
+| Benchmark | Run 1 | Run 2 | A/A control (runs 1, 2) |
+|---|---|---|---|
+| `BM_SheetSmartLayoutLongRoad` | 0.75-0.79 | 0.65-0.67 | 1.05, 1.03 |
+| `BM_SheetEditViewportAndUndo` | 1.06-1.11 | 1.05-1.08 | 0.95, 1.03 |
+| `BM_SheetSetToJson` | 1.06-1.22 | 1.07-1.12 | 1.14, 0.96 |
+| `BM_SheetSetFromJson` | 0.92-1.14 | 0.91-1.04 | 1.23, 0.88 |
+
+The smart layout is 1.3 to 1.5 times as fast. The other three run code the
+fixes did not touch, on the same set (125,652 bytes both times). Their ratios
+are at the edge of the A/A spread, and no claim is made for them either way.
 
 ## Not yet
 
