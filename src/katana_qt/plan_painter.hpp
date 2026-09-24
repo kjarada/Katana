@@ -51,7 +51,6 @@
 
 #include <QFont>
 #include <QImage>
-#include <QList>
 #include <QPixmap>
 #include <QPointF>
 #include <QRgb>
@@ -216,10 +215,6 @@ class PlanPaintCache {
     friend class PlanPainter;
 
     katana::cad::DefinitionCache definitions_;
-    // Dash patterns by linetype name and pen width. A pattern also depends on
-    // the view scale, so they are dropped whenever the scale changes.
-    std::map<std::pair<std::string, double>, QList<qreal>> dashes_;
-    double dashScale_ = 0.0;
     // Plain text's fonts by pixel size, for the family they were made in;
     // on paper one font at a reference size, scaled to each text's height.
     QString fontFamily_;
