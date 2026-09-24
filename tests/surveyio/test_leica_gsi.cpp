@@ -526,6 +526,14 @@ TEST(LeicaGsi, StationWordsWithNoMeasurementAfterThemAreACoordinateListNotSetups
     EXPECT_NE(warningAbout(read, 1, "decimal point"), nullptr) << allWarnings(read);
     EXPECT_NE(warningAbout(read, 1, "coordinates of the point they name"), nullptr)
         << allWarnings(read);
+    // Records 1-3 write a point in all nine coordinate words; record 4's three
+    // ("81..00+01240000" first) and record 5's one leave it to the unit digit:
+    // 4 of 13, the fewer, so they are the ones named, from record 4.
+    const ReadWarning* mixed = warningAbout(read, 4, "4 length words leave the decimal point");
+    ASSERT_NE(mixed, nullptr) << allWarnings(read);
+    EXPECT_NE(mixed->message.find("'01240000'"), std::string::npos) << mixed->message;
+    EXPECT_NE(mixed->message.find("file's other 9 write one"), std::string::npos)
+        << mixed->message;
 }
 
 TEST(LeicaGsi, TextInAHeightWordIsThePointsCodeAndTheImportSaysSo)
