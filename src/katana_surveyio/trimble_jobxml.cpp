@@ -235,6 +235,21 @@ class RecordBuffer {
         bool used;
     };
 
+    // The most one record may make the reader hold, in bytes: its paths and
+    // values, copied or viewed, and its list of fields. Why a limit: the path
+    // of every nested value repeats the names of the elements around it, so
+    // a crafted record - one element with a long name holding many empty
+    // ones - asks for memory growing with the SQUARE of its size (a 128 KB
+    // file, 512 MB; a 1 MB file, some 32 GB), and past 4 GiB the 32-bit
+    // offsets of a Span would wrap and resolve to the wrong bytes. The
+    // largest record in a public 918 kB Survey Controller job is under 3 kB and
+    // its Environment under 4 kB: 16 MiB is thousands of times what a
+    // controller writes, and keeps every offset far below 4 GiB. A record
+    // past it is dropped from the buffer (and the memory given back) while
+    // the rest of it is read through, and the caller skips it with a warning.
+    static constexpr std::size_t kBudgetBytes = std::size_t{16} << 20;
+    static constexpr std::size_t kBudgetMebibytes = kBudgetBytes >> 20;
+
     void reset(std::size_t line)
     {
         arena_.clear();
@@ -245,11 +260,19 @@ class RecordBuffer {
         pending_.clear();
         pendingMode_ = Pending::None;
         line_ = line;
+        viewed_ = 0;
+        overBudget_ = false;
     }
+
+    // True when the record went past kBudgetBytes: nothing of it is held.
+    [[nodiscard]] bool overBudget() const { return overBudget_; }
 
     // `element` must be a view into the document (XmlPullReader::name()).
     void open(std::string_view element)
     {
+        if (overBudget_) {
+            return;
+        }
         if (depth_ > 0) {
             hadChild_[depth_ - 1] = true;
         }
@@ -271,11 +294,15 @@ class RecordBuffer {
         path_.append(element);
         pending_.clear();
         pendingMode_ = Pending::None;
+        checkBudget();
     }
 
     // Attribute of the element just opened.
     void attribute(std::string_view name, std::string_view decoded)
     {
+        if (overBudget_) {
+            return;
+        }
         const auto pathBegin = static_cast<std::uint32_t>(arena_.size());
         arena_.append(path_);
         arena_.push_back('@');
@@ -286,6 +313,7 @@ class RecordBuffer {
                                 Span{nullptr, valueBegin,
                                      static_cast<std::uint32_t>(arena_.size() - valueBegin)},
                                 false});
+        checkBudget();
     }
 
     // A run of character data in the element open now; `raw` must be a view
@@ -296,6 +324,9 @@ class RecordBuffer {
     // Error even when all is well.
     bool addText(std::string_view raw, bool hasReference)
     {
+        if (overBudget_) {
+            return true;
+        }
         const bool plain = !hasReference;
         if (pendingMode_ == Pending::None && plain) {
             pendingView_ = raw;
@@ -308,12 +339,14 @@ class RecordBuffer {
         pendingMode_ = Pending::Copied;
         if (plain) {
             pending_.append(raw);
+            checkBudget();
             return true;
         }
         if (katana::core::Status status = detail::appendXmlText(raw, pending_); !status.ok()) {
             decodeError_ = status.error();
             return false;
         }
+        checkBudget();
         return true;
     }
 
@@ -321,6 +354,9 @@ class RecordBuffer {
 
     void close()
     {
+        if (overBudget_) {
+            return;
+        }
         if (overflow_ > 0) {
             --overflow_;
             return;
@@ -340,6 +376,7 @@ class RecordBuffer {
             }
             if (pendingMode_ == Pending::View) {
                 const std::string_view value = trimmed(pendingView_);
+                viewed_ += value.size(); // counted, so no view's size can wrap its Span either
                 field.value = Span{value.data(), 0, static_cast<std::uint32_t>(value.size())};
             } else if (pendingMode_ == Pending::Copied) {
                 const std::string_view value = trimmed(pending_);
@@ -352,6 +389,7 @@ class RecordBuffer {
         path_.resize(depthStarts_[depth_]);
         pending_.clear();
         pendingMode_ = Pending::None;
+        checkBudget();
     }
 
     [[nodiscard]] std::size_t line() const { return line_; }
@@ -397,6 +435,24 @@ class RecordBuffer {
   private:
     enum class Pending { None, View, Copied };
 
+    // A few additions and a comparison, after each change that can grow
+    // what the record holds. Checked, not reserved against: a record is
+    // almost always a few hundred bytes.
+    void checkBudget()
+    {
+        if (arena_.size() + path_.size() + pending_.size() + viewed_ +
+                fields_.size() * sizeof(Field) <=
+            kBudgetBytes) {
+            return;
+        }
+        overBudget_ = true;
+        std::string().swap(arena_);
+        std::vector<Field>().swap(fields_);
+        std::string().swap(path_);
+        std::string().swap(pending_);
+        pendingMode_ = Pending::None;
+    }
+
     [[nodiscard]] std::string_view resolve(const Span& span) const
     {
         return span.document != nullptr ? std::string_view(span.document, span.size)
@@ -416,6 +472,8 @@ class RecordBuffer {
     Pending pendingMode_ = Pending::None;
     katana::core::Error decodeError_{};
     std::size_t line_ = 0;
+    std::size_t viewed_ = 0; // bytes of the values held as views into the document
+    bool overBudget_ = false;
 };
 
 // ---- What earlier records said, by record ID ----------------------------------------
@@ -491,6 +549,10 @@ struct PointSlot {
     std::size_t named = kNone;
     bool control = false;   // the kept coordinate record is a control one
     bool described = false; // its method, survey method and class are in its metadata
+    // In SurveyProject::controlPoints already. A flag, not a search of that
+    // list: a control list imported into a job is thousands of marks, and a
+    // search per mark made reading it grow with the square of its length.
+    bool controlListed = false;
 };
 
 // ---- The reader ------------------------------------------------------------------
@@ -525,16 +587,23 @@ class JobXmlReader {
     void noteUnread(std::string_view recordName, RecordBuffer& record);
 
     Result<bool> gather(RecordBuffer& record, std::size_t elementDepth);
+    void warnOverBudget(std::string_view name, std::string_view kind, std::size_t line);
 
     // ---- records
+    // Each record counts once in ReadResult: read when anything of it went
+    // into the project (a setup, an observation, a point, a feature, a
+    // definition later records use, metadata), skipped otherwise. So the
+    // record readers below return whether they imported the record, and
+    // readFieldBookRecord does the counting; a record they refuse has had
+    // its warning already.
     void readFieldBookRecord(std::string_view name, std::string_view id,
                              std::string_view timeStamp, RecordBuffer& record);
-    void readPointRecord(std::string_view id, RecordBuffer& record);
-    void readPointRecordBody(std::string_view id, RecordBuffer& record, bool fresh);
+    bool readPointRecord(std::string_view id, RecordBuffer& record);
+    bool readPointRecordBody(std::string_view id, RecordBuffer& record, bool fresh);
     void keepOrRefuse(std::vector<survey::Observation>& list, bool plainlyValid, std::size_t line);
-    void readStationRecord(std::string_view id, std::string_view timeStamp, RecordBuffer& record);
-    void readBackBearingRecord(std::string_view id, RecordBuffer& record);
-    void readLineRecord(std::string_view id, RecordBuffer& record);
+    bool readStationRecord(std::string_view id, std::string_view timeStamp, RecordBuffer& record);
+    bool readBackBearingRecord(std::string_view id, RecordBuffer& record);
+    bool readLineRecord(std::string_view id, RecordBuffer& record);
     void readReductionsPoint(RecordBuffer& record);
     void readEnvironment(RecordBuffer& record);
     void keepAsMetadata(std::string_view prefix, RecordBuffer& record);
@@ -546,8 +615,8 @@ class JobXmlReader {
     survey::UnpositionedPoint* named(std::string_view name);
     survey::SurveyPoint* positioned(std::string_view name);
     std::map<std::string, std::string>* metadataOf(std::string_view name);
-    void addPositioned(survey::SurveyPoint point, bool control, std::string_view recordId);
-    void addObservation(survey::SurveyStation* station, survey::Observation observation,
+    bool addPositioned(survey::SurveyPoint point, bool control, std::string_view recordId);
+    bool addObservation(survey::SurveyStation* station, survey::Observation observation,
                         std::size_t line);
     survey::GnssAntenna antennaFor(std::string_view antennaId) const;
 
@@ -672,7 +741,7 @@ Result<bool> JobXmlReader::gather(RecordBuffer& record, std::size_t elementDepth
         switch (xml_.next()) {
         case XmlPullReader::Event::StartElement: {
             record.open(xml_.name());
-            if (!xml_.hasAttributes()) {
+            if (!xml_.hasAttributes() || record.overBudget()) {
                 break;
             }
             // The schema puts attributes below record level on two elements
@@ -719,6 +788,20 @@ Result<bool> JobXmlReader::gather(RecordBuffer& record, std::size_t elementDepth
                              fileName_ + ": " + xml_.error().message, xml_.error().context);
         }
     }
+}
+
+// A record past RecordBuffer::kBudgetBytes was read through but not kept.
+// Its element `name` comes from the file, so a crafted one is shortened.
+void JobXmlReader::warnOverBudget(std::string_view name, std::string_view kind, std::size_t line)
+{
+    std::string shown(name.substr(0, 64));
+    if (name.size() > 64) {
+        shown += "...";
+    }
+    warn(line, "the " + shown + std::string(kind) + " holds more than " +
+                   std::to_string(RecordBuffer::kBudgetMebibytes) +
+                   " MiB of element names and values, thousands of times what a controller "
+                   "writes, and was not read; the file may be damaged");
 }
 
 // ---- Points ---------------------------------------------------------------------------
@@ -775,14 +858,15 @@ void JobXmlReader::ensureNamed(std::string_view name, std::size_t line)
     point.source = sourceAt(line);
 }
 
-void JobXmlReader::addPositioned(survey::SurveyPoint point, bool control, std::string_view recordId)
+// True when `point` is kept, false when an earlier record for its name is.
+bool JobXmlReader::addPositioned(survey::SurveyPoint point, bool control, std::string_view recordId)
 {
     PointSlot& slot = slotFor(point.id);
     if (slot.positioned == kNone) {
         slot.positioned = positioned_.size();
         slot.control = control;
         positioned_.push_back(std::move(point));
-        return;
+        return true;
     }
     // Two coordinate records for one name. Trimble's own search rules prefer a
     // control point to any other and otherwise the first stored; the one not
@@ -803,9 +887,10 @@ void JobXmlReader::addPositioned(survey::SurveyPoint point, bool control, std::s
         kept = std::move(point);
         slot.control = true;
     }
+    return replace;
 }
 
-void JobXmlReader::addObservation(survey::SurveyStation* station, survey::Observation observation,
+bool JobXmlReader::addObservation(survey::SurveyStation* station, survey::Observation observation,
                                   std::size_t line)
 {
     // A value the survey model would refuse (validateProject) is a warning
@@ -813,14 +898,14 @@ void JobXmlReader::addObservation(survey::SurveyStation* station, survey::Observ
     if (katana::core::Status status = survey::validateObservation(observation); !status.ok()) {
         warn(line, survey::observationKindName(observation) + " not imported: " +
                        status.error().message);
-        ++result_.recordsSkipped;
-        return;
+        return false;
     }
     if (station != nullptr) {
         station->observations.push_back(std::move(observation));
     } else {
         result_.project.observations.push_back(std::move(observation));
     }
+    return true;
 }
 
 survey::GnssAntenna JobXmlReader::antennaFor(std::string_view antennaId) const
@@ -900,12 +985,13 @@ void JobXmlReader::keepAsMetadata(std::string_view prefix, RecordBuffer& record)
 void JobXmlReader::readFieldBookRecord(std::string_view name, std::string_view id,
                                        std::string_view timeStamp, RecordBuffer& record)
 {
+    bool imported = true;
     if (name == "PointRecord") {
-        readPointRecord(id, record);
+        imported = readPointRecord(id, record);
     } else if (name == "StationRecord") {
-        readStationRecord(id, timeStamp, record);
+        imported = readStationRecord(id, timeStamp, record);
     } else if (name == "BackBearingRecord") {
-        readBackBearingRecord(id, record);
+        imported = readBackBearingRecord(id, record);
     } else if (name == "TargetRecord") {
         TargetRecord target;
         target.prismType = text(record, "PrismType");
@@ -960,7 +1046,7 @@ void JobXmlReader::readFieldBookRecord(std::string_view name, std::string_view i
         }
         result_.project.metadata["jxl.note." + std::string(id)] = std::move(notes);
     } else if (name == "LineRecord") {
-        readLineRecord(id, record);
+        imported = readLineRecord(id, record);
     } else if (name == "UnitsRecord" || name == "CorrectionsRecord" ||
                name == "CoordinateSystemRecord" || name == "JobPropertiesRecord" ||
                name == "FeatureCodingRecord" || name == "TimeZoneRecord") {
@@ -970,11 +1056,15 @@ void JobXmlReader::readFieldBookRecord(std::string_view name, std::string_view i
         ++result_.recordsSkipped;
         return;
     }
+    if (!imported) {
+        ++result_.recordsSkipped;
+        return;
+    }
     ++result_.recordsRead;
     noteUnread(name, record);
 }
 
-void JobXmlReader::readStationRecord(std::string_view id, std::string_view timeStamp,
+bool JobXmlReader::readStationRecord(std::string_view id, std::string_view timeStamp,
                                      RecordBuffer& record)
 {
     const std::size_t line = record.line();
@@ -982,7 +1072,7 @@ void JobXmlReader::readStationRecord(std::string_view id, std::string_view timeS
     if (stationName.empty()) {
         warn(line, "a station record with no station name was not read");
         record.markAllUsed();
-        return;
+        return false;
     }
     ensureNamed(stationName, line);
 
@@ -1066,9 +1156,10 @@ void JobXmlReader::readStationRecord(std::string_view id, std::string_view timeS
     state.heightKnown = height.has_value();
     stations_[std::string(id)] = state;
     result_.project.stations.push_back(std::move(station));
+    return true;
 }
 
-void JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& record)
+bool JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& record)
 {
     const std::size_t line = record.line();
     const std::string stationId = text(record, "StationRecordID");
@@ -1081,8 +1172,8 @@ void JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& reco
     const auto found = stations_.find(stationId);
     if (found == stations_.end()) {
         warn(line, "backsight record " + std::string(id) + " names setup record " + stationId +
-                       ", which is not in the file");
-        return;
+                       ", which is not in the file; it was not read");
+        return false;
     }
     backBearingStations_[std::string(id)] = stationId;
     StationState& state = found->second;
@@ -1098,7 +1189,7 @@ void JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& reco
                            " was oriented more than once; the first orientation is used and the "
                            "later ones are in the setup's metadata");
         }
-        return;
+        return true;
     }
     state.backsightSet = true;
     if (!backsight.empty() && backsight != station.setup.pointId) {
@@ -1116,9 +1207,10 @@ void JobXmlReader::readBackBearingRecord(std::string_view id, RecordBuffer& reco
     if (correction && !trimmed(*correction).empty()) {
         station.metadata["jxl.orientationCorrection_deg"] = std::string(trimmed(*correction));
     }
+    return true;
 }
 
-void JobXmlReader::readLineRecord(std::string_view id, RecordBuffer& record)
+bool JobXmlReader::readLineRecord(std::string_view id, RecordBuffer& record)
 {
     const std::size_t line = record.line();
     if (flag(record, "Deleted").value_or(false)) {
@@ -1127,7 +1219,7 @@ void JobXmlReader::readLineRecord(std::string_view id, RecordBuffer& record)
             deletedIds_.push_back(std::string(id));
         }
         record.markAllUsed();
-        return;
+        return false;
     }
     survey::SurveyFeature feature;
     feature.name = text(record, "Name");
@@ -1135,12 +1227,17 @@ void JobXmlReader::readLineRecord(std::string_view id, RecordBuffer& record)
     const std::string method = text(record, "Method");
     const std::string start = text(record, "StartPoint");
     const std::string end = text(record, "EndPoint");
-    if (method != "TwoPoints" || start.empty() || end.empty() || start == end) {
+    if (method != "TwoPoints") {
         warn(line, "line " + feature.name + " is defined by " +
                        (method.empty() ? std::string("no method") : method) +
                        ", not by two points, and was not read");
         record.markAllUsed();
-        return;
+        return false;
+    }
+    if (start.empty() || end.empty() || start == end) {
+        warn(line, "line " + feature.name + " does not join two different points and was not read");
+        record.markAllUsed();
+        return false;
     }
     ensureNamed(start, line);
     ensureNamed(end, line);
@@ -1148,9 +1245,10 @@ void JobXmlReader::readLineRecord(std::string_view id, RecordBuffer& record)
     feature.source = sourceAt(line);
     feature.metadata["jxl.recordId"] = std::string(id);
     result_.project.features.push_back(std::move(feature));
+    return true;
 }
 
-void JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
+bool JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
 {
     // Feature and attribute library values, notes and how the point was
     // measured go to point metadata, and are built only for a point no point
@@ -1162,7 +1260,7 @@ void JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
     const PointSlot* slot = slotOf(name);
     const bool fresh = slot == nullptr || !slot->described;
     touched_ = nullptr;
-    readPointRecordBody(id, record, fresh);
+    const bool imported = readPointRecordBody(id, record, fresh);
     if (fresh && !name.empty()) {
         // The body leaves the slot it named or positioned in touched_, so it
         // is not looked up again; a record it refused may leave none.
@@ -1174,6 +1272,7 @@ void JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
             after->described = metadata != nullptr && metadata->contains("jxl.method");
         }
     }
+    return imported;
 }
 
 void JobXmlReader::keepOrRefuse(std::vector<survey::Observation>& list, bool plainlyValid,
@@ -1187,12 +1286,11 @@ void JobXmlReader::keepOrRefuse(std::vector<survey::Observation>& list, bool pla
     if (katana::core::Status status = survey::validateObservation(list.back()); !status.ok()) {
         warn(line, survey::observationKindName(list.back()) + " not imported: " +
                        status.error().message);
-        ++result_.recordsSkipped;
         list.pop_back();
     }
 }
 
-void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record, bool fresh)
+bool JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record, bool fresh)
 {
     const std::size_t line = record.line();
     if (flag(record, "Deleted").value_or(false)) {
@@ -1201,7 +1299,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
             deletedIds_.push_back(std::string(id));
         }
         record.markAllUsed();
-        return;
+        return false;
     }
     // Views into the record buffer, which holds still until the next record.
     auto view = [&record](std::string_view path) {
@@ -1211,7 +1309,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
     if (name.empty()) {
         warn(line, "a point record with no name was not read");
         record.markAllUsed();
-        return;
+        return false;
     }
     const std::string_view code = view("Code");
     const std::string_view method = view("Method");
@@ -1320,17 +1418,17 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
                                          ? survey::CoordinateSource::Entered
                                          : survey::CoordinateSource::Calculated;
             const bool control = classification == "Control";
-            addPositioned(std::move(point), control, id);
+            // A record whose coordinates lose to an earlier one's is skipped:
+            // its values are only in addPositioned's warning.
+            const bool kept = addPositioned(std::move(point), control, id);
             touched_ = &slotFor(name);
-            if (control && touched_->control &&
-                std::none_of(result_.project.controlPoints.begin(),
-                             result_.project.controlPoints.end(),
-                             [&](const survey::ControlPoint& c) { return c.pointId == name; })) {
+            if (control && touched_->control && !touched_->controlListed) {
+                touched_->controlListed = true;
                 result_.project.controlPoints.push_back(
                     elevation ? survey::ControlPoint::fixed3d(name)
                               : survey::ControlPoint::fixedHorizontal(name));
             }
-            return;
+            return kept;
         }
         warn(line, "point " + name + " has a grid position with no northing or easting; it "
                                      "was read as a named point without coordinates");
@@ -1351,7 +1449,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
                 warn(line, "observation to " + name + " names setup record " +
                                std::string(stationId) + ", which is not in the file; it was not read");
                 record.markAllUsed();
-                return;
+                return false;
             }
             lastStationId_.assign(stationId);
             lastStation_ = &stationFound->second;
@@ -1362,7 +1460,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         if (name == at) {
             warn(line, "observation from " + at + " to itself was not read");
             record.markAllUsed();
-            return;
+            return false;
         }
         (void)record.take("BackBearingID"); // the setup's orientation, already on the station
 
@@ -1425,6 +1523,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         // empty, and every number came through parseNumber - and the model's
         // own check is asked only for the wording of a refusal.
         std::vector<survey::Observation>& list = station.observations;
+        const std::size_t before = list.size();
         if (horizontal) {
             auto& direction = std::get<survey::HorizontalDirectionObservation>(
                 list.emplace_back(std::in_place_type<survey::HorizontalDirectionObservation>));
@@ -1489,9 +1588,12 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
                          line);
         }
         if (!horizontal && !vertical && !distance) {
-            warn(line, "observation to " + name + " records no circle reading and no distance");
+            warn(line, "observation to " + name +
+                           " records no circle reading and no distance and was not read");
         }
-        return;
+        // Read when any of its values was kept; each one refused has its
+        // warning from keepOrRefuse.
+        return list.size() > before;
     }
 
     if (record.has("MTA")) {
@@ -1501,7 +1603,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         describeNamed();
         ++meanTurnedAngles_;
         record.markAllUsed();
-        return;
+        return false;
     }
 
     // ---- GNSS.
@@ -1561,7 +1663,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         if (base.empty() || base == name || !dx || !dy || !dz) {
             warn(line, "the GNSS vector to " + name +
                            " has no base point or an incomplete delta and was not read");
-            return;
+            return false;
         }
         ensureNamed(base, line);
         survey::GnssGeocentricBaselineObservation vector;
@@ -1576,8 +1678,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         vector.toAntenna = antennaFor(antennaId);
         vector.solution = solution;
         vector.source = sourceAt(line);
-        addObservation(nullptr, std::move(vector), line);
-        return;
+        return addObservation(nullptr, std::move(vector), line);
     }
 
     auto globalPosition = [&](survey::GnssGlobalPositionObservation position) {
@@ -1586,7 +1687,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         position.antenna = antennaFor(antennaId);
         position.solution = solution;
         position.source = sourceAt(line);
-        addObservation(nullptr, std::move(position), line);
+        return addObservation(nullptr, std::move(position), line);
     };
 
     if (record.has("ECEF") || record.has("RTXECEF")) {
@@ -1598,7 +1699,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         if (!x || !y || !z) {
             describeNamed();
             warn(line, "the ECEF position of " + name + " is incomplete and was not read");
-            return;
+            return false;
         }
         survey::GnssGlobalPositionObservation position;
         position.geocentric = survey::GeocentricCoordinate{*x, *y, *z};
@@ -1612,8 +1713,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
                 position.referenceFrame += " epoch " + epoch;
             }
         }
-        globalPosition(std::move(position));
-        return;
+        return globalPosition(std::move(position));
     }
 
     if (record.has("WGS84") || record.has("Local")) {
@@ -1641,8 +1741,9 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
                     (*metadata)[prefix + ".height"] = std::to_string(*height);
                 }
             }
+            // Read: the values are kept (a warning at the end says where).
             ++keyedGlobal_;
-            return;
+            return true;
         }
         survey::GnssGlobalPositionObservation position;
         position.geodetic = survey::GeodeticCoordinate{*latitude * kRadiansPerDegree,
@@ -1659,16 +1760,17 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
             }
         }
         position.referenceFrame = "WGS 84";
-        globalPosition(std::move(position));
-        return;
+        return globalPosition(std::move(position));
     }
 
     // Anything else - a polar COGO point, a laser offset, a level reading -
-    // names the point and says what it did not read.
+    // names the point and says what it did not read: a record this reader
+    // does not handle, so it counts as skipped.
     describeNamed();
     warn(line, "point " + name + " was recorded by the method " +
                    (method.empty() ? std::string("(none stated)") : std::string(method)) +
                    ", which this reader does not turn into coordinates or observations");
+    return false;
 }
 
 // ---- Reductions and Environment -------------------------------------------------------
@@ -1762,13 +1864,11 @@ void JobXmlReader::finish()
                     " record(s) the surveyor deleted in the controller were not imported (record "
                     "IDs " +
                     ids + ")");
-        result_.recordsSkipped += deletedCount_;
     }
     if (meanTurnedAngles_ > 0) {
         warn(0, std::to_string(meanTurnedAngles_) +
                     " mean turned angle record(s) were not read as observations: each is the "
                     "controller's mean of shots that are read from their own records");
-        result_.recordsSkipped += meanTurnedAngles_;
     }
     if (keyedGlobal_ > 0) {
         warn(0, std::to_string(keyedGlobal_) +
@@ -1890,7 +1990,11 @@ Result<ReadResult> JobXmlReader::read()
                 if (!gathered) {
                     return gathered.error();
                 }
-                readEnvironment(record);
+                if (record.overBudget()) {
+                    warnOverBudget("Environment", " section", record.line());
+                } else {
+                    readEnvironment(record);
+                }
                 section.clear();
             } else if (section != "FieldBook" && section != "Reductions") {
                 ++skippedKinds_[section + " section"];
@@ -1916,6 +2020,15 @@ Result<ReadResult> JobXmlReader::read()
         Result<bool> gathered = gather(record, 3);
         if (!gathered) {
             return gathered.error();
+        }
+        if (record.overBudget()) {
+            if (section == "Reductions") {
+                warnOverBudget(name, " element of the Reductions section", record.line());
+            } else {
+                warnOverBudget(name, " record", record.line());
+                ++result_.recordsSkipped;
+            }
+            continue;
         }
         if (section == "Reductions") {
             if (name == "Point") {
