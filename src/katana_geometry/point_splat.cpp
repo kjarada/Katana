@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
+#include <memory>
 
 #include "katana/core/cpu_features.hpp"
 #include "katana/core/task_pool.hpp"
@@ -14,9 +16,11 @@ namespace katana::geometry {
 
 namespace {
 
-// The kernel from this many points. Measured with BM_ProjectToPixels
-// (bench_simd.cpp): see docs/performance.md.
-constexpr std::size_t kProjectMinimum = 8;
+// The kernel from one whole step of four points. Measured with
+// BM_ProjectToPixels (bench_simd.cpp) and the kernel allowed from one point:
+// at 4 points a call it already beats the loop (0.21 against 0.23 ms per
+// 65,536 points), at 8 by 1.3x, on the splat's 512-point blocks by 2.5x.
+constexpr std::size_t kProjectMinimum = 4;
 
 // Points projected at a time into a buffer on the stack: 4 KB of pixel
 // coordinates, which stay in L1 between the projection and the scatter.
@@ -29,6 +33,18 @@ constexpr std::size_t kParallelMinimum = 32'768;
 // Bands are at least this many rows, so a band is not mostly the tiles it
 // shares with its neighbours.
 constexpr int kMinimumBandRows = 16;
+
+// Points a pass over the source takes at a time: at least kChunk, and more
+// for a cloud of over kChunks of those. Set by the count alone, so that what
+// each chunk finds, combined in chunk order, is the same at every thread
+// count.
+constexpr std::size_t kChunk = std::size_t{1} << 16;
+constexpr std::size_t kChunks = 64;
+
+template <typename T> std::unique_ptr<T[]> scratch(std::size_t n)
+{
+    return std::unique_ptr<T[]>(new T[n]);
+}
 
 // The deepest level of detail: 4^8 cells, far more than a tile's points.
 constexpr int kMaximumLevel = 8;
@@ -155,12 +171,33 @@ SplatCloud buildSplatCloud(const double* x, const double* y, std::size_t strideB
         return v;
     };
 
+    // Every pass over the points runs in fixed chunks across the pool, and
+    // whatever a chunk finds is combined in chunk order, so nothing depends
+    // on the number of threads.
+    // At most kChunks chunks, so the per-chunk tile counts stay small.
+    const std::size_t chunkSize = std::max(kChunk, (count + kChunks - 1) / kChunks);
+    const std::size_t chunks = (count + chunkSize - 1) / chunkSize;
+    const auto eachChunk = [&](const std::function<void(std::size_t, std::size_t, std::size_t)>& body) {
+        pool.parallelFor(0, chunks, [&](std::size_t c) {
+            body(c, c * chunkSize, std::min(count, (c + 1) * chunkSize));
+        });
+    };
+
+    std::vector<Box2> chunkBounds(chunks);
+    eachChunk([&](std::size_t c, std::size_t lo, std::size_t hi) {
+        for (std::size_t i = lo; i < hi; ++i) {
+            const double px = xAt(i);
+            const double py = yAt(i);
+            if (std::isfinite(px) && std::isfinite(py)) {
+                chunkBounds[c].expand(Point2(px, py));
+            }
+        }
+    });
     Box2 bounds;
-    for (std::size_t i = 0; i < count; ++i) {
-        const double px = xAt(i);
-        const double py = yAt(i);
-        if (std::isfinite(px) && std::isfinite(py)) {
-            bounds.expand(Point2(px, py));
+    for (const Box2& b : chunkBounds) {
+        if (!b.empty()) {
+            bounds.expand(b.min);
+            bounds.expand(b.max);
         }
     }
     if (bounds.empty()) {
@@ -168,45 +205,57 @@ SplatCloud buildSplatCloud(const double* x, const double* y, std::size_t strideB
     }
     cloud.origin = Point2(0.5 * (bounds.min.x + bounds.max.x), 0.5 * (bounds.min.y + bounds.max.y));
 
-    // Offsets in the file's order, and which points they are.
-    std::vector<float> fx;
-    std::vector<float> fy;
-    std::vector<std::uint32_t> source;
-    fx.reserve(count);
-    fy.reserve(count);
-    source.reserve(count);
-    float minX = std::numeric_limits<float>::infinity();
-    float minY = minX;
-    float maxX = -minX;
-    float maxY = -minX;
-    for (std::size_t i = 0; i < count; ++i) {
-        const double px = xAt(i);
-        const double py = yAt(i);
-        if (!std::isfinite(px) || !std::isfinite(py)) {
-            continue;
+    // Offsets in the file's order; NaN marks a point that cannot be drawn.
+    // Scratch arrays are left uninitialised, so the parallel passes are the
+    // first to touch their pages: zero-filling them first on this thread
+    // was a measurable share of a cloud's first frame.
+    const auto fx = scratch<float>(count);
+    const auto fy = scratch<float>(count);
+    struct FloatBox {
+        float minX = std::numeric_limits<float>::infinity();
+        float minY = std::numeric_limits<float>::infinity();
+        float maxX = -std::numeric_limits<float>::infinity();
+        float maxY = -std::numeric_limits<float>::infinity();
+        std::size_t points = 0;
+    };
+    std::vector<FloatBox> chunkBoxes(chunks);
+    eachChunk([&](std::size_t c, std::size_t lo, std::size_t hi) {
+        FloatBox& box = chunkBoxes[c];
+        for (std::size_t i = lo; i < hi; ++i) {
+            const auto ox = static_cast<float>(xAt(i) - cloud.origin.x);
+            const auto oy = static_cast<float>(yAt(i) - cloud.origin.y);
+            if (!std::isfinite(ox) || !std::isfinite(oy)) {
+                fx[i] = std::numeric_limits<float>::quiet_NaN();
+                continue;
+            }
+            fx[i] = ox;
+            fy[i] = oy;
+            box.minX = std::min(box.minX, ox);
+            box.minY = std::min(box.minY, oy);
+            box.maxX = std::max(box.maxX, ox);
+            box.maxY = std::max(box.maxY, oy);
+            ++box.points;
         }
-        const auto ox = static_cast<float>(px - cloud.origin.x);
-        const auto oy = static_cast<float>(py - cloud.origin.y);
-        if (!std::isfinite(ox) || !std::isfinite(oy)) {
-            continue;
-        }
-        fx.push_back(ox);
-        fy.push_back(oy);
-        source.push_back(static_cast<std::uint32_t>(i));
-        minX = std::min(minX, ox);
-        minY = std::min(minY, oy);
-        maxX = std::max(maxX, ox);
-        maxY = std::max(maxY, oy);
+    });
+    FloatBox all;
+    for (const FloatBox& box : chunkBoxes) {
+        all.minX = std::min(all.minX, box.minX);
+        all.minY = std::min(all.minY, box.minY);
+        all.maxX = std::max(all.maxX, box.maxX);
+        all.maxY = std::max(all.maxY, box.maxY);
+        all.points += box.points;
     }
-    const std::size_t n = fx.size();
+    const std::size_t n = all.points;
     if (n == 0) {
         return cloud;
     }
+    const float minX = all.minX;
+    const float minY = all.minY;
 
     // A grid of about n / kSplatTilePoints tiles, roughly square on the ground
     // whatever the cloud's shape, so a corridor scan is cut along its length.
-    const double width = static_cast<double>(maxX) - static_cast<double>(minX);
-    const double height = static_cast<double>(maxY) - static_cast<double>(minY);
+    const double width = static_cast<double>(all.maxX) - static_cast<double>(minX);
+    const double height = static_cast<double>(all.maxY) - static_cast<double>(minY);
     const double wanted = std::max(1.0, static_cast<double>(n) / static_cast<double>(kSplatTilePoints));
     int columns = 1;
     int rows = 1;
@@ -220,43 +269,63 @@ SplatCloud buildSplatCloud(const double* x, const double* y, std::size_t strideB
     }
     const double tileWidth = width / columns;
     const double tileHeight = height / rows;
-    const auto tileOf = [&](std::size_t k) {
+    const std::size_t tileCount = static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
+    constexpr std::uint32_t kNoTile = std::numeric_limits<std::uint32_t>::max();
+
+    // Each point's tile, and each chunk's count of points per tile: chunk
+    // major, so no two threads share a cache line of counters.
+    const auto tileOfPoint = scratch<std::uint32_t>(count);
+    std::vector<std::uint32_t> counts(chunks * tileCount, 0);
+    eachChunk([&](std::size_t c, std::size_t lo, std::size_t hi) {
         const auto index = [](double offset, double extent, int cells) {
             const double t = extent > 0.0 ? offset / extent : 0.0;
             return std::clamp(static_cast<int>(t * cells), 0, cells - 1);
         };
-        const int column = index(static_cast<double>(fx[k]) - minX, width, columns);
-        // Row 0 at the top (largest y), as the image's rows run.
-        const int row = rows - 1 - index(static_cast<double>(fy[k]) - minY, height, rows);
-        return static_cast<std::size_t>(row) * static_cast<std::size_t>(columns) +
-               static_cast<std::size_t>(column);
-    };
-
-    // Counting sort by tile, keeping the file's order within a tile.
-    const std::size_t tileCount = static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
-    std::vector<std::uint32_t> start(tileCount + 1, 0);
-    std::vector<std::uint32_t> tileOfPoint(n);
-    for (std::size_t k = 0; k < n; ++k) {
-        tileOfPoint[k] = static_cast<std::uint32_t>(tileOf(k));
-        ++start[tileOfPoint[k] + 1];
-    }
-    for (std::size_t t = 0; t < tileCount; ++t) {
-        start[t + 1] += start[t];
-    }
-    // The points gathered tile by tile, each tile in the file's order: the
-    // level-of-detail pass then reads each tile's points contiguously.
-    std::vector<float> gx(n);
-    std::vector<float> gy(n);
-    std::vector<std::uint32_t> gsource(n);
-    {
-        std::vector<std::uint32_t> next(start.begin(), start.end() - 1);
-        for (std::size_t k = 0; k < n; ++k) {
-            const std::uint32_t at = next[tileOfPoint[k]]++;
-            gx[at] = fx[k];
-            gy[at] = fy[k];
-            gsource[at] = source[k];
+        for (std::size_t i = lo; i < hi; ++i) {
+            if (std::isnan(fx[i])) {
+                tileOfPoint[i] = kNoTile;
+                continue;
+            }
+            const int column = index(static_cast<double>(fx[i]) - minX, width, columns);
+            // Row 0 at the top (largest y), as the image's rows run.
+            const int row = rows - 1 - index(static_cast<double>(fy[i]) - minY, height, rows);
+            const auto t = static_cast<std::uint32_t>(row * columns + column);
+            tileOfPoint[i] = t;
+            ++counts[c * tileCount + t];
         }
+    });
+
+    // Counting sort by tile, keeping the file's order within a tile: a tile's
+    // points from chunk c go after those from every earlier chunk.
+    std::vector<std::uint32_t> start(tileCount + 1, 0);
+    {
+        std::uint32_t at = 0;
+        for (std::size_t t = 0; t < tileCount; ++t) {
+            start[t] = at;
+            for (std::size_t c = 0; c < chunks; ++c) {
+                const std::uint32_t k = counts[c * tileCount + t];
+                counts[c * tileCount + t] = at;
+                at += k;
+            }
+        }
+        start[tileCount] = at;
     }
+    // The points gathered tile by tile: the level-of-detail pass then reads
+    // each tile's points contiguously.
+    const auto gx = scratch<float>(n);
+    const auto gy = scratch<float>(n);
+    const auto gsource = scratch<std::uint32_t>(n);
+    eachChunk([&](std::size_t c, std::size_t lo, std::size_t hi) {
+        for (std::size_t i = lo; i < hi; ++i) {
+            if (tileOfPoint[i] == kNoTile) {
+                continue;
+            }
+            const std::uint32_t at = counts[c * tileCount + tileOfPoint[i]]++;
+            gx[at] = fx[i];
+            gy[at] = fy[i];
+            gsource[at] = static_cast<std::uint32_t>(i);
+        }
+    });
 
     cloud.xs.resize(n);
     cloud.ys.resize(n);
@@ -277,7 +346,7 @@ SplatCloud buildSplatCloud(const double* x, const double* y, std::size_t strideB
             }
             const auto row = static_cast<int>(t / static_cast<std::size_t>(columns));
             const auto column = static_cast<int>(t % static_cast<std::size_t>(columns));
-            orderByLevel(gx.data() + begin, gy.data() + begin, end - begin,
+            orderByLevel(gx.get() + begin, gy.get() + begin, end - begin,
                          static_cast<double>(minX) + column * tileWidth,
                          static_cast<double>(minY) + (rows - 1 - row) * tileHeight, tileWidth,
                          tileHeight, order);
