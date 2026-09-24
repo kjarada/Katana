@@ -81,5 +81,11 @@ bool paintModifyTransformIcon(std::string_view toolId, const ToolInk& ink);
 bool paintModifyEditIcon(std::string_view toolId, const ToolInk& ink);
 bool paintAnnotateIcon(std::string_view toolId, const ToolInk& ink);
 bool paintInquiryIcon(std::string_view toolId, const ToolInk& ink);
+// icons_everyday.cpp: Divide and Measure, Lengthen and Reverse, Match
+// Properties, Select Similar and Quick Select.
+bool paintDrawDivideIcon(std::string_view toolId, const ToolInk& ink);
+bool paintModifyLengthIcon(std::string_view toolId, const ToolInk& ink);
+bool paintPropertyIcon(std::string_view toolId, const ToolInk& ink);
+bool paintSelectIcon(std::string_view toolId, const ToolInk& ink);
 
 } // namespace katana::qt::tools

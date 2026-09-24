@@ -782,6 +782,48 @@ if(TARGET katana)
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
     # keys that silently do nothing; and within each menu every underlined
     # letter is one item's (--check-shortcuts).
+    # The tools a CAD user reaches for daily, in the menus the catalogue
+    # makes (src/katana_qt/tools/tool_menus.cpp): a Tools menu made beside
+    # the window's tool menus for the Inquiry and Select groups, Divide and
+    # Measure in Draw, Lengthen, Reverse and Match Properties in Modify. Each
+    # menu is opened for its screenshot and read back item by item.
+    add_test(NAME qt_the_tools_menu_holds_the_inquiry_and_select_tools_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%toolsMenu|?toolsMenu"
+            "-DEXPECT=toolsMenu: Tools: Distance .*; Area .*; ID Point .*; Angle .*; List .*; Select Similar .*; Quick Select "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tools_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_the_draw_menu_offers_divide_and_measure_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%drawMenu|?drawMenu"
+            "-DEXPECT=drawMenu: Draw: Point .*; Arc ; Divide .*; Measure "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/draw_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%modifyMenu|?modifyMenu"
+            "-DEXPECT=modifyMenu: Modify: Move .*; Explode .*; Lengthen .*; Reverse .*; Match Properties "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/modify_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # An inquiry tool driven from the command line: DIST, then two typed
+    # points, and the inverse of the 3-4-5 leg in the log - 5.000 by hand.
+    # ZOOM typed between them goes to the tool host's transparent-command
+    # hook rather than to the tool as a malformed point, and the tool carries
+    # on at the same step.
+    add_test(NAME qt_dist_typed_at_the_command_line_reports_the_inverse_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4"
+            "-DEXPECT=Horizontal distance 5.000"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dist_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
