@@ -615,6 +615,34 @@ TEST(LeicaGsi, MeasurementsBeforeAnyStationBlockAreKeptUnderASetupWithNoPosition
     EXPECT_TRUE(says(read->notCarried, "no reflector height before 2 shots"));
 }
 
+TEST(LeicaGsi, AFirstShotToAPointPositionedEarlierIsTheBacksightAndOnePositionedByItselfIsNot)
+{
+    // Record 1 keys in CP01 (input mode 1, "81..10"); record 2 sets up on
+    // STN1; its first shot (record 3) is to CP01, which the file positioned
+    // before it: the backsight. Setup 2's first shot (record 6) is to point
+    // 7, whose coordinates come in that same block, measured: no backsight.
+    const std::string text =
+        "110001+0000CP01 81..10+00100000 82..10+00300000 83..10+00050000 \r\n"
+        "110002+0000STN1 84..10+00100000 85..10+00200000 86..10+00050000 88..10+00001500 \r\n"
+        "110003+0000CP01 21.102+00000000 22.102+10000000 31..00+00100000 \r\n"
+        "110004+00000006 21.102+10000000 22.102+10000000 31..00+00020000 \r\n"
+        "110005+0000STN2 84..10+00140000 85..10+00200000 86..10+00050000 88..10+00001500 \r\n"
+        "110006+00000007 21.102+00000000 22.102+10000000 31..00+00010000 81..00+00150000 "
+        "82..00+00200000 83..00+00050000 \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::SurveyProject& project = read->project;
+    ASSERT_EQ(project.stations.size(), 2U);
+    EXPECT_EQ(project.stations[0].backsightPointId, "CP01");
+    EXPECT_TRUE(project.stations[0].metadata.contains("backsight"));
+    EXPECT_TRUE(project.stations[1].backsightPointId.empty());
+    EXPECT_FALSE(project.stations[1].metadata.contains("backsight"));
+    EXPECT_TRUE(says(read->notCarried, "1 of 2 setups took the point of their first shot"));
+    EXPECT_TRUE(says(read->notCarried, "cannot be oriented until its backsight is known"));
+    // CP01 was keyed in, so it is known to the reduction as entered.
+    EXPECT_EQ(point(project, "CP01")->coordinateSource, survey::CoordinateSource::Entered);
+}
+
 TEST(LeicaGsi, AShotAtTheOccupiedPointIsAWarningNotAnInvalidObservation)
 {
     const std::string text = "110001+0000STN1 88..10+00001500 \n"
