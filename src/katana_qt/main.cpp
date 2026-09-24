@@ -12,6 +12,7 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QTextDocumentFragment>
 #include <QTextEdit>
 #include <QToolBar>
@@ -204,6 +205,18 @@ bool fillField(QWidget& dialog, const QString& assignment)
         check->setChecked(text == "on");
         return true;
     }
+    // Tabbed pages: the tab whose text is TEXT brought to the front, as a
+    // click on it does (the style manager's managerTabs=Linetypes).
+    if (auto* tabs = qobject_cast<QTabWidget*>(widget)) {
+        for (int tab = 0; tab < tabs->count(); ++tab) {
+            if (QString(tabs->tabText(tab)).remove('&') == text) {
+                tabs->setCurrentIndex(tab);
+                return true;
+            }
+        }
+        std::fprintf(stderr, "--fill: %s has no tab '%s'\n", qPrintable(name), qPrintable(text));
+        return false;
+    }
     // A list, a grid or a tree: the row whose text is TEXT made current and
     // selected, as a click on it does (the symbol library's grid).
     if (auto* view = qobject_cast<QAbstractItemView*>(widget);
@@ -215,8 +228,14 @@ bool fillField(QWidget& dialog, const QString& assignment)
             std::fprintf(stderr, "--fill: %s lists no '%s'\n", qPrintable(name), qPrintable(text));
             return false;
         }
-        view->selectionModel()->setCurrentIndex(found.front(),
-                                                QItemSelectionModel::ClearAndSelect);
+        // A view that selects whole rows selects the row, as its click does:
+        // one cell alone is no selected row to a manager that asks for them
+        // (the style manager's linetypeTable), which then shows nothing.
+        QItemSelectionModel::SelectionFlags flags = QItemSelectionModel::ClearAndSelect;
+        if (view->selectionBehavior() == QAbstractItemView::SelectRows) {
+            flags |= QItemSelectionModel::Rows;
+        }
+        view->selectionModel()->setCurrentIndex(found.front(), flags);
         return true;
     }
     std::fprintf(stderr, "--fill: the dialog has no field %s that takes '%s'\n",
