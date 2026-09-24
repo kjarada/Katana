@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -154,6 +155,147 @@ TEST(PolygonClipSegment, LiangBarsky)
     ASSERT_TRUE(diagonal.has_value());
     EXPECT_TRUE(nearlyEqual(diagonal->start, Point2(0, 0)));
     EXPECT_TRUE(nearlyEqual(diagonal->end, Point2(10, 10)));
+}
+
+namespace {
+
+// Run `index` of `runs` as its own vector, for comparing with EXPECT_EQ.
+std::vector<Point2> run(const PolylineRuns& runs, std::size_t index)
+{
+    return std::vector<Point2>(runs.points.begin() + static_cast<std::ptrdiff_t>(runs.begin(index)),
+                               runs.points.begin() + static_cast<std::ptrdiff_t>(runs.ends[index]));
+}
+
+} // namespace
+
+TEST(PolygonClipPolyline, APolylineWhollyInsideComesBackAsOneRunEqualToIt)
+{
+    // Vertices chosen with no exact binary representation, so a vertex
+    // recomputed as a + 1 * (b - a) could differ from the one given; the run
+    // must hold the vertices themselves.
+    const std::vector<Point2> line{Point2(0.1, 0.2), Point2(3.3, 0.7), Point2(9.9, 9.7)};
+    PolylineRuns runs;
+    clipPolyline(line, false, Box2(Point2(0, 0), Point2(10, 10)), runs);
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(run(runs, 0), line);
+}
+
+TEST(PolygonClipPolyline, ALineThatLeavesAndComesBackIsTwoRunsWithCrossingsOnTheBoundary)
+{
+    // Box (0,0)-(10,10). The line (-5,5) (5,5) (5,15) (8,15) (8,5) (15,5):
+    //   (-5,5)-(5,5) enters at x = 0: (0,5)-(5,5);
+    //   (5,5)-(5,15) leaves at y = 10: (5,5)-(5,10), which ends the run;
+    //   (5,15)-(8,15) lies above the box: nothing;
+    //   (8,15)-(8,5) comes back in at y = 10: a new run (8,10)-(8,5);
+    //   (8,5)-(15,5) leaves at x = 10: (8,5)-(10,5).
+    // Every crossing is at a parameter a quarter, a half or three quarters of
+    // a length that is a whole number, so each is exact.
+    const std::vector<Point2> line{Point2(-5, 5), Point2(5, 5),  Point2(5, 15),
+                                   Point2(8, 15), Point2(8, 5), Point2(15, 5)};
+    PolylineRuns runs;
+    clipPolyline(line, false, Box2(Point2(0, 0), Point2(10, 10)), runs);
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(run(runs, 0), (std::vector<Point2>{Point2(0, 5), Point2(5, 5), Point2(5, 10)}));
+    EXPECT_EQ(run(runs, 1), (std::vector<Point2>{Point2(8, 10), Point2(8, 5), Point2(10, 5)}));
+}
+
+TEST(PolygonClipPolyline, KeptWholeASegmentThatMeetsTheBoxKeepsBothItsVertices)
+{
+    // The line of the test above, with segments kept whole: (-5,5)-(5,5)
+    // and (5,5)-(5,15) meet the box and make one run of their three
+    // vertices; (5,15)-(8,15) misses it and ends the run; (8,15)-(8,5) and
+    // (8,5)-(15,5) meet it and make the second. Every point is a vertex.
+    const std::vector<Point2> line{Point2(-5, 5), Point2(5, 5),  Point2(5, 15),
+                                   Point2(8, 15), Point2(8, 5), Point2(15, 5)};
+    PolylineRuns runs;
+    clipPolyline(line, false, Box2(Point2(0, 0), Point2(10, 10)), runs,
+                 PolylineClip::WholeSegments);
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(run(runs, 0), (std::vector<Point2>{Point2(-5, 5), Point2(5, 5), Point2(5, 15)}));
+    EXPECT_EQ(run(runs, 1), (std::vector<Point2>{Point2(8, 15), Point2(8, 5), Point2(15, 5)}));
+    // A segment across the box with both ends outside is kept, whole.
+    clipPolyline({Point2(-10, 5), Point2(20, 5), Point2(20, 40)}, false,
+                 Box2(Point2(0, 0), Point2(10, 10)), runs, PolylineClip::WholeSegments);
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(run(runs, 0), (std::vector<Point2>{Point2(-10, 5), Point2(20, 5)}));
+}
+
+TEST(PolygonClipPolyline, ASegmentCrossingTheBoxWithBothEndsOutsideIsARunOfItsTwoCrossings)
+{
+    // (-10,5)-(20,5) across the box (0,0)-(10,10): enters at t = 1/3, leaves
+    // at t = 2/3, so (0,5)-(10,5) up to rounding in the thirds.
+    const std::vector<Point2> line{Point2(-10, 5), Point2(20, 5)};
+    PolylineRuns runs;
+    clipPolyline(line, false, Box2(Point2(0, 0), Point2(10, 10)), runs);
+    ASSERT_EQ(runs.size(), 1u);
+    const auto only = run(runs, 0);
+    ASSERT_EQ(only.size(), 2u);
+    EXPECT_TRUE(nearlyEqual(only[0], Point2(0, 5)));
+    EXPECT_TRUE(nearlyEqual(only[1], Point2(10, 5)));
+}
+
+TEST(PolygonClipPolyline, AClosedRingEndsItsLastRunAtTheFirstVertexWithoutJoiningTheFirstRun)
+{
+    // The square (2,2) (12,2) (12,8) (2,8), closed, against (0,0)-(10,10):
+    //   (2,2)-(12,2) leaves at x = 10: run (2,2)-(10,2), ended;
+    //   (12,2)-(12,8) is right of the box: nothing;
+    //   (12,8)-(2,8) enters at x = 10: run (10,8)-(2,8);
+    //   the closing (2,8)-(2,2) continues it to (2,2).
+    // The two runs meet at (2,2) and stay two: drawn as a polyline, a closed
+    // ring has two ends there, and a join would draw what was not drawn before.
+    const std::vector<Point2> ring{Point2(2, 2), Point2(12, 2), Point2(12, 8), Point2(2, 8)};
+    PolylineRuns runs;
+    clipPolyline(ring, true, Box2(Point2(0, 0), Point2(10, 10)), runs);
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(run(runs, 0), (std::vector<Point2>{Point2(2, 2), Point2(10, 2)}));
+    EXPECT_EQ(run(runs, 1), (std::vector<Point2>{Point2(10, 8), Point2(2, 8), Point2(2, 2)}));
+}
+
+TEST(PolygonClipPolyline, NothingOutsideTheBoxAndNothingFromTooFewVerticesOrAnEmptyBox)
+{
+    PolylineRuns runs;
+    runs.points.push_back(Point2(1, 1)); // a buffer reused from a last call is replaced
+    runs.ends.push_back(1);
+    clipPolyline({Point2(-5, -5), Point2(-1, 20)}, false, Box2(Point2(0, 0), Point2(10, 10)),
+                 runs);
+    EXPECT_TRUE(runs.empty());
+    EXPECT_TRUE(runs.points.empty());
+    clipPolyline({Point2(1, 1)}, false, Box2(Point2(0, 0), Point2(10, 10)), runs);
+    EXPECT_TRUE(runs.empty());
+    clipPolyline({Point2(1, 1), Point2(2, 2)}, false, Box2{}, runs);
+    EXPECT_TRUE(runs.empty());
+}
+
+TEST(PolygonClipPolyline, EveryRunLiesInTheBoxAndEveryVertexInsideIsKept)
+{
+    // A property over random wandering lines: each run's points lie in the
+    // box (within rounding for the computed crossings), and every original
+    // vertex strictly inside the box appears in some run exactly.
+    Random random(20260924);
+    const Box2 box(Point2(-3, -2), Point2(4, 5));
+    PolylineRuns runs;
+    for (int trial = 0; trial < 200; ++trial) {
+        std::vector<Point2> line;
+        const int count = random.integer(2, 31);
+        for (int i = 0; i < count; ++i) {
+            line.emplace_back(random.real(-8.0, 9.0), random.real(-7.0, 10.0));
+        }
+        const bool closed = trial % 2 == 1;
+        clipPolyline(line, closed, box, runs);
+        for (std::size_t r = 0; r < runs.size(); ++r) {
+            ASSERT_GE(runs.ends[r] - runs.begin(r), 2u);
+        }
+        for (const Point2& point : runs.points) {
+            ASSERT_TRUE(box.inflated(1e-9).contains(point)) << point.x << ", " << point.y;
+        }
+        for (const Point2& vertex : line) {
+            if (vertex.x > box.min.x && vertex.x < box.max.x && vertex.y > box.min.y &&
+                vertex.y < box.max.y) {
+                EXPECT_NE(std::find(runs.points.begin(), runs.points.end(), vertex),
+                          runs.points.end());
+            }
+        }
+    }
 }
 
 TEST(PolygonClipPolygon, SutherlandHodgman)

@@ -129,6 +129,23 @@ TEST(Plot, RefusesASheetThatCannotBePlotted)
               ErrorCode::InvalidArgument);
 }
 
+TEST(Plot, ALineWithNoHeightFitsOnItsLengthAlone)
+{
+    // Audit CAD-15. LINE 0,0 500,0 has width 500 m and height 0. On A4
+    // landscape with 10 mm margins the printable area is 277 x 190 mm, so the
+    // width needs 500 000 / 277 = 1805.1 and the height asks nothing: the
+    // first standard scale at or above 1805.1 is 1 : 2000. It used to be
+    // refused as 'no extent to fit'.
+    const PlotSettings settings = a4Landscape300();
+    const auto across = fitScale(Box2(Point2(0, 0), Point2(500, 0)), settings);
+    ASSERT_TRUE(across.ok()) << across.error().describe();
+    EXPECT_EQ(*across, 2000.0);
+    // The same line running north: 500 000 / 190 = 2631.6 down, so 1 : 5000.
+    const auto down = fitScale(Box2(Point2(7, 0), Point2(7, 500)), settings);
+    ASSERT_TRUE(down.ok()) << down.error().describe();
+    EXPECT_EQ(*down, 5000.0);
+}
+
 TEST(Plot, WhiteAndNearWhitePrintBlackOnPaperWhileEveryOtherColourKeepsItsOwn)
 {
     // Decision D7: white on white paper is invisible, and white is the

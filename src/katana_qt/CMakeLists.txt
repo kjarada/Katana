@@ -25,6 +25,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     main_window.hpp
     main_window_dxf.cpp
     viewport_widget.cpp
+    plan_painter.cpp
+    plan_painter.hpp
     viewport_widget.hpp
     view_workspace.cpp
     view_workspace.hpp
