@@ -1,6 +1,6 @@
 // What a plan-view frame of a point cloud costs: synthetic clouds of two, ten
 // and twenty million points in random order at zoom extents, one zoomed in,
-// and the owner's LAS cloud archive when KATANA_BENCH_CLOUD_12DA names it.
+// and the owner's LAS cloud archive when KATANA_BENCH_CLOUD_ARCHIVE names it.
 //
 // Driven through paintPlan() and nothing newer, so that the SAME source
 // measures the painter before the cloud splat was vectorised and after, and
@@ -114,13 +114,13 @@ void BM_PlanCloudFirstFrame(benchmark::State& state)
     state.counters["points"] = static_cast<double>(state.range(0));
 }
 
-// The owner's archive: set KATANA_BENCH_CLOUD_12DA to its path (a copy - it is
+// The owner's archive: set KATANA_BENCH_CLOUD_ARCHIVE to its path (a copy - it is
 // real data and is never committed).
 void BM_PlanCloudArchive(benchmark::State& state)
 {
-    const char* path = std::getenv("KATANA_BENCH_CLOUD_12DA");
+    const char* path = std::getenv("KATANA_BENCH_CLOUD_ARCHIVE");
     if (path == nullptr || !std::filesystem::exists(path)) {
-        state.SkipWithMessage("KATANA_BENCH_CLOUD_12DA does not name an archive");
+        state.SkipWithMessage("KATANA_BENCH_CLOUD_ARCHIVE does not name an archive");
         return;
     }
     auto imported = katana::interop::importArchive12d(path);
