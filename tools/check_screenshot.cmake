@@ -225,8 +225,33 @@ endif()
 # a text is not said anywhere - in a menu a ?-step reported, or in the log.
 # Give it an EXPECT as well, naming what the run must have printed, so that a
 # run which printed nothing at all cannot pass for one that said nothing wrong.
-if(DEFINED FORBID AND "${out}${err}" MATCHES "${FORBID}")
-    message(FATAL_ERROR "the run reported /${FORBID}/ (\"${CMAKE_MATCH_0}\"):\n${out}\n${err}")
+#
+# The paths this run was given are taken out of what is checked first. The
+# log echoes them - the project that failed to open, a file loaded or
+# imported - and they are where the checkout and the build happen to live,
+# or the name of a fixture's folder: not words the application chose. Left
+# in, a worktree named after the archive work would fail a check of the
+# menus. Only the paths go; the rest of a line that holds one is still
+# checked. The most specific paths are replaced first, so that a fixture
+# folder under the checkout goes whole rather than leaving its tail behind.
+if(DEFINED FORBID)
+    set(_said "${out}${err}")
+    get_filename_component(_app_dir "${APP}" DIRECTORY)
+    get_filename_component(_checkout "${CMAKE_CURRENT_LIST_DIR}" DIRECTORY)
+    foreach(_path "${copy}" "${OUTPUT}" "${CUSTOMISE_DIR}" "${IMPORT}" "${PROJECT}"
+                  "${work}" "${_app_dir}" "${_checkout}")
+        if(_path STREQUAL "")
+            continue()
+        endif()
+        # As given, and with the platform's separators, which is how Qt
+        # writes a path it has made native.
+        file(TO_NATIVE_PATH "${_path}" _native)
+        string(REPLACE "${_path}" "<path>" _said "${_said}")
+        string(REPLACE "${_native}" "<path>" _said "${_said}")
+    endforeach()
+    if(_said MATCHES "${FORBID}")
+        message(FATAL_ERROR "the run reported /${FORBID}/ (\"${CMAKE_MATCH_0}\"), its own paths aside:\n${_said}")
+    endif()
 endif()
 
 if(DEFINED COMPARE)

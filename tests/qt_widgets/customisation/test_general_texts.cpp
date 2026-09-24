@@ -192,8 +192,8 @@ std::vector<Seen> textsIn(QWidget& root)
 const QStringList kPersistedKeys{QStringLiteral("12d.name"), QStringLiteral("12d.style"),
                                  QStringLiteral("12d.breakline")};
 
-// Fails once for each text naming the program, saying where it is.
-void expectNoneNames12d(const std::vector<Seen>& seen)
+// Fails once for each text naming another program, saying where it is.
+void expectNoneNamesAnotherProgram(const std::vector<Seen>& seen)
 {
     for (const Seen& each : seen) {
         if (kPersistedKeys.contains(each.text)) {
@@ -326,7 +326,7 @@ template <typename T> T* child(QWidget& parent, const char* name)
 
 } // namespace
 
-TEST(GeneralTexts, NoFormatMenuItemOrToolbarButtonNames12dInItsTextOrTips)
+TEST(GeneralTexts, NoFormatMenuItemOrToolbarButtonNamesAnotherProgramInItsTextOrTips)
 {
     Bench bench;
     std::vector<Seen> seen;
@@ -342,12 +342,12 @@ TEST(GeneralTexts, NoFormatMenuItemOrToolbarButtonNames12dInItsTextOrTips)
                              "loadCustomisation", "replaceCustomisation"}) {
         EXPECT_NE(bench.window.findChild<QAction*>(name), nullptr) << name;
     }
-    expectNoneNames12d(seen);
+    expectNoneNamesAnotherProgram(seen);
     EXPECT_TRUE(anyContains(seen, "the loaded library linestyles"));
     EXPECT_TRUE(anyContains(seen, "the loaded survey code files"));
 }
 
-TEST(GeneralTexts, NoTextTheStyleManagerShowsNames12d)
+TEST(GeneralTexts, NoTextTheStyleManagerShowsNamesAnotherProgram)
 {
     Bench bench;
     bench.window.findChild<QAction*>("formatStyles")->trigger();
@@ -366,13 +366,13 @@ TEST(GeneralTexts, NoTextTheStyleManagerShowsNames12d)
         seen.push_back(std::move(each));
     }
 
-    expectNoneNames12d(seen);
+    expectNoneNamesAnotherProgram(seen);
     EXPECT_GT(seen.size(), 100u) << "the walk found the dialog's texts";
     EXPECT_TRUE(anyContains(seen, "Paper linestyle: millimetres on the plot"));
     EXPECT_TRUE(anyContains(seen, "Library linestyles belong to the session's customisation"));
 }
 
-TEST(GeneralTexts, NoTextTheSymbolLibraryOrItsFileDialogsShowNames12d)
+TEST(GeneralTexts, NoTextTheSymbolLibraryOrItsFileDialogsShowNamesAnotherProgram)
 {
     Bench bench;
     bench.window.findChild<QAction*>("formatSymbols")->trigger();
@@ -399,13 +399,13 @@ TEST(GeneralTexts, NoTextTheSymbolLibraryOrItsFileDialogsShowNames12d)
             << name << ": " << peek.filters.join(" ;; ").toStdString();
     }
 
-    expectNoneNames12d(seen);
+    expectNoneNamesAnotherProgram(seen);
     EXPECT_GT(seen.size(), 50u) << "the walk found the dialog's texts";
     EXPECT_TRUE(anyContains(seen, "Merge a style or symbol library (.4d)"));
     EXPECT_TRUE(anyContains(seen, "symbols_export.4d"));
 }
 
-TEST(GeneralTexts, NoTextTheSurveyCodeManagerOrItsFileDialogsShowNames12d)
+TEST(GeneralTexts, NoTextTheSurveyCodeManagerOrItsFileDialogsShowNamesAnotherProgram)
 {
     Bench bench;
     bench.window.findChild<QAction*>("formatSurveyCodes")->trigger();
@@ -433,7 +433,7 @@ TEST(GeneralTexts, NoTextTheSurveyCodeManagerOrItsFileDialogsShowNames12d)
     }
     dialog->setInteractive(false);
 
-    expectNoneNames12d(seen);
+    expectNoneNamesAnotherProgram(seen);
     EXPECT_GT(seen.size(), 100u) << "the walk found the dialog's texts";
     EXPECT_TRUE(anyContains(seen, "the plain continuous line"));
     EXPECT_TRUE(anyContains(seen, "Survey code files (*.mapfile *.map *.xml)"));
