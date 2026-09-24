@@ -4,7 +4,11 @@
 // THE SPECIFICATION is Leica Geosystems, "GSI ONLINE for Leica TPS and DNA",
 // November 2003: the data word and the word information table on pages 5-6,
 // the TPS1000/1100/2000/5000 word indices in the PUT and GET tables on pages
-// 35-37, the DNA (levelling) words on pages 40-42. A word is
+// 35-37, the DNA (levelling) words on pages 40-42; its SET/CONF tables list
+// the instrument settings no word records (171, the horizontal circle's
+// direction). Where a code block is stored relative to its point is another
+// such setting, from Leica's "TPS1200 Technical Reference Manual", version
+// 5.0 (see codesRecordedAfterPoints). A word is
 //
 //     WI  info  sign  data  blank
 //     positions 1-2   word index (a DNA level also writes three-digit ones)
@@ -44,7 +48,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -338,6 +341,74 @@ std::size_t lineFeeds(std::string_view bytes)
     return count;
 }
 
+// The kind of block a line holds, judged by its first word as readBlock judges
+// it: 11 (a point's block), 41 (a code block), or 0 for anything else - a
+// blank or unreadable line, or a digital level's special code block, which
+// codes no point (GsiReader::codeBlock).
+int blockKindOf(std::string_view line)
+{
+    std::size_t position = 0;
+    while (true) {
+        while (position < line.size() && isBlank(line[position])) {
+            ++position;
+        }
+        if (position >= line.size()) {
+            return 0;
+        }
+        std::size_t end = position;
+        while (end < line.size() && !isBlank(line[end])) {
+            ++end;
+        }
+        std::string_view token = line.substr(position, end - position);
+        position = end;
+        if (token.front() == '*') {
+            token.remove_prefix(1);
+        }
+        if (token == "\x1a") {
+            continue; // a DOS end-of-file mark, as readBlock skips it
+        }
+        const std::optional<Word> word = parseWord(token);
+        if (!word) {
+            return 0;
+        }
+        if (word->index == 41) {
+            return textOf(word->data).front() == '?' ? 0 : 41;
+        }
+        return word->index == 11 ? 11 : 0;
+    }
+}
+
+// Whether the file's code blocks were recorded AFTER their points. GSI does
+// not say: it is the instrument's <Rec Free Code: Before Point / After Point>
+// setting (Leica TPS1200 Technical Reference Manual, version 5.0, 16.3 "Coding
+// & Linework Settings" and 8.4 "Quick Coding"), and no word carries it. The
+// one sign a file gives is at its ends. Recorded before its point, a code
+// block comes first when the first point is coded and never comes last - a
+// code with no point after it is an unfinished record. Recorded after, the
+// file must begin with a point and ends with a code whenever its last point
+// is coded. So a file that begins with a point block and ends with a code
+// block is read as After Point; any other as Before Point. Only the first and
+// the last blocks are looked at, so this costs a line or two, not a pass.
+bool codesRecordedAfterPoints(std::string_view bytes)
+{
+    int first = 0;
+    for (std::string_view rest = bytes; !rest.empty() && first == 0;) {
+        const std::size_t end = rest.find_first_of("\r\n");
+        first = blockKindOf(rest.substr(0, end));
+        rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
+    }
+    if (first != 11) {
+        return false;
+    }
+    int last = 0;
+    for (std::string_view rest = bytes; !rest.empty() && last == 0;) {
+        const std::size_t cut = rest.find_last_of("\r\n");
+        last = blockKindOf(cut == std::string_view::npos ? rest : rest.substr(cut + 1));
+        rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(0, cut);
+    }
+    return last == 41;
+}
+
 std::string shown(std::string_view text)
 {
     std::string out = "'";
@@ -427,12 +498,21 @@ struct PointSlot {
     std::map<std::string, std::string> metadata;
     std::size_t record = 0; // where the point was first named, or given its position
     bool wide = false;      // ... and whether that block was GSI-16
+    std::size_t setups = 0; // setups made on it so far, for their ids (stationIdFor)
 };
 
 struct CodeBlock {
     std::string code;
     std::array<std::string, 8> info;
     std::size_t record = 0;
+};
+
+// A point's place in the run of points that makes the features, settled once
+// the point can get no more codes (GsiReader::pointCode).
+struct FeatureStep {
+    std::size_t slot = 0;
+    std::size_t record = 0;
+    bool wide = false;
 };
 
 // A setup that is only a setup once a measurement follows it (see stationBlock).
@@ -465,6 +545,7 @@ class GsiReader {
         // points; reserving once spares the doubling copies of a vector that
         // is most of a coordinate list's memory. Counting costs one memchr pass.
         slots_.reserve(lineFeeds(bytes) + 1);
+        codesAfterPoints_ = codesRecordedAfterPoints(bytes);
         std::size_t record = 0;
         std::size_t start = 0;
         while (start < bytes.size()) {
@@ -969,6 +1050,21 @@ class GsiReader {
             code.info[i] = std::string(block.codeInfo[i]);
         }
         code.record = block.record;
+        ++codeBlocks_;
+        // Recorded after its point (codesRecordedAfterPoints): the point
+        // before is the one. Its place in the features waited for this.
+        if (codesAfterPoints_ && lastPointSlot_) {
+            if (!afterPointsSaid_) {
+                afterPointsSaid_ = true;
+                warn(block.record,
+                     "the file begins with a point block and ends with a code block, as an "
+                     "instrument set to record codes after their point (<Rec Free Code: After "
+                     "Point>) writes a job, so each code block was attached to the point before "
+                     "it");
+            }
+            attachCode(*lastPointSlot_, code, codesSincePoint_++);
+            return;
+        }
         pendingCodes_.push_back(std::move(code));
     }
 
@@ -1056,11 +1152,15 @@ class GsiReader {
         }
     }
 
-    // A point's code: word 71 in its own block; else the code block before it
-    // (see leica.hpp); else text the file wrote into a height word. Whichever
-    // is not the code is kept in the point's metadata.
+    // A point's code: word 71 in its own block; else its code block - the one
+    // before it, or after it in a file recorded After Point (see leica.hpp);
+    // else text the file wrote into a height word. Whichever is not the code
+    // is kept in the point's metadata.
     void pointCode(std::size_t index, const Block& block)
     {
+        // The point before this one has every code it will get: in a file
+        // recorded After Point its code blocks came between the two.
+        flushFeature();
         if (!block.remarks[0].empty()) {
             addCode(index, block.remarks[0], "remark 1");
         }
@@ -1084,7 +1184,9 @@ class GsiReader {
                 heightTextKept_.add(block.record, block.heightText);
             }
         }
-        feature(index, block);
+        featureStep_ = FeatureStep{index, block.record, block.wide};
+        lastPointSlot_ = index;
+        codesSincePoint_ = 0;
     }
 
     void attachCode(std::size_t index, const CodeBlock& code, std::size_t ordinal)
@@ -1105,9 +1207,18 @@ class GsiReader {
         }
     }
 
+    void flushFeature()
+    {
+        if (featureStep_) {
+            const FeatureStep step = *featureStep_;
+            featureStep_.reset();
+            feature(step.slot, step.record, step.wide);
+        }
+    }
+
     // One feature per run of consecutive points with the same code: GSI has no
     // string numbers, so a change of code (or an uncoded point) ends a string.
-    void feature(std::size_t index, const Block& block)
+    void feature(std::size_t index, std::size_t record, bool wide)
     {
         const PointSlot& slot = slots_[index];
         if (slot.code.empty()) {
@@ -1124,7 +1235,7 @@ class GsiReader {
         survey::SurveyFeature started;
         started.code = slot.code;
         started.pointIds.push_back(slot.id);
-        started.source = sourceAt(block.record, block.wide);
+        started.source = sourceAt(record, wide);
         run_ = std::move(started);
     }
 
@@ -1178,14 +1289,18 @@ class GsiReader {
         pending_.reset();
     }
 
-    std::string uniqueStationId(const std::string& pointId)
+    // A setup's id: its point's id for the first setup on the point, "ID (n)"
+    // for the n-th. A point id from the file holds no blank (a blank ends a
+    // GSI word) and the one id made up here, "GSI station N", no bracket, so
+    // an "ID (n)" is never a point's id nor another point's setup's: a count
+    // per point makes the id with no search. A search from "(2)" upwards
+    // costs the k-th setup on a point k lookups - a monitoring pillar set up
+    // every half hour for a year is some 17,500 setups, 150 million lookups.
+    std::string stationIdFor(std::size_t slot)
     {
-        std::string id = pointId;
-        for (std::size_t n = 2; stationIds_.contains(id); ++n) {
-            id = pointId + " (" + std::to_string(n) + ")";
-        }
-        stationIds_.insert(id);
-        return id;
+        PointSlot& point = slots_[slot];
+        const std::size_t n = ++point.setups;
+        return n == 1 ? point.id : point.id + " (" + std::to_string(n) + ")";
     }
 
     void openSetup(std::size_t slot, std::optional<double> instrumentHeight, std::size_t record,
@@ -1195,7 +1310,7 @@ class GsiReader {
         closeSetup();
         survey::SurveyStation station;
         station.setup.pointId = slots_[slot].id;
-        station.setup.id = uniqueStationId(station.setup.pointId);
+        station.setup.id = stationIdFor(slot);
         station.setup.instrumentHeight = instrumentHeight.value_or(0.0);
         station.source = sourceAt(record, wide);
         survey::InstrumentSettings& instrument = station.instrument;
@@ -1491,6 +1606,7 @@ class GsiReader {
         // be a second copy of most of the output.
         std::vector<survey::Observation>& observations = station.observations;
         if (block.hz) {
+            ++directions_;
             auto& direction = std::get<survey::HorizontalDirectionObservation>(
                 observations.emplace_back(
                     std::in_place_type<survey::HorizontalDirectionObservation>));
@@ -1604,9 +1720,17 @@ class GsiReader {
     std::vector<PointSlot> slots_;
     IdIndex slotIndex_;
     std::deque<std::string> madeUpIds_; // ids the file does not contain (implicitSetup)
-    std::unordered_set<std::string> stationIds_;
     std::vector<CodeBlock> pendingCodes_;
     std::optional<survey::SurveyFeature> run_;
+    std::optional<FeatureStep> featureStep_; // the last point, not yet in a feature
+    // The slot of the last block that named a point and took its codes
+    // (pointCode): the point BEFORE a code block. It is not the last slot
+    // made once a round of shots names its points a second time.
+    std::optional<std::size_t> lastPointSlot_;
+    std::size_t codesSincePoint_ = 0;
+    bool codesAfterPoints_ = false; // codesRecordedAfterPoints
+    bool afterPointsSaid_ = false;
+    std::size_t codeBlocks_ = 0; // code blocks read as point codes
 
     std::optional<PendingSetup> pending_;
     std::optional<std::size_t> active_; // index into project.stations
@@ -1657,6 +1781,7 @@ class GsiReader {
     std::size_t setupsWithoutPrism_ = 0;
     std::size_t shotsWithoutReflectorHeight_ = 0;
     std::size_t zenithAngles_ = 0;
+    std::size_t directions_ = 0; // horizontal circle readings read
     std::size_t wideBlocks_ = 0;
     std::size_t narrowBlocks_ = 0;
 };
@@ -1667,23 +1792,26 @@ ReadResult GsiReader::finish()
     closeSetup();
     if (!pendingCodes_.empty()) {
         // Nothing followed the last code block(s): the point before is the only
-        // one they can belong to.
-        if (!slots_.empty()) {
-            const std::size_t last = slots_.size() - 1;
+        // one they can belong to - the point of the last block that named one,
+        // not the last point the file happened to name first.
+        if (lastPointSlot_) {
+            const std::size_t last = *lastPointSlot_;
             warn(pendingCodes_.front().record,
                  "no point follows this code block, so it is attached to the point before it, " +
                      slots_[last].id);
             for (std::size_t c = 0; c < pendingCodes_.size(); ++c) {
-                attachCode(last, pendingCodes_[c], c);
+                attachCode(last, pendingCodes_[c], codesSincePoint_ + c);
             }
         } else {
             for (const CodeBlock& code : pendingCodes_) {
                 warn(code.record, "code block " + shown(code.code) +
-                                      " belongs to no point: the file names none");
+                                      " belongs to no point: no block before or after it names "
+                                      "one");
             }
         }
         pendingCodes_.clear();
     }
+    flushFeature();
     closeFeature();
 
     survey::SurveyProject& project = result_.project;
@@ -1722,7 +1850,8 @@ ReadResult GsiReader::finish()
     project.units.linear = linearUnit_;
     project.units.angular = angularUnit_;
     project.metadata.emplace("parser version", kParserVersion);
-    project.metadata.emplace("code blocks belong to", "the point after them");
+    project.metadata.emplace("code blocks belong to",
+                             codesAfterPoints_ ? "the point before them" : "the point after them");
 
     // ---- What the file did many times, said once each ----
     // The message is built only for a tally that has something to say: a
@@ -1880,6 +2009,27 @@ ReadResult GsiReader::finish()
     if (zenithAngles_ != 0) {
         lacking.emplace_back("GSI does not record the vertical angle setting: word 22 was read "
                              "as a zenith angle, the instruments' usual setting");
+    }
+    if (directions_ != 0) {
+        // GSI ONLINE's SET/CONF 171, "Direction of horizontal circle reading
+        // (Hz-Angle)": 0 clockwise, 1 counterclockwise - a setting, not a word.
+        lacking.emplace_back("GSI does not record the direction of the horizontal circle (an "
+                             "instrument setting): word 21 was read as increasing clockwise, as "
+                             "instruments are normally set; a job measured with the circle "
+                             "counterclockwise comes out mirrored about each setup's backsight");
+    }
+    if (codeBlocks_ != 0) {
+        lacking.push_back(
+            "GSI does not record whether the instrument stored a code block before or after its "
+            "point (its <Rec Free Code:> setting): " +
+            std::string(codesAfterPoints_
+                            ? "this file begins with a point block and ends with a code block, "
+                              "as a job recorded After Point does, so each code block was taken "
+                              "to code the point before it; had the instrument been set to "
+                              "Before Point, each code belongs to the point after its block"
+                            : "each code block was taken to code the point after it, as a job "
+                              "recorded Before Point does; had the instrument been set to After "
+                              "Point, each code belongs to the point before its block"));
     }
     if (derivedValues_.count != 0) {
         lacking.push_back(plural(derivedValues_.count, "block's", "blocks'") +
