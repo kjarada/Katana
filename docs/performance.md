@@ -752,3 +752,100 @@ the synthetic scene frame are unchanged within the A/A spread, which is 2-5%.
 - **Dense TINs.** The frame is capped by setup and binning, as the earlier
   measurement said. The remaining lever there is the scene representation,
   which is in `scene.cpp`, not the rasteriser.
+
+### The 3D scene build (`scene.cpp`, 2026-09-24)
+
+`cad::SceneBuilder` rebuilds the 3D view's draw lists on every document
+change, so its time is paid on every edit with a 3D view open. It was
+profiled stage by stage (temporary timers, not committed) on the owner's three
+archives, before any change:
+
+| stage, ms per build | Test 4 with Tin (229k-triangle TIN, 7,820 entities) | plot_PW (8 surfaces) | trimeshes complex (266 meshes, 126k faces) |
+|---|---|---|---|
+| TIN normals | 1.43 | 0.65 | - |
+| TIN vertex colour and hillshade | 3.66 | 2.03 | - |
+| TIN triangles | 0.71 | 0.36 | - |
+| TIN edges, and their reversal | - | 4.96 + 0.82 | - |
+| meshes | - | - | 8.88 |
+| bounds of terrain and edges | 2.84 | 2.68 | 1.52 |
+| the drawing (draping, dashing, styles) | 9.64 | 6.30 | 1.00 |
+| bounds again, with the drawing | 3.82 | 3.08 | 1.55 |
+
+What changed:
+
+- **Kernels** (`src/katana_cad/simd/scene_avx2.cpp`): the lift, the summed
+  per-vertex TIN normals (one triangle per step, the three corner sums in
+  order, so a repeated corner adds twice as the loop did), the per-vertex
+  ramp colour and hillshade, per-face mesh shading, and the edge fade.
+  `std::hypot` of three is libstdc++'s `__hypot3` (largest magnitude, three
+  quotients, a square root), written out lane by lane. The ramp picks its
+  stop with a permute of one register per table row; the first version's
+  gathers were slower. The fade works in 16-bit integers: the scalar blend
+  moves a channel by a whole number of eighths, so
+  `lo + (hi - lo) * e/8 + 0.5` is exact in a double and truncating it is
+  `(8 lo + (hi - lo) e + 4) >> 3`. A test runs all 65,536 channel pairs at
+  every eighth against the scalar blend.
+- **Mesh corner order.** The scalar code added a face's three vertices as
+  the arguments of `addTriangle`, so their order was the compiler's: GCC
+  evaluates them right to left, c first. That is now written out as three
+  statements, so the lists are the same as before on GCC and no longer
+  depend on the compiler, and the kernel writes c, b, a to match.
+- **Allocation.** Lists are sized once and written in place; a per-surface
+  `reserve` of exactly one surface's worth (which copies the list once per
+  surface) is replaced by geometric growth; an ordinary edge's ink is shaded
+  once per vertex, not once per edge end.
+- **Bounds.** `SceneLayers::terrainBounds` keeps the terrain's box, so a
+  rebuild of the drawing alone does not walk the terrain again. The walk
+  visits each vertex once rather than once per primitive using it, and falls
+  back to `DrawList::bounds()` when an extreme is a zero, the one case where
+  the visiting order decides the result (which zero's sign).
+
+Dispatch thresholds, from a probe build with every minimum at 1
+(`BM_SceneKernelBreakEven*`, `BM_SceneFadeEdges/1-4`): a surface of 4 to 25
+vertices was within the noise either way, so surfaces keep the scalar loop
+below 16 vertices; a mesh of 2 faces (0.19 against 0.49-0.74 us) and a fade of
+10 edge vertices (0.03-0.05 against 0.15-0.30 us) were already quicker by
+kernel, so their minimums are 2 faces and 8 vertices.
+
+Measured with `tools/compare_benchmarks.py --alternate 4
+"BM_Scene(TerrainShaded|TerrainEdges|Meshes|Archive|FadeEdges/.*/128)"
+main=... new=... new_again=...` (`benchmarks/bench_scene.cpp`; the
+archives through `KATANA_BENCH_SCENE_12DA`). `main` is the benchmark file
+built against main, where both members time the old code; `new again` is a
+byte-copy of `new`, the A/A control. Other builds ran throughout, so the
+medians wandered by up to 2x; the table gives the minimum of 12 samples, ms:
+
+| benchmark | main | new, scalar | new, avx2 | new again, avx2 (A/A) | main / new avx2 |
+|---|---|---|---|---|---|
+| `ArchiveBuild/0` Test 4 with Tin, whole first build | 22.82 | 17.57 | 16.77 | 15.71 | 1.36x |
+| `ArchiveBuild/1` plot_PW | 19.65 | 15.94 | 15.66 | 13.18 | 1.25x |
+| `ArchiveBuild/2` trimeshes complex | 14.01 | 11.65 | 5.21 | 5.39 | 2.7x |
+| `ArchiveTerrain/0` | 8.14 | 6.08 | 3.74 | 4.37 | 2.2x |
+| `ArchiveTerrain/1` | 10.22 | 7.98 | 6.92 | 7.54 | 1.5x |
+| `ArchiveTerrain/2` | 9.24 | 10.01 | 3.71 | 4.41 | 2.5x |
+| `ArchiveEntities/0` (drawing only: terrain bounds now kept) | 12.95 | 9.52 | 10.64 | 12.11 | 1.2x, inside the A/A spread |
+| `TerrainShaded/512` (524k triangles) | 21.77 | 16.03 | 10.70 | 10.49 | 2.0x |
+| `TerrainEdges/128` (49k edges) | 2.54 | 2.20 | 1.78 | 1.87 | 1.4x |
+| `Meshes` (2,000 meshes, 120k faces) | 10.48 | 10.47 | 3.98 | 4.59 | 2.6x |
+| `FadeEdges/128` (98,816 edge vertices recoloured) | - | 0.51 | 0.02 | 0.03 | 25x over scalar |
+
+The A/A pair differs by up to 19% (plot_PW's build), so only the ratios well
+outside that are results: the terrain of every archive, meshes and the fade.
+The draw lists are the same to the bit at both levels and as main's: each
+benchmark's digest counter (FNV-1a over every list) is equal in all three
+binaries, and the `SceneKernels` tests compare the lists element by element.
+
+Not done:
+
+- **The drawing** is now the largest stage on the survey archives (about
+  10 ms of Test 4's build). It is draping, dashing and style resolution per
+  entity: branches and small strings, not arrays, so no kernel. It is the
+  next thing to profile.
+- **Surfaces and meshes on the TaskPool.** Not attempted. After the kernels, a single
+  dense TIN (Test 4) cannot be split without changing the order its normals
+  are summed in, and the one archive with several surfaces (plot_PW) spends
+  at most about 5 ms in them before bounds and edge reversal; spreading 8
+  surfaces of unequal size over the pool would save at most about 4 ms of a
+  16 ms build, for a size pass and slice writes. The terrain of 126k mesh
+  faces is under 4 ms in all. Worth doing only with the drawing, which is the
+  larger half.
