@@ -948,6 +948,13 @@ class GsiReader {
         if (block.measurementWords) {
             warn(block.record, "a code block holds measurement words; they were not read");
         }
+        // A digital level's "special code block" names the levelling method
+        // ("410000+?......1" is line levelling BF: GSI ONLINE's DNA section)
+        // and starts a line; it is not a point's code.
+        if (!block.name.empty() && block.name.front() == '?') {
+            specialCodes_.add(block.record, block.name);
+            return;
+        }
         CodeBlock code;
         code.code = std::string(block.name);
         for (std::size_t i = 0; i < block.codeInfo.size(); ++i) {
@@ -1611,7 +1618,9 @@ class GsiReader {
     survey::LinearUnit linearUnit_ = survey::LinearUnit::Unknown;
     survey::AngularUnit angularUnit_ = survey::AngularUnit::Unknown;
 
-    std::array<Tally, 1000> unread_{};
+    // By two-digit word index: a three-digit (digital level) word is counted
+    // apart, as `levelling_`, before a word reaches this table.
+    std::array<Tally, 100> unread_{};
     Tally explicitPoints_;
     Tally oddWidth_;
     Tally feet_;
@@ -1626,6 +1635,7 @@ class GsiReader {
     Tally heightOnly_;
     Tally partialPosition_;
     Tally levelling_;
+    Tally specialCodes_; // a digital level's '?' code blocks
     std::size_t backsighted_ = 0; // setups given a backsight by their first shot
     std::size_t setupsWithoutHeight_ = 0;
     std::size_t setupsWithoutPpm_ = 0;
@@ -1772,6 +1782,13 @@ ReadResult GsiReader::finish()
                levelling_.example +
                "): this parser reads total station data, so their points are listed and the "
                "levelling is not read";
+    });
+    once(specialCodes_, [&] {
+        return plural(specialCodes_.count, "code block is", "code blocks are") +
+               " a digital level's special code block (a '?' in position 8, naming the "
+               "levelling method; the first " +
+               shown(specialCodes_.example) +
+               "): the levelling is not read, and they were not taken as point codes";
     });
     once(timeWords_, [&] {
         return plural(timeWords_.count, "block records", "blocks record") +

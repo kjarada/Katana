@@ -30,7 +30,12 @@
 //   * every point the file names: with coordinates (81-83, or 84-86 when the
 //     block measures nothing) as a SurveyPoint, without as an UnpositionedPoint;
 //   * a point's code from word 71, else from the code block (41) BEFORE it;
-//     remarks 72-79 and code information 42-49 in the point's metadata;
+//     remarks 72-79 and code information 42-49 in the point's metadata. A
+//     code block describes what follows it: that is how Leica's own code
+//     blocks run (GSI ONLINE's DNA section: the special code block that names
+//     the levelling method starts the line it describes), and how an
+//     instrument records a code chosen before the shot. A code block with no
+//     point after it goes to the point before, with a warning;
 //   * one SurveyFeature per run of consecutive points sharing a code.
 //   * a setup's BACKSIGHT: GSI has no word for one. A setup is made on the
 //     instrument as a station and then an orientation shot, recorded in that
