@@ -1,9 +1,12 @@
 #include "katana/cad/scene.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <variant>
 
 #include "katana/cad/dashing.hpp"
@@ -11,7 +14,10 @@
 #include "katana/entity/display.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/chording.hpp"
+#include "katana/core/cpu_features.hpp"
 #include "katana/math/numerics.hpp"
+
+#include "simd/scene_kernels.hpp"
 
 namespace katana::cad {
 
@@ -33,6 +39,43 @@ using katana::render::VertexIndex;
 namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+
+// The kernels read these arrays as arrays of doubles and of indices.
+static_assert(std::is_standard_layout_v<Vec3> && sizeof(Vec3) == 3 * sizeof(double) &&
+              offsetof(Vec3, x) == 0 && offsetof(Vec3, z) == 2 * sizeof(double));
+static_assert(sizeof(katana::terrain::TinTriangle) == 3 * sizeof(std::uint32_t));
+static_assert(sizeof(std::array<std::uint32_t, 3>) == 3 * sizeof(std::uint32_t));
+
+// The elevation ramp's palette (elevationRampColor), shared with the kernels'
+// parameters so there is one copy of it.
+constexpr int kRampStops = 5;
+constexpr std::uint8_t kRampR[kRampStops] = {40, 60, 235, 200, 245};
+constexpr std::uint8_t kRampG[kRampStops] = {70, 160, 220, 130, 245};
+constexpr std::uint8_t kRampB[kRampStops] = {140, 90, 130, 70, 245};
+static_assert(kRampStops - 1 == static_cast<int>(simd::kRampSegments));
+
+// Room for `extra` more, growing geometrically: a reserve of exactly what
+// one surface or mesh adds would copy the list once per surface or mesh.
+template <typename T> void grow(std::vector<T>& list, std::size_t extra)
+{
+    if (list.capacity() - list.size() < extra) {
+        list.reserve(std::max(list.size() + extra, 2 * list.capacity()));
+    }
+}
+
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+[[nodiscard]] bool avx2Active()
+{
+    return katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+}
+
+// Below these the scalar loop is as quick as the kernel with its setup, so
+// small surfaces, meshes and fades take it at every level. Measured with
+// BM_SceneKernelBreakEven (benchmarks/bench_scene.cpp): see docs/performance.md.
+constexpr std::size_t kSurfaceKernelMinimum = 16; // vertices
+constexpr std::size_t kMeshKernelMinimum = 8;     // faces
+constexpr std::size_t kFadeKernelMinimum = 16;    // edge vertices
+#endif
 
 // Green (flat) through yellow to red (steep). 1:1 (45 degrees) is the red end,
 // which is where a batter stops being trafficable.
@@ -394,6 +437,46 @@ class Heights {
     mutable std::vector<katana::geometry::Point3> scratch_;
 };
 
+// DrawList::bounds() - the box of the finite vertices a primitive uses - to
+// the bit, visiting each vertex once rather than once per primitive using it:
+// a TIN's vertex is in six triangles, and the walk was an eighth of the build.
+// Only which of two zeros an extreme keeps depends on the order the list
+// visits them in (AABB::expand keeps the first), so when an extreme is zero
+// the list's own walk decides.
+[[nodiscard]] AABB boundsOf(const DrawList& list, std::vector<std::uint8_t>& used)
+{
+    const std::size_t count = list.positions.size();
+    used.assign(count, 0);
+    const auto use = [&used, count](VertexIndex index) {
+        if (index < count) {
+            used[index] = 1;
+        }
+    };
+    for (const auto& triangle : list.triangles) {
+        use(triangle.a);
+        use(triangle.b);
+        use(triangle.c);
+    }
+    for (const auto& line : list.lines) {
+        use(line.a);
+        use(line.b);
+    }
+    for (const auto& point : list.points) {
+        use(point.a);
+    }
+    AABB box;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (used[i] != 0 && list.positions[i].isFinite()) {
+            box.expand(list.positions[i]);
+        }
+    }
+    if (box.min.x == 0.0 || box.min.y == 0.0 || box.min.z == 0.0 || box.max.x == 0.0 ||
+        box.max.y == 0.0 || box.max.z == 0.0) {
+        return list.bounds();
+    }
+    return box;
+}
+
 // A 1-2-5 step at least `wanted`: 1, 2, 5, 10, 20, 50...
 [[nodiscard]] double niceStep(double wanted)
 {
@@ -416,10 +499,10 @@ Rgba elevationRampColor(double t)
     // Linear ramp through a small fixed palette. Chosen over a single hue so
     // that adjacent contour bands are actually distinguishable, which is the
     // whole point of colouring by elevation.
-    static constexpr int kStops = 5;
-    static constexpr std::uint8_t kR[kStops] = {40, 60, 235, 200, 245};
-    static constexpr std::uint8_t kG[kStops] = {70, 160, 220, 130, 245};
-    static constexpr std::uint8_t kB[kStops] = {140, 90, 130, 70, 245};
+    static constexpr int kStops = kRampStops;
+    static constexpr const std::uint8_t* kR = kRampR;
+    static constexpr const std::uint8_t* kG = kRampG;
+    static constexpr const std::uint8_t* kB = kRampB;
 
     const double clamped = std::clamp(std::isfinite(t) ? t : 0.0, 0.0, 1.0) * (kStops - 1);
     const int lower = std::min(static_cast<int>(clamped), kStops - 2);
@@ -437,11 +520,48 @@ Rgba elevationRampColor(double t)
 
 namespace {
 
+// What the kernels are handed: the scalar code's constants, laid out as
+// SceneKernelParam says.
+[[nodiscard]] std::array<double, simd::kParamCount> kernelParams(const Lift& lift,
+                                                                 const Light& light,
+                                                                 const Ramp& ramp)
+{
+    std::array<double, simd::kParamCount> params{};
+    params[simd::kParamLiftFactor] = lift.factor;
+    params[simd::kParamLiftDatum] = lift.datum;
+    params[simd::kParamRampLow] = ramp.low;
+    params[simd::kParamRampSpan] = ramp.high - ramp.low;
+    params[simd::kParamLightOn] = light.on ? 1.0 : 0.0;
+    params[simd::kParamSunX] = light.towardsSun.x;
+    params[simd::kParamSunY] = light.towardsSun.y;
+    params[simd::kParamSunZ] = light.towardsSun.z;
+    params[simd::kParamGround] = light.ground;
+    params[simd::kParamSkyMinusGround] = light.sky - light.ground;
+    params[simd::kParamSun] = light.sun;
+    const std::uint8_t* const palette[3] = {kRampR, kRampG, kRampB};
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        for (std::size_t i = 0; i < simd::kRampSegments; ++i) {
+            const double stop = static_cast<double>(palette[channel][i]);
+            params[simd::kParamRampTable + 2 * channel * simd::kRampSegments + i] = stop;
+            params[simd::kParamRampTable + (2 * channel + 1) * simd::kRampSegments + i] =
+                static_cast<double>(palette[channel][i + 1]) - stop;
+        }
+    }
+    return params;
+}
+
+// The scratch emitSurface reuses across surfaces and builds.
+struct SurfaceScratch {
+    std::vector<Vec3>& normals;
+    std::vector<double>& lifted;
+    std::vector<double>& summed;
+};
+
 // One surface into `out`, and its fading edges into `edges` (or into `out` at
 // full strength when `edges` is null). Shared by appendSurfaces and
 // buildTerrain.
 void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ramp& ramp,
-                 std::vector<Vec3>& normals, DrawList& out, SceneLayers* edges)
+                 SurfaceScratch scratch, DrawList& out, SceneLayers* edges)
 {
     const katana::terrain::TinSurface& surface = *item.surface;
     const Lift lift = liftOf(options);
@@ -461,57 +581,99 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     // so up is its outside; the old abs() did the same for the light but let a
     // face turned AWAY from the sun look as lit as one facing it.
     const bool smooth = shaded && light.on && !slope;
-    if (smooth) {
-        normals.assign(vertices.size(), Vec3(0.0, 0.0, 0.0));
-        for (const auto& t : triangles) {
-            const auto& a = vertices[t[0]];
-            const auto& b = vertices[t[1]];
-            const auto& c = vertices[t[2]];
-            const Vec3 pa(a.x, a.y, lift(a.z));
-            Vec3 n = (Vec3(b.x, b.y, lift(b.z)) - pa).cross(Vec3(c.x, c.y, lift(c.z)) - pa);
-            if (n.z < 0.0) {
-                n = n * -1.0;
-            }
-            normals[t[0]] = normals[t[0]] + n;
-            normals[t[1]] = normals[t[1]] + n;
-            normals[t[2]] = normals[t[2]] + n;
-        }
-    }
-
-    // One vertex per TIN vertex, shared by every triangle that uses it: one
-    // matrix multiply per vertex rather than three per triangle. Lighting per
-    // vertex is what makes the sharing possible; it used to be per facet, on
-    // private copies, six times the vertices.
     const VertexIndex base = static_cast<VertexIndex>(out.positions.size());
-    out.positions.reserve(out.positions.size() + vertices.size());
-    out.colors.reserve(out.colors.size() + vertices.size());
-    for (std::size_t i = 0; i < vertices.size(); ++i) {
-        const auto& vertex = vertices[i];
-        Rgba color = item.flatColor;
-        if (wire) {
-            color = wireColor;
-        } else if (item.coloring == SurfaceColoring::Elevation) {
-            color = ramp.at(vertex.z);
-        }
+    const std::size_t count = vertices.size();
+    // Sized once and written in place: resize grows the arrays geometrically
+    // where a reserve per surface would copy them once per surface.
+    out.positions.resize(base + count);
+    out.colors.resize(base + count);
+    Vec3* const positions = out.positions.data() + base;
+    Rgba* const colors = out.colors.data() + base;
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    if (count >= kSurfaceKernelMinimum && avx2Active()) {
+        const auto params = kernelParams(lift, light, ramp);
+        scratch.lifted.resize(4 * count);
+        katana_avx2_scene_lift(&vertices.data()->x, count, params.data(), scratch.lifted.data());
         if (smooth) {
-            const double length = normals[i].length();
-            if (length > 0.0) {
-                color = katana::render::shade(color, light.intensity(normals[i] / length));
+            scratch.summed.assign(4 * count, 0.0);
+            katana_avx2_scene_surface_normals(scratch.lifted.data(), triangles.data()->data(),
+                                              triangles.size(), scratch.summed.data());
+        }
+        // The ramp's degenerate case (one elevation) is one colour: flat.
+        const bool ramped = !wire && item.coloring == SurfaceColoring::Elevation &&
+                            ramp.high - ramp.low > tol::kGeometric;
+        const Rgba flat = wire ? wireColor
+                               : (item.coloring == SurfaceColoring::Elevation ? ramp.at(ramp.low)
+                                                                              : item.flatColor);
+        katana_avx2_scene_surface_vertices(scratch.lifted.data(), count,
+                                           smooth ? scratch.summed.data() : nullptr,
+                                           params.data(), flat, ramped ? 1 : 0, &positions->x,
+                                           colors);
+    } else
+#endif
+    {
+        // The scalar reference, which the kernels equal to the bit.
+        //
+        // Per-vertex normals for smooth hillshade: the area-weighted sum of
+        // the faces round the vertex, each turned to face UP. A TIN is a
+        // height field, so up is its outside; the old abs() did the same for
+        // the light but let a face turned AWAY from the sun look as lit as one
+        // facing it.
+        std::vector<Vec3>& normals = scratch.normals;
+        if (smooth) {
+            normals.assign(count, Vec3(0.0, 0.0, 0.0));
+            for (const auto& t : triangles) {
+                const auto& a = vertices[t[0]];
+                const auto& b = vertices[t[1]];
+                const auto& c = vertices[t[2]];
+                const Vec3 pa(a.x, a.y, lift(a.z));
+                Vec3 n = (Vec3(b.x, b.y, lift(b.z)) - pa).cross(Vec3(c.x, c.y, lift(c.z)) - pa);
+                if (n.z < 0.0) {
+                    n = n * -1.0;
+                }
+                normals[t[0]] = normals[t[0]] + n;
+                normals[t[1]] = normals[t[1]] + n;
+                normals[t[2]] = normals[t[2]] + n;
             }
         }
-        out.addVertex(Vec3(vertex.x, vertex.y, lift(vertex.z)), color);
+        // One vertex per TIN vertex, shared by every triangle that uses it:
+        // one matrix multiply per vertex rather than three per triangle.
+        // Lighting per vertex is what makes the sharing possible; it used to
+        // be per facet, on private copies, six times the vertices.
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& vertex = vertices[i];
+            Rgba color = item.flatColor;
+            if (wire) {
+                color = wireColor;
+            } else if (item.coloring == SurfaceColoring::Elevation) {
+                color = ramp.at(vertex.z);
+            }
+            if (smooth) {
+                const double length = normals[i].length();
+                if (length > 0.0) {
+                    color = katana::render::shade(color, light.intensity(normals[i] / length));
+                }
+            }
+            positions[i] = Vec3(vertex.x, vertex.y, lift(vertex.z));
+            colors[i] = color;
+        }
     }
 
-    if (shaded) {
-        out.triangles.reserve(out.triangles.size() + triangles.size());
+    if (shaded && !slope) {
+        const std::size_t first = out.triangles.size();
+        out.triangles.resize(first + triangles.size());
+        katana::render::DrawTriangle* const shared = out.triangles.data() + first;
+        for (std::size_t t = 0; t < triangles.size(); ++t) {
+            shared[t] = {base + triangles[t][0], base + triangles[t][1], base + triangles[t][2]};
+        }
+    } else if (shaded) {
+        grow(out.triangles, triangles.size());
+        grow(out.positions, 3 * triangles.size());
+        grow(out.colors, 3 * triangles.size());
         for (std::size_t t = 0; t < triangles.size(); ++t) {
             const VertexIndex a = base + triangles[t][0];
             const VertexIndex b = base + triangles[t][1];
             const VertexIndex c = base + triangles[t][2];
-            if (!slope) {
-                out.addTriangle(a, b, c);
-                continue;
-            }
             // Slope is a property of the FACET: private copies, or sharing
             // would smear it across the surface. Lit by the facet normal.
             const auto aspect = surface.triangleSlopeAspect(t);
@@ -538,12 +700,39 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
     DrawList& target = fading && edges != nullptr ? edges->edges : out;
     const VertexIndex runStart = static_cast<VertexIndex>(target.positions.size());
     const auto& neighbours = surface.neighbors();
+    const auto drawnHere = [&neighbours](std::size_t t, std::size_t e) {
+        return neighbours[t][e] == katana::terrain::kNoTriangle ||
+               neighbours[t][e] >= static_cast<std::uint32_t>(t);
+    };
+    // Reserved once for the lot: these lists hold every surface's edges, and
+    // growing them edge by edge cost more than drawing them.
+    std::size_t drawn = 0;
+    for (std::size_t t = 0; t < triangles.size(); ++t) {
+        for (std::size_t e = 0; e < 3; ++e) {
+            drawn += drawnHere(t, e) ? 1 : 0;
+        }
+    }
+    grow(target.lines, drawn);
+    grow(target.positions, 2 * drawn);
+    grow(target.colors, 2 * drawn);
+    if (fading && edges != nullptr) {
+        grow(edges->edgeBase, 2 * drawn);
+        grow(edges->edgeInk, 2 * drawn);
+    }
+    // An ordinary edge's ink at each vertex: the same shade() of the same
+    // colour for every edge meeting there, so worked out once.
+    std::vector<Rgba> ink;
+    if (!wire) {
+        ink.resize(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            ink[i] = katana::render::shade(out.colors[base + i], 0.55); // not colors: grown since
+        }
+    }
     for (std::size_t t = 0; t < triangles.size(); ++t) {
         for (std::size_t e = 0; e < 3; ++e) {
             // Each interior edge is shared by two triangles; drawing it from
             // the lower-indexed one only halves the line count.
-            if (neighbours[t][e] != katana::terrain::kNoTriangle &&
-                neighbours[t][e] < static_cast<std::uint32_t>(t)) {
+            if (!drawnHere(t, e)) {
                 continue;
             }
             const VertexIndex a = base + triangles[t][e];
@@ -552,7 +741,7 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
             // surface those are the edges that mean something.
             const bool constrained = surface.isEdgeConstrained(t, e);
             if (wire && !constrained) {
-                out.addLine(a, b, scale, 0.0f); // the surface's own grey vertices
+                target.lines.push_back({a, b, scale, 0.0f}); // the surface's own grey vertices
                 continue;
             }
             const float width = (constrained ? 2.0f : 1.0f) * scale;
@@ -560,11 +749,14 @@ void emitSurface(const SceneSurface& item, const SceneOptions& options, const Ra
             const Rgba strong = katana::render::rgba(250, 210, 120);
             // An ordinary edge is a darker shade of the surface under it, so
             // it fades INTO the surface rather than into black.
-            const Rgba inkA = constrained ? strong : katana::render::shade(out.colors[a], 0.55);
-            const Rgba inkB = constrained ? strong : katana::render::shade(out.colors[b], 0.55);
-            const VertexIndex a2 = target.addVertex(out.positions[a], inkA);
-            const VertexIndex b2 = target.addVertex(out.positions[b], inkB);
-            target.addLine(a2, b2, width, bias);
+            const Rgba inkA = constrained ? strong : ink[a - base];
+            const Rgba inkB = constrained ? strong : ink[b - base];
+            const VertexIndex a2 = static_cast<VertexIndex>(target.positions.size());
+            target.positions.push_back(out.positions[a]);
+            target.positions.push_back(out.positions[b]);
+            target.colors.push_back(inkA);
+            target.colors.push_back(inkB);
+            target.lines.push_back({a2, a2 + 1, width, bias});
             if (fading && edges != nullptr) {
                 edges->edgeBase.push_back(out.colors[a]);
                 edges->edgeBase.push_back(out.colors[b]);
@@ -594,7 +786,7 @@ void SceneBuilder::appendSurfaces(const std::vector<SceneSurface>& surfaces,
     const Ramp ramp = rampOf(surfaces);
     for (const SceneSurface& item : surfaces) {
         if (drawable(item)) {
-            emitSurface(item, options, ramp, normals_, out, nullptr);
+            emitSurface(item, options, ramp, {normals_, lifted_, summed_}, out, nullptr);
         }
     }
 }
@@ -614,6 +806,24 @@ void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const Scen
     const Light light = lightOf(options);
     const float scale = std::max(options.pixelScale, 0.1f);
 
+    // Room for every mesh at once: a trimesh archive is hundreds of small
+    // meshes, and growing the lists face by face was most of their cost.
+    std::size_t vertexCount = 0;
+    std::size_t triangleCount = 0;
+    for (const SceneMesh& item : meshes) {
+        if (drawable(item)) {
+            vertexCount += 6 * item.mesh->triangleCount(); // shaded and edge copies at most
+            triangleCount += item.mesh->triangleCount();
+        }
+    }
+    grow(out.positions, vertexCount);
+    grow(out.colors, vertexCount);
+    grow(out.triangles, triangleCount);
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    const bool kernels = avx2Active();
+    const auto params = kernelParams(lift, light, Ramp{});
+#endif
+
     for (const SceneMesh& item : meshes) {
         if (!drawable(item)) {
             continue;
@@ -628,6 +838,48 @@ void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const Scen
             shaded ? katana::render::rgba(40, 40, 45) : katana::render::rgba(190, 190, 190);
         const float bias = shaded ? options.edgeDepthBias : 0.0f;
 
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+        // Shaded without edges - how a mesh is drawn unless asked otherwise -
+        // is three private vertices and a triangle a face: the kernel's shape.
+        // It takes each run of faces that name real vertices; a face that
+        // does not is skipped, as triangle() refuses it below.
+        if (kernels && shaded && !edges && mesh.triangleCount() >= kMeshKernelMinimum) {
+            const std::size_t faces = mesh.triangleCount();
+            const std::size_t points = mesh.vertices.size();
+            const auto valid = [&](std::size_t f) {
+                const auto& face = mesh.faces[f];
+                return face[0] < points && face[1] < points && face[2] < points;
+            };
+            std::size_t f = 0;
+            while (f < faces) {
+                if (!valid(f)) {
+                    ++f;
+                    continue;
+                }
+                std::size_t end = f + 1;
+                while (end < faces && valid(end)) {
+                    ++end;
+                }
+                const std::size_t run = end - f;
+                const std::size_t first = out.positions.size();
+                out.positions.resize(first + 3 * run);
+                out.colors.resize(first + 3 * run);
+                katana_avx2_scene_mesh_faces(&mesh.vertices.data()->x, points,
+                                             mesh.faces.data()->data(), f, run, params.data(),
+                                             item.faceColors.data(), item.faceColors.size(),
+                                             item.flatColor, &out.positions[first].x,
+                                             &out.colors[first]);
+                const std::size_t triangle = out.triangles.size();
+                out.triangles.resize(triangle + run);
+                for (std::size_t k = 0; k < run; ++k) {
+                    const auto a = static_cast<VertexIndex>(first + 3 * k);
+                    out.triangles[triangle + k] = {a + 2, a + 1, a}; // corners c, b, a
+                }
+                f = end;
+            }
+            continue;
+        }
+#endif
         for (std::size_t f = 0; f < mesh.triangleCount(); ++f) {
             // triangle() refuses a face that names a vertex which does not
             // exist, so an unvalidated mesh cannot be read past its end here.
@@ -646,8 +898,14 @@ void SceneBuilder::appendMeshes(const std::vector<SceneMesh>& meshes, const Scen
                 if (area > 1.0e-12) {
                     color = katana::render::shade(base, light.intensity(normal / area));
                 }
-                out.addTriangle(out.addVertex(a, color), out.addVertex(b, color),
-                                out.addVertex(c, color));
+                // The last corner first: the order these lists have always
+                // had, from when the three addVertex calls were addTriangle's
+                // arguments and GCC evaluated them right to left. Spelt out
+                // so it no longer rests on the compiler; the kernel matches.
+                const VertexIndex vc = out.addVertex(c, color);
+                const VertexIndex vb = out.addVertex(b, color);
+                const VertexIndex va = out.addVertex(a, color);
+                out.addTriangle(va, vb, vc);
             }
             if (edges) {
                 const VertexIndex ea = out.addVertex(a, edgeColor);
@@ -994,7 +1252,8 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
     for (const SceneSurface& item : surfaces) {
         if (drawable(item)) {
             edgeStarts.push_back(layers.edges.lines.size());
-            emitSurface(item, options, ramp, normals_, layers.terrain, &layers);
+            emitSurface(item, options, ramp, {normals_, lifted_, summed_}, layers.terrain,
+                        &layers);
         }
     }
     // The edges are drawn writing no depth (renderLayers), so where two
@@ -1022,8 +1281,9 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
                                          : (std::isfinite(options.entityElevation)
                                                 ? options.entityElevation
                                                 : 0.0));
-    layers.bounds = layers.terrain.bounds();
-    layers.bounds.expand(layers.edges.bounds());
+    layers.terrainBounds = boundsOf(layers.terrain, used_);
+    layers.terrainBounds.expand(boundsOf(layers.edges, used_));
+    layers.bounds = layers.terrainBounds;
 }
 
 void SceneBuilder::buildEntities(const Document& document,
@@ -1044,9 +1304,8 @@ void SceneBuilder::buildEntities(const Document& document,
                                                   ? options.entityElevation
                                                   : 0.0));
     }
-    layers.bounds = layers.terrain.bounds();
-    layers.bounds.expand(layers.edges.bounds());
-    layers.bounds.expand(layers.entities.bounds());
+    layers.bounds = layers.terrainBounds;
+    layers.bounds.expand(boundsOf(layers.entities, used_));
 }
 
 void SceneBuilder::buildSelection(const Document& document,
@@ -1085,6 +1344,19 @@ bool SceneBuilder::fadeEdges(SceneLayers& layers, const katana::render::Camera& 
         if (strength != run.applied) {
             const std::size_t end = std::min<std::size_t>(run.first + run.count,
                                                           layers.edges.colors.size());
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+            if (end >= run.first + kFadeKernelMinimum && end <= layers.edgeBase.size() &&
+                end <= layers.edgeInk.size() && avx2Active()) {
+                // strength is a whole number of eighths (above), exactly.
+                katana_avx2_scene_fade(layers.edgeBase.data() + run.first,
+                                       layers.edgeInk.data() + run.first, end - run.first,
+                                       static_cast<int>(strength * 8.0f),
+                                       layers.edges.colors.data() + run.first);
+                run.applied = strength;
+                any = any || strength > 0.0f;
+                continue;
+            }
+#endif
             for (std::size_t i = run.first; i < end; ++i) {
                 layers.edges.colors[i] = mix(layers.edgeBase[i], layers.edgeInk[i], strength);
             }
@@ -1110,7 +1382,7 @@ void SceneBuilder::build(const Document& document, const std::vector<SceneSurfac
         if (!layers.terrainDatum && std::isfinite(lowest)) {
             layers.datum = liftOf(options)(lowest);
         }
-        layers.bounds.expand(entities.bounds());
+        layers.bounds.expand(boundsOf(entities, used_));
     }
     const auto append = [&out](const DrawList& from) {
         const VertexIndex base = static_cast<VertexIndex>(out.positions.size());
