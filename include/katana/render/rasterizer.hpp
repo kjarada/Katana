@@ -134,8 +134,8 @@ class Rasterizer {
         float z = 0.0f;
         float half = 0.5f; // half the square's side, in pixels
         Rgba color = 0;
-        // Decided once, at the centre, after every triangle of the pass
-        // (rasteriseTiles): a point is drawn whole or not at all.
+        // Decided once, at the centre, after the pass's filled triangles and
+        // before its lines (decidePoints): drawn whole or not at all.
         bool visible = false;
     };
 
@@ -155,7 +155,7 @@ class Rasterizer {
     void binPrimitives(const Framebuffer& target, katana::core::TaskPool& pool);
     void rasteriseTiles(Framebuffer& target, const RenderOptions& options,
                         katana::core::TaskPool& pool);
-    void rasterisePoints(Framebuffer& target, bool depthWrite, katana::core::TaskPool& pool);
+    void decidePoints(const Framebuffer& target, katana::core::TaskPool& pool);
 
     DepthPull depthPull_;
 
@@ -174,6 +174,8 @@ class Rasterizer {
     // its index.
     struct Chunk {
         std::vector<ScreenTriangle> triangles;
+        // triangles[0, lineStart) are filled triangles, the rest line quads.
+        std::size_t lineStart = 0;
         std::vector<ScreenPoint> points;
         // tileBins[t] holds indices into `triangles` (below kPointTag) and into
         // `points` (with kPointTag set), in submission order.
