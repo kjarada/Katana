@@ -65,3 +65,58 @@ TEST(DxfImportCommand, AFileThatAddsNothingMakesNoCommand)
     empty.layers.push_back(katana::entity::Layer{}); // layer 0, which the model has
     EXPECT_EQ(dxf::importCommand(empty, model), nullptr);
 }
+
+TEST(DxfImportCommand, AFileImportedASecondTimeComesInOnTheLayerTheFirstTimeLocked)
+{
+    // The first import locks Boundary, as the file says, with the site's
+    // polyline on it. The second lands on that layer again: it must come in
+    // too, and leave Boundary locked as it found it.
+    katana::entity::Model model;
+    katana::commands::CommandStack stack(model);
+    std::size_t count = 0;
+    for (int time = 0; time < 2; ++time) {
+        auto imported = load("r2000_site.dxf");
+        count = imported.entities.size();
+        auto command = dxf::importCommand(imported, model);
+        ASSERT_NE(command, nullptr);
+        const auto status = stack.execute(std::move(command));
+        ASSERT_TRUE(status.ok()) << "import " << time + 1 << ": " << status.error().describe();
+        ASSERT_NE(model.layers.find("Boundary"), nullptr);
+        EXPECT_TRUE(model.layers.find("Boundary")->locked) << "import " << time + 1;
+    }
+    EXPECT_EQ(model.entities.size(), 2 * count);
+    // The second import is one step too: undone, the first is what is left,
+    // with its lock.
+    ASSERT_TRUE(stack.undo().ok());
+    EXPECT_EQ(model.entities.size(), count);
+    EXPECT_TRUE(model.layers.find("Boundary")->locked);
+}
+
+TEST(DxfImportCommand, ALayerLockedByItsParentInTheModelTakesTheImportAndStaysLocked)
+{
+    // The model's "survey" is locked, which locks "survey/kerb" under it; the
+    // file adds a point on "survey/kerb". The parent is opened for the point
+    // and locked again after it; the new child is not locked of itself.
+    katana::entity::Model model;
+    katana::entity::Layer survey;
+    survey.name = "survey";
+    survey.locked = true;
+    ASSERT_TRUE(model.layers.add(survey).ok());
+    dxf::DxfImport imported;
+    katana::entity::Layer kerb;
+    kerb.name = "survey/kerb";
+    imported.layers.push_back(kerb);
+    katana::entity::Entity point;
+    point.geometry = katana::entity::PointGeometry{katana::geometry::Point2(1.0, 2.0)};
+    point.layer = "survey/kerb";
+    imported.entities.push_back(point);
+    katana::commands::CommandStack stack(model);
+    auto command = dxf::importCommand(imported, model);
+    ASSERT_NE(command, nullptr);
+    const auto status = stack.execute(std::move(command));
+    ASSERT_TRUE(status.ok()) << status.error().describe();
+    EXPECT_EQ(model.entities.size(), 1u);
+    EXPECT_TRUE(model.layers.find("survey")->locked);
+    ASSERT_NE(model.layers.find("survey/kerb"), nullptr);
+    EXPECT_FALSE(model.layers.find("survey/kerb")->locked);
+}
