@@ -813,9 +813,10 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # An inquiry tool driven from the command line: DIST, then two typed
     # points, and the inverse of the 3-4-5 leg in the log - 5.000 by hand.
-    # ZOOM typed between them goes to the tool host's transparent-command
-    # hook rather than to the tool as a malformed point, and the tool carries
-    # on at the same step.
+    # ZOOM typed between them is taken by the tool host as the view's
+    # command (ToolHost::onTransparent; refused aloud while no view runs
+    # it), never handed to the tool as a malformed point, and the tool
+    # carries on at the same step.
     add_test(NAME qt_dist_typed_at_the_command_line_reports_the_inverse_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
