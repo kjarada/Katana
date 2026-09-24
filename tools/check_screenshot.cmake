@@ -43,12 +43,13 @@ file(REMOVE "${OUTPUT}")
 # With -DSTYLE_MANAGER=ON the styles and linetypes manager is opened and IT
 # is what the PNG holds, so the dialog is built and painted by a test.
 set(extra)
-# With -DCUSTOMISE_DIR=<directory> every 12d library and mapfile in it is
-# loaded before anything is drawn, so the drawing appears as the customisation
-# says it should (PLAN.MD 20.3). A DIRECTORY rather than a list of files,
-# because a list of paths cannot survive being passed through `cmake -D`
-# without its separators being escaped into the paths themselves - which is
-# exactly what happened, and left this test passing while loading nothing.
+# With -DCUSTOMISE_DIR=<directory> every style or symbol library (.4d) and
+# survey code file (.mapfile) in it is loaded before anything is drawn, so the
+# drawing appears as the customisation says it should (PLAN.MD 20.3). A
+# DIRECTORY rather than a list of files, because a list of paths cannot
+# survive being passed through `cmake -D` without its separators being
+# escaped into the paths themselves - which is exactly what happened, and
+# left this test passing while loading nothing.
 #
 # A customisation that is not in the checkout - the reference one carries its
 # author's licence notice - is reported and the run goes on without it, since
@@ -219,6 +220,13 @@ endif()
 # - and not only that the window painted.
 if(DEFINED EXPECT AND NOT "${out}${err}" MATCHES "${EXPECT}")
     message(FATAL_ERROR "the run did not report /${EXPECT}/:\n${out}\n${err}")
+endif()
+# -DFORBID=<regex> must match NOTHING the run printed: how a test shows that
+# a text is not said anywhere - in a menu a ?-step reported, or in the log.
+# Give it an EXPECT as well, naming what the run must have printed, so that a
+# run which printed nothing at all cannot pass for one that said nothing wrong.
+if(DEFINED FORBID AND "${out}${err}" MATCHES "${FORBID}")
+    message(FATAL_ERROR "the run reported /${FORBID}/ (\"${CMAKE_MATCH_0}\"):\n${out}\n${err}")
 endif()
 
 if(DEFINED COMPARE)

@@ -120,9 +120,9 @@ QString unitsText(katana::entity::StyleUnits units)
 {
     switch (units) {
     case katana::entity::StyleUnits::World:
-        return QStringLiteral("World units: metres on the ground");
+        return QStringLiteral("World: metres on the ground");
     case katana::entity::StyleUnits::Paper:
-        return QStringLiteral("Paper units: millimetres on the plot");
+        return QStringLiteral("Paper: millimetres on the plot");
     case katana::entity::StyleUnits::TwoPoint:
         return QStringLiteral("Two-point: stretched between two points");
     }
