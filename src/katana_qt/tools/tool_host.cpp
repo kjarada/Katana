@@ -13,12 +13,14 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Status;
 
-bool isTransparentCommand(std::string_view text)
+bool isTransparentCommand(std::string_view text, bool wantsValue)
 {
     std::string_view word = katana::core::trimmed(text);
     const bool apostrophe = !word.empty() && word.front() == '\'';
     if (apostrophe) {
         word.remove_prefix(1);
+    } else if (wantsValue) {
+        return false;
     }
     word = word.substr(0, word.find(' '));
     const auto is = [&](std::string_view verb) {
@@ -86,7 +88,7 @@ ToolHost::Outcome ToolHost::typed(std::string_view text)
     if (tool_ == nullptr) {
         return idle();
     }
-    if (isTransparentCommand(text)) {
+    if (isTransparentCommand(text, tool_->expects() == cad::ToolInput::Value)) {
         // The view's, not the tool's: the tool stays at its step and its
         // prompt is shown again, as AutoCAD resumes LINE after 'ZOOM.
         const std::string command(katana::core::trimmed(text));
