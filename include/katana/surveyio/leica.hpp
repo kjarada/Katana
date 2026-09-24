@@ -32,8 +32,13 @@
 //   * a point's code from word 71, else from the code block (41) BEFORE it;
 //     remarks 72-79 and code information 42-49 in the point's metadata;
 //   * one SurveyFeature per run of consecutive points sharing a code.
-// GSI states no coordinate system and marks no backsight: both are left for the
-// person to supply, and the import says so (ReadResult::notCarried).
+//   * a setup's BACKSIGHT: GSI has no word for one. A setup is made on the
+//     instrument as a station and then an orientation shot, recorded in that
+//     order, so the first shot of a setup is its backsight when the file has
+//     already given that point coordinates (a keyed-in control point, an
+//     earlier station). A first shot to an unknown point names none.
+// GSI states no coordinate system: the person supplies it, and the import says
+// so (ReadResult::notCarried), as it says how many setups found a backsight.
 //
 // LEICA DBX is Leica's internal job database (an index .xcf and data files
 // .x01, .x02 ... in one folder). No specification of it is published, so it is
