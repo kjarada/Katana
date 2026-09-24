@@ -53,7 +53,23 @@ Camera ─────────────── relativeViewProjection (dou
   defect). Pushing the fill back by two pixels of its own depth slope, plus 64
   units of the depth's last bit for a face seen straight on, lets an edge lying
   in a surface win without letting a line behind a wall show through it
-  (`ALineOnTheGroundBehindAWallStaysHidden`).
+  (`ALineOnTheGroundBehindAWallStaysHidden`). Two pixels of slope are enough
+  for a mark that reaches one pixel from its centre - a 1 px line, the TIN's
+  edges - and no more, because the same offset lets linework behind a ridge
+  show through next to its silhouette.
+* **Marks wider than that pulled towards the eye by their own size.** A point
+  or line quad is flat in depth, so on a sloping surface the part of a size-5
+  point (3 px from its centre, 3.6 px at 125%) uphill of its centre was behind
+  the surface and cut off: 13% of the points' pixels were lost on a relief 24
+  degrees steep seen 35 degrees down, 17.5% at 125%. Each mark now moves along
+  its own ray - same pixels, nearer depth - by three pixels' worth of world at
+  its depth for every pixel it reaches beyond the first, and draws whole
+  (`MarksLyingOnASlopedSurfaceDrawWholeOverIt`: 100% and 99.97%, orthographic
+  100%). A 1 px line is not moved at all. The price is that a mark shows
+  through a surface nearer to it than about its own size on screen; a wall
+  twice a point's size in front still hides it
+  (`APointWellBehindAWallStaysHidden`). The working is at `kMarkPull` in
+  `gpu_renderer.cpp`.
 * **Per-pixel lighting from face normals** (`LightingMode::PerPixel`), from the
   screen-space derivatives of the position because the draw list has no
   normals. The normal is turned to face the eye, so a face lit from behind gets
@@ -68,7 +84,7 @@ Camera ─────────────── relativeViewProjection (dou
 
 **Uploads happen only when the scene changes.** `setDrawList` packs the list and
 marks it dirty; the next frame uploads it once. Every other frame writes one
-144-byte uniform block (the camera and the frame settings) and draws
+160-byte uniform block (the camera and the frame settings) and draws
 (`AFrameThatOnlyMovesTheCameraUploadsNothing`). A packed vertex is 16 bytes
 against the draw list's 28.
 
@@ -340,6 +356,22 @@ none on screen 2.01 / 2.01 ms against 5.10 / 5.24 ms. Tried and rejected: lines
 without depth writes and without discarding empty fringe fragments, so the depth
 test could run early - 16.83 ms against 12.44 (A/A 12.47): the test and the
 discard are what spare the blender the overlapping fringes.
+
+**Pulling marks towards the eye** (the second change of 2026-09-24; "Marks
+wider than that", above) against the binary before it, with that binary run
+twice as the A/A control, 5 rounds x 3 repetitions, GPU ms min / median:
+
+| Case | before | after | before again |
+| --- | --- | --- | --- |
+| whole scene | 11.22 / 13.59 | 12.65 / 13.45 | 13.23 / 13.59 |
+| its lines alone | 11.57 / 12.66 | 12.27 / 12.59 | 12.45 / 12.69 |
+| its lines, none on screen | 1.66 / 2.00 | 1.69 / 1.96 | 1.85 / 1.99 |
+| one million 2 px cloud points | 15.65 / 17.23 | 15.10 / 17.88 | 15.83 / 17.46 |
+
+No change the control does not show as well: the scene's lines are 1 px, which
+the shader leaves unpulled before doing any of the arithmetic. The cloud's
+sprites reach 1.5 px and are pulled, 4% slower at the median against the
+control's 1% - inside this laptop's noise, and noted in case it is not.
 
 **Starting a view** (`BM_GpuStartUp`, `BM_GpuShaderCompile`, 5 iterations each,
 min / median, run 1 then run 2):

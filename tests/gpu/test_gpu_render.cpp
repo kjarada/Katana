@@ -476,6 +476,237 @@ TEST_P(GpuRender, ALineOnTheGroundBehindAWallStaysHidden)
     EXPECT_GT(lineOn(render(*gpu, camera, blackBackground())), 10u);
 }
 
+namespace {
+
+// The site's relief as a single-coloured TIN, and marks lying on it: size-5
+// points at its vertices (the scene builder's default point size - survey
+// points on the TIN built from them) or lines along its grid rows. Pure
+// green under pure magenta, so a mark pixel is told from the surface by its
+// red and blue alone.
+constexpr int kSlopeCells = 8;
+constexpr double kSlopeSize = 40.0;
+const Rgba kMarkColour = rgba(255, 0, 255);
+
+Vec3 slopeVertex(int i, int j)
+{
+    const double step = kSlopeSize / kSlopeCells;
+    const double x = -kSlopeSize * 0.5 + step * i;
+    const double y = -kSlopeSize * 0.5 + step * j;
+    return Vec3(x, y, 3.0 * std::sin(x * 0.15) * std::cos(y * 0.11));
+}
+
+void addSlopedSurface(DrawList& list)
+{
+    const auto first = static_cast<std::uint32_t>(list.positions.size());
+    for (int j = 0; j <= kSlopeCells; ++j) {
+        for (int i = 0; i <= kSlopeCells; ++i) {
+            list.addVertex(slopeVertex(i, j), rgba(0, 150, 0));
+        }
+    }
+    const auto at = [first](int i, int j) {
+        return first + static_cast<std::uint32_t>(j * (kSlopeCells + 1) + i);
+    };
+    for (int j = 0; j < kSlopeCells; ++j) {
+        for (int i = 0; i < kSlopeCells; ++i) {
+            list.addTriangle(at(i, j), at(i + 1, j), at(i + 1, j + 1));
+            list.addTriangle(at(i, j), at(i + 1, j + 1), at(i, j + 1));
+        }
+    }
+}
+
+DrawList slopePoints(float size)
+{
+    DrawList list;
+    for (int j = 0; j <= kSlopeCells; ++j) {
+        for (int i = 0; i <= kSlopeCells; ++i) {
+            list.addPoint(list.addVertex(slopeVertex(i, j), kMarkColour), size);
+        }
+    }
+    return list;
+}
+
+// Every TIN edge along a grid row, in pieces a cell long, as a TIN's edges
+// are drawn: each piece lies exactly in the surface.
+DrawList slopeRows(float width)
+{
+    DrawList list;
+    for (int j = 0; j <= kSlopeCells; ++j) {
+        for (int i = 0; i < kSlopeCells; ++i) {
+            list.addSegment(slopeVertex(i, j), slopeVertex(i + 1, j), kMarkColour, width);
+        }
+    }
+    return list;
+}
+
+// Over black a mark pixel's red is its coverage, 255 where the mark covers
+// the whole pixel; over the green surface an uncut mark blends to the same
+// red, since the surface has none. At least half covered counts as a mark
+// pixel, and it shows over the surface when it keeps that red to within 16
+// levels - a sixteenth of it, where losing one of the four samples to the
+// surface costs a quarter.
+bool markPixel(Rgba alone) { return katana::render::redOf(alone) >= 128; }
+
+bool markShows(Rgba alone, Rgba over)
+{
+    return katana::render::redOf(over) + 16 >= katana::render::redOf(alone);
+}
+
+} // namespace
+
+// A mark lying on a surface draws whole over it. The quad a point or a line
+// becomes is flat in depth - the depth of its centre - while the surface
+// under it slopes away, so wherever the quad reaches uphill of its centre the
+// surface is nearer than the quad. A size-5 point reaches 3 px from its
+// centre (3.6 px at 125%), well past what the fill's offset of two pixels of
+// its own depth slope covers, and before the marks were pulled towards the
+// eye (gpu_renderer.cpp, kMarkPull) lost the uphill corner of every square:
+// 13% of the points' pixels here, 17.5% at 125%.
+TEST_P(GpuRender, MarksLyingOnASlopedSurfaceDrawWholeOverIt)
+{
+    constexpr int kWidth = 256;
+    constexpr int kHeight = 192;
+    auto gpu = device(kWidth, kHeight);
+    if (!gpu) {
+        GTEST_SKIP() << skipReason;
+    }
+    // 35 degrees down from the south-west. The relief's steepest facet
+    // climbs 24 degrees (dz/dx at most 3 * 0.15 = 0.45 = tan 24.2), less than
+    // the view's 35, so no facet turns its back on the eye and nothing on
+    // the TIN is hidden by the TIN: every mark pixel drawn on black must
+    // still show over the surface.
+    Camera camera;
+    camera.setViewportSize(kWidth, kHeight);
+    camera.setProjection(Projection::Perspective);
+    camera.setOrientation(-3.0 * std::numbers::pi / 4.0, 35.0 * std::numbers::pi / 180.0);
+    DrawList framing;
+    addSlopedSurface(framing);
+    ASSERT_TRUE(camera.frame(framing.bounds()));
+
+    struct Kept {
+        std::size_t marks = 0;
+        std::size_t shown = 0;
+    };
+    const auto keptOver = [&](const DrawList& marks, double pixelRatio, const std::string& name,
+                              const Camera& view) {
+        FrameSettings settings = blackBackground();
+        settings.pixelRatio = pixelRatio;
+        gpu->renderer().setDrawList(marks);
+        const Image alone = render(*gpu, view, settings);
+        DrawList onSurface;
+        addSlopedSurface(onSurface);
+        const auto base = static_cast<std::uint32_t>(onSurface.positions.size());
+        onSurface.positions.insert(onSurface.positions.end(), marks.positions.begin(),
+                                   marks.positions.end());
+        onSurface.colors.insert(onSurface.colors.end(), marks.colors.begin(), marks.colors.end());
+        for (auto line : marks.lines) {
+            line.a += base;
+            line.b += base;
+            onSurface.lines.push_back(line);
+        }
+        for (auto point : marks.points) {
+            point.a += base;
+            onSurface.points.push_back(point);
+        }
+        gpu->renderer().setDrawList(onSurface);
+        const Image over = render(*gpu, view, settings);
+        saveForLooking(label(name), over, kWidth, kHeight);
+        Kept kept;
+        for (std::size_t i = 0; i < alone.size(); ++i) {
+            if (markPixel(alone[i])) {
+                ++kept.marks;
+                kept.shown += markShows(alone[i], over[i]) ? 1 : 0;
+            }
+        }
+        return kept;
+    };
+    // Every mark pixel, less the odd one where the antialiased edge of the
+    // quad meets a triangle's edge in the depth test's last bit.
+    const auto expectWhole = [](const Kept& kept) {
+        EXPECT_GT(kept.marks, 500u);
+        EXPECT_GE(static_cast<double>(kept.shown), 0.995 * static_cast<double>(kept.marks))
+            << kept.shown << " of " << kept.marks << " mark pixels show over the surface";
+    };
+    {
+        SCOPED_TRACE("size-5 points");
+        expectWhole(keptOver(slopePoints(5.0f), 1.0, "slope_points", camera));
+    }
+    {
+        SCOPED_TRACE("size-5 points at 125%");
+        expectWhole(keptOver(slopePoints(5.0f), 1.25, "slope_points_125", camera));
+    }
+    {
+        SCOPED_TRACE("4 px lines");
+        expectWhole(keptOver(slopeRows(4.0f), 1.0, "slope_lines4", camera));
+    }
+    {
+        SCOPED_TRACE("2 px lines at 125%");
+        expectWhole(keptOver(slopeRows(2.0f), 1.25, "slope_lines2_125", camera));
+    }
+    {
+        SCOPED_TRACE("1 px lines, which the fill's own offset already covered");
+        expectWhole(keptOver(slopeRows(1.0f), 1.0, "slope_lines1", camera));
+    }
+    {
+        // The same view without perspective: the pull is then a fixed
+        // length along the view direction rather than a share of the depth.
+        SCOPED_TRACE("size-5 points, orthographic");
+        Camera orthographic = camera;
+        orthographic.setProjection(Projection::Orthographic);
+        expectWhole(keptOver(slopePoints(5.0f), 1.0, "slope_points_ortho", orthographic));
+    }
+}
+
+// The other side of the same pull: a mark pulled towards the eye so that the
+// surface it lies on cannot cut it must still be hidden by a wall standing
+// well in front of it.
+TEST_P(GpuRender, APointWellBehindAWallStaysHidden)
+{
+    constexpr int kWidth = 128;
+    constexpr int kHeight = 96;
+    auto gpu = device(kWidth, kHeight);
+    if (!gpu) {
+        GTEST_SKIP() << skipReason;
+    }
+    DrawList list;
+    const Rgba red = rgba(255, 0, 0);
+    const auto a = list.addVertex(Vec3(-20.0, 0.0, 0.0), red);
+    const auto b = list.addVertex(Vec3(20.0, 0.0, 0.0), red);
+    const auto c = list.addVertex(Vec3(20.0, 0.0, 25.0), red);
+    const auto d = list.addVertex(Vec3(-20.0, 0.0, 25.0), red);
+    list.addTriangle(a, b, c);
+    list.addTriangle(a, c, d);
+    Camera camera;
+    camera.setViewportSize(kWidth, kHeight);
+    camera.setProjection(Projection::Perspective);
+    camera.setOrientation(-std::numbers::pi / 2.0, 0.2); // from the south, a little above
+    ASSERT_TRUE(camera.frame(list.bounds()));
+    // A 9 px point - larger than the scene builder's 5, so pulled further: it
+    // reaches 4.5 + 0.5 = 5 px, and is pulled 3 x (5 - 1) = 12 pixels' worth
+    // of world (gpu_renderer.cpp, kMarkPull) - twice its own size, 18
+    // pixels' worth, behind the wall, at the wall's metres per pixel.
+    const double metresPerPixel = camera.worldPerPixel();
+    const double behind = 2.0 * 9.0 * metresPerPixel;
+    list.addPoint(list.addVertex(Vec3(0.0, behind, 12.0), kMarkColour), 9.0f);
+
+    const auto markOn = [](const Image& image) {
+        std::size_t count = 0;
+        for (const Rgba pixel : image) {
+            count += katana::render::blueOf(pixel) > 8 ? 1 : 0;
+        }
+        return count;
+    };
+    gpu->renderer().setDrawList(list);
+    const Image image = render(*gpu, camera, blackBackground());
+    saveForLooking(label("point_behind_wall"), image, kWidth, kHeight);
+    EXPECT_EQ(markOn(image), 0u);
+
+    // The control: without the wall the point is there to be seen.
+    DrawList pointOnly = list;
+    pointOnly.triangles.clear();
+    gpu->renderer().setDrawList(pointOnly);
+    EXPECT_GT(markOn(render(*gpu, camera, blackBackground())), 40u);
+}
+
 TEST_P(GpuRender, ZoomingFarOutNeverClipsTheSceneAway)
 {
     constexpr int kSize = 64;

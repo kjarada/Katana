@@ -7,6 +7,7 @@
 
 #include <rhi/qrhi.h>
 
+#include "katana/math/vec4.hpp"
 #include "scene_origin.hpp"
 
 namespace katana::qt::gpu {
@@ -26,8 +27,9 @@ struct FrameUniforms {
     std::array<float, 4> eyeRel{};
     std::array<float, 4> forwardMode{};
     std::array<float, 4> params{};
+    std::array<float, 4> markPull{};
 };
-static_assert(sizeof(FrameUniforms) == 144);
+static_assert(sizeof(FrameUniforms) == 160);
 
 // FILL OFFSET. Filled triangles are pushed AWAY from the eye by a polygon
 // offset, so that a line lying in a surface - a TIN edge, a string draped on
@@ -36,11 +38,16 @@ static_assert(sizeof(FrameUniforms) == 144);
 //
 // The slope term does the work: a line quad is flat in depth across its
 // width while the surface under it slopes, and at a grazing angle the surface
-// changes depth by metres per pixel. The quad reaches half a pixel of
-// antialiasing fringe past its width's half (shader_library.cpp), which for a
-// 1 px line is 1 px, so pushing the surface back by two pixels of its own
-// depth slope leaves the line a pixel to spare. The constant term covers a surface seen face on, where the
-// slope is zero: for a float depth buffer one unit is 2^(e - 23) of the
+// changes depth by metres per pixel. The slope the offset is scaled by is the
+// larger of the surface's depth changes per pixel across and down the screen,
+// and a quad corner r pixels across and r down from where the mark touches
+// the surface is at most twice r of that deeper, so two of it keep whole any
+// mark reaching one pixel from its centre: a 1 px line, whose quad reaches
+// half a pixel of antialiasing fringe past its half width (shader_library.cpp).
+// That is the dense TIN's edges, and no more, because the same offset is what
+// lets linework behind a ridge show through the ridge: two pixels of it, next
+// to the silhouette. The constant term covers a surface seen face on, where
+// the slope is zero: for a float depth buffer one unit is 2^(e - 23) of the
 // value's own exponent, so 64 units is a relative 4e-6 to 8e-6 of the depth -
 // millimetres at a kilometre.
 //
@@ -48,6 +55,30 @@ static_assert(sizeof(FrameUniforms) == 144);
 // standard-Z buffer and pulls lines metres forward, through buildings.
 constexpr int kFillConstantBias = -64;
 constexpr float kFillSlopeBias = -2.0f;
+
+// MARK PULL. A mark reaching further than the fill's offset covers - a
+// size-5 point reaches 3 px (3.6 px at 125%), a selected line 1.5 px - is
+// moved towards the eye along its own ray, so it stays on the same pixels, by
+// this many pixels' worth of world at its depth for every pixel it reaches
+// beyond the first (shader_library.cpp, pulledTowardsEye). Only the mark
+// moves, so the TIN's own 1 px edges, which reach one pixel, are not pulled
+// and see no more through a ridge than the fill offset lets them.
+//
+// Worked out: the pull and the fill offset together keep a mark of reach r
+// whole on a surface whose depth changes by up to 3 (r - 1) / (r - 2) pixels'
+// worth per pixel up the screen - 6 for a size-5 point, a surface 80 degrees
+// from face on - or 1.5 along each axis at once, 65 degrees on a diagonal.
+// Measured (MarksLyingOnASlopedSurfaceDrawWholeOverIt, size-5 points on a
+// relief 24 degrees steep seen 35 degrees down; at 100% and 125%): with no
+// pull 86.8% and 82.5% of the points' pixels showed, with a pull of 1 99.3%
+// and 98.7%, 2 99.85% and 99.90%, 3 100% and 99.97%.
+//
+// The price is the other side of the same depth: a mark shows through a
+// surface less than 3 (r - 1) pixels' worth in front of it - for a size-5
+// point 6 px, about its own width. A wall twice a point's size in front still
+// hides it (APointWellBehindAWallStaysHidden), which a pull of 4 already did
+// not.
+constexpr double kMarkPull = 3.0;
 
 constexpr std::size_t kProgramCount = kAllPrograms.size();
 
@@ -333,8 +364,9 @@ namespace {
     projection.clip.yUpInNdc = rhi.isYUpInNDC();
     projection.clip.depthZeroToOne = rhi.isClipDepthZeroToOne();
 
+    const Mat4 clip = relativeViewProjection(camera, origin, projection);
     FrameUniforms u;
-    u.mvp = toFloatColumnMajor(relativeViewProjection(camera, origin, projection));
+    u.mvp = toFloatColumnMajor(clip);
     u.viewport = float4(width, height, 1.0 / width, 1.0 / height);
 
     katana::math::Vec3 light = settings.lightDirection;
@@ -366,6 +398,20 @@ namespace {
                                  ? settings.cloudPointSize
                                  : 2.0;
     u.params = float4(factor, datum - origin.z, ratio, cloudSize);
+
+    // The mark pull (kMarkPull): per pixel of reach, a pixel's worth of world
+    // at the mark's depth - in perspective a fraction of that depth, the
+    // pixel's angular size; in orthographic a fixed length - and the clip z
+    // of what the mark is pulled towards: the eye, or the view direction.
+    // The projection mixes no x or y into z (no off-centre frusta), so the
+    // eye's clip position is (0, 0, z, 0) and so is the direction's.
+    const double perPixel =
+        perspective ? 2.0 * std::tan(camera.fieldOfView() * 0.5) / static_cast<double>(height)
+                    : camera.orthographicHeight() / static_cast<double>(height);
+    const katana::math::Vec4 target =
+        perspective ? clip * katana::math::Vec4(eye.x, eye.y, eye.z, 1.0)
+                    : clip * katana::math::Vec4(forward.x, forward.y, forward.z, 0.0);
+    u.markPull = float4(kMarkPull * perPixel, target.z, 0.0, 0.0);
     return u;
 }
 
