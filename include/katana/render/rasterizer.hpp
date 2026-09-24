@@ -112,9 +112,12 @@ class Rasterizer {
     struct ScreenTriangle {
         float x[3]{};
         float y[3]{};
-        float z[3]{};       // NDC depth, already in [0, 1] and screen-linear
+        float z[3]{};       // reversed NDC depth, already in [0, 1] and screen-linear
         float invW[3]{};
         Rgba color[3]{};
+        // Added to the depth (reversed: positive is nearer). The slope-scaled
+        // push of a filled triangle, negative; 0 for a widened line, whose
+        // pull is already in its vertices' depths.
         float depthBias = 0.0f;
     };
 
@@ -126,12 +129,23 @@ class Rasterizer {
         Rgba color = 0;
     };
 
+    // How a line's or a point's depth bias (pixel footprints towards the eye)
+    // becomes a change of reversed depth: pixels * (scale * depth + offset).
+    // Worked out once per frame from the camera (rasterizer.cpp).
+    struct DepthPull {
+        float scale = 0.0f;
+        float offset = 0.0f;
+    };
+    [[nodiscard]] static DepthPull depthPullFor(const Camera& camera);
+
     void transformVertices(const DrawList& list, const Camera& camera,
                            katana::core::TaskPool& pool);
     void buildScreenPrimitives(const DrawList& list, const Framebuffer& target,
                                const RenderOptions& options, katana::core::TaskPool& pool);
     void binPrimitives(const Framebuffer& target, katana::core::TaskPool& pool);
     void rasteriseTiles(Framebuffer& target, katana::core::TaskPool& pool);
+
+    DepthPull depthPull_;
 
     // Stage 1 output.
     std::vector<ClipVertex> clip_;

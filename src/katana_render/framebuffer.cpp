@@ -60,7 +60,7 @@ Status Framebuffer::resize(int width, int height)
     tilesAcross_ = (width + kTileSize - 1) / kTileSize;
     tilesDown_ = (height + kTileSize - 1) / kTileSize;
     color_.assign(pixels, 0u);
-    depth_.assign(pixels, 1.0f);
+    depth_.assign(pixels, 0.0f);
     return {};
 }
 
@@ -82,7 +82,7 @@ TileRect Framebuffer::tile(std::size_t index) const
 void Framebuffer::clear(Rgba background)
 {
     std::fill(color_.begin(), color_.end(), background);
-    std::fill(depth_.begin(), depth_.end(), 1.0f);
+    std::fill(depth_.begin(), depth_.end(), 0.0f);
 }
 
 void Framebuffer::clearTile(const TileRect& rect, Rgba background)
@@ -94,7 +94,7 @@ void Framebuffer::clearTile(const TileRect& rect, Rgba background)
                   background);
         std::fill(depth_.begin() + static_cast<std::ptrdiff_t>(row + static_cast<std::size_t>(rect.x0)),
                   depth_.begin() + static_cast<std::ptrdiff_t>(row + static_cast<std::size_t>(rect.x1)),
-                  1.0f);
+                  0.0f);
     }
 }
 
