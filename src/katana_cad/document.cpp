@@ -109,6 +109,7 @@ void Document::rebuildSpatialIndex()
     });
     index_.rebuild(entries);
     indexChosenFor_ = model_.entities.size();
+    indexOversizedAtRebuild_ = index_.oversizedCount();
 }
 
 // WHEN THE INDEX IS REBUILT RATHER THAN UPDATED.
@@ -122,32 +123,41 @@ void Document::rebuildSpatialIndex()
 // repaint was 36x slower until the project was reopened - opening being the
 // one thing that rebuilt it.
 //
-// So a command rebuilds the index when either
-//   * it touched at least a tenth of the drawing (kBulkFraction), or
-//   * the drawing has grown to twice the size the cell was chosen for - an
-//     empty drawing's cell was chosen for none, so its first command always
-//     rebuilds.
-// Neither is ever true of the ordinary click on a drawing of any size, which
-// stays an O(1) insert. A rebuild costs O(n); the first rule fires only when
-// the command itself was already a tenth of that, and the second only after
-// n/2 entities were added since the last rebuild, so neither can make a
-// sequence of commands cost more than a constant factor over the edits in it.
+// So the index is rebuilt, re-choosing the cell, when
+//   * THE SIZE RULE: the drawing has grown to twice, or shrunk to half, the
+//     number of entities the cell was chosen for. An empty drawing's cell was
+//     chosen for none, so the first command into it - an import - always
+//     rebuilds, and without first filing everything into the default cell.
+//   * THE OVERFLOW RULE: after a command is applied incrementally, the
+//     oversized list holds more than twice what the last rebuild left there
+//     plus a hundredth of the drawing. Boxes too big for the cell are what
+//     make every query slow, and they come from a command that brings in or
+//     scales up geometry the cell was not chosen for.
+// NOT when a command merely touches many entities. That was the first rule
+// tried (a tenth of the drawing), and measured on the 27,886-entity corridor
+// stand-in (BM_MoveATenthOfAnImport*, bench_cad.cpp) it made a MOVE of a
+// tenth, with its undo, about 4x slower than the same move one entity short
+// of the threshold (101 against 24 ms, min of 9) - two rebuilds of the whole
+// drawing for a move that changes no box's size and so no cell choice.
+//
+// Neither rule fires on an ordinary click on a drawing of any size, which
+// stays an O(1) update. A rebuild costs O(n), and each rule fires only after
+// Theta(n) entities were added, removed or pushed onto the oversized list since
+// the last one, so a sequence of commands costs a constant factor over the
+// edits in it, never O(n) per edit.
 void Document::applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent>& changes)
 {
     if (changes.empty()) {
         return; // a table-only command: nothing the index holds moved
     }
-    // One in ten: see "when the index is rebuilt" above.
-    constexpr std::size_t kBulkFraction = 10;
     const std::size_t entities = model_.entities.size();
-    const bool bulk = changes.size() * kBulkFraction >= entities || entities >= 2 * indexChosenFor_;
+    const bool resized = entities >= 2 * indexChosenFor_ || 2 * entities <= indexChosenFor_;
+    // After a Cleared the data is about to be different altogether.
     const bool cleared =
         std::ranges::any_of(changes, [](const katana::entity::ChangeEvent& change) {
             return change.kind == katana::entity::ChangeKind::Cleared;
         });
-    if (bulk || cleared) {
-        // After a Cleared the data is about to be different altogether, and a
-        // rebuild re-chooses the cell for it.
+    if (resized || cleared) {
         rebuildSpatialIndex();
         return;
     }
@@ -175,6 +185,10 @@ void Document::applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent
             break;
         }
         }
+    }
+    // The overflow rule, above.
+    if (index_.oversizedCount() > 2 * indexOversizedAtRebuild_ + entities / 100) {
+        rebuildSpatialIndex();
     }
 }
 
