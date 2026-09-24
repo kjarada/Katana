@@ -281,7 +281,7 @@ TEST(DomainImport, WhatOnlyTwelveDKnowsAboutAStringTravelsInItsMetadata)
     EXPECT_EQ(domain.entities[0].style, "Kerb");
     ASSERT_EQ(domain.stylesNeeded.size(), 1u);
     EXPECT_EQ(domain.stylesNeeded[0].name, "Kerb");
-    EXPECT_EQ(domain.stylesNeeded[0].description, "12d linestyle");
+    EXPECT_EQ(domain.stylesNeeded[0].description, "library linestyle");
     // The 12d LINESTYLE NAME, which is what the line should be drawn with.
     // It used to be left as "continuous", so the name reached nowhere a
     // renderer would look and a loaded 12d linestyle library could never be

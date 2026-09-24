@@ -1,7 +1,7 @@
 #pragma once
 
 // A small strict XML reader, shared by everything in Katana that has to read
-// an XML-shaped survey or design file: the 12d mapfile and .4d libraries
+// an XML-shaped survey or design file: the survey code file and .4d libraries
 // (PLAN.MD 20.3) and LandXML. It lives in core because there must be exactly
 // one of these - a second hand-written XML reader is a second piece of
 // untrusted-input surface to audit, not a convenience.
@@ -13,7 +13,7 @@
 //
 // Supported: the XML declaration and other processing instructions, comments,
 // CDATA, self-closing elements, attributes in single or double quotes, and
-// the five predefined entities. Measured against two production 12d mapfiles,
+// the five predefined entities. Measured against two production survey code files,
 // which between them use a processing instruction, attributes on the root
 // element only, 467 self-closing elements, no entity reference, no CDATA and
 // no comment.
@@ -52,8 +52,8 @@
 namespace katana::core {
 
 // The deepest nesting `readXml` accepts. See the note above: this is the
-// stack-exhaustion guard, not a document limit anybody should be near - a 12d
-// mapfile is four elements deep. Exposed so that a caller and its tests can
+// stack-exhaustion guard, not a document limit anybody should be near - a survey
+// code file is four elements deep. Exposed so that a caller and its tests can
 // name the limit rather than repeat the number.
 constexpr std::size_t kXmlMaxDepth = 64;
 
