@@ -62,7 +62,8 @@ template <typename T> inline void store(const Vec<T>& value, T* to)
 
 // Lane by lane, `whenTrue` where `mask` is set and `whenFalse` elsewhere.
 template <typename T>
-[[nodiscard]] inline Vec<T> select(const Mask<T>& mask, const Vec<T>& whenTrue, const Vec<T>& whenFalse)
+[[nodiscard]] inline Vec<T> select(const Mask<T>& mask, const Vec<T>& whenTrue,
+                                   const Vec<T>& whenFalse)
 {
     return std::simd::select(mask, whenTrue, whenFalse);
 }
@@ -87,7 +88,8 @@ template <typename T> inline void store(const Vec<T>& value, T* to)
 }
 
 template <typename T>
-[[nodiscard]] inline Vec<T> select(const Mask<T>& mask, const Vec<T>& whenTrue, const Vec<T>& whenFalse)
+[[nodiscard]] inline Vec<T> select(const Mask<T>& mask, const Vec<T>& whenTrue,
+                                   const Vec<T>& whenFalse)
 {
     Vec<T> result = whenFalse;
     std::experimental::where(mask, result) = whenTrue;
