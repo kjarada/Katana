@@ -552,13 +552,16 @@ void PlanPainter::drawPointClouds()
                 maximum = cloud.bounds.maxZ;
             }
 
-            std::vector<std::uint32_t> colours;
-            colours.reserve(cloud.points.size());
-            for (const auto& point : cloud.points) {
-                const katana::interop::Rgb rgb =
-                    katana::interop::colorForPoint(point, cloud.colorMode, minimum, maximum);
-                colours.push_back(qRgb(rgb.r, rgb.g, rgb.b));
-            }
+            // Each point's colour is its own, so the pool can share them out.
+            std::vector<std::uint32_t> colours(cloud.points.size());
+            katana::core::TaskPool::shared().parallelRanges(
+                0, cloud.points.size(), 65'536, [&](std::size_t lo, std::size_t hi) {
+                    for (std::size_t i = lo; i < hi; ++i) {
+                        const katana::interop::Rgb rgb = katana::interop::colorForPoint(
+                            cloud.points[i], cloud.colorMode, minimum, maximum);
+                        colours[i] = qRgb(rgb.r, rgb.g, rgb.b);
+                    }
+                });
             PlanPaintCache::CloudDisplay entry;
             entry.id = cloud.id;
             entry.mode = cloud.colorMode;
