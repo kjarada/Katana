@@ -166,7 +166,8 @@ TEST(RinexFormat, EveryObservationFixtureIsIdentifiedAsRinexObservation)
 {
     for (const std::string name :
          {"test2560.24o", "TEST00AUS_R_20242561000_01H_30S_MO.rnx",
-          "ROVR00AUS_R_20242561100_01H_01S_GO.rnx", "BASE00AUS_R_20242561200_01H_30S_MO.rnx"}) {
+          "ROVR00AUS_R_20242561100_01H_01S_GO.rnx", "BASE00AUS_R_20242561200_01H_30S_MO.rnx",
+          "rinex305_example1.rnx"}) {
         const std::string bytes = fixture(name);
         const Detection detection = detectFormat(probeOf(bytes, name));
         ASSERT_EQ(detection.outcome(), DetectionOutcome::Identified)
@@ -537,6 +538,68 @@ TEST(Rinex3, EachOccupationChangeIsWarnedAtTheEventThatCausedIt)
               std::string::npos);
 }
 
+TEST(Rinex3, TheSpecificationsOwnExampleReadsAsItsCommentsDescribe)
+{
+    // RINEX 3.05 (IGS/RTCM RINEX WG, 1 December 2020) table A4, example #1,
+    // laid out by the format descriptors of tables A2 and A3 (the printed
+    // "." ellipsis lines are not records and are left out). What it holds,
+    // by its own comments: site A 9080 observed at 13:10:36 and 13:10:54 with
+    // G06 G09 G12, R21 R22, E11 and S20; "FROM NOW ON KINEMATIC DATA" at
+    // 13:11:12 and one moving epoch; "THE START OF A NEW SITE", A 9081 with an
+    // antenna height of 0.9050, observed at 13:12:06 and 13:14:12 with G06
+    // G09 G12 G16; an external event at 13:13:01.2345678.
+    const std::string name = "rinex305_example1.rnx";
+    const std::string bytes = fixture(name);
+    const Result<ReadResult> read = readRinex(bytes, name);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    const survey::SurveyProject& project = read->project;
+    ASSERT_EQ(project.gnssSessions.size(), 2U);
+    const survey::GnssSession& first = project.gnssSessions[0];
+    EXPECT_EQ(first.markerName, "A 9080");
+    EXPECT_EQ(first.markerNumber, "9080.1.34");
+    EXPECT_EQ(first.epochCount, 2U);
+    EXPECT_EQ(toString(first.firstEpoch), "2006-03-24T13:10:36 GPS");
+    EXPECT_EQ(toString(first.lastEpoch), "2006-03-24T13:10:54 GPS");
+    EXPECT_DOUBLE_EQ(first.intervalSeconds.value_or(0.0), 18.0);
+    EXPECT_DOUBLE_EQ(first.antenna.height, 0.903);
+    EXPECT_EQ(first.antenna.type, "ROVER");
+    const std::map<std::string, std::size_t> firstSatellites{
+        {"GPS", 3}, {"GLONASS", 2}, {"Galileo", 1}, {"SBAS", 1}};
+    EXPECT_EQ(first.satellitesPerSystem, firstSatellites);
+
+    const survey::GnssSession& second = project.gnssSessions[1];
+    EXPECT_EQ(second.markerName, "A 9081");
+    EXPECT_EQ(second.markerNumber, "9081.1.34");
+    EXPECT_EQ(second.epochCount, 2U);
+    EXPECT_EQ(toString(second.firstEpoch), "2006-03-24T13:12:06 GPS");
+    EXPECT_EQ(toString(second.lastEpoch), "2006-03-24T13:14:12 GPS");
+    EXPECT_DOUBLE_EQ(second.antenna.height, 0.905);
+    EXPECT_EQ(second.satellitesPerSystem.at("GPS"), 4U);
+    EXPECT_EQ(second.receiverType, "GEODETIC") << "REC # / TYPE / VERS: X1234A123, GEODETIC";
+
+    EXPECT_EQ(project.metadata.at("kinematic epochs"), "1");
+    EXPECT_EQ(project.metadata.at("external events (event flag 5)"),
+              "1: 2006-03-24T13:13:01.2345678 GPS");
+    // A 9080 has the header's position (4375274, 587466, 4589095); A 9081 is
+    // given none.
+    ASSERT_EQ(project.observations.size(), 1U);
+    EXPECT_EQ(positionAt(project, 0).point, "A 9080");
+    EXPECT_DOUBLE_EQ(positionAt(project, 0).geocentric->z, 4589095.0);
+    EXPECT_TRUE(anyNotCarriedContains(*read, "a position for A 9081"));
+
+    // 78 lines, every one a record. Two warnings: A 9081's epochs are 126 s
+    // apart against the header's 18 s (reported at its MARKER NAME, line 57),
+    // and the one kinematic epoch (reported at the flag 2 event, line 48:
+    // header 33 lines, then 1 + 5 and 1 + 7 for the two epochs).
+    EXPECT_EQ(lineCount(bytes), 78U);
+    EXPECT_EQ(read->recordsRead, 78U);
+    EXPECT_EQ(read->recordsSkipped, 0U);
+    ASSERT_EQ(read->warnings.size(), 2U) << describeWarnings(*read);
+    EXPECT_EQ(read->warnings[0].record, 57U);
+    EXPECT_NE(read->warnings[0].message.find("mostly 126.000 s apart"), std::string::npos);
+    EXPECT_EQ(read->warnings[1].record, 48U);
+}
+
 // ---- RINEX 4.01 ----------------------------------------------------------------------
 
 TEST(Rinex4, AVersionFourFileIsReadWithItsNewHeaderRecordsAndLongNamedNavigationFile)
@@ -677,6 +740,26 @@ TEST(RinexDamage, ARinexTwoObservationLineWithForeignCharactersIsWarnedAndItsSat
     // satellite records drop by the one that could not be read.
     EXPECT_EQ(read->project.metadata.at("satellite records"), "28");
     EXPECT_EQ(read->project.gnssSessions.at(0).satellitesPerSystem.at("GPS"), 10U);
+}
+
+TEST(RinexDamage, AnEventWithADamagedTimeStillHasItsHeaderRecordsRead)
+{
+    // Line 12 epoch at M1 with G01 (13); line 14 a new site occupation whose
+    // month is 13, followed by MARKER NAME M2 (15); line 16 an epoch with G02
+    // (17), which belongs to M2.
+    const std::string bytes = minimalV3Header() + epochV3(0, 0.0, 0, 1) + satelliteV3("G01") +
+                              "> 2024 13 12 10 00 15.0000000  3  1\n" +
+                              header("M2", "MARKER NAME") + epochV3(0, 30.0, 0, 1) +
+                              satelliteV3("G02");
+    const Result<ReadResult> read = readRinex(bytes, "event.rnx");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->project.gnssSessions.size(), 2U);
+    EXPECT_EQ(read->project.gnssSessions[1].markerName, "M2");
+    EXPECT_EQ(read->project.gnssSessions[1].epochCount, 1U);
+    EXPECT_TRUE(std::any_of(read->warnings.begin(), read->warnings.end(), [](const ReadWarning& w) {
+        return w.record == 14 && w.message.find("month 13 does not exist") != std::string::npos;
+    })) << describeWarnings(*read);
+    EXPECT_EQ(read->recordsSkipped, 0U);
 }
 
 TEST(RinexDamage, AFileCutInsideAnEpochIsWarnedAndWhatWasReadIsKept)
@@ -839,6 +922,7 @@ const std::vector<std::string>& allFixtures()
                                                 "ROVR00AUS_R_20242561100_01H_01S_GO.rnx",
                                                 "BASE00AUS_R_20242561200_01H_30S_MO.rnx",
                                                 "test2560.24d",
+                                                "rinex305_example1.rnx",
                                                 "test2560.24n",
                                                 "BASE00AUS_R_20242561200_01H_MN.rnx"};
     return names;

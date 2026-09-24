@@ -212,8 +212,9 @@ struct Epoch {
 
 // Why an epoch line could not be used, or empty when it could.
 struct EpochParse {
-    bool isEpoch = false;  // the line is shaped as an epoch record
-    std::string problem{}; // shaped as one but unusable: bad time, bad count
+    bool isEpoch = false;   // the line is shaped as an epoch record
+    bool countRead = false; // its satellite / special-record count was read
+    std::string problem{};  // shaped as one but unusable: bad time, bad count
 };
 
 bool readInt(std::string_view field, int& value)
@@ -241,7 +242,7 @@ std::string readTime(std::string_view year, std::string_view month, std::string_
     }
     time.second = *seconds;
     if (twoDigitYear) {
-        // RINEX 2.11 section 6.5: 80-99 are 1980-1999, 00-79 are 2000-2079.
+        // RINEX 2.11: two-digit years 80-99 are 1980-1999, 00-79 are 2000-2079.
         if (time.year < 0 || time.year > 99) {
             return "its two-digit year is not two digits";
         }
@@ -272,6 +273,7 @@ EpochParse parseEpochV2(std::string_view line, Epoch& epoch)
         parse.problem = "its satellite count is not a number";
         return parse;
     }
+    parse.countRead = true;
     if (epoch.timed) {
         parse.problem =
             readTime(rinex::columns(line, 2, 2), rinex::columns(line, 5, 2),
@@ -301,6 +303,7 @@ EpochParse parseEpochV3(std::string_view line, Epoch& epoch)
         parse.problem = "its satellite count (columns 33-35) is not a number";
         return parse;
     }
+    parse.countRead = true;
     const std::string_view timeFields = line.substr(1, 30);
     epoch.timed = !isBlank(timeFields);
     if (epoch.timed) {
@@ -903,6 +906,16 @@ void ObservationReader::readBody()
                 continue; // a blank last line: an editor's, not the writer's
             }
             skipToNextEpoch(record, "this line is not an epoch record where one should start");
+            continue;
+        }
+        if (!parse.problem.empty() && parse.countRead && epoch.flag >= 2 && epoch.flag <= 5) {
+            // What an event's header records say does not depend on when it
+            // happened: read them, and say the time was not.
+            warn(record, "the time of this event cannot be read (" + parse.problem +
+                             "); the header records after it are still read");
+            epoch.timed = false;
+            ++result_.recordsRead;
+            readSpecialRecords(epoch, record);
             continue;
         }
         if (!parse.problem.empty()) {
