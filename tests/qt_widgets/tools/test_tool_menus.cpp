@@ -14,11 +14,13 @@
 #include <QKeyEvent>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMenuBar>
 #include <QToolBar>
 #include <QToolButton>
 
 #include "katana/cad/interactive_tool.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "tools/tool_icons.hpp"
 #include "tools/tool_menus.hpp"
 #include "view_workspace.hpp"
 #include "widget_harness.hpp"
@@ -130,7 +132,8 @@ TEST(ToolMenus, ACircleVariantIsItemInTheCircleSubmenuNamedByItsVariant)
         }
     }
     ASSERT_NE(twoPoints, nullptr);
-    EXPECT_EQ(twoPoints->text(), "2 Points");
+    // Its menu letter aside: "&2 Points".
+    EXPECT_EQ(QString(twoPoints->text()).remove('&'), "2 Points");
     EXPECT_TRUE(twoPoints->toolTip().contains("Circle, 2 Points"));
     // On the toolbar the family is one button that runs its first variant.
     auto* button = built.window.findChild<QToolButton*>("toolFamilyButton.Draw.Circle");
@@ -381,4 +384,131 @@ TEST(ToolMenus, APlanViewClosedWhileItsToolRunsEndsTheToolAndSaysSo)
     EXPECT_EQ(changes.back(), "");
     EXPECT_EQ(views->activeToolId(), "");
     EXPECT_EQ(views->planViews().size(), 1u);
+}
+
+// ---- menus made for a category, menu letters, icons -----------------------------------
+
+namespace {
+
+// The letter after a single '&', upper case; empty for none.
+QString letterOf(const QString& text)
+{
+    for (qsizetype at = text.indexOf('&'); at >= 0 && at + 1 < text.size();
+         at = text.indexOf('&', at + 2)) {
+        if (text[at + 1] != '&') {
+            return text.mid(at + 1, 1).toUpper();
+        }
+    }
+    return {};
+}
+
+// Every item of `menu` and its submenus has a letter, none shared within one
+// menu; the offenders are listed.
+void checkLetters(const QMenu& menu, QStringList& problems)
+{
+    QStringList seen;
+    for (const QAction* item : menu.actions()) {
+        if (item->isSeparator()) {
+            continue;
+        }
+        const QString letter = letterOf(item->text());
+        if (letter.isEmpty()) {
+            problems << menu.title() + " > " + item->text() + " has no letter";
+        } else if (seen.contains(letter)) {
+            problems << menu.title() + " > " + item->text() + " repeats " + letter;
+        }
+        seen << letter;
+        if (const QMenu* sub = item->menu()) {
+            checkLetters(*sub, problems);
+        }
+    }
+}
+
+} // namespace
+
+TEST(ToolMenus, EveryToolMenuItemHasAMenuLetterOfItsOwn)
+{
+    Menus built;
+    QStringList problems;
+    for (const auto& [category, menu] : built.menus) {
+        checkLetters(*menu, problems);
+    }
+    EXPECT_TRUE(problems.isEmpty()) << problems.join("; ").toStdString();
+}
+
+TEST(ToolMenus, AMenuLetterPrefersTheStartOfAWordAndSkipsTakenLetters)
+{
+    using katana::qt::tools::withMnemonic;
+    std::string taken = "M";
+    EXPECT_EQ(withMnemonic("Match Properties", taken), "Match &Properties");
+    EXPECT_EQ(taken, "MP");
+    // No word's first letter is free: the first free letter anywhere.
+    EXPECT_EQ(withMnemonic("Map", taken), "M&ap");
+    // A text with a letter keeps it, and the letter counts as taken.
+    EXPECT_EQ(withMnemonic("&Draw", taken), "&Draw");
+    EXPECT_EQ(taken, "MPAD");
+    // Nothing free: left alone rather than doubled up.
+    std::string every = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    EXPECT_EQ(withMnemonic("List", every), "List");
+}
+
+TEST(ToolMenus, ACategoryTheWindowGaveNoMenuGetsOneBesideTheToolMenusOnItsBar)
+{
+    QMainWindow window;
+    QMenuBar* bar = window.menuBar();
+    (void)bar->addMenu("&File");
+    ToolMenuTargets targets;
+    targets.menus["Draw"] = bar->addMenu("&Draw");
+    targets.menus["Modify"] = bar->addMenu("&Modify");
+    targets.menus["Annotate"] = bar->addMenu("&Annotate");
+    (void)bar->addMenu("&Terrain");
+    (void)bar->addMenu("F&ormat");
+    const ToolActions actions = fillToolMenus(toolCatalog(), targets, &window, {});
+    EXPECT_TRUE(actions.unplaced().empty());
+    auto* tools = window.findChild<QMenu*>("toolsMenu");
+    ASSERT_NE(tools, nullptr);
+    ASSERT_EQ(actions.madeMenus().size(), 1u);
+    EXPECT_EQ(actions.madeMenus().at("Tools"), tools);
+    // After Annotate, before Terrain; T and O are the bar's already, so
+    // "Tools" underlines its l.
+    QStringList titles;
+    for (const QAction* top : bar->actions()) {
+        titles << top->text();
+    }
+    EXPECT_EQ(titles, (QStringList{"&File", "&Draw", "&Modify", "&Annotate", "Too&ls", "&Terrain",
+                                   "F&ormat"}));
+    // Inquiry, then Select, as kGroupOrder has them.
+    std::map<std::string, int> seen;
+    countActions(*tools, seen);
+    EXPECT_EQ(seen.count("inquiry.distance"), 1u);
+    EXPECT_EQ(seen.count("select.quick"), 1u);
+    EXPECT_EQ(tools->actions().front()->objectName(), "inquiry.distance");
+}
+
+TEST(ToolMenus, EveryCatalogueToolHasAPaintedIcon)
+{
+    for (const auto* info : toolCatalog().all()) {
+        EXPECT_TRUE(katana::qt::tools::hasToolIcon(info->id)) << info->id;
+    }
+}
+
+TEST(ToolMenus, NamesWhoseLettersEarlierItemsUsedUpStillGetOne)
+{
+    // Taken first come first served, Stretch, Mirror, Move and Rotate used
+    // up every letter of "Trim", and the letters of "Match Properties" went
+    // the same way; the matching gives both one, and the first letter where
+    // it is free.
+    Menus built;
+    QStringList modify;
+    for (const QAction* item : built.menus.at("Modify")->actions()) {
+        if (!item->isSeparator()) {
+            modify << item->text();
+        }
+    }
+    const std::string all = modify.join(" | ").toStdString();
+    EXPECT_TRUE(modify.contains("&Trim")) << all;
+    EXPECT_TRUE(std::ranges::any_of(modify, [](const QString& text) {
+        return QString(text).remove('&') == "Match Properties" && !letterOf(text).isEmpty();
+    })) << all;
+    EXPECT_EQ(built.menus.at("Draw")->actions().front()->text(), "&Point");
 }

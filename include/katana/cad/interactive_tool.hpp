@@ -66,6 +66,12 @@ struct ToolStep {
     // of Circle or Text - press Esc to stop. False for tools whose next use
     // needs a fresh selection (Move, Rotate).
     bool restart = false;
+    // Done: the selection to leave behind, for a tool whose answer IS a
+    // selection (Select Similar, Quick Select). The host puts it in the
+    // document's selection set when the step's command, if any, has run;
+    // nullopt leaves the selection as it is. A selection is not a command -
+    // it is not undone with the drawing - so it travels beside one.
+    std::optional<std::vector<katana::entity::EntityId>> selection;
 
     [[nodiscard]] static ToolStep next(std::string message = {});
     [[nodiscard]] static ToolStep rejected(std::string why);
@@ -118,6 +124,15 @@ class InteractiveTool {
     [[nodiscard]] virtual ToolStep enter();
     // Steps back one input (the U inside LINE). The default rejects.
     [[nodiscard]] virtual ToolStep undo();
+    // Esc: the tool is ending, and this says what of its work stays. Done
+    // with a command keeps work the user has already placed step by step -
+    // a LINE chain's segments, the copies Copy has put down, the cuts a Trim
+    // has made - as AutoCAD keeps them; Done with no command drops the lot.
+    // It is not enter(): Enter at some steps applies a DEFAULT (Move's "the
+    // base point as the displacement", Copy's with nothing placed yet),
+    // which Esc must never do. The host ends the tool whatever this answers
+    // and ignores `restart`. The default keeps nothing.
+    [[nodiscard]] virtual ToolStep cancel();
     // The rubber band for the cursor. The default draws nothing.
     [[nodiscard]] virtual ToolFeedback preview(const katana::geometry::Point2& cursor) const;
     // The last point accepted, which relative input (@dx,dy) and the

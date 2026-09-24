@@ -66,6 +66,46 @@ if(TARGET katana)
     add_subdirectory(qt_widgets)
 endif()
 
+# Every headless check in this file runs the application offscreen, with the
+# runtime it was built against first on PATH and a TIMEOUT, whatever shell
+# ctest is started from. In a Git Bash whose PATH puts another MinGW's bin
+# first, the application loads the wrong C++ runtime and dies before main
+# (0xc0000139, entry point not found); without the platform it opens real
+# windows, or fails where there is no display; without the TIMEOUT a modal
+# box nobody closes holds the run for ctest's default 1,500 seconds. A check
+# added without its set_tests_properties passes only where the caller's own
+# environment happens to be right, so this test names it. The scan is
+# deferred to the end of the file, after the last set_tests_properties.
+function(katana_name_headless_checks_without_their_environment)
+    get_property(_tests DIRECTORY PROPERTY TESTS)
+    set(_bare "")
+    foreach(_test IN LISTS _tests)
+        if(NOT _test MATCHES "_headless$")
+            continue()
+        endif()
+        get_test_property(${_test} ENVIRONMENT_MODIFICATION _environment)
+        get_test_property(${_test} TIMEOUT _timeout)
+        if(NOT _environment MATCHES "(^|;)PATH=path_list_prepend:"
+           OR NOT _environment MATCHES "(^|;)QT_QPA_PLATFORM=set:offscreen(;|$)"
+           OR NOT _timeout)
+            list(APPEND _bare ${_test})
+        endif()
+    endforeach()
+    if(_bare)
+        string(JOIN ", " _named ${_bare})
+    else()
+        set(_named "none")
+    endif()
+    add_test(NAME qt_every_headless_check_runs_offscreen_with_the_runtime_first_on_its_path
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Headless checks without the offscreen platform, the runtime on PATH or a timeout: ${_named}.")
+    set_tests_properties(qt_every_headless_check_runs_offscreen_with_the_runtime_first_on_its_path
+        PROPERTIES PASS_REGULAR_EXPRESSION "or a timeout: none[.]")
+endfunction()
+if(TARGET katana)
+    cmake_language(DEFER CALL katana_name_headless_checks_without_their_environment)
+endif()
+
 # A plot produced headlessly, so the PDF writing inside the Qt widget is
 # exercised by ctest and not only by hand (PLAN.MD Phase 22). The script
 # copies the sample project first: a test must never touch repository data.
@@ -839,6 +879,66 @@ if(TARGET katana)
             "-DEXPECT=dirtyIndicator: Unapplied edits:[^\r\n]* 1625 rules[.][\r\n]+! Unapplied Edits: the Survey Code Manager has rule edits that are not on the drawing"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quit_with_code_edits_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The tools a CAD user reaches for daily, in the menus the catalogue
+    # makes (src/katana_qt/tools/tool_menus.cpp): a Tools menu made beside
+    # the window's tool menus for the Inquiry and Select groups, Divide and
+    # Measure in Draw, Lengthen, Reverse and Match Properties in Modify. Each
+    # menu is opened for its screenshot and read back item by item.
+    add_test(NAME qt_the_tools_menu_holds_the_inquiry_and_select_tools_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%toolsMenu|?toolsMenu"
+            "-DEXPECT=toolsMenu: Tools: Distance .*; Area .*; ID Point .*; Angle .*; List .*; Select Similar .*; Quick Select "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/tools_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_the_draw_menu_offers_divide_and_measure_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%drawMenu|?drawMenu"
+            "-DEXPECT=drawMenu: Draw: Point .*; Arc ; Divide .*; Measure "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/draw_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%modifyMenu|?modifyMenu"
+            "-DEXPECT=modifyMenu: Modify: Move .*; Explode .*; Lengthen .*; Reverse .*; Match Properties "
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/modify_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # An inquiry tool driven from the command line: DIST, then two typed
+    # points, and the inverse of the 3-4-5 leg in the log - 5.000 by hand.
+    # ZOOM typed between them is taken by the tool host as the view's
+    # command (ToolHost::onTransparent), never handed to the tool as a
+    # malformed point, and the tool carries on at the same step. No view
+    # runs it yet, so the host refuses it aloud; the EXPECT holds that
+    # refusal before the inverse, because a ZOOM wrongly sent to the tool
+    # is refused by the tool instead ("'ZOOM' is not an input this tool
+    # takes now") and the inverse still follows, which the result alone
+    # cannot tell apart. When the view sets onTransparent the refusal
+    # becomes the prompt shown again, and this EXPECT with it.
+    add_test(NAME qt_dist_typed_at_the_command_line_reports_the_inverse_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>DIST|>0,0|>ZOOM|>3,4"
+            "-DEXPECT=! ZOOM cannot run inside Distance; press Esc to end the tool first[.].*Horizontal distance 5[.]000"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dist_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Quick Select is a form asked at the command line, one question at a
+    # time with a default for Enter, so a headless run fills it as a person
+    # does and no dialog waits on anyone: kind Line, Enter for any layer and
+    # for no condition. One line drawn, one selected.
+    add_test(NAME qt_quick_select_is_answered_at_the_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE 0,0 10,0|>CIRCLE 5,5 2|>SELECT NONE|>QSELECT|>Line|>|>"
+            "-DEXPECT=1 entity selected: Lines on any layer, in the drawing"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quick_select_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Every key sequence the window answers to reaches one thing: Qt
     # disables an ambiguous shortcut for BOTH actions, so a clash is two
     # keys that silently do nothing; and within each menu every underlined
@@ -864,6 +964,11 @@ if(TARGET katana)
                          qt_a_tool_started_by_its_alias_draws_from_typed_points_headless
                          qt_a_tool_refused_for_want_of_a_plan_view_is_left_unchecked_headless
                          qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
+                         qt_the_tools_menu_holds_the_inquiry_and_select_tools_headless
+                         qt_the_draw_menu_offers_divide_and_measure_headless
+                         qt_the_modify_menu_offers_lengthen_reverse_and_match_properties_headless
+                         qt_dist_typed_at_the_command_line_reports_the_inverse_headless
+                         qt_quick_select_is_answered_at_the_command_line_headless
                          qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
