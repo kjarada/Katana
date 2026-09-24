@@ -35,6 +35,8 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <deque>
 #include <functional>
 #include <map>
 #include <numbers>
@@ -42,7 +44,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -321,6 +322,22 @@ std::string metresText(double metres)
     return text;
 }
 
+std::size_t lineFeeds(std::string_view bytes)
+{
+    std::size_t count = 0;
+    const char* at = bytes.data();
+    const char* const end = bytes.data() + bytes.size();
+    while (at != end) {
+        const void* found = std::memchr(at, '\n', static_cast<std::size_t>(end - at));
+        if (found == nullptr) {
+            break;
+        }
+        ++count;
+        at = static_cast<const char*>(found) + 1;
+    }
+    return count;
+}
+
 std::string shown(std::string_view text)
 {
     std::string out = "'";
@@ -331,12 +348,70 @@ std::string shown(std::string_view text)
     return out + (text.size() > 40 ? "...'" : "'");
 }
 
-struct StringHash {
-    using is_transparent = void;
-    std::size_t operator()(std::string_view text) const noexcept
+// Point id -> slot, keyed by views into the file's own bytes (or into ids the
+// reader made up, which it keeps). Open addressing in one vector: a job names a
+// new point on nearly every line, and a node-based map spent more time in the
+// allocator for those than the reader spent reading them.
+class IdIndex {
+  public:
+    static constexpr std::size_t kAbsent = static_cast<std::size_t>(-1);
+
+    [[nodiscard]] std::size_t find(std::string_view id) const
     {
-        return std::hash<std::string_view>{}(text);
+        if (entries_.empty()) {
+            return kAbsent;
+        }
+        const std::size_t mask = entries_.size() - 1;
+        for (std::size_t at = std::hash<std::string_view>{}(id) & mask;; at = (at + 1) & mask) {
+            const Entry& entry = entries_[at];
+            if (entry.value == kAbsent) {
+                return kAbsent;
+            }
+            if (entry.key == id) {
+                return entry.value;
+            }
+        }
     }
+
+    // `id` must outlive the index.
+    void insert(std::string_view id, std::size_t value)
+    {
+        if ((size_ + 1) * 2 > entries_.size()) {
+            grow();
+        }
+        place(Entry{id, value}, std::hash<std::string_view>{}(id));
+        ++size_;
+    }
+
+  private:
+    struct Entry {
+        std::string_view key;
+        std::size_t value = kAbsent;
+    };
+
+    void place(const Entry& entry, std::size_t hash)
+    {
+        const std::size_t mask = entries_.size() - 1;
+        std::size_t at = hash & mask;
+        while (entries_[at].value != kAbsent) {
+            at = (at + 1) & mask;
+        }
+        entries_[at] = entry;
+    }
+
+    void grow()
+    {
+        std::vector<Entry> old(std::max<std::size_t>(entries_.size() * 2, 1024));
+        old.swap(entries_);
+        for (const Entry& entry : old) {
+            if (entry.value != kAbsent) {
+                place(entry, std::hash<std::string_view>{}(entry.key));
+            }
+        }
+    }
+
+    std::vector<Entry> entries_;
+    std::size_t size_ = 0;
 };
 
 // A point as the file builds it up, before it is known whether it has a
@@ -386,20 +461,24 @@ class GsiReader {
     void read(std::string_view bytes)
     {
         bytes = withoutByteOrderMark(bytes);
+        // A block names at most one point, so the line count bounds the
+        // points; reserving once spares the doubling copies of a vector that
+        // is most of a coordinate list's memory. Counting costs one memchr pass.
+        slots_.reserve(lineFeeds(bytes) + 1);
         std::size_t record = 0;
         std::size_t start = 0;
         while (start < bytes.size()) {
-            std::size_t end = start;
-            while (end < bytes.size() && bytes[end] != '\n' && bytes[end] != '\r') {
-                ++end;
+            std::size_t stop = start;
+            while (stop < bytes.size() && bytes[stop] != '\n' && bytes[stop] != '\r') {
+                ++stop;
             }
             ++record;
-            readBlock(bytes.substr(start, end - start), record);
+            readBlock(bytes.substr(start, stop - start), record);
             // "\r\n" ends one line, not two.
-            if (end + 1 < bytes.size() && bytes[end] == '\r' && bytes[end + 1] == '\n') {
-                ++end;
+            if (stop + 1 < bytes.size() && bytes[stop] == '\r' && bytes[stop + 1] == '\n') {
+                ++stop;
             }
-            start = end + 1;
+            start = stop + 1;
         }
     }
 
@@ -880,15 +959,15 @@ class GsiReader {
 
     std::size_t slotFor(std::string_view id, std::size_t record, bool wide)
     {
-        if (const auto found = slotIndex_.find(id); found != slotIndex_.end()) {
-            return found->second;
+        if (const std::size_t found = slotIndex_.find(id); found != IdIndex::kAbsent) {
+            return found;
         }
         PointSlot slot;
         slot.id = std::string(id);
         slot.record = record;
         slot.wide = wide;
         slots_.push_back(std::move(slot));
-        slotIndex_.emplace(std::string(id), slots_.size() - 1);
+        slotIndex_.insert(id, slots_.size() - 1);
         return slots_.size() - 1;
     }
 
@@ -1124,6 +1203,9 @@ class GsiReader {
         if (!timeWithoutYear.empty()) {
             station.metadata.emplace("time (no year recorded)", timeWithoutYear);
         }
+        // Setups in one job are alike in size; starting from the last one's
+        // count saves the growth copies of this one's observations.
+        station.observations.reserve(lastSetupObservations_);
         result_.project.stations.push_back(std::move(station));
         active_ = result_.project.stations.size() - 1;
         activeSlot_ = slot;
@@ -1141,6 +1223,7 @@ class GsiReader {
             return;
         }
         survey::SurveyStation& station = result_.project.stations[*active_];
+        lastSetupObservations_ = station.observations.size();
         // Input mode 2 / 3 of an angle word: the horizontal (collimation and
         // tilt) correction on / off. Position 4: the automatic vertical index
         // off (0) or operating (1, 3).
@@ -1286,13 +1369,15 @@ class GsiReader {
     void implicitSetup(const Block& block)
     {
         std::string id = "GSI station";
-        for (std::size_t n = 2; slotIndex_.contains(id); ++n) {
+        for (std::size_t n = 2; slotIndex_.find(id) != IdIndex::kAbsent; ++n) {
             id = "GSI station " + std::to_string(n);
         }
         warn(block.record, "measurements begin before any station block, so the instrument's "
                            "position is not recorded; they are kept under a setup at a point "
                            "named '" + id + "' with no coordinates");
-        const std::size_t slot = slotFor(id, block.record, block.wide);
+        // The index keys by view: the made-up name must outlive it.
+        const std::size_t slot = slotFor(madeUpIds_.emplace_back(std::move(id)), block.record,
+                                         block.wide);
         openSetup(slot, std::nullopt, block.record, block.wide, {}, {});
     }
 
@@ -1343,6 +1428,20 @@ class GsiReader {
             return;
         }
         const std::size_t target = slotFor(block.name, block.record, block.wide);
+        // GSI has no backsight word. A setup is made on the instrument as a
+        // station and then an orientation shot, and the file records them in
+        // that order; so a setup's FIRST shot, when it is to a point the file
+        // had already given coordinates, is taken as its backsight. Orienting
+        // on a point of known position is sound whatever the observer called
+        // the shot; a first shot to an unknown point orients nothing and is
+        // not named. The import says how many setups this gave (finish()).
+        if (pointings_ == 0 && slots_[target].positioned && station.backsightPointId.empty()) {
+            station.backsightPointId = slots_[target].id;
+            station.metadata.emplace("backsight",
+                                     "the setup's first shot, to a point with coordinates "
+                                     "earlier in the file (GSI marks no backsight)");
+            ++backsighted_;
+        }
         if (block.targetCoordinates()) {
             placePoint(target, block.e, block.n, block.h, block.targetInputMode, false, block);
         }
@@ -1371,18 +1470,24 @@ class GsiReader {
             ++zenithAngles_;
         }
         const survey::SourceRecord source = sourceAt(block.record, block.wide);
+        // Built in place: an Observation is several hundred bytes, and a job
+        // is mostly observations, so a temporary moved into the vector would
+        // be a second copy of most of the output.
+        std::vector<survey::Observation>& observations = station.observations;
         if (block.hz) {
-            survey::HorizontalDirectionObservation direction;
+            auto& direction = std::get<survey::HorizontalDirectionObservation>(
+                observations.emplace_back(
+                    std::in_place_type<survey::HorizontalDirectionObservation>));
             direction.at = from;
             direction.to = to;
             direction.direction = wrapToCircle(*block.hz);
             direction.sigma = precision_.direction;
             direction.source = source;
             direction.pointing = pointing;
-            station.observations.emplace_back(std::move(direction));
         }
         if (zenith) {
-            survey::ZenithAngleObservation vertical;
+            auto& vertical = std::get<survey::ZenithAngleObservation>(
+                observations.emplace_back(std::in_place_type<survey::ZenithAngleObservation>));
             vertical.from = from;
             vertical.to = to;
             vertical.angle = *zenith;
@@ -1391,10 +1496,10 @@ class GsiReader {
             vertical.targetHeight = targetHeight;
             vertical.source = source;
             vertical.pointing = pointing;
-            station.observations.emplace_back(std::move(vertical));
         }
         const auto distanceOf = [&](double value, survey::DistanceKind kind) {
-            survey::DistanceObservation distance;
+            auto& distance = std::get<survey::DistanceObservation>(
+                observations.emplace_back(std::in_place_type<survey::DistanceObservation>));
             distance.from = from;
             distance.to = to;
             distance.distance = value;
@@ -1408,7 +1513,6 @@ class GsiReader {
                 distance.target.prismConstant = prism_;
                 distance.target.prismConstantState = survey::CorrectionState::Applied;
             }
-            station.observations.emplace_back(std::move(distance));
         };
         const auto usable = [&](const std::optional<double>& value, const char* what) {
             if (!value) {
@@ -1438,7 +1542,8 @@ class GsiReader {
             if (zenith) {
                 derivedValues_.add(block.record);
             } else {
-                survey::LevelDifferenceObservation level;
+                auto& level = std::get<survey::LevelDifferenceObservation>(observations.emplace_back(
+                    std::in_place_type<survey::LevelDifferenceObservation>));
                 level.from = from;
                 level.to = to;
                 level.heightDifference = *block.heightDifference;
@@ -1450,7 +1555,6 @@ class GsiReader {
                                          precision_.heightMeasurement,
                                          level.length * precision_.zenith);
                 level.source = source;
-                station.observations.emplace_back(std::move(level));
             }
         }
     }
@@ -1478,7 +1582,8 @@ class GsiReader {
     std::size_t unlistedWarnings_ = 0;
 
     std::vector<PointSlot> slots_;
-    std::unordered_map<std::string, std::size_t, StringHash, std::equal_to<>> slotIndex_;
+    IdIndex slotIndex_;
+    std::deque<std::string> madeUpIds_; // ids the file does not contain (implicitSetup)
     std::unordered_set<std::string> stationIds_;
     std::vector<CodeBlock> pendingCodes_;
     std::optional<survey::SurveyFeature> run_;
@@ -1488,6 +1593,7 @@ class GsiReader {
     std::size_t activeSlot_ = 0;
     std::optional<double> activeHeight_;
     std::size_t pointings_ = 0;
+    std::size_t lastSetupObservations_ = 0;
     char hzInputMode_ = 0; // 0 none seen, 'x' varies, else the digit
     char vIndex_ = 0;
 
@@ -1520,6 +1626,7 @@ class GsiReader {
     Tally heightOnly_;
     Tally partialPosition_;
     Tally levelling_;
+    std::size_t backsighted_ = 0; // setups given a backsight by their first shot
     std::size_t setupsWithoutHeight_ = 0;
     std::size_t setupsWithoutPpm_ = 0;
     std::size_t setupsWithoutPrism_ = 0;
@@ -1692,8 +1799,17 @@ ReadResult GsiReader::finish()
                          "system the instrument or controller was set to");
     const std::size_t setups = project.stations.size();
     if (setups != 0) {
-        lacking.emplace_back("GSI does not mark a backsight: no setup has one, so the "
-                             "orientation is the reduction's to find");
+        lacking.push_back(
+            "GSI does not mark a backsight: " +
+            (backsighted_ == 0
+                 ? std::string("no setup's first shot is to a point with coordinates earlier in "
+                               "the file, so no setup has one")
+                 : std::to_string(backsighted_) + " of " + plural(setups, "setup", "setups") +
+                       " took the point of their first shot as the backsight, because the "
+                       "file had already given it coordinates") +
+            (backsighted_ == setups ? std::string()
+                                    : "; a setup without one cannot be oriented until its "
+                                      "backsight is known"));
     }
     if (setupsWithoutHeight_ != 0) {
         lacking.push_back("no instrument height on " + std::to_string(setupsWithoutHeight_) +
