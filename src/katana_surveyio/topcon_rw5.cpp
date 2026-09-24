@@ -10,6 +10,14 @@
 //          3.03", updated February 25, 2014 - the direct/reverse set records
 //          BD, BR, FD, FR, the GPS record, the BP base position with its
 //          antenna fields, and the G0 to G4 GNSS vector records.
+//   [SCE250] Carlson Software, "SurvCE Version 2.50 Raw File records",
+//          updated 5/4/2010 - the units and antenna points of the GNSS
+//          vector: "The DX, DY and DZ values are phase center to phase
+//          center. ALL THE VALUES ARE ALWAYS IN METERS"; "You will get the rod
+//          height of the rover from the LS record prior to the vector records.
+//          The LS,HR value is from phase center to the ground ... THE UNITS CAN
+//          BE FEET OR METERS" (the MO unit); and the BP record's AG and PA,
+//          always metres, added "to get the Phase Center to Ground value".
 //   [CSP]  Carlson Survey 2019 help, "Edit-Process Raw Data File": "The Set
 //          Azimuth is the circle reading of the instrument when sighting the
 //          backsight", and that the MO scale factor "is multiplied by the
@@ -45,14 +53,23 @@
 //   * The description after "--" is the point's description; its first word
 //     is the field code that strings the point into a feature.
 //   * OF (off-centre shot) does not say which shot it corrects, so it is not
-//     applied to one: its AR, ZE and SD are kept as written in the setup's
-//     metadata, with a warning. FE (foresight elevation), listed by [SCE]
-//     without a record, is kept in the target point's metadata.
-//   * Nothing in a record is dropped without a word: a field no handler asks
-//     for is warned about at its first record and counted at the end, a note
-//     on a record with no use for one joins the setup's notes, and a shot
-//     giving two of a group [SCE] says to give one of (AR/AL/AZ/BR/DR/DL,
-//     ZE/VA/CE, SD/HD) reads the first and names the others.
+//     applied to one: every field it carries ([SCE]'s AR, ZE and SD, [TDS]'s
+//     OL, HD, VD and LR) is kept as written in the setup's metadata, with a
+//     warning. FE (foresight elevation), listed by [SCE] without a record, is
+//     kept in the target point's metadata.
+//   * A SurvCE vector (G1) is in metres whatever the MO unit, as [SCE250]
+//     says; a Survey Pro baseline (BL) is in the MO unit, as [TDS] says ("See
+//     MO for units"). The vector runs from phase centre to phase centre
+//     ([SCE250]) unless a G4 record names another point for an end: its base
+//     end is the last BP record's AG (to the reference point) plus its PA
+//     (to the phase centre), its rover end the LS HR in force at the G1.
+//   * Nothing in a record is dropped without a word: every field the
+//     specifications define for a record is read into the model or into
+//     metadata; a field they do not define is warned about at its first
+//     record and counted at the end; a note on a record with no use for one
+//     joins the setup's notes; and a shot giving two of a group [SCE] says to
+//     give one of (AR/AL/AZ/BR/DR/DL, ZE/VA/CE, SD/HD) reads the first and
+//     names the others.
 //
 // Records the specifications define that carry no survey observation or
 // coordinate - stake-out, cut sheets, slope staking, calibration, projection
@@ -60,6 +77,7 @@
 // skipped, never dropped silently.
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -67,6 +85,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "katana/core/text.hpp"
 #include "katana/surveyio/detect.hpp"
@@ -136,10 +155,48 @@ bool startsNumber(char c)
     return (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == ' ';
 }
 
+// [TDS] record 30, "BL,DC%s,PN%s,DX%s,DY%s,DZ%s,--%s,GM%s,CL%s,HP%s,VP%s", is
+// the one record whose note is followed by fields. One of those is its tag
+// written straight after the comma and a number (GM and CL are enumerations,
+// HP and VP distances), so a note's own ", HP 2" is not taken for one.
+bool isBaselineTailField(std::string_view piece)
+{
+    if (piece.size() < 2) {
+        return false;
+    }
+    const std::string_view tag = piece.substr(0, 2);
+    if (tag != "GM" && tag != "CL" && tag != "HP" && tag != "VP") {
+        return false;
+    }
+    const std::string_view value = trimmed(piece.substr(2));
+    return value.empty() || (piece[2] != ' ' && startsNumber(value.front()));
+}
+
+// Where a BL record's note, starting at `noteStart`, ends: before the run of
+// tail fields that closes the line. Found from the end, so that a comma in
+// the note stays in it ("--CP fence, north,GM4,CL1,..."), and in one pass
+// over the line.
+std::size_t baselineNoteEnd(std::string_view line, std::size_t noteStart)
+{
+    std::size_t end = line.size();
+    while (end > noteStart) {
+        const std::size_t comma = line.rfind(',', end - 1);
+        if (comma == std::string_view::npos || comma < noteStart) {
+            break;
+        }
+        const std::string_view piece = line.substr(comma + 1, end - comma - 1);
+        if (!trimmed(piece).empty() && !isBaselineTailField(piece)) {
+            break;
+        }
+        end = comma;
+    }
+    return end;
+}
+
 // Splits `line` into a Record. [TDS]: "Raw data records are comma delimited";
 // each field starts with its two-letter header, except northing and easting,
 // whose header is "N " and "E " ("the header is N space"); a note field "--"
-// is free text and runs to the end of the line.
+// is free text and runs to the end of the line, except on a BL record.
 Record splitRecord(std::string_view line)
 {
     Record record;
@@ -155,10 +212,18 @@ Record splitRecord(std::string_view line)
         const std::size_t start = cut + 1;
         const std::string_view rest = line.substr(start);
         const std::string_view leading = trimmed(rest);
-        if (leading.starts_with("--")) {
+        if (leading.starts_with("--") && !record.hasNote) {
             record.hasNote = true;
-            record.note = trimmed(leading.substr(2));
-            return record;
+            const std::size_t noteStart =
+                static_cast<std::size_t>(leading.data() - line.data()) + 2;
+            if (record.type != "BL") {
+                record.note = trimmed(line.substr(noteStart));
+                return record;
+            }
+            const std::size_t noteEnd = baselineNoteEnd(line, noteStart);
+            record.note = trimmed(line.substr(noteStart, noteEnd - noteStart));
+            cut = noteEnd == line.size() ? std::string_view::npos : noteEnd;
+            continue;
         }
         cut = line.find(',', start);
         const std::string_view text =
@@ -259,6 +324,103 @@ bool isKnownType(std::string_view type)
     return false;
 }
 
+// The field tags [TDS] and [SCE] define for each record type the reader
+// imports, space separated. Every handler reads all of its record's; the list
+// is what a warning about a field no handler read consults, so that it says
+// truly whether the specifications define the field.
+struct DefinedFields {
+    std::string_view type;
+    std::string_view tags;
+};
+
+constexpr std::string_view kShotFields = "OP FP AZ BR AR AL DR DL ZE VA CE SD HD HR FE";
+
+constexpr std::array kDefinedFields = {
+    DefinedFields{"JB", "NM DT TM"},
+    DefinedFields{"MO", "AD UN SF EC EO AU"},
+    DefinedFields{"OC", "OP N E EL"},
+    DefinedFields{"BK", "OP BP BS BC"},
+    DefinedFields{"LS", "HI HR"},
+    DefinedFields{"SS", kShotFields},
+    DefinedFields{"TR", kShotFields},
+    DefinedFields{"OB", kShotFields},
+    DefinedFields{"BD", kShotFields},
+    DefinedFields{"BR", kShotFields},
+    DefinedFields{"FD", kShotFields},
+    DefinedFields{"FR", kShotFields},
+    DefinedFields{"SK", "OP FP AR ZE SD"},
+    DefinedFields{"RB", "OP BP AR ZE SD HR"},
+    DefinedFields{"RF", "OP FP AR ZE SD HR"},
+    DefinedFields{"OF", "AR ZE SD OL HD VD LR"},
+    DefinedFields{"SP", "PN N E EL"},
+    DefinedFields{"AP", "PN N E EL"},
+    DefinedFields{"GS", "PN N E EL"},
+    DefinedFields{"GR", "PN N E EL"},
+    DefinedFields{"FC", "PN FN"},
+    DefinedFields{"DP", "PN"},
+    DefinedFields{"AT", "TN TV"},
+    DefinedFields{"CS", "CO ZG ZN DN"},
+    DefinedFields{"GPS", "PN LA LN EL"},
+    DefinedFields{"BP", "PN LA LN HT SG EL AG PA AT SR"},
+    DefinedFields{"BL", "DC PN DX DY DZ GM CL HP VP"},
+    DefinedFields{"CV", "DC SV SC XX XY XZ YY YZ ZZ"},
+    DefinedFields{"EP", "TM LA LN HT RH RV DH DV GM CL"},
+    DefinedFields{"AH", "DC MA ME RA"},
+    DefinedFields{"EQ", "DC RX RS AN AI AT TS TA HO VO"},
+    DefinedFields{"G1", "BP PN DX DY DZ"},
+    DefinedFields{"G2", "VX VY VZ"},
+    DefinedFields{"G3", "XY XZ YZ"},
+    DefinedFields{"G4", "BV RV"},
+};
+
+bool isDefinedField(std::string_view type, std::string_view tag)
+{
+    for (const DefinedFields& defined : kDefinedFields) {
+        if (defined.type != type) {
+            continue;
+        }
+        std::string_view tags = defined.tags;
+        while (!tags.empty()) {
+            const std::size_t space = tags.find(' ');
+            if (tags.substr(0, space) == tag) {
+                return true;
+            }
+            tags = space == std::string_view::npos ? std::string_view{} : tags.substr(space + 1);
+        }
+        return false;
+    }
+    return false;
+}
+
+// The name [TDS]'s "GPS Enumerated Fields List" gives a value, numbered from
+// `first`; a value it does not list is kept as written, and said to be one.
+template <std::size_t N>
+std::string enumerated(std::string_view value, const std::array<std::string_view, N>& names,
+                       int first)
+{
+    int number = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+    if (error == std::errc{} && end == value.data() + value.size() && number >= first &&
+        static_cast<std::size_t>(number - first) < N) {
+        return std::string(names[static_cast<std::size_t>(number - first)]);
+    }
+    return "'" + std::string(value) + "', a value the specification does not list";
+}
+
+// CL, numbered from 0; DC and CO from 1.
+constexpr std::array<std::string_view, 11> kClassifications = {
+    "unknown", "normal",          "control",          "as-built",
+    "check",   "backsight",       "deleted normal",   "deleted control",
+    "deleted as-built", "deleted check", "deleted backsight"};
+constexpr std::array<std::string_view, 4> kDerivations = {"base", "rover", "get base", "static"};
+constexpr std::array<std::string_view, 4> kCoordinateSystemOptions = {
+    "none", "scale only", "keyed in", "chosen from library"};
+
+// Where a GNSS vector ends on an antenna: [SCE] G4's "APC Antenna Phase
+// Center (L1)", "ARP Antenna Reference Point (Bottom of Antenna Mount)" and
+// "UNK Unknown".
+enum class AntennaPoint { PhaseCentre, ReferencePoint, NotStated };
+
 // ---- Reading ---------------------------------------------------------------------
 
 class Rw5Reader {
@@ -293,6 +455,9 @@ class Rw5Reader {
     void equipment(const Record& r, std::size_t n);
     void offCentre(const Record& r, std::size_t n);
     void finishVector();
+    // The antennas at the two ends of the vector being assembled.
+    survey::GnssAntenna baseEnd();
+    survey::GnssAntenna roverEnd();
     void unreadFields(const Record& r, std::size_t n);
     void reportUnreadFields();
 
@@ -331,9 +496,30 @@ class Rw5Reader {
     std::string basePoint_;
     survey::GnssAntenna baseAntenna_;
     survey::GnssAntenna roverAntenna_;
+    bool roverAntennaStated_ = false; // an AH record gave the rover's height
+    // The last BP record's AG (reference point to ground) and PA (reference
+    // point to phase centre), metres, kept apart because a vector from that
+    // base may start at either point (G4 BV), not only where the BP's own EL
+    // was (its AT).
+    std::optional<double> baseReferenceHeight_;
+    std::optional<double> basePhaseOffset_;
+
     std::optional<survey::GnssGeocentricBaselineObservation> vector_;
     std::size_t vectorRecord_ = 0;
     std::string vectorNote_;
+    // The vector's ends and what was in force at its G1: an LS or BP record
+    // between the G1 and the next vector does not belong to this one.
+    struct VectorEnds {
+        AntennaPoint base = AntennaPoint::PhaseCentre; // [SCE250]: "phase center to
+        AntennaPoint rover = AntennaPoint::PhaseCentre; // phase center" unless G4 says
+        std::size_t record = 0; // the G4 that named them, else the G1
+        survey::GnssAntenna baseAntenna;
+        std::optional<double> baseReferenceHeight;
+        std::optional<double> basePhaseOffset;
+        survey::GnssAntenna roverAntenna;
+        std::optional<double> rodHeight;
+    };
+    VectorEnds vectorEnds_;
     std::size_t lastGnss_ = std::string_view::npos; // index in project().observations
 
     // Fields no handler reads, by "<record type> <tag>": the record of the
@@ -574,6 +760,11 @@ void Rw5Reader::dispatch(const Record& r, std::size_t n)
         }
         if (!name.empty()) {
             builder_.project().coordinateSystem = survey::DeclaredCoordinateSystem::named(name);
+        }
+        // [TDS] CO: how the system was set up (1 none ... 4 from the library).
+        if (const std::optional<std::string_view> option = r.find("CO")) {
+            builder_.project().metadata["coordinate system option"] =
+                enumerated(*option, kCoordinateSystemOptions, 1);
         }
         builder_.countRead();
     } else if (type == "GPS") {
@@ -1149,44 +1340,47 @@ void Rw5Reader::basePosition(const Record& r, std::size_t n)
     const std::optional<double> longitude = latitudeOrLongitude(r.find("LN"), "LN", n);
     // [SCE] writes EL in metres; [TDS] writes HT "(See MO for units)".
     std::optional<double> height;
+    const std::optional<std::string_view> ht = r.find("HT");
     if (r.find("EL")) {
         height = real(r.find("EL"), "EL", n);
+        if (ht) {
+            builder_.warn(n, "the base record gives both EL and HT; EL is read and HT ('" +
+                                 std::string(*ht) + "') is not imported");
+        }
     } else {
-        height = linear(r.find("HT"), "HT", n);
+        height = linear(ht, "HT", n);
     }
     if (fatal_) {
         return;
     }
     basePoint_ = std::string(*pn);
     builder_.mentionPoint(*pn, n);
-    if (!latitude || !longitude || !height || std::abs(*latitude) > kPi / 2.0) {
-        builder_.warn(n, "base position without a readable latitude, longitude and height; the "
-                         "base point is imported without a position");
-        builder_.countRead();
-        return;
+    // [TDS] SG: the setup group, an identifier with no survey meaning here.
+    if (const std::optional<std::string_view> group = r.find("SG")) {
+        builder_.addPointMetadata(basePoint_, "setup group", std::string(*group));
     }
-    survey::GnssGlobalPositionObservation position;
-    position.point = basePoint_;
-    position.geodetic = survey::GeodeticCoordinate{*latitude, *longitude, *height};
-    position.referenceFrame = "WGS 84";
-    position.antenna = baseAntenna_;
-    // [SCE] BP: AG antenna ARP to ground, PA ARP to phase centre, AT where EL
-    // is: APC, ARP or UNK.
+    // [SCE] BP: AG "Antenna distance from ARP (bottom of antenna) to Ground",
+    // PA "Phase Center to ARP", both metres ([SCE250]). A new base replaces
+    // both, stated or not.
     const std::optional<double> ag = real(r.find("AG"), "AG", n);
     const std::optional<double> pa = real(r.find("PA"), "PA", n);
+    baseReferenceHeight_ = ag;
+    basePhaseOffset_ = pa;
+    // The antenna where the BP's own EL is: [SCE] BP AT, APC, ARP or UNK.
+    survey::GnssAntenna antenna = baseAntenna_;
     const std::optional<std::string_view> at = r.find("AT");
     if (ag) {
         if (at == "APC") {
-            position.antenna.height = *ag + pa.value_or(0.0);
-            position.antenna.method = survey::AntennaHeightMethod::PhaseCentre;
-            position.antenna.measuredTo = "L1 phase centre";
+            antenna.height = *ag + pa.value_or(0.0);
+            antenna.method = survey::AntennaHeightMethod::PhaseCentre;
+            antenna.measuredTo = "L1 phase centre";
         } else if (at == "ARP") {
-            position.antenna.height = *ag;
-            position.antenna.method = survey::AntennaHeightMethod::Vertical;
-            position.antenna.measuredTo = "antenna reference point";
+            antenna.height = *ag;
+            antenna.method = survey::AntennaHeightMethod::Vertical;
+            antenna.measuredTo = "antenna reference point";
         } else {
-            position.antenna.height = *ag;
-            position.antenna.method = survey::AntennaHeightMethod::Unknown;
+            antenna.height = *ag;
+            antenna.method = survey::AntennaHeightMethod::Unknown;
             builder_.warn(n, "the base record does not say whether its height is at the phase "
                              "centre or the antenna reference point");
         }
@@ -1198,8 +1392,21 @@ void Rw5Reader::basePosition(const Record& r, std::size_t n)
         builder_.addPointMetadata(basePoint_, "antenna phase centre offset (m)",
                                   katana::core::formatExactReal(*pa));
     }
-    // Vectors from this base start at the same antenna.
-    baseAntenna_ = position.antenna;
+    // A Survey Pro baseline (BL) from this base starts at the same antenna; a
+    // SurvCE vector (G1) at the point its G4 names (baseEnd).
+    baseAntenna_ = antenna;
+    if (!latitude || !longitude || !height || std::abs(*latitude) > kPi / 2.0) {
+        builder_.warn(n, "base position without a readable latitude, longitude and height; the "
+                         "base point is imported without a position");
+        describePoint(*pn, r, n);
+        builder_.countRead();
+        return;
+    }
+    survey::GnssGlobalPositionObservation position;
+    position.point = basePoint_;
+    position.geodetic = survey::GeodeticCoordinate{*latitude, *longitude, *height};
+    position.referenceFrame = "WGS 84";
+    position.antenna = antenna;
     position.source = builder_.source(n);
     builder_.addLooseObservation(std::move(position));
     lastGnss_ = builder_.project().observations.size() - 1;
@@ -1221,10 +1428,91 @@ void Rw5Reader::finishVector()
                                      "covariance is not imported");
         vector_->covariance = {};
     }
+    // Only now: the G4 that names the ends comes after the G1.
+    vector_->fromAntenna = baseEnd();
+    vector_->toAntenna = roverEnd();
     builder_.addLooseObservation(std::move(*vector_));
     lastGnss_ = builder_.project().observations.size() - 1;
     vector_.reset();
     vectorNote_.clear();
+}
+
+survey::GnssAntenna Rw5Reader::baseEnd()
+{
+    const VectorEnds& ends = vectorEnds_;
+    survey::GnssAntenna antenna = ends.baseAntenna;
+    if (!ends.baseReferenceHeight) {
+        // No BP record gave AG: the base antenna is whatever an AH record
+        // said, as it said it.
+        return antenna;
+    }
+    const double ag = *ends.baseReferenceHeight;
+    antenna.height = ag;
+    switch (ends.base) {
+    case AntennaPoint::PhaseCentre:
+        if (ends.basePhaseOffset) {
+            // [SCE250]: AG and PA "add ... together to get the Phase Center
+            // to Ground value".
+            antenna.height = ag + *ends.basePhaseOffset;
+            antenna.method = survey::AntennaHeightMethod::PhaseCentre;
+            antenna.measuredTo = "L1: AG + PA of the base record";
+        } else {
+            antenna.method = survey::AntennaHeightMethod::Other;
+            antenna.measuredTo = "antenna reference point (AG of the base record); the vector "
+                                 "starts at the phase centre, and no PA gives the offset";
+            builder_.warn(ends.record,
+                          "the vector starts at the base's phase centre, but the base record "
+                          "gives no PA (phase centre to reference point); its height is to the "
+                          "reference point and the vector's height difference cannot be taken "
+                          "to the marks");
+        }
+        break;
+    case AntennaPoint::ReferencePoint:
+        antenna.method = survey::AntennaHeightMethod::Vertical;
+        antenna.measuredTo = "AG of the base record";
+        break;
+    case AntennaPoint::NotStated:
+        antenna.method = survey::AntennaHeightMethod::Unknown;
+        antenna.measuredTo = "antenna reference point (AG of the base record); the G4 record "
+                             "does not say where the vector starts (BV UNK)";
+        break;
+    }
+    return antenna;
+}
+
+survey::GnssAntenna Rw5Reader::roverEnd()
+{
+    const VectorEnds& ends = vectorEnds_;
+    survey::GnssAntenna antenna = ends.roverAntenna;
+    if (!ends.rodHeight) {
+        return antenna; // an AH record's, or nothing (warned at the G1)
+    }
+    // [SCE250]: "The LS,HR value is from phase center to the ground".
+    antenna.height = *ends.rodHeight;
+    switch (ends.rover) {
+    case AntennaPoint::PhaseCentre:
+        antenna.method = survey::AntennaHeightMethod::PhaseCentre;
+        antenna.measuredTo = "LS HR, phase centre to ground";
+        break;
+    case AntennaPoint::ReferencePoint:
+        // The height is not the one this end needs, and no record gives the
+        // rover's phase centre offset to make it so: not passed off as one.
+        antenna.method = survey::AntennaHeightMethod::Other;
+        antenna.measuredTo = "phase centre (LS HR); the vector ends at the antenna reference "
+                             "point (G4 RV ARP), an offset from it no record gives";
+        builder_.warn(ends.record,
+                      "the vector ends at the rover's antenna reference point (RV ARP), but "
+                      "SurvCE records the rover's rod height (LS HR) to the phase centre, and no "
+                      "record gives the offset between them; the vector's height difference "
+                      "cannot be taken to the marks");
+        break;
+    case AntennaPoint::NotStated:
+        antenna.method = survey::AntennaHeightMethod::Unknown;
+        antenna.measuredTo = "phase centre (LS HR); the G4 record does not say where the vector "
+                             "ends (RV UNK)";
+        break;
+    }
+    return antenna;
 }
 
 void Rw5Reader::vectorRecord(const Record& r, std::size_t n)
@@ -1245,12 +1533,11 @@ void Rw5Reader::vectorRecord(const Record& r, std::size_t n)
         vectorNote_ = note;
         const std::optional<std::string_view> from = r.find("BP");
         const std::optional<std::string_view> to = r.find("PN");
-        const std::optional<double> dx = linear(r.find("DX"), "DX", n);
-        const std::optional<double> dy = linear(r.find("DY"), "DY", n);
-        const std::optional<double> dz = linear(r.find("DZ"), "DZ", n);
-        if (fatal_) {
-            return;
-        }
+        // [SCE250]: "ALL THE VALUES ARE ALWAYS IN METERS", whatever MO says -
+        // unlike a Survey Pro BL, whose components are in the MO unit.
+        const std::optional<double> dx = real(r.find("DX"), "DX", n);
+        const std::optional<double> dy = real(r.find("DY"), "DY", n);
+        const std::optional<double> dz = real(r.find("DZ"), "DZ", n);
         if (!from || !to || from->empty() || to->empty() || *from == *to || !dx || !dy || !dz) {
             builder_.skip(n, "GNSS vector without two distinct points and all three components");
             vectorNote_.clear();
@@ -1263,11 +1550,27 @@ void Rw5Reader::vectorRecord(const Record& r, std::size_t n)
         vector.to = std::string(*to);
         vector.delta = survey::GeocentricCoordinate{*dx, *dy, *dz};
         vector.referenceFrame = "WGS 84";
-        vector.fromAntenna = baseAntenna_;
-        vector.toAntenna = roverAntenna_;
         vector.source = builder_.source(n);
         vector_ = std::move(vector);
         vectorRecord_ = n;
+        vectorEnds_ = VectorEnds{};
+        vectorEnds_.record = n;
+        vectorEnds_.baseAntenna = baseAntenna_;
+        vectorEnds_.baseReferenceHeight = baseReferenceHeight_;
+        vectorEnds_.basePhaseOffset = basePhaseOffset_;
+        vectorEnds_.roverAntenna = roverAntenna_;
+        if (rodHeightStated_) {
+            vectorEnds_.rodHeight = rodHeight_;
+        } else if (!roverAntennaStated_) {
+            // [SCE250]: the rover's height is "the LS record prior to the
+            // vector records"; with none, the rover end's height is unknown,
+            // not zero.
+            vectorEnds_.roverAntenna.method = survey::AntennaHeightMethod::Other;
+            vectorEnds_.roverAntenna.measuredTo = "not stated: no LS record before the vector "
+                                                  "gives the rover's rod height";
+            builder_.warn(n, "no LS record before this vector gives the rover's rod height, so "
+                             "the vector's height difference cannot be taken to the marks");
+        }
         builder_.countRead();
         return;
     }
@@ -1285,17 +1588,28 @@ void Rw5Reader::vectorRecord(const Record& r, std::size_t n)
         vector_->covariance.xz = real(r.find("XZ"), "XZ", n).value_or(0.0);
         vector_->covariance.yz = real(r.find("YZ"), "YZ", n).value_or(0.0);
     } else {
-        const auto method = [](std::optional<std::string_view> where, survey::GnssAntenna& antenna) {
-            if (where == "APC") {
-                antenna.method = survey::AntennaHeightMethod::PhaseCentre;
-                antenna.measuredTo = "L1 phase centre";
-            } else if (where == "ARP") {
-                antenna.method = survey::AntennaHeightMethod::Vertical;
-                antenna.measuredTo = "antenna reference point";
+        // [SCE] G4: "Antenna point in Base, Antenna point in Rover"; the
+        // heights follow in finishVector.
+        const auto point = [&](std::optional<std::string_view> where, std::string_view tag,
+                               AntennaPoint& into) {
+            if (!where) {
+                return;
+            }
+            if (*where == "APC") {
+                into = AntennaPoint::PhaseCentre;
+            } else if (*where == "ARP") {
+                into = AntennaPoint::ReferencePoint;
+            } else if (*where == "UNK") {
+                into = AntennaPoint::NotStated;
+            } else {
+                builder_.warn(n, std::string(tag) + " '" + std::string(*where) +
+                                     "' is not APC, ARP or UNK; that end of the vector is taken "
+                                     "to be the phase centre");
             }
         };
-        method(r.find("BV"), vector_->fromAntenna);
-        method(r.find("RV"), vector_->toAntenna);
+        point(r.find("BV"), "BV", vectorEnds_.base);
+        point(r.find("RV"), "RV", vectorEnds_.rover);
+        vectorEnds_.record = n;
     }
     builder_.countRead();
 }
@@ -1333,6 +1647,14 @@ void Rw5Reader::baseline(const Record& r, std::size_t n)
     if (const std::optional<double> vp = linear(r.find("VP"), "VP", n)) {
         builder_.addPointMetadata(*to, "vertical precision (m)", katana::core::formatExactReal(*vp));
     }
+    // [TDS] DC: how the baseline was derived (1 base, 2 rover, 3 get base, 4
+    // static); CL: the point's classification (1 normal, 2 control ...).
+    if (const std::optional<std::string_view> dc = r.find("DC")) {
+        builder_.addPointMetadata(*to, "GNSS derivation", enumerated(*dc, kDerivations, 1));
+    }
+    if (const std::optional<std::string_view> cl = r.find("CL")) {
+        builder_.addPointMetadata(*to, "classification", enumerated(*cl, kClassifications, 0));
+    }
     describePoint(*to, r, n);
     builder_.countRead();
 }
@@ -1355,18 +1677,41 @@ void Rw5Reader::covariance(const Record& r, std::size_t n)
         return;
     }
     survey::Observation& target = builder_.project().observations[lastGnss_];
+    std::string point;
     if (auto* vector = std::get_if<survey::GnssGeocentricBaselineObservation>(&target)) {
         vector->covariance = c;
+        point = vector->to;
     } else if (auto* position = std::get_if<survey::GnssGlobalPositionObservation>(&target)) {
         // An X/Y/Z covariance cannot be the north/east/up one a geodetic
         // position carries (data_model.hpp); it is kept as text.
-        builder_.addPointMetadata(position->point, "covariance XX YY ZZ XY XZ YZ (m2)",
+        point = position->point;
+        builder_.addPointMetadata(point, "covariance XX YY ZZ XY XZ YZ (m2)",
                                   katana::core::formatExactReal(c.xx) + " " +
                                       katana::core::formatExactReal(c.yy) + " " +
                                       katana::core::formatExactReal(c.zz) + " " +
                                       katana::core::formatExactReal(c.xy) + " " +
                                       katana::core::formatExactReal(c.xz) + " " +
                                       katana::core::formatExactReal(c.yz));
+    }
+    // [TDS] CV: DC the derivation, SV "Minimum number of SV during
+    // observation", SC "Error Scale" - kept with the point the covariance
+    // belongs to (lastGnss_ is always a vector or a position, so one exists).
+    if (const std::optional<std::string_view> dc = r.find("DC"); dc && !point.empty()) {
+        builder_.addPointMetadata(point, "covariance derivation", enumerated(*dc, kDerivations, 1));
+    }
+    if (const std::optional<std::string_view> sv = r.find("SV"); sv && !point.empty()) {
+        builder_.addPointMetadata(point, "minimum satellites", std::string(*sv));
+    }
+    if (const std::optional<std::string_view> sc = r.find("SC"); sc && !point.empty()) {
+        builder_.addPointMetadata(point, "covariance error scale", std::string(*sc));
+        // The specification does not say whether the variances already hold
+        // the scale, so they are imported as written; a scale other than one
+        // is worth a surveyor's look.
+        if (const std::optional<double> scale = real(sc, "SC", n); scale && *scale != 1.0) {
+            builder_.warn(n, "the covariance's error scale SC is " + std::string(*sc) +
+                                 "; the variances are imported as written, not scaled, because "
+                                 "the specification does not say whether they include it");
+        }
     }
     builder_.countRead();
 }
@@ -1403,6 +1748,14 @@ void Rw5Reader::geodeticPosition(const Record& r, std::size_t n)
                                       std::string(*value));
         }
     }
+    // [TDS] EP TM "System Time" (HH:MM:SS) and CL the classification.
+    if (const std::optional<std::string_view> time = r.find("TM")) {
+        builder_.addPointMetadata(lastPoint_, "GNSS time", std::string(*time));
+    }
+    if (const std::optional<std::string_view> cl = r.find("CL")) {
+        builder_.addPointMetadata(lastPoint_, "classification",
+                                  enumerated(*cl, kClassifications, 0));
+    }
     builder_.countRead();
 }
 
@@ -1415,7 +1768,11 @@ void Rw5Reader::antennaHeight(const Record& r, std::size_t n)
     if (fatal_) {
         return;
     }
-    survey::GnssAntenna& antenna = r.find("DC") == "1" ? baseAntenna_ : roverAntenna_;
+    const bool base = r.find("DC") == "1";
+    survey::GnssAntenna& antenna = base ? baseAntenna_ : roverAntenna_;
+    if (!base && (measured || reduced)) {
+        roverAntennaStated_ = true;
+    }
     if (measured) {
         antenna.height = *measured;
         const std::optional<std::string_view> me = r.find("ME");
@@ -1435,8 +1792,17 @@ void Rw5Reader::antennaHeight(const Record& r, std::size_t n)
     builder_.countRead();
 }
 
-void Rw5Reader::equipment(const Record& r, std::size_t)
+void Rw5Reader::equipment(const Record& r, std::size_t n)
 {
+    // [TDS] EQ: TA "Tape Adjustment", HO "Horizontal Offset" and VO "Vertical
+    // Offset" are the antenna's measuring geometry, in the MO unit. An AH
+    // record's RA already has them applied; the raw values are kept.
+    const std::optional<double> tape = linear(r.find("TA"), "TA", n);
+    const std::optional<double> horizontal = linear(r.find("HO"), "HO", n);
+    const std::optional<double> vertical = linear(r.find("VO"), "VO", n);
+    if (fatal_) {
+        return;
+    }
     survey::GnssAntenna& antenna = r.find("DC") == "1" ? baseAntenna_ : roverAntenna_;
     if (const std::optional<std::string_view> type = r.find("AT")) {
         antenna.type = std::string(*type);
@@ -1445,11 +1811,29 @@ void Rw5Reader::equipment(const Record& r, std::size_t)
         antenna.serialNumber = std::string(*serial);
     }
     const std::string role = r.find("DC") == "1" ? "base" : "rover";
+    auto& metadata = builder_.project().metadata;
     if (const std::optional<std::string_view> receiver = r.find("RX")) {
-        builder_.project().metadata[role + " receiver"] = std::string(*receiver);
+        metadata[role + " receiver"] = std::string(*receiver);
     }
     if (const std::optional<std::string_view> serial = r.find("RS")) {
-        builder_.project().metadata[role + " receiver serial"] = std::string(*serial);
+        metadata[role + " receiver serial"] = std::string(*serial);
+    }
+    // AN and AI index the collector's own antenna table (Antenna.ini).
+    if (const std::optional<std::string_view> number = r.find("AN")) {
+        metadata[role + " antenna number"] = std::string(*number);
+    }
+    if (const std::optional<std::string_view> index = r.find("AI")) {
+        metadata[role + " antenna index"] = std::string(*index);
+    }
+    if (tape) {
+        metadata[role + " antenna tape adjustment (m)"] = katana::core::formatExactReal(*tape);
+    }
+    if (horizontal) {
+        metadata[role + " antenna horizontal offset (m)"] =
+            katana::core::formatExactReal(*horizontal);
+    }
+    if (vertical) {
+        metadata[role + " antenna vertical offset (m)"] = katana::core::formatExactReal(*vertical);
     }
     builder_.countRead();
 }
@@ -1457,20 +1841,22 @@ void Rw5Reader::equipment(const Record& r, std::size_t)
 void Rw5Reader::offCentre(const Record& r, std::size_t n)
 {
     // [SCE] OF: the angle right, the actual zenith and the slope distance of
-    // an off-centre shot (a tree, a pole). The specification does not say
-    // which shot it corrects, so it is not tied to one: the values are kept,
-    // as written, with the setup they were observed from.
+    // an off-centre shot (a tree, a pole); [TDS] 16 adds the offset length
+    // OL, the horizontal and vertical distances HD and VD and the left/right
+    // offset LR. The specifications do not say which shot it corrects, so it
+    // is not tied to one: every field is kept, as written and in the order
+    // written, with the setup it was observed from.
     survey::SurveyStation* station = builder_.currentStation();
     if (station == nullptr) {
         builder_.skip(n, "off-centre shot before any setup");
         return;
     }
     std::string values;
-    for (const std::string_view tag : {"AR", "ZE", "SD"}) {
-        if (const std::optional<std::string_view> value = r.find(tag)) {
-            values += (values.empty() ? "" : ", ") + std::string(tag) + " " + std::string(*value);
-        }
+    for (std::size_t i = 0; i < r.count; ++i) {
+        values += (values.empty() ? "" : ", ") + std::string(r.fields[i].tag) + " " +
+                  std::string(r.fields[i].value);
     }
+    r.looked = UINT32_MAX;
     r.noteLooked = true;
     if (r.hasNote && !r.note.empty()) {
         values += (values.empty() ? "note " : ", note ") + std::string(r.note);
@@ -1497,6 +1883,27 @@ void Rw5Reader::unreadFields(const Record& r, std::size_t n)
         if ((r.looked & (1u << i)) != 0) {
             continue;
         }
+        const std::string_view tag = r.fields[i].tag;
+        const std::string_view value = r.fields[i].value.substr(0, 40);
+        // Record::find reads the first of a tag given twice.
+        bool repeated = false;
+        for (std::size_t j = 0; j < i && !repeated; ++j) {
+            repeated = r.fields[j].tag == tag;
+        }
+        if (repeated) {
+            builder_.warn(n, "field '" + std::string(tag) +
+                                 "' is given more than once; the first is read and this one "
+                                 "(value '" + std::string(value) + "') is not imported");
+            continue;
+        }
+        if (isDefinedField(r.type, tag)) {
+            // Every handler reads its record's fields, so this is a field
+            // it passed over here; said on every record, with its value.
+            builder_.warn(n, "field '" + std::string(tag) + "' (value '" + std::string(value) +
+                                 "') is one the RW5 specifications define for a " +
+                                 std::string(r.type) + " record, but it is not imported here");
+            continue;
+        }
         std::string key(r.type);
         key += ' ';
         key += r.fields[i].tag;
@@ -1504,9 +1911,8 @@ void Rw5Reader::unreadFields(const Record& r, std::size_t n)
         ++entry->second.records;
         if (first) {
             entry->second.first = n;
-            builder_.warn(n, "field '" + std::string(r.fields[i].tag) + "' (value '" +
-                                 std::string(r.fields[i].value.substr(0, 40)) + "') is not one "
-                                 "the RW5 specifications define for a " +
+            builder_.warn(n, "field '" + std::string(tag) + "' (value '" + std::string(value) +
+                                 "') is not one the RW5 specifications define for a " +
                                  std::string(r.type) + " record; it is not imported, here or "
                                  "on any later " + std::string(r.type) + " record");
         }
