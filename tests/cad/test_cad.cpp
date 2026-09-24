@@ -1082,7 +1082,7 @@ TEST(CadInterpreter, StylesCanBeDefinedTunedAppliedAndListed)
     session.ok("STYLE SET Kerb colour #FF8000");
     session.ok("STYLE SET Kerb symbol cross");
     session.ok("STYLE SET Kerb symbolsize 1.5");
-    session.ok("STYLE SET Kerb description from 12d, colour shade 48");
+    session.ok("STYLE SET Kerb description from the library, colour shade 48");
 
     const katana::entity::Style* kerb = session.document.model().styles.find("Kerb");
     ASSERT_NE(kerb, nullptr);
@@ -1092,7 +1092,7 @@ TEST(CadInterpreter, StylesCanBeDefinedTunedAppliedAndListed)
     EXPECT_EQ(kerb->color->toHex(), "#FF8000");
     EXPECT_EQ(kerb->symbol, "cross");
     EXPECT_DOUBLE_EQ(kerb->symbolSize, 1.5);
-    EXPECT_EQ(kerb->description, "from 12d, colour shade 48");
+    EXPECT_EQ(kerb->description, "from the library, colour shade 48");
     const std::string listed = session.ok("STYLE LIST");
     EXPECT_NE(listed.find("Kerb"), std::string::npos);
     EXPECT_NE(listed.find("symbol=cross@1.5"), std::string::npos) << listed;
@@ -1115,7 +1115,7 @@ TEST(CadInterpreter, PropertiesAreListedTypedRenamedAndRemoved)
     s.ok("POINT 1,1");
     s.ok("SELECT ALL");
 
-    // The type is guessed from the value, unless it is stated - and a 12d
+    // The type is guessed from the value, unless it is stated - and a
     // feature code like "2" must be able to stay text.
     s.ok("PROP SET Level 31.25");
     s.ok("PROP SET Code 2 text");
@@ -1155,11 +1155,11 @@ TEST(CadInterpreter, PropertiesAreListedTypedRenamedAndRemoved)
 
 TEST(CadInterpreter, RenamingAStyleOrALinetypeTakesEverythingThatNamedItAlong)
 {
-    // What a 12d import leaves to tidy: a style named after a linestyle and
+    // What an archive import leaves to tidy: a style named after a linestyle and
     // worn by the points, and a linetype named by a layer and a style.
     Session session;
     session.ok("LINETYPE NEW fence 1 -0.5");
-    // Quoted, because a 12d style name has spaces and dropping the rest of
+    // Quoted, because a library style name has spaces and dropping the rest of
     // one silently is what the arity check below now refuses.
     session.ok("STYLE NEW \"TOPO Natural Surface Point\"");
     EXPECT_EQ(session.fails("STYLE NEW TOPO Natural Surface Point"), ErrorCode::InvalidArgument);
@@ -1211,7 +1211,7 @@ TEST(CadInterpreter, StyleRejectsNonsenseWithItsOwnReason)
 
 TEST(CadInterpreter, AStyleCanNameASymbolFromTheLoadedLibraryButNotOneFromNowhere)
 {
-    // The point of PLAN.MD 20.3: a 12d customisation brings hundreds of
+    // The point of PLAN.MD 20.3: a customisation brings hundreds of
     // symbols, so the sixteen built-in names stopped being the whole set.
     Session session;
     session.ok("STYLE NEW s");
@@ -1378,9 +1378,9 @@ void loadManagerLibrary(Document& document)
             {katana::entity::StrokeOp::Draw, katana::geometry::Point2(1.0, 0.0)});
         ASSERT_TRUE(library.add(style).ok());
     };
-    add("WATR Main", false, "user_linestyl_test.4d");
-    add("CULT Bollard", true, "user_symbols_test.4d");
-    add("SEWR Manhole Cover", false, "user_symbols_test.4d");
+    add("WATR Main", false, "linestyles_test.4d");
+    add("CULT Bollard", true, "symbols_test.4d");
+    add("SEWR Manhole Cover", false, "symbols_test.4d");
     document.setStyleLibrary(std::move(library));
 }
 
@@ -1388,7 +1388,7 @@ void loadManagerLibrary(Document& document)
 
 TEST(CadInterpreter, AStyleOrLayerLinetypeMayNameALibraryLinestyleAndAStyleMaySayByLayer)
 {
-    // audit CAD-06: the model and the viewport take a 12d linestyle name,
+    // audit CAD-06: the model and the viewport take a library linestyle name,
     // and STYLE SET refused one - so a user could get one only by import.
     Session session;
     loadManagerLibrary(session.document);
