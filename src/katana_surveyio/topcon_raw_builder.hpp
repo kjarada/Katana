@@ -96,6 +96,7 @@ class RawProjectBuilder {
     // A record that was not imported: a warning and one more skipped record.
     void skip(std::size_t record, std::string message);
     void countRead() { ++result_.recordsRead; }
+    [[nodiscard]] std::size_t recordsSkipped() const { return result_.recordsSkipped; }
     void notCarried(std::string text);
 
     // ---- Points

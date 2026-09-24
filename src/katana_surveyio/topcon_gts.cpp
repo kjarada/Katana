@@ -48,6 +48,7 @@
 
 #include <array>
 #include <cmath>
+#include <map>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -88,6 +89,23 @@ bool isControlWord(std::string_view word)
         }
     }
     return false;
+}
+
+// How many fields each record has in [LINK]'s list (C-6 to C-8); a field
+// past these is one this reader cannot place and says so. NOTE is free text.
+std::size_t fieldsDefined(std::string_view word)
+{
+    if (word == "NAME" || word == "INST") {
+        return 1;
+    }
+    if (word == "JOB" || word == "DATE" || word == "UNITS" || word == "ATMOS" || word == "TEMP" ||
+        word == "BS" || word == "HV") {
+        return 2;
+    }
+    if (word == "FS" || word == "SS") {
+        return 4;
+    }
+    return 3; // SCALE, STN, XYZ, BKB, CTL, SD, HD, OFFSET
 }
 
 // Up to 8 comma-separated fields; no record in [LINK] has more than four.
@@ -150,6 +168,7 @@ class Gts7Reader {
     void header(std::string_view word, const Fields& f, std::size_t n);
     void measurement(std::string_view word, const Fields& f, std::size_t n);
     void offset(const Fields& f, std::size_t n);
+    void extraFields(std::string_view word, const Fields& f, std::size_t n);
 
     std::optional<double> linear(std::optional<std::string_view> value, std::string_view what,
                                  std::size_t n);
@@ -174,7 +193,39 @@ class Gts7Reader {
     std::string target_;
     double targetHeight_ = 0.0;
     std::string lastObserved_;
+
+    // Records carrying fields past the defined ones, by control word: warned
+    // at the first, counted after, so a program that adds a field to every
+    // shot gives two warnings and not one per shot.
+    struct Extra {
+        std::size_t first = 0;
+        std::size_t records = 0;
+    };
+    std::map<std::string, Extra, std::less<>> extra_;
 };
+
+void Gts7Reader::extraFields(std::string_view word, const Fields& f, std::size_t n)
+{
+    std::string values;
+    for (std::size_t i = fieldsDefined(word); i < f.count; ++i) {
+        if (!f.values[i].empty()) {
+            values += (values.empty() ? "'" : ", '") + std::string(f.values[i].substr(0, 40)) + "'";
+        }
+    }
+    if (values.empty()) {
+        return;
+    }
+    auto [entry, first] = extra_.try_emplace(std::string(word));
+    ++entry->second.records;
+    if (first) {
+        entry->second.first = n;
+        builder_.warn(n, std::string(word) + " record has fields past the " +
+                             std::to_string(fieldsDefined(word)) +
+                             " the GTS-7 format defines (" + values +
+                             "); they are not imported, here or on any later " +
+                             std::string(word) + " record");
+    }
+}
 
 bool Gts7Reader::unitsKnown(std::size_t n)
 {
@@ -265,10 +316,22 @@ Result<ReadResult> Gts7Reader::read(std::string_view bytes)
             builder_.warn(n, "record has more fields than any GTS-7 record defines; the extra "
                              "fields were not read");
         }
+        const std::size_t skippedBefore = builder_.recordsSkipped();
         record(word, fields, n);
+        if (!fatal_ && builder_.recordsSkipped() == skippedBefore) {
+            extraFields(word, fields, n);
+        }
     }
     if (fatal_) {
         return *fatal_;
+    }
+    for (const auto& [word, extra] : extra_) {
+        if (extra.records > 1) {
+            builder_.warn(0, std::to_string(extra.records) + " " + word +
+                                 " records carry fields past the ones the GTS-7 format defines, "
+                                 "none of them imported; the first is record " +
+                                 std::to_string(extra.first));
+        }
     }
     if (!builder_.project().stations.empty()) {
         if (!anyTargetHeight_) {
