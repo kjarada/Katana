@@ -200,6 +200,7 @@ QTreeWidgetItem* contentRow(QTreeWidget* tree, const QString& what, const QStrin
     auto* item = new QTreeWidgetItem(tree);
     item->setText(0, what);
     item->setText(1, detail);
+    item->setToolTip(0, what);
     item->setToolTip(1, detail);
     return item;
 }
@@ -209,6 +210,7 @@ QTreeWidgetItem* contentChild(QTreeWidgetItem* parent, const QString& what, cons
     auto* item = new QTreeWidgetItem(parent);
     item->setText(0, what);
     item->setText(1, detail);
+    item->setToolTip(0, what);
     item->setToolTip(1, detail);
     return item;
 }
@@ -377,7 +379,14 @@ QWidget* SurveyImportWizard::buildFormatPage()
     formatRecord_ = mutedLabel({}, page);
     formatRecord_->setObjectName("formatRecord");
     layout->addWidget(formatRecord_);
-    connect(format_, &QComboBox::currentIndexChanged, this, [this] { showFormatRecord(); });
+    connect(format_, &QComboBox::currentIndexChanged, this, [this] {
+        showFormatRecord();
+        // The steps ahead depend on the format: seven for a field file, six
+        // for a coordinate file.
+        if (pages_ != nullptr && pages_->currentIndex() == FormatPage) {
+            showStepTitle();
+        }
+    });
     return page;
 }
 
@@ -572,9 +581,20 @@ QWidget* SurveyImportWizard::buildContentPage()
     content_ = new QTreeWidget(page);
     content_->setObjectName("content");
     content_->setHeaderLabels({"In the file", "What was read"});
-    content_->header()->setStretchLastSection(true);
-    content_->setColumnWidth(0, 260);
+    // The sentences - what the file does not carry, each warning - are in
+    // the first column and wrap in it; the counts keep a column of their own
+    // that a long sentence can never push out of sight.
+    content_->header()->setStretchLastSection(false);
+    content_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    content_->header()->setSectionResizeMode(1, QHeaderView::Interactive);
+    content_->setColumnWidth(1, 280);
     content_->setWordWrap(true);
+    content_->setTextElideMode(Qt::ElideNone);
+    content_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Rows are measured for the width they have: a column made wider or
+    // narrower lays them out again, so a wrapped sentence keeps its lines.
+    connect(content_->header(), &QHeaderView::sectionResized, content_,
+            [this] { content_->doItemsLayout(); });
     layout->addWidget(content_, 1);
     layout->addWidget(mutedLabel(
         "What the reader made of the file, before anything is reduced or drawn. Every record "
@@ -588,9 +608,12 @@ QWidget* SurveyImportWizard::buildReductionPage()
     auto* page = new QWidget(this);
     auto* layout = new QVBoxLayout(page);
     auto* splitter = new QSplitter(Qt::Vertical, page);
+    splitter->setChildrenCollapsible(false);
+    reductionSplitter_ = splitter;
     auto* scroll = new QScrollArea(splitter);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     options_ = new ReductionOptionsWidget(scroll);
     scroll->setWidget(options_);
     auto* previewPane = new QWidget(splitter);
@@ -614,7 +637,10 @@ QWidget* SurveyImportWizard::buildReductionPage()
     splitter->addWidget(previewPane);
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({420, 280});
+    // The options first get most of the page - the basic ones and the
+    // control table in view, the Advanced fold just below; a preview then
+    // gives the room to its report (runPreview).
+    splitter->setSizes({500, 200});
     layout->addWidget(splitter, 1);
     connect(previewButton_, &QPushButton::clicked, this, [this] { runPreview({}); });
     options_->onChanged = [this] {
@@ -636,32 +662,39 @@ QWidget* SurveyImportWizard::buildSystemPage()
     systemSummary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     systemSummary_->setVisible(false);
     layout->addWidget(systemSummary_);
-    layout->addWidget(mutedLabel(
+    // What a coordinate file needs; a field file's reader states its units
+    // and nothing of it is transformed, so its path hides all of this.
+    systemFields_ = new QWidget(page);
+    auto* fieldsLayout = new QVBoxLayout(systemFields_);
+    fieldsLayout->setContentsMargins(0, 0, 0, 0);
+    fieldsLayout->addWidget(mutedLabel(
         "A point file does not say what its numbers are: choose the unit they are in (there is "
         "no default - a wrong unit scales the whole survey). The coordinate system is recorded "
         "as unknown unless you state it. Katana transforms the points only when you give BOTH "
         "the file's system and a target, by EPSG code, through its geodesy library; both must "
         "be projected (grid) systems, and heights are carried through unchanged - no vertical "
         "datum change is made.",
-        page));
+        systemFields_));
+    layout->addWidget(systemFields_);
+    layout->addStretch(1);
+    QWidget* fields = systemFields_;
     auto* form = new QFormLayout();
-    unit_ = new QComboBox(page);
+    unit_ = new QComboBox(fields);
     unit_->setObjectName("unit");
     unit_->addItem("(choose the unit)");
     for (const survey::LinearUnit unit : units()) {
         unit_->addItem(survey::toString(unit));
     }
     form->addRow("The numbers are in:", unit_);
-    declared_ = new QLineEdit(page);
+    declared_ = new QLineEdit(fields);
     declared_->setObjectName("declared");
     declared_->setPlaceholderText("unknown - or an EPSG code, e.g. 28356");
     form->addRow("The file's system:", declared_);
-    target_ = new QLineEdit(page);
+    target_ = new QLineEdit(fields);
     target_->setObjectName("target");
     target_->setPlaceholderText("none - or an EPSG code to transform into");
     form->addRow("Transform into:", target_);
-    layout->addLayout(form);
-    layout->addStretch(1);
+    fieldsLayout->addLayout(form);
     return page;
 }
 
@@ -735,7 +768,15 @@ void SurveyImportWizard::showEvent(QShowEvent* event)
 
 std::vector<int> SurveyImportWizard::path() const
 {
-    if (readerPath_) {
+    // Until the format is chosen, the path is the one the format on show
+    // would take, so the step count does not change under the person's feet
+    // between the Format step and the next.
+    bool reader = readerPath_;
+    if (pages_ != nullptr && pages_->currentIndex() <= FormatPage && format_ != nullptr) {
+        const QString id = format_->currentData().toString();
+        reader = !id.isEmpty() && surveyio::formatRegistry().reader(id.toStdString()) != nullptr;
+    }
+    if (reader) {
         return {FilePage,   FormatPage,  ContentPage, SystemPage,
                 ReductionPage, OptionsPage, ReportPage};
     }
@@ -756,9 +797,9 @@ int SurveyImportWizard::previousPage(int page) const
     return at == pages.end() || at == pages.begin() ? FilePage : *(at - 1);
 }
 
-void SurveyImportWizard::goTo(int page)
+void SurveyImportWizard::showStepTitle()
 {
-    page = std::clamp(page, 0, Pages - 1);
+    const int page = pages_->currentIndex();
     static const char* const titles[] = {"Choose the file",
                                          "The file's format",
                                          "Columns and delimiter",
@@ -774,7 +815,13 @@ void SurveyImportWizard::goTo(int page)
                        .arg(number)
                        .arg(pages.size())
                        .arg(titles[page]));
+}
+
+void SurveyImportWizard::goTo(int page)
+{
+    page = std::clamp(page, 0, Pages - 1);
     pages_->setCurrentIndex(page);
+    showStepTitle();
     const bool busy = task_->busy();
     back_->setEnabled(!busy && page > 0);
     next_->setEnabled(!busy && page < ReportPage);
@@ -1035,6 +1082,7 @@ Status SurveyImportWizard::chooseFormat()
     readerPath_ = false;
     formatId_ = descriptor->id;
     systemSummary_->setVisible(false);
+    systemFields_->setVisible(true);
     for (QWidget* field : std::initializer_list<QWidget*>{unit_, declared_, target_}) {
         field->setEnabled(true);
     }
@@ -1517,9 +1565,10 @@ void SurveyImportWizard::showContent()
                                                 qs(survey::toString(session.lastEpoch)));
         }
         contentChild(sessions,
-                     session.markerName.empty() ? QString("(no marker name)")
-                                                : qs(session.markerName),
-                     detail);
+                     (session.markerName.empty() ? QString("(no marker name)")
+                                                 : qs(session.markerName)) +
+                         ": " + detail,
+                     QString("%1 epoch(s)").arg(session.epochCount));
     }
     QTreeWidgetItem* siblings =
         contentRow(content_, "Files read beside it", number(read.siblingsRead.size()));
@@ -1540,14 +1589,14 @@ void SurveyImportWizard::showContent()
     const std::size_t listed = std::min(read.warnings.size(), kListedWarnings);
     for (std::size_t i = 0; i < listed; ++i) {
         const surveyio::ReadWarning& warning = read.warnings[i];
-        contentChild(warnings,
-                     QString("%1 record %2").arg(qs(warning.fileName)).arg(warning.record),
-                     qs(warning.message));
+        contentChild(warnings, qs(warning.message),
+                     QString("%1 record %2").arg(qs(warning.fileName)).arg(warning.record));
     }
     if (listed < read.warnings.size()) {
-        contentChild(warnings, "...",
+        contentChild(warnings,
                      QString("%1 more, in the reduction report")
-                         .arg(read.warnings.size() - listed));
+                         .arg(read.warnings.size() - listed),
+                     "...");
     }
     if (!read.warnings.empty()) {
         warnings->setForeground(0, theme::error());
@@ -1557,7 +1606,6 @@ void SurveyImportWizard::showContent()
     for (QTreeWidgetItem* item : {observations, missing, warnings, siblings}) {
         item->setExpanded(item->childCount() > 0 && item->childCount() <= 50);
     }
-    content_->resizeColumnToContents(0);
 }
 
 void SurveyImportWizard::prepareSystemForReader()
@@ -1569,12 +1617,13 @@ void SurveyImportWizard::prepareSystemForReader()
     for (QWidget* field : std::initializer_list<QWidget*>{unit_, declared_, target_}) {
         field->setEnabled(false);
     }
+    systemFields_->setVisible(false);
     const std::string& drawing = context_.document->metadata().coordinateSystem;
     systemSummary_->setText(
         QString("The file's own units: %1 - converted to metres and radians as it was read.\n"
                 "The file declares: %2.\n"
                 "The observations are reduced into the drawing's coordinate system: %3.\n"
-                "Nothing is transformed; the fields below are for coordinate files.")
+                "Nothing is transformed.")
             .arg(unitsText(raw_->units),
                  raw_->coordinateSystem.unknown ? QString("no coordinate system")
                                                 : qs(raw_->coordinateSystem.name),
@@ -1684,6 +1733,12 @@ void SurveyImportWizard::runPreview(std::function<void()> then)
                 outcomeSystem_ = std::move(system);
                 previewReport_->setReportHtml(html);
                 importReport_->setReportHtml(html);
+                // The report was asked for: it gets the larger part of the
+                // page, the options the smaller (the person may drag back).
+                if (const QList<int> sizes = reductionSplitter_->sizes();
+                    sizes.size() == 2 && sizes[1] < sizes[0]) {
+                    reductionSplitter_->setSizes({sizes[1], sizes[0]});
+                }
                 showMessage(QString("Preview: %1 point(s); %2; %3 observation(s) rejected.")
                                 .arg(shared->points.size())
                                 .arg(qs(adjustmentSummary(shared->report)))

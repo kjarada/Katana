@@ -106,6 +106,7 @@ class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
+class QSplitter;
 class QStackedWidget;
 class QTableWidget;
 class QTreeWidget;
@@ -180,6 +181,8 @@ class SurveyImportWizard final : public QDialog {
     [[nodiscard]] int previousPage(int page) const;
     void advance();
     void goTo(int page);
+    // "Step 3 of 7: What the file holds" for the page on show.
+    void showStepTitle();
     // What leaving `page` forward needs: the page's input checked and the next
     // page's content prepared. An error keeps the person where they are.
     [[nodiscard]] katana::core::Status leave(int page);
@@ -262,9 +265,11 @@ class SurveyImportWizard final : public QDialog {
     QTreeWidget* content_ = nullptr;
     // system
     QLabel* systemSummary_ = nullptr;
+    QWidget* systemFields_ = nullptr; // the unit and systems of a coordinate file
     // reduction
     ReductionOptionsWidget* options_ = nullptr;
     ReductionReportView* previewReport_ = nullptr;
+    QSplitter* reductionSplitter_ = nullptr; // the options above, the preview below
     QPushButton* previewButton_ = nullptr;
     // report
     QPlainTextEdit* report_ = nullptr;

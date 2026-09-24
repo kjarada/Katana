@@ -26,6 +26,8 @@
 
 class QLabel;
 class QListWidget;
+class QResizeEvent;
+class QSplitter;
 class QTextBrowser;
 
 namespace katana::qt {
@@ -64,7 +66,17 @@ class ReductionReportView final : public QWidget {
     // Scrolls to the section at `index` of sections().
     void showSection(int index);
 
+    // True when the sections are listed above the text rather than beside it.
+    [[nodiscard]] bool sectionsAbove() const;
+
+  protected:
+    // The sections go beside the text when the view is wide and above it
+    // when it is narrow - two reports side by side (Survey Jobs' preview)
+    // would otherwise give half of each to a list of headings.
+    void resizeEvent(QResizeEvent* event) override;
+
   private:
+    QSplitter* splitter_ = nullptr;
     QListWidget* list_ = nullptr;
     QTextBrowser* browser_ = nullptr;
     QLabel* summary_ = nullptr;
