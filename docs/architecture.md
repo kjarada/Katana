@@ -24,7 +24,7 @@ core → math → geometry → { terrain, render, entity } → commands → stor
 
 `cad` may see neither `interop` nor `surveyio` nor `archive12d`: the
 application core builds without GDAL and PDAL (`-DKATANA_BUILD_IO=OFF`), and no
-instrument format's or 12d's own types can reach the drawing. This diagram
+instrument format's or archive reader's own types can reach the drawing. This diagram
 used to show `io` and nothing above `cad` but `qt` and `app`; the exact lists
 are in the layering check and nowhere else.
 
