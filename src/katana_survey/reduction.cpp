@@ -78,22 +78,19 @@ AtmosphereDecision decideAtmosphere(Engine& engine, const SurveyStation& station
 {
     const ReductionSettings& settings = engine.settings;
     const InstrumentSettings& instrument = station.instrument;
-    const std::string& id = station.setup.id;
     AtmosphereDecision decision;
 
     std::optional<double> computed;
-    std::string weather;
     if (instrument.temperatureCelsius && instrument.pressureHectopascals) {
         double humidity = kAssumedHumidityPercent;
-        std::string humidityNote = " (humidity not recorded, 60 % assumed)";
         if (instrument.relativeHumidityPercent) {
             humidity = *instrument.relativeHumidityPercent;
-            humidityNote = " and " + formatNumber(humidity, 0) + " %";
+        } else {
+            engine.warnSetup(station, "no humidity recorded; 60 % was assumed for the "
+                                      "atmospheric correction (under 1 ppm below 25 C).");
         }
         computed = atmosphericPpm(*instrument.temperatureCelsius,
                                   *instrument.pressureHectopascals, humidity);
-        weather = formatNumber(*instrument.temperatureCelsius, 1) + " C, " +
-                  formatNumber(*instrument.pressureHectopascals, 1) + " hPa" + humidityNote;
     }
     const auto ppmText = [](double ppm) {
         return (ppm >= 0.0 ? "+" : "") + formatNumber(ppm, 1) + " ppm";
@@ -107,20 +104,14 @@ AtmosphereDecision decideAtmosphere(Engine& engine, const SurveyStation& station
             return decision; // the instrument did it; the setup record says so
         }
         if (instrument.atmosphericPpmState == CorrectionState::Unknown) {
-            engine.warn("Setup " + id +
-                            ": the file does not say whether the instrument applied an "
+            engine.warnSetup(station, "the file does not say whether the instrument applied an "
                             "atmospheric correction, so none was applied. Choose Recompute or "
-                            "Fixed if the distances are raw.",
-                        station.source);
+                            "Fixed if the distances are raw.");
             return decision;
         }
         if (computed) {
+            // The note names the value; the setup row names the weather.
             decision = {true, *computed, ppmText(*computed)};
-            engine.report.setups.back().instrument.atmosphericPpm = *computed;
-            engine.warn("Setup " + id + ": atmospheric correction " + ppmText(*computed) +
-                            " computed from " + weather + " (IUGG 1999, 658 nm, reference 12 C, "
-                            "1013.25 hPa, 60 %).",
-                        station.source);
             return decision;
         }
         if (instrument.atmosphericPpm) {
@@ -128,28 +119,22 @@ AtmosphereDecision decideAtmosphere(Engine& engine, const SurveyStation& station
                         ppmText(*instrument.atmosphericPpm) + " as recorded"};
             return decision;
         }
-        engine.warn("Setup " + id +
-                        ": the instrument did not apply an atmospheric correction and the file "
-                        "records no weather to compute one, so none was applied.",
-                    station.source);
+        engine.warnSetup(station, "the instrument did not apply an atmospheric correction and the file "
+                        "records no weather to compute one, so none was applied.");
         return decision;
     case AtmosphericCorrection::Recompute: {
         if (!computed) {
-            engine.warn("Setup " + id +
-                            ": no temperature and pressure recorded, so the atmospheric "
-                            "correction cannot be recomputed; distances used as recorded.",
-                        station.source);
+            engine.warnSetup(station, "no temperature and pressure recorded, so the atmospheric "
+                            "correction cannot be recomputed; distances used as recorded.");
             return decision;
         }
         double net = *computed;
         std::string note = ppmText(*computed);
         if (instrument.atmosphericPpmState == CorrectionState::Applied) {
             if (!instrument.atmosphericPpm) {
-                engine.warn("Setup " + id +
-                                ": the instrument applied an atmospheric correction but the file "
+                engine.warnSetup(station, "the instrument applied an atmospheric correction but the file "
                                 "does not say how much, so it cannot be taken out; distances "
-                                "used as recorded.",
-                            station.source);
+                                "used as recorded.");
                 return decision;
             }
             // (1 + new) / (1 + old), as ppm.
@@ -157,15 +142,10 @@ AtmosphereDecision decideAtmosphere(Engine& engine, const SurveyStation& station
                   1e6;
             note = ppmText(*computed) + " for " + ppmText(*instrument.atmosphericPpm);
         } else if (instrument.atmosphericPpmState == CorrectionState::Unknown) {
-            engine.warn("Setup " + id +
-                            ": the file does not say whether the instrument applied an "
+            engine.warnSetup(station, "the file does not say whether the instrument applied an "
                             "atmospheric correction; the recomputed one was applied as if it had "
-                            "not.",
-                        station.source);
+                            "not.");
         }
-        engine.warn("Setup " + id + ": atmospheric correction recomputed as " +
-                        ppmText(*computed) + " from " + weather + ".",
-                    station.source);
         return AtmosphereDecision{true, net, note};
     }
     case AtmosphericCorrection::Fixed:
@@ -173,11 +153,9 @@ AtmosphereDecision decideAtmosphere(Engine& engine, const SurveyStation& station
             return decision;
         }
         if (instrument.atmosphericPpmState == CorrectionState::Unknown) {
-            engine.warn("Setup " + id +
-                            ": the file does not say whether the instrument applied an "
+            engine.warnSetup(station, "the file does not say whether the instrument applied an "
                             "atmospheric correction; the fixed value was applied as if it had "
-                            "not.",
-                        station.source);
+                            "not.");
         }
         return AtmosphereDecision{true, settings.fixedPpm, ppmText(settings.fixedPpm) + " fixed"};
     }
@@ -218,7 +196,7 @@ std::optional<AppliedCorrection> prismCorrection(Engine& engine, const SurveySta
     const auto notStated = [&](const char* what) {
         if (!warned) {
             warned = true;
-            engine.warn("Setup " + station.setup.id + ": " + what, station.source);
+            engine.warnSetup(station, what);
         }
     };
 
@@ -295,6 +273,10 @@ std::size_t addRow(Engine& engine, const SurveyStation& station, std::string_vie
     observation.raw = raw;
     observation.reduced = raw;
     observation.source = source;
+    // One allocation for the whole chain instead of one per doubling: a
+    // distance collects up to six corrections, and at 100 000 rows the
+    // reallocations were a measurable share of the reduction.
+    observation.corrections.reserve(6);
     engine.report.observations.push_back(std::move(observation));
     return engine.report.observations.size() - 1;
 }
@@ -471,8 +453,8 @@ void reducePair(Engine& engine, std::size_t setupIndex, ReducedPointing& pointin
         const double rightRaw = right.zenith ? right.zenith->angle : right.vertical->angle;
         const double leftBefore = row(engine, left.zenithRow).reduced.value_or(leftRaw);
         const double rightBefore = row(engine, right.zenithRow).reduced.value_or(rightRaw);
-        correct(engine, left.zenithRow, CorrectionKind::FaceMean, mean - leftBefore,
-                std::nullopt, "index " + formatSeconds(0.5 * (left.zenithValue - right.zenithValue)));
+        // The face-left row's amount is minus the index error.
+        correct(engine, left.zenithRow, CorrectionKind::FaceMean, mean - leftBefore);
         correct(engine, right.zenithRow, CorrectionKind::FaceMean, mean - rightBefore);
         setReduced(engine, left.zenithRow, mean);
         setReduced(engine, right.zenithRow, mean);
@@ -610,6 +592,7 @@ void reduceToHorizontal(Engine& engine, std::size_t setupIndex, ReducedPointing&
     height.to = pointing.target;
     height.pointing = Pointing{pointing.leftIndex, pointing.face};
     height.raw = reduction.measuredVertical;
+    height.corrections.reserve(2);
     if (settings.curvatureAndRefraction) {
         height.corrections.push_back(AppliedCorrection{CorrectionKind::CurvatureRefraction,
                                                        reduction.verticalCorrection,
@@ -1351,19 +1334,45 @@ void seedGnss(Engine& engine, const Observation& observation, std::size_t rowInd
 
 // ---- Outputs -----------------------------------------------------------------------------
 
-void addReducedObservations(const Engine& engine, SurveyProject& reduced)
+// The raw project with every station's pointings replaced by the reduced
+// ones. Built field by field rather than copied and edited: copying 100 000
+// raw observations only to throw them away cost as much as reducing them.
+SurveyProject reducedProject(const Engine& engine)
 {
-    for (std::size_t s = 0; s < reduced.stations.size(); ++s) {
+    const SurveyProject& raw = engine.raw;
+    SurveyProject reduced;
+    reduced.name = raw.name;
+    reduced.coordinateSystem = raw.coordinateSystem;
+    reduced.units = raw.units;
+    reduced.points = raw.points;
+    reduced.unpositionedPoints = raw.unpositionedPoints;
+    reduced.observations = raw.observations;
+    reduced.traverses = raw.traverses;
+    reduced.features = raw.features;
+    reduced.metadata = raw.metadata;
+    reduced.source = raw.source;
+    reduced.controlPoints = raw.controlPoints;
+    reduced.gnssSessions = raw.gnssSessions;
+    reduced.stations.resize(raw.stations.size());
+    for (std::size_t s = 0; s < raw.stations.size(); ++s) {
+        const SurveyStation& from = raw.stations[s];
         SurveyStation& station = reduced.stations[s];
+        station.setup = from.setup;
+        station.backsightPointId = from.backsightPointId;
+        station.backsightAzimuth = from.backsightAzimuth;
+        station.metadata = from.metadata;
+        station.source = from.source;
+        station.instrument = from.instrument;
         std::vector<Observation> kept;
-        for (Observation& observation : station.observations) {
+        kept.reserve(3 * engine.setups[s].pointings.size() + 4);
+        for (const Observation& observation : from.observations) {
             const bool pointingKind =
                 std::holds_alternative<HorizontalDirectionObservation>(observation) ||
                 std::holds_alternative<ZenithAngleObservation>(observation) ||
                 std::holds_alternative<VerticalAngleObservation>(observation) ||
                 std::holds_alternative<DistanceObservation>(observation);
             if (!pointingKind) {
-                kept.push_back(std::move(observation));
+                kept.push_back(observation);
             }
         }
         const std::string& at = station.setup.pointId;
@@ -1419,6 +1428,7 @@ void addReducedObservations(const Engine& engine, SurveyProject& reduced)
         }
         station.observations = std::move(kept);
     }
+    return reduced;
 }
 
 } // namespace
@@ -1463,6 +1473,7 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
         observationCount += station.observations.size();
     }
     engine.report.observations.reserve(observationCount + observationCount / 3 + 8);
+    engine.report.facePairs.reserve(observationCount / 6 + 4);
     engine.pointings.reserve(observationCount / 3 + 8);
     engine.positions.reserve(raw.points.size() + raw.unpositionedPoints.size() + 8);
 
@@ -1540,6 +1551,8 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
         }
     }
 
+    engine.flushSetupNotices();
+
     // The adjustment.
     if (settings.method == AdjustmentMethod::Traverse) {
         if (Status status = adjustAsTraverse(engine); !status) {
@@ -1550,6 +1563,8 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
             return status.error();
         }
     }
+
+    engine.flushSetupNotices();
 
     // ---- Outputs ----
     ReductionOutcome outcome;
@@ -1595,7 +1610,7 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
         engine.report.coordinates.push_back(std::move(coordinate));
     }
 
-    outcome.reduced = raw;
+    outcome.reduced = reducedProject(engine);
     SurveyProject& reduced = outcome.reduced;
     {
         std::unordered_map<std::string_view, const ComputedPoint*> computed;
@@ -1636,7 +1651,6 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
         }
         reduced.unpositionedPoints = std::move(stillUnpositioned);
     }
-    addReducedObservations(engine, reduced);
 
     outcome.report = std::move(engine.report);
     return outcome;
