@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <queue>
 #include <string>
 #include <type_traits>
 #include <unordered_set>
@@ -956,8 +958,8 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
 
     // ---- orientation ----
     const std::string_view backsight = station.backsightPointId;
-    const Position* backsightPosition =
-        backsight.empty() || backsight == station.setup.pointId ? nullptr : engine.find(backsight);
+    const bool namedBacksight = !backsight.empty() && backsight != station.setup.pointId;
+    const Position* backsightPosition = namedBacksight ? engine.find(backsight) : nullptr;
     std::optional<double> backsightAzimuth;
     state.orientationAssumed = false;
     if (backsightPosition != nullptr &&
@@ -965,7 +967,11 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                    backsightPosition->easting - here.easting) > 1e-4) {
         backsightAzimuth = normalizeAngle(std::atan2(backsightPosition->easting - here.easting,
                                                      backsightPosition->northing - here.northing));
-    } else if (station.backsightAzimuth) {
+    } else if (station.backsightAzimuth &&
+               (!namedBacksight || backsightPosition != nullptr || state.acceptCircleAsSet)) {
+        // The circle as set, taken as the grid azimuth: only where no
+        // coordinates of the backsight can orient the setup (see
+        // SetupState::acceptCircleAsSet for why not sooner).
         backsightAzimuth = normalizeAngle(*station.backsightAzimuth);
         state.orientationAssumed = true;
     }
@@ -1007,9 +1013,6 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
         context.geoidSeparation && !settings.useCombinedFactor) {
         geoid = context.geoidSeparation(here.northing, here.easting);
     }
-    bool warnedHeight = false;
-    bool warnedGeoid = false;
-    bool warnedScale = false;
     const double instrumentHeight = station.setup.instrumentHeight;
 
     for (const std::size_t p : state.pointings) {
@@ -1050,8 +1053,8 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
             } else {
                 if (settings.heightReduction != HeightReduction::None) {
                     if (!here.height) {
-                        if (!warnedHeight) {
-                            warnedHeight = true;
+                        if (!state.warnedHeight) {
+                            state.warnedHeight = true;
                             engine.warn("Setup " + station.setup.id + ": its point " +
                                             station.setup.pointId +
                                             " has no height, so its distances were not reduced for "
@@ -1067,8 +1070,8 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                                 height += *geoid;
                             } else {
                                 ok = false;
-                                if (!warnedGeoid) {
-                                    warnedGeoid = true;
+                                if (!state.warnedGeoid) {
+                                    state.warnedGeoid = true;
                                     engine.warn("Setup " + station.setup.id +
                                                     ": the drawing gives no geoid separation there, so "
                                                     "its distances were not reduced to the ellipsoid.",
@@ -1102,8 +1105,8 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                         context.gridScaleFactor(northing, easting, ellipsoidal);
                     if (scale && std::isfinite(*scale) && *scale > 0.0) {
                         factor(CorrectionKind::GridScale, *scale, where);
-                    } else if (!warnedScale) {
-                        warnedScale = true;
+                    } else if (!state.warnedScale) {
+                        state.warnedScale = true;
                         engine.warn("Setup " + station.setup.id +
                                         ": the drawing's projection gives no scale factor there, so "
                                         "its distances were not reduced to grid.",
@@ -1284,37 +1287,45 @@ void seedEntered(Engine& engine)
     }
 }
 
+// What seedGnss found worth one sentence each rather than one per position.
+struct GnssSeedNotices {
+    std::size_t toReferencePoint = 0; // antenna heights to the ARP, not the phase centre
+};
+
 // GNSS positions: the grid ones as they are, the global ones through the
-// context's conversion.
-void seedGnss(Engine& engine, const Observation& observation, std::size_t rowIndex)
+// context's conversion. The first position of a point places it (unless
+// control or an entered point already has); every later one is a check
+// against what is there, with its misclosure. Each is kept in
+// engine.globalPositions for the network, which takes them all.
+//
+// A global position is where the receiver was: at its antenna. The file's
+// antenna height takes it down to the mark, the way reduction_gnss.cpp takes
+// a vector's ends down, so a position and a vector from it agree on what
+// height they mean. A reader whose position is already of the mark gives no
+// antenna (height 0).
+void seedGnss(Engine& engine, std::size_t rawIndex, std::size_t rowIndex, GnssSeedNotices& notices)
 {
+    const Observation& observation = engine.raw.observations[rawIndex];
     const ReductionSettings& settings = engine.settings;
     const ReductionContext& context = engine.context;
-    std::optional<GridPosition> grid;
-    std::string_view pointId;
-    double sigmaHorizontal = settings.apriori.gnssHorizontal;
-    double sigmaVertical = settings.apriori.gnssVertical;
-    std::optional<double> height;
+    GlobalGridPosition converted;
+    converted.row = rowIndex;
+    converted.sigmaHorizontal = settings.apriori.gnssHorizontal;
+    converted.sigmaVertical = settings.apriori.gnssVertical;
     if (const auto* position = std::get_if<GnssPositionObservation>(&observation)) {
-        pointId = position->point;
-        grid = GridPosition{position->northing, position->easting, position->elevation};
-        height = position->elevation;
-        sigmaHorizontal = std::max(position->sigmaNorthing, position->sigmaEasting);
-        sigmaVertical = position->sigmaElevation;
+        converted.point = position->point;
+        converted.northing = position->northing;
+        converted.easting = position->easting;
+        converted.height = position->elevation;
+        converted.sigmaHorizontal = std::max(position->sigmaNorthing, position->sigmaEasting);
+        converted.sigmaVertical = position->sigmaElevation;
+        converted.source = &position->source;
     } else if (const auto* global = std::get_if<GnssGlobalPositionObservation>(&observation)) {
-        pointId = global->point;
-        // The form the file gave, through the matching conversion; failing
-        // that, the other form on the GRS80 ellipsoid (the one GNSS frames
-        // use) through the other conversion.
-        if (global->geocentric && context.geocentricToGrid) {
-            grid = context.geocentricToGrid(*global->geocentric);
-        } else if (global->geodetic && context.geodeticToGrid) {
-            grid = context.geodeticToGrid(*global->geodetic);
-        } else if (global->geodetic && context.geocentricToGrid) {
-            grid = context.geocentricToGrid(geocentricFromGeodetic(*global->geodetic));
-        } else if (global->geocentric && context.geodeticToGrid) {
-            grid = context.geodeticToGrid(geodeticFromGeocentric(*global->geocentric));
-        }
+        converted.point = global->point;
+        converted.source = &global->source;
+        const std::optional<GridPosition> grid = global->geocentric
+                                                     ? gridOfGeocentric(context, *global->geocentric)
+                                                     : gridOfGeodetic(context, *global->geodetic);
         if (!grid) {
             engine.warn("GNSS position of " + global->point +
                             " not used: the drawing's coordinate system cannot convert it to "
@@ -1323,43 +1334,320 @@ void seedGnss(Engine& engine, const Observation& observation, std::size_t rowInd
             reject(engine, rowIndex, "no conversion to the drawing's grid");
             return;
         }
-        if (global->geodetic && settings.useFileCovariances && global->covariance.stated()) {
-            // Local north / east / up.
-            sigmaHorizontal = std::sqrt(std::max(global->covariance.xx, global->covariance.yy));
-            sigmaVertical = std::sqrt(global->covariance.zz);
-        }
-        height = grid->ellipsoidalHeight;
-        if (context.geoidSeparation) {
-            if (const auto separation = context.geoidSeparation(grid->northing, grid->easting)) {
-                height = grid->ellipsoidalHeight - *separation;
+        if (settings.useFileCovariances && global->covariance.stated()) {
+            // A geodetic value's covariance is already local north / east /
+            // up; a geocentric one's is X / Y / Z and is turned at the point.
+            double north = global->covariance.xx;
+            double east = global->covariance.yy;
+            double up = global->covariance.zz;
+            if (global->geocentric) {
+                const LocalVariances local =
+                    localVariances(global->covariance, geodeticFromGeocentric(*global->geocentric));
+                north = local.north;
+                east = local.east;
+                up = local.up;
+            }
+            if (north > 0.0 && east > 0.0 && up > 0.0) {
+                converted.sigmaHorizontal = std::sqrt(std::max(north, east));
+                converted.sigmaVertical = std::sqrt(up);
             }
         }
+        converted.northing = grid->northing;
+        converted.easting = grid->easting;
+        // The row follows the height, the one value the reduction changes:
+        // from the ellipsoid at the antenna down to the mark.
+        ReportObservation& reportRow = row(engine, rowIndex);
+        reportRow.raw = grid->ellipsoidalHeight;
+        reportRow.reduced = grid->ellipsoidalHeight;
+        double height = grid->ellipsoidalHeight;
+        if (context.geoidSeparation) {
+            if (const auto separation = context.geoidSeparation(grid->northing, grid->easting)) {
+                correct(engine, rowIndex, CorrectionKind::Other, -*separation, std::nullopt,
+                        "geoid separation " + formatNumber(*separation, 3) + " m");
+                height -= *separation;
+            }
+        }
+        // The antenna: the horizontal position needs nothing (the plumb line
+        // through a 2 m pole moves 0.3 mm over the grid's convergence), the
+        // height comes down by the antenna height.
+        const GnssAntenna& antenna = global->antenna;
+        std::string gridWords = "to grid N " + formatNumber(grid->northing, 3) + " E " +
+                                formatNumber(grid->easting, 3);
+        if (antenna.height != 0.0 && reducibleAntenna(antenna)) {
+            correct(engine, rowIndex, CorrectionKind::InstrumentAndTargetHeight, -antenna.height,
+                    std::nullopt, "antenna " + antennaWords(antenna));
+            height -= antenna.height;
+            if (antenna.method == AntennaHeightMethod::Vertical) {
+                ++notices.toReferencePoint;
+            }
+            converted.height = height;
+        } else if (antenna.height != 0.0) {
+            engine.warn("GNSS position of " + global->point + ": its antenna height (" +
+                            antennaWords(antenna) +
+                            ") is not a vertical one, so the point's height was left out; its "
+                            "horizontal position was used.",
+                        global->source);
+            gridWords += "; height left out, antenna " + antennaWords(antenna);
+        } else {
+            converted.height = height;
+        }
+        correct(engine, rowIndex, CorrectionKind::Other, 0.0, std::nullopt, std::move(gridWords));
         if (global->solution == GnssSolution::Float || global->solution == GnssSolution::Autonomous) {
             engine.warn("GNSS position of " + global->point + " is a " +
                             toString(global->solution) + " solution.",
                         global->source);
         }
-        ReportObservation& reportRow = row(engine, rowIndex);
-        reportRow.corrections.push_back(AppliedCorrection{
-            CorrectionKind::Other, 0.0, std::nullopt,
-            "to grid N " + formatNumber(grid->northing, 3) + " E " +
-                formatNumber(grid->easting, 3) + " H " + formatNumber(*height, 3)});
     } else {
         return;
     }
-    if (engine.find(pointId)) {
-        return; // control or an entered point wins
+    engine.globalPositions[rawIndex] = converted;
+
+    if (const Position* existing = engine.find(converted.point)) {
+        if (existing->origin != PositionOrigin::Gnss) {
+            return; // control or an entered point wins; the position still serves a vector
+        }
+        // An earlier occupation placed it: this one is a check on it, never
+        // silently unused.
+        MisclosureReport check;
+        check.name = std::string(converted.point) + " by a second GNSS position" +
+                     (converted.source->recordNumber != 0
+                          ? " (record " + std::to_string(converted.source->recordNumber) + ")"
+                          : std::string{});
+        check.northing = converted.northing - existing->northing;
+        check.easting = converted.easting - existing->easting;
+        check.linear = std::hypot(*check.northing, *check.easting);
+        if (converted.height && existing->height) {
+            check.height = *converted.height - *existing->height;
+        }
+        engine.report.misclosures.push_back(std::move(check));
+        return;
     }
     Position position;
-    position.northing = grid->northing;
-    position.easting = grid->easting;
-    position.height = height;
+    position.northing = converted.northing;
+    position.easting = converted.easting;
+    position.height = converted.height;
     position.origin = PositionOrigin::Gnss;
     position.method = ComputationMethod::Gnss;
-    position.sigmaNorthing = sigmaHorizontal;
-    position.sigmaEasting = sigmaHorizontal;
-    position.sigmaHeight = sigmaVertical;
-    engine.place(pointId, position);
+    position.sigmaNorthing = converted.sigmaHorizontal;
+    position.sigmaEasting = converted.sigmaHorizontal;
+    position.sigmaHeight = converted.sigmaVertical;
+    engine.place(converted.point, position);
+}
+
+// ---- Phase B over the setups ------------------------------------------------------------
+
+// Phase B for every setup: each in file order once its station has a
+// position, with GNSS vectors radiated as their bases get one (a setup may
+// stand on an RTK point, a vector may start at a point a setup radiated).
+//
+// A setup whose named backsight has no position yet waits for it: a setup on
+// control that backsights a traverse point is oriented once a later setup
+// has radiated that point. It is tried again when THAT point is placed, not
+// whenever anything is: with a thousand setups placed one at a time, trying
+// every waiting setup after every placement took 12 s, where waiting on the
+// one point that matters costs nothing. Each setup is tried at most twice.
+//
+// When nothing more can be tried, in this order:
+//   1. a setup whose station nothing positions stands on the file's own
+//      coordinates for it, one at a time (its radiation may position others);
+//   2. a setup still waiting for its backsight, where the file records the
+//      circle set on it, is oriented on that circle taken as a grid azimuth,
+//      one at a time in file order (it may place another setup's backsight),
+//      and the report says so;
+//   3. the rest are given up, and the report says why.
+void placeSetups(Engine& engine)
+{
+    const std::vector<SurveyStation>& stations = engine.raw.stations;
+    const std::size_t count = stations.size();
+    constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+    using MinHeap = std::priority_queue<std::size_t, std::vector<std::size_t>, std::greater<>>;
+
+    std::vector<bool> done(count, false);
+    std::vector<bool> tried(count, false);
+    std::vector<bool> queued(count, false);
+    std::size_t remaining = count;
+    // Setups by the point they wait for: their station, or, once tried, their
+    // backsight.
+    std::unordered_map<std::string_view, std::vector<std::size_t>> waitingFor;
+    // Waiting setups whose file records the circle set on the backsight.
+    MinHeap circleCandidates;
+    // A pass tries setups in file order; one woken by a setup later in the
+    // file than itself waits for the next pass, as a sweep through the file
+    // would leave it.
+    MinHeap thisPass;
+    MinHeap nextPass;
+    // Entries of engine.positionOrder already looked up in waitingFor.
+    std::size_t woken = 0;
+
+    const auto wake = [&](std::size_t current) {
+        while (woken < engine.positionOrder.size()) {
+            const auto it = waitingFor.find(engine.positionOrder[woken++]);
+            if (it == waitingFor.end()) {
+                continue;
+            }
+            for (const std::size_t s : it->second) {
+                if (done[s] || queued[s]) {
+                    continue;
+                }
+                queued[s] = true;
+                (current == kNone || s > current ? thisPass : nextPass).push(s);
+            }
+            waitingFor.erase(it);
+        }
+    };
+    const auto waitsForBacksight = [&](std::size_t s) {
+        const SurveyStation& station = stations[s];
+        const std::string& backsight = station.backsightPointId;
+        return !engine.setups[s].orientation && !backsight.empty() &&
+               backsight != station.setup.pointId && engine.find(backsight) == nullptr;
+    };
+    const auto warnUnoriented = [&](std::size_t s) {
+        const SurveyStation& station = stations[s];
+        const std::string& backsight = station.backsightPointId;
+        std::string why;
+        if (backsight.empty()) {
+            why = " has no backsight";
+        } else if (backsight == station.setup.pointId) {
+            why = " cannot be oriented: its backsight is the point it stands on and no circle "
+                  "setting was recorded";
+        } else if (engine.find(backsight) == nullptr) {
+            why = " cannot be oriented: its backsight " + backsight +
+                  " has no position and no circle setting was recorded";
+        } else {
+            why = " cannot be oriented on its backsight " + backsight +
+                  ": it has no direction to it, or stands on the same position, and no circle "
+                  "setting was recorded";
+        }
+        engine.warn("Setup " + station.setup.id + why +
+                        ", so its directions are not oriented and its targets are not radiated.",
+                    station.source);
+    };
+    const auto finish = [&](std::size_t s) {
+        done[s] = true;
+        --remaining;
+        const SetupState& state = engine.setups[s];
+        if (state.orientationAssumed) {
+            engine.warnSetup(
+                stations[s],
+                state.acceptCircleAsSet
+                    ? "its backsight has no position, so its directions were oriented on the "
+                      "circle reading set on the backsight, taken as a grid azimuth: the "
+                      "bearings are right only if the circle was set to one."
+                    : "no backsight coordinates orient it, so its directions were oriented on "
+                      "the circle reading as set, taken as a grid azimuth: the bearings are "
+                      "right only if the circle was set to one.");
+        } else if (!state.orientation) {
+            warnUnoriented(s);
+        }
+    };
+    const auto attempt = [&](std::size_t s) {
+        queued[s] = false;
+        if (done[s]) {
+            return;
+        }
+        tried[s] = true;
+        orientAndRadiate(engine, s);
+        if (waitsForBacksight(s)) {
+            waitingFor[stations[s].backsightPointId].push_back(s);
+            if (stations[s].backsightAzimuth) {
+                circleCandidates.push(s);
+            }
+            return;
+        }
+        finish(s);
+    };
+
+    radiateGnssVectors(engine);
+    for (std::size_t s = 0; s < count; ++s) {
+        if (engine.find(stations[s].setup.pointId) != nullptr) {
+            queued[s] = true;
+            thisPass.push(s);
+        } else {
+            waitingFor[stations[s].setup.pointId].push_back(s);
+        }
+    }
+    // Everything placed so far was placed before anything waited for it.
+    woken = engine.positionOrder.size();
+
+    std::size_t fallbackCursor = 0; // setups before it can never fall back
+    while (remaining > 0) {
+        while (!nextPass.empty()) {
+            thisPass.push(nextPass.top());
+            nextPass.pop();
+        }
+        radiateGnssVectors(engine);
+        wake(kNone);
+        if (!thisPass.empty()) {
+            while (!thisPass.empty()) {
+                const std::size_t s = thisPass.top();
+                thisPass.pop();
+                attempt(s);
+                wake(s);
+            }
+            continue;
+        }
+
+        // 1. The file's own coordinates for a station nothing positions. A
+        // setup already standing on a position keeps it.
+        bool fellBack = false;
+        for (; fallbackCursor < count && !fellBack; ++fallbackCursor) {
+            const std::size_t s = fallbackCursor;
+            const std::string& pointId = stations[s].setup.pointId;
+            if (done[s] || engine.find(pointId) != nullptr) {
+                continue;
+            }
+            const auto it = engine.filePoints.find(pointId);
+            if (it == engine.filePoints.end()) {
+                continue;
+            }
+            Position position;
+            position.northing = it->second->northing;
+            position.easting = it->second->easting;
+            position.height = it->second->elevation;
+            position.origin = PositionOrigin::FileOnly;
+            engine.place(it->second->id, position);
+            engine.warn("Setup " + stations[s].setup.id + " stands on " + pointId +
+                            ", which is not control and was not computed; the file's own "
+                            "coordinates for it were used.",
+                        stations[s].source);
+            fellBack = true;
+        }
+        if (fellBack) {
+            continue;
+        }
+
+        // 2. The circle as set, for the first setup still waiting that has one.
+        while (!circleCandidates.empty() && done[circleCandidates.top()]) {
+            circleCandidates.pop();
+        }
+        if (!circleCandidates.empty()) {
+            const std::size_t s = circleCandidates.top();
+            circleCandidates.pop();
+            engine.setups[s].acceptCircleAsSet = true;
+            orientAndRadiate(engine, s);
+            finish(s);
+            continue;
+        }
+
+        // 3. Nothing more can be done.
+        for (std::size_t s = 0; s < count; ++s) {
+            if (!done[s] && tried[s]) {
+                done[s] = true;
+                --remaining;
+                warnUnoriented(s);
+            }
+        }
+        for (std::size_t s = 0; s < count; ++s) {
+            if (!done[s]) {
+                done[s] = true;
+                --remaining;
+                engine.warn("Setup " + stations[s].setup.id + " stands on " +
+                                stations[s].setup.pointId +
+                                ", which has no position: nothing was computed from it.",
+                            stations[s].source);
+            }
+        }
+    }
 }
 
 // ---- Outputs -----------------------------------------------------------------------------
@@ -1526,116 +1814,23 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
     {
         std::vector<std::size_t> looseRows;
         looseRows.reserve(raw.observations.size());
-        for (const Observation& observation : raw.observations) {
-            recordLoose(engine, observation, static_cast<std::size_t>(-1), {});
+        engine.globalPositions.resize(raw.observations.size());
+        GnssSeedNotices notices;
+        for (std::size_t i = 0; i < raw.observations.size(); ++i) {
+            recordLoose(engine, raw.observations[i], static_cast<std::size_t>(-1), {});
             looseRows.push_back(engine.report.observations.size() - 1);
-            seedGnss(engine, observation, looseRows.back());
+            seedGnss(engine, i, looseRows.back(), notices);
+        }
+        if (notices.toReferencePoint > 0) {
+            engine.warn(std::to_string(notices.toReferencePoint) +
+                        " GNSS position(s) have antenna heights to the antenna's reference "
+                        "point: the offset from there to the phase centre, a few centimetres "
+                        "and not in the file, remains in their heights.");
         }
         convertGnssVectors(engine, looseRows);
     }
 
-    // Phase B: setups in file order as their stations become known, and GNSS
-    // vectors as their bases do (a setup may stand on an RTK point, a vector
-    // may start at a point a setup radiated); a setup whose point nothing
-    // positions falls back to the file's own coordinates for that point, and
-    // the report says so.
-    //
-    // A setup whose backsight has no position yet is tried again whenever
-    // more points have been placed since its last try: a setup on control
-    // that backsights a traverse point is oriented once a later setup has
-    // radiated that point. Only when nothing more can be placed is it given
-    // up on, and then the report says why.
-    std::vector<bool> done(raw.stations.size(), false);
-    constexpr std::size_t kNeverTried = static_cast<std::size_t>(-1);
-    std::vector<std::size_t> positionsAtTry(raw.stations.size(), kNeverTried);
-    std::size_t remaining = raw.stations.size();
-    radiateGnssVectors(engine);
-    const auto warnUnoriented = [&](const SurveyStation& station) {
-        const std::string& backsight = station.backsightPointId;
-        engine.warn("Setup " + station.setup.id +
-                        (backsight.empty()
-                             ? std::string(" has no backsight")
-                             : " cannot be oriented: its backsight " + backsight +
-                                   " has no position and no circle setting was recorded") +
-                        ", so its directions are not oriented and its targets are not radiated.",
-                    station.source);
-    };
-    const auto giveUpUnoriented = [&] {
-        for (std::size_t s = 0; s < raw.stations.size(); ++s) {
-            if (done[s] || positionsAtTry[s] == kNeverTried) {
-                continue;
-            }
-            done[s] = true;
-            --remaining;
-            warnUnoriented(raw.stations[s]);
-        }
-    };
-    while (remaining > 0) {
-        bool progress = radiateGnssVectors(engine);
-        for (std::size_t s = 0; s < raw.stations.size(); ++s) {
-            if (done[s] || !engine.find(raw.stations[s].setup.pointId) ||
-                positionsAtTry[s] == engine.positionOrder.size()) {
-                continue;
-            }
-            positionsAtTry[s] = engine.positionOrder.size();
-            orientAndRadiate(engine, s);
-            if (!engine.setups[s].orientation) {
-                if (!raw.stations[s].backsightPointId.empty()) {
-                    continue; // try again when more is known
-                }
-                warnUnoriented(raw.stations[s]); // nothing later can orient it
-            }
-            done[s] = true;
-            --remaining;
-            progress = true;
-        }
-        // A try that placed nothing is no progress; one that placed a point
-        // lets the unoriented setups try again.
-        for (std::size_t s = 0; s < raw.stations.size() && !progress; ++s) {
-            progress = !done[s] && positionsAtTry[s] != kNeverTried &&
-                       positionsAtTry[s] != engine.positionOrder.size();
-        }
-        if (progress) {
-            continue;
-        }
-        bool fellBack = false;
-        for (std::size_t s = 0; s < raw.stations.size() && !fellBack; ++s) {
-            // A setup already standing on a position (waiting for its
-            // backsight) keeps it: the file's coordinates are the last resort.
-            if (done[s] || engine.find(raw.stations[s].setup.pointId)) {
-                continue;
-            }
-            const std::string& pointId = raw.stations[s].setup.pointId;
-            const auto it = engine.filePoints.find(pointId);
-            if (it == engine.filePoints.end()) {
-                continue;
-            }
-            Position position;
-            position.northing = it->second->northing;
-            position.easting = it->second->easting;
-            position.height = it->second->elevation;
-            position.origin = PositionOrigin::FileOnly;
-            engine.place(it->second->id, position);
-            engine.warn("Setup " + raw.stations[s].setup.id + " stands on " + pointId +
-                            ", which is not control and was not computed; the file's own "
-                            "coordinates for it were used.",
-                        raw.stations[s].source);
-            fellBack = true;
-        }
-        if (!fellBack) {
-            giveUpUnoriented();
-            for (std::size_t s = 0; s < raw.stations.size(); ++s) {
-                if (!done[s]) {
-                    engine.warn("Setup " + raw.stations[s].setup.id + " stands on " +
-                                    raw.stations[s].setup.pointId +
-                                    ", which has no position: nothing was computed from it.",
-                                raw.stations[s].source);
-                }
-            }
-            break;
-        }
-    }
-    giveUpUnoriented();
+    placeSetups(engine);
     radiateGnssVectors(engine);
 
     engine.flushSetupNotices();

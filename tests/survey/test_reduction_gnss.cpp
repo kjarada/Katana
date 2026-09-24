@@ -147,9 +147,217 @@ TEST(ReductionGnss, AVectorWhoseBaseHasNoGlobalPositionIsRejectedWithTheReasonNo
     const ReportObservation* row = findRow(outcome->report, "GNSS geocentric baseline", "R");
     ASSERT_NE(row, nullptr);
     EXPECT_TRUE(row->rejected);
-    EXPECT_NE(row->rejectionReason.find("no global position"), std::string::npos);
-    EXPECT_TRUE(warned(outcome->report, "base B3 no global"));
+    EXPECT_NE(row->rejectionReason.find("no global position given as an observation"),
+              std::string::npos);
+    // What is missing is an observation of it: a file may well key the base's
+    // latitude and longitude in somewhere the reduction does not read.
+    EXPECT_TRUE(warned(outcome->report, "its base B3 has no global position (latitude, longitude "
+                                        "or X, Y, Z) among the observations read"));
+    EXPECT_FALSE(warned(outcome->report, "the file gives its base"));
     EXPECT_EQ(findPoint(*outcome, "R"), nullptr);
+}
+
+TEST(ReductionGnss, VectorsConvertThroughTheGeodeticConversionWhenTheDrawingGivesOnlyThat)
+{
+    // A drawing that converts latitude and longitude only. The base is at
+    // latitude 0, longitude 0, height 0: on GRS80, X = a, Y = Z = 0. The
+    // drawing here takes a geodetic point back to X, Y, Z by the textbook
+    // formula and maps it as N = Z, E = Y, h = X - a, so the vector B1 -> R,
+    // dX 0, dY 30, dZ 40, must come out as dN 40, dE 30: R = N 40, E 30,
+    // whatever route the conversion takes, to the GRS80 inverse's precision.
+    constexpr double a = 6378137.0;
+    constexpr double f = 1.0 / 298.257222101;
+    SurveyProject project;
+    project.unpositionedPoints.push_back(unpositioned("B1"));
+    project.unpositionedPoints.push_back(unpositioned("R"));
+    GnssGlobalPositionObservation base;
+    base.point = "B1";
+    base.geodetic = GeodeticCoordinate{0.0, 0.0, 0.0};
+    base.source = SourceRecord{"Test", "synthetic", "1", "rtk.job", 1};
+    project.observations.push_back(base);
+    project.observations.push_back(vectorOf("B1", "R", 0.0, 30.0, 40.0));
+    ReductionContext context;
+    context.geodeticToGrid = [](const GeodeticCoordinate& g) -> std::optional<GridPosition> {
+        const double e2 = f * (2.0 - f);
+        const double n = a / std::sqrt(1.0 - e2 * std::sin(g.latitude) * std::sin(g.latitude));
+        const double x = (n + g.ellipsoidalHeight) * std::cos(g.latitude) * std::cos(g.longitude);
+        const double y = (n + g.ellipsoidalHeight) * std::cos(g.latitude) * std::sin(g.longitude);
+        const double z = (n * (1.0 - e2) + g.ellipsoidalHeight) * std::sin(g.latitude);
+        return GridPosition{z, y, x - a};
+    };
+    const auto outcome = reduceAndAdjust(project, bareSettings(), context);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ReportObservation* row = findRow(outcome->report, "GNSS geocentric baseline", "R");
+    ASSERT_NE(row, nullptr);
+    EXPECT_FALSE(row->rejected) << row->rejectionReason;
+    const ComputedPoint* r = findPoint(*outcome, "R");
+    ASSERT_NE(r, nullptr);
+    EXPECT_NEAR(r->northing, 40.0, 1e-6);
+    EXPECT_NEAR(r->easting, 30.0, 1e-6);
+    EXPECT_FALSE(warned(outcome->report, "no coordinate system"));
+}
+
+TEST(ReductionGnss, AGlobalPositionIsTakenDownToTheMarkByItsAntennaHeight)
+{
+    // G200's position is where its antenna was: the linear grid puts
+    // X0, Y0, Z0 - 50 at N 5000, E 3000, h 100 - 50 = 50.000 (no geoid, so
+    // ellipsoidal). The antenna is 2.000 m vertical to its reference point,
+    // so the mark is at 50.000 - 2.000 = 48.000.
+    // A vector G200 -> R, dX 30, dY 40, dZ 1, with 2.000 m vertical antennas
+    // at both ends: dH mark to mark = 1.000 + 2.000 - 2.000 = 1.000, so
+    // R = N 5040, E 3030, H 48.000 + 1.000 = 49.000 - on the same vertical
+    // reference as G200, not 2 m above it.
+    SurveyProject project;
+    project.unpositionedPoints.push_back(unpositioned("G200"));
+    project.unpositionedPoints.push_back(unpositioned("R"));
+    GnssGlobalPositionObservation position = globalAt("G200", kX0, kY0, kZ0 - 50.0);
+    position.antenna = antenna(2.0, AntennaHeightMethod::Vertical);
+    position.antenna.measuredTo = "BottomOfAntennaMount";
+    project.observations.push_back(position);
+    GnssGeocentricBaselineObservation vector = vectorOf("G200", "R", 30.0, 40.0, 1.0);
+    vector.fromAntenna = antenna(2.0, AntennaHeightMethod::Vertical);
+    vector.toAntenna = antenna(2.0, AntennaHeightMethod::Vertical);
+    project.observations.push_back(vector);
+
+    const auto outcome = reduceAndAdjust(project, bareSettings(), linearContext());
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* g200 = findPoint(*outcome, "G200");
+    ASSERT_NE(g200, nullptr);
+    ASSERT_TRUE(g200->elevation.has_value());
+    EXPECT_NEAR(*g200->elevation, 48.0, 1e-9);
+    const ComputedPoint* r = findPoint(*outcome, "R");
+    ASSERT_NE(r, nullptr);
+    ASSERT_TRUE(r->elevation.has_value());
+    EXPECT_NEAR(*r->elevation, 49.0, 1e-9);
+
+    // The position's row: 50.000 at the antenna, -2.000 for the antenna,
+    // 48.000 at the mark.
+    const ReportObservation* row = findRow(outcome->report, "GNSS geocentric position", "G200");
+    ASSERT_NE(row, nullptr);
+    EXPECT_NEAR(row->raw, 50.0, 1e-9);
+    const AppliedCorrection* taken = findCorrection(*row, CorrectionKind::InstrumentAndTargetHeight);
+    ASSERT_NE(taken, nullptr);
+    EXPECT_NEAR(taken->amount, -2.0, 1e-12);
+    EXPECT_NE(taken->note.find("BottomOfAntennaMount"), std::string::npos);
+    ASSERT_TRUE(row->reduced.has_value());
+    EXPECT_NEAR(*row->reduced, 48.0, 1e-9);
+    // A height to the antenna's reference point leaves its phase-centre
+    // offset in, and the report says so.
+    EXPECT_TRUE(warned(outcome->report, "1 GNSS position(s) have antenna heights to the antenna's "
+                                        "reference point"));
+}
+
+TEST(ReductionGnss, AGlobalPositionWithASlantAntennaHeightKeepsItsPlaceAndLeavesItsHeightOut)
+{
+    SurveyProject project;
+    project.unpositionedPoints.push_back(unpositioned("G300"));
+    GnssGlobalPositionObservation position = globalAt("G300", kX0, kY0, kZ0 - 50.0);
+    position.antenna = antenna(1.62, AntennaHeightMethod::Slant);
+    project.observations.push_back(position);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), linearContext());
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* g300 = findPoint(*outcome, "G300");
+    ASSERT_NE(g300, nullptr);
+    EXPECT_NEAR(g300->northing, 5000.0, 1e-9);
+    EXPECT_FALSE(g300->elevation.has_value());
+    EXPECT_TRUE(warned(outcome->report, "GNSS position of G300: its antenna height (1.620 m"));
+}
+
+TEST(ReductionGnss, ASecondGnssPositionOfAPointIsACheckOnTheFirstNotSilentlyUnused)
+{
+    // G1 occupied twice: N 5000.000 (record 1), then 40 mm further north
+    // (record 3). The first places it; the second is a check: +0.040 N,
+    // 0 E, 0.040 linear.
+    SurveyProject project;
+    project.unpositionedPoints.push_back(unpositioned("G1"));
+    project.observations.push_back(globalAt("G1", kX0, kY0, kZ0));
+    GnssGlobalPositionObservation again = globalAt("G1", kX0, kY0 + 0.040, kZ0);
+    again.source.recordNumber = 3;
+    project.observations.push_back(again);
+    const auto outcome = reduceAndAdjust(project, bareSettings(), linearContext());
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* g1 = findPoint(*outcome, "G1");
+    ASSERT_NE(g1, nullptr);
+    EXPECT_NEAR(g1->northing, 5000.0, 1e-9);
+    ASSERT_EQ(outcome->report.misclosures.size(), 1U);
+    const MisclosureReport& check = outcome->report.misclosures[0];
+    EXPECT_EQ(check.name, "G1 by a second GNSS position (record 3)");
+    EXPECT_NEAR(*check.northing, 0.040, 1e-9);
+    EXPECT_NEAR(*check.easting, 0.0, 1e-9);
+    EXPECT_NEAR(*check.linear, 0.040, 1e-9);
+}
+
+TEST(ReductionGnss, TwoGnssPositionsOfOnePointEnterTheNetworkEachWithItsOwnValue)
+{
+    // The same two occupations adjusted: two observations of G1's northing,
+    // 5000.000 and 5000.040, and two of its easting, both 3000.000, each at
+    // the a-priori 10 mm; unknowns G1's N and E (the positions are the datum).
+    //   N = mean = 5000.020; v = +0.020, -0.020 (adjusted - observed);
+    //   E = 3000.000; v = 0, 0.
+    //   v'Pv = 2 (0.020 / 0.010)^2 = 8; redundancy 4 - 2 = 2;
+    //   variance factor 8 / 2 = 4.
+    // Built from one seeded value twice, it would be N 5000.000 with
+    // variance factor 0.
+    SurveyProject project;
+    project.unpositionedPoints.push_back(unpositioned("G1"));
+    project.observations.push_back(globalAt("G1", kX0, kY0, kZ0));
+    GnssGlobalPositionObservation again = globalAt("G1", kX0, kY0 + 0.040, kZ0);
+    again.source.recordNumber = 3;
+    project.observations.push_back(again);
+    ReductionSettings settings = bareSettings();
+    settings.method = AdjustmentMethod::Network;
+    const auto outcome = reduceAndAdjust(project, settings, linearContext());
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* g1 = findPoint(*outcome, "G1");
+    ASSERT_NE(g1, nullptr);
+    EXPECT_NEAR(g1->northing, 5000.020, 1e-7);
+    EXPECT_NEAR(g1->easting, 3000.0, 1e-7);
+    ASSERT_EQ(outcome->report.adjustments.size(), 1U);
+    const AdjustmentReport& network = outcome->report.adjustments[0];
+    EXPECT_EQ(network.observations, 4U);
+    EXPECT_EQ(network.redundancy, 2U);
+    ASSERT_TRUE(network.varianceFactor.has_value());
+    EXPECT_NEAR(*network.varianceFactor, 4.0, 1e-5);
+    std::optional<double> first;
+    std::optional<double> second;
+    for (const ReportResidual& residual : network.residuals) {
+        if (residual.observation == "GNSS position G1 (record 1) (north)") {
+            first = residual.residual;
+        } else if (residual.observation == "GNSS position G1 (record 3) (north)") {
+            second = residual.residual;
+        }
+    }
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    EXPECT_NEAR(*first, 0.020, 1e-7);
+    EXPECT_NEAR(*second, -0.020, 1e-7);
+}
+
+TEST(ReductionGnss, AGeocentricPositionKeepsTheCovarianceItsFileStatesTurnedToNorthEastAndUp)
+{
+    // On the equator at the prime meridian, X = a: north is +Z, east is +Y,
+    // up is +X. A covariance of XX 2.5e-5, YY 6.4e-5, ZZ 3.6e-5 is sigma
+    // north sqrt(ZZ) = 0.006, east sqrt(YY) = 0.008, up sqrt(XX) = 0.005;
+    // the horizontal sigma is the larger, 0.008. Not the a-priori 10 / 20 mm.
+    constexpr double a = 6378137.0;
+    SurveyProject project;
+    project.unpositionedPoints.push_back(unpositioned("G1"));
+    GnssGlobalPositionObservation position = globalAt("G1", a, 0.0, 0.0);
+    position.covariance = GnssCovariance3{2.5e-5, 6.4e-5, 3.6e-5, 0.0, 0.0, 0.0};
+    project.observations.push_back(position);
+    ReductionContext context;
+    context.geocentricToGrid = [](const GeocentricCoordinate& c) -> std::optional<GridPosition> {
+        return GridPosition{c.z, c.y, c.x - 6378137.0 + 10.0};
+    };
+    const auto outcome = reduceAndAdjust(project, bareSettings(), context);
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ComputedPoint* g1 = findPoint(*outcome, "G1");
+    ASSERT_NE(g1, nullptr);
+    ASSERT_TRUE(g1->sigmaNorthing.has_value());
+    ASSERT_TRUE(g1->sigmaElevation.has_value());
+    EXPECT_NEAR(*g1->sigmaNorthing, 0.008, 1e-12);
+    EXPECT_NEAR(*g1->sigmaEasting, 0.008, 1e-12);
+    EXPECT_NEAR(*g1->sigmaElevation, 0.005, 1e-12);
 }
 
 TEST(ReductionGnss, WithoutACoordinateSystemEveryVectorIsRejectedAndTheReportSaysWhy)
