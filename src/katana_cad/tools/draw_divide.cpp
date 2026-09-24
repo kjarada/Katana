@@ -102,17 +102,21 @@ class AlongTool final : public InteractiveTool {
             return ToolStep::rejected(withArticle(kindName(entity->geometry)) +
                                       " has no length to place points along");
         }
-        if (path->length() <= tolerance::kGeometric) {
+        // Read once, from the local: GCC's -O3 maybe-uninitialized analysis
+        // loses track of a Path read back through path_ after the optional's
+        // move-assignment below (a false positive that -Werror makes fatal).
+        const double length = path->length();
+        if (length <= tolerance::kGeometric) {
             return ToolStep::rejected("that " + kindName(entity->geometry) + " has no length");
         }
         // From the nearer end, for an open object only: a closed one has no
         // end, and is measured from its start.
         fromEnd_ = !path->closed() &&
-                   at.distanceTo(path->pointAt(path->length())) < at.distanceTo(path->pointAt(0.0));
+                   at.distanceTo(path->pointAt(length)) < at.distanceTo(path->pointAt(0.0));
         source_ = *entity;
         path_ = std::move(path);
         step_ = Step::Amount;
-        return ToolStep::next("Length " + fixed(path_->length()));
+        return ToolStep::next("Length " + fixed(length));
     }
 
     ToolStep value(std::string_view text) override
