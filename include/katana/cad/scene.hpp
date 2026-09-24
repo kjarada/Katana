@@ -17,6 +17,7 @@
 // the 229k-triangle surface under it. build() still makes the whole scene as
 // one list for a caller that wants that.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -220,6 +221,10 @@ struct SceneLayers {
     // frames and fits its depth range to. The grid is left out on purpose -
     // it is sized from this.
     katana::math::AABB bounds;
+    // The part of `bounds` buildTerrain found (terrain and edges), kept so a
+    // rebuild of the drawing alone need not walk the terrain again: on a
+    // 229k-triangle TIN that walk was an eighth of the build.
+    katana::math::AABB terrainBounds;
 
     [[nodiscard]] bool hasRamp() const { return rampLow <= rampHigh; }
 };
@@ -280,6 +285,11 @@ class SceneBuilder {
 
     std::vector<Point2> chord_; // tessellation scratch, reused
     std::vector<katana::render::Vec3> normals_; // per-vertex normal scratch, reused
+    // The AVX2 kernels' scratch (src/katana_cad/simd/scene_kernels.hpp): four
+    // doubles a vertex of lifted positions and of summed normals.
+    std::vector<double> lifted_;
+    std::vector<double> summed_;
+    std::vector<std::uint8_t> used_; // bounds scratch: which vertices a primitive uses
 };
 
 // One frame of `layers` as the 3D view draws it: the depth range fitted to
