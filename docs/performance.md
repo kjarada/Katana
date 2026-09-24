@@ -338,11 +338,23 @@ what was measured.
   are bit-identical.
 
 Each caller dispatches in a baseline file with
-`if (activeSimdLevel() == SimdLevel::Avx2)`. Short inputs skip the dispatch.
-`transformPoints` and `boundsOf` take the kernel only from 8 points up, which
-leaves out most of a drawing's strings (about six vertices each).
-`isValidUtf8` takes it only for a remainder of 32 bytes or more, which leaves
-out every name and label.
+`if (activeSimdLevel() == SimdLevel::Avx2)`. Short inputs skip the dispatch,
+and the thresholds are measured, not guessed (see "Measured" below; the first
+guesses were wrong in both places):
+
+- `boundsOf` below `kBoundsBatchMinimum` (16 points) is the `expand()` loop,
+  inline in `point_batch.hpp`, so a drawing's strings (about six vertices
+  each) cost no call at all. From 16 points it calls the batch code, which
+  takes the kernel. The kernel with its call and its zero-sign fix-up breaks
+  even with the loop at about 12-16 points.
+- `isValidUtf8` takes the kernel from 64 bytes (`kValidateMinimum` in
+  `text_encoding.cpp`). The kernel ends on a whole 32-byte block that begins
+  inside the text, so it needs 64. A padded copy for shorter texts was
+  measured and does not pay: slower than the byte loop up to about 24
+  bytes, and at most 15 ns faster up to 63. So names and labels take main's
+  byte loop at every level, with no extra call.
+- `transformPoints` takes the kernel from 8 points (two kernel steps). It has
+  no caller in the program yet, so its break-even has not been measured.
 
 Not used, and why:
 
@@ -350,10 +362,10 @@ Not used, and why:
   compile.
 - **Highway 1.4** is installed, builds with GCC 16, links statically and
   dispatched to AVX2 in a probe. It has not been adopted yet. It would be a
-  new third-party dependency to vet, and four kernels of 20-60 lines do not
-  need it. It is worth revisiting if the kernels multiply or a second
-  architecture matters. Its per-target namespaces are its own answer to the
-  hazard below.
+  new third-party dependency to vet, and six kernel entries, the largest
+  about 150 lines, do not need it. It is worth revisiting if the kernels
+  multiply or a second architecture matters. Its per-target namespaces are
+  its own answer to the hazard below.
 
 ### The inline-copy hazard
 
@@ -400,7 +412,7 @@ So a kernel file follows these rules:
 
 ### The guard
 
-Every `ctest` run includes two checks, both in `tools/check_simd_kernels.cmake`:
+Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`:
 
 - **`simd_kernel_sources`** reads source files, like `layering` does. It
   checks rule 2 for each `src/**/*_avx2.cpp` and for its declarations header,
@@ -411,6 +423,21 @@ Every `ctest` run includes two checks, both in `tools/check_simd_kernels.cmake`:
   visible code symbol other than `katana_avx2_*`, and at least one entry per
   object. `objdump -h` must find no `.ctors` or `.init_array` section.
   `objdump -d` must find no `vfmadd`, `vfmsub`, `vfnmadd` or `vfnmsub`.
+- **`simd_kernel_objects_under_asan`** runs the same object check on the
+  kernels compiled a second time with `-fsanitize=address`, as the
+  `linux-sanitize` preset compiles them. They are only compiled, never
+  linked, so it runs on MinGW too, which has no ASan runtime. It exists
+  because that preset cannot be run on the owner's machine, and it was
+  broken: ASan puts a module constructor into every object (`.ctors.65436`
+  on MinGW, `.init_array.00099` on Linux), and `simd_kernel_objects` failed
+  on it every time. `katana_simd_kernel_options` now compiles kernel objects
+  with `-fno-sanitize=address`. UBSan adds no constructor and stays. The
+  price is that ASan would not report a kernel reading past the end of its
+  input. The kernels guard against that by their structure (whole blocks
+  only while a whole block remains, then a scalar tail, or in the UTF-8
+  validator a last block that ends exactly at the text's end), and the tests
+  run lengths across every block edge. Without the flag this check fails on
+  both kernel objects with "has a static initialiser (.ctors)".
 
 The object check is the one that matters, because it checks what the compiler
 did rather than what the source intended. It was run on four deliberately bad
@@ -466,13 +493,33 @@ any `#pragma omp` other than `omp simd`.
 | kernel | called from | one AVX2 step | scalar reference |
 |---|---|---|---|
 | UTF-16 to UTF-8, ASCII runs | `decodeText`, both byte orders | 32 units: two loads, one test, pack, permute, one store | the unit loop, which takes over at the first non-ASCII unit and reports errors at the same byte as before |
-| ASCII prefix | `isValidUtf8`, for remainders of 32 bytes or more | 64 bytes: two loads, OR, movemask | the byte loop |
+| UTF-8 validation | `isValidUtf8`, for texts of 64 bytes or more | 32 bytes: three nibble-table lookups (VPSHUFB) on each byte and the one before it, two saturating subtractions for leads two and three back, one XOR; a 64-byte step of pure ASCII is one OR and one movemask | main's byte loop, unchanged |
 | `geometry::transformPoints` (Mat4 with Vec3, Mat3 with Point2, in place) | the batch API | 4 points: 3 loads, 6 permutes or blends, 9 multiplies and 9 adds, 6 permutes back (2D: no transpose) | `math::transformPoint` on each point |
-| `geometry::boundsOf` (Point2, Vec3) | `Polyline2::boundingBox`, `TriangleMesh::bounds` | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
+| `geometry::boundsOf` (Point2, Vec3) | `Polyline2::boundingBox`, `TriangleMesh::bounds`, for 16 points or more | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
 
 Both text kernels are on the real import path. The interop archive import
 decodes the file and then calls `readArchive`, which validates the whole
-decoded text again.
+decoded text again. `decodeText` also validates the whole of a file that has
+no byte order mark, to tell UTF-8 from Windows-1252.
+
+**Why validation is a whole validator, not an ASCII fast path.** The first
+version looked for runs of ASCII and handed them to a kernel. That made text
+dense with accented, Cyrillic or CJK characters 2-4.5x slower than main,
+because it paid a call for every short run between two characters. A 16-byte
+byte-by-byte probe before the call only narrowed that: in one binary against
+main's own loop (21 alternating rounds, minimum ms) it was still 1.44x main
+on accented text, 1.15x on Cyrillic and 1.25x on CJK. Every other placement
+of an ASCII check tried there (a run counter, an 8-byte SWAR skip, a check at
+the start of each run, a check at aligned positions) cost 10-40% on one of
+those shapes, because main's loop is already about one cycle a byte and any
+work per run or per character is a large share of that. The validator judges
+every byte against the three before it, whatever the language, using the
+lookup algorithm of J. Keiser and D. Lemire ("Validating UTF-8 in less than
+one instruction per byte", Software: Practice and Experience, 2021). It never
+branches on where one character ends. The last 32 bytes of a text are judged
+again with the 32 before them, so there is no padded partial block. Judging a
+byte twice gives the same answer. The result is a yes or a no, and it is the
+same yes or no as the byte loop's.
 
 Keeping the results bit-identical required three details:
 
@@ -495,12 +542,29 @@ The tests hold every kernel to its reference through the public function,
 running at each level in one process (`tests/core/test_simd_text.cpp`,
 `tests/geometry/test_point_batch.cpp`). This covers 3000 generated UTF-16
 inputs, every position of a bad byte across the first three 64-byte steps,
-and 300 transforms and 600 bounds over arrays of every length up to 70 with
-zeros, NaN and infinities. ctest also runs the whole core and geometry suites
+text dense with accented letters at every ASCII run length from 0 to 40 and
+every cut near its end, and for the validator: sixteen kinds of error worked
+by hand at block edges, all 65,536 byte pairs at six places (18,304 valid at
+each, counted by hand), every lead C0-FF with sixteen kinds of follower, and
+6000 generated texts with damage. A scratch run, not committed, compared the
+validator with main's loop on 225 million texts at `-O3` and `-O0`, with no
+difference. There are also 300 transforms and 600 bounds over arrays of
+every length up to 70 with zeros, NaN and infinities. The hand-worked bounds
+cases are 17-20 points long and assert that they reach `kBoundsBatchMinimum`,
+so that at the AVX2 level they test the kernel and not the inline loop; with
+the minimum set to 24 they fail on that assertion.
+`PointBatch.AnArrayShorterThanTheBatchMinimumIsBoundedInlineWithoutACall`
+bounds three points in `static_assert`s, which compile only while the short
+path is inline. ctest also runs the whole core and geometry suites
 a second time under `KATANA_SIMD=scalar` and under `KATANA_SIMD=avx2`
-(`simd_scalar.*`, `simd_avx2.*`). Two mutations were tried to confirm that
-the tests have teeth: disabling the zero fix-up, and changing the text
-kernel's lane permute from `0xD8` to `0x00`. Each one failed the tests.
+(`simd_scalar.*`, `simd_avx2.*`). Mutations were tried to confirm that the
+tests have teeth: disabling the zero fix-up; changing the text kernel's lane
+permute from `0xD8` to `0x00`; and five in the validator (the surrogate bit
+dropped from a table, a character left open before a step of ASCII not
+counted, the last block judged without the 32 bytes before it, a character
+open at the text's end not counted, and the rule for a four-byte lead's
+continuations dropped). Each one failed the tests; the validator's each
+failed three to five of them.
 
 ### Measured
 
