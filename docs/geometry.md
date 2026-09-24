@@ -160,14 +160,15 @@ Two numbers set expectations for later phases. `triangulate` grows quadratically
 constrained Delaunay rather than this routine, which exists for drafting-scale
 polygons. And point-in-polygon is O(n) twice over (a boundary-distance pass and
 a crossing-number pass); at 11.6 µs against a 1024-vertex ring it is comfortably
-inside PLAN.MD §32's 16 ms selection budget for interactive use. (This said it
-was the call a spatial index should accelerate first; the index of Phase 18 is a
+inside the 16 ms selection target (`docs/architecture.md`, "Performance
+targets") for interactive use. (This said it
+was the call a spatial index should accelerate first; the spatial index is a
 broad phase for picking, snapping, box selection and repaint and does not touch
 `Polyline2::classify`, which is still the O(n) pair.)
 
 `isSimple`, `clipPolygon` and `Rectangle2::closestPoint` were optimised on
-2026-09-23, measured, below; nothing else here has been, per PLAN.MD Rules 5
-and 6 — tests first, profile before optimising.
+2026-09-23, measured, below; nothing else here has been, per Rules 5
+and 6 (`docs/architecture.md`) — tests first, profile before optimising.
 
 ## Failure modes
 
@@ -188,7 +189,8 @@ and 6 — tests first, profile before optimising.
 `include/katana/geometry/spiral2.hpp` is the transition curve every road and
 railway standard uses: curvature changes linearly with distance, which is the
 path a vehicle follows when the wheel is turned at a steady rate. It is the
-first slice of Phase 21, and the only primitive that phase needs which did not
+first slice of the civil work (alignments, profiles, corridors), and the only
+primitive that work needs which did not
 already exist.
 
 ### Decisions
@@ -263,22 +265,23 @@ a 1 mm tolerance on the 300 m spiral was written as 38 from a slip in the
 sagitta arithmetic. The code gave 60. Before the test was re-run the number
 was re-derived two ways - directly, and by the small-angle identity
 `acos(1 - e) ~ sqrt(2e)` - and both gave 60. The test now says 60 because of
-those derivations, not because the program did (CLAUDE.md section 3).
+those derivations, not because the program did (`docs/architecture.md`,
+"Derived expectations").
 
 ### Where it is used
 
 `SolvedAlignment` stations along spirals and chords them, the viewport draws
 alignments that contain them, and `ALIGN` prints setting-out tables through
 them. (This section said nothing drew or stationed along a spiral, from before
-the alignment slice of Phase 21.)
+the alignment slice of the civil work.)
 
 ## Chording curves (`chording.hpp`)
 
 The sagitta rule - chords sized so none departs from the curve by more than a
 stated tolerance - lived in `cad::scene` as `chordArc` and `chordCircle`.
 When `Spiral2::chordCountFor` was written it grew its own copy of the same
-arithmetic, which is the second way of doing something that CLAUDE.md section
-1 calls a defect. The rule now lives in `geometry::chording`, the lowest layer
+arithmetic, which is the second way of doing something that the working rules
+call a defect (`docs/architecture.md`, "One way of doing a thing"). The rule now lives in `geometry::chording`, the lowest layer
 that can see `Arc2`, and the scene builder, the spiral and the horizontal
 alignment all call it.
 
@@ -303,7 +306,7 @@ on the same radius, because 90 m on r = 300 *is* a 0.3 rad sweep.
 ## The horizontal alignment (`alignment.hpp`)
 
 The plan centreline of a road, railway, pipe or channel: the second slice of
-Phase 21, built on the clothoid and the shared chording rule.
+the civil work, built on the clothoid and the shared chording rule.
 
 ### Decisions
 
@@ -380,13 +383,14 @@ rather than duplicating it. Details in `docs/cad.md`.
 
 ### Built on it since
 
-Profiles, corridor quantities and the corridor surface, and parcels are built
-(PLAN.MD section 26); grading has an engine without a GUI route. Nothing
-references an alignment BY NAME in the model, so `deleteAlignment` still has no
-in-use guard - but `ViewportCell::sectionAlignment` is declared as such a
-reference and is dead, which is either to be removed or to become the first
-thing the guard protects. (This section listed profiles, corridors and parcels
-as not done.)
+Profiles, corridor quantities and the corridor surface, and parcels are built;
+grading has an engine (`cad::gradeToSurface`) without a GUI route or a verb.
+Nothing references an alignment BY NAME in the model, so `deleteAlignment`
+still has no in-use guard. A section view keeps the polyline it was cut along
+(`cad::Section::alignment`, held in `ViewState::section`), not the name of an
+alignment, so deleting the alignment leaves the section as it was cut. (This
+section listed profiles, corridors and parcels as not done, and then cited a
+dead name reference in the retired tiled viewport.)
 
 ## The vertical alignment (`profile.hpp`)
 
@@ -462,7 +466,7 @@ where the water will. Details in `docs/cad.md`.
 ### Built on it since
 
 Corridor cut and fill quantities between design and ground are integrated along
-the alignment (PLAN.MD section 26), which is what this section said was
+the alignment (`cad::corridorQuantities`), which is what this section said was
 missing.
 
 ## Rejecting early without changing the answer (`polygon.hpp`, `primitives2d.hpp`)
