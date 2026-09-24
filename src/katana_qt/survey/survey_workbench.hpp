@@ -12,20 +12,23 @@
 // other work is changing that file.
 //
 // The menu, in sections:
-//   Survey Points           Import Survey Points..., Export Survey Points...,
-//                           Point Manager (a dock), Point Report...
+//   Survey Points           Import Survey Points..., Survey Jobs...,
+//                           Export Survey Points..., Point Manager (a dock),
+//                           Point Report...
 //   Coordinate Geometry     Inverse..., Forward Point..., Area of Selection,
 //                           Angle and Bearing Calculator...
 //   Traverse and Levelling  Traverse..., Level Book...
 //   Coordinates             Coordinate Converter...
 //   Survey Coding           the window's customisation actions and the
 //                           Format menu's Survey Code Manager
-// Each action's object name (surveyImport, surveyExport, surveyPointManager,
+// Each action's object name (surveyImport, surveyJobs, surveyExport,
+// surveyPointManager,
 // surveyPointReport, surveyInverse, surveyForward, surveyArea,
 // surveyAngleCalculator, surveyTraverse, surveyLevelBook,
 // surveyCoordinateConverter) is what --action and --survey-dialog know it by.
 // A dialog's object name is its action's plus "Dialog" (survey_dialogs.hpp,
-// survey_import_wizard.hpp, survey_points_ui.hpp); the Point Manager is the
+// survey_import_wizard.hpp, survey_jobs_dialog.hpp, survey_points_ui.hpp); the
+// Point Manager is the
 // dock SurveyPointsDock, which --survey-dock knows it by.
 //
 // The computing is katana::cad's (survey_tools.hpp); this class and its
@@ -115,6 +118,7 @@ class SurveyWorkbench {
     QPointer<QDialog> levelBook_;
     QPointer<QDialog> converter_;
     QPointer<QDialog> import_;
+    QPointer<QDialog> jobs_;
     QPointer<QDialog> export_;
     QPointer<QDialog> pointReport_;
     QPointer<SurveyPointsDock> pointManager_;

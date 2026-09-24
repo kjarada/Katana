@@ -73,7 +73,7 @@ QString screenStyleSheet()
 {
     const QColor background = theme::panel();
     return QString("body { color: %1; background-color: %2; }\n"
-                   "h1 { font-size: 14pt; color: %1; }\n"
+                   "h1 { font-size: 12pt; color: %1; }\n"
                    "h2 { font-size: 11pt; color: %3; margin-top: 14px; }\n"
                    "table { border-color: %4; }\n"
                    "th { background-color: %5; color: %1; font-weight: 600; }\n"
@@ -208,7 +208,8 @@ ReductionReportView::ReductionReportView(const QString& name, QWidget* parent) :
     splitter->addWidget(browser_);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({170, 600});
+    list_->setMinimumWidth(90);
+    splitter->setSizes({140, 600});
     layout->addWidget(splitter, 1);
     connect(list_, &QListWidget::currentRowChanged, this, [this](int row) { showSection(row); });
     showNote("No report yet.");

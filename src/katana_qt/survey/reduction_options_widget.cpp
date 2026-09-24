@@ -395,19 +395,24 @@ QWidget* ReductionOptionsWidget::buildControl()
     remove->setObjectName("removeControl");
     remove->setAutoDefault(false);
     remove->setToolTip("Stop holding the point chosen in the table");
-    row->addWidget(new QLabel("From", box));
+    // Two rows, so the options fit the narrow pane of Survey Jobs as well as
+    // the wizard's page: which point, then how it is held.
+    row->addWidget(new QLabel("Point from", box));
     row->addWidget(controlFrom_);
     row->addWidget(controlPick_, 1);
-    row->addWidget(new QLabel("N, E", box));
-    row->addWidget(controlHorizontal_);
-    row->addWidget(controlSigmaHorizontal_);
-    row->addWidget(new QLabel("mm  Elev.", box));
-    row->addWidget(controlVertical_);
-    row->addWidget(controlSigmaVertical_);
-    row->addWidget(new QLabel("mm", box));
     row->addWidget(add);
     row->addWidget(remove);
     layout->addLayout(row);
+    auto* how = new QHBoxLayout();
+    how->addWidget(new QLabel("Northing, easting", box));
+    how->addWidget(controlHorizontal_);
+    how->addWidget(controlSigmaHorizontal_);
+    how->addWidget(new QLabel("mm   Elevation", box));
+    how->addWidget(controlVertical_);
+    how->addWidget(controlSigmaVertical_);
+    how->addWidget(new QLabel("mm", box));
+    how->addStretch(1);
+    layout->addLayout(how);
 
     controlTable_ = new QTableWidget(0, 4, box);
     controlTable_->setObjectName("control");
