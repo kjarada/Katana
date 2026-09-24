@@ -19,16 +19,31 @@ bool isSpace(char c)
 
 // XML's name rules, restricted to what can be checked a byte at a time: any
 // byte of a multi-byte UTF-8 sequence is accepted, so a name in another script
-// is read, and every ASCII byte is checked against the rule exactly.
+// is read, and every ASCII byte is checked against the rule exactly. A table,
+// because every byte of every tag name passes through here: a large job has
+// tens of millions of them.
+enum : unsigned char { kNameStart = 1, kNameChar = 2 };
+
+constexpr std::array<unsigned char, 256> kNameClass = [] {
+    std::array<unsigned char, 256> table{};
+    for (int c = 0; c < 256; ++c) {
+        const bool start = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' ||
+                           c == ':' || c >= 0x80;
+        const bool inside = start || (c >= '0' && c <= '9') || c == '-' || c == '.';
+        table[static_cast<std::size_t>(c)] =
+            static_cast<unsigned char>((start ? kNameStart : 0) | (inside ? kNameChar : 0));
+    }
+    return table;
+}();
+
 bool isNameStart(char c)
 {
-    const auto u = static_cast<unsigned char>(c);
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == ':' || u >= 0x80;
+    return (kNameClass[static_cast<unsigned char>(c)] & kNameStart) != 0;
 }
 
 bool isNameChar(char c)
 {
-    return isNameStart(c) || (c >= '0' && c <= '9') || c == '-' || c == '.';
+    return (kNameClass[static_cast<unsigned char>(c)] & kNameChar) != 0;
 }
 
 bool allSpace(std::string_view text)
@@ -217,7 +232,7 @@ XmlPullReader::Event XmlPullReader::readEndTag(std::size_t tagStart)
     if (depth_ == 0) {
         return fail(tagStart, "the end tag </" + std::string(tagName) + "> closes nothing");
     }
-    if (open_[depth_ - 1] != tagName) {
+    if (!sameText(open_[depth_ - 1], tagName)) {
         return fail(tagStart, "</" + std::string(tagName) + "> where </" +
                                   std::string(open_[depth_ - 1]) + "> was expected");
     }
@@ -238,6 +253,18 @@ XmlPullReader::Event XmlPullReader::readMarkup()
     // tag's event for a tag, and EndOfDocument as "nothing to report, carry
     // on" for comments and processing instructions - next() loops on it.
     const std::size_t tagStart = pos_;
+    // Start and end tags are nearly every piece of markup in a large file,
+    // so they are recognised by their second byte before anything rarer is
+    // looked for.
+    if (pos_ + 1 < doc_.size()) {
+        const char second = doc_[pos_ + 1];
+        if (isNameStart(second)) {
+            return readStartTag(tagStart);
+        }
+        if (second == '/') {
+            return readEndTag(tagStart);
+        }
+    }
     const std::string_view rest = doc_.substr(pos_);
     if (rest.starts_with("<!--")) {
         const std::size_t close = doc_.find("-->", pos_ + 4);
@@ -257,6 +284,7 @@ XmlPullReader::Event XmlPullReader::readMarkup()
         }
         text_ = doc_.substr(pos_ + 9, close - pos_ - 9);
         cdata_ = true;
+        textHasReference_ = false;
         eventOffset_ = tagStart;
         eventDepth_ = depth_;
         pos_ = close + 3;
@@ -311,9 +339,19 @@ XmlPullReader::Event XmlPullReader::next()
             }
             return event;
         }
+        // Text runs between tags are short - a value or the indentation
+        // before the next tag - so they are walked a byte at a time, which
+        // also notes an '&' on the way, rather than handed to memchr twice.
         const std::size_t start = pos_;
-        const std::size_t lt = doc_.find('<', pos_);
-        pos_ = lt == std::string_view::npos ? doc_.size() : lt;
+        const std::size_t size = doc_.size();
+        const char* const data = doc_.data();
+        bool reference = false;
+        std::size_t p = pos_;
+        while (p < size && data[p] != '<') {
+            reference = reference || data[p] == '&';
+            ++p;
+        }
+        pos_ = p;
         const std::string_view raw = doc_.substr(start, pos_ - start);
         if (depth_ == 0) {
             if (!allSpace(raw)) {
@@ -323,6 +361,7 @@ XmlPullReader::Event XmlPullReader::next()
         }
         text_ = raw;
         cdata_ = false;
+        textHasReference_ = reference;
         eventOffset_ = start;
         eventDepth_ = depth_;
         return Event::Text;
