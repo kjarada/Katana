@@ -1,5 +1,7 @@
 #include "katana/geometry/primitives2d.hpp"
 
+#include "katana/geometry/point_batch.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -313,14 +315,7 @@ std::optional<double> Polyline2::distanceTo(const Point2& p) const
     return closest->distanceTo(p);
 }
 
-Box2 Polyline2::boundingBox() const
-{
-    Box2 box;
-    for (const Point2& vertex : vertices) {
-        box.expand(vertex);
-    }
-    return box;
-}
+Box2 Polyline2::boundingBox() const { return boundsOf(vertices); }
 
 Polyline2 Polyline2::reversed() const
 {
