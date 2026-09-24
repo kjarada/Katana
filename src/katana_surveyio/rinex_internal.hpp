@@ -23,6 +23,13 @@
 
 namespace katana::surveyio::rinex {
 
+// A damaged 200 MB file could otherwise produce a warning per epoch; past this
+// many the rest are counted in one closing warning rather than listed. One
+// limit for the observation reader and the Compact RINEX expansion together:
+// a compact file's damaged stretch can be 40 bytes, so a 1 GiB one could
+// otherwise hold millions of listed warnings.
+inline constexpr std::size_t kMaxListedWarnings = 500;
+
 // Lines of a byte buffer, one at a time, without their terminators. LF and
 // CRLF both end a line: RINEX files are written on every operating system and
 // copied between them. (A lone CR is not a RINEX line end; it stays in the
@@ -181,6 +188,7 @@ struct CompactExpansion {
     // What could not be expanded, by compact line; the rest of the file is
     // still expanded from the next epoch that starts afresh.
     std::vector<ReadWarning> warnings;
+    std::size_t unlistedWarnings = 0; // past kMaxListedWarnings: counted, not listed
     std::size_t compactLines = 0;  // lines in the compact file
     std::size_t linesSkipped = 0;  // compact lines that could not be expanded
     std::size_t optionalLines = 0; // Compact RINEX 3 optional ('&') records, skipped
