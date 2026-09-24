@@ -387,6 +387,38 @@ TEST(SheetStorage, GeneratedSheetsJoinASetInOneStepWithTheirReferencesIntact)
     EXPECT_EQ(document.sheetSet().sheets.size(), 1u);
 }
 
+TEST(SheetStorage, ASheetAddedAfterTheLastTileIsRemovedIsNotLedToByTheTilesMarks)
+{
+    // 400 x 100 m at 1 : 500: tiles of 192.5 x 125 m, three across and one
+    // down (400 / 192.5 = 2.08), after a key plan - s1 the key plan, s2 to
+    // s4 the tiles. The middle tile's match lines lead right to s4 and left
+    // to s2; the key plan's third outline is s4.
+    Document document;
+    GridRequest grid;
+    grid.area = Box2(Point2(0.0, 0.0), Point2(400.0, 100.0));
+    grid.scale = 500.0;
+    auto tiles = gridSheets(grid);
+    ASSERT_TRUE(tiles.ok());
+    ASSERT_TRUE(addSheets(document, std::move(*tiles)).ok());
+    ASSERT_EQ(document.sheetSet().sheets.size(), 4u);
+    const WorldMark toLast = document.sheetSet().sheets[2].viewports[0].marks[0];
+    ASSERT_EQ(toLast.sheet, "s4");
+    ASSERT_EQ(markLabel(document.sheetSet(), toLast), "MATCH LINE - SEE SHEET 4");
+
+    // The last tile goes and a legend comes. The legend is sheet 4 now, but
+    // not s4: the match line and the outline that led to the removed tile
+    // lead nowhere, rather than to the legend.
+    ASSERT_TRUE(removeSheet(document, 3).ok());
+    ASSERT_TRUE(addSheet(document, namedSheet("LEGEND")).ok());
+    const SheetSet& set = document.sheetSet();
+    ASSERT_EQ(set.sheets.size(), 4u);
+    EXPECT_EQ(set.sheets[3].id, "s5");
+    EXPECT_EQ(markLabel(set, set.sheets[2].viewports[0].marks[0]), "MATCH LINE");
+    EXPECT_EQ(markLabel(set, set.sheets[0].viewports[0].marks[2]), "");
+    // The first tile's outline still reads 2.
+    EXPECT_EQ(markLabel(set, set.sheets[0].viewports[0].marks[0]), "2");
+}
+
 TEST(SheetStorage, SheetsWrittenByANewerVersionAreKeptAndNotOverwritten)
 {
     Document document;
