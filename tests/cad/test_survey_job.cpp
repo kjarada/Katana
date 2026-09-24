@@ -962,6 +962,13 @@ TEST(SurveyJobReadjustCommand, AReadjustmentThatWouldTakeTheJobPastWhatAProjectH
     auto fake = std::make_shared<FakeReduction>();
     const std::string id = importThreePoints(document, fake);
     SurveyJob& job = SurveyJobAccess::jobs(document).front();
+    // No stored report to start with, so the re-adjustment can only make the
+    // job larger (a report where there was none, and one more point). Left
+    // in place, the import's report can be longer than the re-adjustment's
+    // (measured on main at 75acaf0: the job came out 393 bytes smaller even
+    // with its fourth point), and a job that still fits is rightly accepted.
+    job.reportText.clear();
+    job.reportHtml.clear();
     const std::uint64_t rest = ProjectStore::surveyJobRowBytes(job) - job.sourceBytes.size();
     job.sourceBytes.resize_and_overwrite(ProjectStore::kMaxSurveyJobBytes - rest,
                                          [](char*, std::size_t size) { return size; });

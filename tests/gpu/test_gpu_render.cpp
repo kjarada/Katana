@@ -216,7 +216,8 @@ TEST_P(GpuRender, OverlappingSurfacesInPerspectiveHideEachOtherAsTheSoftwarePath
     ASSERT_TRUE(camera.frame(list.bounds()));
 
     gpu->renderer().setDrawList(list);
-    // The software path clips at the camera's far plane; so must the GPU here.
+    // The software path's depths: the camera's own near and far (frame()
+    // fitted them to the box), reversed, nothing drawn past the far plane.
     FrameSettings settings = blackBackground();
     settings.infiniteFar = false;
     const Image gpuImage = render(*gpu, camera, settings);
@@ -226,17 +227,24 @@ TEST_P(GpuRender, OverlappingSurfacesInPerspectiveHideEachOtherAsTheSoftwarePath
 
     const auto result = compare(cpuImage, gpuImage, kWidth, kHeight, kBlack, 128);
     SCOPED_TRACE(describe(result));
-    // Framed by its bounding sphere (radius half of sqrt(50^2 + 55^2 + 12^2)
-    // = 37.6 m, 6% margin) the view is 80 m high over 96 px: 1.2 px a metre.
-    // Seen 35 degrees down, ground shrinks by sin 35.26 = 0.577: the red
-    // square's 1600 m2 is 1330 px, the green's half off it 500 px more, and
-    // the wall adds a little: about 1900 px drawn.
-    EXPECT_NEAR(static_cast<double>(result.coveredA), 1900.0, 250.0);
+    // Framed by the box's projected corners (Camera::frame, docs/render.md
+    // "Framing"; this case used to be worked out for the bounding sphere the
+    // camera framed by before, which gave "about 1900 px" and failed once the
+    // framing changed, with both renderers still agreeing to 41 pixels). The
+    // box is (-20, -25, 0)-(30, 30, 12), centre (5, 2.5, 6); seen from the SW
+    // isometric direction the vertical fit decides, and the eye stands 94.2 m
+    // from the centre. The squares' corners then project, in pixels, to
+    //   red    (61.1, 88.1) (96.9, 57.9) (62.2, 39.7) (26.7, 57.9)  1698 px
+    //   green  (71.1, 62.0) (93.6, 45.9) (62.4, 31.4) (39.7, 41.7)   806 px
+    //   wall   (72.7, 88.1) (91.5, 70.8) (94.1, 57.8) (73.7, 74.5)   231 px
+    // (shoelace areas), and their union - everything drawn is lit against
+    // black - is 2284 px.
+    EXPECT_NEAR(static_cast<double>(result.coveredA), 2284.0, 250.0);
     // Disagreement only where an outline or the green square's edge over the
-    // red crosses a pixel: the three squares' outlines on screen are each
-    // under 4 x 60 px, so under 720 px of edge, and at most half of those
-    // pixels (the quarter-pixel band above) can flip either way.
-    EXPECT_LE(result.coverageMismatches, 360u);
+    // red crosses a pixel: the outlines above are 172, 124 and 79 px long,
+    // 375 px of edge, and at most half of those pixels (the quarter-pixel
+    // band above) can flip either way.
+    EXPECT_LE(result.coverageMismatches, 188u);
     EXPECT_LE(result.differingPixels, 360u);
     EXPECT_LE(result.maxInteriorDifference, 2);
 }
