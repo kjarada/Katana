@@ -481,3 +481,41 @@ TEST(DxfReaderPaths, TheDxfExtensionIsRecognisedInAnyCase)
     EXPECT_FALSE(dxf::isDxfPath("site.dxfx"));
     EXPECT_FALSE(dxf::isDxfPath("dxf"));
 }
+
+TEST(DxfReaderLayers, TwoLayerNamesThatBecomeOnePathAreOneLayer)
+{
+    // "Kerb" with a control character in it cannot be a layer path, and
+    // becomes "Kerb_" - which the file also names. One layer, two entities.
+    const std::string text = "  0\nSECTION\n  2\nTABLES\n  0\nTABLE\n  2\nLAYER\n"
+                             "  0\nLAYER\n  2\nKerb\x01\n 62\n1\n"
+                             "  0\nLAYER\n  2\nKerb_\n 62\n5\n"
+                             "  0\nENDTAB\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nPOINT\n  8\nKerb\x01\n 10\n1\n 20\n1\n"
+                             "  0\nPOINT\n  8\nKerb_\n 10\n2\n 20\n2\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->layers.size(), 1u);
+    EXPECT_EQ(imported->layers[0].name, "Kerb_");
+    EXPECT_EQ(imported->layers[0].color, rgb(255, 0, 0)); // the first stands
+    ASSERT_EQ(imported->entities.size(), 2u);
+    EXPECT_EQ(imported->entities[0].layer, "Kerb_");
+    EXPECT_EQ(imported->entities[1].layer, "Kerb_");
+}
+
+TEST(DxfReaderLayers, LayerNamesAreMatchedWithoutRegardToLetterCase)
+{
+    // The table says "Kerb", the entity "KERB": the same layer, as the format
+    // compares names.
+    const std::string text = "  0\nSECTION\n  2\nTABLES\n  0\nTABLE\n  2\nLAYER\n"
+                             "  0\nLAYER\n  2\nKerb\n 62\n3\n"
+                             "  0\nENDTAB\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nPOINT\n  8\nKERB\n 10\n1\n 20\n1\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->layers.size(), 1u);
+    EXPECT_EQ(imported->entities.front().layer, "Kerb");
+}

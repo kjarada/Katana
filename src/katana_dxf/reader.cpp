@@ -549,8 +549,10 @@ void Reader::readTables()
 
 // A layer name as a Katana layer path. One that is already a valid path is
 // kept - a "/" in it nests, which is how a file written by an older export
-// brings its tree back - and otherwise the characters a path cannot hold are
-// replaced.
+// brings its tree back. Otherwise it is mended level by level: a control
+// character becomes "_", the blanks around a level go, and a level that is
+// then empty, "." or ".." becomes "_"; past the depth a path may have, the
+// levels are joined with "_" instead. Never an invalid path: "_" at worst.
 std::string pathForLayerName(std::string_view name)
 {
     if (name.empty()) {
@@ -559,21 +561,37 @@ std::string pathForLayerName(std::string_view name)
     if (katana::entity::validateLayerPath(name)) {
         return std::string(name);
     }
-    std::string fixed(name);
-    for (char& c : fixed) {
-        const auto byte = static_cast<unsigned char>(c);
-        if (byte < 0x20 || byte == 0x7F || c == '\\') {
-            c = '_';
+    std::vector<std::string> levels;
+    for (std::string_view rest = name;;) {
+        const std::size_t slash = rest.find('/');
+        std::string level(katana::core::trimmed(rest.substr(0, slash)));
+        for (char& c : level) {
+            const auto byte = static_cast<unsigned char>(c);
+            if (byte < 0x20 || byte == 0x7F) {
+                c = '_';
+            }
         }
+        if (level.empty() || level == "." || level == "..") {
+            level = "_" + level;
+        }
+        levels.push_back(std::move(level));
+        if (slash == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(slash + 1);
+    }
+    const char joiner = levels.size() > katana::entity::kMaximumLayerDepth ? '_' : '/';
+    std::string fixed;
+    for (const std::string& level : levels) {
+        if (!fixed.empty()) {
+            fixed.push_back(joiner);
+        }
+        fixed += level;
     }
     if (katana::entity::validateLayerPath(fixed)) {
         return fixed;
     }
-    std::replace(fixed.begin(), fixed.end(), '/', '_');
-    if (katana::entity::validateLayerPath(fixed)) {
-        return fixed;
-    }
-    return "_" + fixed.substr(0, katana::entity::kMaximumLayerNameLength - 1);
+    return "_"; // too long, or bytes that are not UTF-8: nothing of it can be kept safely
 }
 
 void Reader::readLayer(const Record& record)
@@ -2101,9 +2119,15 @@ Result<DxfImport> Reader::run()
     }
 
     // Layers: the linetype each names resolved against LTYPE (continuous
-    // where the table does not have it), in file order.
+    // where the table does not have it), in file order. Two DXF names can
+    // become one path - " Kerb" and "Kerb" once the blank is trimmed - and
+    // one layer is what they then are: the first stands.
+    std::unordered_map<std::string, bool> listed;
     for (LayerEntry& entry : layers_) {
         Layer& layer = entry.layer;
+        if (!listed.emplace(layer.name, true).second) {
+            continue;
+        }
         if (layer.linetype != katana::entity::kContinuousLinetype) {
             const auto found = linetypeNames_.find(upper(layer.linetype));
             if (found != linetypeNames_.end()) {
