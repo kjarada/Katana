@@ -1293,10 +1293,11 @@ struct GnssSeedNotices {
 };
 
 // GNSS positions: the grid ones as they are, the global ones through the
-// context's conversion. The first position of a point places it (unless
-// control or an entered point already has); every later one is a check
-// against what is there, with its misclosure. Each is kept in
-// engine.globalPositions for the network, which takes them all.
+// context's conversion. The first position of a point places it, unless
+// control or an entered point already holds it; a later one of a point an
+// earlier position placed is a check on it, with its misclosure. Each is
+// kept in engine.globalPositions, and the network takes every one of a
+// point GNSS placed, each with its own value.
 //
 // A global position is where the receiver was: at its antenna. The file's
 // antenna height takes it down to the mark, the way reduction_gnss.cpp takes
