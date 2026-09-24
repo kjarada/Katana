@@ -42,6 +42,7 @@ add_executable(katana_qt_widget_tests
     test_section_view.cpp
     test_plan_view.cpp
     test_plan_painter.cpp
+    test_plan_cloud.cpp
     test_view_chrome.cpp
     # The background job runner (test_jobs).
     test_jobs.cpp

@@ -12,4 +12,5 @@ katana_add_test_suite(geometry
         test_editing.cpp
         test_mesh.cpp
         test_point_batch.cpp
+        test_point_splat.cpp
 )
