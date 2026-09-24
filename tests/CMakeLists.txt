@@ -110,6 +110,17 @@ foreach(_suite core geometry)
         endforeach()
     endif()
 endforeach()
+# The cad suite is large and its kernels are the scene build's alone, so only
+# the scene tests are run again at each level.
+if(TARGET katana_cad_tests)
+    foreach(_level scalar avx2)
+        add_test(NAME simd_${_level}.cad
+                 COMMAND katana_cad_tests "--gtest_filter=CadScene*:Scene*")
+        set_tests_properties(simd_${_level}.cad PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};KATANA_SIMD=set:${_level}")
+    endforeach()
+endif()
 
 # The view widgets on their own, headlessly (tests/qt_widgets/). Not found by
 # the loop above: the application has no katana_qt library, so the suite
