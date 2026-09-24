@@ -39,6 +39,10 @@
 //     it changes the marker, antenna or position under an occupation that
 //     already has epochs; 5 (external event) is counted; 6 (cycle slip
 //     records) is read through and counted.
+//   * A Hatanaka-compressed file (Compact RINEX) is first expanded to the
+//     RINEX it stands for (rinex_compact.cpp) and then read exactly as above;
+//     its warnings and source records are mapped back to the compact file's
+//     own lines.
 
 #include <algorithm>
 #include <array>

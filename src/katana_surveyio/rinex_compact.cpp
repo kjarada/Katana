@@ -356,7 +356,8 @@ class Expander {
     std::uint64_t epoch_ = 1;
     std::vector<SatelliteState> satellites_;
 
-    // The epoch being expanded, kept apart until it has expanded whole.
+    // The line-map runs of the epoch being expanded, added to the map only
+    // once it has expanded whole (its text is cut off again if it does not).
     struct PendingRun {
         std::size_t expanded;
         std::size_t compact;
