@@ -68,7 +68,7 @@ struct SceneSurface {
     bool visible = true;
 };
 
-// A mesh in the session: a 12d trimesh, drawn like a surface but NOT one - it
+// A mesh in the session: a .12da trimesh, drawn like a surface but NOT one - it
 // may be closed or overhang, so it is never sampled for a height and carries
 // no elevation ramp. Colouring is flat or per face, because that is what the
 // file gives.
