@@ -144,7 +144,8 @@ namespace {
 // Below this many vertices a range is transformed one vertex at a time: the
 // AVX2 kernel takes four a step and hands the rest back, and for a handful the
 // call is the whole cost. Ranges are 4096 vertices but for a list's last, so
-// this only decides small lists; measured, the kernel is 2-12% off a frame
+// this only decides small lists. Measured, the kernel took 12% off the
+// 'Test 4' archive frame and stayed inside the A/A spread elsewhere
 // (docs/performance.md, "SIMD: the software rasteriser").
 constexpr std::size_t kTransformBatchMinimum = 16;
 
