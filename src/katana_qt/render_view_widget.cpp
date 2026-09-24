@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include <QKeyEvent>
+#include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
@@ -74,13 +75,30 @@ void RenderViewWidget::listenTo(katana::cad::Document* document)
         // a line drawn in plan never appeared here and an erased one stayed
         // (audit QT-05). The rebuild is lazy - this marks the scene dirty and
         // asks for one paint, and Qt folds a burst of changes into that paint.
-        documentListener_ = document->addListener([this] { invalidateScene(); });
+        documentListener_ = document->addListener([this] { documentChanged(); });
+        builtRevision_ = document->modelRevision();
     }
+}
+
+void RenderViewWidget::documentChanged()
+{
+    // The revision moves for every command, undo, redo and opened drawing and
+    // for nothing else (Document::modelRevision), so a notification that
+    // leaves it where it was is a selection or a current-layer change: only
+    // the overlay depends on that. A click used to rebuild the whole scene -
+    // 60 to 115 ms on a 229k-triangle surface - to recolour one line.
+    if (context_.document != nullptr && context_.document->modelRevision() != builtRevision_) {
+        entitiesDirty_ = true;
+    }
+    selectionDirty_ = true;
+    update();
 }
 
 void RenderViewWidget::invalidateScene()
 {
-    sceneDirty_ = true;
+    terrainDirty_ = true;
+    entitiesDirty_ = true;
+    selectionDirty_ = true;
     update();
 }
 
@@ -117,20 +135,47 @@ void RenderViewWidget::setVerticalExaggeration(double factor)
 
 void RenderViewWidget::rebuildIfNeeded()
 {
-    if (!sceneDirty_ || context_.document == nullptr) {
+    if (context_.document == nullptr) {
         return;
     }
-    builder_.build(*context_.document, surfaces(), context_.options, list_, meshes());
-    sceneDirty_ = false;
-    // Empty when the list holds the grid and nothing else. Counted against a
-    // grid built alone, by the same builder, rather than by asking
-    // cad::sceneBounds: that walks every entity again, and this now runs on
-    // every edit - measured (Debug, 100 000 lines) at 21 ms on top of the
-    // 90 ms build. A grid's line count does not depend on where it is centred.
-    gridOnly_.clear();
-    builder_.appendGrid(context_.options, katana::math::AABB{}, gridOnly_);
-    sceneEmpty_ = list_.triangles.empty() && list_.points.empty() &&
-                  list_.lines.size() <= gridOnly_.lines.size();
+    // Line widths and point sizes follow the display the view is on.
+    const auto ratio = static_cast<float>(pixelRatio());
+    if (ratio != context_.options.pixelScale) {
+        context_.options.pixelScale = ratio;
+        terrainDirty_ = entitiesDirty_ = selectionDirty_ = true;
+    }
+    if (!terrainDirty_ && !entitiesDirty_ && !selectionDirty_) {
+        return;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    // Each layer is built from the ones before it: the drawing drapes on the
+    // terrain and takes its datum from it, the grid stands on that datum and
+    // spans the bounds of both.
+    const bool gridDirty = terrainDirty_ || entitiesDirty_;
+    if (terrainDirty_) {
+        builder_.buildTerrain(surfaces(), meshes(), context_.options, layers_);
+        ++terrainBuilds_;
+        entitiesDirty_ = true;
+    }
+    if (entitiesDirty_) {
+        builder_.buildEntities(*context_.document, surfaces(), context_.options, layers_);
+        builtRevision_ = context_.document->modelRevision();
+        ++entityBuilds_;
+        selectionDirty_ = true;
+    }
+    if (selectionDirty_) {
+        builder_.buildSelection(*context_.document, surfaces(), context_.options, layers_);
+        ++selectionBuilds_;
+    }
+    if (gridDirty) {
+        builder_.buildGrid(context_.options, layers_);
+    }
+    terrainDirty_ = entitiesDirty_ = selectionDirty_ = false;
+    lastBuildMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                             started)
+                       .count();
+    // Empty when nothing but the grid was built.
+    sceneEmpty_ = layers_.terrain.empty() && layers_.edges.empty() && layers_.entities.empty();
     if (framedEmpty_ && !sceneEmpty_) {
         zoomExtents();
     }
@@ -141,82 +186,149 @@ void RenderViewWidget::zoomExtents()
     if (context_.document == nullptr) {
         return;
     }
-    auto box = katana::cad::sceneBounds(*context_.document, surfaces(), context_.options, meshes());
-    framedEmpty_ = box.empty();
+    // The box of what was BUILT, so the framing sees exactly the z the
+    // linework was put at (draped, own heights, datum) - and a rebuild is due
+    // anyway before the next paint.
+    framedEmpty_ = false; // so the rebuild below does not frame again
+    rebuildIfNeeded();
+    auto box = layers_.bounds;
+    framedEmpty_ = box.empty() || sceneEmpty_;
     if (framedEmpty_) {
         // Nothing to frame: show a patch of ground round the origin rather
         // than leaving the camera wherever it was, which looks like a broken
-        // view - and the paint says there is nothing to show. Five grid cells
-        // each way (SceneOptions::gridSpacing, 10 m by default, so 100 m
-        // across) and a tenth of that in height, so the frame is the ground
-        // plane seen at a slant rather than a cube.
-        const double spacing =
-            std::isfinite(context_.options.gridSpacing) && context_.options.gridSpacing > 0.0
-                ? context_.options.gridSpacing
-                : 10.0;
-        const double half = 5.0 * spacing;
-        box = katana::math::AABB(katana::math::Vec3(-half, -half, -0.1 * half),
-                                 katana::math::Vec3(half, half, 0.1 * half));
+        // view - and the paint says there is nothing to show. 100 m across
+        // and a tenth of that in height, so the frame is the ground plane
+        // seen at a slant rather than a cube.
+        constexpr double kHalf = 50.0;
+        box = katana::math::AABB(katana::math::Vec3(-kHalf, -kHalf, -0.1 * kHalf),
+                                 katana::math::Vec3(kHalf, kHalf, 0.1 * kHalf));
     }
     camera().frame(box);
     framed_ = true;
+    refitOnResize_ = true;
     // Only a frame of something drawn is worth keeping for the next widget:
     // one of the empty ground is replaced by the first real frame anyway.
     state_.cameraFramed = !framedEmpty_;
     update();
 }
 
-void RenderViewWidget::resizeEvent(QResizeEvent* event)
+double RenderViewWidget::pixelRatio() const
 {
-    QWidget::resizeEvent(event);
-    const int w = std::max(width(), 1);
-    const int h = std::max(height(), 1);
+    const double ratio = devicePixelRatioF();
+    return std::isfinite(ratio) && ratio > 0.0 ? ratio : 1.0;
+}
+
+bool RenderViewWidget::resizeTarget()
+{
+    // In DEVICE pixels: a 3D view on a 125% display rendered at 80% of its
+    // resolution and was scaled up nearest-neighbour, so a 1 px line beaded
+    // into 1 and 2 px steps while the plan view beside it stayed crisp.
+    const double ratio = pixelRatio();
+    const int w = std::max(static_cast<int>(std::lround(width() * ratio)), 1);
+    const int h = std::max(static_cast<int>(std::lround(height() * ratio)), 1);
+    if (framebuffer_.width() == w && framebuffer_.height() == h &&
+        camera().viewportWidth() == w && camera().viewportHeight() == h) {
+        return true;
+    }
     if (auto status = framebuffer_.resize(w, h); !status) {
         if (onStatus) {
             onStatus(QString::fromStdString(status.error().describe()));
         }
-        return;
+        return false;
     }
     camera().setViewportSize(w, h);
+    return true;
+}
+
+void RenderViewWidget::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    if (!resizeTarget()) {
+        return;
+    }
+    // A frame made before the view had its real size fitted the wrong aspect
+    // - or none, before the first resize - and cut the sides off. Until the
+    // user moves the camera, every resize frames again.
+    if (framed_ && refitOnResize_ && context_.document != nullptr) {
+        zoomExtents();
+    }
 }
 
 void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
 {
+    const auto started = std::chrono::steady_clock::now();
     QPainter painter(this);
     emptyMessageShown_ = false;
-    if (framebuffer_.empty()) {
+    // The display the view is on may have changed since the last resize.
+    if (!resizeTarget() || framebuffer_.empty()) {
         painter.fillRect(rect(), kBackground);
         return;
     }
+    const bool rebuilt = terrainDirty_ || entitiesDirty_ || selectionDirty_;
     if (!framed_) {
         zoomExtents();
     }
     rebuildIfNeeded();
 
-    const auto started = std::chrono::steady_clock::now();
+    // The depth range is fitted to what is drawn EVERY frame: after an orbit,
+    // a pan or a zoom it was left where frame() put it, and eight wheel
+    // notches out pushed the model past the far plane.
+    katana::math::AABB depthBox = layers_.bounds;
+    depthBox.expand(layers_.grid.bounds());
+    camera().fitDepthRange(depthBox);
+    const bool drawEdges = katana::cad::SceneBuilder::fadeEdges(layers_, camera());
+
     katana::render::RenderOptions options;
     options.background =
         katana::render::rgba(kBackground.red(), kBackground.green(), kBackground.blue());
-    const auto result = rasterizer_.render(list_, camera(), framebuffer_, options);
-    const auto finished = std::chrono::steady_clock::now();
-    lastFrameMs_ =
-        std::chrono::duration<double, std::milli>(finished - started).count();
+    // One depth buffer, layer after layer in a fixed order, so equal depths
+    // resolve the same way every frame (the first drawn wins, Rule 7).
+    stats_ = katana::render::RenderStats{};
+    std::string failure;
+    const auto pass = [&](const katana::render::DrawList& list) {
+        if (!failure.empty() || (list.empty() && !options.clear)) {
+            return;
+        }
+        const auto result = rasterizer_.render(list, camera(), framebuffer_, options);
+        if (!result) {
+            failure = result.error().describe();
+            return;
+        }
+        stats_.vertices += result->vertices;
+        stats_.trianglesSubmitted += result->trianglesSubmitted;
+        stats_.trianglesRasterised += result->trianglesRasterised;
+        stats_.linesSubmitted += result->linesSubmitted;
+        stats_.pointsSubmitted += result->pointsSubmitted;
+        stats_.fragments += result->fragments;
+        stats_.binEntries += result->binEntries;
+        stats_.tiles = result->tiles;
+        options.clear = false;
+    };
+    pass(layers_.grid);
+    pass(layers_.terrain);
+    if (drawEdges) {
+        pass(layers_.edges);
+    }
+    pass(layers_.entities);
+    pass(layers_.selection);
 
-    if (!result) {
+    if (!failure.empty()) {
         painter.fillRect(rect(), QColor(60, 20, 20));
         painter.setPen(Qt::white);
-        painter.drawText(rect(), Qt::AlignCenter,
-                         QString::fromStdString(result.error().describe()));
+        painter.drawText(rect(), Qt::AlignCenter, QString::fromStdString(failure));
         return;
     }
-    stats_ = *result;
 
     // No copy: the framebuffer's bytes ARE the image's bytes for this call.
-    const QImage image(reinterpret_cast<const uchar*>(framebuffer_.color().data()),
-                       framebuffer_.width(), framebuffer_.height(),
-                       framebuffer_.width() * static_cast<int>(sizeof(katana::render::Rgba)),
-                       QImage::Format_ARGB32);
+    // Its pixel ratio makes Qt draw the device-sized image over the widget's
+    // logical size one to one, instead of scaling it up.
+    QImage image(reinterpret_cast<const uchar*>(framebuffer_.color().data()),
+                 framebuffer_.width(), framebuffer_.height(),
+                 framebuffer_.width() * static_cast<int>(sizeof(katana::render::Rgba)),
+                 QImage::Format_ARGB32);
+    image.setDevicePixelRatio(pixelRatio());
     painter.drawImage(0, 0, image);
+    drawLegend(painter);
     // Only for a drawing with nothing in it. A scene of the grid alone is
     // also what a drawing whose every layer is hidden - in the document or in
     // this view - builds, and telling that user to draw or import something
@@ -226,12 +338,61 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
         emptyMessageShown_ = drawEmptyMessage(painter);
     }
 
+    lastFrameMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                             started)
+                       .count();
     if (onFrameStats) {
-        onFrameStats(QString("%1  %2 tri  %3 ms")
-                         .arg(QString::fromLatin1(katana::cad::toString(state_.kind)))
-                         .arg(stats_.trianglesRasterised)
-                         .arg(lastFrameMs_, 0, 'f', 1));
+        // The whole paint - build, render and blit - and the build on its own
+        // when this paint did one.
+        QString text = QString("%1  %2 tri  %3 ms")
+                           .arg(QString::fromLatin1(katana::cad::toString(state_.kind)))
+                           .arg(stats_.trianglesRasterised)
+                           .arg(lastFrameMs_, 0, 'f', 1);
+        if (rebuilt) {
+            text += QString(" (scene %1 ms)").arg(lastBuildMs_, 0, 'f', 1);
+        }
+        onFrameStats(text);
     }
+}
+
+// A small bar of the one elevation ramp with its two ends, so a colour can be
+// read as a height. Only when a surface is coloured by elevation and the view
+// has room for it.
+void RenderViewWidget::drawLegend(QPainter& painter) const
+{
+    if (!layers_.hasRamp() || height() < 160 || width() < 160) {
+        return;
+    }
+    constexpr int kBarWidth = 10;
+    constexpr int kBarHeight = 110;
+    const QFontMetrics metrics = painter.fontMetrics();
+    const QString high = QString::number(layers_.rampHigh, 'f', 2);
+    const QString low = QString::number(layers_.rampLow, 'f', 2);
+    const int textWidth = std::max(metrics.horizontalAdvance(high), metrics.horizontalAdvance(low));
+    const QRect bar(width() - 16 - kBarWidth - textWidth - 6, 16, kBarWidth, kBarHeight);
+
+    painter.save();
+    QLinearGradient gradient(bar.topLeft(), bar.bottomLeft());
+    constexpr int kStops = 8;
+    for (int i = 0; i <= kStops; ++i) {
+        const double t = static_cast<double>(i) / kStops;
+        const katana::render::Rgba c = katana::cad::elevationRampColor(1.0 - t);
+        gradient.setColorAt(t, QColor(katana::render::redOf(c), katana::render::greenOf(c),
+                                      katana::render::blueOf(c)));
+    }
+    QColor backing = kBackground;
+    backing.setAlpha(200);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(backing);
+    painter.drawRoundedRect(bar.adjusted(-6, -6 - metrics.height() / 2, textWidth + 12,
+                                         6 + metrics.height() / 2),
+                            4, 4);
+    painter.setBrush(gradient);
+    painter.drawRect(bar);
+    painter.setPen(theme::textMuted());
+    painter.drawText(QPoint(bar.right() + 6, bar.top() + metrics.ascent() / 2), high);
+    painter.drawText(QPoint(bar.right() + 6, bar.bottom() + metrics.ascent() / 2), low);
+    painter.restore();
 }
 
 bool RenderViewWidget::drawingIsEmpty() const
@@ -279,6 +440,7 @@ void RenderViewWidget::mousePressEvent(QMouseEvent* event)
     }
     setFocus(Qt::MouseFocusReason);
     lastMouse_ = event->pos();
+    refitOnResize_ = false; // the user is moving the camera now
 
     const bool panModifier = (event->modifiers() & Qt::ShiftModifier) != 0;
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && panModifier)) {
@@ -304,7 +466,8 @@ void RenderViewWidget::mouseMoveEvent(QMouseEvent* event)
         // other way; dragging down tips the top towards you.
         camera().orbit(-delta.x() * kOrbitPerPixel, delta.y() * kOrbitPerPixel);
     } else {
-        camera().panPixels(delta.x(), delta.y());
+        // The camera counts in framebuffer (device) pixels.
+        camera().panPixels(delta.x() * pixelRatio(), delta.y() * pixelRatio());
     }
     update();
 }
@@ -320,7 +483,8 @@ void RenderViewWidget::wheelEvent(QWheelEvent* event)
         return;
     }
     const double factor = std::pow(1.0 / kZoomPerNotch, notches);
-    const QPointF position = event->position();
+    const QPointF position = event->position() * pixelRatio();
+    refitOnResize_ = false;
     camera().dollyAtPixel(factor, position.x(), position.y());
     update();
     event->accept();
