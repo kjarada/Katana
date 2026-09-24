@@ -989,10 +989,31 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
     const Ramp ramp = rampOf(surfaces);
     layers.rampLow = ramp.low;
     layers.rampHigh = ramp.high;
+    // Where each surface's edges begin in edges.lines.
+    std::vector<std::size_t> edgeStarts;
     for (const SceneSurface& item : surfaces) {
         if (drawable(item)) {
+            edgeStarts.push_back(layers.edges.lines.size());
             emitSurface(item, options, ramp, normals_, layers.terrain, &layers);
         }
+    }
+    // The edges are drawn writing no depth (renderLayers), so where two
+    // surfaces coincide - a design repeating the existing triangles outside
+    // the works - the one drawn later covers the other. The terrain goes the
+    // other way: at a tie the surface drawn FIRST is the one seen. So the
+    // edges go surface by surface in reverse, and the edges on top are those
+    // of the surface seen, as they were while edges wrote depth.
+    if (edgeStarts.size() > 1) {
+        std::vector<katana::render::DrawLine> reversed;
+        reversed.reserve(layers.edges.lines.size());
+        std::size_t end = layers.edges.lines.size();
+        for (auto start = edgeStarts.rbegin(); start != edgeStarts.rend(); ++start) {
+            reversed.insert(reversed.end(),
+                            layers.edges.lines.begin() + static_cast<std::ptrdiff_t>(*start),
+                            layers.edges.lines.begin() + static_cast<std::ptrdiff_t>(end));
+            end = *start;
+        }
+        layers.edges.lines = std::move(reversed);
     }
     appendMeshes(meshes, options, layers.terrain);
     const auto floor = terrainFloor(surfaces, meshes);
