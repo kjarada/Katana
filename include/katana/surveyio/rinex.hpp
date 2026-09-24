@@ -21,8 +21,10 @@
 // The pseudorange, phase, Doppler and signal-strength values are checked and
 // counted, never stored: processing raw GNSS is outside what Katana does.
 //
-// Hatanaka-compressed (Compact RINEX) and gzip / Unix-compress / bzip2 / zip
-// packed files are recognised and refused with the step that unpacks them.
+// Hatanaka-compressed files (Compact RINEX 1.0 and 3.0, .YYd / .crx) are
+// expanded as they are read and then read like any other; warnings name the
+// compact file's own lines. gzip / Unix-compress / bzip2 / zip packed files
+// are recognised and refused with the step that unpacks them.
 
 #include <string_view>
 
