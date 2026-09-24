@@ -126,6 +126,15 @@ std::string symbolName(std::string_view name, bool nested)
     return encodeText(out);
 }
 
+// Every vertex known, at exactly 0: a level the plain groups write as the Z 0
+// that means "in plan", so it needs saying beside the entity (Writer::finish).
+bool isZeroLevel(const std::vector<std::optional<double>>& heights)
+{
+    return !heights.empty() && std::all_of(heights.begin(), heights.end(), [](const auto& z) {
+        return z.has_value() && *z == 0.0;
+    });
+}
+
 class Writer {
   public:
     Writer(const katana::entity::Model& model, const ExportOptions& options)
@@ -226,11 +235,12 @@ class Writer {
     void writeText(const Entity& entity, const katana::entity::TextGeometry& text);
     void writeDimension(const Entity& entity, const katana::entity::DimensionGeometry& dimension);
     // Ends the entity begun last with this module's extended data where it
-    // has something the entity's groups could not hold: heights known at
-    // only some vertices (`partial`), a colour no index is.
-    void finish(const std::vector<std::optional<double>>* partial = nullptr);
+    // has something the entity's groups could not hold: `heights` they
+    // cannot carry, a colour no index is.
+    void finish(const std::vector<std::optional<double>>* heights = nullptr);
     void textLine(const Entity& entity, const Point2& position, std::string_view line,
-                  double height, double rotation, double z, const Point2* centre = nullptr);
+                  double height, double rotation, double z, const Point2* centre = nullptr,
+                  const std::vector<std::optional<double>>* heights = nullptr);
     void line(const Entity& entity, const Point2& from, const Point2& to);
     std::string_view layerOf(const Entity& entity);
     std::vector<std::optional<double>> heightsOf(const Entity& entity, std::size_t count) const;
@@ -809,7 +819,8 @@ void Writer::line(const Entity& entity, const Point2& from, const Point2& to)
 }
 
 void Writer::textLine(const Entity& entity, const Point2& position, std::string_view lineText,
-                      double height, double rotation, double z, const Point2* centre)
+                      double height, double rotation, double z, const Point2* centre,
+                      const std::vector<std::optional<double>>* heights)
 {
     begin("TEXT", entity, "AcDbText");
     point(10, position, z);
@@ -832,13 +843,14 @@ void Writer::textLine(const Entity& entity, const Point2& position, std::string_
         point(11, *centre, z);
     }
     text(100, "AcDbText");
-    finish();
+    finish(heights);
 }
 
 void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry& geometry)
 {
     const auto heights = heightsOf(entity, 1);
     const double z = heights.front().value_or(0.0);
+    const auto* besides = isZeroLevel(heights) ? &heights : nullptr;
     // One TEXT a line: TEXT holds one, and a Text holding a break is lines.
     const Vec2 down = Vec2(std::sin(geometry.rotation), -std::cos(geometry.rotation)) *
                       (kLinePitch * geometry.height);
@@ -851,7 +863,8 @@ void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry&
             lineText.remove_suffix(1);
         }
         if (!lineText.empty()) {
-            textLine(entity, position, lineText, geometry.height, geometry.rotation, z);
+            textLine(entity, position, lineText, geometry.height, geometry.rotation, z, nullptr,
+                     besides);
         }
         if (end == std::string_view::npos) {
             break;
@@ -865,26 +878,42 @@ void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry&
 // entity's own groups cannot hold, for this reader to take back. Other
 // programs pass it by.
 //
-// HEIGHTS known at some vertices and not others: the entity itself goes in
-// plan, because the format has no "no height" and a vertex written at Z 0
-// would be a false level - a surface built from the file would dive to the
-// datum there. The list is the `elevations` property's text ("31.25 null
-// 32.5"), in pieces of at most 250 characters, since R2000 holds an extended
-// data string to 255.
+// HEIGHTS the entity's own groups cannot hold:
+//  - known at some vertices and not others. The entity itself goes in plan,
+//    because the format has no "no height" and a vertex written at Z 0 would
+//    be a false level - a surface built from the file would dive to the datum
+//    there.
+//  - at the two ends of an arc that climbs: ARC has one Z. In plan too, for
+//    the same reason.
+//  - a level of exactly 0 at every vertex. The groups say Z 0, which is how
+//    every program writes "in plan", and so how this reader takes it; a
+//    surveyed level of 0 would come back as no level at all.
+// The list is the `elevations` property's text ("31.25 null 32.5"), in pieces
+// of at most 250 characters, since R2000 holds an extended data string to
+// 255. One height at every vertex is that one height alone, which the reader
+// takes for every vertex, as the `elevation` property is. Only the first two
+// kinds lose anything in another program, and the export's warning counts
+// them.
 //
 // A COLOUR that no index is: R2000 has no true colour, so the entity carries
 // the nearest index for everyone else and its own colour here.
-void Writer::finish(const std::vector<std::optional<double>>* partial)
+void Writer::finish(const std::vector<std::optional<double>>* heights)
 {
-    if (partial == nullptr && !exactColour_) {
+    if (heights == nullptr && !exactColour_) {
         return;
     }
     text(1001, kApplicationName);
-    if (partial != nullptr) {
+    if (heights != nullptr) {
+        const bool one = !heights->empty() &&
+                         std::all_of(heights->begin(), heights->end(), [&](const auto& height) {
+                             return height.has_value() && *height == *heights->front();
+                         });
+        const std::size_t count = one ? 1 : heights->size();
         text(1000, kExtendedHeights);
         text(1002, "{");
         std::string piece;
-        for (const auto& height : *partial) {
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& height = (*heights)[i];
             std::string token = "null";
             if (height) {
                 char buffer[32];
@@ -905,7 +934,9 @@ void Writer::finish(const std::vector<std::optional<double>>* partial)
             text(1000, piece);
         }
         text(1002, "}");
-        ++partialHeights_;
+        if (!one) {
+            ++partialHeights_; // written in plan: other programs see no height
+        }
     }
     if (exactColour_) {
         text(1000, kExtendedColour);
@@ -932,7 +963,8 @@ void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
         begin("LWPOLYLINE", entity, "AcDbPolyline");
         integer(90, static_cast<std::int64_t>(count));
         integer(70, polyline.closed ? 1 : 0);
-        if (oneHeight && anyHeight && *heights.front() != 0.0) {
+        const bool zeroLevel = oneHeight && anyHeight && *heights.front() == 0.0;
+        if (oneHeight && anyHeight && !zeroLevel) {
             real(38, *heights.front());
         }
         for (const Point2& vertex : polyline.vertices) {
@@ -940,7 +972,7 @@ void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
             real(20, vertex.y + shift_.y);
             extents_.expand(Point2(vertex.x + shift_.x, vertex.y + shift_.y));
         }
-        finish(anyHeight && !everyHeight ? &heights : nullptr);
+        finish((anyHeight && !everyHeight) || zeroLevel ? &heights : nullptr);
         return;
     }
     // Heights that differ: a 3D polyline, the only kind with a Z per vertex.
@@ -1020,10 +1052,10 @@ void Writer::writeEntity(const Entity& entity)
         [&](const auto& shape) {
             using T = std::decay_t<decltype(shape)>;
             if constexpr (std::is_same_v<T, katana::entity::PointGeometry>) {
-                const double z = heightsOf(entity, 1).front().value_or(0.0);
+                const auto heights = heightsOf(entity, 1);
                 begin("POINT", entity, "AcDbPoint");
-                point(10, shape.position, z);
-                finish();
+                point(10, shape.position, heights.front().value_or(0.0));
+                finish(isZeroLevel(heights) ? &heights : nullptr);
             } else if constexpr (std::is_same_v<T, Segment2>) {
                 const auto heights = heightsOf(entity, 2);
                 // One end's height without the other's: in plan, with the
@@ -1032,14 +1064,23 @@ void Writer::writeEntity(const Entity& entity)
                 begin("LINE", entity, "AcDbLine");
                 point(10, shape.start, both ? *heights[0] : 0.0);
                 point(11, shape.end, both ? *heights[1] : 0.0);
-                finish(!both && (heights[0] || heights[1]) ? &heights : nullptr);
+                finish((!both && (heights[0] || heights[1])) || isZeroLevel(heights) ? &heights
+                                                                                     : nullptr);
             } else if constexpr (std::is_same_v<T, Arc2>) {
-                const double z = heightsOf(entity, 1).front().value_or(0.0);
                 const bool full = std::abs(shape.sweep) >= 2.0 * std::numbers::pi - 1e-12;
                 // Every arc in the file runs counter-clockwise: a clockwise
-                // one is the same curve from its other end.
+                // one is the same curve from its other end, and its heights
+                // are in that order too.
                 const double from = shape.sweep >= 0.0 ? shape.startAngle
                                                        : shape.startAngle + shape.sweep;
+                // A height at each end, as the model keeps them for an arc
+                // on a grade. One Z holds them only when they are the same.
+                auto heights = heightsOf(entity, 2);
+                if (shape.sweep < 0.0) {
+                    std::swap(heights[0], heights[1]);
+                }
+                const bool oneLevel = heights[0].has_value() && heights[0] == heights[1];
+                const double z = oneLevel ? *heights[0] : 0.0;
                 begin(full ? "CIRCLE" : "ARC", entity, "AcDbCircle");
                 point(10, shape.center, z);
                 real(40, shape.radius);
@@ -1054,16 +1095,17 @@ void Writer::writeEntity(const Entity& entity)
                     real(50, start);
                     real(51, end);
                 }
-                finish();
+                const bool any = heights[0].has_value() || heights[1].has_value();
+                finish(any && (!oneLevel || z == 0.0) ? &heights : nullptr);
                 const double r = shape.radius;
                 extents_.expand(Point2(shape.center.x + shift_.x - r, shape.center.y + shift_.y - r));
                 extents_.expand(Point2(shape.center.x + shift_.x + r, shape.center.y + shift_.y + r));
             } else if constexpr (std::is_same_v<T, Circle2>) {
-                const double z = heightsOf(entity, 1).front().value_or(0.0);
+                const auto heights = heightsOf(entity, 1);
                 begin("CIRCLE", entity, "AcDbCircle");
-                point(10, shape.center, z);
+                point(10, shape.center, heights.front().value_or(0.0));
                 real(40, shape.radius);
-                finish();
+                finish(isZeroLevel(heights) ? &heights : nullptr);
                 const double r = shape.radius;
                 extents_.expand(Point2(shape.center.x + shift_.x - r, shape.center.y + shift_.y - r));
                 extents_.expand(Point2(shape.center.x + shift_.x + r, shape.center.y + shift_.y + r));
@@ -1128,8 +1170,9 @@ Result<DxfExport> Writer::run()
     if (partialHeights_ != 0) {
         result_.warnings.push_back(
             std::to_string(partialHeights_) +
-            " entities with heights at only some vertices were written in plan, since the "
-            "format has no \"no height\" and Z 0 would be a false level; their heights go "
+            " entities with heights the format cannot hold - at only some vertices, or "
+            "different at the two ends of an arc - were written in plan, since the format "
+            "has no \"no height\" and a Z of 0 would be a false level; their heights go "
             "beside them as extended data, which Katana reads back");
     }
     std::string out = header();

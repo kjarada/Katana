@@ -45,7 +45,7 @@ The public interface:
 | --- | --- |
 | `dxf/reader.hpp` | `readDxf(bytes)`, `readDxfFile(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `isDxfPath`. |
 | `dxf/writer.hpp` | `writeDxf(model)`, `writeDxfFile(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layerNameFor`. |
-| `dxf/import_command.hpp` | `importCommand(import, model)`: linetypes, layers, entities and layer locks as one transaction. |
+| `dxf/import_command.hpp` | `importCommand(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
 | `dxf/codes.hpp` | The indexed colours, lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
 
 ## Reading
@@ -83,9 +83,10 @@ What is kept, and how:
 - **Heights.** Through `entity::setHeights`, the one writer of the
   `elevation` / `elevations` properties the surface builder reads. A 3D
   polyline keeps every vertex's Z, zero included - zero is data there. A 2D
-  polyline's elevation, a point's Z, a line's two Z values and a circle's
-  elevation are kept when they are not zero, since zero is what a plan
-  drawing writes for "no height".
+  polyline's elevation, a point's Z, a line's two Z values, a circle's, arc's,
+  ellipse's and text's elevation are kept when they are not zero, since zero
+  is what a plan drawing writes for "no height". A level of exactly 0 that
+  this module's writer said beside the entity (see Writing) is kept as 0.
 - **Blocks.** An insert's position, scale (per axis), rotation and array; a
   block's own base point. An entity on layer 0 inside a block takes the
   insert's layer, and a ByBlock colour the insert's colour, as the format
@@ -94,11 +95,22 @@ What is kept, and how:
   kept as `dxf.block` metadata ("SITE/TREE" for one nested in another). A
   block of attributes only, which draws nothing, leaves a Point carrying its
   attributes, so the data is not lost.
+- **Heights through an insert.** A block entity with heights has them scaled
+  by the insert's Z scale and raised to its level. One drawn at the block's
+  Z 0 - the usual survey symbol, drawn at 0 and inserted at the point's
+  level - takes the insert's level (block Z 0, scaled, plus the insert's Z);
+  only where that comes to exactly 0 at the top does it stay in plan. An
+  insert in a tilted plane gives no heights, and says so.
 - **Scale that is not uniform.** A circle or arc in a block inserted at
   different X and Y scales is an ellipse; it is chorded to the same tolerance.
 - **Object coordinate systems.** Entities whose extrusion direction is -Z
-  (drawn mirrored) are mirrored into plan exactly, arcs reversed. An entity in
-  a tilted plane is projected onto the plan, a circle or arc as chords, and
+  (drawn mirrored) are mirrored into plan exactly, arcs reversed. Their
+  elevation runs along the extrusion too, so an elevation of -10 facing down
+  is a height of +10 - for CIRCLE, ARC, LWPOLYLINE, a 2D POLYLINE, TEXT and an
+  INSERT's level alike. MTEXT is not an object coordinate system entity: its
+  point and its direction are world coordinates whichever way it faces, and
+  only an angle given without a direction is measured in its plane. An entity
+  in a tilted plane is projected onto the plan, a circle or arc as chords, and
   counted.
 - **Colours.** Group 420 (true colour) wins over group 62 (indexed); ByLayer
   is left ByLayer. Indexed colours 1-9 are the named colours, 250-255 the grey
@@ -168,7 +180,7 @@ errors and no fixes.
 | --- | --- |
 | Point | `POINT`, its elevation as Z. |
 | Line | `LINE`, its heights as the two Z values - or, with a height at one end only, in plan (see Heights below). |
-| Arc, Circle | `ARC`, `CIRCLE` - true curves, never chords. A clockwise arc is written counter-clockwise from its other end, the only direction the format has. |
+| Arc, Circle | `ARC`, `CIRCLE` - true curves, never chords. A clockwise arc is written counter-clockwise from its other end, the only direction the format has, its end heights in that order too. An arc with the same height at both ends has it as Z; one that climbs, as an imported survey arc on a grade does, is written in plan (see Heights below). |
 | Polyline | `LWPOLYLINE` with the closed flag - **never a HATCH**. One height for every vertex is its elevation. Heights that differ make a 3D `POLYLINE` instead, since an `LWPOLYLINE` has one elevation. Heights at only some vertices: in plan (see Heights below). |
 | Text | `TEXT`: the left of the baseline, height, rotation. A Text holding line breaks is a `TEXT` a line, a five-thirds pitch apart. |
 | Dimension | exploded: two extension lines, the dimension line, a tick at each end, and the measurement as `TEXT` centred over it, by the layer's dimension style. |
@@ -191,7 +203,11 @@ errors and no fixes.
   file would dive to the datum there. Such an entity is written in plan, its
   heights beside it (`elevations`, the property's own text, nulls included, in
   pieces of at most 250 characters since R2000 holds an extended data string
-  to 255), and the export says how many.
+  to 255), and the export says how many. An arc whose two ends differ in
+  height is written the same way, since `ARC` has one Z. A level of exactly
+  0 at every vertex is written as Z 0 and said beside the entity as well
+  (the one height "0"), since Z 0 alone reads as "no height"; nothing is lost
+  to another program there, so it is not counted in the warning.
 - **Colours** are indexed: R2000 has no true colour. The nearest of the 255 is
   written, and every other program draws that; black, which no index is, is
   written as 7, the drawing's foreground. A colour no index is exactly goes

@@ -438,3 +438,80 @@ TEST(DxfWriter, HeightsKnownAtOnlySomeVerticesGoOutInPlanAndComeBackWithTheirGap
     EXPECT_FALSE(line[0].has_value());
     EXPECT_EQ(line[1], 12.0);
 }
+
+TEST(DxfWriter, AnArcThatClimbsGoesOutWithBothEndHeightsBesideItAndComesBackWithThem)
+{
+    // An arc on a grade keeps a height at each end; ARC has one Z. So it
+    // goes out in plan with both beside it, and is counted in the warning.
+    // The clockwise arc goes out from its other end (counter-clockwise from
+    // 0 to 90 degrees about (50,0)), so its heights go out, and come back,
+    // in that order: 12 at the start, 10 at the end. An arc at one height
+    // needs nothing beside it.
+    katana::entity::Model model;
+    add(model, Arc2{Point2(0.0, 0.0), 10.0, 0.0, kPi / 2.0}, "0", {31.5, 32.25});
+    add(model, Arc2{Point2(50.0, 0.0), 5.0, kPi / 2.0, -kPi / 2.0}, "0", {10.0, 12.0});
+    add(model, Arc2{Point2(100.0, 0.0), 5.0, 0.0, kPi / 2.0}, "0", {5.0, 5.0});
+    auto out = dxf::writeDxf(model);
+    ASSERT_TRUE(out.ok());
+    EXPECT_EQ(records(out->text, "ARC"), 3u);
+    EXPECT_NE(out->text.find("1000\n31.5 32.25\n"), std::string::npos);
+    EXPECT_NE(out->text.find("1000\n12 10\n"), std::string::npos);
+    ASSERT_EQ(out->warnings.size(), 1u);
+    EXPECT_EQ(out->warnings[0].rfind("2 entities with heights the format cannot hold", 0), 0u)
+        << out->warnings[0];
+    const auto back = dxf::readDxf(out->text);
+    ASSERT_TRUE(back.ok());
+    ASSERT_EQ(back->entities.size(), 3u);
+    const auto climbing = katana::entity::heightsOf(back->entities[0].properties, 2);
+    EXPECT_EQ(climbing[0], 31.5);
+    EXPECT_EQ(climbing[1], 32.25);
+    const Arc2& turned = std::get<Arc2>(back->entities[1].geometry);
+    EXPECT_NEAR(turned.startAngle, 0.0, 1e-15);
+    const auto reversed = katana::entity::heightsOf(back->entities[1].properties, 2);
+    EXPECT_EQ(reversed[0], 12.0);
+    EXPECT_EQ(reversed[1], 10.0);
+    const auto level = katana::entity::heightsOf(back->entities[2].properties, 2);
+    EXPECT_EQ(level[0], 5.0);
+    EXPECT_EQ(level[1], 5.0);
+}
+
+TEST(DxfWriter, ALevelOfExactlyZeroComesBackAsZeroNotAsNoLevel)
+{
+    // Z 0 is how every program writes "in plan", so the reader takes it as
+    // no level; a surveyed level of 0.000 must be said beside the entity or
+    // it comes back unsurveyed. The one height "0" stands for every vertex.
+    // Level 5 and no level at all are the controls.
+    katana::entity::Model model;
+    add(model, PointGeometry{Point2(10.0, 10.0)}, "0", {0.0});
+    add(model, PointGeometry{Point2(20.0, 20.0)}, "0", {5.0});
+    add(model, PointGeometry{Point2(30.0, 30.0)});
+    add(model, Polyline2{{Point2(0.0, 0.0), Point2(10.0, 0.0), Point2(10.0, 10.0)}, true}, "0",
+        {0.0, 0.0, 0.0});
+    add(model, Segment2{Point2(0.0, 0.0), Point2(5.0, 0.0)}, "0", {0.0, 0.0});
+    add(model, Circle2{Point2(40.0, 0.0), 2.0}, "0", {0.0});
+    add(model, Arc2{Point2(60.0, 0.0), 2.0, 0.0, kPi / 2.0}, "0", {0.0, 0.0});
+    add(model, TextGeometry{Point2(70.0, 0.0), "RL 0.000", 2.5, 0.0}, "0", {0.0});
+    auto out = dxf::writeDxf(model);
+    ASSERT_TRUE(out.ok());
+    // Nothing is lost to another program - its Z 0 is the level - so there
+    // is nothing to warn of.
+    EXPECT_TRUE(out->warnings.empty());
+    const auto back = dxf::readDxf(out->text);
+    ASSERT_TRUE(back.ok());
+    ASSERT_EQ(back->entities.size(), 8u);
+    const auto& e = back->entities;
+    EXPECT_EQ(katana::entity::heightsOf(e[0].properties, 1)[0], 0.0);
+    EXPECT_EQ(katana::entity::heightsOf(e[1].properties, 1)[0], 5.0);
+    EXPECT_FALSE(katana::entity::heightsOf(e[2].properties, 1)[0].has_value());
+    for (const auto& height : katana::entity::heightsOf(e[3].properties, 3)) {
+        EXPECT_EQ(height, 0.0);
+    }
+    for (const auto& height : katana::entity::heightsOf(e[4].properties, 2)) {
+        EXPECT_EQ(height, 0.0);
+    }
+    EXPECT_EQ(katana::entity::heightsOf(e[5].properties, 1)[0], 0.0);
+    for (const auto& height : katana::entity::heightsOf(e[6].properties, 2)) {
+        EXPECT_EQ(height, 0.0);
+    }
+    EXPECT_EQ(katana::entity::heightsOf(e[7].properties, 1)[0], 0.0);
+}
