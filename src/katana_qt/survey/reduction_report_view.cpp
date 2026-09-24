@@ -3,10 +3,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QResizeEvent>
 #include <QSplitter>
 #include <QTextBrowser>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <format>
 #include <string_view>
 #include <utility>
@@ -196,21 +198,29 @@ ReductionReportView::ReductionReportView(const QString& name, QWidget* parent) :
     summary_->setObjectName(name + "Summary");
     summary_->setWordWrap(true);
     layout->addWidget(summary_);
-    auto* splitter = new QSplitter(Qt::Horizontal, this);
-    list_ = new QListWidget(splitter);
+    splitter_ = new QSplitter(Qt::Horizontal, this);
+    splitter_->setChildrenCollapsible(false);
+    list_ = new QListWidget(splitter_);
     list_->setObjectName(name + "Sections");
     list_->setToolTip("The report's sections: choose one to go to it");
-    browser_ = new QTextBrowser(splitter);
+    // A heading such as "Residuals: network least squares (horizontal)" is
+    // read whole, on two lines, rather than cut where its marked count is.
+    list_->setWordWrap(true);
+    list_->setTextElideMode(Qt::ElideNone);
+    list_->setUniformItemSizes(false);
+    list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    browser_ = new QTextBrowser(splitter_);
     browser_->setObjectName(name + "Browser");
     browser_->setOpenLinks(false);
     browser_->document()->setDefaultStyleSheet(screenStyleSheet());
-    splitter->addWidget(list_);
-    splitter->addWidget(browser_);
-    splitter->setStretchFactor(0, 0);
-    splitter->setStretchFactor(1, 1);
+    splitter_->addWidget(list_);
+    splitter_->addWidget(browser_);
+    splitter_->setStretchFactor(0, 0);
+    splitter_->setStretchFactor(1, 1);
     list_->setMinimumWidth(90);
-    splitter->setSizes({140, 600});
-    layout->addWidget(splitter, 1);
+    list_->setMinimumHeight(60);
+    splitter_->setSizes({190, 600});
+    layout->addWidget(splitter_, 1);
     connect(list_, &QListWidget::currentRowChanged, this, [this](int row) { showSection(row); });
     showNote("No report yet.");
 }
@@ -225,16 +235,20 @@ void ReductionReportView::setReportHtml(const std::string& html)
     list_->blockSignals(true);
     list_->clear();
     for (const ReportSection& section : sections_) {
+        // The count first, so a narrow list still shows that something in
+        // the section is marked.
         auto* item = new QListWidgetItem(
             section.marked == 0 ? qs(section.title)
-                                : QString("%1  [%2 marked]").arg(qs(section.title)).arg(section.marked),
+                                : QString("[%1 marked] %2").arg(section.marked).arg(qs(section.title)),
             list_);
+        item->setToolTip(qs(section.title));
         if (section.marked > 0) {
             item->setForeground(theme::error());
             QFont bold = item->font();
             bold.setBold(true);
             item->setFont(bold);
-            item->setToolTip("Holds a flagged or rejected outlier, a failed test or a value "
+            item->setToolTip(qs(section.title) +
+                             ": holds a flagged or rejected outlier, a failed test or a value "
                              "outside its tolerance");
         }
     }
@@ -266,6 +280,30 @@ std::size_t ReductionReportView::marked() const
         total += section.marked;
     }
     return total;
+}
+
+bool ReductionReportView::sectionsAbove() const
+{
+    return splitter_->orientation() == Qt::Vertical;
+}
+
+void ReductionReportView::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    // Below this width a list beside the text leaves the text too narrow for
+    // the report's tables; above it the list costs little.
+    constexpr int kSideBySide = 620;
+    const Qt::Orientation wanted = width() < kSideBySide ? Qt::Vertical : Qt::Horizontal;
+    if (splitter_->orientation() == wanted) {
+        return;
+    }
+    splitter_->setOrientation(wanted);
+    if (wanted == Qt::Vertical) {
+        // A few headings' height; the list scrolls for the rest.
+        splitter_->setSizes({96, std::max(120, height() - 96)});
+    } else {
+        splitter_->setSizes({190, std::max(200, width() - 190)});
+    }
 }
 
 void ReductionReportView::showSection(int index)

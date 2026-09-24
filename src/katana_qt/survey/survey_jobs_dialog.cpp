@@ -11,6 +11,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTableWidget>
@@ -197,8 +198,12 @@ SurveyJobsDialog::SurveyJobsDialog(const SurveyDialogContext& context, QWidget* 
     auto* scroll = new QScrollArea(editPage);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     options_ = new ReductionOptionsWidget(scroll);
     scroll->setWidget(options_);
+    // Wide enough for the options' rows, so none is cut at the right.
+    scroll->setMinimumWidth(options_->minimumSizeHint().width() +
+                            scroll->verticalScrollBar()->sizeHint().width() + 4);
     auto* right = new QWidget(editPage);
     auto* rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
@@ -229,10 +234,10 @@ SurveyJobsDialog::SurveyJobsDialog(const SurveyDialogContext& context, QWidget* 
     shiftSummary_ = mutedLabel("Press Preview to see how far each point would move.", right);
     shiftSummary_->setObjectName("shiftSummary");
     rightLayout->addWidget(shiftSummary_);
-    shifts_ = new QTableWidget(0, 5, right);
+    shifts_ = new QTableWidget(0, 6, right);
     shifts_->setObjectName("shifts");
-    shifts_->setHorizontalHeaderLabels(
-        {"Point", "Shift N (mm)", "Shift E (mm)", "Shift H (mm)", "Horizontal (mm)"});
+    shifts_->setHorizontalHeaderLabels({"Point", "Shift N (mm)", "Shift E (mm)", "Shift H (mm)",
+                                        "Horizontal (mm)", "In the drawing"});
     shifts_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     shifts_->verticalHeader()->setVisible(false);
     shifts_->horizontalHeader()->setStretchLastSection(true);
@@ -723,13 +728,23 @@ void SurveyJobsDialog::showShifts(const survey::ReductionReport& report)
     const auto mm = [](const std::optional<double>& metres) {
         return metres ? QString::number(*metres * 1000.0, 'f', 1) : QString("-");
     };
+    std::size_t heldControl = 0;
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const survey::CoordinateReport& point = *rows[i].point;
         const double vertical = std::abs(point.shiftElevation.value_or(0.0));
         const double worst = std::max(rows[i].horizontal, vertical);
-        const QStringList cells{qs(point.pointId), mm(point.shiftNorthing),
-                                mm(point.shiftEasting), mm(point.shiftElevation),
-                                QString::number(rows[i].horizontal * 1000.0, 'f', 1)};
+        // A control point is drawn where it is held, not where a weighted
+        // adjustment puts it (the reduced project keeps its known
+        // coordinates), so Apply leaves it; the adjusted value is the
+        // report's.
+        const bool control = point.method == survey::ComputationMethod::Control;
+        heldControl += control && worst >= kShiftNoticed ? 1 : 0;
+        const QStringList cells{qs(point.pointId),
+                                mm(point.shiftNorthing),
+                                mm(point.shiftEasting),
+                                mm(point.shiftElevation),
+                                QString::number(rows[i].horizontal * 1000.0, 'f', 1),
+                                control ? QString("stays: control") : QString("moves")};
         for (int column = 0; column < cells.size(); ++column) {
             auto* item = new QTableWidgetItem(cells[column]);
             if (worst >= kShiftNoticed) {
@@ -758,6 +773,11 @@ void SurveyJobsDialog::showShifts(const survey::ReductionReport& report)
         text += QString(" (the most %1 mm, %2)").arg(largest * 1000.0, 0, 'f', 1).arg(largestId);
     }
     text += QString("; %1 new; %2 no longer computed.").arg(fresh).arg(gone);
+    if (heldControl > 0) {
+        text += QString(" %1 of them control: its adjusted value is in the report, and its point "
+                        "stays where it is held.")
+                    .arg(heldControl);
+    }
     shiftSummary_->setText(text);
     shiftSummary_->setStyleSheet(QString("color: %1").arg(
         noticed > 0 ? theme::accent().name() : theme::textMuted().name()));
