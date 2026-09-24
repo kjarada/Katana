@@ -226,8 +226,9 @@ class MapReader {
         rule.section = section;
         rule.key = item.childText("key");
         if (rule.key.empty()) {
-            // `names.4d` ends with an <item> holding only a <group>. It names
-            // no code, so there is nothing it could ever apply to.
+            // The second survey code file of the built-in customisation ends
+            // with an <item> holding only a <group>. It names no code, so
+            // there is nothing it could ever apply to.
             if (!item.children.empty()) {
                 warn("an <item> of <" + sectionName + "> has no <key> and was skipped");
             }
