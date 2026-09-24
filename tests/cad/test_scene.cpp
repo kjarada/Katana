@@ -254,7 +254,7 @@ TEST(CadScene, SelectedEntitiesAreDrawnInTheSelectionColour)
     EXPECT_EQ(list.colors.front(), options.selectionColor);
 }
 
-TEST(CadScene, TheGridIsBoundedHoweverFarTheViewIsZoomedOut)
+TEST(CadScene, TheGridIsBoundedHoweverFineASpacingIsAskedFor)
 {
     Document document;
     SceneBuilder builder;
@@ -262,16 +262,74 @@ TEST(CadScene, TheGridIsBoundedHoweverFarTheViewIsZoomedOut)
     SceneOptions options;
     options.drawEntities = false;
     options.drawGrid = true;
-    options.gridLines = 100'000; // nonsense from a zoomed-out view
+    options.gridSpacing = 1.0e-6; // nonsense: 10^8 cells across a 100 m patch
     builder.build(document, {}, options, list);
 
-    // Clamped to 400 each way: 2 * 400 + 1 lines in each direction.
-    EXPECT_LE(list.lines.size(), 2u * (2u * 400u + 1u));
+    // The spacing is doubled until at most 200 cells span each side, so at
+    // most 201 lines each way of at most 200 cells each: 2 * 201 * 200.
+    EXPECT_LE(list.lines.size(), 2u * 201u * 200u);
     EXPECT_GT(list.lines.size(), 0u);
+}
 
-    options.gridSpacing = 0.0;
+TEST(CadScene, AnAutomaticGridIsSizedToTheSceneAndCutIntoCells)
+{
+    // Nothing to draw, so the grid stands round the default 100 m patch
+    // (-50..50 each way). Worked by hand from emitGrid's rule:
+    //   span 100, 16 cells wanted -> 6.25 m -> the 1-2-5 step above it, 10 m;
+    //   reach 15% of the span = 15 m, so x runs over -65..65:
+    //   floor(-6.5) = -7 .. ceil(6.5) = 7, 14 cells and 15 lines each way;
+    //   one DrawLine per cell: 15 lines x 14 cells x 2 directions = 420.
+    // A full-length line per grid line would be 30; cut per cell it is 420,
+    // which is what keeps a long diagonal from touching every tile.
+    Document document;
+    SceneBuilder builder;
+    DrawList list;
+    SceneOptions options;
+    options.drawEntities = false;
+    options.drawGrid = true;
     builder.build(document, {}, options, list);
-    EXPECT_TRUE(list.lines.empty()) << "a zero spacing must draw nothing, not loop forever";
+    EXPECT_EQ(list.lines.size(), 420u);
+    const auto box = list.bounds();
+    EXPECT_NEAR(box.min.x, -70.0, 1e-9);
+    EXPECT_NEAR(box.max.x, 70.0, 1e-9);
+
+    // A scene 100 times larger gets a grid 100 times coarser and the same
+    // number of cells, not a sea of 10 m lines.
+    std::vector<katana::geometry::Point3> vertices = {
+        {0.0, 0.0, 0.0}, {10000.0, 0.0, 10.0}, {10000.0, 10000.0, 10.0}, {0.0, 10000.0, 0.0}};
+    auto big = TinSurface::create(std::move(vertices), {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(big.ok());
+    SceneSurface item;
+    item.surface = &*big;
+    item.style = SurfaceStyle::Shaded;
+    builder.build(document, {item}, options, list);
+    // span 10 000 -> 625 -> 1000 m cells; reach 1500: -1500..11500 is
+    // floor(-1.5) = -2 .. ceil(11.5) = 12, 14 cells, 15 lines: 420 again.
+    EXPECT_EQ(list.lines.size(), 420u);
+}
+
+TEST(CadScene, TheGridStandsOnTheLowestSurface)
+{
+    // A surface from 0 to 10 lifted to 250..260: the grid goes under it at
+    // 250, where the ground is, not at a z = 0 two hundred metres below.
+    std::vector<katana::geometry::Point3> vertices = {
+        {0.0, 0.0, 250.0}, {100.0, 0.0, 260.0}, {100.0, 100.0, 260.0}, {0.0, 100.0, 250.0}};
+    auto surface = TinSurface::create(std::move(vertices), {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(surface.ok());
+    SceneSurface item;
+    item.surface = &*surface;
+    item.style = SurfaceStyle::Shaded;
+    Document document;
+    SceneBuilder builder;
+    katana::cad::SceneLayers layers;
+    SceneOptions options;
+    builder.buildTerrain({item}, {}, options, layers);
+    builder.buildEntities(document, {item}, options, layers);
+    builder.buildGrid(options, layers);
+    ASSERT_FALSE(layers.grid.lines.empty());
+    const auto box = layers.grid.bounds();
+    EXPECT_NEAR(box.min.z, 250.0, 1e-9);
+    EXPECT_NEAR(box.max.z, 250.0, 1e-9);
 }
 
 TEST(CadScene, SceneBoundsCoverBothSurfacesAndDrawingGeometry)
@@ -600,4 +658,334 @@ TEST(SceneMeshes, AFaceNamingAVertexThatDoesNotExistIsSkippedRatherThanRead)
     SceneBuilder builder;
     builder.appendMeshes({item}, options, out);
     EXPECT_EQ(out.triangles.size(), 4u) << "the four sound faces, and no fifth";
+}
+
+// ---- heights, draping, ramp, light, edges (docs/render.md, "The scene") ----------------
+
+namespace {
+
+using katana::cad::LineworkHeights;
+using katana::cad::SceneLayers;
+
+// A 3D string from (0, 50) to (100, 50) with its own heights 30 and 40.
+katana::entity::Entity threeDString()
+{
+    katana::entity::Entity entity;
+    katana::geometry::Polyline2 line;
+    line.vertices = {Point2(0.0, 50.0), Point2(100.0, 50.0)};
+    entity.geometry = line;
+    katana::entity::setHeights(entity.properties, {30.0, 40.0});
+    return entity;
+}
+
+// Terrain, drawing, selection and grid as the 3D view builds them.
+SceneLayers layersOf(const Document& document, const std::vector<SceneSurface>& surfaces,
+                     const SceneOptions& options)
+{
+    SceneBuilder builder;
+    SceneLayers layers;
+    builder.buildTerrain(surfaces, {}, options, layers);
+    builder.buildEntities(document, surfaces, options, layers);
+    builder.buildSelection(document, surfaces, options, layers);
+    builder.buildGrid(options, layers);
+    return layers;
+}
+
+// A flat square TIN at height z, 100 x 100 from (x0, y0).
+TinSurface flatAt(double x0, double y0, double z)
+{
+    std::vector<katana::geometry::Point3> vertices = {
+        {x0, y0, z}, {x0 + 100.0, y0, z}, {x0 + 100.0, y0 + 100.0, z}, {x0, y0 + 100.0, z}};
+    auto surface = TinSurface::create(std::move(vertices), {{0, 1, 2}, {0, 2, 3}});
+    EXPECT_TRUE(surface.ok());
+    return surface.ok() ? std::move(*surface) : TinSurface{};
+}
+
+} // namespace
+
+TEST(SceneLinework, AThreeDStringIsDrawnAtItsOwnHeightsEvenOverASurface)
+{
+    // It was drawn at z = 0 whatever its heights, so a road string surveyed
+    // at 30-40 m lay under the surface it was measured on.
+    const TinSurface surface = ramp(); // 0..10 under the string
+    Document document;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({threeDString()})).ok());
+    SceneSurface item;
+    item.surface = &surface;
+    const SceneLayers layers = layersOf(document, {item}, plainOptions());
+    ASSERT_EQ(layers.entities.positions.size(), 2u);
+    EXPECT_EQ(layers.entities.positions[0].z, 30.0);
+    EXPECT_EQ(layers.entities.positions[1].z, 40.0);
+}
+
+TEST(SceneLinework, APlanLineIsDrapedOnTheSurfaceAndBentWhereItCrossesAnEdge)
+{
+    // ramp() is z = x / 10 over two triangles split along the diagonal from
+    // (0, 0) to (100, 100). The line (10, 50)-(90, 50) starts in the upper
+    // triangle at z 1, crosses the diagonal at (50, 50) where z is 5, and
+    // ends in the lower one at z 9: three vertices, two lines. Without the
+    // crossing a straight chord would cut through a ridge or float over a
+    // valley of a real TIN.
+    const TinSurface surface = ramp();
+    Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(10.0, 50.0), Point2(90.0, 50.0)))
+            .ok());
+    SceneSurface item;
+    item.surface = &surface;
+    const SceneLayers layers = layersOf(document, {item}, plainOptions());
+    ASSERT_EQ(layers.entities.positions.size(), 3u);
+    ASSERT_EQ(layers.entities.lines.size(), 2u);
+    EXPECT_NEAR(layers.entities.positions[0].z, 1.0, 1e-9);
+    EXPECT_NEAR(layers.entities.positions[1].x, 50.0, 1e-9);
+    EXPECT_NEAR(layers.entities.positions[1].z, 5.0, 1e-9);
+    EXPECT_NEAR(layers.entities.positions[2].z, 9.0, 1e-9);
+}
+
+TEST(SceneLinework, LineworkOffEverySurfaceGoesOnTheDatumOfTheLowestOne)
+{
+    // Two surfaces at 250 and 270; a line nowhere over either has nothing to
+    // drape on and no heights, so it goes on the datum: the lower, 250 - not
+    // on z = 0, 250 m under everything.
+    const TinSurface low = flatAt(0.0, 0.0, 250.0);
+    const TinSurface high = flatAt(200.0, 0.0, 270.0);
+    Document document;
+    ASSERT_TRUE(document
+                    .execute(katana::commands::createLine(Point2(-500.0, -500.0),
+                                                          Point2(-400.0, -450.0)))
+                    .ok());
+    SceneSurface a;
+    a.surface = &low;
+    SceneSurface b;
+    b.surface = &high;
+    const SceneLayers layers = layersOf(document, {a, b}, plainOptions());
+    ASSERT_EQ(layers.entities.positions.size(), 2u);
+    EXPECT_EQ(layers.entities.positions[0].z, 250.0);
+    EXPECT_EQ(layers.entities.positions[1].z, 250.0);
+    EXPECT_EQ(layers.datum, 250.0);
+}
+
+TEST(SceneLinework, WithNoSurfaceLineworkWithoutHeightsGoesAtTheLowestHeightDrawn)
+{
+    // No terrain: the datum is the lowest height any entity carries, 30
+    // (threeDString), so a plan line sits with the survey rather than 30 m
+    // below it at 0.
+    Document document;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({threeDString()})).ok());
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(10.0, 0.0))).ok());
+    const SceneLayers layers = layersOf(document, {}, plainOptions());
+    ASSERT_EQ(layers.entities.positions.size(), 4u);
+    EXPECT_EQ(layers.entities.positions[2].z, 30.0);
+    EXPECT_EQ(layers.entities.positions[3].z, 30.0);
+}
+
+TEST(SceneLinework, TheModeDecidesBetweenHeightsDrapeAndDatum)
+{
+    // The 3D string (heights 30, 40) over ramp(): z = x / 10, so 0 under
+    // its start at x 0 and 10 under its end at x 100.
+    const TinSurface surface = ramp();
+    Document document;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({threeDString()})).ok());
+    SceneSurface item;
+    item.surface = &surface;
+    SceneOptions options = plainOptions();
+
+    options.linework = LineworkHeights::Drape; // heights ignored: on the surface
+    SceneLayers layers = layersOf(document, {item}, options);
+    ASSERT_GE(layers.entities.positions.size(), 2u);
+    EXPECT_NEAR(layers.entities.positions.front().z, 0.0, 1e-9);
+    EXPECT_NEAR(layers.entities.positions.back().z, 10.0, 1e-9);
+
+    options.linework = LineworkHeights::Datum; // flat on the lowest surface, 0
+    layers = layersOf(document, {item}, options);
+    ASSERT_EQ(layers.entities.positions.size(), 2u);
+    EXPECT_EQ(layers.entities.positions[0].z, 0.0);
+    EXPECT_EQ(layers.entities.positions[1].z, 0.0);
+
+    options.linework = LineworkHeights::Heights;
+    layers = layersOf(document, {item}, options);
+    ASSERT_EQ(layers.entities.positions.size(), 2u);
+    EXPECT_EQ(layers.entities.positions[0].z, 30.0);
+    EXPECT_EQ(layers.entities.positions[1].z, 40.0);
+}
+
+TEST(SceneLinework, SceneBoundsReachTheHeightsTheLineworkIsDrawnAt)
+{
+    // Framing uses sceneBounds; it must see the string at 30..40 above a
+    // surface of 0..10, or zoom-extents cuts the string's top off.
+    const TinSurface surface = ramp();
+    Document document;
+    ASSERT_TRUE(document.execute(katana::commands::createEntities({threeDString()})).ok());
+    SceneSurface item;
+    item.surface = &surface;
+    const auto box = katana::cad::sceneBounds(document, {item}, plainOptions());
+    EXPECT_EQ(box.min.z, 0.0);
+    EXPECT_EQ(box.max.z, 40.0);
+    // A 3D LINE - a Segment2 with two heights - is read by vertex as well.
+    Document lines;
+    katana::entity::Entity segment;
+    segment.geometry = katana::geometry::Segment2{Point2(0.0, 0.0), Point2(10.0, 0.0)};
+    katana::entity::setHeights(segment.properties, {12.0, 55.0});
+    ASSERT_TRUE(lines.execute(katana::commands::createEntities({segment})).ok());
+    const auto lineBox = katana::cad::sceneBounds(lines, {item}, plainOptions());
+    EXPECT_EQ(lineBox.max.z, 55.0);
+}
+
+TEST(SceneSurfaces, OneElevationRampColoursEveryVisibleSurfaceAlike)
+{
+    // Two surfaces, 0 to 10 high and 10 to 20 high: one ramp from 0 to 20,
+    // so the height 10 both have is ONE colour, the ramp's middle, and each
+    // surface is not its own blue-to-white. Light off, so the colours are
+    // the ramp's own.
+    std::vector<katana::geometry::Point3> lowVertices = {
+        {0.0, 0.0, 0.0}, {100.0, 0.0, 10.0}, {100.0, 100.0, 10.0}, {0.0, 100.0, 0.0}};
+    auto low = TinSurface::create(std::move(lowVertices), {{0, 1, 2}, {0, 2, 3}});
+    std::vector<katana::geometry::Point3> highVertices = {
+        {0.0, 200.0, 10.0}, {100.0, 200.0, 20.0}, {100.0, 300.0, 20.0}, {0.0, 300.0, 10.0}};
+    auto high = TinSurface::create(std::move(highVertices), {{0, 1, 2}, {0, 2, 3}});
+    ASSERT_TRUE(low.ok());
+    ASSERT_TRUE(high.ok());
+    SceneSurface a;
+    a.surface = &*low;
+    a.style = SurfaceStyle::Shaded;
+    SceneSurface b = a;
+    b.surface = &*high;
+    SceneOptions options = plainOptions();
+    options.lightDirection = katana::render::Vec3(0.0, 0.0, 0.0); // off
+    SceneBuilder builder;
+    DrawList list;
+    builder.appendSurfaces({a, b}, options, list);
+    ASSERT_EQ(list.positions.size(), 8u);
+    const auto colourAt = [&list](double y, double z) {
+        for (std::size_t i = 0; i < list.positions.size(); ++i) {
+            if (list.positions[i].y == y && list.positions[i].z == z) {
+                return list.colors[i];
+            }
+        }
+        ADD_FAILURE() << "no vertex at y " << y << " z " << z;
+        return katana::render::Rgba{};
+    };
+    EXPECT_EQ(colourAt(0.0, 0.0), katana::cad::elevationRampColor(0.0));
+    EXPECT_EQ(colourAt(0.0, 10.0), katana::cad::elevationRampColor(0.5));
+    EXPECT_EQ(colourAt(200.0, 10.0), katana::cad::elevationRampColor(0.5));
+    EXPECT_EQ(colourAt(200.0, 20.0), katana::cad::elevationRampColor(1.0));
+
+    SceneLayers layers;
+    builder.buildTerrain({a, b}, {}, options, layers);
+    EXPECT_EQ(layers.rampLow, 0.0);
+    EXPECT_EQ(layers.rampHigh, 20.0);
+}
+
+TEST(SceneMeshes, AWallTurnedAwayFromTheSunIsDarkerThanOneFacingIt)
+{
+    // One vertical wall on the line x = y, drawn twice: wound a, b, c its
+    // normal (b - a) x (c - a) = (10, 10, 0) x (0, 0, 5) = (50, -50, 0)
+    // faces south-east, away from the default sun (-0.5, 0.5, 0.707);
+    // wound a, c, b it faces north-west, towards it. The old abs() lit both
+    // alike. From SceneOptions' constants:
+    //   hemisphere for a level normal (z = 0): 0.10 + (0.30 - 0.10) * 0.5 = 0.20
+    //   facing:  n . sun = (0.5 + 0.5) / sqrt 2 = 0.7071, so 0.20 + 0.80 * 0.7071
+    //   away:    n . sun < 0 adds nothing: 0.20
+    katana::geometry::TriangleMesh mesh;
+    mesh.vertices = {katana::geometry::Point3(0, 0, 0), katana::geometry::Point3(10, 10, 0),
+                     katana::geometry::Point3(0, 0, 5)};
+    mesh.faces = {{0, 1, 2}, {0, 2, 1}};
+    katana::cad::SceneMesh item;
+    item.mesh = &mesh;
+    const katana::render::Rgba base = katana::render::rgba(200, 200, 200);
+    item.flatColor = base;
+    SceneBuilder builder;
+    DrawList list;
+    builder.appendMeshes({item}, plainOptions(), list);
+    ASSERT_EQ(list.triangles.size(), 2u);
+    EXPECT_EQ(list.colors[list.triangles[0].a], katana::render::shade(base, 0.20));
+    EXPECT_EQ(list.colors[list.triangles[1].a],
+              katana::render::shade(base, 0.20 + 0.80 * std::sqrt(0.5)));
+}
+
+TEST(SceneSurfaces, ADenseSurfaceIsDrawnWithoutEdgesByDefaultAndASparseOneWithThem)
+{
+    // Automatic: edges up to kDenseSurfaceTriangles, none above. 160 x 160
+    // vertices make 2 * 159 * 159 = 50 562 triangles, past the 50 000.
+    std::vector<katana::geometry::Point3> vertices;
+    std::vector<katana::terrain::TinTriangle> triangles;
+    constexpr std::uint32_t n = 160;
+    for (std::uint32_t j = 0; j < n; ++j) {
+        for (std::uint32_t i = 0; i < n; ++i) {
+            vertices.emplace_back(static_cast<double>(i), static_cast<double>(j),
+                                  0.01 * static_cast<double>((i * 7 + j * 3) % 11));
+        }
+    }
+    for (std::uint32_t j = 0; j + 1 < n; ++j) {
+        for (std::uint32_t i = 0; i + 1 < n; ++i) {
+            const std::uint32_t v = j * n + i;
+            triangles.push_back({v, v + 1, v + n + 1});
+            triangles.push_back({v, v + n + 1, v + n});
+        }
+    }
+    auto dense = TinSurface::create(std::move(vertices), std::move(triangles));
+    ASSERT_TRUE(dense.ok());
+    ASSERT_GT(dense->triangleCount(), katana::cad::kDenseSurfaceTriangles);
+    const TinSurface sparse = ramp();
+    const Document document;
+
+    SceneSurface item; // style Automatic, the default
+    item.surface = &*dense;
+    SceneLayers layers = layersOf(document, {item}, plainOptions());
+    EXPECT_TRUE(layers.edges.lines.empty());
+    EXPECT_EQ(layers.terrain.triangles.size(), dense->triangleCount());
+
+    item.surface = &sparse;
+    layers = layersOf(document, {item}, plainOptions());
+    EXPECT_EQ(layers.edges.lines.size(), 5u) << "3 + 3 - 1 shared: every edge once";
+}
+
+TEST(SceneSurfaces, EdgesFadeAwayAsTheTrianglesShrinkOnScreen)
+{
+    // ramp(): two triangles of 5000 m2 each, so the typical edge is the side
+    // of an equilateral triangle of that area: sqrt(5000 * 4 / sqrt 3)
+    // = 107.5 m. Seen at 2 px to that edge (under 4) the edges are gone;
+    // at 50 px (over 12) they are at full strength, the ink colour.
+    const TinSurface surface = ramp();
+    SceneSurface item;
+    item.surface = &surface;
+    item.style = SurfaceStyle::ShadedWithEdges;
+    const Document document;
+    SceneLayers layers = layersOf(document, {item}, plainOptions());
+    ASSERT_EQ(layers.edgeRuns.size(), 1u);
+    EXPECT_NEAR(layers.edgeRuns[0].typicalEdge, std::sqrt(5000.0 * 4.0 / std::sqrt(3.0)), 1e-9);
+
+    katana::render::Camera camera;
+    camera.setViewportSize(500, 500);
+    camera.setProjection(katana::render::Projection::Orthographic);
+    const double edge = layers.edgeRuns[0].typicalEdge;
+    camera.setOrthographicHeight(edge / 2.0 * 500.0); // 2 px per edge
+    EXPECT_FALSE(SceneBuilder::fadeEdges(layers, camera));
+    for (std::size_t i = 0; i < layers.edges.colors.size(); ++i) {
+        EXPECT_EQ(layers.edges.colors[i], layers.edgeBase[i]);
+    }
+    camera.setOrthographicHeight(edge / 50.0 * 500.0); // 50 px per edge
+    EXPECT_TRUE(SceneBuilder::fadeEdges(layers, camera));
+    for (std::size_t i = 0; i < layers.edges.colors.size(); ++i) {
+        EXPECT_EQ(layers.edges.colors[i], layers.edgeInk[i]);
+    }
+}
+
+TEST(SceneLayersBuild, TheSelectionOverlayHoldsOnlyTheSelectedEntities)
+{
+    Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0.0, 0.0), Point2(10.0, 0.0))).ok());
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0.0, 5.0), Point2(10.0, 5.0))).ok());
+    document.selection().add(document.model().entities.ids().back());
+    const SceneOptions options = plainOptions();
+    const SceneLayers layers = layersOf(document, {}, options);
+    EXPECT_EQ(layers.entities.lines.size(), 2u) << "the drawing, as drawn";
+    ASSERT_EQ(layers.selection.lines.size(), 1u);
+    EXPECT_EQ(layers.selection.colors.front(), options.selectionColor);
+    EXPECT_EQ(layers.selection.positions.front().y, 5.0);
+    EXPECT_GT(layers.selection.lines.front().depthBias, layers.entities.lines.front().depthBias)
+        << "the overlay must win the tie with the entity's own first drawing";
 }
