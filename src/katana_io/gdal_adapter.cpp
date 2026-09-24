@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <system_error>
 #include <vector>
 
@@ -445,6 +447,33 @@ BandRoles classifyBands(GDALDataset& dataset)
     }
     return roles;
 }
+
+// A GDAL configuration option set for this thread only, until the guard goes,
+// and then put back as it was. Thread-local so that an export does not change
+// how another thread's GDAL call behaves, and restored so that it does not
+// change how the next one on this thread does.
+class ScopedThreadConfig {
+  public:
+    ScopedThreadConfig(const char* key, const char* value) : key_(key)
+    {
+        if (const char* previous = CPLGetThreadLocalConfigOption(key, nullptr)) {
+            previous_ = previous;
+            hadPrevious_ = true;
+        }
+        CPLSetThreadLocalConfigOption(key, value);
+    }
+    ~ScopedThreadConfig()
+    {
+        CPLSetThreadLocalConfigOption(key_, hadPrevious_ ? previous_.c_str() : nullptr);
+    }
+    ScopedThreadConfig(const ScopedThreadConfig&) = delete;
+    ScopedThreadConfig& operator=(const ScopedThreadConfig&) = delete;
+
+  private:
+    const char* key_;
+    std::string previous_;
+    bool hadPrevious_ = false;
+};
 
 } // namespace
 
@@ -1031,6 +1060,17 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         referencePtr = &reference;
     }
 
+    // GDAL's DXF writer turns every polygon into a HATCH with a SOLID fill
+    // unless told otherwise, so a closed polyline or a circle - which the
+    // exporter hands over as a polygon, the right thing for a GeoPackage or a
+    // shapefile - opened in a CAD program as a filled solid: every parcel of
+    // a drawing handed to a client was a black shape. With the hatch off, the
+    // same driver writes each ring as an LWPOLYLINE with its closed flag set.
+    std::optional<ScopedThreadConfig> outlineNotHatch;
+    if (driverName == "DXF") {
+        outlineNotHatch.emplace("DXF_WRITE_HATCH", "NO");
+    }
+
     // Most drivers refuse to overwrite. Remove an existing file first so that
     // re-exporting to the same name behaves the way a user expects a Save As to.
     std::error_code removeError;
@@ -1118,6 +1158,31 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         }
     }
 
+    // Every feature in ONE transaction, where the format has them. A
+    // GeoPackage is SQLite, and SQLite commits - and so syncs the file to disk
+    // - once per transaction; given none, every feature was a transaction of
+    // its own, and the owner's 27,886-entity corridor drawing took 67 s to
+    // export where ogr2ogr, batching, took 3.2 s for the same features. Not
+    // forced: a driver without real transactions (a shapefile) would emulate
+    // one by copying the whole file, which is the opposite of the point.
+    bool inTransaction = false;
+    if (dataset->TestCapability(ODsCTransactions) != 0) {
+        if (dataset->StartTransaction(FALSE) != OGRERR_NONE) {
+            return abandon(dataset,
+                           makeError(ErrorCode::FileExportFailure,
+                                     "GDAL could not start a transaction", lastGdalError()));
+        }
+        inTransaction = true;
+    }
+    // A failure part-way leaves nothing: the transaction is rolled back and
+    // then the file is deleted, as a failure outside one always was.
+    const auto abandonFeatures = [&](Error error) {
+        if (inTransaction) {
+            (void)dataset->RollbackTransaction();
+        }
+        return abandon(dataset, std::move(error));
+    };
+
     for (const VectorFeature& source : features) {
         OGRGeometry* geometry = makeGeometry(source.geometry);
         if (geometry == nullptr) {
@@ -1136,13 +1201,21 @@ Status GdalDataset::writeVector(const std::filesystem::path& path,
         const OGRErr status = layer->CreateFeature(feature);
         OGRFeature::DestroyFeature(feature);
         if (status != OGRERR_NONE) {
-            return abandon(dataset, makeError(ErrorCode::FileExportFailure,
-                                              "GDAL could not write a feature", lastGdalError()));
+            return abandonFeatures(makeError(ErrorCode::FileExportFailure,
+                                             "GDAL could not write a feature", lastGdalError()));
         }
     }
+    // Where the features reach the file: a full disk shows here.
+    if (inTransaction && dataset->CommitTransaction() != OGRERR_NONE) {
+        inTransaction = false; // a failed commit has already ended it
+        return abandonFeatures(makeError(
+            ErrorCode::FileExportFailure,
+            "GDAL could not commit the features to '" + path.string() + "'", lastGdalError()));
+    }
 
-    // A GeoPackage commits its transaction and a shapefile flushes its .dbf
-    // here, so this is where a full disk shows (audit IO-14). GDAL reports it
+    // A shapefile flushes its .dbf here, and a GeoPackage writes its last
+    // metadata (the extent, the spatial index), so a full disk can show here
+    // as well as at the commit above (audit IO-14). GDAL reports it
     // through the return value since 3.7; it used to be ignored and the
     // export reported success over a truncated file.
     if (GDALClose(dataset) != CE_None) {
