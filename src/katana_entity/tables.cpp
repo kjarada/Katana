@@ -72,6 +72,7 @@ void LayerDatabase::reset()
     layers_.clear();
     layers_.emplace(std::string(kDefaultLayerName), Node{Layer{}});
     refreshSubtree(kDefaultLayerName);
+    ++revision_;
 }
 
 // Everything under `name` is exactly the keys beginning "name/", and those are
@@ -190,6 +191,7 @@ Status LayerDatabase::add(Layer layer)
     // and refreshing from the root of the path covers both.
     refreshSubtree(ancestors.empty() ? std::string_view(name)
                                      : std::string_view(ancestors.front()));
+    ++revision_;
     return {};
 }
 
@@ -201,6 +203,7 @@ Status LayerDatabase::update(const Layer& layer)
     const auto found = layers_.find(layer.name);
     found->second.layer = layer;
     refreshSubtree(layer.name);
+    ++revision_;
     return {};
 }
 
@@ -212,6 +215,7 @@ Result<Layer> LayerDatabase::remove(std::string_view name)
     const auto found = layers_.find(name);
     Layer removed = std::move(found->second.layer);
     layers_.erase(found);
+    ++revision_;
     return removed; // a leaf: nothing inherited from it
 }
 
@@ -344,6 +348,7 @@ Result<std::vector<Layer>> LayerDatabase::removeSubtree(std::string_view name)
         removed.push_back(found->second.layer);
         layers_.erase(found);
     }
+    ++revision_;
     return removed; // a whole branch: nothing left inherits from it
 }
 
@@ -420,6 +425,7 @@ LayerDatabase::renameSubtree(std::string_view from, std::string_view to)
     // The moved branch inherits from its new parents now, some perhaps just
     // created: refresh from the topmost of them.
     refreshSubtree(newAncestors.empty() ? to : std::string_view(newAncestors.front()));
+    ++revision_;
     return mapping;
 }
 
@@ -880,6 +886,7 @@ Status PropertyDatabase::define(PropertyDefinition definition)
     }
     std::string name = definition.name;
     definitions_.emplace(std::move(name), std::move(definition));
+    ++revision_;
     return {};
 }
 
@@ -891,6 +898,7 @@ Result<PropertyDefinition> PropertyDatabase::undefine(std::string_view name)
     }
     PropertyDefinition removed = std::move(found->second);
     definitions_.erase(found);
+    ++revision_;
     return removed;
 }
 

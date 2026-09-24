@@ -9,11 +9,12 @@
 //
 // Threading: single-threaded, owned by the application's main thread.
 
-#include <filesystem>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -30,9 +31,90 @@
 
 namespace katana::cad {
 
+// What one Document notification is about.
+//
+// A listener that only learns "something changed" must assume everything
+// did: the 3D view rebuilt its whole scene - 217-768 ms on a real TIN
+// archive - for a selection click, and every plan view repainted the drawing
+// for it. So each notification says which parts moved, and a listener
+// rebuilds only what is built from them.
+//
+// The parts are bits because one notification can carry several: a command
+// that deletes selected entities changes the entities AND the selection, an
+// import creates layers and styles AND entities. Ask has(mask) with every
+// part the listener depends on rather than comparing `parts` for equality:
+// a listener written for today's parts then keeps working when a later
+// change carries one more alongside.
+struct DocumentChange {
+    enum Part : std::uint32_t {
+        // Entities added, modified or removed; `entities` lists which.
+        Entities = 1u << 0,
+        // The selection set. Alone (selectionOnly()) it is a click: nothing
+        // the drawing or a scene is built from has changed, only what is
+        // highlighted.
+        Selection = 1u << 1,
+        // One bit per model table. A command sets the bit of every table it
+        // changed, found by comparing the tables' revisions before and after.
+        Layers = 1u << 2,
+        Styles = 1u << 3,
+        Linetypes = 1u << 4,
+        DimensionStyles = 1u << 5,
+        HatchPatterns = 1u << 6,
+        Alignments = 1u << 7,
+        PropertyDefinitions = 1u << 8,
+        // The current layer or style new work is drawn in.
+        CurrentAttributes = 1u << 9,
+        // The undo history moved: every command executed, undone or redone.
+        History = 1u << 10,
+        // Saved, or saved somewhere else: the modified flag and the project
+        // path may read differently now.
+        Saved = 1u << 11,
+        // The project metadata (setMetadata, or the name saveAs gives it).
+        Metadata = 1u << 12,
+        // The customisation the drawing is looked at through: the library
+        // linestyles and symbols, and the survey code rules. Not part of the
+        // model; see Document::styleLibrary.
+        StyleLibrary = 1u << 13,
+        SurveyMap = 1u << 14,
+        // A new or opened drawing: the model, history, selection, current
+        // attributes and metadata are all different. Set together with every
+        // one of those bits, so a listener that tests has(Entities) rebuilds
+        // on an open without having to know this bit exists. Not with the
+        // customisation bits: the customisation is kept across a new or an
+        // open.
+        Replaced = 1u << 15,
+    };
+
+    // Every table bit.
+    static constexpr std::uint32_t kTables = Layers | Styles | Linetypes | DimensionStyles |
+                                             HatchPatterns | Alignments | PropertyDefinitions;
+    // What a drawing is DRAWN from - its entities, the tables that say how
+    // they look, the customisation - as against what is only highlighted
+    // (the selection) or only bookkeeping (history, saved, metadata).
+    static constexpr std::uint32_t kDrawing = Entities | kTables | StyleLibrary | SurveyMap;
+
+    std::uint32_t parts = 0;
+    // The entity-level detail of a command, undo or redo, in the order the
+    // model reported it; empty for anything else. A Replaced drawing does not
+    // list its entities: every one of them changed. Valid only for the
+    // duration of the call - copy what must outlive it.
+    std::span<const katana::entity::ChangeEvent> entities{};
+
+    [[nodiscard]] constexpr bool has(std::uint32_t mask) const { return (parts & mask) != 0; }
+    // Only the selection changed.
+    [[nodiscard]] constexpr bool selectionOnly() const { return parts == Selection; }
+    // Something the drawing is drawn from changed (kDrawing).
+    [[nodiscard]] constexpr bool changesDrawing() const { return has(kDrawing); }
+};
+
 class Document {
   public:
+    // A listener told only that something changed, kept for the callers that
+    // redraw whatever happens. A listener that can skip work takes a
+    // ChangeListener instead.
     using Listener = std::function<void()>;
+    // A listener told what changed.
+    using ChangeListener = std::function<void(const DocumentChange&)>;
 
     // Owns a registration made by addListener and ends it when destroyed.
     //
@@ -117,8 +199,10 @@ class Document {
 
     // Broad-phase index over the entities, kept in step with the model
     // (PLAN.MD Phase 18). Maintained incrementally from the per-entity changes
-    // every command reports, and rebuilt whole whenever the model is replaced -
-    // a rebuild is what chooses the cell size from the data.
+    // an ordinary command reports, and rebuilt whole - which is what chooses
+    // the cell size from the data - when the model is replaced and when a
+    // command is a BULK change (applyToSpatialIndex has the rule), so that an
+    // import leaves the same index as opening the saved result would.
     //
     // Pass it to snap(), pickEntity() and pickInBox(). They give the same
     // answer without it, only slower, so a caller that has no Document loses
@@ -184,16 +268,28 @@ class Document {
     // layer, project. Listeners must not mutate the document re-entrantly.
     // The registration lasts as long as the handle does - keep it as a member
     // of the object the listener captures, declared so that it dies first.
+    //
+    // Both kinds are called for every notification, in the order they were
+    // added. A ChangeListener is told what changed; a Listener is not, and
+    // so has to treat every call as a change to everything.
     [[nodiscard]] ListenerHandle addListener(Listener listener);
+    [[nodiscard]] ListenerHandle addListener(ChangeListener listener);
 
   private:
     void rebuildStack();
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();
-    // Incremental maintenance from the changes one command reported.
+    // The index after one command: incremental for an ordinary edit, a
+    // whole rebuild for a bulk one.
     void applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent>& changes);
-    void pruneSelection();
-    void notify();
+    // The DocumentChange table bits of every table whose revision moved
+    // since the last call (or rememberTables), and remembers the new ones.
+    [[nodiscard]] std::uint32_t tablesChanged();
+    void rememberTables();
+    // True when it removed anything from the selection.
+    bool pruneSelection();
+    void notify(const DocumentChange& change);
+    void notify(std::uint32_t parts) { notify(DocumentChange{.parts = parts}); }
 
     katana::core::Logger* logger_ = nullptr;
     katana::entity::Model model_;
@@ -203,6 +299,21 @@ class Document {
     std::uint64_t surveyMapGeneration_ = 0;
     std::uint64_t modelRevision_ = 0;
     katana::geometry::SpatialIndex index_;
+    // How many entities the model held when the index last chose its cell
+    // size (its last rebuild). 0 until the first rebuild: an index that has
+    // never been rebuilt is on the default cell, which was chosen for no data.
+    std::size_t indexChosenFor_ = 0;
+    // Each table's revision when tablesChanged() last looked.
+    struct TableRevisions {
+        std::uint64_t layers = 0;
+        std::uint64_t styles = 0;
+        std::uint64_t linetypes = 0;
+        std::uint64_t dimensionStyles = 0;
+        std::uint64_t hatchPatterns = 0;
+        std::uint64_t alignments = 0;
+        std::uint64_t properties = 0;
+    };
+    TableRevisions tablesSeen_{};
     std::unique_ptr<katana::commands::CommandStack> stack_;
     std::unique_ptr<katana::storage::ProjectStore> store_;
     katana::storage::ProjectMetadata metadata_;
