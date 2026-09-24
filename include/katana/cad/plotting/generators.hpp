@@ -109,10 +109,15 @@ crossSectionSheets(const geometry::SolvedAlignment& alignment, const std::string
                    const CrossSectionRequest& request);
 
 // One sheet per imported plot frame in `model` - a closed polyline carrying
-// plot_frame.width, .height, .scale, .rotation, .xorigin, .yorigin and the four
-// margins - showing exactly the ground the frame covered, on the ISO paper its
-// size is (within 2 mm), with the frame's own layer hidden in the viewport.
-// Frames that cannot be read are skipped and described in `skipped`.
+// plot_frame.width, .height, .scale and the four margins - showing exactly
+// the ground inside the frame's margins, on the ISO paper its size is (within
+// 2 mm), with the frame's own layer hidden in the viewport. Where the paper
+// lies and which way it is turned come from the outline itself (its first
+// corner and first edge), so a frame imported with an origin shift, or moved
+// or rotated since, is plotted where it is drawn; the file's .xorigin,
+// .yorigin and .rotation are not used. Frames that cannot be read - no ISO
+// size, no scale, an outline that is no longer four corners - are skipped and
+// described in `skipped`.
 [[nodiscard]] core::Result<std::vector<Sheet>>
 sheetsFromPlotFrames(const entity::Model& model, const SheetTemplate& paper = {},
                      std::vector<std::string>* skipped = nullptr);
@@ -137,8 +142,11 @@ struct LayoutRequest {
 //     chainages below at the same horizontal scale;
 //   - a plan of an area: one sheet at the fitted scale ("auto"), or at a
 //     fixed scale, tiles when the area does not fit one sheet at it;
-//   - the 3D snapshot and legend beside a lone plan (MainRight, MainTwoRight),
-//     or on a sheet of their own when the first sheet is full;
+//   - the 3D snapshot and legend beside the plan (MainRight, MainTwoRight)
+//     when a plan of an area or one strip along the alignment is the only
+//     plan and, made for that narrower cell, still shows all of it - an
+//     automatic scale is fitted to the cell, a fixed one must hold it -
+//     otherwise on a sheet of their own after the plan;
 //   - cross sections on sheets of their own after the rest.
 // "auto" fits everything on as few sheets as it can: an area or an alignment
 // on one sheet. NotFound for an alignment the model does not have;
@@ -146,10 +154,11 @@ struct LayoutRequest {
 [[nodiscard]] core::Result<std::vector<Sheet>> smartLayout(const entity::Model& model,
                                                            const LayoutRequest& request);
 
-// Numbers every viewport of `sheets` with ids not used in `set`, and fixes the
-// key plans' and match lines' sheet references to where `sheets` will sit when
-// appended to `set`. Generators number from zero; this is how their output
-// joins a set that already has sheets.
+// Gives every sheet and viewport of `sheets` a new id (newSheetIds,
+// newViewportIds - never one `set` uses or one of its marks still names), and
+// moves the key plans' and match lines' references among `sheets` to their
+// new ids. Generators number from one; this is how their output joins a set
+// that already has sheets.
 void prepareForAppend(const SheetSet& set, std::vector<Sheet>& sheets);
 
 } // namespace katana::cad::plotting

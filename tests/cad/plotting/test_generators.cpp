@@ -422,6 +422,53 @@ TEST(SheetGenerators, TheExaggerationIsTheLargestThatFitsTheDeepestSection)
     }
 }
 
+TEST(SheetGenerators, CrossSectionsOnACurveAreCutAtTheirTrueChainageToTheVeryEnd)
+{
+    // East 300 m, a 100 m radius curve, north 300 m. The turn is 90 degrees,
+    // so each tangent is 100 tan 45 = 100 m and the curve 100 pi / 2 =
+    // 157.0796326794897 m: the road ends at CH 200 + 157.0796326794897 +
+    // 200 = 557.0796326794897. Drawn in chords the curve is a little
+    // shorter; a chainage is still the road's, not the chords'.
+    const auto road = alignmentThrough(
+        {{Point2(0.0, 0.0)}, {Point2(300.0, 0.0), 100.0}, {Point2(300.0, 300.0)}});
+    ASSERT_TRUE(road.ok()) << road.error().describe();
+    ASSERT_NEAR(road->endStation(), 557.0796326794897, 1e-9);
+
+    // The end chainage given as a station is cut there.
+    CrossSectionRequest request;
+    request.stations = {0.0, 100.0, road->endStation()};
+    const auto given = crossSectionSheets(*road, "ROAD", request);
+    ASSERT_TRUE(given.ok()) << given.error().describe();
+    ASSERT_EQ(given->front().viewports.size(), 3u);
+    EXPECT_EQ(given->front().viewports[2].source.stations[0], road->endStation());
+
+    // Every 100 m: CH 0, 100 ... 500 and the end, seven sections; the last
+    // is at the end chainage and titled with it, rounded to 557.080.
+    request.stations.clear();
+    request.interval = 100.0;
+    const auto every = crossSectionSheets(*road, "ROAD", request);
+    ASSERT_TRUE(every.ok()) << every.error().describe();
+    std::vector<double> chainages;
+    const Viewport* last = nullptr;
+    for (const Sheet& sheet : *every) {
+        for (const Viewport& section : sheet.viewports) {
+            chainages.push_back(section.source.stations.at(0));
+            last = &section;
+        }
+    }
+    ASSERT_EQ(chainages.size(), 7u);
+    for (std::size_t i = 0; i < 6; ++i) {
+        EXPECT_NEAR(chainages[i], 100.0 * static_cast<double>(i), 1e-9);
+    }
+    EXPECT_NEAR(chainages[6], 557.0796326794897, 1e-9);
+    EXPECT_EQ(automaticTitle(*last), "CROSS SECTION CH 557.080");
+
+    // A chainage past the end is still refused.
+    request.stations = {600.0};
+    EXPECT_EQ(crossSectionSheets(*road, "ROAD", request).error().code,
+              ErrorCode::InvalidArgument);
+}
+
 TEST(SheetGenerators, CrossSectionsRefuseAnEmptyGridOrNoWidth)
 {
     const auto road = alignmentThrough({{Point2(0.0, 0.0)}, {Point2(100.0, 0.0)}});
@@ -440,32 +487,62 @@ TEST(SheetGenerators, CrossSectionsRefuseAnEmptyGridOrNoWidth)
 
 namespace {
 
-katana::entity::Entity frameEntity(double width, double height, double scale, double rotation,
-                                   Point2 origin, std::array<double, 4> margins,
+// What a plot_frame string in a .12da file says: its paper, scale, rotation
+// (degrees), origin and margins (left, right, top, bottom).
+struct FrameFields {
+    double width = 420.0;
+    double height = 297.0;
+    double scale = 1000.0;
+    double rotation = 0.0;
+    Point2 origin{};
+    std::array<double, 4> margins{};
+};
+
+// A plot frame entity with `outline` as its geometry and `fields` copied into
+// its plot_frame.* properties, as the importer copies them.
+katana::entity::Entity frameEntity(const FrameFields& fields, std::vector<Point2> outline,
                                    std::string layer, std::string name)
 {
     katana::entity::Entity entity;
-    katana::geometry::Polyline2 outline;
-    outline.closed = true;
-    outline.vertices = {origin, origin + katana::geometry::Vec2(1.0, 0.0),
-                        origin + katana::geometry::Vec2(1.0, 1.0)};
-    entity.geometry = outline;
+    katana::geometry::Polyline2 polyline;
+    polyline.closed = true;
+    polyline.vertices = std::move(outline);
+    entity.geometry = polyline;
     entity.layer = std::move(layer);
     auto& p = entity.properties;
-    p["plot_frame.width"] = width;
-    p["plot_frame.height"] = height;
-    p["plot_frame.scale"] = scale;
-    p["plot_frame.rotation"] = rotation;
-    p["plot_frame.xorigin"] = origin.x;
-    p["plot_frame.yorigin"] = origin.y;
-    p["plot_frame.left_margin"] = margins[0];
-    p["plot_frame.right_margin"] = margins[1];
-    p["plot_frame.top_margin"] = margins[2];
-    p["plot_frame.bottom_margin"] = margins[3];
+    p["plot_frame.width"] = fields.width;
+    p["plot_frame.height"] = fields.height;
+    p["plot_frame.scale"] = fields.scale;
+    p["plot_frame.rotation"] = fields.rotation;
+    p["plot_frame.xorigin"] = fields.origin.x;
+    p["plot_frame.yorigin"] = fields.origin.y;
+    p["plot_frame.left_margin"] = fields.margins[0];
+    p["plot_frame.right_margin"] = fields.margins[1];
+    p["plot_frame.top_margin"] = fields.margins[2];
+    p["plot_frame.bottom_margin"] = fields.margins[3];
     if (!name.empty()) {
         entity.metadata["12d.name"] = std::move(name);
     }
     return entity;
+}
+
+// The frame as the archive importer draws it (domain_import.cpp, PlotFrame):
+// the paper on the ground from its origin less the import's origin shift,
+// width along the rotation, height up from it - while the properties keep
+// the file's origin as it was.
+katana::entity::Entity importedFrame(const FrameFields& fields, std::string layer,
+                                     std::string name,
+                                     katana::geometry::Vec2 originShift = {})
+{
+    const double rotation = fields.rotation * std::numbers::pi / 180.0;
+    const katana::geometry::Vec2 along(std::cos(rotation), std::sin(rotation));
+    const katana::geometry::Vec2 up(-along.y, along.x);
+    const double w = fields.width * fields.scale / 1000.0;
+    const double h = fields.height * fields.scale / 1000.0;
+    const Point2 corner = fields.origin - originShift;
+    return frameEntity(fields,
+                       {corner, corner + along * w, corner + along * w + up * h, corner + up * h},
+                       std::move(layer), std::move(name));
 }
 
 } // namespace
@@ -476,19 +553,22 @@ TEST(SheetGenerators, AnImportedPlotFrameBecomesASheetShowingTheGroundItCovered)
     // An A3 frame at 1 : 1000, rotated 30 degrees, its paper's corner at
     // (1000, 2000), with the built-in frame's own margins (L23 R10 T10 B35).
     ASSERT_TRUE(model.entities
-                    .add(frameEntity(420.0, 297.0, 1000.0, 30.0, Point2(1000.0, 2000.0),
-                                     {23.0, 10.0, 10.0, 35.0}, "FRAMES", "NORTH"))
+                    .add(importedFrame({420.0, 297.0, 1000.0, 30.0, Point2(1000.0, 2000.0),
+                                        {23.0, 10.0, 10.0, 35.0}},
+                                       "FRAMES", "NORTH"))
                     .ok());
     // An A1 frame at 1 : 500, not rotated, margins 22 all round but 82 at
     // the bottom.
     ASSERT_TRUE(model.entities
-                    .add(frameEntity(841.0, 594.0, 500.0, 0.0, Point2(0.0, 0.0),
-                                     {22.0, 22.0, 22.0, 82.0}, "FRAMES", ""))
+                    .add(importedFrame({841.0, 594.0, 500.0, 0.0, Point2(0.0, 0.0),
+                                        {22.0, 22.0, 22.0, 82.0}},
+                                       "FRAMES", ""))
                     .ok());
     // 500 x 300 mm is no ISO A size.
     ASSERT_TRUE(model.entities
-                    .add(frameEntity(500.0, 300.0, 1000.0, 0.0, Point2(0.0, 0.0),
-                                     {10.0, 10.0, 10.0, 10.0}, "FRAMES", "ODD"))
+                    .add(importedFrame({500.0, 300.0, 1000.0, 0.0, Point2(0.0, 0.0),
+                                        {10.0, 10.0, 10.0, 10.0}},
+                                       "FRAMES", "ODD"))
                     .ok());
     std::vector<std::string> skipped;
     const auto sheets = sheetsFromPlotFrames(model, {}, &skipped);
@@ -508,9 +588,12 @@ TEST(SheetGenerators, AnImportedPlotFrameBecomesASheetShowingTheGroundItCovered)
     // = (0.8660254037844386, 0.5), up (-0.5, 0.8660254037844386):
     // x = 1000 + 187.4944999193310 - 80.5 = 1106.994499919331,
     // y = 2000 + 108.25 + 139.4300900092946 = 2247.680090009295.
+    // (The outline's corners are rounded to the ground's doubles, so the
+    // direction read back from them is 30 degrees to within a few units in
+    // the last place.)
     expectBox(plan.rect, 23.0, 35.0, 410.0, 287.0);
     EXPECT_EQ(plan.scale, 1000.0);
-    EXPECT_NEAR(plan.rotation, std::numbers::pi / 6.0, 1e-15);
+    EXPECT_NEAR(plan.rotation, std::numbers::pi / 6.0, 1e-12);
     expectPoint(plan.centre, 1106.994499919331, 2247.680090009295, 1e-9);
     EXPECT_TRUE(plan.hiddenLayers.hides("FRAMES"));
 
@@ -522,6 +605,61 @@ TEST(SheetGenerators, AnImportedPlotFrameBecomesASheetShowingTheGroundItCovered)
     // point (216.25, 163.5) m from the corner.
     expectBox(a1.viewports.front().rect, 46.0, 82.0, 819.0, 572.0);
     expectPoint(a1.viewports.front().centre, 216.25, 163.5);
+}
+
+TEST(SheetGenerators, APlotFrameSheetIsPlacedByTheFramesOutlineNotByItsFileOrigin)
+{
+    katana::entity::Model model;
+    // An A3 frame at 1 : 500 whose file puts its corner at (300000,
+    // 6200000), imported with that shifted to (0, 0) - the outline is drawn
+    // at (0, 0), the properties still say 300000, 6200000. Margins L23 R10
+    // T10 B35 give the window 23..410 x 35..287, centre (216.5, 161) mm: at
+    // 1 : 500, (108.25, 80.5) m from the outline's corner.
+    const FrameFields shifted{420.0, 297.0, 500.0, 0.0, Point2(300000.0, 6200000.0),
+                              {23.0, 10.0, 10.0, 35.0}};
+    ASSERT_TRUE(model.entities
+                    .add(importedFrame(shifted, "FRAMES", "SHIFTED",
+                                       katana::geometry::Vec2(300000.0, 6200000.0)))
+                    .ok());
+    // A frame imported at (0, 0) unrotated and then turned a quarter turn
+    // and moved: its outline now starts at (100, 50) and runs north - 420 m
+    // up to (100, 470) at 1 : 1000, then 297 m west to x = -197 - while its
+    // properties still say rotation 0, origin (0, 0). Along is (0, 1), up
+    // (-1, 0): the window's centre, 216.5 m along and 161 m up, is
+    // (100 - 161, 50 + 216.5) = (-61, 266.5), and the plan is turned a
+    // quarter turn with it.
+    const FrameFields moved{420.0, 297.0, 1000.0, 0.0, Point2(0.0, 0.0),
+                            {23.0, 10.0, 10.0, 35.0}};
+    ASSERT_TRUE(model.entities
+                    .add(frameEntity(moved,
+                                     {Point2(100.0, 50.0), Point2(100.0, 470.0),
+                                      Point2(-197.0, 470.0), Point2(-197.0, 50.0)},
+                                     "FRAMES", "MOVED"))
+                    .ok());
+    // An outline that is no longer the frame's four corners - here a
+    // triangle - cannot say where its paper is.
+    ASSERT_TRUE(model.entities
+                    .add(frameEntity(moved,
+                                     {Point2(0.0, 0.0), Point2(1.0, 0.0), Point2(1.0, 1.0)},
+                                     "FRAMES", "BROKEN"))
+                    .ok());
+    std::vector<std::string> skipped;
+    const auto sheets = sheetsFromPlotFrames(model, {}, &skipped);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 2u);
+    ASSERT_EQ(skipped.size(), 1u);
+    EXPECT_NE(skipped.front().find("outline"), std::string::npos) << skipped.front();
+
+    const Viewport& near = (*sheets)[0].viewports.front();
+    EXPECT_EQ((*sheets)[0].name, "SHIFTED");
+    EXPECT_EQ(near.scale, 500.0);
+    EXPECT_EQ(near.rotation, 0.0);
+    expectPoint(near.centre, 108.25, 80.5);
+
+    const Viewport& turned = (*sheets)[1].viewports.front();
+    EXPECT_EQ((*sheets)[1].name, "MOVED");
+    EXPECT_NEAR(turned.rotation, std::numbers::pi / 2.0, 1e-15);
+    expectPoint(turned.centre, -61.0, 266.5);
 }
 
 // ---- smartLayout -----------------------------------------------------------------------
@@ -582,6 +720,124 @@ TEST(SheetGenerators, ASmartPlanAtAFixedScaleTooLargeForOneSheetIsTiled)
     ASSERT_TRUE(one.ok());
     ASSERT_EQ(one->size(), 1u);
     EXPECT_EQ(one->front().viewports.front().scale, 500.0);
+}
+
+namespace {
+
+katana::entity::Model modelWithStraight(double length)
+{
+    katana::entity::Model model;
+    katana::entity::Alignment road;
+    road.name = "ROAD";
+    road.horizontal.pis = {{Point2(0.0, 0.0)}, {Point2(length, 0.0)}};
+    EXPECT_TRUE(model.alignments.add(road).ok());
+    return model;
+}
+
+// The ground a plan viewport shows across its width, in metres.
+double metresWide(const Viewport& plan)
+{
+    return plan.rect.width() * plan.scale / 1000.0;
+}
+
+} // namespace
+
+TEST(SheetGenerators, AnAutomaticStripBesideA3DViewIsFittedToItsNarrowerCell)
+{
+    // A 180 m straight road, a plan along it and a 3D view, scale "auto".
+    // "Main and panel right" gives the plan the cell 25.5 .. 276.6 x 37.5 ..
+    // 284.5 (0.66 x 385 - 3 = 251.1 mm wide, 250 - 3 = 247 high) and the 3D
+    // view 279.6 .. 407.5 (24 + 254.1 + 1.5; 0.34 x 385 - 3 = 127.9 wide).
+    // 180 m in 251.1 mm needs 1 : 716.8 - 1 : 750, 188.325 m across: the
+    // whole road, CH 0 to 180, in one strip centred on x = 90.
+    const katana::entity::Model model = modelWithStraight(180.0);
+    LayoutRequest request;
+    request.alignment = "ROAD";
+    request.planAlongAlignment = true;
+    request.model3d = true;
+    const auto sheets = smartLayout(model, request);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 1u);
+    const Sheet& sheet = sheets->front();
+    ASSERT_EQ(sheet.viewports.size(), 2u);
+    const Viewport& plan = sheet.viewports[0];
+    EXPECT_EQ(plan.kind, ViewportKind::Plan);
+    expectBox(plan.rect, 25.5, 37.5, 276.6, 284.5);
+    EXPECT_EQ(plan.scale, 750.0);
+    EXPECT_NEAR(plan.source.chainageFrom, 0.0, 1e-9);
+    EXPECT_NEAR(plan.source.chainageTo, 180.0, 1e-9);
+    expectPoint(plan.centre, 90.0, 0.0, 1e-9);
+    EXPECT_GE(metresWide(plan), 180.0);
+    EXPECT_EQ(sheet.viewports[1].kind, ViewportKind::Model3D);
+    expectBox(sheet.viewports[1].rect, 279.6, 37.5, 407.5, 284.5);
+}
+
+TEST(SheetGenerators, AFixedScaleStripTooLongForTheNarrowCellLeavesThe3DViewASheetOfItsOwn)
+{
+    // The same road at 1 : 500: the narrow cell holds 251.1 x 0.5 = 125.55 m
+    // - not the 180 m - so the plan keeps the whole width, 382 mm (385 - 3)
+    // = 191 m, one strip, and the 3D view goes on a second sheet.
+    const katana::entity::Model model = modelWithStraight(180.0);
+    LayoutRequest request;
+    request.alignment = "ROAD";
+    request.planAlongAlignment = true;
+    request.model3d = true;
+    request.scale = 500.0;
+    const auto sheets = smartLayout(model, request);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 2u);
+    const Sheet& first = (*sheets)[0];
+    ASSERT_EQ(first.viewports.size(), 1u);
+    const Viewport& plan = first.viewports[0];
+    EXPECT_EQ(plan.scale, 500.0);
+    expectBox(plan.rect, 25.5, 37.5, 407.5, 284.5);
+    EXPECT_NEAR(plan.source.chainageFrom, 0.0, 1e-9);
+    EXPECT_NEAR(plan.source.chainageTo, 180.0, 1e-9);
+    EXPECT_GE(metresWide(plan), 180.0);
+    const Sheet& second = (*sheets)[1];
+    EXPECT_EQ(second.id, "s2");
+    EXPECT_EQ(second.name, "3D VIEW");
+    ASSERT_EQ(second.viewports.size(), 1u);
+    EXPECT_EQ(second.viewports[0].kind, ViewportKind::Model3D);
+}
+
+TEST(SheetGenerators, AnAreaAtAFixedScaleGoesBesideTheLegendOnlyWhenItStillFits)
+{
+    // 180 x 100 m at 1 : 500 with a legend. Beside it, in the 251.1 x 247 mm
+    // cell of "Main and panel right", the area needs 1 : max(180000 / 251.1
+    // = 716.8, 100000 / 247 = 404.9) - more than 500, it does not fit. On a
+    // sheet of its own, 385 x 250 mm, it needs 1 : max(467.5, 400): it fits,
+    // so the plan keeps its sheet (the tiling area 24 .. 409 x 36 .. 286,
+    // 192.5 m across) and the legend gets the next.
+    LayoutRequest request;
+    request.planArea = Box2(Point2(0.0, 0.0), Point2(180.0, 100.0));
+    request.scale = 500.0;
+    request.legend = true;
+    const auto sheets = smartLayout(katana::entity::Model{}, request);
+    ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
+    ASSERT_EQ(sheets->size(), 2u);
+    ASSERT_EQ((*sheets)[0].viewports.size(), 1u);
+    const Viewport& plan = (*sheets)[0].viewports[0];
+    EXPECT_EQ(plan.scale, 500.0);
+    expectBox(plan.rect, 24.0, 36.0, 409.0, 286.0);
+    EXPECT_GE(metresWide(plan), 180.0);
+    EXPECT_EQ((*sheets)[1].name, "LEGEND");
+    ASSERT_EQ((*sheets)[1].viewports.size(), 1u);
+    EXPECT_EQ((*sheets)[1].viewports[0].kind, ViewportKind::Legend);
+
+    // 100 x 80 m needs 1 : max(100000 / 251.1 = 398.2, 80000 / 247 = 323.9)
+    // beside the legend: at 1 : 500 it fits, and shares the sheet.
+    request.planArea = Box2(Point2(0.0, 0.0), Point2(100.0, 80.0));
+    const auto shared = smartLayout(katana::entity::Model{}, request);
+    ASSERT_TRUE(shared.ok()) << shared.error().describe();
+    ASSERT_EQ(shared->size(), 1u);
+    ASSERT_EQ(shared->front().viewports.size(), 2u);
+    const Viewport& beside = shared->front().viewports[0];
+    EXPECT_EQ(beside.scale, 500.0);
+    expectBox(beside.rect, 25.5, 37.5, 276.6, 284.5);
+    expectPoint(beside.centre, 50.0, 40.0);
+    EXPECT_EQ(shared->front().viewports[1].kind, ViewportKind::Legend);
+    expectBox(shared->front().viewports[1].rect, 279.6, 37.5, 407.5, 284.5);
 }
 
 TEST(SheetGenerators, ASmartPlanAndProfileThenCrossSectionsSpillsOntoMoreSheets)
@@ -651,6 +907,15 @@ TEST(SheetGenerators, ASmartLayoutRefusesAnUnknownAlignmentOrARequestForNothing)
     request.alignment = "NOWHERE";
     request.longSection = true;
     EXPECT_EQ(smartLayout(katana::entity::Model{}, request).error().code, ErrorCode::NotFound);
+    // An empty plan area, at a fixed scale as well as "auto".
+    LayoutRequest empty;
+    empty.planArea = Box2{};
+    empty.legend = true;
+    EXPECT_EQ(smartLayout(katana::entity::Model{}, empty).error().code,
+              ErrorCode::InvalidArgument);
+    empty.scale = 500.0;
+    EXPECT_EQ(smartLayout(katana::entity::Model{}, empty).error().code,
+              ErrorCode::InvalidArgument);
 }
 
 TEST(SheetGenerators, TheSameRequestGivesTheSameSheets)
@@ -701,4 +966,54 @@ TEST(SheetGenerators, AppendedSheetsTakeFreshIdsAndTheirMarksFollow)
     EXPECT_EQ(more[0].viewports[0].id, "vp4");
     EXPECT_EQ(more[1].viewports[0].id, "vp5");
     EXPECT_EQ(more[0].viewports[0].marks[0].sheet, "s4");
+}
+
+TEST(SheetGenerators, AnAppendedSheetNeverTakesTheIdOfARemovedSheetAMarkStillNames)
+{
+    // Sheets s1 and s2 are left; s1's match line still leads to s3, which
+    // was removed. A new sheet must not become s3 and be led to by it: it
+    // is s4, one past the highest id any sheet has or any mark names.
+    SheetSet set;
+    set.sheets.resize(2);
+    set.sheets[0].id = "s1";
+    set.sheets[1].id = "s2";
+    set.sheets[0].viewports.resize(1);
+    set.sheets[0].viewports[0].id = "vp1";
+    set.sheets[0].viewports[0].marks.push_back({WorldMark::Kind::MatchLine, {}, "", "s3"});
+    EXPECT_EQ(nextSheetId(set), "s4");
+    std::vector<Sheet> more(1);
+    prepareForAppend(set, more);
+    EXPECT_EQ(more[0].id, "s4");
+}
+
+TEST(SheetGenerators, AppendingAfterAHugeStoredViewportIdNeitherThrowsNorRepeatsAnId)
+{
+    // Ids come from stored JSON unchecked. vp4294967295 is the largest
+    // number 32 bits hold: the next ids are 4294967296 and 4294967297, one
+    // and two past it.
+    std::vector<Sheet> more(1);
+    more[0].viewports.resize(2);
+    SheetSet large = setOf({Sheet{}});
+    large.sheets[0].id = "s1";
+    large.sheets[0].viewports.resize(1);
+    large.sheets[0].viewports[0].id = "vp4294967295";
+    prepareForAppend(large, more);
+    EXPECT_EQ(more[0].viewports[0].id, "vp4294967296");
+    EXPECT_EQ(more[0].viewports[1].id, "vp4294967297");
+
+    // 18446744073709551615 is the largest a 64-bit count holds: nothing
+    // comes after it, so the new ids are the lowest free ones - vp1 is
+    // taken, so vp2 and vp3. An id too large for any count is no number of
+    // ours and is left alone.
+    SheetSet largest = large;
+    largest.sheets[0].viewports.resize(3);
+    largest.sheets[0].viewports[0].id = "vp18446744073709551615";
+    largest.sheets[0].viewports[1].id = "vp1";
+    largest.sheets[0].viewports[2].id = "vp99999999999999999999999";
+    more[0].viewports[0].id.clear();
+    more[0].viewports[1].id.clear();
+    prepareForAppend(largest, more);
+    EXPECT_EQ(more[0].viewports[0].id, "vp2");
+    EXPECT_EQ(more[0].viewports[1].id, "vp3");
+    EXPECT_EQ(nextViewportId(largest), "vp2");
 }

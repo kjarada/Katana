@@ -5,10 +5,10 @@
 #include <cmath>
 #include <format>
 #include <map>
-#include <numbers>
 #include <utility>
 
 #include "katana/cad/plotting/layout.hpp"
+#include "katana/math/numerics.hpp"
 
 namespace katana::cad::plotting {
 
@@ -16,6 +16,7 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
 using katana::geometry::Vec2;
+namespace tol = katana::math::tolerance;
 
 namespace {
 
@@ -30,9 +31,6 @@ constexpr double kSectionFill = 0.8;
 // How much of a strip's height the alignment may use; the rest keeps a curve
 // off the viewport's edge, where its labels would be cut.
 constexpr double kStripFill = 0.9;
-// Chord tolerance for an alignment drawn as a polyline: a millimetre on the
-// ground, far below anything a plotted sheet can show.
-constexpr double kChordTolerance = 0.001;
 // Two paper sizes this close (mm) are the same size.
 constexpr double kPaperMatchMm = 2.0;
 
@@ -156,9 +154,12 @@ Box2 intersection(const Box2& a, const Box2& b)
 // Appends a generator's output to `out`, renumbered after what is there.
 void append(std::vector<Sheet>& out, std::vector<Sheet> more)
 {
+    // Moved into a set and back rather than copied: a long road's layout
+    // appends to a hundred sheets.
     SheetSet so_far;
-    so_far.sheets = out;
+    so_far.sheets = std::move(out);
     prepareForAppend(so_far, more);
+    out = std::move(so_far.sheets);
     for (Sheet& sheet : more) {
         out.push_back(std::move(sheet));
     }
@@ -440,22 +441,37 @@ Result<std::vector<Sheet>> crossSectionSheets(const geometry::SolvedAlignment& a
     if (!(request.halfWidth > 0.0)) {
         return makeError(ErrorCode::InvalidArgument, "a cross section needs a width");
     }
-    const geometry::Polyline2 line = alignment.toPolyline(kChordTolerance);
-    // Distances along the alignment as drawn, from its start. cad::section
-    // works in these; the chainage is the alignment's start station plus it.
-    std::vector<double> distances;
+    // Chainages, and each section's line, from the alignment itself - not
+    // from a distance along its chorded polyline, which is a little shorter
+    // on every curve: the end chainage fell past the chords' end and was
+    // refused, and the last section of an interval was titled short of it.
+    const double start = alignment.startStation();
+    const double end = alignment.endStation();
+    std::vector<double> chainages;
     if (request.stations.empty()) {
-        auto stations = sectionStations(line, request.interval);
-        if (!stations) {
-            return stations.error();
+        // cad::sectionStations' rule - every interval from the start, and
+        // the end - on a straight line as long as the alignment.
+        geometry::Polyline2 straight;
+        straight.vertices = {Point2(0.0, 0.0), Point2(alignment.length(), 0.0)};
+        auto distances = sectionStations(straight, request.interval);
+        if (!distances) {
+            return distances.error();
         }
-        distances = std::move(*stations);
+        for (const double distance : *distances) {
+            chainages.push_back(start + distance);
+        }
     } else {
         for (const double chainage : request.stations) {
-            distances.push_back(chainage - alignment.startStation());
+            // A station a rounding past an end (as crossSectionLine allows)
+            // is the end.
+            if (!(chainage >= start - tol::kGeometric && chainage <= end + tol::kGeometric)) {
+                return makeError(ErrorCode::InvalidArgument, "the station is outside the alignment",
+                                 std::format("CH {} of {} to {}", chainage, start, end));
+            }
+            chainages.push_back(std::clamp(chainage, start, end));
         }
-        std::sort(distances.begin(), distances.end());
-        distances.erase(std::unique(distances.begin(), distances.end()), distances.end());
+        std::sort(chainages.begin(), chainages.end());
+        chainages.erase(std::unique(chainages.begin(), chainages.end()), chainages.end());
     }
 
     struct Cut {
@@ -464,17 +480,23 @@ Result<std::vector<Sheet>> crossSectionSheets(const geometry::SolvedAlignment& a
         std::optional<double> high;
     };
     std::vector<Cut> cuts;
-    for (const double distance : distances) {
-        auto across = crossSectionLine(line, distance, request.halfWidth);
-        if (!across) {
-            return across.error();
+    for (const double chainage : chainages) {
+        // Square to the alignment at the chainage, left to right looking
+        // along it, as crossSectionLine draws one.
+        const auto left = alignment.pointAtStationOffset(chainage, request.halfWidth);
+        const auto right = alignment.pointAtStationOffset(chainage, -request.halfWidth);
+        if (!left || !right) {
+            return makeError(ErrorCode::InvalidArgument, "the alignment has no section there",
+                             std::format("CH {}", chainage));
         }
-        Cut cut{alignment.startStation() + distance, std::nullopt, std::nullopt};
+        geometry::Polyline2 across;
+        across.vertices = {*left, *right};
+        Cut cut{chainage, std::nullopt, std::nullopt};
         if (!request.surfaces.empty()) {
             SectionOptions options;
             options.interval = request.halfWidth / 50.0;
             options.includeCrossings = false;
-            auto section = extractSection(*across, request.surfaces, nullptr, options);
+            auto section = extractSection(across, request.surfaces, nullptr, options);
             if (!section) {
                 return section.error();
             }
@@ -612,14 +634,30 @@ Result<std::vector<Sheet>> sheetsFromPlotFrames(const entity::Model& model,
             skip(label + ": its margins leave nothing to draw");
             continue;
         }
-        // Paper millimetres to the ground, as the importer placed the frame:
-        // from its origin, along its rotation, at its scale.
-        const double rotation =
-            numberProperty(p, "plot_frame.rotation").value_or(0.0) * std::numbers::pi / 180.0;
-        const Point2 origin(numberProperty(p, "plot_frame.xorigin").value_or(0.0),
-                            numberProperty(p, "plot_frame.yorigin").value_or(0.0));
-        const Vec2 along(std::cos(rotation), std::sin(rotation));
-        const Vec2 up(-along.y, along.x);
+        // Paper millimetres to the ground, from the frame's outline: its
+        // first corner is the paper's origin, its first edge runs along the
+        // paper's bottom, and its last corner is up the paper's left side
+        // (domain_import.cpp draws it so). Not from the plot_frame.xorigin,
+        // .yorigin and .rotation properties: they are the file's as it was,
+        // while an import with an origin shift, or a later move or rotation
+        // of the frame, moves the outline alone - and the sheet would show
+        // ground far from the frame.
+        const auto* outline = std::get_if<geometry::Polyline2>(&frame->geometry);
+        if (outline == nullptr || outline->vertices.size() < 4) {
+            skip(label + ": its outline is no longer the frame's four corners");
+            continue;
+        }
+        const Point2 origin = outline->vertices.front();
+        const Vec2 firstEdge = outline->vertices[1] - origin;
+        if (!(firstEdge.length() > 0.0)) {
+            skip(label + ": its outline has no direction");
+            continue;
+        }
+        const double rotation = firstEdge.angle();
+        const Vec2 along = firstEdge.normalized();
+        // Up the paper is left of along, unless the frame was mirrored.
+        const Vec2 side = outline->vertices.back() - origin;
+        const Vec2 up = along.cross(side) < 0.0 ? -along.perpendicular() : along.perpendicular();
         const Point2 centre = origin + along * metresAcross(rect.center().x, scale) +
                               up * metresAcross(rect.center().y, scale);
         Viewport plan = planViewport(rect, scale, centre);
@@ -651,16 +689,56 @@ Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutR
     }
     std::vector<Sheet> out;
     const Box2 area = tilingArea(blankSheet(request.paper, {}));
+    const bool planAlong = solved && request.planAlongAlignment;
 
-    if (solved && request.planAlongAlignment) {
-        // Plan and profile: the plan along the alignment above, its long
-        // section below at the same horizontal scale - the sheet a road or a
-        // pipe is built from.
-        const std::vector<Box2> cells =
-            presetCells(request.longSection ? TilingPreset::MainBelow : TilingPreset::Full, area);
+    // The 3D snapshot and the legend.
+    std::vector<Viewport> extras;
+    if (request.model3d) {
+        Viewport view;
+        view.kind = ViewportKind::Model3D;
+        view.autoScale = true;
+        if (request.planArea) {
+            view.centre = request.planArea->center();
+        } else if (solved) {
+            view.centre = *solved->pointAtStation((solved->startStation() + solved->endStation()) / 2.0);
+        }
+        extras.push_back(std::move(view));
+    }
+    if (request.legend) {
+        Viewport legend;
+        legend.kind = ViewportKind::Legend;
+        extras.push_back(std::move(legend));
+    }
+    // They share the plan's sheet when the plan is all that sheet would
+    // hold - a plan of an area or along the alignment, not both, and no long
+    // section - and the plan still shows everything asked of it in the
+    // narrower main cell of "Main and panel right" (or "two panels right").
+    // The plan is made for that cell from the start, so an automatic scale
+    // is fitted to it and a fixed one is tried in it; made for the whole
+    // sheet and squeezed afterwards, it lost the ends of a strip or the edges
+    // of an area. When it does not fit, it keeps its whole sheet and the
+    // extras have a sheet of their own.
+    const TilingPreset besidePreset =
+        extras.size() == 1 ? TilingPreset::MainRight : TilingPreset::MainTwoRight;
+    const bool besideWanted =
+        !extras.empty() && !request.longSection && (request.planArea.has_value() != planAlong);
+    const Box2 besideCell = presetCells(besidePreset, area).front();
+    // Puts the extras beside the plan on `sheet`.
+    const auto shareSheet = [&extras, besidePreset](Sheet& sheet) {
+        for (Viewport& extra : extras) {
+            sheet.viewports.push_back(std::move(extra));
+        }
+        extras.clear();
+        tileViewports(sheet, besidePreset);
+    };
+
+    // Strips along the alignment whose plans fill `cell`: at the fixed
+    // scale, or at the largest that puts the whole alignment in the cell's
+    // width.
+    const auto stripsIn = [&](const Box2& cell) -> Result<std::vector<Sheet>> {
         double scale = request.scale;
         if (!(scale > 0.0)) {
-            auto fitted = sheetScaleAtLeast(solved->length() * 1000.0 / cells.front().width());
+            auto fitted = sheetScaleAtLeast(solved->length() * 1000.0 / cell.width());
             if (!fitted) {
                 return fitted.error();
             }
@@ -669,24 +747,48 @@ Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutR
         StripRequest strip;
         strip.scale = scale;
         strip.paper = request.paper;
-        strip.planRect = cells.front();
-        auto strips = stripSheets(*solved, request.alignment, strip);
-        if (!strips) {
-            return strips.error();
-        }
-        if (request.longSection) {
-            for (Sheet& sheet : *strips) {
-                const Viewport& plan = sheet.viewports.front();
-                Viewport profile;
-                profile.kind = ViewportKind::LongSection;
-                profile.rect = cells[1];
-                profile.scale = scale;
-                profile.verticalExaggeration = kLongSectionExaggeration;
-                profile.source = plan.source;
-                profile.centre = Point2((plan.source.chainageFrom + plan.source.chainageTo) / 2.0, 0.0);
-                profile.autoCentre = true;
-                sheet.viewports.push_back(std::move(profile));
+        strip.planRect = cell;
+        return stripSheets(*solved, request.alignment, strip);
+    };
+
+    if (planAlong) {
+        std::optional<std::vector<Sheet>> strips;
+        if (besideWanted) {
+            // One strip in the narrow cell, or none of this: a failure here
+            // only means it does not fit, and the whole-sheet strips below
+            // report anything really wrong.
+            auto narrow = stripsIn(besideCell);
+            if (narrow && narrow->size() == 1) {
+                shareSheet(narrow->front());
+                strips = std::move(*narrow);
             }
+        }
+        if (!strips) {
+            // Plan and profile: the plan along the alignment above, its long
+            // section below at the same horizontal scale - the sheet a road
+            // or a pipe is built from.
+            const std::vector<Box2> cells = presetCells(
+                request.longSection ? TilingPreset::MainBelow : TilingPreset::Full, area);
+            auto whole = stripsIn(cells.front());
+            if (!whole) {
+                return whole.error();
+            }
+            if (request.longSection) {
+                for (Sheet& sheet : *whole) {
+                    const Viewport& plan = sheet.viewports.front();
+                    Viewport profile;
+                    profile.kind = ViewportKind::LongSection;
+                    profile.rect = cells[1];
+                    profile.scale = plan.scale;
+                    profile.verticalExaggeration = kLongSectionExaggeration;
+                    profile.source = plan.source;
+                    profile.centre =
+                        Point2((plan.source.chainageFrom + plan.source.chainageTo) / 2.0, 0.0);
+                    profile.autoCentre = true;
+                    sheet.viewports.push_back(std::move(profile));
+                }
+            }
+            strips = std::move(*whole);
         }
         append(out, std::move(*strips));
     } else if (solved && request.longSection) {
@@ -723,24 +825,53 @@ Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutR
     }
 
     if (request.planArea) {
+        const Box2& wanted = *request.planArea;
+        // Checked here, not left to fitToSheet: at a fixed scale an empty
+        // box, whose width and height read as 0, "fits" and would be centred
+        // on a NaN, half the sum of its infinite corners.
+        if (wanted.empty() || !std::isfinite(wanted.width()) || !std::isfinite(wanted.height())) {
+            return makeError(ErrorCode::InvalidArgument, "the plan area is empty");
+        }
+        // The denominator at which the area just fits `cell`.
+        const auto needed = [&wanted](const Box2& cell) {
+            return std::max(wanted.width() * 1000.0 / cell.width(),
+                            wanted.height() * 1000.0 / cell.height());
+        };
         std::vector<Sheet> plans;
-        if (!(request.scale > 0.0)) {
-            auto fitted = fitToSheet(*request.planArea, request.paper);
+        if (besideWanted) {
+            // At the fixed scale if the area fits the narrow cell at it; at
+            // the largest standard scale that fits it there otherwise
+            // ("auto"). An area with nothing to fit - a point, an empty box -
+            // is left to fitToSheet below to refuse.
+            std::optional<double> scale;
+            if (request.scale > 0.0) {
+                if (needed(besideCell) <= request.scale) {
+                    scale = request.scale;
+                }
+            } else if (auto fitted = sheetScaleAtLeast(needed(besideCell))) {
+                scale = *fitted;
+            }
+            if (scale) {
+                Sheet sheet = blankSheet(request.paper, "PLAN");
+                sheet.viewports.push_back(planViewport(besideCell, *scale, wanted.center()));
+                shareSheet(sheet);
+                plans.push_back(std::move(sheet));
+            }
+        }
+        if (plans.empty() && !(request.scale > 0.0)) {
+            auto fitted = fitToSheet(wanted, request.paper);
             if (!fitted) {
                 return fitted.error();
             }
             plans = std::move(*fitted);
-        } else {
-            const double needed = std::max(request.planArea->width() * 1000.0 / area.width(),
-                                           request.planArea->height() * 1000.0 / area.height());
-            if (needed <= request.scale) {
+        } else if (plans.empty()) {
+            if (needed(area) <= request.scale) {
                 Sheet sheet = blankSheet(request.paper, "PLAN");
-                sheet.viewports.push_back(planViewport(area, request.scale, request.planArea->center()));
+                sheet.viewports.push_back(planViewport(area, request.scale, wanted.center()));
                 plans.push_back(std::move(sheet));
-                numberSheets(plans);
             } else {
                 GridRequest grid;
-                grid.area = *request.planArea;
+                grid.area = wanted;
                 grid.scale = request.scale;
                 grid.paper = request.paper;
                 auto tiles = gridSheets(grid);
@@ -753,61 +884,17 @@ Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutR
         append(out, std::move(plans));
     }
 
-    // The 3D snapshot and the legend: beside a lone plan when there is one,
-    // on a sheet of their own otherwise.
-    std::vector<Viewport> extras;
-    if (request.model3d) {
-        Viewport view;
-        view.kind = ViewportKind::Model3D;
-        view.autoScale = true;
-        if (request.planArea) {
-            view.centre = request.planArea->center();
-        } else if (solved) {
-            view.centre = *solved->pointAtStation((solved->startStation() + solved->endStation()) / 2.0);
-        }
-        extras.push_back(std::move(view));
-    }
-    if (request.legend) {
-        Viewport legend;
-        legend.kind = ViewportKind::Legend;
-        extras.push_back(std::move(legend));
-    }
+    // Extras that did not share a plan's sheet have one of their own.
     if (!extras.empty()) {
-        const bool lonePlan = out.size() == 1 && out.front().viewports.size() == 1 &&
-                              out.front().viewports.front().kind == ViewportKind::Plan;
-        if (lonePlan) {
-            Sheet& sheet = out.front();
-            for (Viewport& extra : extras) {
-                sheet.viewports.push_back(std::move(extra));
-            }
-            tileViewports(sheet, sheet.viewports.size() == 2 ? TilingPreset::MainRight
-                                                              : TilingPreset::MainTwoRight);
-            // The plan's cell is smaller now; an automatic scale is refitted.
-            Viewport& plan = sheet.viewports.front();
-            if (!(request.scale > 0.0) && request.planArea) {
-                const double needed =
-                    std::max(request.planArea->width() * 1000.0 / plan.rect.width(),
-                             request.planArea->height() * 1000.0 / plan.rect.height());
-                auto fitted = sheetScaleAtLeast(needed);
-                if (!fitted) {
-                    return fitted.error();
-                }
-                plan.scale = *fitted;
-            }
-            numberSheets(out);
-        } else {
-            Sheet sheet = blankSheet(request.paper, extras.size() == 1 && request.legend
-                                                        ? "LEGEND"
-                                                        : "3D VIEW");
-            for (Viewport& extra : extras) {
-                sheet.viewports.push_back(std::move(extra));
-            }
-            tileViewports(sheet, sheet.viewports.size() == 1 ? TilingPreset::Full
-                                                             : TilingPreset::Columns2);
-            std::vector<Sheet> one{std::move(sheet)};
-            numberSheets(one);
-            append(out, std::move(one));
+        Sheet sheet =
+            blankSheet(request.paper, extras.size() == 1 && request.legend ? "LEGEND" : "3D VIEW");
+        for (Viewport& extra : extras) {
+            sheet.viewports.push_back(std::move(extra));
         }
+        tileViewports(sheet, sheet.viewports.size() == 1 ? TilingPreset::Full
+                                                         : TilingPreset::Columns2);
+        std::vector<Sheet> one{std::move(sheet)};
+        append(out, std::move(one));
     }
 
     if (solved && request.crossSectionInterval > 0.0) {
@@ -826,27 +913,23 @@ Result<std::vector<Sheet>> smartLayout(const entity::Model& model, const LayoutR
 
 void prepareForAppend(const SheetSet& set, std::vector<Sheet>& sheets)
 {
-    SheetSet numbering = set;
-    std::map<std::string, std::string> renamed;
-    for (Sheet& sheet : sheets) {
-        const std::string fresh = nextSheetId(numbering);
-        if (!sheet.id.empty()) {
-            renamed.emplace(sheet.id, fresh);
-        }
-        sheet.id = fresh;
-        for (Viewport& viewport : sheet.viewports) {
-            viewport.id.clear();
-        }
-        Sheet placeholder;
-        placeholder.id = fresh;
-        numbering.sheets.push_back(std::move(placeholder));
+    const std::vector<std::string> sheetIds = newSheetIds(set, sheets.size());
+    std::size_t viewportCount = 0;
+    for (const Sheet& sheet : sheets) {
+        viewportCount += sheet.viewports.size();
     }
-    // Viewport ids after every id the set already uses, in order.
-    std::string next = nextViewportId(set);
-    std::size_t number = std::stoul(next.substr(2));
+    const std::vector<std::string> viewportIds = newViewportIds(set, viewportCount);
+    std::map<std::string, std::string> renamed;
+    for (std::size_t i = 0; i < sheets.size(); ++i) {
+        if (!sheets[i].id.empty()) {
+            renamed.emplace(sheets[i].id, sheetIds[i]);
+        }
+        sheets[i].id = sheetIds[i];
+    }
+    std::size_t next = 0;
     for (Sheet& sheet : sheets) {
         for (Viewport& viewport : sheet.viewports) {
-            viewport.id = "vp" + std::to_string(number++);
+            viewport.id = viewportIds[next++];
             for (WorldMark& mark : viewport.marks) {
                 if (const auto found = renamed.find(mark.sheet); found != renamed.end()) {
                     mark.sheet = found->second;
