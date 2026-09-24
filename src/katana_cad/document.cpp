@@ -158,6 +158,8 @@ void Document::newDocument()
     rebuildSpatialIndex();
     metadata_ = {};
     metadataModified_ = false;
+    surveyJobs_.clear();
+    ++surveyJobsGeneration_;
     selection_.clear();
     currentLayer_ = std::string(katana::entity::kDefaultLayerName);
     currentStyle_.clear();
@@ -179,6 +181,9 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     // once the apply has succeeded - a failed open must leave this document
     // exactly as it was, metadata included.
     auto metadata = std::move(contents->metadata);
+    // The jobs likewise: applyToModel does not read them, and they are the
+    // largest thing in a project that has any (the raw field files).
+    auto surveyJobs = std::move(contents->surveyJobs);
     // applyToModel validates before it touches the model, so a bad project
     // leaves the current drawing as it was. The contents are consumed: they are
     // a local that dies either way, and copying every entity into the model was
@@ -189,6 +194,8 @@ Status Document::open(const std::filesystem::path& projectDirectory)
     store_ = std::make_unique<katana::storage::ProjectStore>(std::move(*store));
     metadata_ = std::move(metadata);
     metadataModified_ = false;
+    surveyJobs_ = std::move(surveyJobs);
+    ++surveyJobsGeneration_;
     rebuildStack();
     // Whole rebuild rather than incremental: the model was replaced, and a
     // rebuild is what picks a cell size suited to the data just loaded.
@@ -218,7 +225,7 @@ Status Document::save()
     if (auto backup = store_->backup(); !backup) {
         return backup.error();
     }
-    if (auto status = store_->save(katana::storage::captureModel(model_, metadata_)); !status) {
+    if (auto status = saveContents(*store_); !status) {
         return status;
     }
     stack_->markSaved();
@@ -229,6 +236,23 @@ Status Document::save()
     }
     notify();
     return {};
+}
+
+Status Document::saveContents(katana::storage::ProjectStore& store)
+{
+    katana::storage::ProjectContents contents =
+        katana::storage::captureModel(model_, metadata_);
+    // LENT to the contents for the save and taken back after, rather than
+    // copied: a job holds its field file whole, and copying tens of megabytes
+    // on every save to hand it to a function that only reads it is waste.
+    // The guard hands the jobs back however the save ends.
+    struct GiveBack {
+        std::vector<katana::storage::SurveyJob>& owner;
+        std::vector<katana::storage::SurveyJob>& lent;
+        ~GiveBack() { owner = std::move(lent); }
+    } giveBack{surveyJobs_, contents.surveyJobs};
+    contents.surveyJobs = std::move(surveyJobs_);
+    return store.save(contents);
 }
 
 Status Document::saveAs(const std::filesystem::path& projectDirectory)
@@ -244,7 +268,7 @@ Status Document::saveAs(const std::filesystem::path& projectDirectory)
     if (created) {
         metadata_.createdUtc = created->metadata.createdUtc;
     }
-    if (auto status = store->save(katana::storage::captureModel(model_, metadata_)); !status) {
+    if (auto status = saveContents(*store); !status) {
         return status;
     }
     store_ = std::make_unique<katana::storage::ProjectStore>(std::move(*store));

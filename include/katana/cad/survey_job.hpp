@@ -26,6 +26,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/survey_import.hpp"
+#include "katana/cad/survey_points.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/core/error.hpp"
 #include "katana/storage/survey_job.hpp"
@@ -37,6 +38,7 @@ namespace katana::cad {
 // cad); these are the names cad code uses for it.
 using SurveyJob = katana::storage::SurveyJob;
 using SurveyJobFile = katana::storage::SurveyJobFile;
+using SurveyJobPoint = katana::storage::SurveyJobPoint;
 
 // The reduction, as the commands call it.
 using ReductionFunction = std::function<katana::core::Result<katana::survey::ReductionOutcome>(
@@ -70,6 +72,12 @@ struct SurveyJobImport {
     katana::survey::SurveyProject raw;
     katana::survey::ReductionContext context;
     SurveyImportOptions importOptions;
+    // What to do with a computed point whose id a survey point in the drawing
+    // already has (importSurveyPoints' rule, and its report). A control point
+    // the settings take FROM the drawing (ControlOrigin::Drawing) is never
+    // drawn again, whatever this says: it is the drawing's point, not the
+    // job's.
+    ExistingPointPolicy existingPoints = ExistingPointPolicy::Refuse;
 };
 
 // Reduces and adjusts `raw`, draws the result (as importSurveyProject does,
@@ -108,10 +116,45 @@ class ImportSurveyJobCommand final : public katana::commands::Command {
 
 // ---- Re-adjust ---------------------------------------------------------------------
 
+// A job's point the person has changed since the job last placed it - moved,
+// re-levelled or deleted - and what re-adjusting does about it.
+enum class HandEditPolicy {
+    // The edit stands: the point stays where the person put it, and a deleted
+    // one stays deleted. The report names each one with the coordinates the
+    // new run computed for it.
+    Keep,
+    // The new run's coordinates replace the edit, and a deleted point is drawn
+    // again. The report names each one.
+    Overwrite,
+};
+
+[[nodiscard]] const char* toString(HandEditPolicy policy);
+
 struct SurveyJobReadjustment {
     std::string jobId;
     katana::survey::ReductionSettings settings; // the new settings
     katana::survey::ReductionContext context;   // `previous` is filled by the command
+    HandEditPolicy handEdits = HandEditPolicy::Keep;
+    // The version of the reader the SurveyJobReader used, which becomes the
+    // job's parserVersion; empty leaves the job's as it was.
+    std::string parserVersion{};
+};
+
+// What one re-adjustment did to the drawing, by point id, in the order of the
+// job's points and then of the new run's.
+struct SurveyJobChanges {
+    std::vector<std::string> moved;   // given the new run's coordinates
+    std::vector<std::string> created; // produced now, not drawn by the job before
+    std::vector<std::string> removed; // no longer produced, so deleted
+    // Changed by hand since the job last placed them, and deleted by hand.
+    // Under HandEditPolicy::Keep these are left as the person left them.
+    std::vector<std::string> editedByHand;
+    std::vector<std::string> deletedByHand;
+    // Produced now, but a survey point the job did not create already has
+    // the id: not drawn, because the job never touches another's point.
+    std::vector<std::string> notDrawn;
+
+    friend bool operator==(const SurveyJobChanges&, const SurveyJobChanges&) = default;
 };
 
 // Re-reads the job's stored bytes, reduces and adjusts them with the new
@@ -139,6 +182,35 @@ class ReadjustSurveyJobCommand final : public katana::commands::Command {
     [[nodiscard]] std::vector<katana::entity::EntityId> createdEntities() const override;
 
     [[nodiscard]] const katana::survey::ReductionReport* report() const;
+    // After a successful execute(): what it did to the drawing.
+    [[nodiscard]] const SurveyJobChanges& changes() const;
+
+  private:
+    struct State;
+    std::unique_ptr<State> state_;
+};
+
+// ---- Remove ------------------------------------------------------------------------
+
+// Takes a job off the document's list - its raw bytes, settings and report -
+// and, when `withPoints`, deletes the entities it created that are still in
+// the drawing (whether or not the person has edited them since: they are the
+// job's). Without, the points stay as ordinary survey points. Undo puts the
+// job back in its place in the list, and the entities with their ids.
+// NotFound for a job the document does not have.
+class RemoveSurveyJobCommand final : public katana::commands::Command {
+  public:
+    RemoveSurveyJobCommand(Document& document, std::string jobId, bool withPoints);
+    ~RemoveSurveyJobCommand() override;
+
+    [[nodiscard]] std::string_view name() const override { return "REMOVE_SURVEY_JOB"; }
+    // The job's raw data goes with it.
+    [[nodiscard]] bool isDestructive() const override { return true; }
+    [[nodiscard]] katana::core::Status
+    validate(const katana::commands::CommandContext& context) const override;
+    [[nodiscard]] katana::core::Status execute(katana::commands::CommandContext& context) override;
+    [[nodiscard]] katana::core::Status undo(katana::commands::CommandContext& context) override;
+    [[nodiscard]] katana::core::Status redo(katana::commands::CommandContext& context) override;
 
   private:
     struct State;
