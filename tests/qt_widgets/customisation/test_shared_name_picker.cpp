@@ -491,10 +491,10 @@ TEST(NamePicker, PlainLineNamesAreNeitherMarkedNorMissingAndAMissingNameIsBoth)
                   reported);
     }
 
-    // And each tooltip says what is drawn: a plain line, or - for ByLayer in
+    // And each tooltip says what is drawn: the plain continuous line, or - for ByLayer in
     // any spelling on a Style - the layer's linetype, not a solid line.
     picker.setCurrentName("1");
-    EXPECT_TRUE(picker.toolTip().contains(QStringLiteral("plain line")));
+    EXPECT_TRUE(picker.toolTip().contains(QStringLiteral("the plain continuous line")));
     picker.setCurrentName("BYLAYER");
     EXPECT_TRUE(picker.toolTip().contains(QStringLiteral("layer's linetype")));
     EXPECT_FALSE(picker.toolTip().contains(QStringLiteral("solid line")));
