@@ -380,6 +380,38 @@ TEST(Rinex2, TheNavigationFileBesideItIsReadAndSummarised)
         << "still only the power failure: " << describeWarnings(*read);
 }
 
+TEST(Rinex2, NewObservationTypesAfterAnEventChangeHowManyLinesEachSatelliteTakes)
+{
+    // Two types (one line a satellite) until the flag 4 event at line 9
+    // redefines them as seven (two lines a satellite: five and two).
+    const std::string oneLine = "  21000000.123   110000001.50008\n";
+    const std::string twoLines = "  21000000.123   110000001.50008  85000005.50007"
+                                 "  21000004.123       -2000.250\n"
+                                 "        44.500          40.250\n";
+    const std::string bytes =
+        header("     2.11           OBSERVATION DATA    G (GPS)", "RINEX VERSION / TYPE") +
+        header("M2", "MARKER NAME") + header("     2    C1    L1", "# / TYPES OF OBSERV") +
+        header("  2024     9    12    10     0    0.0000000     GPS", "TIME OF FIRST OBS") +
+        header("", "END OF HEADER") +                          // lines 1-5
+        " 24  9 12 10  0  0.0000000  0  2G01G02\n" + oneLine + // 6, 7
+        oneLine +                                              // 8
+        std::string(26, ' ') + "  4  1\n" +                    // 9
+        header("     7    C1    L1    L2    P2    D1    S1    S2", "# / TYPES OF OBSERV") + // 10
+        " 24  9 12 10  0 30.0000000  0  2G01G03\n" + twoLines + twoLines + // 11, 12-15
+        " 24  9 12 10  1  0.0000000  0  1G04\n" + twoLines;                // 16, 17-18
+    const Result<ReadResult> read = readRinex(bytes, "m2.24o");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    const survey::GnssSession& session = read->project.gnssSessions.at(0);
+    EXPECT_EQ(session.epochCount, 3U);
+    EXPECT_EQ(session.satellitesPerSystem.at("GPS"), 4U) << "G01, G02, G03 and G04";
+    EXPECT_EQ(read->recordsRead, 18U);
+    EXPECT_EQ(read->recordsSkipped, 0U);
+    ASSERT_EQ(read->warnings.size(), 1U) << describeWarnings(*read);
+    EXPECT_EQ(read->warnings.front().record, 10U);
+    EXPECT_NE(read->warnings.front().message.find("change here from 2 to 7"), std::string::npos);
+    EXPECT_EQ(read->project.metadata.at("observation types"), "C1 L1 L2 P2 D1 S1 S2");
+}
+
 // ---- RINEX 3.04 ----------------------------------------------------------------------
 
 TEST(Rinex3, AMixedFileCountsItsEpochsAndSatellitesPerSystemAndSkipsCycleSlips)
@@ -927,6 +959,53 @@ std::string syntheticV3(std::size_t epochs)
     return text;
 }
 
+// The same in RINEX 2.11: GPS and GLONASS, 30 satellites, seven observation
+// types - two lines a satellite, about 3.5 kB an epoch.
+std::string syntheticV2(std::size_t epochs)
+{
+    std::string text =
+        header("     2.11           OBSERVATION DATA    M (MIXED)", "RINEX VERSION / TYPE") +
+        header("katana test", "PGM / RUN BY / DATE") + header("BIG", "MARKER NAME") +
+        header(" -4646000.0000  2553000.0000 -3534000.0000", "APPROX POSITION XYZ") +
+        header("        1.0000        0.0000        0.0000", "ANTENNA: DELTA H/E/N") +
+        header("     7    C1    L1    L2    P2    D1    S1    S2", "# / TYPES OF OBSERV") +
+        header("     1.000", "INTERVAL") +
+        header("  2024     9    12     0     0    0.0000000     GPS", "TIME OF FIRST OBS") +
+        header("", "END OF HEADER");
+    std::string list;
+    for (int n = 1; n <= 18; ++n) {
+        list += (n < 10 ? "G0" : "G") + std::to_string(n);
+    }
+    for (int n = 1; n <= 12; ++n) {
+        list += (n < 10 ? "R0" : "R") + std::to_string(n);
+    }
+    // Seven F14.3,I1,I1 fields: five on the first line, two on the second.
+    const std::string first = std::string("  21000000.123  ") + " 110000001.50008" +
+                              "  85000005.50007" + "  21000004.123  " + "     -2000.250  ";
+    const std::string second = std::string("        44.500  ") + "        40.250";
+    char line[80];
+    for (std::size_t e = 0; e < epochs; ++e) {
+        const std::size_t hour = (e / 3600) % 24;
+        const std::size_t minute = (e / 60) % 60;
+        const std::size_t second_ = e % 60;
+        std::snprintf(line, sizeof line, " 24  9 12 %2zu %2zu%11.7f  0 30", hour, minute,
+                      static_cast<double>(second_));
+        text += line;
+        text += list.substr(0, 36);
+        text += '\n';
+        for (std::size_t at = 36; at < list.size(); at += 36) {
+            text += std::string(32, ' ') + list.substr(at, 36) + '\n';
+        }
+        for (int s = 0; s < 30; ++s) {
+            text += first;
+            text += '\n';
+            text += second;
+            text += '\n';
+        }
+    }
+    return text;
+}
+
 double megabytesPerSecond(std::size_t bytes, std::chrono::steady_clock::duration elapsed)
 {
     const double seconds = std::chrono::duration<double>(elapsed).count();
@@ -957,6 +1036,33 @@ TEST(RinexThroughput, A50MegabyteOneHertzFileIsCountedNotStored)
     EXPECT_EQ(read->project.metadata.at("satellite records"), std::to_string(epochs * 30));
     const double rate = megabytesPerSecond(bytes.size(), elapsed);
     std::cout << "[ RINEX    ] read " << static_cast<double>(bytes.size()) / 1e6 << " MB, "
+              << epochs << " epochs in " << std::chrono::duration<double>(elapsed).count()
+              << " s: " << rate << " MB/s\n";
+    RecordProperty("megabytes_per_second", std::to_string(rate));
+}
+
+TEST(RinexThroughput, A50MegabyteRinexTwoFileIsCountedNotStored)
+{
+    std::size_t megabytes = 50;
+    if (const char* wanted = std::getenv("KATANA_RINEX_THROUGHPUT_MB")) {
+        megabytes = static_cast<std::size_t>(std::max(1, std::atoi(wanted)));
+    }
+    // ~3.5 kB an epoch; a day at 1 Hz is 86 400 epochs, so the time of day wraps
+    // only past 300 MB.
+    const std::size_t epochs = std::min<std::size_t>(megabytes * 282, 86'400);
+    const std::string bytes = syntheticV2(epochs);
+    const auto start = std::chrono::steady_clock::now();
+    const Result<ReadResult> read = readRinex(bytes, "big02560.24o");
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_TRUE(read->warnings.empty()) << describeWarnings(*read);
+    const survey::GnssSession& session = read->project.gnssSessions.at(0);
+    EXPECT_EQ(session.epochCount, epochs);
+    const std::map<std::string, std::size_t> expected{{"GPS", 18}, {"GLONASS", 12}};
+    EXPECT_EQ(session.satellitesPerSystem, expected);
+    EXPECT_EQ(read->project.metadata.at("satellite records"), std::to_string(epochs * 30));
+    const double rate = megabytesPerSecond(bytes.size(), elapsed);
+    std::cout << "[ RINEX 2  ] read " << static_cast<double>(bytes.size()) / 1e6 << " MB, "
               << epochs << " epochs in " << std::chrono::duration<double>(elapsed).count()
               << " s: " << rate << " MB/s\n";
     RecordProperty("megabytes_per_second", std::to_string(rate));
