@@ -27,14 +27,23 @@
 // Screen and paper differ only where they must, and the difference is named
 // here once: on screen a line is a hairline, the selection and locked layers
 // show, and marks are sized in pixels; on paper a line is its layer's weight
-// in millimetres, white prints black (cad::paperColour), and every mark -
-// point crosses, the alignment overlay, hatch lines - is sized in paper
+// in millimetres, white prints black (cad::paperColour), a solid hatch is
+// opaque, text is set at its exact fractional size, and every mark - point
+// crosses, the alignment overlay, hatch lines - is sized in paper
 // millimetres, so a plot looks the same at 150 dpi and at 600.
+//
+// On screen the painter also does what only a screen wants for speed, none
+// of which changes what a line looks like (docs/plan_view.md has the
+// measurements): plain lines are clipped to the view before QPainter sees
+// them, each distinct layer/style/colour is resolved to its pens once a
+// frame instead of once an entity, and library symbols are stamped from
+// images rasterised once per symbol, pen and size. A plot stays vector.
 
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -136,10 +145,17 @@ struct PlanPaintOptions {
     // antialiased lines needs a width of at most one pixel. Plots keep their
     // paper-millimetre weights whatever this says.
     bool thinLines = false;
-    // Screen only. Library symbols stamped from pixmaps rasterised once per
-    // symbol, pen and size, instead of stroked from scratch at every point.
-    // Plots stay vector.
+    // Screen only. Library symbols stamped from images rasterised once per
+    // symbol, pen, size and quarter-pixel position, instead of stroked from
+    // scratch at every point. Plots stay vector. Ignored while the painter's
+    // transform turns or scales (a rotated viewport), where a stamp would not
+    // land on the pixel grid it was rasterised for.
     bool symbolSprites = false;
+    // Screen only. Plain polylines, arcs and circles clipped to the view
+    // (with a margin wider than the pen reaches) before they are handed to
+    // QPainter, so a string crossing the whole site costs what its visible
+    // part costs. Off draws every vertex, which tests compare against.
+    bool clipLines = true;
     // The face plain text (TextGeometry, dimension labels, the overlay) is
     // drawn in. A library text names its own.
     QString fontFamily = QStringLiteral("Segoe UI");
@@ -150,8 +166,28 @@ struct PlanPaintOptions {
 struct PlanPaintStats {
     std::size_t entitiesDrawn = 0; // passed the visibility rule and lay in view
     std::size_t symbolsStamped = 0;
-    std::size_t spritesDrawn = 0; // of those, from a cached pixmap
+    std::size_t spritesDrawn = 0; // of those, from a cached image
+    // Distinct layer/style/colour combinations resolved to pens this paint:
+    // once each, however many entities share one.
+    std::size_t displaysResolved = 0;
+    // Polylines, arcs and circles that ran off the view and were clipped.
+    std::size_t linesClipped = 0;
 };
+
+// Sizes of the marks the painter draws that are not the drawing's own: on
+// screen in pixels, on paper in millimetres of paper, so that a plot's marks
+// do not shrink as its resolution rises (a 4 px cross was 0.68 mm at 300 dpi
+// and 0.34 mm at 600).
+inline constexpr double kPointMarkerPixels = 4.0;           // the plain point cross's half-width
+inline constexpr double kPointMarkerPaperMillimetres = 1.0; // the same on paper: a 2 mm cross
+inline constexpr double kHatchLinePaperMillimetres = 0.13;  // the finest ISO 128 pen
+// The alignment overlay: on screen a 2 px centreline, 1 px ticks 6 px either
+// side, 11 px labels at least 70 px apart; on paper the nearest standard
+// sizes, the label gap kept in proportion to the label.
+inline constexpr double kAlignmentLinePaperMillimetres = 0.5;
+inline constexpr double kAlignmentTickPenPaperMillimetres = 0.25;
+inline constexpr double kAlignmentTickPaperMillimetres = 1.5;
+inline constexpr double kAlignmentTextPaperMillimetres = 2.5;
 
 // What the painter keeps between frames. Owned by the caller - one per view,
 // one per plotting thread - and never shared between threads. Everything in
@@ -167,8 +203,13 @@ class PlanPaintCache {
     void clear();
 
     // How many distinct fonts plain text has been set in since the last
-    // clear: one per size, reused, rather than a QFont made per text.
-    [[nodiscard]] std::size_t fontCount() const { return fonts_.size(); }
+    // clear, reused rather than a QFont made per text: on screen one per
+    // whole pixel size, on paper one for every size (a paper text is scaled
+    // to its exact height rather than rounded to a font size).
+    [[nodiscard]] std::size_t fontCount() const
+    {
+        return fonts_.size() + (paperFont_.has_value() ? 1u : 0u);
+    }
     [[nodiscard]] std::size_t spriteCount() const { return sprites_.size(); }
 
   private:
@@ -179,9 +220,11 @@ class PlanPaintCache {
     // the view scale, so they are dropped whenever the scale changes.
     std::map<std::pair<std::string, double>, QList<qreal>> dashes_;
     double dashScale_ = 0.0;
-    // Plain text's fonts by pixel size, for the family they were made in.
+    // Plain text's fonts by pixel size, for the family they were made in;
+    // on paper one font at a reference size, scaled to each text's height.
     QString fontFamily_;
-    std::map<double, QFont> fonts_;
+    std::map<int, QFont> fonts_;
+    std::optional<QFont> paperFont_;
 
     struct RasterImage {
         katana::interop::ReferenceId id = 0;
@@ -195,23 +238,29 @@ class PlanPaintCache {
     std::vector<RasterImage> rasters_;
     std::vector<CloudColours> clouds_;
 
+    // A symbol stamp rasterised once and blitted wherever the same symbol is
+    // put in the same pen at the same size and sub-pixel position. The view
+    // scale, the paper scale, the device ratio and the library generation
+    // are the cache's, not the key's: every sprite goes when one changes.
     struct SpriteKey {
         std::string symbol;
-        QRgb colour = 0;
+        QRgb colour = 0; // with alpha
         double penWidth = 0.0;
-        double size = 0.0;      // Style::symbolSize
-        double scale = 0.0;     // view pixels per model unit
-        double paperScale = 0.0;
-        int phaseX = 0;         // the stamp's sub-pixel position, in quarters
+        bool cosmetic = false;
+        double size = 0.0; // Style::symbolSize
+        int phaseX = 0;    // the stamp's sub-pixel position, in quarters of a device pixel
         int phaseY = 0;
         friend auto operator<=>(const SpriteKey&, const SpriteKey&) = default;
     };
     struct Sprite {
-        QImage image;       // premultiplied, device pixels
-        QPointF offset;     // from the stamp's whole pixel to the image's corner
-        bool empty = true;
+        QImage image;  // premultiplied, device pixels, tagged with the device ratio
+        QPoint anchor; // the image's device pixel the stamp's whole pixel lands on
     };
     std::map<SpriteKey, Sprite> sprites_;
+    double spriteScale_ = 0.0;
+    double spritePaperScale_ = 0.0;
+    double spriteDeviceRatio_ = 0.0;
+    std::uint64_t spriteGeneration_ = 0;
 };
 
 // Paints the drawing through `frame` onto `painter`. The painter's state is
@@ -238,10 +287,11 @@ void paintPlanGeometry(QPainter& painter, const PlanFrame& frame, const PlanPain
 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides& layers,
             const std::set<std::uint64_t>& hiddenReferences);
 
-// The whole-number resolution a QPdfWriter is given for `dpi`, and the
-// painter scale that makes a sheet laid out at exactly `dpi` land exactly on
-// it: the writer's resolution is an int, and a sheet at 300.9 dpi drawn at
-// 300 plotted at 1 : 1003 while reporting 1 : 1000 (audit QT-27).
+// The whole-number resolution a QPdfWriter is given for `dpi` (the nearest,
+// at least 1), and the painter scale that makes a sheet laid out at exactly
+// `dpi` land exactly on it: the writer's resolution is an int, and a sheet at
+// 300.9 dpi drawn at 300 plotted at 1 : 1003 while reporting 1 : 1000
+// (audit QT-27).
 struct PdfResolution {
     int resolution = 300;
     double scale = 1.0; // resolution / dpi
@@ -249,13 +299,17 @@ struct PdfResolution {
 [[nodiscard]] PdfResolution pdfResolutionFor(double dpi);
 
 // The frame a plot draws through: the printable area of the sheet (the paper
-// less its margins), at the sheet's scale about its centre, clipped to it.
-// Fails with whatever cad::sheetFor refuses.
+// less its margins), at the sheet's scale about its centre, clipped to it,
+// so that at a fixed scale the drawing stops at the margin instead of running
+// to the paper's edge. In the sheet's device pixels (cad::Sheet). Fails with
+// whatever cad::sheetFor refuses.
 [[nodiscard]] katana::core::Result<PlanFrame> sheetFrame(const katana::cad::PlotSettings& settings);
 
 // Plots `source` to a one-page PDF at `path` through sheetFrame, in paper
-// mode, with the view's hidden layers and reference layers. Widget-free, so
-// it may run off the GUI thread with its own cache. Fails with
+// mode, with the view's hidden layers and reference layers. The PDF's title
+// is `title` (the file's own name when empty) and its creator Katana, so a
+// viewer's tab and a document list say what the sheet is. Widget-free, so it
+// may run off the GUI thread with its own cache. Fails with
 // FileExportFailure when the file cannot be written or finished, and with
 // whatever cad::sheetFor refuses.
 [[nodiscard]] katana::core::Status plotPlanToPdf(const QString& path,
@@ -263,6 +317,7 @@ struct PdfResolution {
                                                  const PlanSource& source,
                                                  const katana::cad::LayerOverrides& layers,
                                                  const std::set<std::uint64_t>& hiddenReferences,
-                                                 PlanPaintCache& cache);
+                                                 PlanPaintCache& cache,
+                                                 const QString& title = QString());
 
 } // namespace katana::qt

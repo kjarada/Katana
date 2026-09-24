@@ -3,17 +3,23 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
+#include <string_view>
+#include <unordered_map>
 
+#include <QFileInfo>
 #include <QFont>
 #include <QLineF>
 #include <QMarginsF>
 #include <QPageSize>
+#include <QPaintDevice>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPdfWriter>
 #include <QPolygonF>
+#include <QTransform>
 
 #include "customisation/style_painter.hpp"
 #include "katana/cad/dashing.hpp"
@@ -26,6 +32,7 @@
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/chording.hpp"
+#include "katana/geometry/polygon.hpp"
 
 namespace katana::qt {
 
@@ -46,8 +53,26 @@ const QColor kAxis(0x5a, 0x68, 0x75);
 const QColor kSelection(0xff, 0x9f, 0x1c);
 const QColor kAlignment(0xff, 0xb7, 0x4d); // amber: an overlay, not drawing content
 
-// The plain point mark's half-width on screen.
-constexpr double kPointMarkerPixels = 4.0;
+// The size a paper text's one font is made at, in pixels. A text is set by
+// scaling this, so its height on the page is exact to the fraction of a
+// device pixel; the size only has to be large enough that the font's own
+// metrics are not rounded coarsely.
+constexpr int kPaperFontReferencePixels = 100;
+
+// Texts are drawn no taller than this: a font asked for at a size of
+// hundreds of thousands of pixels, one zoom step from a survey's extent,
+// makes the raster engine allocate glyphs larger than any screen.
+constexpr double kMaximumTextPixels = 2000.0;
+
+// A symbol stamp larger than this across, in device pixels, is stroked and
+// not cached: a sprite of it would cost more memory than it saves time, and
+// a symbol that large is few on screen.
+constexpr int kMaximumSpritePixels = 256;
+// More cached stamps than this and the cache is emptied: a view zoomed
+// through many scales keeps only the current one's anyway (the cache is
+// keyed on the scale), and this bounds a drawing of very many symbol and
+// colour combinations.
+constexpr std::size_t kMaximumSprites = 20000;
 
 QColor toQColor(const katana::entity::Color& color)
 {
@@ -100,6 +125,51 @@ const katana::entity::StyleLibrary& noLibrary()
     return none;
 }
 
+// What an entity's pens depend on besides the frame: its layer, its style
+// and its own colour. The names are views into the entity's own strings,
+// which the model keeps still for the whole paint.
+struct DisplayKey {
+    std::string_view layer;
+    std::string_view style;
+    std::uint32_t colour = 0;
+    bool hasColour = false;
+    friend bool operator==(const DisplayKey&, const DisplayKey&) = default;
+};
+
+struct DisplayKeyHash {
+    std::size_t operator()(const DisplayKey& key) const noexcept
+    {
+        std::size_t hash = std::hash<std::string_view>{}(key.layer);
+        const auto mix = [&hash](std::size_t value) {
+            hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+        };
+        mix(std::hash<std::string_view>{}(key.style));
+        mix((static_cast<std::size_t>(key.colour) << 1) | (key.hasColour ? 1u : 0u));
+        return hash;
+    }
+};
+
+DisplayKey displayKeyOf(const Entity& entity)
+{
+    DisplayKey key;
+    key.layer = entity.layer;
+    key.style = entity.style;
+    if (entity.color.has_value()) {
+        const katana::entity::Color& c = *entity.color;
+        key.colour = (static_cast<std::uint32_t>(c.r) << 24) | (static_cast<std::uint32_t>(c.g) << 16) |
+                     (static_cast<std::uint32_t>(c.b) << 8) | static_cast<std::uint32_t>(c.a);
+        key.hasColour = true;
+    }
+    return key;
+}
+
+// The width a pen strokes, in the painter's units: a cosmetic pen's width
+// is device pixels and never less than one.
+double strokeWidth(const QPen& pen)
+{
+    return pen.isCosmetic() || pen.widthF() <= 0.0 ? std::max(1.0, pen.widthF()) : pen.widthF();
+}
+
 } // namespace
 
 // ---- the cache ------------------------------------------------------------------------
@@ -116,9 +186,14 @@ void PlanPaintCache::clear()
     dashes_.clear();
     dashScale_ = 0.0;
     fonts_.clear();
+    paperFont_.reset();
     rasters_.clear();
     clouds_.clear();
     sprites_.clear();
+    spriteScale_ = 0.0;
+    spritePaperScale_ = 0.0;
+    spriteDeviceRatio_ = 0.0;
+    spriteGeneration_ = 0;
 }
 
 // ---- the painter ----------------------------------------------------------------------
@@ -142,6 +217,7 @@ class PlanPainter {
         }
         if (cache_.fontFamily_ != options_.fontFamily) {
             cache_.fonts_.clear();
+            cache_.paperFont_.reset();
             cache_.fontFamily_ = options_.fontFamily;
         }
     }
@@ -156,6 +232,33 @@ class PlanPainter {
     }
 
   private:
+    // Everything an entity's look depends on besides its geometry, worked
+    // out once per distinct layer, style and colour in a paint rather than
+    // once per entity: the layer walk, resolveDisplay's table lookups and
+    // string copies, the linetype and hatch resolution, the pens and the
+    // flattened library linestyle. Measured on a 28k-entity survey drawing
+    // this was about a sixth of a frame; a drawing has tens to hundreds of
+    // such combinations.
+    struct Resolved {
+        katana::entity::ResolvedLayer layer;
+        bool layerDrawn = false; // shown, and not hidden in this view
+        katana::entity::ResolvedDisplay display;
+        cad::ResolvedLinetype pattern;
+        const katana::entity::HatchPattern* hatch = nullptr;
+        std::shared_ptr<const cad::FlatDefinition> linestyle; // a library linestyle, flattened
+        QPen entityPen; // the entity's pen WITHOUT a model linetype's dashes
+        QPen pen;       // the pen the plain line is drawn with
+        StylePaintTarget target;
+    };
+    // What a point symbol stamp is, worked out once per symbol and size in
+    // a paint: where it reaches from its insertion point and whether it is
+    // too small to draw.
+    struct Stamp {
+        Box2 extent; // about the insertion point
+        bool belowDetail = false;
+        bool empty = true;
+    };
+
     [[nodiscard]] bool paper() const { return options_.medium == PlanMedium::Paper; }
     [[nodiscard]] QPointF toScreen(const Point2& world) const
     {
@@ -172,8 +275,17 @@ class PlanPainter {
     {
         return options_.pixelsPerMillimetre / std::max(view_.scale, 1e-12);
     }
+    // A mark `pixels` wide on screen and `millimetres` wide on paper, in
+    // device pixels.
+    [[nodiscard]] double markSize(double pixels, double millimetres) const
+    {
+        return paper() ? millimetres * options_.pixelsPerMillimetre : pixels;
+    }
     // The plain point mark's half-width, in device pixels.
-    [[nodiscard]] double markPixels() const { return kPointMarkerPixels; }
+    [[nodiscard]] double markPixels() const
+    {
+        return markSize(kPointMarkerPixels, kPointMarkerPaperMillimetres);
+    }
     // The plain point mark's size, in model units at the current scale, so a
     // built-in symbol with no size of its own stays a mark and not a blob.
     [[nodiscard]] double plainMarkHalfWidth() const
@@ -181,6 +293,9 @@ class PlanPainter {
         return markPixels() / std::max(view_.scale, 1e-12);
     }
     const QFont& fontFor(double pixels);
+    const QFont& paperFont();
+    const Resolved& resolve(const Entity& entity);
+    const Stamp& stampOf(const std::string& symbol, double size);
 
     void drawRasters();
     void drawGrid();
@@ -189,11 +304,16 @@ class PlanPainter {
     void drawEntities();
     void drawAlignments();
     void drawGeometry(const katana::entity::Geometry& geometry);
+    // The polyline through `vertices` (model units), in the painter's pen,
+    // clipped to the view when that cannot change a pixel.
+    void strokePolyline(const std::vector<Point2>& vertices, bool closed);
     [[nodiscard]] bool drawLineStyle(const StylePaintTarget& target,
                                      const cad::FlatDefinition& definition,
                                      const katana::entity::Geometry& geometry);
     void drawSymbol(const StylePaintTarget& target, const std::string& symbol,
                     const Point2& centre, double size);
+    [[nodiscard]] bool stampSprite(const StylePaintTarget& target, const std::string& symbol,
+                                   const Point2& centre, double size, const Stamp& stamp);
     void drawHatch(const Polyline2& boundary, const QPolygonF& screen);
     void drawText(const Point2& position, const std::string& text, double height,
                   double rotation);
@@ -214,21 +334,55 @@ class PlanPainter {
     // model, which outlives the paint.
     katana::entity::DimensionStyle dimensionStyle_{};
     const katana::entity::HatchPattern* hatch_ = nullptr;
+
+    // This paint's resolutions, and the last one asked for: consecutive
+    // entities mostly share a layer and style, and comparing two short
+    // strings is cheaper than hashing them.
+    std::unordered_map<DisplayKey, Resolved, DisplayKeyHash> resolved_;
+    DisplayKey lastKey_{};
+    const Resolved* last_ = nullptr;
+    // By symbol, then by size: a handful of sizes per symbol at most.
+    std::map<std::string, std::vector<std::pair<double, Stamp>>, std::less<>> stamps_;
+    // Whether stamps may come from the sprite cache this paint, and where
+    // the painter's (translation-only) transform and the device ratio put a
+    // logical pixel.
+    bool sprites_ = false;
+    QPointF translation_{0.0, 0.0};
+    double deviceRatio_ = 1.0;
+    // Scratch for clipping and for arcs, reused across entities.
+    katana::geometry::PolylineRuns runs_;
+    std::vector<Point2> arcPoints_;
 };
 
 const QFont& PlanPainter::fontFor(double pixels)
 {
     // One QFont per size, kept: making a QFont by family name resolves the
     // family through the font database, which done for each of thousands of
-    // labels a frame was a measurable part of the frame.
+    // labels a frame was a measurable part of the frame. On screen a text is
+    // a whole number of pixels, the screen's own resolution, and the glyphs
+    // are hinted at that size.
     const int size = static_cast<int>(pixels);
-    auto found = cache_.fonts_.find(static_cast<double>(size));
+    auto found = cache_.fonts_.find(size);
     if (found == cache_.fonts_.end()) {
         QFont font(options_.fontFamily);
         font.setPixelSize(size);
-        found = cache_.fonts_.emplace(static_cast<double>(size), font).first;
+        found = cache_.fonts_.emplace(size, font).first;
     }
     return found->second;
+}
+
+const QFont& PlanPainter::paperFont()
+{
+    // One font for every paper text, scaled to each: a font's pixel size is
+    // an int, and a 2.5 mm label at 1 : 1000 and 300 dpi is 29.5 device
+    // pixels, which a whole-pixel size set 0.04 mm short (and at 72 dpi,
+    // 0.35 mm).
+    if (!cache_.paperFont_.has_value()) {
+        QFont font(options_.fontFamily);
+        font.setPixelSize(kPaperFontReferencePixels);
+        cache_.paperFont_ = font;
+    }
+    return *cache_.paperFont_;
 }
 
 PlanPaintStats PlanPainter::paint()
@@ -250,6 +404,23 @@ PlanPaintStats PlanPainter::paint()
         painter_.rotate(-frame_.rotation * katana::math::kRadToDeg);
         painter_.translate(-centre);
     }
+    // A stamp is blitted onto whole device pixels, which only a painter that
+    // merely shifts the drawing keeps: under a turn or a scale it is stroked.
+    const QTransform& transform = painter_.transform();
+    sprites_ = options_.symbolSprites && !paper() && transform.type() <= QTransform::TxTranslate;
+    translation_ = QPointF(transform.dx(), transform.dy());
+    deviceRatio_ = painter_.device() != nullptr ? painter_.device()->devicePixelRatioF() : 1.0;
+    if (sprites_ && (cache_.spriteScale_ != view_.scale || cache_.spritePaperScale_ != paperScale() ||
+                     cache_.spriteDeviceRatio_ != deviceRatio_ ||
+                     cache_.spriteGeneration_ != source_.libraryGeneration ||
+                     cache_.sprites_.size() > kMaximumSprites)) {
+        cache_.sprites_.clear();
+        cache_.spriteScale_ = view_.scale;
+        cache_.spritePaperScale_ = paperScale();
+        cache_.spriteDeviceRatio_ = deviceRatio_;
+        cache_.spriteGeneration_ = source_.libraryGeneration;
+    }
+
     // Imagery sits beneath everything: it is a backdrop, and the grid has to
     // stay legible over it. Point clouds sit above the grid but below the
     // drawing, so drawn geometry is never obscured by survey returns.
@@ -506,12 +677,132 @@ void PlanPainter::drawMeshFootprints()
     }
 }
 
+const PlanPainter::Resolved& PlanPainter::resolve(const Entity& entity)
+{
+    const DisplayKey key = displayKeyOf(entity);
+    if (last_ != nullptr && key == lastKey_) {
+        return *last_;
+    }
+    auto found = resolved_.find(key);
+    if (found == resolved_.end()) {
+        const auto& model = *source_.model;
+        const katana::cad::LayerOverrides& overrides =
+            frame_.layers != nullptr ? *frame_.layers : noOverrides();
+        Resolved r;
+        // The layer is resolved ONCE and the visibility rule asked about
+        // that (cad::isDrawn without the entity's own flag, which the caller
+        // adds), rather than looked up again inside isDrawn.
+        r.layer = model.layers.resolve(entity.layer);
+        r.layerDrawn = r.layer.shown && !overrides.hides(entity.layer);
+        // Through the one resolution chain, so this agrees with the 3D view
+        // and so that a named style can change how an entity looks.
+        r.display = katana::entity::resolveDisplay(model, entity);
+        // One answer to what the linetype NAME draws (decisions D2 and D8): a
+        // library linestyle's own strokes, a model linetype's dashes, or a
+        // plain line - never a symbol laid along the line as a pattern.
+        r.pattern = cad::resolveLinePattern(model, library_, r.display.linetype, r.display.symbol);
+        // On paper, white and near-white print black (D7): white is a new
+        // layer's colour and a third of the reference mapfile's, and it would
+        // vanish into the sheet.
+        QColor color = toQColor(paper() && options_.plot != nullptr
+                                    ? cad::paperColour(r.display.color, *options_.plot)
+                                    : r.display.color);
+        // The fading of a locked layer is screen furniture: it says what the
+        // user is working on, and a plot printed it in half tone (audit
+        // QT-26).
+        if (!paper() && r.layer.locked) {
+            color.setAlpha(110); // locked layers, and their children, read as background
+        }
+        // On screen every line is a hairline: a screen has no paper for a
+        // line weight to be millimetres of. It is 1.5 px, or with the view's
+        // thin-line option a cosmetic pixel, which strokes 5-8x faster
+        // because Qt's fast path for antialiased lines needs a width of at
+        // most one. On a plot the width is the line weight - "millimetres on
+        // paper" - which means what it says.
+        double penWidthPixels = 1.5;
+        if (paper()) {
+            penWidthPixels = r.display.lineWeight * options_.pixelsPerMillimetre;
+        } else if (options_.thinLines) {
+            penWidthPixels = 1.0;
+        }
+        r.entityPen = QPen(color, penWidthPixels);
+        if (!paper() && options_.thinLines) {
+            r.entityPen.setCosmetic(true);
+        }
+        r.pen = r.entityPen;
+        // Dashes are MODEL lengths: a 0.5 m dash stays half a metre of ground
+        // at every zoom, so the pixel pattern is recomputed from the view
+        // scale. Qt's array is in units of PEN WIDTH, not pixels, which is why
+        // the width is passed in rather than assumed. The pattern depends only
+        // on the linetype, the view scale and the pen width, so it is built
+        // once per scale and kept (PlanPaintCache). Only a MODEL linetype
+        // dashes the pen: a library linestyle of the same name wins, and its
+        // strokes are drawn undashed (D2).
+        if (r.pattern.kind == cad::LinetypeKind::ModelLinetype) {
+            const auto dashKey = std::make_pair(r.display.linetype, penWidthPixels);
+            auto cached = cache_.dashes_.find(dashKey);
+            if (cached == cache_.dashes_.end()) {
+                cad::DashOptions dash;
+                dash.viewScale = view_.scale;
+                const auto dashes = cad::qtDashPattern(*r.pattern.linetype, dash, penWidthPixels);
+                cached = cache_.dashes_.emplace(dashKey, QList<qreal>(dashes.begin(), dashes.end()))
+                             .first;
+            }
+            if (!cached->second.isEmpty()) {
+                r.pen.setDashPattern(cached->second);
+            }
+        }
+        // A library definition is painted in the entity's colour and width
+        // with a FLAT cap, so a 3 mm dash plots 3 mm rather than 3 mm and a pen
+        // width (QPen's square cap); the painter draws its dots round.
+        r.target.view = view_;
+        r.target.entityPen = r.entityPen;
+        r.target.entityPen.setCapStyle(Qt::FlatCap);
+        r.target.paper = paper() ? options_.plot : nullptr;
+        // resolveHatchPattern from the display already resolved, rather than
+        // a second full resolveDisplay of its own.
+        r.hatch = cad::resolveHatchPattern(model, r.display);
+        if (r.pattern.kind == cad::LinetypeKind::LibraryDefinition) {
+            r.linestyle = cache_.definitions_.find(library_, source_.libraryGeneration,
+                                                   r.pattern.definition->name);
+        }
+        found = resolved_.emplace(key, std::move(r)).first;
+        ++stats_.displaysResolved;
+    }
+    lastKey_ = key;
+    last_ = &found->second;
+    return found->second;
+}
+
+const PlanPainter::Stamp& PlanPainter::stampOf(const std::string& symbol, double size)
+{
+    auto bySymbol = stamps_.find(symbol);
+    if (bySymbol == stamps_.end()) {
+        bySymbol = stamps_.emplace(symbol, std::vector<std::pair<double, Stamp>>{}).first;
+    }
+    auto& sizes = bySymbol->second;
+    auto found = std::find_if(sizes.begin(), sizes.end(),
+                              [size](const auto& entry) { return entry.first == size; });
+    if (found == sizes.end()) {
+        // At the origin: a stamp's reach and size do not depend on where it
+        // is put, and at the origin its strokes are not rounded to the
+        // magnitude of a map grid coordinate.
+        const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
+            cache_.definitions_, library_, source_.libraryGeneration, symbol, Point2(0.0, 0.0),
+            size, 0.0, paperScale(), plainMarkHalfWidth());
+        Stamp stamp;
+        stamp.extent = cad::drawnExtent(drawing);
+        stamp.empty = stamp.extent.empty();
+        stamp.belowDetail = cad::belowSymbolDetail(drawing, view_.scale);
+        sizes.emplace_back(size, stamp);
+        found = std::prev(sizes.end());
+    }
+    return found->second;
+}
+
 void PlanPainter::drawEntities()
 {
     const auto& model = *source_.model;
-    const katana::entity::StyleLibrary& library = library_;
-    const katana::cad::LayerOverrides& overrides =
-        frame_.layers != nullptr ? *frame_.layers : noOverrides();
     const Box2 visible = visible_;
     const double millimetre = paperScale();
 
@@ -529,7 +820,7 @@ void PlanPainter::drawEntities()
             return;
         }
         const Box2 box = cad::drawnExtent(cad::pointSymbolDrawing(
-            cache_.definitions_, library, source_.libraryGeneration, style.symbol,
+            cache_.definitions_, library_, source_.libraryGeneration, style.symbol,
             Point2(0.0, 0.0), style.symbolSize, 0.0, millimetre, plainMarkHalfWidth()));
         if (box.empty()) {
             return;
@@ -549,9 +840,11 @@ void PlanPainter::drawEntities()
     std::vector<katana::geometry::SpatialId> scratch;
     cad::detail::forEachCandidate(
         model, source_.index, visible.inflated(furthestReach), scratch, [&](const Entity& entity) {
-            // The layer is resolved ONCE and the visibility rule is asked about
-            // that, rather than looking it up again inside isDrawn.
-            const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
+            const Resolved& resolved = resolve(entity);
+            // cad::isDrawn, with the layer's half answered once per layer.
+            if (!entity.visible || !resolved.layerDrawn) {
+                return;
+            }
             // This box test is NOT the one forEachCandidate already did:
             // queryExtents is deliberately wider than the geometry (an arc offers
             // its centre for snapping), so this is the tighter, drawing-specific
@@ -566,88 +859,35 @@ void PlanPainter::drawEntities()
                 std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry);
             Box2 drawn = dimension ? cad::detail::queryExtents(model, entity)
                                    : katana::entity::boundingBox(entity.geometry);
-            if (const auto reach = symbolReach.find(entity.style); reach != symbolReach.end()) {
-                drawn = drawn.inflated(reach->second);
+            if (!resolved.display.symbol.empty()) {
+                if (const auto reach = symbolReach.find(entity.style); reach != symbolReach.end()) {
+                    drawn = drawn.inflated(reach->second);
+                }
             }
-            if (!cad::isDrawn(layer, entity, overrides) || !drawn.intersects(visible)) {
+            if (!drawn.intersects(visible)) {
                 return;
             }
             ++stats_.entitiesDrawn;
-            // Through the one resolution chain, so this agrees with the 3D view
-            // and so that a named style can finally change how an entity looks.
-            const auto display = katana::entity::resolveDisplay(model, entity);
-            // One answer to what the linetype NAME draws (decisions D2 and D8): a
-            // library linestyle's own strokes, a model linetype's dashes, or a
-            // plain line - never a symbol laid along the line as a pattern.
-            const cad::ResolvedLinetype pattern =
-                cad::resolveLinePattern(model, library, display.linetype, display.symbol);
-            // The selection and the fading of a locked layer are screen furniture:
-            // they say what the user is working on, and a plot of a drawing
-            // printed them in orange dashes and half tone (audit QT-26).
+            const auto& display = resolved.display;
+            // The selection is screen furniture: it says what the user is
+            // working on, and a plot of a drawing printed it in orange dashes
+            // (audit QT-26).
             const bool selected = !paper() && source_.selection != nullptr &&
                                   source_.selection->contains(entity.id);
-            QPen entityPen; // the entity's pen WITHOUT a model linetype's dashes
+            std::optional<StylePaintTarget> selectedTarget;
             if (selected) {
-                entityPen = QPen(kSelection, 2, Qt::DashLine);
-                painter_.setPen(entityPen);
+                const QPen selection(kSelection, 2, Qt::DashLine);
+                painter_.setPen(selection);
+                selectedTarget = resolved.target;
+                selectedTarget->entityPen = selection;
+                selectedTarget->entityPen.setCapStyle(Qt::FlatCap);
+                selectedTarget->entityPenOnly = true;
             } else {
-                // On paper, white and near-white print black (D7): white is a new
-                // layer's colour and a third of the reference mapfile's, and it
-                // would vanish into the sheet.
-                QColor color = toQColor(paper() && options_.plot != nullptr
-                                            ? cad::paperColour(display.color, *options_.plot)
-                                            : display.color);
-                if (!paper() && layer.locked) {
-                    color.setAlpha(110); // locked layers, and their children, read as background
-                }
-                // On screen every line is a 1.5 px hairline: a screen has no
-                // paper for a line weight to be millimetres of. On a plot the
-                // width is Layer::lineWeight - "millimetres on paper" - which
-                // means what it says.
-                const double penWidthPixels =
-                    paper() ? display.lineWeight * options_.pixelsPerMillimetre : 1.5;
-                entityPen = QPen(color, penWidthPixels);
-                QPen pen = entityPen;
-                // Dashes are MODEL lengths: a 0.5 m dash stays half a metre of
-                // ground at every zoom, so the pixel pattern is recomputed from
-                // the view scale each frame. Qt's array is in units of PEN WIDTH,
-                // not pixels, which is why the width is passed in rather than
-                // assumed. The pattern depends only on the linetype, the view
-                // scale and the pen width, so it is built once per scale and
-                // kept (PlanPaintCache). Only a MODEL linetype dashes the pen: a
-                // library linestyle of the same name wins, and its strokes are
-                // drawn undashed (D2).
-                if (pattern.kind == cad::LinetypeKind::ModelLinetype) {
-                    const auto key = std::make_pair(display.linetype, penWidthPixels);
-                    auto cached = cache_.dashes_.find(key);
-                    if (cached == cache_.dashes_.end()) {
-                        cad::DashOptions dash;
-                        dash.viewScale = view_.scale;
-                        const auto dashes =
-                            cad::qtDashPattern(*pattern.linetype, dash, penWidthPixels);
-                        cached = cache_.dashes_
-                                     .emplace(key, QList<qreal>(dashes.begin(), dashes.end()))
-                                     .first;
-                    }
-                    if (!cached->second.isEmpty()) {
-                        pen.setDashPattern(cached->second);
-                    }
-                }
-                painter_.setPen(pen);
+                painter_.setPen(resolved.pen);
             }
-            // A library definition is painted in the entity's colour and width with
-            // a FLAT cap, so a 3 mm dash plots 3 mm rather than 3 mm and a pen
-            // width (QPen's square cap); the painter draws its dots round.
-            StylePaintTarget target;
-            target.view = view_;
-            target.entityPen = entityPen;
-            target.entityPen.setCapStyle(Qt::FlatCap);
-            target.paper = paper() ? options_.plot : nullptr;
-            target.entityPenOnly = selected;
-            // Resolved once above and reused: resolveHatchPattern used to do a
-            // second full resolveDisplay of its own, and the dimension style was
-            // looked up for every entity although only a dimension can use it.
-            hatch_ = cad::resolveHatchPattern(model, display);
+            const StylePaintTarget& target = selected ? *selectedTarget : resolved.target;
+            hatch_ = resolved.hatch;
+            // Looked up only for a dimension, the one entity that can use it.
             if (dimension) {
                 dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
             }
@@ -661,12 +901,8 @@ void PlanPainter::drawEntities()
             // see or too long to lay is the plain line, and so is one that is
             // not laid for any other reason: never nothing.
             bool drawnByStyle = false;
-            if (pattern.kind == cad::LinetypeKind::LibraryDefinition) {
-                if (const auto flat = cache_.definitions_.find(library, source_.libraryGeneration,
-                                                               pattern.definition->name);
-                    flat != nullptr) {
-                    drawnByStyle = drawLineStyle(target, *flat, entity.geometry);
-                }
+            if (resolved.linestyle != nullptr) {
+                drawnByStyle = drawLineStyle(target, *resolved.linestyle, entity.geometry);
             }
             // A hatch is painted inside drawGeometry, so an entity carrying one
             // is drawn anyway and puts up with a doubled outline.
@@ -735,17 +971,19 @@ bool PlanPainter::drawLineStyle(const StylePaintTarget& target,
 void PlanPainter::drawSymbol(const StylePaintTarget& target, const std::string& symbol,
                              const Point2& centre, double size)
 {
-    // Through the one resolver the previews use: a loaded library definition
-    // first, the sixteen built-in shapes after. Rotation is 0 because nothing
-    // in the model carries one yet.
-    const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
-        cache_.definitions_, library_, source_.libraryGeneration, symbol, centre, size, 0.0,
-        paperScale(), plainMarkHalfWidth());
-    if (!cad::drawnExtent(drawing).intersects(visible_)) {
+    // Where the stamp reaches and whether it is too small to draw are the
+    // same wherever it is put, so they are worked out once per symbol and
+    // size, and a stamp off screen or blitted from a sprite is never built.
+    const Stamp& stamp = stampOf(symbol, size);
+    if (stamp.empty) {
+        return; // kNoSymbol, or a definition that draws nothing
+    }
+    const Box2 extent(stamp.extent.min + centre, stamp.extent.max + centre);
+    if (!extent.intersects(visible_)) {
         return; // culled by what it draws, not by where it stands
     }
     ++stats_.symbolsStamped;
-    if (cad::belowSymbolDetail(drawing, view_.scale)) {
+    if (stamp.belowDetail) {
         // Under three pixels a symbol is a smudge: a dot in its pen says a
         // point is there, for one draw call instead of every stroke.
         QPen dot = target.entityPen;
@@ -757,7 +995,166 @@ void PlanPainter::drawSymbol(const StylePaintTarget& target, const std::string& 
         painter_.setPen(previous);
         return;
     }
+    if (sprites_ && !target.entityPenOnly && stampSprite(target, symbol, centre, size, stamp)) {
+        ++stats_.spritesDrawn;
+        return;
+    }
+    // Through the one resolver the previews use: a loaded library definition
+    // first, the sixteen built-in shapes after. Rotation is 0 because nothing
+    // in the model carries one yet.
+    const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
+        cache_.definitions_, library_, source_.libraryGeneration, symbol, centre, size, 0.0,
+        paperScale(), plainMarkHalfWidth());
     paintStyleDrawing(painter_, drawing, target);
+}
+
+// A survey drawing puts the same few symbols in the same few pens at
+// thousands of points; stroking each from scratch was a third of a frame
+// (14 059 stamps, 267 ms, on the 28k-entity archive). Rasterised once into
+// an image at the stamp's quarter-pixel position and blitted onto whole
+// device pixels, each stamp after the first is a copy of a few hundred
+// pixels, and differs from the stroked one by at most an eighth of a pixel
+// of position.
+bool PlanPainter::stampSprite(const StylePaintTarget& target, const std::string& symbol,
+                              const Point2& centre, double size, const Stamp& stamp)
+{
+    const QPointF logical = toScreen(centre) + translation_;
+    const double deviceX = logical.x() * deviceRatio_;
+    const double deviceY = logical.y() * deviceRatio_;
+    if (!(std::abs(deviceX) < 1.0e6 && std::abs(deviceY) < 1.0e6)) {
+        return false; // no whole-pixel position to speak of; stroke it
+    }
+    // The nearest quarter pixel: a stamp is off by at most an eighth.
+    double wholeX = std::floor(deviceX);
+    double wholeY = std::floor(deviceY);
+    int phaseX = static_cast<int>(std::lround((deviceX - wholeX) * 4.0));
+    int phaseY = static_cast<int>(std::lround((deviceY - wholeY) * 4.0));
+    if (phaseX == 4) {
+        phaseX = 0;
+        wholeX += 1.0;
+    }
+    if (phaseY == 4) {
+        phaseY = 0;
+        wholeY += 1.0;
+    }
+    PlanPaintCache::SpriteKey key;
+    key.symbol = symbol;
+    key.colour = target.entityPen.color().rgba();
+    key.penWidth = target.entityPen.widthF();
+    key.cosmetic = target.entityPen.isCosmetic();
+    key.size = size;
+    key.phaseX = phaseX;
+    key.phaseY = phaseY;
+    auto found = cache_.sprites_.find(key);
+    if (found == cache_.sprites_.end()) {
+        PlanPaintCache::Sprite sprite;
+        // The stamp's reach in device pixels about its insertion point, plus
+        // what the pen and antialiasing add beyond the strokes' own points.
+        const double s = view_.scale * deviceRatio_;
+        const double pad = std::ceil(0.75 * strokeWidth(target.entityPen) * deviceRatio_ + 2.0);
+        const double left = std::ceil(-stamp.extent.min.x * s + pad);
+        const double right = std::ceil(stamp.extent.max.x * s + pad);
+        const double top = std::ceil(stamp.extent.max.y * s + pad); // y down
+        const double bottom = std::ceil(-stamp.extent.min.y * s + pad);
+        const double width = left + right + 1.0;
+        const double height = top + bottom + 1.0;
+        if (width <= kMaximumSpritePixels && height <= kMaximumSpritePixels && width > 0.0 &&
+            height > 0.0) {
+            QImage image(static_cast<int>(width), static_cast<int>(height),
+                         QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            image.setDevicePixelRatio(deviceRatio_);
+            // A view onto the image that puts the origin - where the stamp is
+            // built - at device pixel (left, top) plus the phase, so the
+            // strokes land in the image exactly as they would have landed on
+            // the device relative to the stamp's whole pixel.
+            cad::ViewTransform view;
+            view.scale = view_.scale;
+            view.widthPixels = width / deviceRatio_;
+            view.heightPixels = height / deviceRatio_;
+            const double anchorX = (left + 0.25 * phaseX) / deviceRatio_;
+            const double anchorY = (top + 0.25 * phaseY) / deviceRatio_;
+            view.center = Point2((0.5 * view.widthPixels - anchorX) / view_.scale,
+                                 (anchorY - 0.5 * view.heightPixels) / view_.scale);
+            StylePaintTarget local = target;
+            local.view = view;
+            const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
+                cache_.definitions_, library_, source_.libraryGeneration, symbol,
+                Point2(0.0, 0.0), size, 0.0, paperScale(), plainMarkHalfWidth());
+            QPainter imagePainter(&image);
+            imagePainter.setRenderHints(painter_.renderHints());
+            paintStyleDrawing(imagePainter, drawing, local);
+            imagePainter.end();
+            sprite.image = std::move(image);
+            sprite.anchor = QPoint(static_cast<int>(left), static_cast<int>(top));
+        }
+        // A stamp too large to cache is remembered as such (a null image), so
+        // it is not measured again at every point.
+        found = cache_.sprites_.emplace(std::move(key), std::move(sprite)).first;
+    }
+    const PlanPaintCache::Sprite& sprite = found->second;
+    if (sprite.image.isNull()) {
+        return false;
+    }
+    const QPointF at((wholeX - sprite.anchor.x()) / deviceRatio_ - translation_.x(),
+                     (wholeY - sprite.anchor.y()) / deviceRatio_ - translation_.y());
+    painter_.drawImage(at, sprite.image);
+    return true;
+}
+
+void PlanPainter::strokePolyline(const std::vector<Point2>& vertices, bool closed)
+{
+    const QPen& pen = painter_.pen();
+    // Only a solid pen is clipped: a dash pattern starts at the start of the
+    // line, so a line cut at the view's edge would start its dashes there
+    // and every dash would move.
+    const bool clip = options_.clipLines && !paper() && pen.style() == Qt::SolidLine &&
+                      vertices.size() >= 2 && view_.scale > 0.0;
+    if (!clip) {
+        QPolygonF polygon;
+        polygon.reserve(static_cast<int>(vertices.size()) + 1);
+        for (const auto& vertex : vertices) {
+            polygon << toScreen(vertex);
+        }
+        if (closed && !vertices.empty()) {
+            polygon << toScreen(vertices.front());
+        }
+        painter_.drawPolyline(polygon);
+        return;
+    }
+    // The view grown by more than the pen can reach past a line's end - a
+    // square cap is half the width out and half across, 0.71 of it on the
+    // diagonal - and an antialiasing pixel, so a cut end and its cap lie
+    // wholly outside the view and no visible pixel changes.
+    const double margin = (strokeWidth(pen) + 2.0) / view_.scale;
+    katana::geometry::clipPolyline(vertices, closed, visible_.inflated(margin), runs_);
+    if (runs_.empty()) {
+        return;
+    }
+    const std::size_t whole = vertices.size() + (closed ? 1u : 0u);
+    if (runs_.size() > 1 || runs_.points.size() != whole) {
+        ++stats_.linesClipped;
+    }
+    if (runs_.size() == 1) {
+        QPolygonF polygon;
+        polygon.reserve(static_cast<int>(runs_.points.size()));
+        for (const auto& point : runs_.points) {
+            polygon << toScreen(point);
+        }
+        painter_.drawPolyline(polygon);
+        return;
+    }
+    // Several runs are one path, stroked once, as the whole line was: where
+    // two runs cross or meet (a closed ring's two ends), an antialiased edge
+    // is covered once and not blended twice.
+    QPainterPath path;
+    for (std::size_t run = 0; run < runs_.size(); ++run) {
+        path.moveTo(toScreen(runs_.points[runs_.begin(run)]));
+        for (std::size_t i = runs_.begin(run) + 1; i < runs_.ends[run]; ++i) {
+            path.lineTo(toScreen(runs_.points[i]));
+        }
+    }
+    painter_.strokePath(path, pen);
 }
 
 void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
@@ -772,12 +1169,12 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
                                      : katana::math::kPi;
         const int segments = static_cast<int>(
             std::clamp(std::ceil(std::abs(arc.sweep) / std::max(stepAngle, 1e-4)), 8.0, 2048.0));
-        QPolygonF polygon;
-        polygon.reserve(segments + 1);
+        arcPoints_.clear();
+        arcPoints_.reserve(static_cast<std::size_t>(segments) + 1);
         for (int i = 0; i <= segments; ++i) {
-            polygon << toScreen(arc.pointAt(static_cast<double>(i) / segments));
+            arcPoints_.push_back(arc.pointAt(static_cast<double>(i) / segments));
         }
-        painter_.drawPolyline(polygon);
+        strokePolyline(arcPoints_, false);
     };
 
     struct Visitor {
@@ -802,18 +1199,18 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
         }
         void operator()(const Polyline2& g) const
         {
-            QPolygonF polygon;
-            polygon.reserve(static_cast<int>(g.vertices.size()) + 1);
-            for (const auto& vertex : g.vertices) {
-                polygon << self.toScreen(vertex);
-            }
-            if (g.closed && !g.vertices.empty()) {
+            if (g.closed && !g.vertices.empty() && self.hatch_ != nullptr) {
                 // The fill goes down before the boundary, so the outline stays
                 // crisp over its own hatching instead of being half covered.
+                // It needs the whole boundary, visible or not.
+                QPolygonF polygon;
+                polygon.reserve(static_cast<int>(g.vertices.size()));
+                for (const auto& vertex : g.vertices) {
+                    polygon << self.toScreen(vertex);
+                }
                 self.drawHatch(g, polygon);
-                polygon << self.toScreen(g.vertices.front());
             }
-            self.painter_.drawPolyline(polygon);
+            self.strokePolyline(g.vertices, g.closed);
         }
         void operator()(const katana::entity::TextGeometry& g) const
         {
@@ -863,10 +1260,19 @@ void PlanPainter::drawAlignments()
     if (model.alignments.empty() || !(view_.scale > 0.0)) {
         return;
     }
+    // An overlay's sizes are the medium's: pixels on screen, millimetres of
+    // paper on a plot (kAlignment*PaperMillimetres), so a sheet's chainages
+    // read the same at every resolution.
+    const double linePen = markSize(2.0, kAlignmentLinePaperMillimetres);
+    const double tickPen = markSize(1.0, kAlignmentTickPenPaperMillimetres);
+    const double tickPixels = markSize(6.0, kAlignmentTickPaperMillimetres);
+    const double textPixels = markSize(11.0, kAlignmentTextPaperMillimetres);
+    // About one "0+000.00" at the text size: 70 px at 11 px.
+    const double minimumLabelGapPixels = 70.0 / 11.0 * textPixels;
     // Half a pixel: finer cannot be seen, coarser shows facets on tight curves.
     const double tolerance = 0.5 / view_.scale;
-    const double tick = 6.0 / view_.scale; // screen-constant, like the snap marker
-    const double height = 11.0 / view_.scale;
+    const double tick = tickPixels / view_.scale; // screen-constant, like the snap marker
+    const double height = textPixels / view_.scale;
 
     for (const katana::entity::Alignment& alignment : model.alignments.all()) {
         // Solved per repaint. A document has a handful of alignments and the
@@ -893,17 +1299,16 @@ void PlanPainter::drawAlignments()
         for (const Point2& vertex : line.vertices) {
             polygon << toScreen(vertex);
         }
-        painter_.setPen(QPen(kAlignment, 2.0));
+        painter_.setPen(QPen(kAlignment, linePen));
         painter_.drawPolyline(polygon);
 
-        painter_.setPen(QPen(kAlignment, 1.0));
+        painter_.setPen(QPen(kAlignment, tickPen));
         // Key stations bunch up - a 10 m spiral puts TS and SC ten metres
         // apart - and their labels then print over one another into a smear
         // nobody can read. A label is skipped when it would land within its
         // own length of the last one drawn; the TICK is always drawn, because
         // the tick is the information and the label only names it.
         std::optional<QPointF> lastLabel;
-        const double minimumLabelGapPixels = 70.0; // about one "0+000.00" at this text size
         for (const double station : solved->keyStations()) {
             const auto left = solved->pointAtStationOffset(station, tick);
             const auto right = solved->pointAtStationOffset(station, -tick);
@@ -940,11 +1345,14 @@ void PlanPainter::drawHatch(const Polyline2& boundary, const QPolygonF& screen)
     case cad::HatchDrawing::None:
         return;
     case cad::HatchDrawing::Solid: {
-        // Drawn at partial opacity rather than flat: a solid fill in the
+        // On screen at partial opacity rather than flat: a solid fill in the
         // entity's own colour hides the drawing underneath it, and at this zoom
-        // the user is looking at the layout, not at the fill.
+        // the user is looking at the layout, not at the fill. On paper a solid
+        // fill is what it says - a plot printed it at a third of its colour.
         QColor fill = color;
-        fill.setAlpha(90);
+        if (!paper()) {
+            fill.setAlpha(90);
+        }
         painter_.fillPath(
             [&] {
                 QPainterPath path;
@@ -959,11 +1367,14 @@ void PlanPainter::drawHatch(const Polyline2& boundary, const QPolygonF& screen)
         break;
     }
 
-    // Hatch lines are always solid and hairline, whatever the boundary is
-    // drawn with: a dashed hatch of a dashed boundary is unreadable, and no CAD
-    // package draws one.
+    // Hatch lines are always solid and fine, whatever the boundary is drawn
+    // with: a dashed hatch of a dashed boundary is unreadable, and no CAD
+    // package draws one. On screen a hairline; on paper the finest standard
+    // pen, since a PDF hairline is one device pixel and its width on the
+    // page would follow the resolution.
     const QPen previous = painter_.pen();
-    painter_.setPen(QPen(color, 0));
+    painter_.setPen(QPen(color, paper() ? kHatchLinePaperMillimetres * options_.pixelsPerMillimetre
+                                        : 0.0));
     for (const Segment2& line : cad::hatchSegments(boundary, *hatch_)) {
         painter_.drawLine(toScreen(line.start), toScreen(line.end));
     }
@@ -982,10 +1393,18 @@ void PlanPainter::drawText(const Point2& position, const std::string& text, doub
                           anchor + QPointF(std::cos(rotation), -std::sin(rotation)) * width);
         return;
     }
+    const double size = std::min(pixels, kMaximumTextPixels);
     painter_.save();
-    painter_.setFont(fontFor(std::min(pixels, 2000.0)));
     painter_.translate(anchor);
     painter_.rotate(-rotation * katana::math::kRadToDeg); // screen y points down
+    if (paper()) {
+        // Exactly `size` tall: the one paper font, scaled.
+        painter_.setFont(paperFont());
+        const double scale = size / kPaperFontReferencePixels;
+        painter_.scale(scale, scale);
+    } else {
+        painter_.setFont(fontFor(size));
+    }
     painter_.drawText(QPointF(0.0, 0.0), QString::fromStdString(text));
     painter_.restore();
 }
@@ -1107,8 +1526,10 @@ Box2 planDrawnBounds(const PlanSource& source, const katana::cad::LayerOverrides
 PdfResolution pdfResolutionFor(double dpi)
 {
     PdfResolution result;
-    result.resolution = static_cast<int>(dpi);
-    result.scale = 1.0;
+    // The nearest whole resolution, so the scale that corrects it is within
+    // half a dot of 1 and the writer's own units are as fine as asked for.
+    result.resolution = std::max(1, static_cast<int>(std::lround(dpi)));
+    result.scale = static_cast<double>(result.resolution) / dpi;
     return result;
 }
 
@@ -1118,8 +1539,16 @@ katana::core::Result<PlanFrame> sheetFrame(const katana::cad::PlotSettings& sett
     if (!sheet) {
         return sheet.error();
     }
+    // The printable area in the sheet's device pixels. The margins are equal
+    // all round, so the area's centre is the paper's and the sheet's
+    // transform, sized to the area and moved in by one margin, maps every
+    // model point to the same device pixel it did over the whole paper.
+    const double margin = settings.marginMm * sheet->pixelsPerMillimetre;
     PlanFrame frame;
     frame.transform = sheet->view;
+    frame.transform.resize(sheet->widthPixels - 2.0 * margin, sheet->heightPixels - 2.0 * margin);
+    frame.origin = QPointF(margin, margin);
+    frame.clip = true;
     return frame;
 }
 
@@ -1127,7 +1556,7 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
                                    const PlanSource& source,
                                    const katana::cad::LayerOverrides& layers,
                                    const std::set<std::uint64_t>& hiddenReferences,
-                                   PlanPaintCache& cache)
+                                   PlanPaintCache& cache, const QString& title)
 {
     auto frame = sheetFrame(settings);
     if (!frame) {
@@ -1138,6 +1567,8 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
     const PdfResolution resolution = pdfResolutionFor(settings.dpi);
     QPdfWriter writer(path);
     writer.setResolution(resolution.resolution);
+    writer.setTitle(title.isEmpty() ? QFileInfo(path).completeBaseName() : title);
+    writer.setCreator(QStringLiteral("Katana"));
     const cad::PaperDimensions paper = cad::paperDimensions(settings.paper, settings.landscape);
     writer.setPageSize(QPageSize(QSizeF(paper.widthMm, paper.heightMm), QPageSize::Millimeter));
     // The sheet transform owns the margins; the writer's would shift the page.
@@ -1147,13 +1578,21 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
         return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
                                        "could not open the PDF for writing", path.toStdString());
     }
+    // The sheet is laid out in pixels of exactly settings.dpi; the writer's
+    // whole-number resolution is brought to it by one scale.
+    if (resolution.scale != 1.0) {
+        painter.scale(resolution.scale, resolution.scale);
+    }
     PlanPaintOptions options;
     options.medium = PlanMedium::Paper;
     options.pixelsPerMillimetre = cad::millimetresToPixels(1.0, settings.dpi);
     options.plot = &settings;
     painter.setRenderHint(QPainter::Antialiasing, true);
     (void)paintPlan(painter, source, *frame, options, cache);
-    painter.end();
+    if (!painter.end()) {
+        return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
+                                       "could not finish the PDF", path.toStdString());
+    }
     return {};
 }
 

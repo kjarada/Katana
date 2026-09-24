@@ -84,6 +84,33 @@ class ViewportWidget final : public QWidget {
     // hidden in one view is gone from that view and from no other.
     [[nodiscard]] std::size_t lastDrawnEntityCount() const { return lastDrawnEntities_; }
 
+    // ---- what a frame costs -------------------------------------------------
+    // The drawing is painted into an image kept between paints, and a paint
+    // whose view, drawing, layers, library, selection, reference layers and
+    // meshes are all as they were only lays that image down and draws the
+    // view's own furniture over it (tool previews, the snap marker, the
+    // selection box, the prompt). A mouse move then costs the furniture, not
+    // the drawing: measured on a 27.6k-entity survey drawing it was a whole
+    // repaint every move. How many times the drawing itself has been painted,
+    // for the tests that prove a move does not repaint it.
+    [[nodiscard]] std::size_t drawingPaintCount() const { return drawingPaints_; }
+    // The last paint, whole, and the last time the drawing was painted, in
+    // milliseconds: what onFrameStats reports.
+    [[nodiscard]] double lastFrameMilliseconds() const { return lastFrameMs_; }
+    [[nodiscard]] double lastDrawingMilliseconds() const { return lastDrawingMs_; }
+    // Raised after every paint with the view's statistics - "Plan  N drawn
+    // X ms", the drawing's own time and whether this frame reused it - as the
+    // 3D view reports its triangles and frame time.
+    std::function<void(const QString&)> onFrameStats;
+
+    // Every plan view's lines on screen as a cosmetic one-pixel pen instead
+    // of the 1.5 px hairline: 5-8x cheaper to stroke (docs/plan_view.md). A
+    // process-wide choice, the View menu's "Thin screen lines (faster)", on
+    // by default; plots keep their paper-millimetre weights either way.
+    // Views read it at their next paint; the caller repaints them.
+    static void setThinScreenLines(bool thin);
+    [[nodiscard]] static bool thinScreenLines();
+
     // Legacy: Select stops the running tool; the others start their
     // catalogue tool (toolId).
     void setTool(Tool tool);
@@ -267,6 +294,32 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] PlanSource paintSource() const;
     [[nodiscard]] PlanFrame paintFrame() const;
     [[nodiscard]] PlanPaintOptions screenOptions() const;
+
+    // Everything the kept drawing image depends on: when any of it differs
+    // from the last paint's, the drawing is painted again. The document's
+    // notifications count every command, undo, selection change, library
+    // and current-layer change; the fingerprints catch what changes without
+    // one - a reference layer shown or hidden in its panel, a mesh's style.
+    struct DrawingKey {
+        double centreX = 0.0;
+        double centreY = 0.0;
+        double scale = 0.0;
+        double width = 0.0;
+        double height = 0.0;
+        double deviceRatio = 0.0;
+        std::uint64_t notifications = 0;
+        std::uint64_t modelRevision = 0;
+        std::uint64_t libraryGeneration = 0;
+        std::uint64_t selection = 0;
+        std::uint64_t references = 0;
+        std::uint64_t meshes = 0;
+        katana::cad::LayerOverrides layers;
+        std::set<std::uint64_t> hiddenReferences;
+        bool grid = false;
+        bool thinLines = false;
+        friend bool operator==(const DrawingKey&, const DrawingKey&) = default;
+    };
+    [[nodiscard]] DrawingKey drawingKey(double deviceRatio) const;
     void drawPreview(QPainter& painter) const;
     // The running tool's prompt and what has been typed for it, in a band
     // along the bottom of the view.
@@ -318,6 +371,17 @@ class ViewportWidget final : public QWidget {
     // screen's. Mutable because painting is logically const.
     mutable PlanPaintCache paintCache_;
     PlanPaintCache plotCache_;
+
+    // The drawing as last painted, and what it was painted for.
+    QImage drawing_;
+    std::optional<DrawingKey> drawingKey_;
+    std::size_t drawingPaints_ = 0;
+    // Counted by the document listener: one per notification.
+    std::uint64_t notifications_ = 0;
+    // Counted when the window says its reference data changed.
+    std::uint64_t referenceRevision_ = 0;
+    double lastFrameMs_ = 0.0;
+    double lastDrawingMs_ = 0.0;
 
     bool panning_ = false;
     QPointF lastMouse_;

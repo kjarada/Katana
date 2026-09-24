@@ -15,6 +15,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 #include <QPdfWriter>
@@ -22,6 +23,7 @@
 #include <QLineF>
 #include <QMarginsF>
 #include <QContextMenuEvent>
+#include <QElapsedTimer>
 #include <QCursor>
 #include <QFont>
 #include <QFontMetrics>
@@ -164,7 +166,10 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
     if (!state_.planFramed) {
         state_.plan.scale = kInitialScale;
     }
-    documentListener_ = document_.addListener([this] { update(); });
+    documentListener_ = document_.addListener([this] {
+        ++notifications_; // the kept drawing is stale (drawingKey)
+        update();
+    });
     wireToolHost();
     activateOnFocus(*this, [this] {
         if (onActivated) {
@@ -327,6 +332,7 @@ void ViewportWidget::setReferenceData(katana::interop::ReferenceData* reference)
 void ViewportWidget::invalidateReferenceCache()
 {
     paintCache_.invalidateReferences();
+    ++referenceRevision_;
     update();
 }
 
@@ -904,22 +910,144 @@ PlanPaintOptions ViewportWidget::screenOptions() const
     // vanished into the line they sit on.
     options.pixelsPerMillimetre = std::max(1.0, logicalDpiX() / 25.4);
     options.grid = gridVisible_;
+    options.thinLines = thinScreenLines();
+    options.symbolSprites = true;
     return options;
+}
+
+namespace {
+
+// Whether plan views draw their lines as a cosmetic pixel: the View menu's
+// "Thin screen lines (faster)", on unless the user turns it off.
+bool thinScreenLinesSetting = true;
+
+// FNV-1a, for the fingerprints of what the drawing depends on without the
+// document saying so.
+struct Fingerprint {
+    std::uint64_t value = 1469598103934665603ULL;
+    void add(std::uint64_t word)
+    {
+        for (int byte = 0; byte < 8; ++byte) {
+            value ^= (word >> (8 * byte)) & 0xffU;
+            value *= 1099511628211ULL;
+        }
+    }
+    void add(double number)
+    {
+        std::uint64_t bits = 0;
+        static_assert(sizeof bits == sizeof number);
+        std::memcpy(&bits, &number, sizeof bits);
+        add(bits);
+    }
+};
+
+} // namespace
+
+void ViewportWidget::setThinScreenLines(bool thin)
+{
+    thinScreenLinesSetting = thin;
+}
+
+bool ViewportWidget::thinScreenLines()
+{
+    return thinScreenLinesSetting;
+}
+
+ViewportWidget::DrawingKey ViewportWidget::drawingKey(double deviceRatio) const
+{
+    DrawingKey key;
+    key.centreX = state_.plan.center.x;
+    key.centreY = state_.plan.center.y;
+    key.scale = state_.plan.scale;
+    key.width = state_.plan.widthPixels;
+    key.height = state_.plan.heightPixels;
+    key.deviceRatio = deviceRatio;
+    key.notifications = notifications_;
+    key.modelRevision = document_.modelRevision();
+    key.libraryGeneration = document_.libraryGeneration();
+    // The selection is announced (Document::notifySelectionChanged), but a
+    // caller that changes it and only asks for a repaint must still see it
+    // drawn: a selection is the ids, in order, and hashing even a whole
+    // drawing's is a fraction of a millisecond.
+    Fingerprint selection;
+    for (const katana::entity::EntityId id : document_.selection().ids()) {
+        selection.add(static_cast<std::uint64_t>(id));
+    }
+    key.selection = selection.value;
+    Fingerprint references;
+    references.add(referenceRevision_);
+    if (reference_ != nullptr) {
+        // The panel shows, hides and fades a layer without a notification.
+        for (const katana::interop::RasterOverlay& raster : reference_->rasters()) {
+            references.add(static_cast<std::uint64_t>(raster.id));
+            references.add(static_cast<std::uint64_t>(raster.visible));
+            references.add(raster.opacity);
+        }
+        for (const katana::interop::PointCloudLayer& cloud : reference_->pointClouds()) {
+            references.add(static_cast<std::uint64_t>(cloud.id));
+            references.add(static_cast<std::uint64_t>(cloud.visible));
+            references.add(static_cast<std::uint64_t>(cloud.colorMode));
+            references.add(static_cast<double>(cloud.pointSize));
+            references.add(static_cast<std::uint64_t>(cloud.points.size()));
+        }
+    }
+    key.references = references.value;
+    Fingerprint meshes;
+    if (meshes_ != nullptr) {
+        // The window's vector, which grows and restyles in place.
+        meshes.add(static_cast<std::uint64_t>(meshes_->size()));
+        for (const katana::cad::SceneMesh& mesh : *meshes_) {
+            meshes.add(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(mesh.mesh)));
+            meshes.add(static_cast<std::uint64_t>(mesh.visible));
+            meshes.add(static_cast<std::uint64_t>(mesh.style));
+            meshes.add(static_cast<std::uint64_t>(mesh.flatColor));
+        }
+    }
+    key.meshes = meshes.value;
+    key.layers = state_.layers;
+    key.hiddenReferences = state_.hiddenReferences;
+    key.grid = gridVisible_;
+    key.thinLines = thinScreenLines();
+    return key;
 }
 
 void ViewportWidget::paintEvent(QPaintEvent*)
 {
+    QElapsedTimer frameTimer;
+    frameTimer.start();
     QPainter painter(this);
-    painter.fillRect(rect(), kBackground);
     state_.plan.resize(width(), height());
     if (!state_.planFramed) {
         frameOnFirstPaint();
     }
 
-    // The drawing, through the one plan painter the plot uses too.
-    const PlanPaintStats stats =
-        paintPlan(painter, paintSource(), paintFrame(), screenOptions(), paintCache_);
-    lastDrawnEntities_ = stats.entitiesDrawn;
+    // The drawing, through the one plan painter the plot uses too, into an
+    // image kept until something it depends on changes. The image is the
+    // widget's size in DEVICE pixels, so on a scaled display it is as sharp
+    // as painting the widget directly, and laying it down is a copy.
+    const double deviceRatio = devicePixelRatioF();
+    DrawingKey key = drawingKey(deviceRatio);
+    const bool stale = !drawingKey_.has_value() || *drawingKey_ != key || drawing_.isNull();
+    if (stale) {
+        QElapsedTimer drawingTimer;
+        drawingTimer.start();
+        const QSize pixels(std::max(1, static_cast<int>(std::ceil(width() * deviceRatio))),
+                           std::max(1, static_cast<int>(std::ceil(height() * deviceRatio))));
+        if (drawing_.size() != pixels) {
+            drawing_ = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
+        }
+        drawing_.setDevicePixelRatio(deviceRatio);
+        QPainter layer(&drawing_);
+        layer.fillRect(rect(), kBackground);
+        const PlanPaintStats stats =
+            paintPlan(layer, paintSource(), paintFrame(), screenOptions(), paintCache_);
+        layer.end();
+        lastDrawnEntities_ = stats.entitiesDrawn;
+        drawingKey_ = std::move(key);
+        ++drawingPaints_;
+        lastDrawingMs_ = static_cast<double>(drawingTimer.nsecsElapsed()) / 1.0e6;
+    }
+    painter.drawImage(QPointF(0.0, 0.0), drawing_);
 
     // The view's own furniture over the drawing: what a tool is making, the
     // hint for an empty drawing, the selection box, the snap and the prompt.
@@ -939,6 +1067,19 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     }
     drawSnapMarker(painter);
     drawPrompt(painter);
+
+    lastFrameMs_ = static_cast<double>(frameTimer.nsecsElapsed()) / 1.0e6;
+    if (onFrameStats) {
+        // The drawing's own time, and this frame's when it only laid the
+        // kept drawing down: a mouse move reads "kept", a pan the drawing.
+        onFrameStats(stale ? QString("Plan  %1 drawn  %2 ms")
+                                 .arg(lastDrawnEntities_)
+                                 .arg(lastDrawingMs_, 0, 'f', 1)
+                           : QString("Plan  %1 drawn  %2 ms (kept, %3 ms)")
+                                 .arg(lastDrawnEntities_)
+                                 .arg(lastDrawingMs_, 0, 'f', 1)
+                                 .arg(lastFrameMs_, 0, 'f', 1));
+    }
 }
 
 bool ViewportWidget::drawingIsEmpty() const
@@ -1016,8 +1157,14 @@ void ViewportWidget::setMeshes(const std::vector<katana::cad::SceneMesh>* meshes
 katana::core::Status ViewportWidget::plotToPdf(const QString& path,
                                                const cad::PlotSettings& settings)
 {
+    // Titled with the project's name when it has one, so a sheet opened on
+    // its own says which drawing it came from.
+    QString title;
+    if (const auto directory = document_.projectDirectory()) {
+        title = QString::fromStdWString(directory->filename().wstring());
+    }
     return plotPlanToPdf(path, settings, paintSource(), state_.layers, state_.hiddenReferences,
-                         plotCache_);
+                         plotCache_, title);
 }
 
 void ViewportWidget::drawPreview(QPainter& painter) const

@@ -204,6 +204,72 @@ std::optional<Segment2> clip(const Segment2& segment, const Box2& box)
     return Segment2{segment.pointAt(enter), segment.pointAt(exit)};
 }
 
+void clipPolyline(const std::vector<Point2>& vertices, bool closed, const Box2& box,
+                  PolylineRuns& runs)
+{
+    runs.clear();
+    const std::size_t count = vertices.size();
+    if (count < 2 || box.empty()) {
+        return;
+    }
+    // Whether the last run is still open, and so continues if the next
+    // segment starts inside the box where this one ended.
+    bool open = false;
+    const auto close = [&runs, &open] {
+        if (open) {
+            runs.ends.push_back(runs.points.size());
+            open = false;
+        }
+    };
+    const std::size_t segments = closed ? count : count - 1;
+    for (std::size_t i = 0; i < segments; ++i) {
+        const Point2& a = vertices[i];
+        const Point2& b = vertices[(i + 1) % count];
+        // Liang-Barsky, as clip() above, kept inline so that a parameter of
+        // exactly 0 or 1 - the segment's own end inside the box - is known
+        // and the vertex copied rather than recomputed as a + 1 * (b - a),
+        // which need not equal b in floating point.
+        const double dx = b.x - a.x;
+        const double dy = b.y - a.y;
+        const double p[4] = {-dx, dx, -dy, dy};
+        const double q[4] = {a.x - box.min.x, box.max.x - a.x, a.y - box.min.y, box.max.y - a.y};
+        double enter = 0.0;
+        double exit = 1.0;
+        bool outside = false;
+        for (int edge = 0; edge < 4 && !outside; ++edge) {
+            if (p[edge] == 0.0) {
+                outside = q[edge] < 0.0; // parallel to this edge and beyond it
+                continue;
+            }
+            const double r = q[edge] / p[edge];
+            if (p[edge] < 0.0) {
+                enter = std::max(enter, r);
+            } else {
+                exit = std::min(exit, r);
+            }
+            outside = enter > exit;
+        }
+        if (outside) {
+            close();
+            continue;
+        }
+        const Point2 start = enter == 0.0 ? a : Point2(a.x + enter * dx, a.y + enter * dy);
+        const Point2 end = exit == 1.0 ? b : Point2(a.x + exit * dx, a.y + exit * dy);
+        // A run carries on only through a vertex it reached whole: this
+        // segment starts at its own first vertex and the run ended there.
+        if (!(open && enter == 0.0)) {
+            close();
+            runs.points.push_back(start);
+            open = true;
+        }
+        runs.points.push_back(end);
+        if (exit != 1.0) {
+            close(); // left the box: whatever comes back in is a new run
+        }
+    }
+    close();
+}
+
 Result<Polyline2> clipPolygon(const Polyline2& subject, const Polyline2& clipRegion)
 {
     if (!subject.closed) {
