@@ -54,9 +54,9 @@ std::vector<Entity> horizontalLines(int count, double length, double y0 = 0.0)
     std::vector<Entity> entities;
     for (int i = 0; i < count; ++i) {
         const double y = y0 + static_cast<double>(i);
-        Entity entity;
-        entity.geometry = Segment2(Point2(0.0, y), Point2(length, y));
-        entities.push_back(std::move(entity));
+        // Built in place: moving a local Entity into the vector trips GCC's
+        // -O3 maybe-uninitialized false positive on the geometry variant.
+        entities.emplace_back().geometry = Segment2(Point2(0.0, y), Point2(length, y));
     }
     return entities;
 }
