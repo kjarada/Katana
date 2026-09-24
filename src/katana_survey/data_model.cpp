@@ -1,5 +1,7 @@
 #include "katana/survey/data_model.hpp"
 
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <initializer_list>
 #include <set>
@@ -77,6 +79,29 @@ std::string checkStations(const std::vector<std::string>& ids)
     return {};
 }
 
+// A covariance the file did not state is allowed (the reduction weights the
+// value from ObservationPrecision); a stated one needs a positive diagonal.
+std::string checkCovariance(const GnssCovariance3& covariance)
+{
+    if (!covariance.stated()) {
+        return {};
+    }
+    if (std::string reason = checkFinite({{"covariance XY", covariance.xy},
+                                          {"covariance XZ", covariance.xz},
+                                          {"covariance YZ", covariance.yz}});
+        !reason.empty()) {
+        return reason;
+    }
+    for (const auto& [name, variance] : {std::pair{"variance X", covariance.xx},
+                                         std::pair{"variance Y", covariance.yy},
+                                         std::pair{"variance Z", covariance.zz}}) {
+        if (!std::isfinite(variance) || !(variance > 0.0)) {
+            return std::string(name) + " must be a positive finite variance";
+        }
+    }
+    return {};
+}
+
 // First non-empty reason wins.
 std::string firstOf(std::initializer_list<std::string> reasons)
 {
@@ -149,6 +174,37 @@ std::string valueProblem(const Observation& observation)
                                 o.length >= 0.0 ? std::string{}
                                                 : std::string("length must not be negative")});
             },
+            [](const HorizontalDirectionObservation& o) {
+                return firstOf(
+                    {checkFinite({{"direction", o.direction}}), checkSigmas({{"sigma", o.sigma}})});
+            },
+            [](const GnssGlobalPositionObservation& o) {
+                if (o.geocentric.has_value() == o.geodetic.has_value()) {
+                    return std::string(
+                        "a GNSS position must be either geocentric or geodetic, not both or neither");
+                }
+                std::string reason;
+                if (o.geocentric) {
+                    reason = checkFinite({{"X", o.geocentric->x},
+                                          {"Y", o.geocentric->y},
+                                          {"Z", o.geocentric->z}});
+                } else {
+                    reason = firstOf(
+                        {checkFinite({{"latitude", o.geodetic->latitude},
+                                      {"longitude", o.geodetic->longitude},
+                                      {"ellipsoidal height", o.geodetic->ellipsoidalHeight}}),
+                         std::abs(o.geodetic->latitude) <= kHalfPi
+                             ? std::string{}
+                             : std::string("latitude must lie in [-pi/2, pi/2]")});
+                }
+                return firstOf({reason, checkCovariance(o.covariance)});
+            },
+            [](const GnssGeocentricBaselineObservation& o) {
+                return firstOf({checkFinite({{"delta X", o.delta.x},
+                                             {"delta Y", o.delta.y},
+                                             {"delta Z", o.delta.z}}),
+                                checkCovariance(o.covariance)});
+            },
         },
         observation);
 }
@@ -214,6 +270,102 @@ std::string describeSource(const SourceRecord& source)
         text += " (" + format + ")";
     }
     return text;
+}
+
+const char* toString(CorrectionState state)
+{
+    switch (state) {
+    case CorrectionState::Unknown:
+        return "not stated";
+    case CorrectionState::Applied:
+        return "applied by the instrument";
+    case CorrectionState::NotApplied:
+        return "not applied";
+    }
+    return "not stated";
+}
+
+const char* toString(Face face)
+{
+    switch (face) {
+    case Face::Unknown:
+        return "unknown face";
+    case Face::Left:
+        return "face left";
+    case Face::Right:
+        return "face right";
+    }
+    return "unknown face";
+}
+
+const char* toString(AntennaHeightMethod method)
+{
+    switch (method) {
+    case AntennaHeightMethod::Unknown:
+        return "not stated";
+    case AntennaHeightMethod::Vertical:
+        return "vertical to the antenna reference point";
+    case AntennaHeightMethod::Slant:
+        return "slant";
+    case AntennaHeightMethod::PhaseCentre:
+        return "to the phase centre";
+    case AntennaHeightMethod::Other:
+        return "other";
+    }
+    return "not stated";
+}
+
+const char* toString(GnssSolution solution)
+{
+    switch (solution) {
+    case GnssSolution::Unknown:
+        return "not stated";
+    case GnssSolution::Fixed:
+        return "fixed";
+    case GnssSolution::Float:
+        return "float";
+    case GnssSolution::Differential:
+        return "differential";
+    case GnssSolution::Autonomous:
+        return "autonomous";
+    }
+    return "not stated";
+}
+
+std::string toString(const SurveyTimestamp& timestamp)
+{
+    if (!timestamp.known()) {
+        return {};
+    }
+    // Shortest text that reads back as the same double, so a stored second is
+    // not rounded to whatever a fixed precision thought was enough.
+    std::array<char, 64> second{};
+    const auto written =
+        std::to_chars(second.data(), second.data() + second.size(), timestamp.second);
+    const std::string_view secondText(
+        second.data(), written.ec == std::errc{} ? static_cast<std::size_t>(written.ptr - second.data()) : 0);
+    auto twoDigits = [](int value) {
+        std::string text = std::to_string(value);
+        return text.size() < 2 ? "0" + text : text;
+    };
+    std::string text = std::to_string(timestamp.year) + "-" + twoDigits(timestamp.month) + "-" +
+                       twoDigits(timestamp.day) + "T" + twoDigits(timestamp.hour) + ":" +
+                       twoDigits(timestamp.minute) + ":";
+    // Two integer digits, as ISO 8601 has them: "05.5", not "5.5".
+    if (timestamp.second < 10.0) {
+        text += '0';
+    }
+    text += secondText;
+    if (!timestamp.timeSystem.empty()) {
+        text += ' ';
+        text += timestamp.timeSystem;
+    }
+    return text;
+}
+
+double distanceSigma(const ObservationPrecision& precision, double distance)
+{
+    return std::hypot(precision.distanceConstant, precision.distancePpm * 1e-6 * distance);
 }
 
 const char* toString(CoordinateSource source)
@@ -302,6 +454,16 @@ std::string observationKindName(const Observation& observation)
             [](const GnssBaselineObservation&) { return std::string("GNSS baseline"); },
             [](const GnssPositionObservation&) { return std::string("GNSS position"); },
             [](const LevelDifferenceObservation&) { return std::string("level difference"); },
+            [](const HorizontalDirectionObservation&) {
+                return std::string("horizontal direction");
+            },
+            [](const GnssGlobalPositionObservation& o) {
+                return std::string(o.geocentric ? "GNSS geocentric position"
+                                                : "GNSS geodetic position");
+            },
+            [](const GnssGeocentricBaselineObservation&) {
+                return std::string("GNSS geocentric baseline");
+            },
         },
         observation);
 }
@@ -313,6 +475,8 @@ std::vector<std::string> referencedPoints(const Observation& observation)
         Overloaded{
             [](const HorizontalAngleObservation& o) { return Ids{o.at, o.from, o.to}; },
             [](const GnssPositionObservation& o) { return Ids{o.point}; },
+            [](const GnssGlobalPositionObservation& o) { return Ids{o.point}; },
+            [](const HorizontalDirectionObservation& o) { return Ids{o.at, o.to}; },
             [](const auto& o) { return Ids{o.from, o.to}; },
         },
         observation);
@@ -335,8 +499,26 @@ Observation normalizedObservation(Observation observation)
         angle->angle = normalizeAngle(angle->angle);
     } else if (auto* azimuth = std::get_if<AzimuthObservation>(&observation)) {
         azimuth->azimuth = normalizeAngle(azimuth->azimuth);
+    } else if (auto* direction = std::get_if<HorizontalDirectionObservation>(&observation)) {
+        direction->direction = normalizeAngle(direction->direction);
     }
     return observation;
+}
+
+const Pointing* observationPointing(const Observation& observation)
+{
+    return std::visit(
+        Overloaded{
+            [](const DistanceObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const HorizontalAngleObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const VerticalAngleObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const ZenithAngleObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const HorizontalDirectionObservation& o) -> const Pointing* {
+                return &o.pointing;
+            },
+            [](const auto&) -> const Pointing* { return nullptr; },
+        },
+        observation);
 }
 
 const SourceRecord& observationSource(const Observation& observation)
@@ -491,6 +673,29 @@ Status validateProject(const SurveyProject& project)
         if (Status status = checkProjectObservation(observation, points, "project observation");
             !status.ok()) {
             return status;
+        }
+    }
+
+    PointIdSet positioned;
+    for (const SurveyPoint& point : project.points) {
+        positioned.insert(point.id);
+    }
+    for (const ControlPoint& control : project.controlPoints) {
+        if (!positioned.contains(control.pointId)) {
+            return makeError(ErrorCode::NotFound,
+                             "control point '" + control.pointId +
+                                 "' is not a positioned point of the project",
+                             "control needs a published value to hold");
+        }
+        for (const auto& [name, component] :
+             {std::pair{"northing", &control.northing}, std::pair{"easting", &control.easting},
+              std::pair{"elevation", &control.elevation}}) {
+            if (component->constraint == ControlConstraint::Weighted &&
+                (!std::isfinite(component->sigma) || !(component->sigma > 0.0))) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "control point '" + control.pointId + "': the weighted " +
+                                     name + " needs a positive standard deviation");
+            }
         }
     }
 

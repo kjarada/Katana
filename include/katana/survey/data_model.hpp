@@ -157,11 +157,145 @@ struct UnpositionedPoint {
     friend bool operator==(const UnpositionedPoint&, const UnpositionedPoint&) = default;
 };
 
+// ---- What the instrument did, and when ---------------------------------------------
+
+// Whether a correction is already in a recorded value.
+//
+// Three states and not a bool, because "the file does not say" is the common
+// case and it is not the same as "not applied": an atmospheric correction
+// added a second time is as wrong as one left out, and the reduction has to
+// be able to tell the person which of the two it guessed (reduction.hpp).
+enum class CorrectionState {
+    Unknown,    // the file does not say
+    Applied,    // the instrument or controller already put it in the recorded value
+    NotApplied, // the file states the value is raw in this respect
+};
+
+[[nodiscard]] const char* toString(CorrectionState state);
+
+// A calendar date and time exactly as a field file states it, with the time
+// system it names. Not a std::chrono time point: a field file's clock is
+// often local and unlabelled, and converting it would invent a time zone the
+// file never gave. `year == 0` means "not stated".
+struct SurveyTimestamp {
+    int year = 0;
+    int month = 0; // 1..12
+    int day = 0;   // 1..31
+    int hour = 0;
+    int minute = 0;
+    double second = 0.0;
+    std::string timeSystem{}; // "UTC", "GPS", "local"; empty when the file does not say
+
+    [[nodiscard]] bool known() const { return year != 0; }
+
+    friend bool operator==(const SurveyTimestamp&, const SurveyTimestamp&) = default;
+};
+
+// "2024-03-05T10:15:30.5 GPS", or "" for a timestamp that is not known. The
+// seconds are written with as many decimals as they need and no more.
+[[nodiscard]] std::string toString(const SurveyTimestamp& timestamp);
+
+// The settings a total station recorded for one setup: which instrument, and
+// what it had already done to the numbers it wrote down.
+//
+// Typed rather than left in SurveyStation::metadata, because the reduction
+// DECIDES from these (reduction.hpp): an atmospheric correction is applied
+// automatically only when the instrument did not apply one, and a prism
+// constant only when the shot says it is missing. A key/value bag would make
+// every parser spell those facts its own way and the reduction guess.
+struct InstrumentSettings {
+    std::string make{};  // "Leica"
+    std::string model{}; // "TS16"
+    std::string serialNumber{};
+    // Metres, as set on the instrument (e.g. -0.0344 for a Leica round prism
+    // against a zero-constant instrument, 0.0 for a Leica GPR1 on a Leica).
+    std::optional<double> prismConstant{};
+    CorrectionState prismConstantState = CorrectionState::Unknown;
+    // Parts per million, as the instrument computed or was told it.
+    std::optional<double> atmosphericPpm{};
+    CorrectionState atmosphericPpmState = CorrectionState::Unknown;
+    std::optional<double> temperatureCelsius{};
+    std::optional<double> pressureHectopascals{};
+    std::optional<double> relativeHumidityPercent{};
+    // The coefficient of refraction the instrument used for its own reduced
+    // values (a recorded horizontal distance or height difference).
+    std::optional<double> refractionCoefficient{};
+    CorrectionState curvatureRefractionState = CorrectionState::Unknown;
+    // A grid or project scale factor the instrument or controller applied to
+    // the distances it recorded.
+    std::optional<double> scaleFactor{};
+    CorrectionState scaleFactorState = CorrectionState::Unknown;
+    SurveyTimestamp time{};
+
+    friend bool operator==(const InstrumentSettings&, const InstrumentSettings&) = default;
+};
+
+// The a-priori precision of observations, used twice: a parser gives an
+// observation whose file states no standard deviation these values (every
+// observation must carry a sigma > 0, see validateObservation), and the
+// reduction replaces them with the ones the person set (reduction_settings.hpp).
+// Defaults are those of a 3" total station with a 2 mm + 2 ppm EDM, which is a
+// middling instrument: a better one is under-weighted, which is the safe way
+// round for an adjustment's outlier test.
+struct ObservationPrecision {
+    double direction = 1.4544410433286079e-05;  // radians: 3" = 3 * pi / 648000
+    double zenith = 1.4544410433286079e-05;     // radians: 3"
+    double distanceConstant = 0.002;            // metres (the "a" of a mm + b ppm)
+    double distancePpm = 2.0;                   // parts per million (the "b")
+    double instrumentCentring = 0.001;          // metres
+    double targetCentring = 0.001;              // metres
+    double heightMeasurement = 0.002;           // metres, instrument and target heights
+    double levellingPerSqrtKilometre = 0.001;   // metres per sqrt(km) of level line
+    double gnssHorizontal = 0.010;              // metres, where a file gives no covariance
+    double gnssVertical = 0.020;                // metres, where a file gives no covariance
+
+    friend bool operator==(const ObservationPrecision&, const ObservationPrecision&) = default;
+};
+
+// sqrt(a^2 + (b * 1e-6 * d)^2): the EDM part only; centring is the reduction's
+// business because it depends on the geometry, not on the distance alone.
+[[nodiscard]] double distanceSigma(const ObservationPrecision& precision, double distance);
+
 // ---- Observations ------------------------------------------------------------
 
 // Every observation carries the record it was read from, for the reasons given
 // beside SourceRecord. It is part of the observation rather than a table beside
 // it so that an observation moved between containers cannot lose its origin.
+//
+// Fields added after `source` (pointing, target and the like) carry default
+// member initialisers, so that an aggregate written before they existed still
+// compiles and means what it meant.
+
+// Which face of the telescope an observation was made on. Face I / face II in
+// the older books; Left is "vertical circle on the left of the observer".
+enum class Face { Unknown, Left, Right };
+
+[[nodiscard]] const char* toString(Face face);
+
+// Which POINTING an observation belongs to: the horizontal direction, zenith
+// angle and slope distance of one shot share an index, so that the reduction
+// can pair a face-left shot with its face-right partner and reduce the three
+// together (a slope distance needs the zenith angle of the same pointing).
+// 0 means "the file does not group this observation with any other". Indices
+// are unique within one SurveyStation and carry no meaning beyond equality.
+struct Pointing {
+    std::size_t index = 0;
+    Face face = Face::Unknown;
+
+    friend bool operator==(const Pointing&, const Pointing&) = default;
+};
+
+// What a distance was measured to.
+struct TargetInfo {
+    // Metres, as recorded with the shot (which may differ from the setup's
+    // InstrumentSettings::prismConstant when the prism was changed mid setup).
+    std::optional<double> prismConstant{};
+    CorrectionState prismConstantState = CorrectionState::Unknown;
+    std::string targetType{}; // the file's own words: "prism", "reflectorless", "tape"
+
+    friend bool operator==(const TargetInfo&, const TargetInfo&) = default;
+};
+
 enum class DistanceKind { Horizontal, Slope };
 
 // Distance from `from` to `to`. Slope distances carry the instrument and target
@@ -175,6 +309,8 @@ struct DistanceObservation {
     double instrumentHeight = 0.0;
     double targetHeight = 0.0;
     SourceRecord source;
+    Pointing pointing{};
+    TargetInfo target{};
 
     friend bool operator==(const DistanceObservation&, const DistanceObservation&) = default;
 };
@@ -188,6 +324,7 @@ struct HorizontalAngleObservation {
     double angle = 0.0;
     double sigma = 0.0; // radians
     SourceRecord source;
+    Pointing pointing{};
 
     friend bool operator==(const HorizontalAngleObservation&,
                            const HorizontalAngleObservation&) = default;
@@ -202,6 +339,7 @@ struct VerticalAngleObservation {
     double instrumentHeight = 0.0;
     double targetHeight = 0.0;
     SourceRecord source;
+    Pointing pointing{};
 
     friend bool operator==(const VerticalAngleObservation&,
                            const VerticalAngleObservation&) = default;
@@ -216,9 +354,32 @@ struct ZenithAngleObservation {
     double instrumentHeight = 0.0;
     double targetHeight = 0.0;
     SourceRecord source;
+    Pointing pointing{};
 
     friend bool operator==(const ZenithAngleObservation&,
                            const ZenithAngleObservation&) = default;
+};
+
+// A horizontal circle READING at `at` towards `to`, radians clockwise in
+// [0, 2*pi): what a total station actually records, before anything has
+// oriented it.
+//
+// Its own kind, rather than a HorizontalAngleObservation from the backsight,
+// because a parser does not know the backsight reading of the same face when
+// it meets a shot (the backsight may be observed last, or on both faces), and
+// differencing early would throw away the face pairing the reduction needs.
+// The reduction turns directions into angles or azimuths; the network
+// adjustment does not take them (it lists them as unused).
+struct HorizontalDirectionObservation {
+    std::string at;
+    std::string to;
+    double direction = 0.0;
+    double sigma = 0.0; // radians
+    SourceRecord source;
+    Pointing pointing{};
+
+    friend bool operator==(const HorizontalDirectionObservation&,
+                           const HorizontalDirectionObservation&) = default;
 };
 
 // Grid azimuth of the line `from` -> `to` (gyro, astronomic or a known bearing).
@@ -278,10 +439,131 @@ struct LevelDifferenceObservation {
                            const LevelDifferenceObservation&) = default;
 };
 
+// ---- GNSS as the receiver states it --------------------------------------------
+//
+// GnssBaselineObservation and GnssPositionObservation above are GRID values,
+// already reduced into the network's system. What a receiver or a Trimble job
+// actually records is earth-centred: ECEF coordinates, ECEF vectors, or
+// latitude, longitude and ellipsoidal height. Turning those into grid needs a
+// projection, which is geodesy, which katana::survey may not see; so a parser
+// records them as they are and the reduction converts them through a function
+// the caller supplies (ReductionContext in reduction.hpp).
+
+// Earth-centred, earth-fixed, metres.
+struct GeocentricCoordinate {
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+
+    friend bool operator==(const GeocentricCoordinate&, const GeocentricCoordinate&) = default;
+};
+
+// Latitude and longitude in radians (north and east positive), height above
+// the ellipsoid in metres.
+struct GeodeticCoordinate {
+    double latitude = 0.0;
+    double longitude = 0.0;
+    double ellipsoidalHeight = 0.0;
+
+    friend bool operator==(const GeodeticCoordinate&, const GeodeticCoordinate&) = default;
+};
+
+// A symmetric 3x3 covariance, metres squared, in the frame of the value it
+// belongs to: X/Y/Z for a geocentric value; north/east/up (local, at the
+// point) for a geodetic one. All zero means the file gave none; otherwise the
+// diagonal must be positive.
+struct GnssCovariance3 {
+    double xx = 0.0;
+    double yy = 0.0;
+    double zz = 0.0;
+    double xy = 0.0;
+    double xz = 0.0;
+    double yz = 0.0;
+
+    [[nodiscard]] bool stated() const
+    {
+        return xx != 0.0 || yy != 0.0 || zz != 0.0 || xy != 0.0 || xz != 0.0 || yz != 0.0;
+    }
+
+    friend bool operator==(const GnssCovariance3&, const GnssCovariance3&) = default;
+};
+
+// How an antenna height was measured. The reduction to the antenna reference
+// point depends on it, and a slant height reduced as a vertical one is a
+// centimetre-level error nobody sees.
+enum class AntennaHeightMethod {
+    Unknown,
+    Vertical,    // vertically to the antenna reference point (ARP)
+    Slant,       // to the edge of the antenna; needs the antenna's radius
+    PhaseCentre, // already reduced to the phase centre by the receiver
+    Other,       // the file names a mark this list does not: see GnssAntenna::measuredTo
+};
+
+[[nodiscard]] const char* toString(AntennaHeightMethod method);
+
+struct GnssAntenna {
+    std::string type{}; // as the file gives it, e.g. the IGS name "LEIGS15     NONE"
+    std::string serialNumber{};
+    double height = 0.0; // metres, as measured (RINEX "ANTENNA: DELTA H/E/N" H)
+    AntennaHeightMethod method = AntennaHeightMethod::Unknown;
+    std::string measuredTo{}; // the file's own words: "bottom of quick release"
+    double eastOffset = 0.0;  // metres (RINEX DELTA E)
+    double northOffset = 0.0; // metres (RINEX DELTA N)
+
+    friend bool operator==(const GnssAntenna&, const GnssAntenna&) = default;
+};
+
+// The kind of solution a receiver reports. Carried so that a report can say
+// "3 of these positions are float solutions" instead of weighting them all
+// alike without comment.
+enum class GnssSolution { Unknown, Fixed, Float, Differential, Autonomous };
+
+[[nodiscard]] const char* toString(GnssSolution solution);
+
+// A GNSS position of `point` in a global frame, as the file states it.
+// Exactly one of `geocentric` and `geodetic` is set (validateObservation).
+struct GnssGlobalPositionObservation {
+    std::string point;
+    std::optional<GeocentricCoordinate> geocentric{};
+    std::optional<GeodeticCoordinate> geodetic{};
+    GnssCovariance3 covariance{}; // see GnssCovariance3 for its frame
+    std::string referenceFrame{}; // as declared: "WGS 84", "ITRF2014"; empty when not
+    GnssAntenna antenna{};
+    GnssSolution solution = GnssSolution::Unknown;
+    SourceRecord source;
+
+    friend bool operator==(const GnssGlobalPositionObservation&,
+                           const GnssGlobalPositionObservation&) = default;
+};
+
+// A GNSS vector `from` -> `to` in ECEF components, metres.
+struct GnssGeocentricBaselineObservation {
+    std::string from;
+    std::string to;
+    GeocentricCoordinate delta{};
+    GnssCovariance3 covariance{}; // X/Y/Z
+    std::string referenceFrame{};
+    GnssAntenna fromAntenna{};
+    GnssAntenna toAntenna{};
+    GnssSolution solution = GnssSolution::Unknown;
+    SourceRecord source;
+
+    friend bool operator==(const GnssGeocentricBaselineObservation&,
+                           const GnssGeocentricBaselineObservation&) = default;
+};
+
+// New kinds are APPENDED, so that the index of every older alternative stays
+// what it was.
 using Observation =
     std::variant<DistanceObservation, HorizontalAngleObservation, VerticalAngleObservation,
                  ZenithAngleObservation, AzimuthObservation, GnssBaselineObservation,
-                 GnssPositionObservation, LevelDifferenceObservation>;
+                 GnssPositionObservation, LevelDifferenceObservation,
+                 HorizontalDirectionObservation, GnssGlobalPositionObservation,
+                 GnssGeocentricBaselineObservation>;
+
+// The pointing an observation belongs to, or nullptr for a kind that has none
+// (azimuths, GNSS, level differences).
+[[nodiscard]] const Pointing* observationPointing(const Observation& observation);
 
 // Short name of the alternative held by `observation`, for diagnostics.
 [[nodiscard]] std::string observationKindName(const Observation& observation);
@@ -425,8 +707,39 @@ struct SurveyStation {
     std::vector<Observation> observations;
     std::map<std::string, std::string> metadata;
     SourceRecord source;
+    // What the instrument was and what it had already done to the numbers.
+    InstrumentSettings instrument{};
 
     friend bool operator==(const SurveyStation&, const SurveyStation&) = default;
+};
+
+// One GNSS observing session, as a RINEX observation header (or a receiver's
+// own job) describes it. Metadata, not observations: raw phase and code are not
+// read into the model - a RINEX file is imported for what it says about the
+// occupation (marker, antenna, span), and processing it is out of scope.
+struct GnssSession {
+    std::string markerName{};
+    std::string markerNumber{};
+    std::string receiverType{};
+    std::string receiverSerial{};
+    std::string receiverFirmware{};
+    GnssAntenna antenna{};
+    // The header's approximate position, ECEF metres. Approximate is the word:
+    // it is typically a navigation solution, metres out.
+    std::optional<GeocentricCoordinate> approximatePosition{};
+    SurveyTimestamp firstEpoch{};
+    SurveyTimestamp lastEpoch{};
+    std::optional<double> intervalSeconds{};
+    std::size_t epochCount = 0;
+    // Distinct satellites seen, per system, keyed by the system's name
+    // ("GPS", "GLONASS", "Galileo", "BeiDou", "QZSS", "NavIC", "SBAS").
+    std::map<std::string, std::size_t> satellitesPerSystem{};
+    std::string formatVersion{}; // "3.04"
+    std::string observer{};
+    std::string agency{};
+    SourceRecord source;
+
+    friend bool operator==(const GnssSession&, const GnssSession&) = default;
 };
 
 // A coded string: the points one field code strung together, in the order they
@@ -524,6 +837,13 @@ struct SurveyProject {
     std::vector<SurveyFeature> features;
     std::map<std::string, std::string> metadata;
     SourceRecord source; // the file as a whole; its recordNumber is 0
+    // Points the FILE marks as control (a Leica fixed point, a Trimble
+    // "control" class). The published values are the points' own coordinates.
+    // What the reduction actually holds is the person's choice in
+    // ReductionSettings, which starts from these.
+    std::vector<ControlPoint> controlPoints{};
+    // GNSS sessions the file describes (RINEX headers, receiver jobs).
+    std::vector<GnssSession> gnssSessions{};
 
     friend bool operator==(const SurveyProject&, const SurveyProject&) = default;
 };
@@ -539,7 +859,9 @@ struct SurveyProject {
 //   * every feature names at least one point and every point it names is in the
 //     project;
 //   * every observation, on a station or loose, passes validateObservation() and
-//     refers only to points that are in the project.
+//     refers only to points that are in the project;
+//   * every control point names a POSITIONED point (control with no published
+//     value is a contradiction), and a Weighted component has a sigma > 0.
 // Traverses are NOT checked against the points: a Traverse is self-contained by
 // design (see above - it carries its own start and end coordinates), so its
 // station ids are names of its own and need not be project points.
