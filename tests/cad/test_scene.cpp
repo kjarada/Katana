@@ -7,11 +7,16 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <string>
+#include <utility>
 
 #include "katana/cad/scene.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/task_pool.hpp"
 
 using katana::cad::Document;
 using katana::cad::SceneBuilder;
@@ -308,10 +313,32 @@ TEST(CadScene, AnAutomaticGridIsSizedToTheSceneAndCutIntoCells)
     EXPECT_EQ(list.lines.size(), 420u);
 }
 
+TEST(CadScene, TheGridDrawsItsAxesLastSoNoOtherGridLineBreaksThem)
+{
+    // The grid writes no depth (renderLayers), so where two of its lines
+    // cross the later covers the earlier. Round the default 100 m patch the
+    // origin is in range (-70..70, AnAutomaticGridIsSizedToTheSceneAndCutIntoCells),
+    // so both axes are drawn, 2 px against every other line's 1: 14 cells
+    // each, the last 2 x 14 = 28 of the 420 lines, and none before them.
+    Document document;
+    SceneBuilder builder;
+    DrawList list;
+    SceneOptions options;
+    options.drawEntities = false;
+    options.drawGrid = true;
+    builder.build(document, {}, options, list);
+    ASSERT_EQ(list.lines.size(), 420u);
+    for (std::size_t k = 0; k < list.lines.size(); ++k) {
+        EXPECT_EQ(list.lines[k].width, k < 392u ? 1.0f : 2.0f) << "line " << k;
+    }
+}
+
 TEST(CadScene, TheGridStandsOnTheLowestSurface)
 {
     // A surface from 0 to 10 lifted to 250..260: the grid goes under it at
     // 250, where the ground is, not at a z = 0 two hundred metres below.
+    // Exactly in the plane of the surface's lowest part; drawn as a backdrop
+    // it never shows through it (SceneFrame.AFlatSurfaceAtTheDatumCoversTheGridStandingUnderIt).
     std::vector<katana::geometry::Point3> vertices = {
         {0.0, 0.0, 250.0}, {100.0, 0.0, 260.0}, {100.0, 100.0, 260.0}, {0.0, 100.0, 250.0}};
     auto surface = TinSurface::create(std::move(vertices), {{0, 1, 2}, {0, 2, 3}});
@@ -988,4 +1015,181 @@ TEST(SceneLayersBuild, TheSelectionOverlayHoldsOnlyTheSelectedEntities)
     EXPECT_EQ(layers.selection.positions.front().y, 5.0);
     EXPECT_GT(layers.selection.lines.front().depthBias, layers.entities.lines.front().depthBias)
         << "the overlay must win the tie with the entity's own first drawing";
+}
+
+// ---- one frame: the layers drawn as the 3D view draws them -----------------------
+
+namespace {
+
+using katana::render::Camera;
+using katana::render::Framebuffer;
+using katana::render::Projection;
+using katana::render::Rgba;
+using katana::render::StandardView;
+
+constexpr Rgba kBlack = katana::render::rgba(0, 0, 0);
+
+// A TIN of n x n square cells over the square `size` wide from (x0, y0), at
+// the heights `height` gives.
+TinSurface gridTin(double x0, double y0, double size, int n,
+                   const std::function<double(double, double)>& height)
+{
+    std::vector<katana::geometry::Point3> vertices;
+    for (int j = 0; j <= n; ++j) {
+        for (int i = 0; i <= n; ++i) {
+            const double x = x0 + size * i / n;
+            const double y = y0 + size * j / n;
+            vertices.push_back({x, y, height(x, y)});
+        }
+    }
+    std::vector<katana::terrain::TinTriangle> triangles;
+    for (int j = 0; j < n; ++j) {
+        for (int i = 0; i < n; ++i) {
+            const auto v0 = static_cast<std::uint32_t>(j * (n + 1) + i);
+            const auto v3 = v0 + static_cast<std::uint32_t>(n + 1);
+            triangles.push_back({v0, v0 + 1, v3 + 1});
+            triangles.push_back({v0, v3 + 1, v3});
+        }
+    }
+    auto surface = TinSurface::create(std::move(vertices), std::move(triangles));
+    EXPECT_TRUE(surface.ok());
+    return surface.ok() ? std::move(*surface) : TinSurface{};
+}
+
+// One frame of `layers` through a copy of `camera`, on one thread, over black.
+Framebuffer frameOf(SceneLayers& layers, Camera camera)
+{
+    auto target = Framebuffer::create(camera.viewportWidth(), camera.viewportHeight());
+    EXPECT_TRUE(target.ok());
+    katana::core::TaskPool pool(0);
+    katana::render::RenderOptions options;
+    options.background = kBlack;
+    options.pool = &pool;
+    katana::render::Rasterizer rasterizer;
+    EXPECT_TRUE(katana::cad::renderLayers(layers, camera, rasterizer, *target, options).ok());
+    return std::move(*target);
+}
+
+std::size_t countPixels(const Framebuffer& frame, Rgba color)
+{
+    return static_cast<std::size_t>(
+        std::count(frame.color().begin(), frame.color().end(), color));
+}
+
+} // namespace
+
+TEST(SceneFrame, AFlatSurfaceAtTheDatumCoversTheGridStandingUnderIt)
+{
+    // A pad flat at 5 m, 200 m square in 13 x 13 cells. The datum is its
+    // lowest point, 5, so the grid lies exactly in its plane. A filled
+    // triangle is pushed back by its own depth slope, and the grid drawn
+    // before it with depth won: 8,902 of the pad's 235,340 pixels at the iso
+    // view were grid lines, the whole grid pattern across the pad. Drawn as
+    // a backdrop the grid is under the pad everywhere, so every pixel of the
+    // pad is what the pad draws with no grid at all.
+    const TinSurface pad = gridTin(0.0, 0.0, 200.0, 13, [](double, double) { return 5.0; });
+    SceneSurface item;
+    item.surface = &pad;
+    item.style = SurfaceStyle::Shaded;
+    Document document;
+    SceneOptions withGrid; // the grid the view draws by default
+    SceneOptions noGrid = withGrid;
+    noGrid.drawGrid = false;
+    SceneLayers gridded = layersOf(document, {item}, withGrid);
+    SceneLayers bare = layersOf(document, {item}, noGrid);
+    ASSERT_FALSE(gridded.grid.lines.empty());
+    ASSERT_NEAR(gridded.grid.bounds().min.z, 5.0, 1e-9)
+        << "the grid is not in the pad's plane, so this proves nothing";
+
+    const std::pair<Projection, StandardView> views[] = {
+        {Projection::Perspective, StandardView::IsoSouthWest},
+        {Projection::Orthographic, StandardView::IsoSouthWest},
+        {Projection::Perspective, StandardView::Top},
+        {Projection::Orthographic, StandardView::Top}};
+    for (const auto& [projection, standard] : views) {
+        SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " " +
+                     std::to_string(static_cast<int>(standard)));
+        Camera camera;
+        camera.setViewportSize(800, 600);
+        camera.setProjection(projection);
+        camera.setStandardView(standard);
+        ASSERT_TRUE(camera.frame(bare.bounds));
+        const Framebuffer plain = frameOf(bare, camera);
+        const Framebuffer seen = frameOf(gridded, camera);
+        std::size_t padPixels = 0;
+        std::size_t changed = 0;
+        std::size_t gridBeside = 0;
+        for (std::size_t k = 0; k < plain.color().size(); ++k) {
+            if (plain.color()[k] != kBlack) {
+                ++padPixels;
+                changed += seen.color()[k] != plain.color()[k] ? 1u : 0u;
+            } else if (seen.color()[k] != kBlack) {
+                ++gridBeside;
+            }
+        }
+        ASSERT_GT(padPixels, 50000u) << "the pad is not in view, so this proves nothing";
+        EXPECT_EQ(changed, 0u) << "grid pixels drawn over the pad, of " << padPixels;
+        EXPECT_GT(gridBeside, 1000u) << "the grid was not drawn at all";
+    }
+}
+
+TEST(SceneFrame, DrawingLinesDrapedOnASurfaceCrossItsEdgesUnbroken)
+{
+    // A plane rising 5% east and 2% north, 400 m square in 40 x 40 cells:
+    // 3,200 triangles, under kDenseSurfaceTriangles, so the default style
+    // draws its edges, and 10 m cells are 20 px or more at the frame, so at
+    // full strength. Across it 40 plan lines, draped. An edge (1 footprint)
+    // and a draped line (1.5) each have one depth across their width; off
+    // their centres those differ by up to a pixel of the plane's slope,
+    // which at a low angle is more than the half footprint between them, so
+    // the edge drawn first won every crossing: 2.4% of the line pixels lost
+    // at the iso view, 9.4% at 0.25 rad, 18.7% at 0.12. Edges that write no
+    // depth leave the lines exactly the pixels they draw on the bare plane.
+    const TinSurface plane =
+        gridTin(0.0, 0.0, 400.0, 40, [](double x, double y) { return 0.05 * x + 0.02 * y; });
+    Document document;
+    for (int k = 0; k < 30; ++k) {
+        const double y = 7.0 + 12.0 * k;
+        ASSERT_TRUE(
+            document.execute(katana::commands::createLine(Point2(5.0, y), Point2(395.0, y + 30.0)))
+                .ok());
+    }
+    for (int k = 0; k < 10; ++k) {
+        const double x = 13.0 + 37.0 * k;
+        ASSERT_TRUE(
+            document.execute(katana::commands::createLine(Point2(x, 5.0), Point2(x + 20.0, 395.0)))
+                .ok());
+    }
+    SceneSurface edged;
+    edged.surface = &plane; // the default, Automatic: edges at this size
+    SceneSurface shaded = edged;
+    shaded.style = SurfaceStyle::Shaded;
+    SceneLayers withEdges = layersOf(document, {edged}, plainOptions());
+    SceneLayers bare = layersOf(document, {shaded}, plainOptions());
+    ASSERT_FALSE(withEdges.edges.lines.empty()) << "no edges, so this proves nothing";
+    ASSERT_TRUE(bare.edges.lines.empty());
+    const Rgba ink = bare.entities.colors.front();
+
+    for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
+        for (double elevation : {0.61, 0.25, 0.12}) {
+            SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " at " +
+                         std::to_string(elevation));
+            Camera camera;
+            camera.setViewportSize(1200, 800);
+            camera.setProjection(projection);
+            camera.setStandardView(StandardView::IsoSouthWest);
+            camera.setOrientation(camera.azimuth(), elevation);
+            ASSERT_TRUE(camera.frame(bare.bounds));
+            const Framebuffer plain = frameOf(bare, camera);
+            const std::size_t alone = countPixels(plain, ink);
+            ASSERT_GT(alone, 5000u) << "the lines are not in view, so this proves nothing";
+            const Framebuffer seen = frameOf(withEdges, camera);
+            EXPECT_EQ(countPixels(seen, ink), alone);
+            std::size_t edgePixels = 0;
+            for (std::size_t k = 0; k < plain.color().size(); ++k) {
+                edgePixels += seen.color()[k] != plain.color()[k] ? 1u : 0u;
+            }
+            EXPECT_GT(edgePixels, 5000u) << "the edges were not drawn, so this proves nothing";
+        }
+    }
 }

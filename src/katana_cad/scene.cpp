@@ -945,20 +945,32 @@ void SceneBuilder::emitGrid(const SceneOptions& options, const AABB& around, dou
         }
         return std::make_pair(index % 5 == 0 ? options.gridMajorColor : options.gridColor, 1.0f);
     };
-    for (long long i = i0; i <= i1; ++i) {
-        const double x = static_cast<double>(i) * spacing;
-        const auto [color, width] = lineStyle(i, options.axisColorY);
-        for (long long j = j0; j < j1; ++j) {
-            cellLine(x, static_cast<double>(j) * spacing, x, static_cast<double>(j + 1) * spacing,
-                     color, width);
+    // The grid writes no depth (renderLayers), so where two of its lines
+    // cross, the one drawn later covers the other: the plain lines first,
+    // then every fifth, then the axes, so that no plain line breaks an axis.
+    const auto rankOf = [](long long index) { return index == 0 ? 2 : (index % 5 == 0 ? 1 : 0); };
+    for (int rank = 0; rank < 3; ++rank) {
+        for (long long i = i0; i <= i1; ++i) {
+            if (rankOf(i) != rank) {
+                continue;
+            }
+            const double x = static_cast<double>(i) * spacing;
+            const auto [color, width] = lineStyle(i, options.axisColorY);
+            for (long long j = j0; j < j1; ++j) {
+                cellLine(x, static_cast<double>(j) * spacing, x,
+                         static_cast<double>(j + 1) * spacing, color, width);
+            }
         }
-    }
-    for (long long j = j0; j <= j1; ++j) {
-        const double y = static_cast<double>(j) * spacing;
-        const auto [color, width] = lineStyle(j, options.axisColorX);
-        for (long long i = i0; i < i1; ++i) {
-            cellLine(static_cast<double>(i) * spacing, y, static_cast<double>(i + 1) * spacing, y,
-                     color, width);
+        for (long long j = j0; j <= j1; ++j) {
+            if (rankOf(j) != rank) {
+                continue;
+            }
+            const double y = static_cast<double>(j) * spacing;
+            const auto [color, width] = lineStyle(j, options.axisColorX);
+            for (long long i = i0; i < i1; ++i) {
+                cellLine(static_cast<double>(i) * spacing, y, static_cast<double>(i + 1) * spacing,
+                         y, color, width);
+            }
         }
     }
 }
@@ -1101,6 +1113,57 @@ void SceneBuilder::build(const Document& document, const std::vector<SceneSurfac
     append(layers.terrain);
     append(layers.edges);
     append(entities);
+}
+
+// ---- one frame ------------------------------------------------------------------
+
+katana::core::Result<katana::render::RenderStats>
+renderLayers(SceneLayers& layers, katana::render::Camera& camera,
+             katana::render::Rasterizer& rasterizer, katana::render::Framebuffer& target,
+             katana::render::RenderOptions options)
+{
+    // The depth range is fitted to what is drawn EVERY frame: after an orbit,
+    // a pan or a zoom it was left where frame() put it, and eight wheel
+    // notches out pushed the model past the far plane.
+    AABB depthBox = layers.bounds;
+    depthBox.expand(layers.grid.bounds());
+    camera.fitDepthRange(depthBox);
+    const bool drawEdges = SceneBuilder::fadeEdges(layers, camera);
+
+    // In this order into one depth buffer, so equal depths resolve the same
+    // way every frame (the first drawn wins, Rule 7). Why the grid and the
+    // edges write no depth: scene.hpp, renderLayers.
+    struct Pass {
+        const DrawList* list;
+        bool depthWrite;
+    };
+    const Pass passes[] = {{&layers.grid, false},
+                           {&layers.terrain, true},
+                           {drawEdges ? &layers.edges : nullptr, false},
+                           {&layers.entities, true},
+                           {&layers.selection, true}};
+    katana::render::RenderStats total;
+    for (const Pass& pass : passes) {
+        // An empty list still clears when it comes first.
+        if (pass.list == nullptr || (pass.list->empty() && !options.clear)) {
+            continue;
+        }
+        options.depthWrite = pass.depthWrite;
+        auto result = rasterizer.render(*pass.list, camera, target, options);
+        if (!result) {
+            return result;
+        }
+        total.vertices += result->vertices;
+        total.trianglesSubmitted += result->trianglesSubmitted;
+        total.trianglesRasterised += result->trianglesRasterised;
+        total.linesSubmitted += result->linesSubmitted;
+        total.pointsSubmitted += result->pointsSubmitted;
+        total.fragments += result->fragments;
+        total.binEntries += result->binEntries;
+        total.tiles = result->tiles;
+        options.clear = false;
+    }
+    return total;
 }
 
 AABB sceneBounds(const Document& document, const std::vector<SceneSurface>& surfaces,
