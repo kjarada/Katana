@@ -615,6 +615,20 @@ if(TARGET katana)
             "-DEXPECT=--dialog formatStyles opened styleManagerDialog \"Styles and Linetypes\"[\r\n]+styleTable: Kerb \\|[^;]*; Water \\|"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same manager's Linetypes page (managerTabs, filled as a click on
+    # its tab does) narrowed to the fixture's group Test/Lines. By hand from
+    # test_linestyles.4d's head comment: that group holds TEST Dashed Kerb, a
+    # paper linestyle, and TEST Gate, a two-point one, and nothing else. The
+    # Kerb chosen, the details pane explains its kind in the general words.
+    add_test(NAME qt_the_style_manager_lists_a_library_group_s_linestyles_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DCUSTOMISE_DIR=${CMAKE_SOURCE_DIR}/tests/archive12d/data/customisation"
+            "-DDRIVE=@formatStyles|managerTabs=Linetypes|linetypeGroup=Test/Lines|linetypeTable=TEST Dashed Kerb|?linetypeTable|?libraryDetails"
+            "-DEXPECT=linetypeTable: TEST Dashed Kerb \\| Library \\| Test/Lines \\| paper \\|[^;\r\n]*; TEST Gate \\| Library \\| Test/Lines \\| two-point \\|[^;\r\n]*[\r\n]+libraryDetails: TEST Dashed Kerb Group: Test/Lines File: test_linestyles\\.4d Kind: Paper linestyle: millimetres on the plot, the same at every scale[^\r\n]*Library linestyles belong to the session's customisation and are read-only here\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/format_style_manager_linetypes_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Symbols, searched for TEST. By hand from the fixture's head comments:
     # its four definitions are all symbols by decision D3 - TEST Tree too,
     # though it is not `mode vertex`, because rule TR* draws it as one - and
@@ -750,6 +764,7 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/shortcuts_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_format_menu_opens_the_style_manager_headless
+                         qt_the_style_manager_lists_a_library_group_s_linestyles_headless
                          qt_format_menu_opens_the_symbol_library_headless
                          qt_format_menu_opens_the_code_manager_and_explains_a_code_headless
                          qt_the_format_menu_and_the_customisation_log_name_no_other_program_headless
