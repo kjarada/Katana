@@ -214,8 +214,10 @@ expandTemplate(std::string_view text, const std::map<std::string, std::string, s
 [[nodiscard]] std::string automaticTitle(const Viewport& viewport);
 
 // The scale the title block reports: the main viewport's (the lowest tiling
-// rank that draws at a scale), "AS SHOWN" when the scaled viewports disagree,
-// and "N.T.S." when nothing on the sheet is drawn to scale.
+// rank among plans and sections), "AS SHOWN" when those disagree. A key plan
+// beside a plan has a scale of its own and does not make the sheet "AS
+// SHOWN"; on a sheet with no plan or section - a key-plan sheet - the key
+// plan's scale is the sheet's. "N.T.S." when nothing is drawn to scale.
 [[nodiscard]] std::string sheetScaleText(const Sheet& sheet);
 
 // Where a sheet's viewports go: the frame's drawing area, or the paper less

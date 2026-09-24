@@ -141,6 +141,17 @@ TEST(SheetFields, TheScaleIsTheMainViewportsAndASectionStatesBoth)
     two.viewports.push_back(viewportOf(ViewportKind::Model3D, 123.0));
     two.viewports.push_back(viewportOf(ViewportKind::Legend, 1.0));
     EXPECT_EQ(sheetScaleText(two), "1:500");
+    // A key plan inset beside the plan is at its own, smaller scale by
+    // design: the sheet is still 1:500, not AS SHOWN.
+    Sheet inset = plan;
+    inset.viewports.push_back(viewportOf(ViewportKind::KeyPlan, 5000.0));
+    EXPECT_EQ(sheetScaleText(inset), "1:500");
+    // A key-plan sheet, with nothing else drawn to scale, is at the key
+    // plan's scale.
+    Sheet key;
+    key.viewports.push_back(viewportOf(ViewportKind::KeyPlan, 2000.0));
+    key.viewports.push_back(viewportOf(ViewportKind::Legend, 1.0));
+    EXPECT_EQ(sheetScaleText(key), "1:2000");
     // Nothing drawn to scale.
     Sheet legend;
     legend.viewports.push_back(viewportOf(ViewportKind::Legend, 1.0));
