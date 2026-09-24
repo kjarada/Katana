@@ -345,8 +345,8 @@ void BM_SceneFadeEdges(benchmark::State& state, int level)
     state.counters["vertices"] = static_cast<double>(layers.edges.colors.size());
     state.counters["digest"] = digestOf(layers);
 }
-BENCHMARK_CAPTURE(BM_SceneFadeEdges, scalar, 0)->Arg(128)->Unit(benchmark::kMicrosecond);
-BENCHMARK_CAPTURE(BM_SceneFadeEdges, avx2, 1)->Arg(128)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_SceneFadeEdges, scalar, 0)->Arg(1)->Arg(2)->Arg(4)->Arg(128)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_SceneFadeEdges, avx2, 1)->Arg(1)->Arg(2)->Arg(4)->Arg(128)->Unit(benchmark::kMicrosecond);
 
 // Where the kernels start to pay: the build of one small TIN (a ShadedWithEdges
 // design) of `cells` squares, and of one small mesh. The dispatch thresholds
