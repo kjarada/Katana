@@ -400,3 +400,33 @@ TEST(Reduction, ReadingsHalfATurnApartWithNoStatedFaceArePairedAsTheTwoFaces)
     EXPECT_NEAR(p1->easting, 1050.0, 1e-9);
     EXPECT_EQ(outcome->report.facePairs.size(), 4U);
 }
+
+TEST(Reduction, TheFacePairOfTheOwnersNeuralSurveyEngineMeansToItsValues)
+{
+    // The pair in NeuralSurvey's engine/src/reduce.rs test
+    // fl_fr_pair_cancels_collimation_and_index (run with cargo: it passes):
+    //   FL direction 1.0 rad, zenith 1.4 rad; FR direction 1.0 + pi + 0.0005,
+    //   zenith 2 pi - 1.4 + 0.0003.
+    //   direction: FR - pi = 1.0005, mean 1.0 + 0.0005 / 2 = 1.00025 (its
+    //   asserted value);
+    //   zenith: FR folded 2 pi - (2 pi - 1.4 + 0.0003) = 1.3997, mean
+    //   (1.4 + 1.3997) / 2 = 1.39985 - its z_mean, the same formula.
+    constexpr double pi = katana::math::kPi;
+    SurveyProject project;
+    project.points.push_back(point("A", 0.0, 0.0, 10.0));
+    project.points.push_back(point("B", 100.0, 0.0, 10.0));
+    project.unpositionedPoints.push_back(unpositioned("T"));
+    project.stations.push_back(
+        setup("S", "A", 1.5, "B",
+              {Shot{"B", 1, Face::Left, 0.0, {}, {}},
+               Shot{"T", 2, Face::Left, 1.0, 1.4, 100.0, 1.5},
+               Shot{"T", 3, Face::Right, 1.0 + pi + 0.0005, 2.0 * pi - 1.4 + 0.0003, 100.0, 1.5}}));
+    const auto outcome = reduceAndAdjust(project, bareSettings(), {});
+    ASSERT_TRUE(outcome.ok()) << outcome.error().describe();
+    const ReportObservation* direction = findRow(outcome->report, "horizontal direction", "T");
+    const ReportObservation* zenith = findRow(outcome->report, "zenith angle", "T");
+    ASSERT_NE(direction, nullptr);
+    ASSERT_NE(zenith, nullptr);
+    EXPECT_NEAR(*direction->reduced, 1.00025, 1e-12); // oriented on B: reading 0 is azimuth 0
+    EXPECT_NEAR(*zenith->reduced, 1.39985, 1e-12);
+}

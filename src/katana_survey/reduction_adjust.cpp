@@ -41,9 +41,13 @@ using katana::math::normalizeAngleSigned;
 
 namespace {
 
-// Dense least squares costs n u^2: beyond this many unknowns the existing
-// solver takes minutes and gigabytes, so the reduction refuses rather than
-// appear to hang. Side shots do not count (see above).
+// Dense least squares costs n u^2 per iteration, and the existing solver
+// (adjustHorizontalNetwork) forms the full cofactor matrix and the thin Q on
+// every one. Measured in a Release build (ReductionPerformance, a chain of
+// setups with 17 side shots each): 400 unknowns 0.44 s, 1 000 unknowns
+// 6.4 s, 2 000 unknowns 63 s, all of it in the solve. Beyond this many the
+// reduction refuses rather than appear to hang. Side shots do not count (see
+// above).
 constexpr std::size_t kMaxNetworkUnknowns = 3000;
 
 bool isKnown(const Position& position)
