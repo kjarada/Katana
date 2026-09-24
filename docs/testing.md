@@ -26,8 +26,8 @@ about the configuration that ships.
 
 | Kind | Registered by | Named | Where |
 |---|---|---|---|
-| unit, integration, property and regression cases (GoogleTest) | `katana_add_test_suite` | `Suite.CaseName` | `tests/<module>/`, one executable per module |
-| widget tests, offscreen | `tests/qt_widgets/CMakeLists.txt` | `qt_widgets.Suite.CaseName` | `tests/qt_widgets/` |
+| unit, integration, property and regression cases (GoogleTest) | `katana_add_test_suite` | `<Suite>.<Case>` | `tests/<module>/`, one executable per module |
+| widget tests, offscreen | `tests/qt_widgets/CMakeLists.txt` | `qt_widgets.<Suite>.<Case>` | `tests/qt_widgets/` |
 | the whole window, headless | `add_test` in `tests/CMakeLists.txt` | `qt_<what it shows>_headless` | `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
 | end-to-end command line | `add_test` in `src/katana_app/CMakeLists.txt` | `cli.<what it shows>` | `katana_cli` run as a process |
 | the layering rules | `tests/CMakeLists.txt` | `layering` | `tools/check_layering.cmake` |

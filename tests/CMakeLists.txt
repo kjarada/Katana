@@ -20,6 +20,17 @@ add_test(NAME layering
     COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
             -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
 
+# What the documents cite exists - repository paths, Class::member names,
+# test names - no document cites the removed root plan or instructions, and
+# docs/index.md lists every document (docs/testing.md, "The docs test").
+# Python is a build-time convenience, never a requirement (Rule 1), so
+# without it there is no such test rather than a failing one.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME docs
+        COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_docs.py"
+                "${PROJECT_SOURCE_DIR}")
+endif()
+
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only
 # when that module is.
 file(GLOB _suites LIST_DIRECTORIES true "${CMAKE_CURRENT_SOURCE_DIR}/*")
