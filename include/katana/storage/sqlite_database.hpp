@@ -99,6 +99,12 @@ class SqliteDatabase {
     [[nodiscard]] katana::core::Status setApplicationId(std::int32_t id);
     [[nodiscard]] katana::core::Result<bool> tableExists(std::string_view name);
 
+    // The most bytes this connection holds in one string or BLOB - and in one
+    // row, which SQLite encodes as a single BLOB while it inserts or reads it
+    // (sqlite3_limit, SQLITE_LIMIT_LENGTH; 1,000,000,000 as SQLite is built
+    // by default). A value or row over it fails with "string or blob too big".
+    [[nodiscard]] std::int64_t lengthLimit() const;
+
     // Empty optional when the file is sound, otherwise SQLite's description of
     // the damage (PRAGMA integrity_check).
     [[nodiscard]] katana::core::Result<std::optional<std::string>> integrityProblems();

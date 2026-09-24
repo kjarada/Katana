@@ -1,0 +1,23 @@
+     4.01           OBSERVATION DATA    M                   RINEX VERSION / TYPE
+katana fixture      hand built          20240912 120000 UTC PGM / RUN BY / DATE
+https://doi.org/10.0000/katana-fixture                      DOI
+CC BY 4.0                                                   LICENSE OF USE
+https://example.org/station/BASE                            STATION INFORMATION
+BASE                                                        MARKER NAME
+A SURVEYOR          KATANA TESTS                            OBSERVER / AGENCY
+7001                LEICA GR30          4.60                REC # / TYPE / VERS
+7002                LEIAR25.R4      LEIT                    ANT # / TYPE
+ -4646200.5000  2553200.2500 -3534200.7500                  APPROX POSITION XYZ
+        0.3050        0.0000        0.0000                  ANTENNA: DELTA H/E/N
+G    4 C1C L1C D1C S1C                                      SYS / # / OBS TYPES
+E    4 C1X L1X D1X S1X                                      SYS / # / OBS TYPES
+  2024     9    12    12     0    0.0000000     GPS         TIME OF FIRST OBS
+                                                            END OF HEADER
+> 2024 09 12 12 00  0.0000000  0  3
+G05  21000000.000   110000001.50008     -2000.250          44.500
+G07  21000100.000   110000101.50008     -2001.250          44.500
+E11  21000200.000   110000201.50008     -2002.250          44.500
+> 2024 09 12 12 00 30.0000000  0  3
+G05  21000000.000   110000001.50008     -2000.250          44.500
+G07  21000100.000   110000101.50008     -2001.250          44.500
+E11  21000200.000   110000201.50008     -2002.250          44.500
