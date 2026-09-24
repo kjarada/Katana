@@ -70,24 +70,29 @@ void GpuSceneView::setFrameSettings(const FrameSettings& settings)
 
 void GpuSceneView::zoomExtents()
 {
+    frameScene();
+    update();
+}
+
+void GpuSceneView::frameScene()
+{
     framed_ = true;
     if (onZoomExtents) {
         onZoomExtents();
-        update();
         return;
     }
     katana::math::AABB box = renderer_.scene().bounds;
-    if (!box.empty()) {
-        // What is drawn is exaggerated in the shader; frame what is drawn.
-        const double k = settings_.verticalExaggeration;
-        const double datum = settings_.exaggerationDatum;
-        const double low = datum + (box.min.z - datum) * k;
-        const double high = datum + (box.max.z - datum) * k;
-        box.min.z = std::min(low, high);
-        box.max.z = std::max(low, high);
-        camera_.frame(box);
+    if (box.empty()) {
+        return;
     }
-    update();
+    // What is drawn is exaggerated in the shader; frame what is drawn.
+    const double k = settings_.verticalExaggeration;
+    const double datum = settings_.exaggerationDatum;
+    const double low = datum + (box.min.z - datum) * k;
+    const double high = datum + (box.max.z - datum) * k;
+    box.min.z = std::min(low, high);
+    box.max.z = std::max(low, high);
+    camera_.frame(box);
 }
 
 void GpuSceneView::initialize(QRhiCommandBuffer* /*commands*/)
@@ -100,26 +105,28 @@ void GpuSceneView::initialize(QRhiCommandBuffer* /*commands*/)
         fail(QStringLiteral("the GPU view needs Direct3D 11 (its shaders are HLSL)"));
         return;
     }
-    QRhiTexture* color = colorTexture();
-    if (color == nullptr) {
+    // Multisampled, the widget draws into msaaColorBuffer() and resolves into
+    // resolveTexture(); colorTexture() is null then (QRhiWidget's contract).
+    const int samples = std::max(sampleCount(), 1);
+    QRhiColorAttachment attachment;
+    QSize size;
+    if (samples > 1 && msaaColorBuffer() != nullptr && resolveTexture() != nullptr) {
+        attachment = QRhiColorAttachment(msaaColorBuffer());
+        attachment.setResolveTexture(resolveTexture());
+        size = msaaColorBuffer()->pixelSize();
+    } else if (colorTexture() != nullptr) {
+        attachment = QRhiColorAttachment(colorTexture());
+        size = colorTexture()->pixelSize();
+    } else {
         fail(QStringLiteral("the GPU view has no colour buffer"));
         return;
     }
-    const QSize size = color->pixelSize();
-    const int samples = std::max(sampleCount(), 1);
 
     target_.reset();
     depth_.reset(gpu->newTexture(QRhiTexture::D32F, size, samples, QRhiTexture::RenderTarget));
     if (!depth_->create()) {
         fail(QStringLiteral("the GPU view could not create its depth buffer"));
         return;
-    }
-    QRhiColorAttachment attachment;
-    if (samples > 1 && msaaColorBuffer() != nullptr) {
-        attachment = QRhiColorAttachment(msaaColorBuffer());
-        attachment.setResolveTexture(color);
-    } else {
-        attachment = QRhiColorAttachment(color);
     }
     QRhiTextureRenderTargetDescription description(attachment);
     description.setDepthTexture(depth_.get());
@@ -151,7 +158,7 @@ void GpuSceneView::render(QRhiCommandBuffer* commands)
     // the mouse's logical pixels up to match.
     camera_.setViewportSize(size.width(), size.height());
     if (!framed_) {
-        zoomExtents();
+        frameScene(); // no update(): this IS the frame
     }
     FrameSettings settings = settings_;
     settings.pixelRatio = pixelRatio();
