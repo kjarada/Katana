@@ -62,8 +62,11 @@ katana::interop::PointCloudLayer syntheticCloud(std::size_t count)
     return cloud;
 }
 
+// Frames after the first: the first builds what the painter keeps for the
+// cloud (BM_PlanCloudFirstFrame measures that), which a pan does not repeat.
+// `fresh` measures the first frame instead, with a new cache every time.
 void paintFrames(benchmark::State& state, const katana::interop::ReferenceData& reference,
-                 const Box2& extent, double zoom)
+                 const Box2& extent, double zoom, bool fresh = false)
 {
     katana::qt::PlanFrame frame;
     frame.transform.resize(kWidth, kHeight);
@@ -74,13 +77,22 @@ void paintFrames(benchmark::State& state, const katana::interop::ReferenceData& 
     katana::qt::PlanPaintOptions options;
     katana::qt::PlanPaintCache cache;
     QImage image(kWidth, kHeight, QImage::Format_ARGB32_Premultiplied);
-    double direction = 1.0;
-    for (auto _ : state) {
-        frame.transform.panByPixels(direction, 0.0);
-        direction = -direction;
+    const auto paint = [&] {
         QPainter painter(&image);
         painter.fillRect(image.rect(), QColor(0x1e, 0x23, 0x29));
         (void)katana::qt::paintPlan(painter, source, frame, options, cache);
+    };
+    if (!fresh) {
+        paint();
+    }
+    double direction = 1.0;
+    for (auto _ : state) {
+        if (fresh) {
+            cache.clear();
+        }
+        frame.transform.panByPixels(direction, 0.0);
+        direction = -direction;
+        paint();
     }
 }
 
@@ -90,6 +102,15 @@ void BM_PlanCloud(benchmark::State& state, double zoom)
     (void)reference.add(syntheticCloud(static_cast<std::size_t>(state.range(0))));
     const Box2 extent = reference.pointClouds().front().worldBounds();
     paintFrames(state, reference, extent, zoom);
+    state.counters["points"] = static_cast<double>(state.range(0));
+}
+
+void BM_PlanCloudFirstFrame(benchmark::State& state)
+{
+    katana::interop::ReferenceData reference;
+    (void)reference.add(syntheticCloud(static_cast<std::size_t>(state.range(0))));
+    const Box2 extent = reference.pointClouds().front().worldBounds();
+    paintFrames(state, reference, extent, 1.0, true);
     state.counters["points"] = static_cast<double>(state.range(0));
 }
 
@@ -128,4 +149,8 @@ BENCHMARK_CAPTURE(BM_PlanCloud, extents, 1.0)
 // Zoomed in eight times: most of the cloud is off screen.
 BENCHMARK_CAPTURE(BM_PlanCloud, zoomed, 8.0)
     ->Arg(10'000'000)->Unit(benchmark::kMillisecond)->UseRealTime();
+// The first frame of a cloud: its colours and, after this change, its
+// display copy are built.
+BENCHMARK(BM_PlanCloudFirstFrame)->Arg(2'000'000)->Arg(20'000'000)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
 BENCHMARK(BM_PlanCloudArchive)->Unit(benchmark::kMicrosecond)->UseRealTime();
