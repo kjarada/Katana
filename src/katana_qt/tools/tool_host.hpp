@@ -140,6 +140,9 @@ class ToolHost {
 // an answer for the tool: ZOOM, Z and PAN in any case, with or without
 // AutoCAD's leading apostrophe ('ZOOM), and 'P (a bare P is Rotate's and
 // Scale's [Points] option), with any arguments after the verb ("ZOOM E").
-[[nodiscard]] bool isTransparentCommand(std::string_view text);
+// When the tool `wantsValue` (ToolInput::Value: a text's string, a layer
+// name, a count) a bare word is its answer - a text may well read "Z" - so
+// there only the apostrophe forms are the view's.
+[[nodiscard]] bool isTransparentCommand(std::string_view text, bool wantsValue = false);
 
 } // namespace katana::qt::tools
