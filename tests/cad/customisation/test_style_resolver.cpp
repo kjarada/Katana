@@ -372,3 +372,30 @@ TEST(StyleResolver, AVertexSymbolGoesOnEveryVertexOfALineAndNowhereOnACircle)
         katana::cad::symbolVertices(Geometry{katana::geometry::Circle2{Point2(0, 0), 1.0}})
             .empty());
 }
+
+// A drawing saved before the built-in customisation was given general names
+// still names the definitions that were renamed. The lookup every drawing path
+// shares tries the exact name first and asks the rename table only when that
+// misses: "Brand X" (invented; the table holds its hash) finds "X", while a
+// library that itself holds "Brand X" - a person's own definition - keeps it.
+TEST(StyleResolver, ADefinitionNamedAsItWasBeforeTheRenameIsFoundUnderItsNameNow)
+{
+    const std::vector<katana::cad::RenamedDefinition> renamed{
+        {katana::cad::sourceNameHash("Brand X"), "X"}};
+
+    StyleLibrary renamedOnly;
+    ASSERT_TRUE(renamedOnly.add(definition("X", {move(0, 0), draw(1, 0)})).ok());
+    const LineStyle* found = katana::cad::findDefinition(renamedOnly, "Brand X", renamed);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->name, "X");
+    EXPECT_EQ(katana::cad::findDefinition(renamedOnly, "X", renamed), found);
+
+    StyleLibrary both = renamedOnly;
+    ASSERT_TRUE(both.add(definition("Brand X", {move(0, 0), draw(0, 1)})).ok());
+    const LineStyle* own = katana::cad::findDefinition(both, "Brand X", renamed);
+    ASSERT_NE(own, nullptr);
+    EXPECT_EQ(own->name, "Brand X");
+
+    EXPECT_EQ(katana::cad::findDefinition(renamedOnly, "Other", renamed), nullptr);
+    EXPECT_EQ(katana::cad::findDefinition(renamedOnly, "", renamed), nullptr);
+}

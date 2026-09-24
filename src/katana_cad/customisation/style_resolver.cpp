@@ -70,6 +70,23 @@ void append(StyleDrawing& into, StyleDrawing&& from)
 
 } // namespace
 
+const LineStyle* findDefinition(const StyleLibrary& library, std::string_view name)
+{
+    return findDefinition(library, name, builtinDefinitionRenames());
+}
+
+const LineStyle* findDefinition(const StyleLibrary& library, std::string_view name,
+                                std::span<const RenamedDefinition> renamed)
+{
+    if (const LineStyle* definition = library.find(name); definition != nullptr) {
+        return definition;
+    }
+    // Only a miss asks the rename table, and definitionNameNow answers empty
+    // for a name it does not know - which find("") misses.
+    const std::string_view now = definitionNameNow(name, renamed);
+    return now.empty() ? nullptr : library.find(now);
+}
+
 ResolvedLinetype resolveLinetype(const katana::entity::Model& model, const StyleLibrary& library,
                                  std::string_view name)
 {
@@ -77,7 +94,7 @@ ResolvedLinetype resolveLinetype(const katana::entity::Model& model, const Style
     if (name.empty()) {
         return resolved; // no name: nothing to look up, a plain line
     }
-    const LineStyle* definition = library.find(name);
+    const LineStyle* definition = findDefinition(library, name);
     const katana::entity::Linetype* linetype = model.linetypes.find(name);
     resolved.collision = definition != nullptr && linetype != nullptr;
     if (definition != nullptr && !definition->atVertices) {
@@ -108,7 +125,7 @@ ResolvedSymbol resolveSymbol(const StyleLibrary& library, std::string_view name)
     if (name.empty()) {
         return {};
     }
-    if (const LineStyle* definition = library.find(name); definition != nullptr) {
+    if (const LineStyle* definition = findDefinition(library, name); definition != nullptr) {
         ResolvedSymbol resolved;
         resolved.kind = SymbolKind::LibraryDefinition;
         resolved.definition = definition;
@@ -128,7 +145,7 @@ DefinitionCache::find(const StyleLibrary& library, std::uint64_t generation, std
         return found->second;
     }
     std::shared_ptr<const FlatDefinition> flat;
-    if (const LineStyle* definition = library.find(name); definition != nullptr) {
+    if (const LineStyle* definition = findDefinition(library, name); definition != nullptr) {
         flat = std::make_shared<const FlatDefinition>(flattenDefinition(*definition));
     }
     entries_.emplace(std::string(name), flat);
