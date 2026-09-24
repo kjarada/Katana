@@ -16,11 +16,18 @@ legacy-scaffold-*.zip
 # The samples are inputs, not working directories.
 samples/*/backups/
 
-# A production 12d customisation (a mapfile and two .4d libraries) under its
-# author's own licence. It stays on disk for the tests and the embedded build
-# (tools/embed_customisation.py) and never in the repository; everything that
-# reads it skips when it is absent. See PLAN.MD 20.3.
+# Third-party reference material under its author's own licence, kept on disk
+# and never in the repository: what resources/customisation/ below was made
+# from. The build and the tests read that folder, not this one.
 docs/12d Refrence Files/
+
+# The customisation compiled into the build - linestyles.4d, symbols.4d,
+# survey_codes.mapfile and survey_codes_names.mapfile, read by
+# tools/embed_customisation.py through KATANA_CUSTOMISATION_DIR. Third-party
+# material under its own licence, so it is kept on disk and never in the
+# repository; a checkout without it builds an empty table, and the tests that
+# read it skip.
+resources/customisation/
 
 # Git worktrees created for parallel agents (CLAUDE.md section 5.3). Each is a
 # checkout of its own; tracking one would embed a repository in this one.
