@@ -82,9 +82,44 @@ ToolStep InteractiveTool::enter() { return ToolStep::done(nullptr); }
 
 ToolStep InteractiveTool::undo() { return ToolStep::rejected("nothing to undo in this tool"); }
 
+ToolStep InteractiveTool::cancel() { return ToolStep::done(nullptr); }
+
 ToolFeedback InteractiveTool::preview(const Point2& /*cursor*/) const { return {}; }
 
 std::optional<Point2> InteractiveTool::lastPoint() const { return std::nullopt; }
+
+namespace tools {
+
+ToolStep keepWorkOnEscape(InteractiveTool& tool)
+{
+    // Out of a value prompt first. Enter there takes the prompt's default -
+    // at Chamfer's second distance it stores both distances for every later
+    // Chamfer - or only returns to the picks (Fillet's radius), and then the
+    // corners a Multiple session made would go with the tool. Undo at those
+    // prompts only steps back towards the picks (CornerTool::undo); a value
+    // prompt still showing after that is left rather than defaulted.
+    constexpr int kMostStepsBack = 4; // SecondDistance -> FirstDistance -> First is 2
+    for (int stepped = 0; stepped < kMostStepsBack && tool.expects() == ToolInput::Value;
+         ++stepped) {
+        if (tool.undo().outcome != ToolStep::Outcome::Continue) {
+            break;
+        }
+    }
+    if (tool.expects() == ToolInput::Value) {
+        return ToolStep::done(nullptr);
+    }
+    ToolStep step = tool.enter();
+    // Only a finished step's command is work to keep. A Continue is Enter
+    // moving the tool on a step (Trim's edges, Offset's distance) and a
+    // Rejected changed nothing; either way there is nothing to keep.
+    if (step.outcome != ToolStep::Outcome::Done) {
+        return ToolStep::done(nullptr);
+    }
+    step.restart = false;
+    return step;
+}
+
+} // namespace tools
 
 // ---- typed input -------------------------------------------------------------------
 
@@ -243,6 +278,10 @@ const BuiltCatalog& builtCatalog()
         tools::addModifyEditTools(out.catalog, report);
         tools::addAnnotateTools(out.catalog, report);
         tools::addInquiryTools(out.catalog, report);
+        tools::addDrawDivideTools(out.catalog, report);
+        tools::addModifyLengthTools(out.catalog, report);
+        tools::addPropertyTools(out.catalog, report);
+        tools::addSelectTools(out.catalog, report);
         return out;
     }();
     return built;

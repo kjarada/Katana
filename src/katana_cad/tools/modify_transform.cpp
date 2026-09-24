@@ -360,6 +360,13 @@ class SelectionTool : public InteractiveTool {
         return selecting_ ? std::nullopt : stepLastPoint();
     }
 
+    // Nothing is made while the selection is being given; after it, the
+    // tool's own step says what Esc keeps.
+    [[nodiscard]] ToolStep cancel() final
+    {
+        return selecting_ ? ToolStep::done(nullptr) : stepCancel();
+    }
+
   protected:
     // After the selection: the tool's own dialogue.
     [[nodiscard]] virtual std::string stepPrompt() const = 0;
@@ -377,6 +384,9 @@ class SelectionTool : public InteractiveTool {
     [[nodiscard]] virtual bool stepUndo() { return false; }
     [[nodiscard]] virtual ToolFeedback stepPreview(const Point2& /*cursor*/) const { return {}; }
     [[nodiscard]] virtual std::optional<Point2> stepLastPoint() const { return std::nullopt; }
+    // Esc after the selection: the default keeps nothing, as every tool here
+    // but Copy makes its one command in a single step.
+    [[nodiscard]] virtual ToolStep stepCancel() { return ToolStep::done(nullptr); }
     // The selection is complete. Erase finishes here; the others go on.
     [[nodiscard]] virtual ToolStep selected()
     {
@@ -635,6 +645,18 @@ class CopyTool final : public SelectionTool {
     }
 
     [[nodiscard]] bool stepUndo() override { return state_.back(); }
+
+    // Esc keeps the copies already placed: each was a click the user meant,
+    // and dropping them all for want of an Enter lost work (the tool host's
+    // old rule had to leave Copy out, because its Enter with none placed yet
+    // copies by the base point - a default Esc must not apply).
+    [[nodiscard]] ToolStep stepCancel() override
+    {
+        if (state_.now.step == Displace::Second && !state_.now.offsets.empty()) {
+            return finish(state_.now.offsets);
+        }
+        return ToolStep::done(nullptr);
+    }
 
     [[nodiscard]] ToolFeedback stepPreview(const Point2& cursor) const override
     {
