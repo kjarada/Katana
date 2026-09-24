@@ -22,6 +22,19 @@ file(GLOB _qt_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}
 # for the same reason.
 file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
 file(GLOB _qt_tool_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
+# The survey import wizard, the reduction options and report, and Survey
+# Jobs (src/katana_qt/survey/), with their tests: the pages are driven by
+# their object names as a person clicks them, on the fixtures of
+# tests/surveyio/data and tests/qt_widgets/survey/data.
+file(GLOB _qt_survey_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/survey/*.cpp")
+set(_qt_survey_sources
+    ${_qt_src}/survey/survey_import_wizard.cpp
+    ${_qt_src}/survey/survey_templates.cpp
+    ${_qt_src}/survey/reduction_options_widget.cpp
+    ${_qt_src}/survey/reduction_report_view.cpp
+    ${_qt_src}/survey/survey_task.cpp
+    ${_qt_src}/survey/survey_job_support.cpp
+    ${_qt_src}/survey/survey_jobs_dialog.cpp)
 add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
@@ -46,12 +59,19 @@ add_executable(katana_qt_widget_tests
     ${_qt_customisation_tests}
     ${_qt_tool_sources}
     ${_qt_tool_tests}
+    ${_qt_survey_sources}
+    ${_qt_survey_tests}
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
 # katana_archive12d: the style painter names 12d pens through its colour table.
+# katana_surveyio and katana_survey: the survey pages read and reduce field files.
 target_link_libraries(katana_qt_widget_tests PRIVATE
-    katana_cad katana_interop katana_render katana_archive12d Qt6::Widgets GTest::gtest)
+    katana_cad katana_interop katana_render katana_archive12d katana_survey katana_surveyio
+    Qt6::Widgets GTest::gtest)
+target_compile_definitions(katana_qt_widget_tests PRIVATE
+    KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
+    KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data")
 katana_target_defaults(katana_qt_widget_tests)
 set_target_properties(katana_qt_widget_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
