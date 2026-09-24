@@ -5,21 +5,21 @@
 // all use, so the QT-02 rule is kept in one place:
 //
 //   A PICKER NEVER DROPS THE NAME IT WAS GIVEN (decision D3). A name in no
-//   list - a 12d name whose library is not loaded, a typo in an imported
-//   mapfile - is kept as a marked item, "<name> (not defined)" in amber,
+//   list - a library name whose library is not loaded, a typo in an imported
+//   survey code file - is kept as a marked item, "<name> (not defined)" in amber,
 //   whose tooltip says what it draws as meanwhile, and currentName() gives
 //   the name back exactly as it was set. The old combos rebuilt their list
 //   and wrote whatever it showed back into the style, rewriting names they
 //   could not show.
 //
 //   A linetype name that needs no definition is kept the same way but NOT
-//   marked: 12d's and DXF's plain line ("1", "0", "continuous" in any case;
+//   marked: the plain continuous line ("1", "0", "continuous" in any case;
 //   D4) and ByLayer in any spelling - exactly the names cad::missingNames
 //   never reports, so the picker's mark and a manager's Missing count agree.
 //
 // The list, in sections (header rows that cannot be chosen):
 //   linetype: [ByLayer - a Style's linetype only]; Drawing linetypes (the
-//             model's Linetype table); Library linestyles (non-vertex 12d
+//             model's Linetype table); Library linestyles (non-vertex library
 //             definitions, decision D2)
 //   symbol:   Built-in symbols; Library symbols (decision D3's four reasons)
 // each entry with a picture from the shared DefinitionThumbnails, and the

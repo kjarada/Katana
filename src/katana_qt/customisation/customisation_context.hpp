@@ -61,7 +61,7 @@ struct CustomisationContext {
     std::function<void(const std::vector<katana::entity::EntityId>& ids)> selectAndShow{};
 
     // The session's survey control codes (start, end, close, arc...) that
-    // linework processing reads - configurable, and not 12d mapfile data
+    // linework processing reads - configurable, and not survey code file data
     // (cad/linework.hpp). Owned by the maker, which keeps them for the
     // session. May be null: a dialog then shows the defaults and cannot
     // change them.

@@ -366,7 +366,7 @@ QStandardItem* NamePicker::addEntry(const CatalogueEntry& entry)
         }
         break;
     case DefinitionSource::Library:
-        tip = tr("12d %1 from %2")
+        tip = tr("Library %1 from %2")
                   .arg(role_ == NameRole::Symbol ? tr("symbol") : tr("linestyle"),
                        entry.sourceFile.empty() ? tr("the loaded library")
                                                 : fromName(entry.sourceFile));
@@ -482,7 +482,7 @@ bool NamePicker::isPlainName(std::string_view name) const
 {
     // cad::missingNames' own rule (style_catalogue.cpp, isPlainLinetype),
     // built from the same two public halves so the two cannot drift: the
-    // plain line of 12d and DXF ("1", "0", "continuous" in any case; D4),
+    // plain continuous line ("1", "0", "continuous" in any case; D4),
     // or ByLayer in any spelling. "" is nothing chosen, not a name.
     return role_ == NameRole::Linetype && !name.empty() &&
            (katana::cad::isPlainLinestyle(name) || katana::entity::isByLayer(name));
@@ -513,7 +513,7 @@ QString NamePicker::plainDescription(std::string_view name) const
                         "so it is drawn as a plain line")
                          .arg(fromName(name));
     }
-    return tr("\"%1\" is the plain line of 12d and DXF: it needs no definition")
+    return tr("\"%1\" is the plain continuous line: it needs no definition")
         .arg(fromName(name));
 }
 
