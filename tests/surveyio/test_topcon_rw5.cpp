@@ -174,8 +174,35 @@ TEST(TopconRw5, TheModeRecordSetsScaleCurvatureAndThePrismConstantInMetres)
     ASSERT_TRUE(settings.prismConstant.has_value());
     EXPECT_DOUBLE_EQ(*settings.prismConstant, 0.0254);
     EXPECT_EQ(settings.prismConstantState, survey::CorrectionState::Unknown);
+    // Each distance carries the offset in force when it was measured.
+    const auto distances =
+        observationsTo<survey::DistanceObservation>(result.project.stations.at(0), "10");
+    ASSERT_FALSE(distances.empty());
+    ASSERT_TRUE(distances[0].target.prismConstant.has_value());
+    EXPECT_DOUBLE_EQ(*distances[0].target.prismConstant, 0.0254);
+    EXPECT_EQ(distances[0].target.prismConstantState, survey::CorrectionState::Unknown);
     EXPECT_EQ(settings.atmosphericPpmState, survey::CorrectionState::Unknown);
     EXPECT_TRUE(topcon_test::anyNotCarriedContains(result, "no atmospheric settings"));
+}
+
+TEST(TopconRw5, AnEdmOffsetChangedMidSetupIsCarriedByTheShotsAfterItOnly)
+{
+    const std::string bytes = "MO,AD0,UN1,SF1.0,EC0,EO0.0,AU0\n"
+                              "OC,OP1,N 0.0,E 0.0,EL0.0\n"
+                              "SS,OP1,FP2,AR0.0000,ZE90.0000,SD10.000\n"
+                              "MO,AD0,UN1,SF1.0,EC0,EO-1.0,AU0\n"
+                              "SS,OP1,FP3,AR90.0000,ZE90.0000,SD10.000\n";
+    const auto result = topcon_test::read(kRw5, bytes, "prism.rw5");
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    const survey::SurveyStation& station = result->project.stations.at(0);
+    // The setup began under EO0.0.
+    EXPECT_DOUBLE_EQ(*station.instrument.prismConstant, 0.0);
+    const auto before = observationsTo<survey::DistanceObservation>(station, "2");
+    const auto after = observationsTo<survey::DistanceObservation>(station, "3");
+    ASSERT_TRUE(before.size() == 1 && after.size() == 1);
+    EXPECT_DOUBLE_EQ(*before[0].target.prismConstant, 0.0);
+    // EO-1.0 inch = -0.0254 m.
+    EXPECT_DOUBLE_EQ(*after[0].target.prismConstant, -0.0254);
 }
 
 TEST(TopconRw5, DescriptionsBecomeCodesAndStringPointsIntoFeaturesInObservationOrder)
