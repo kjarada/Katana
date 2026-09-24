@@ -87,6 +87,8 @@ SurveyJob fullJob(std::string id)
         SurveyJobPoint{"102", 8, 1.0 / 3.0, -0.1, std::nullopt},
         SurveyJobPoint{"", 9, std::numeric_limits<double>::denorm_min(), 0.0, -0.0},
     };
+    job.importOptions = "katana-survey-import-options=1\nlayer-per-code=true\n"
+                        "point-number-property=pt%0Ano\n";
     return job;
 }
 

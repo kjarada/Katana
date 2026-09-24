@@ -13,11 +13,14 @@
 #include "katana/cad/survey_job.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <format>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -240,6 +243,182 @@ std::string newJobId(const Document& document, katana::entity::Model& model)
     return "job-" + std::to_string(number);
 }
 
+// ---- The import's drawing options, kept on the job (SurveyJob::importOptions)
+
+// SurveyImportOptions less the layer (the job's own `layer`), as key=value
+// lines under a versioned first line - the same shape as the reduction
+// settings' text form, for the same reasons: a key a later build adds is
+// skipped by this one, and text from a NEWER version is refused rather than
+// half read, so a job is never drawn with options the person did not choose.
+constexpr std::string_view kImportOptionsHeader = "katana-survey-import-options";
+constexpr int kImportOptionsVersion = 1;
+constexpr std::string_view kLayerPerCodeKey = "layer-per-code";
+constexpr std::string_view kCreateLayersKey = "create-layers";
+constexpr std::string_view kCodePropertyKey = "code-property";
+constexpr std::string_view kPointNumberPropertyKey = "point-number-property";
+constexpr std::string_view kDescriptionPropertyKey = "description-property";
+constexpr std::string_view kRecordSourceKey = "record-source";
+
+// A property name is the person's own text: a line break or a '%' in one is
+// percent-encoded, so that a line stays one line.
+std::string percentEncoded(std::string_view text)
+{
+    constexpr std::string_view hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(text.size());
+    for (const char c : text) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || byte == 0x7F || c == '%') {
+            out += '%';
+            out += hex[byte >> 4];
+            out += hex[byte & 0x0F];
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+std::optional<std::string> percentDecoded(std::string_view text)
+{
+    const auto digit = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        return -1;
+    };
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '%') {
+            out += text[i];
+            continue;
+        }
+        if (text.size() - i < 3) {
+            return std::nullopt; // a '%' needs two hex digits after it
+        }
+        const int high = digit(text[i + 1]);
+        const int low = digit(text[i + 2]);
+        if (high < 0 || low < 0) {
+            return std::nullopt;
+        }
+        out += static_cast<char>((high << 4) | low);
+        i += 2;
+    }
+    return out;
+}
+
+std::string serialiseImportOptions(const SurveyImportOptions& options)
+{
+    std::string text;
+    auto line = [&text](std::string_view key, std::string_view value) {
+        text += key;
+        text += '=';
+        text += value;
+        text += '\n';
+    };
+    line(kImportOptionsHeader, std::to_string(kImportOptionsVersion));
+    line(kLayerPerCodeKey, options.layerPerCode ? "true" : "false");
+    line(kCreateLayersKey, options.createLayers ? "true" : "false");
+    line(kCodePropertyKey, percentEncoded(options.codeProperty));
+    line(kPointNumberPropertyKey, percentEncoded(options.pointNumberProperty));
+    line(kDescriptionPropertyKey, percentEncoded(options.descriptionProperty));
+    line(kRecordSourceKey, options.recordSource ? "true" : "false");
+    return text;
+}
+
+// The options the job's points were drawn with. Empty text is the defaults.
+// The text comes from a project file, which may have been damaged or edited
+// by hand, so every malformed line is an error naming the job and the line.
+Result<SurveyImportOptions> parseImportOptions(std::string_view text, std::string_view jobId)
+{
+    const auto unreadable = [jobId](std::size_t lineNumber, std::string what) {
+        return makeError(ErrorCode::ParseFailure,
+                         "the drawing options of survey job " + std::string(jobId) +
+                             " cannot be read: line " + std::to_string(lineNumber) + ": " +
+                             std::move(what));
+    };
+    SurveyImportOptions options;
+    bool sawHeader = false;
+    std::size_t lineNumber = 0;
+    std::size_t start = 0;
+    while (start < text.size()) {
+        const std::size_t cut = text.find('\n', start);
+        std::string_view line =
+            text.substr(start, cut == std::string_view::npos ? std::string_view::npos : cut - start);
+        start = cut == std::string_view::npos ? text.size() : cut + 1;
+        ++lineNumber;
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+        const std::size_t equals = line.find('=');
+        if (equals == std::string_view::npos) {
+            return unreadable(lineNumber, "expected key=value");
+        }
+        const std::string_view key = line.substr(0, equals);
+        const std::string_view value = line.substr(equals + 1);
+        if (!sawHeader) {
+            int version = 0;
+            const auto [end, error] =
+                std::from_chars(value.data(), value.data() + value.size(), version);
+            if (key != kImportOptionsHeader || error != std::errc{} ||
+                end != value.data() + value.size() || version <= 0) {
+                return unreadable(lineNumber, "it must begin with " +
+                                                  std::string(kImportOptionsHeader) +
+                                                  "=<version>");
+            }
+            if (version > kImportOptionsVersion) {
+                return makeError(ErrorCode::Unsupported,
+                                 "survey job " + std::string(jobId) +
+                                     " was drawn by a newer Katana (drawing options version " +
+                                     std::to_string(version) + "); this one reads up to version " +
+                                     std::to_string(kImportOptionsVersion));
+            }
+            sawHeader = true;
+            continue;
+        }
+        bool* flag = key == kLayerPerCodeKey   ? &options.layerPerCode
+                     : key == kCreateLayersKey ? &options.createLayers
+                     : key == kRecordSourceKey ? &options.recordSource
+                                               : nullptr;
+        if (flag != nullptr) {
+            if (value != "true" && value != "false") {
+                return unreadable(lineNumber, "'" + std::string(key) + "' must be true or false");
+            }
+            *flag = value == "true";
+            continue;
+        }
+        std::string* name = key == kCodePropertyKey          ? &options.codeProperty
+                            : key == kPointNumberPropertyKey ? &options.pointNumberProperty
+                            : key == kDescriptionPropertyKey ? &options.descriptionProperty
+                                                             : nullptr;
+        if (name != nullptr) {
+            std::optional<std::string> decoded = percentDecoded(value);
+            if (!decoded) {
+                return unreadable(lineNumber, "'" + std::string(key) +
+                                                  "' has a '%' not followed by two hex digits");
+            }
+            *name = std::move(*decoded);
+            continue;
+        }
+        // A key a later build added: skipped, as its versioning promises.
+    }
+    if (!text.empty() && !sawHeader) {
+        return unreadable(lineNumber, "it must begin with " + std::string(kImportOptionsHeader) +
+                                          "=<version>");
+    }
+    return options;
+}
+
 void renderInto(SurveyJob& job, const survey::ReductionReport& report, std::string createdUtc)
 {
     job.reportText = survey::renderText(report);
@@ -384,6 +563,7 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
     job.layer = s.request.importOptions.layer;
     job.createdEntities = std::move(created);
     job.placedPoints = std::move(placed);
+    job.importOptions = serialiseImportOptions(s.request.importOptions);
 
     std::string stamp =
         s.request.context.createdUtc.empty() ? nowUtc() : s.request.context.createdUtc;
@@ -542,6 +722,7 @@ struct ReadjustSurveyJobCommand::State {
         survey::ReductionReport report;
         survey::SurveyProject fresh;                  // the new points only
         std::vector<const survey::SurveyPoint*> drawn; // into `fresh`
+        std::string pointNumberProperty;              // what the new points are numbered by
         CommandPtr entities;                          // nullptr: the drawing is unchanged
         JobRevision revision;                         // placedPoints without the new ones yet
         std::vector<EntityId> deleted;
@@ -578,6 +759,17 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
         return makeError(ErrorCode::InvalidArgument,
                          "no reader or no reduction was given for re-adjusting the survey job");
     }
+    // A point this run draws for the first time goes where and as the import
+    // drew the job's others - a layer per code, the same property names - so
+    // the job's points stay together on the drawing. Read before the
+    // reduction: options that cannot be read end the run before its costly
+    // part.
+    auto drawOptions = parseImportOptions(job->importOptions, job->id);
+    if (!drawOptions) {
+        return drawOptions.error();
+    }
+    SurveyImportOptions options = std::move(*drawOptions);
+    options.layer = job->layer.empty() ? SurveyImportOptions{}.layer : job->layer;
     auto raw = read(*job);
     if (!raw) {
         return raw.error();
@@ -702,7 +894,8 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
                               "deleted from the drawing.");
     }
 
-    // Points the job has not drawn before: on the job's layer, and never over
+    // Points the job has not drawn before: drawn as the import drew the job's
+    // others (`options`, from the job), and never over
     // a survey point the job did not create (Skip) - that point is someone
     // else's, and the report says it was left alone.
     // Built from the unaccounted points only, not copied whole and pruned:
@@ -716,8 +909,7 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
             plan.fresh.points.push_back(point);
         }
     }
-    SurveyImportOptions options;
-    options.layer = job->layer.empty() ? SurveyImportOptions{}.layer : job->layer;
+    plan.pointNumberProperty = options.pointNumberProperty;
     SurveyPointImportReport drawing;
     CommandPtr draw;
     if (!plan.fresh.points.empty()) {
@@ -823,8 +1015,8 @@ Status ReadjustSurveyJobCommand::execute(CommandContext& context)
         // The new points follow the moved and deleted ones in the command's
         // created list; only the drawing part creates anything.
         const std::vector<EntityId> created = plan.entities->createdEntities();
-        auto placed = placedPoints(context.model, created, plan.drawn,
-                                   SurveyImportOptions{}.pointNumberProperty);
+        auto placed =
+            placedPoints(context.model, created, plan.drawn, plan.pointNumberProperty);
         if (!placed) {
             (void)plan.entities->undo(context); // all or nothing
             return placed.error();
