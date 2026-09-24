@@ -6,9 +6,10 @@
 // which reads a drawing as GIS features and loses what a CAD user exchanges a
 // DXF for: an arc became a 9-vertex polyline, a circle an OPEN polyline, text
 // a point. This module reads the entities themselves, so an ARC is an Arc.
-// It sits where the 12d archive module does - entity and geometry below it,
-// nothing above - and so builds with -DKATANA_BUILD_IO=OFF, which puts a
-// hand-written parser of untrusted text under the sanitizer job.
+// It sits where archive12d does - the entity model below it (and commands,
+// for dxf::importCommand), no third-party library - and so builds with
+// -DKATANA_BUILD_IO=OFF, which puts a hand-written parser of untrusted text
+// under the sanitizer job.
 //
 // WHERE EACH ENTITY GOES.
 //
