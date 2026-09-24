@@ -38,7 +38,7 @@ TEST(Symbols, EveryNamedSymbolHasItsOwnShapeAndAnyOtherNameFallsBackToOne)
         }
     }
     // Only "no symbol" draws nothing. A name that is not one of the sixteen
-    // is a real 12d linestyle name - "SEWR Manhole Cover" - and falls back to
+    // is a real library linestyle name - "SEWR Manhole Cover" - and falls back to
     // the shape its words suggest, because the alternative is a point that
     // draws nothing at all when no library defines its name.
     EXPECT_TRUE(symbolStrokes(katana::entity::kNoSymbol, Point2(0.0, 0.0), 1.0).empty());

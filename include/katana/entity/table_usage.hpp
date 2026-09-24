@@ -19,7 +19,7 @@
 // ByLayer. A per-row scan would be one pass per row - 800 styles over 250 000
 // entities - which is why this is one pass for everything.
 //
-// Names are kept whether or not a table defines them: a 12d linestyle a
+// Names are kept whether or not a table defines them: a library linestyle a
 // style names lives in the library, not the model, and a name nothing
 // defines is exactly what a manager has to show. The caller asks the tables
 // (or the library) which is which.

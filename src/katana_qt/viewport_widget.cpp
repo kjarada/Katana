@@ -1244,9 +1244,9 @@ void ViewportWidget::drawEntities(QPainter& painter) const
 
     // How far each style's symbol reaches from the point it is put at, at
     // this frame's scale. A symbol is culled by what it DRAWS, not by its
-    // insertion point: 12d's SSM1 draws 434 m from its point and the plot
-    // stamps up to 388 m, and culling on the point dropped every one whose
-    // point was just off screen while its strokes were in view. The index is
+    // insertion point: one library symbol draws 434 m from its point and the
+    // plot stamps up to 388 m, and culling on the point dropped every one
+    // whose point was just off screen while its strokes were in view. The index is
     // asked for the view grown by the furthest reach, and each entity then by
     // its own style's.
     std::map<std::string, double, std::less<>> symbolReach;
@@ -1369,7 +1369,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             }
             painter.setPen(pen);
         }
-        // A 12d definition is painted in the entity's colour and width with
+        // A library definition is painted in the entity's colour and width with
         // a FLAT cap, so a 3 mm dash plots 3 mm rather than 3 mm and a pen
         // width (QPen's square cap); the painter draws its dots round.
         StylePaintTarget target;
@@ -1390,7 +1390,7 @@ void ViewportWidget::drawEntities(QPainter& painter) const
             drawSymbol(painter, target, display.symbol, point->position, display.symbolSize);
             return;
         }
-        // A 12d linestyle IS the line, gaps and all: "move 0 0 / draw 3 0 /
+        // A library linestyle IS the line, gaps and all: "move 0 0 / draw 3 0 /
         // move 5 0" is a three-unit dash followed by a two-unit gap, and a
         // fence style carries the fence as well as its ticks. So it REPLACES
         // the plain line rather than being drawn over it. Drawing both filled
@@ -1412,9 +1412,9 @@ void ViewportWidget::drawEntities(QPainter& painter) const
         if (!drawnByStyle || hatch_ != nullptr) {
             drawGeometry(painter, entity.geometry);
         }
-        // A line whose style names a symbol carries it at EVERY vertex, as a
-        // 12d string does (D8) and as the 12da import intends: a fence line's
-        // posts, a string of drill holes. The line above is drawn as well.
+        // A line whose style names a symbol carries it at EVERY vertex (D8),
+        // as the archive import intends: a fence line's posts, a string of
+        // drill holes. The line above is drawn as well.
         if (!display.symbol.empty()) {
             for (const Point2& vertex : cad::symbolVertices(entity.geometry)) {
                 drawSymbol(painter, target, display.symbol, vertex, display.symbolSize);
@@ -1472,7 +1472,7 @@ void ViewportWidget::drawMeshFootprints(QPainter& painter) const
 
 double ViewportWidget::paperScale() const
 {
-    // Model units to one plot millimetre, which is what a `paperstyle` is
+    // Model units to one plot millimetre, which is what a paper linestyle is
     // measured in. Dividing by the view scale is what makes such a mark keep
     // its size on the PAGE as you zoom, which is the whole point of one.
     //
@@ -1548,7 +1548,7 @@ void ViewportWidget::drawSymbol(QPainter& painter, const StylePaintTarget& targe
                                 const std::string& symbol, const Point2& centre,
                                 double size) const
 {
-    // Through the one resolver the previews use: a loaded 12d definition
+    // Through the one resolver the previews use: a loaded library definition
     // first, the sixteen built-in shapes after (PLAN.MD 20.3). Rotation is 0
     // because nothing in the model carries one yet.
     const cad::StyleDrawing drawing = cad::pointSymbolDrawing(

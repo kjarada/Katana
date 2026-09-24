@@ -51,7 +51,7 @@ namespace katana::cad {
 struct SymbolCode {
     std::string key{};    // as written: "AC*"
     double size = 0.0;    // SurveySymbol::size; 0 is the definition's own
-    std::string colour{}; // a 12d colour name; empty is the string's own
+    std::string colour{}; // a standard colour name; empty is the string's own
     std::string comment{};
 
     friend bool operator==(const SymbolCode&, const SymbolCode&) = default;

@@ -35,7 +35,7 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
     # shipped sample should be the drawing and nothing else.
     PATTERN "backups" EXCLUDE
     PATTERN "cache" EXCLUDE)
-# The 12d customisation is COMPILED INTO the binary (see
+# The built-in customisation is COMPILED INTO the binary (see
 # src/katana_archive12d/CMakeLists.txt and tools/embed_customisation.py), so
 # there is nothing to install beside it: its linestyles, symbols and survey
 # codes travel inside the executable and need no files at run time.

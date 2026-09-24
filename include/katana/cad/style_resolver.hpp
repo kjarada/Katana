@@ -6,7 +6,7 @@
 //
 // A name reaches here from Style::linetype, Layer::linetype or Style::symbol.
 // Two tables can hold it: the Model's Linetype table (DXF-style dashes, saved
-// in the project) and the session's 12d StyleLibrary (strokes, texts and
+// in the project) and the session's StyleLibrary (strokes, texts and
 // pens; cad::Document::styleLibrary). The rules, as the lead decided them:
 //
 //   LINETYPE (decision D2). A NON-vertex library definition of the name wins
@@ -22,9 +22,9 @@
 //   (entity::builtInSymbolFor), and the caller is told which.
 //
 //   SYMBOLS ON LINES (decision D8). A line whose style names a symbol draws
-//   that symbol at EVERY vertex, as 12d does, and a symbol's name is never
+//   that symbol at EVERY vertex, as a vertex symbol is, and its name is never
 //   used as a pattern along the line: a style whose linetype names its own
-//   symbol - which is what the 12da import writes for a symbol string - is a
+//   symbol - which is what an archive import writes for a symbol string - is a
 //   plain line with symbols on it.
 //
 // Nothing here keeps a pointer into a library beyond the call that returned
@@ -37,10 +37,12 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "katana/cad/customisation_record.hpp"
 #include "katana/cad/dashing.hpp"
 #include "katana/cad/style_drawing.hpp"
 #include "katana/entity/entity.hpp"
@@ -70,6 +72,19 @@ struct ResolvedLinetype {
     // places deserves to be told.
     bool collision = false;
 };
+
+// The library definition `name` names: the exact name first, so a definition
+// that has that name itself - a person's own - is the one drawn; then, only
+// when that misses, the name `renamed` gives it now, so a drawing saved before
+// the built-in customisation was given general names still draws the
+// definitions that were renamed (customisation_record.hpp). Null when neither
+// is in the library. Every lookup below goes through here. The two-argument
+// form uses builtinDefinitionRenames.
+[[nodiscard]] const katana::entity::LineStyle*
+findDefinition(const katana::entity::StyleLibrary& library, std::string_view name);
+[[nodiscard]] const katana::entity::LineStyle*
+findDefinition(const katana::entity::StyleLibrary& library, std::string_view name,
+               std::span<const RenamedDefinition> renamed);
 
 [[nodiscard]] ResolvedLinetype resolveLinetype(const katana::entity::Model& model,
                                                const katana::entity::StyleLibrary& library,

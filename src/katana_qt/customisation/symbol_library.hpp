@@ -1,7 +1,7 @@
 #pragma once
 
-// The symbol library: AutoCAD's Blocks palette, MicroStation's cell selector
-// and 12d's symbol chooser in one non-modal window over the drawing.
+// The symbol library: AutoCAD's Blocks palette and MicroStation's cell
+// selector in one non-modal window over the drawing.
 //
 //   left    a tree of groups - All, Built-in, the library's `/` groups,
 //           "(ungrouped)", and "Not defined" when a name resolves to nothing
@@ -123,8 +123,9 @@ class SymbolLibraryDialog : public QDialog {
     // Refused (and logged) for an empty `replacement`: taking a symbol off
     // its styles is not a replacement.
     bool replaceInStyles(const std::string& replacement);
-    // Reads a 12d file (a .4d library, or a mapfile - the extension does not
-    // say which) and MERGES it into the session's customisation.
+    // Reads a customisation file (a .4d library, or a survey code file - the
+    // extension does not say which) and MERGES it into the session's
+    // customisation.
     bool loadLibraryFile(const std::filesystem::path& path);
     // Writes the selected library definitions to a .4d file. Built-in and
     // undefined names cannot be written, and are named in the log.

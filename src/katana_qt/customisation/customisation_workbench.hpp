@@ -17,7 +17,7 @@
 //   Symbol Library...              formatSymbols      -> symbolLibraryDialog
 //   Survey Code Manager...         formatSurveyCodes  -> surveyCodeManagerDialog
 //   ---
-//   Load 12d Customisation...      the window's actions (services.load...,
+//   Load Customisation...          the window's actions (services.load...,
 //   Replace Loaded Customisation...  services.replace...)
 //   ---
 //   Purge Unused...                formatPurge

@@ -58,7 +58,7 @@ struct Bench {
     QMenu* menu = new QMenu("Format", &window);
     QToolBar* bar = new QToolBar("Format", &window);
     QAction* layers = new QAction("Layers...", &window);
-    QAction* load = new QAction("Load 12d Customisation...", &window);
+    QAction* load = new QAction("Load Customisation...", &window);
     QAction* replace = new QAction("Replace Loaded Customisation...", &window);
     std::vector<QString> log;
     bool headless = true;

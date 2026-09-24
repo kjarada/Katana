@@ -195,7 +195,7 @@ Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, the
 Angle and Bearing Calculator), Traverse and Levelling (Traverse, Level Book)
 and Coordinates (the Coordinate Converter) - plus a Survey Coding section that
 shows actions the window and the Format workbench own: the Survey Code Manager,
-Load 12d Customisation, Replace Loaded Customisation and Apply Survey Codes
+Load Customisation, Replace Loaded Customisation and Apply Survey Codes
 (`docs/survey_coding.md`). The first three are the same `QAction` objects as
 on the Format menu (`SurveyServices::codeManager`, `loadCustomisation`,
 `replaceCustomisation`), so the two menus cannot drift; Apply Survey Codes
@@ -268,7 +268,7 @@ with:
   puts it back) or Keep Both (the report says the drawing now has two).
 - **One command.** Import makes one undoable command
   (`cad::importSurveyPoints`), frames the views and logs the report; step 5
-  can apply the loaded mapfile's codes afterwards with the window's own Apply
+  can apply the loaded survey codes afterwards with the window's own Apply
   Survey Codes action. After Import the wizard hides and goes back to step 1
   with its fields kept, as a wizard's Finish does.
 

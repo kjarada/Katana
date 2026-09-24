@@ -94,7 +94,7 @@ struct LayerManagerDialog::Impl {
     // the linetype list has no pictures here.
     CustomisationContext context{};
     QTableWidget* table = nullptr;
-    // A NamePicker, not a plain combo: a layer may name a 12d linestyle no
+    // A NamePicker, not a plain combo: a layer may name a linestyle no
     // loaded library defines, and a combo that cannot show it wrote the
     // previous row's name back on Save (audit QT-02's twin).
     NamePicker* linetypeBox = nullptr;

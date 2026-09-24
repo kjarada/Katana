@@ -48,7 +48,7 @@ struct ProjectMetadata {
     std::string createdUtc{};       // ISO 8601; filled in by create()
     std::string modifiedUtc{};      // ISO 8601; refreshed by save()
     std::string applicationVersion{};
-    // The 12d customisation the drawing was drawn with: the NAMES of the
+    // The customisation the drawing was drawn with: the NAMES of the
     // linestyle, symbol and map files that were loaded, in load order - never
     // their paths, because a project travels between machines and a path
     // says whose disk it was made on. A record, not a reference: nothing is

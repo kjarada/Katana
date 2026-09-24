@@ -30,7 +30,7 @@ set(KATANA_ALLOWED_surveyio "core;math;geometry;survey")
 set(KATANA_ALLOWED_terrain "core;math;geometry")
 set(KATANA_ALLOWED_entity "core;math;geometry")
 set(KATANA_ALLOWED_commands "core;math;geometry;entity")
-# The 12d file formats: the Archive, and the survey coding libraries beside it.
+# The archive module: the .12da Archive, and the survey coding libraries beside it.
 # Pure text handling plus the mapping onto entities, alignments and surfaces, so
 # it sits beside commands and needs no GDAL.
 set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
