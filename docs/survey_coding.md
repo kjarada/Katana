@@ -552,10 +552,10 @@ repository:
 - **An earlier definition name** is given its current one by
   `definitionNameNow` (`builtinDefinitionRenames`), asked only after an exact
   lookup missed, so a person's own definition that still has such a name is
-  the one found. Not done: the drawing's lookups (`resolveLinetype`,
-  `resolveSymbol`, `DefinitionCache::find` in `style_resolver.cpp`) do not ask
-  it yet, so a style saved naming an earlier definition draws the plain
-  continuous line until it is renamed.
+  the one found. Every drawing lookup asks it through `findDefinition`
+  (`style_resolver.cpp`): `resolveLinetype`, `resolveSymbol` and
+  `DefinitionCache::find`, so a style saved naming an earlier definition
+  draws that definition, on screen, on the plot and in every preview.
 
 An older build opening a project this one saved warns about the four general
 names; nothing on this side can change that.
