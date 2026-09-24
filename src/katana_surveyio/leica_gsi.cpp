@@ -1401,10 +1401,9 @@ class GsiReader {
         noteSettings(block, true);
         survey::SurveyStation& station = result_.project.stations[*active_];
 
-        survey::SurveyTimestamp time;
-        std::string withoutYear;
         if (!block.time19.empty() || !block.time18.empty()) {
             if (!station.instrument.time.known() && pointings_ == 0) {
+                std::string withoutYear;
                 timeOf(block, station.instrument.time, withoutYear);
                 if (!withoutYear.empty()) {
                     station.metadata.emplace("time (no year recorded)", withoutYear);
@@ -1476,7 +1475,9 @@ class GsiReader {
             zenith = reading > kPi ? kTwoPi - reading : reading;
             ++zenithAngles_;
         }
-        const survey::SourceRecord source = sourceAt(block.record, block.wide);
+        // Each observation's source is the file's, at this record: copied from
+        // the template straight into the observation, not through a local.
+        const survey::SourceRecord& source = templateFor(block.wide);
         // Built in place: an Observation is several hundred bytes, and a job
         // is mostly observations, so a temporary moved into the vector would
         // be a second copy of most of the output.
@@ -1490,6 +1491,7 @@ class GsiReader {
             direction.direction = wrapToCircle(*block.hz);
             direction.sigma = precision_.direction;
             direction.source = source;
+            direction.source.recordNumber = block.record;
             direction.pointing = pointing;
         }
         if (zenith) {
@@ -1502,6 +1504,7 @@ class GsiReader {
             vertical.instrumentHeight = instrumentHeight;
             vertical.targetHeight = targetHeight;
             vertical.source = source;
+            vertical.source.recordNumber = block.record;
             vertical.pointing = pointing;
         }
         const auto distanceOf = [&](double value, survey::DistanceKind kind) {
@@ -1515,6 +1518,7 @@ class GsiReader {
             distance.instrumentHeight = instrumentHeight;
             distance.targetHeight = targetHeight;
             distance.source = source;
+            distance.source.recordNumber = block.record;
             distance.pointing = pointing;
             if (prism_) {
                 distance.target.prismConstant = prism_;
@@ -1562,6 +1566,7 @@ class GsiReader {
                                          precision_.heightMeasurement,
                                          level.length * precision_.zenith);
                 level.source = source;
+                level.source.recordNumber = block.record;
             }
         }
     }
