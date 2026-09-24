@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QLineF>
+#include <QList>
 #include <QMarginsF>
 #include <QPageSize>
 #include <QPaintDevice>
@@ -183,8 +184,6 @@ void PlanPaintCache::invalidateReferences()
 void PlanPaintCache::clear()
 {
     definitions_.clear();
-    dashes_.clear();
-    dashScale_ = 0.0;
     fonts_.clear();
     paperFont_.reset();
     rasters_.clear();
@@ -209,12 +208,6 @@ class PlanPainter {
           library_(source.library != nullptr ? *source.library : noLibrary()),
           view_(frame.transform), visible_(visibleBox(frame))
     {
-        // A dash pattern is a function of the linetype, the pen width and the
-        // VIEW SCALE; the patterns of another scale are of no use.
-        if (cache_.dashScale_ != view_.scale) {
-            cache_.dashes_.clear();
-            cache_.dashScale_ = view_.scale;
-        }
         if (cache_.fontFamily_ != options_.fontFamily) {
             cache_.fonts_.clear();
             cache_.paperFont_.reset();
@@ -343,6 +336,15 @@ class PlanPainter {
     const Resolved* last_ = nullptr;
     // By symbol, then by size: a handful of sizes per symbol at most.
     std::map<std::string, std::vector<std::pair<double, Stamp>>, std::less<>> stamps_;
+    // Dash patterns by linetype name and pen width, for this paint only. A
+    // pattern is the linetype's CONTENTS at this scale, and the model's
+    // linetypes can be edited between two paints (updateLinetype, its undo,
+    // a delete and re-create under the name) with nothing here to say so;
+    // kept across paints by name, a view drew the old dashes until it was
+    // zoomed and a second plot printed them. Worked out once per distinct
+    // display a paint anyway (resolve), so keeping them longer saved a few
+    // dozen small vectors a frame at most.
+    std::map<std::pair<std::string, double>, QList<qreal>> dashes_;
     // Whether stamps may come from the sprite cache this paint, and where
     // the painter's (translation-only) transform and the device ratio put a
     // logical pixel.
@@ -735,18 +737,18 @@ const PlanPainter::Resolved& PlanPainter::resolve(const Entity& entity)
         // scale. Qt's array is in units of PEN WIDTH, not pixels, which is why
         // the width is passed in rather than assumed. The pattern depends only
         // on the linetype, the view scale and the pen width, so it is built
-        // once per scale and kept (PlanPaintCache). Only a MODEL linetype
-        // dashes the pen: a library linestyle of the same name wins, and its
-        // strokes are drawn undashed (D2).
+        // once per paint (dashes_). Only a MODEL linetype dashes the pen: a
+        // library linestyle of the same name wins, and its strokes are drawn
+        // undashed (D2).
         if (r.pattern.kind == cad::LinetypeKind::ModelLinetype) {
             const auto dashKey = std::make_pair(r.display.linetype, penWidthPixels);
-            auto cached = cache_.dashes_.find(dashKey);
-            if (cached == cache_.dashes_.end()) {
+            auto cached = dashes_.find(dashKey);
+            if (cached == dashes_.end()) {
                 cad::DashOptions dash;
                 dash.viewScale = view_.scale;
                 const auto dashes = cad::qtDashPattern(*r.pattern.linetype, dash, penWidthPixels);
-                cached = cache_.dashes_.emplace(dashKey, QList<qreal>(dashes.begin(), dashes.end()))
-                             .first;
+                cached =
+                    dashes_.emplace(dashKey, QList<qreal>(dashes.begin(), dashes.end())).first;
             }
             if (!cached->second.isEmpty()) {
                 r.pen.setDashPattern(cached->second);
