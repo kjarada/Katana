@@ -427,6 +427,18 @@ TEST(TopconRw5, AReadOfALargeSyntheticJobReadsEveryRecordAndReportsItsRate)
                      std::to_string(10 + shot) + ".2345,--KB" + std::to_string(shot % 7) + "\n";
         }
     }
+    // The reader on its own, then the whole door (readSurvey adds the size
+    // caps and survey::validateProject, which is not this reader's cost).
+    const FormatReader reader = formatRegistry().reader(kRw5);
+    ASSERT_NE(reader, nullptr);
+    double readerSeconds = 0.0;
+    {
+        const auto start = std::chrono::steady_clock::now();
+        const auto alone = reader(bytes, "throughput.rw5", ReadOptions{});
+        readerSeconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        EXPECT_TRUE(alone.ok());
+    } // freed here, outside both timings
     const auto start = std::chrono::steady_clock::now();
     const auto result = topcon_test::read(kRw5, bytes, "throughput.rw5");
     const double seconds =
@@ -436,6 +448,7 @@ TEST(TopconRw5, AReadOfALargeSyntheticJobReadsEveryRecordAndReportsItsRate)
     EXPECT_EQ(result->recordsSkipped, 0u);
     EXPECT_EQ(result->project.stations.size(), setups);
     const double mb = static_cast<double>(bytes.size()) / (1024.0 * 1024.0);
-    std::cout << "RW5 throughput: " << mb << " MB, " << shots << " shots, " << seconds << " s, "
-              << mb / seconds << " MB/s (readSurvey, including validateProject)\n";
+    std::cout << "RW5 throughput: " << mb << " MB, " << shots << " shots; reader alone "
+              << readerSeconds << " s, " << mb / readerSeconds << " MB/s; readSurvey (with "
+              << "validateProject) " << seconds << " s, " << mb / seconds << " MB/s\n";
 }

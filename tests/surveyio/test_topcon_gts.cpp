@@ -353,6 +353,18 @@ TEST(TopconGts, AReadOfALargeSyntheticJobReadsEveryRecordAndReportsItsRate)
                      std::to_string(10 + shot) + ".23450\n";
         }
     }
+    // The reader on its own, then the whole door (readSurvey adds the size
+    // caps and survey::validateProject, which is not this reader's cost).
+    const FormatReader reader = formatRegistry().reader(kGts7);
+    ASSERT_NE(reader, nullptr);
+    double readerSeconds = 0.0;
+    {
+        const auto start = std::chrono::steady_clock::now();
+        const auto alone = reader(bytes, "throughput.gt7", ReadOptions{});
+        readerSeconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        EXPECT_TRUE(alone.ok());
+    } // freed here, outside both timings
     const auto start = std::chrono::steady_clock::now();
     const auto result = topcon_test::read(kGts7, bytes, "throughput.gt7");
     const double seconds =
@@ -361,8 +373,9 @@ TEST(TopconGts, AReadOfALargeSyntheticJobReadsEveryRecordAndReportsItsRate)
     EXPECT_EQ(result->recordsRead, 2 + setups * 3 + shots * 2);
     EXPECT_EQ(result->recordsSkipped, 0u);
     const double mb = static_cast<double>(bytes.size()) / (1024.0 * 1024.0);
-    std::cout << "GTS-7 throughput: " << mb << " MB, " << shots << " shots, " << seconds
-              << " s, " << mb / seconds << " MB/s (readSurvey, including validateProject)\n";
+    std::cout << "GTS-7 throughput: " << mb << " MB, " << shots << " shots; reader alone "
+              << readerSeconds << " s, " << mb / readerSeconds << " MB/s; readSurvey (with "
+              << "validateProject) " << seconds << " s, " << mb / seconds << " MB/s\n";
 }
 
 TEST(TopconGts, APointOccupiedManyTimesGivesNumberedSetupsInLinearTime)
