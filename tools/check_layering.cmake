@@ -36,8 +36,10 @@ set(KATANA_ALLOWED_commands "core;math;geometry;entity")
 set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
 # dxf: the drawing exchange format, read and written natively. Text handling
 # plus the mapping onto entities and their tables, beside archive12d and for
-# the same reason: no GDAL, so it builds with -DKATANA_BUILD_IO=OFF.
-set(KATANA_ALLOWED_dxf "core;math;geometry;entity")
+# the same reason: no GDAL, so it builds with -DKATANA_BUILD_IO=OFF. It sees
+# commands for one thing, the import as the single undoable step both front
+# ends execute (dxf/import_command.hpp), so that they cannot differ about it.
+set(KATANA_ALLOWED_dxf "core;math;geometry;entity;commands")
 set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
 # gis and pointcloud are both implemented by src/katana_io.
 set(KATANA_ALLOWED_gis "core;pointcloud")

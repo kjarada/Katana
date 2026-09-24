@@ -10,6 +10,9 @@ add_library(katana_dxf STATIC
     codes.cpp
     reader.cpp
     writer.cpp
+    import_command.cpp
 )
 katana_target_defaults(katana_dxf)
-target_link_libraries(katana_dxf PUBLIC katana_core katana_geometry katana_entity)
+# commands only for import_command.hpp: the import as the one undoable step
+# both front ends execute.
+target_link_libraries(katana_dxf PUBLIC katana_core katana_geometry katana_entity katana_commands)

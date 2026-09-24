@@ -3,10 +3,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
-#include <memory>
 
-#include "katana/commands/command_stack.hpp"
-#include "katana/commands/entity_commands.hpp"
+#include "katana/dxf/import_command.hpp"
 #include "katana/dxf/reader.hpp"
 #include "katana/dxf/writer.hpp"
 
@@ -17,8 +15,6 @@
 namespace katana::app {
 
 namespace {
-
-namespace cmd = katana::commands;
 
 bool importDxf(katana::cad::Document& document, const std::filesystem::path& file, bool local)
 {
@@ -37,33 +33,16 @@ bool importDxf(katana::cad::Document& document, const std::filesystem::path& fil
         std::cerr << "error: " << imported.error().describe() << '\n';
         return false;
     }
-    const katana::entity::Model& model = document.model();
-    // Linetypes before the layers that name them, parents before children,
-    // and all of it with the entities as ONE undo step.
-    auto transaction = std::make_unique<cmd::Transaction>("IMPORT");
-    for (const katana::entity::Linetype& linetype : imported->linetypes) {
-        if (!model.linetypes.contains(linetype.name)) {
-            transaction->add(cmd::createLinetype(linetype));
-        }
-    }
-    std::vector<katana::entity::Layer> layers = imported->layers;
-    std::sort(layers.begin(), layers.end(),
-              [](const auto& a, const auto& b) { return a.name < b.name; });
-    for (const katana::entity::Layer& layer : layers) {
-        if (!model.layers.contains(layer.name)) {
-            transaction->add(cmd::createLayer(layer));
-        }
-    }
     const std::size_t count = imported->entities.size();
 #if defined(KATANA_WITH_INTEROP)
-    const auto existingBounds = model.entities.bounds();
+    const auto existingBounds = document.model().entities.bounds();
 #endif
-    if (count != 0) {
-        transaction->add(cmd::createEntities(std::move(imported->entities)));
-    }
-    if (const auto status = document.execute(std::move(transaction)); !status) {
-        std::cerr << "error: " << status.error().describe() << '\n';
-        return false;
+    // Linetypes, layers and entities: ONE undo step.
+    if (auto command = katana::dxf::importCommand(*imported, document.model())) {
+        if (const auto status = document.execute(std::move(command)); !status) {
+            std::cerr << "error: " << status.error().describe() << '\n';
+            return false;
+        }
     }
     std::cout << "imported " << count << " entities from " << file.filename().string()
               << " (DXF" << (imported->release.empty() ? "" : " ") << imported->release << ")\n";
