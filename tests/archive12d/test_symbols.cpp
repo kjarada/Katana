@@ -110,7 +110,7 @@ TEST(SymbolImport, APointTakesItsSymbolsLinestyleAsItsStyleAndTheStyleCarriesThe
     EXPECT_EQ(katana::entity::builtInSymbolFor(style->symbol), "manhole")
         << "the name still says what it is";
     EXPECT_EQ(style->symbolSize, 1.0);
-    EXPECT_EQ(style->description, "12d symbol");
+    EXPECT_EQ(style->description, "library symbol");
     // The string's own linestyle "0" is not the point's style, but it is
     // kept so that export writes the string as it was.
     ASSERT_NE(meta(point, "12d.string_style"), nullptr);

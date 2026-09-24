@@ -258,7 +258,7 @@ class Importer {
             // happened before, when this was left as "continuous" and the
             // name was recorded nowhere a renderer would look.
             style.linetype = linestyle;
-            style.description = "12d linestyle";
+            style.description = "library linestyle";
             result_.stylesNeeded.push_back(std::move(style));
             at = styleIndex_.emplace(linestyle, result_.stylesNeeded.size() - 1).first;
         }
@@ -272,7 +272,7 @@ class Importer {
             // if nothing defines the name (entity::builtInSymbolFor).
             known.symbol = linestyle;
             known.symbolSize = std::max(0.0, symbolBlock->real("size").value_or(0.0));
-            known.description = "12d symbol";
+            known.description = "library symbol";
         }
         return known;
     }

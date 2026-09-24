@@ -2,7 +2,7 @@
 
 // The bytes of a text file -> UTF-8, and back.
 //
-// Every reader of a text format in Katana starts here: the 12d Archive, the 12d
+// Every reader of a text format in Katana starts here: the 12d Archive, the
 // customisation files, and the survey field-data formats. There is ONE decoder,
 // in core, because each of those readers is in a layer that may not see the
 // others (tools/check_layering.cmake) and the survey parsers had started to

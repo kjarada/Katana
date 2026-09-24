@@ -49,7 +49,7 @@ struct Archive12dImportOptions {
 struct Archive12dImportResult {
     std::vector<katana::entity::Entity> entities;
     std::vector<katana::entity::Layer> layersNeeded;
-    // One per distinct 12d linestyle; the caller creates those the drawing
+    // One per distinct linestyle the archive names; the caller creates those the drawing
     // lacks, in the same transaction as the layers.
     std::vector<katana::entity::Style> stylesNeeded;
     // Names are unique within the import; the caller must still rename any
