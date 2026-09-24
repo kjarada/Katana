@@ -101,9 +101,10 @@ TEST(InquiryDistance, PicksOnSurveyPointsReportTheirNumbersAndHeightDifference)
     const EntityId b = addSurveyPoint(driver, {1003, 2004}, "CP2", 12.0);
     driver.start("inquiry.distance");
     (void)driver.click(1000, 2000);
-    // A pick 0.004 off the point (within the driver's 0.01 aperture) is the
-    // point: its number and height, not the bare coordinates.
-    const ToolStep step = driver.click(1003.004, 2004);
+    // Typed as a report prints it, to three decimals: 0.0004 off the point,
+    // inside the millimetre that makes it the point - its number and
+    // height, not the bare coordinates.
+    const ToolStep step = driver.click(1003.0004, 2004);
     ASSERT_EQ(step.outcome, kDone);
     const std::string& report = step.message;
     EXPECT_TRUE(contains(report, "point " + std::to_string(a) + " (CP1)")) << report;
@@ -113,6 +114,21 @@ TEST(InquiryDistance, PicksOnSurveyPointsReportTheirNumbersAndHeightDifference)
     EXPECT_TRUE(contains(report, "Height difference +2.000")) << report;
     EXPECT_TRUE(contains(report, "slope distance 5.385")) << report;
     EXPECT_TRUE(contains(report, "grade +40.000 %")) << report;
+}
+
+TEST(InquiryDistance, APickNearASurveyPointButNotOnItIsOnlyItsCoordinates)
+{
+    // 0.004 from the point: more than a millimetre, so a click that missed
+    // the mark is not reported as the mark (its number, its height).
+    ToolDriver driver;
+    (void)addSurveyPoint(driver, {1000, 2000}, "CP1", 10.0);
+    driver.start("inquiry.distance");
+    (void)driver.click(1000.004, 2000);
+    const ToolStep step = driver.click(1003.004, 2004);
+    ASSERT_EQ(step.outcome, kDone);
+    EXPECT_FALSE(contains(step.message, "CP1")) << step.message;
+    EXPECT_TRUE(contains(step.message, "Inverse  E 1000.004 N 2000.000")) << step.message;
+    EXPECT_TRUE(contains(step.message, "No height difference")) << step.message;
 }
 
 TEST(InquiryDistance, TheSamePointTwiceIsRefusedAndUndoTakesBackTheFirst)
@@ -196,10 +212,12 @@ TEST(InquiryId, APickOnASurveyPointReportsItsNumberHeightAndCode)
     ToolDriver driver;
     const EntityId id = addSurveyPoint(driver, {100, 200}, "CP1", 10.5, "TB");
     driver.start("inquiry.id");
-    const ToolStep step = driver.click(100.005, 200);
+    const ToolStep step = driver.click(100.0005, 200); // within the millimetre
     ASSERT_EQ(step.outcome, kDone);
     EXPECT_EQ(step.message,
               "point " + std::to_string(id) + " (CP1)  E 100.000 N 200.000  Z 10.500  code TB");
+    // Ten centimetres off it is somewhere else.
+    EXPECT_EQ(driver.click(100.1, 200).message, "E 100.100 N 200.000");
 }
 
 // ---- Angle -------------------------------------------------------------------------
