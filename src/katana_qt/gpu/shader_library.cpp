@@ -54,7 +54,7 @@ VSOut main(VSIn i)
 // and a TIN's facets are what a surveyor wants to see. The normal is turned
 // to face the eye before lighting, so a face lit from behind gets ambient
 // only - unlike the baked abs(n.l) of the software path, which lights both
-// sides of a face alike (map_view3d).
+// sides of a face alike (cad::SceneBuilder).
 const char* const kTrianglesFragment = KATANA_GPU_FRAME_CBUFFER R"(
 struct VSOut { float4 pos : SV_Position; float4 color : COLOR0; float3 rel : TEXCOORD0; };
 float4 main(VSOut i) : SV_Target

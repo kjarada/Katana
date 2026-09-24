@@ -83,29 +83,70 @@ void PointCloudData::clear()
     sourceCount = 0;
 }
 
+namespace {
+
+// Every stride-th of `count` points, the stride the smallest whole number that
+// keeps the count within the budget: ceil(count / budget).
+template <typename PositionOf, typename ColorOf>
+void packThinned(std::size_t count, PositionOf positionOf, ColorOf colorOf,
+                 const katana::math::Vec3& origin, std::size_t budget, PointCloudData& out)
+{
+    out.clear();
+    out.origin = origin;
+    out.sourceCount = count;
+    std::size_t stride = 1;
+    if (budget > 0 && count > budget) {
+        stride = (count + budget - 1) / budget;
+    }
+    out.points.reserve(count / stride + 1);
+    for (std::size_t i = 0; i < count; i += stride) {
+        const katana::math::Vec3 position = positionOf(i);
+        if (!position.isFinite()) {
+            continue;
+        }
+        const auto p = relativePosition(position, origin);
+        out.points.push_back(GpuCloudPoint{p[0], p[1], p[2], colorOf(i)});
+    }
+}
+
+} // namespace
+
 void packPointCloud(const std::vector<katana::math::Vec3>& positions,
                     const std::vector<katana::render::Rgba>& colors,
                     katana::render::Rgba fallbackColor, const katana::math::Vec3& origin,
                     std::size_t budget, PointCloudData& out)
 {
-    out.clear();
-    out.origin = origin;
-    out.sourceCount = positions.size();
     const bool colored = colors.size() == positions.size();
-    // Every stride-th point. The stride is the smallest whole number that
-    // keeps the count within the budget: ceil(n / budget).
-    std::size_t stride = 1;
-    if (budget > 0 && positions.size() > budget) {
-        stride = (positions.size() + budget - 1) / budget;
-    }
-    out.points.reserve(positions.size() / stride + 1);
-    for (std::size_t i = 0; i < positions.size(); i += stride) {
-        if (!positions[i].isFinite()) {
-            continue;
+    packThinned(
+        positions.size(), [&](std::size_t i) { return positions[i]; },
+        [&](std::size_t i) { return colored ? colors[i] : fallbackColor; }, origin, budget, out);
+}
+
+void packPointCloud(const katana::pointcloud::PointCloud& cloud,
+                    katana::render::Rgba fallbackColor, std::size_t budget, PointCloudData& out)
+{
+    const auto& points = cloud.points;
+    katana::math::AABB box;
+    if (!cloud.bounds.empty()) {
+        box.expand(katana::math::Vec3(cloud.bounds.minX, cloud.bounds.minY, cloud.bounds.minZ));
+        box.expand(katana::math::Vec3(cloud.bounds.maxX, cloud.bounds.maxY, cloud.bounds.maxZ));
+    } else {
+        for (const auto& point : points) {
+            const katana::math::Vec3 position(point.x, point.y, point.z);
+            if (position.isFinite()) { // a stray infinity would put the origin nowhere
+                box.expand(position);
+            }
         }
-        const auto p = relativePosition(positions[i], origin);
-        out.points.push_back(GpuCloudPoint{p[0], p[1], p[2], colored ? colors[i] : fallbackColor});
     }
+    packThinned(
+        points.size(),
+        [&](std::size_t i) { return katana::math::Vec3(points[i].x, points[i].y, points[i].z); },
+        [&](std::size_t i) {
+            const auto& point = points[i];
+            return point.hasColor ? katana::render::rgba(point.red, point.green, point.blue)
+                                  : fallbackColor;
+        },
+        chooseSceneOrigin(box), budget, out);
 }
 
 } // namespace katana::qt::gpu

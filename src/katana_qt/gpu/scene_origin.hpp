@@ -26,8 +26,8 @@
 // 0, cleared to 0, test "greater"). A float's exponent then spends its
 // precision where the perspective divide throws it away, and the two cancel:
 // depth resolution becomes roughly constant RELATIVE to distance, instead of
-// the software path's 289 distinct depth values across a framed TIN
-// (map_view3d). Perspective uses an INFINITE far plane - nothing can be clipped
+// the few hundred distinct depth values the software path's standard Z
+// gives a framed TIN (docs/gpu.md). Perspective uses an INFINITE far plane - nothing can be clipped
 // away by zooming out (audit REN-05) - so the camera's far plane only matters
 // to the orthographic projection, which has no divide and takes it as given.
 
