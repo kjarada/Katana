@@ -17,6 +17,7 @@
 #include <iterator>
 #include <numbers>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -405,6 +406,14 @@ TEST(LeicaGsi, TheImportSaysWhatTheFileDoesNotCarry)
     EXPECT_TRUE(says(read.notCarried, "no coordinate system"));
     EXPECT_TRUE(says(read.notCarried, "backsight"));
     EXPECT_TRUE(says(read.notCarried, "zenith angle"));
+    // GSI ONLINE's SET/CONF 171 makes the horizontal circle's direction a
+    // setting no word records; the fixture's word 21s were read clockwise.
+    EXPECT_TRUE(says(read.notCarried, "direction of the horizontal circle"));
+    EXPECT_TRUE(says(read.notCarried, "word 21 was read as increasing clockwise"));
+    // Record 4 is a code block and the file ends with a point block (record
+    // 12): read Before Point, and the import says it is the instrument's call.
+    EXPECT_TRUE(says(read.notCarried, "<Rec Free Code:>"));
+    EXPECT_TRUE(says(read.notCarried, "each code block was taken to code the point after it"));
     // Both setups have an instrument height and a ppm: nothing said about them.
     EXPECT_FALSE(says(read.notCarried, "no instrument height"));
     EXPECT_FALSE(says(read.notCarried, "no atmospheric ppm"));
@@ -599,10 +608,90 @@ TEST(LeicaGsi, APointGivenTwoPositionsKeepsTheFirstAndTheDifferenceIsReported)
 TEST(LeicaGsi, ACodeBlockWithNoPointAfterItBelongsToThePointBefore)
 {
     const ReadResult read = readFixture("damaged_gsi8.gsi");
+    // Record 1 is a point block and record 7, "410007+000000TR", the last:
+    // the shape of a job recorded After Point, so TR codes 203 (record 6).
     const survey::UnpositionedPoint* p203 = unpositioned(read.project, "203");
     ASSERT_NE(p203, nullptr);
     EXPECT_EQ(p203->code, "TR");
-    EXPECT_NE(warningAbout(read, 7, "point before it"), nullptr) << allWarnings(read);
+    EXPECT_NE(warningAbout(read, 7, "After Point"), nullptr) << allWarnings(read);
+    EXPECT_EQ(read.project.metadata.at("code blocks belong to"), "the point before them");
+}
+
+// Leica's TPS1200 Technical Reference Manual (version 5.0, 16.3 "Coding &
+// Linework Settings"): <Rec Free Code: Before Point / After Point> "determines
+// if a free code is stored before or after the point", and no GSI word says
+// which. The two fixtures hold the same survey recorded each way - points 1
+// and 2 KERB, point 3 TREE - and must read alike.
+TEST(LeicaGsi, TheSameCodesRecordedBeforeOrAfterTheirPointsCodeTheSamePoints)
+{
+    for (const char* name : {"codes_before_gsi8.gsi", "codes_after_gsi8.gsi"}) {
+        SCOPED_TRACE(name);
+        const bool after = std::string_view(name) == "codes_after_gsi8.gsi";
+        const ReadResult read = readFixture(name);
+        ASSERT_EQ(read.project.points.size(), 3U);
+        const survey::SurveyPoint* p1 = point(read.project, "1");
+        const survey::SurveyPoint* p2 = point(read.project, "2");
+        const survey::SurveyPoint* p3 = point(read.project, "3");
+        ASSERT_NE(p1, nullptr);
+        ASSERT_NE(p2, nullptr);
+        ASSERT_NE(p3, nullptr);
+        EXPECT_EQ(p1->code, "KERB");
+        EXPECT_EQ(p2->code, "KERB");
+        EXPECT_EQ(p3->code, "TREE");
+        // No code was displaced into another point's metadata.
+        EXPECT_FALSE(p3->metadata.contains("code block"));
+        // "81..00+00002000": unit 0, the last digit a millimetre, 2.000 m.
+        EXPECT_DOUBLE_EQ(p3->easting, 2.0);
+        EXPECT_DOUBLE_EQ(p3->northing, 2.1);
+
+        ASSERT_EQ(read.project.features.size(), 2U);
+        EXPECT_EQ(read.project.features[0].code, "KERB");
+        EXPECT_EQ(read.project.features[0].pointIds, (std::vector<std::string>{"1", "2"}));
+        // A feature starts at its first point's block: record 1 when the code
+        // follows the point, record 2 when it precedes it.
+        EXPECT_EQ(read.project.features[0].source.recordNumber, after ? 1U : 2U);
+        EXPECT_EQ(read.project.features[1].code, "TREE");
+        EXPECT_EQ(read.project.features[1].pointIds, (std::vector<std::string>{"3"}));
+
+        EXPECT_EQ(read.project.metadata.at("code blocks belong to"),
+                  after ? "the point before them" : "the point after them");
+        EXPECT_TRUE(says(read.notCarried, "<Rec Free Code:>"));
+        // The After Point file is told so at its first code block, record 2;
+        // the Before Point file needs no warning.
+        EXPECT_EQ(warningAbout(read, 2, "After Point") != nullptr, after) << allWarnings(read);
+        EXPECT_EQ(read.warnings.empty(), !after) << allWarnings(read);
+    }
+}
+
+// The reviewer's case: a code block ending a round of shots. The file begins
+// with a code block, so it reads Before Point and the last code block has no
+// point after it. The block before it (record 6) is BS, face right, which was
+// NOT the last point the file named first (101, record 4).
+TEST(LeicaGsi, ACodeBlockEndingARoundOfShotsGoesToThePointOfTheBlockBeforeIt)
+{
+    const std::string text =
+        "410001+0000CTRL \r\n"
+        "110002+0000STN1 84..10+00100000 85..10+00200000 86..10+00050000 88..10+00001500 \r\n"
+        "110003+000000BS 21.102+00000000 22.102+10000000 31..00+00100000 \r\n"
+        "110004+00000101 21.102+05000000 22.102+09500000 31..00+00025000 \r\n"
+        "110005+00000101 21.102+25000000 22.102+30500000 31..00+00025000 \r\n"
+        "110006+000000BS 21.102+20000000 22.102+30000000 31..00+00100000 \r\n"
+        "410007+0000KERB \r\n";
+    Result<ReadResult> read = readText(text);
+    ASSERT_TRUE(read.ok()) << read.error().message;
+    const survey::UnpositionedPoint* bs = unpositioned(read->project, "BS");
+    const survey::UnpositionedPoint* p101 = unpositioned(read->project, "101");
+    ASSERT_NE(bs, nullptr);
+    ASSERT_NE(p101, nullptr);
+    EXPECT_EQ(bs->code, "KERB");
+    EXPECT_TRUE(p101->code.empty()) << p101->code;
+    EXPECT_NE(warningAbout(*read, 7, "attached to the point before it, BS"), nullptr)
+        << allWarnings(*read);
+    // CTRL, the first block, codes the point after it: the station.
+    const survey::SurveyPoint* station = point(read->project, "STN1");
+    ASSERT_NE(station, nullptr);
+    EXPECT_EQ(station->code, "CTRL");
+    EXPECT_EQ(read->project.metadata.at("code blocks belong to"), "the point after them");
 }
 
 // ---- Inline cases --------------------------------------------------------------------
@@ -649,6 +738,63 @@ TEST(LeicaGsi, AFirstShotToAPointPositionedEarlierIsTheBacksightAndOnePositioned
     EXPECT_TRUE(says(read->notCarried, "cannot be oriented until its backsight is known"));
     // CP01 was keyed in, so it is known to the reduction as entered.
     EXPECT_EQ(point(project, "CP01")->coordinateSource, survey::CoordinateSource::Entered);
+}
+
+// A monitoring pillar set up every half hour for a year is some 17,500 setups
+// on one point. Each gets its own id - STN1, STN1 (2), STN1 (3) ... - and
+// making the k-th must not cost more than making the first: the file of
+// setups on one point must read in about the time of the same file with
+// every setup on a different point. (A search for a free "(n)" from 2
+// upwards - 1 + 2 + ... + 2,999, some 4.5 million id lookups - read 3,000
+// setups on one point in 11.5 s and 3,000 on different points in 0.25 s,
+// Debug build.)
+TEST(LeicaGsi, ThousandsOfSetupsOnOnePointEachGetAnIdInNoMoreTimeThanSetupsOnDifferentPoints)
+{
+    constexpr int kSetups = 3000;
+    const auto job = [](bool onePoint) {
+        std::string text;
+        for (int i = 1; i <= kSetups; ++i) {
+            // 8 characters of GSI-8 data: STN1 padded, or 10000001 ... 10003000.
+            const std::string id = onePoint ? std::string("0000STN1") : std::to_string(10000000 + i);
+            text += "110001+" + id +
+                    " 84..10+00100000 85..10+00200000 86..10+00050000 88..10+00001500 \r\n"
+                    "110002+00000101 21.102+00000000 22.102+10000000 31..00+00010000 \r\n";
+        }
+        return text;
+    };
+    const std::string onePoint = job(true);
+    const std::string manyPoints = job(false);
+    const FormatReader reader = formatRegistry().reader(kLeicaGsiFormatId);
+    ASSERT_NE(reader, nullptr);
+
+    const auto manyStart = std::chrono::steady_clock::now();
+    const Result<ReadResult> many = reader(manyPoints, "many.gsi", ReadOptions{});
+    const auto oneStart = std::chrono::steady_clock::now();
+    const Result<ReadResult> one = reader(onePoint, "one.gsi", ReadOptions{});
+    const auto oneEnd = std::chrono::steady_clock::now();
+    ASSERT_TRUE(many.ok()) << many.error().message;
+    ASSERT_TRUE(one.ok()) << one.error().message;
+
+    const std::vector<survey::SurveyStation>& stations = one->project.stations;
+    ASSERT_EQ(stations.size(), static_cast<std::size_t>(kSetups));
+    EXPECT_EQ(stations[0].setup.id, "STN1");
+    EXPECT_EQ(stations[1].setup.id, "STN1 (2)");
+    EXPECT_EQ(stations[kSetups - 1].setup.id, "STN1 (3000)");
+    std::set<std::string> ids;
+    for (const survey::SurveyStation& station : stations) {
+        EXPECT_EQ(station.setup.pointId, "STN1");
+        ids.insert(station.setup.id);
+    }
+    EXPECT_EQ(ids.size(), static_cast<std::size_t>(kSetups)); // no two alike
+    EXPECT_EQ(many->project.stations.size(), static_cast<std::size_t>(kSetups));
+
+    const double manySeconds = std::chrono::duration<double>(oneStart - manyStart).count();
+    const double oneSeconds = std::chrono::duration<double>(oneEnd - oneStart).count();
+    std::cout << "[ setups ] " << kSetups << " on one point " << oneSeconds << " s, on "
+              << kSetups << " points " << manySeconds << " s\n";
+    // Proportional reading gives about 1:1. The allowance of five times and
+    // half a second is for a machine shared with other builds.
+    EXPECT_LT(oneSeconds, 5.0 * manySeconds + 0.5);
 }
 
 TEST(LeicaGsi, AShotAtTheOccupiedPointIsAWarningNotAnInvalidObservation)
@@ -766,7 +912,8 @@ constexpr Sample kOtherFormats[] = {
 TEST(LeicaGsiDetection, EveryGsiFixtureIsIdentifiedAsGsiWithItsEvidence)
 {
     for (const char* name : {"tps_gsi8.gsi", "tps_gsi16.gsi", "feet_mil_gsi8.gsi",
-                             "coordinates_gsi8.gsi"}) {
+                             "coordinates_gsi8.gsi", "codes_before_gsi8.gsi",
+                             "codes_after_gsi8.gsi"}) {
         const std::string bytes = slurp(leicaFolder() / name);
         const Detection detection = detectFormat(probeOf(bytes, name));
         ASSERT_EQ(detection.outcome(), DetectionOutcome::Identified)
@@ -823,7 +970,8 @@ void readsOrFailsCleanly(std::string_view bytes, const std::string& what)
 TEST(LeicaGsiRobustness, EveryTruncationOfEveryFixtureReadsOrFailsWithAMessage)
 {
     for (const char* name : {"tps_gsi8.gsi", "tps_gsi16.gsi", "feet_mil_gsi8.gsi",
-                             "coordinates_gsi8.gsi", "damaged_gsi8.gsi"}) {
+                             "coordinates_gsi8.gsi", "damaged_gsi8.gsi", "codes_before_gsi8.gsi",
+                             "codes_after_gsi8.gsi"}) {
         const std::string bytes = slurp(leicaFolder() / name);
         ASSERT_FALSE(bytes.empty());
         for (std::size_t length = 0; length <= bytes.size(); ++length) {

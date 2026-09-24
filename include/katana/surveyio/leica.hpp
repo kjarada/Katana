@@ -19,23 +19,31 @@
 //   * per measurement block, one pointing: the horizontal circle reading (21)
 //     as a HorizontalDirectionObservation, the vertical circle reading (22) as a
 //     ZenithAngleObservation and the slope distance (31) as a
-//     DistanceObservation, sharing one Pointing. The FACE comes from the
-//     vertical reading: under half a turn is face left, over it face right. A
-//     face-right zenith angle is stored in the model's [0, pi] range, i.e. as
-//     a full turn less the reading (the face-left equivalent); the horizontal
-//     direction is always the raw circle reading. A block with a horizontal
+//     DistanceObservation, sharing one Pointing. The horizontal circle is
+//     read as increasing clockwise: its direction is an instrument setting
+//     (GSI ONLINE's SET/CONF 171) no word carries, and the import says so.
+//     The FACE comes from the vertical reading: under half a turn is face
+//     left, over it face right. A face-right zenith angle is stored in the
+//     model's [0, pi] range, i.e. as a full turn less the reading (the
+//     face-left equivalent); the horizontal direction is always the raw
+//     circle reading. A block with a horizontal
 //     distance (32) and no slope distance gives a horizontal distance; one
 //     with a height difference (33) and neither a zenith angle nor a slope
 //     distance gives a LevelDifferenceObservation from the station;
 //   * every point the file names: with coordinates (81-83, or 84-86 when the
 //     block measures nothing) as a SurveyPoint, without as an UnpositionedPoint;
-//   * a point's code from word 71, else from the code block (41) BEFORE it;
-//     remarks 72-79 and code information 42-49 in the point's metadata. A
-//     code block describes what follows it: that is how Leica's own code
-//     blocks run (GSI ONLINE's DNA section: the special code block that names
-//     the levelling method starts the line it describes), and how an
-//     instrument records a code chosen before the shot. A code block with no
-//     point after it goes to the point before, with a warning;
+//   * a point's code from word 71, else from its code block (41); remarks
+//     72-79 and code information 42-49 in the point's metadata. Whether a
+//     code block comes before or after its point is an INSTRUMENT SETTING
+//     that GSI does not record: <Rec Free Code: Before Point / After Point>
+//     (Leica TPS1200 Technical Reference Manual, version 5.0, 16.3 "Coding &
+//     Linework Settings"). A file that begins with a point block and ends
+//     with a code block has the shape only After Point gives, and its code
+//     blocks code the point BEFORE them, with a warning; any other file's
+//     code the point AFTER them. The import says which in project metadata
+//     ("code blocks belong to") and in ReadResult::notCarried. A code block
+//     with no point after it in a Before Point file goes to the point of the
+//     block before it, with a warning;
 //   * one SurveyFeature per run of consecutive points sharing a code.
 //   * a setup's BACKSIGHT: GSI has no word for one. A setup is made on the
 //     instrument as a station and then an orientation shot, recorded in that
