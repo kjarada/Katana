@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 
 #include <QApplication>
 #include <QWheelEvent>
@@ -268,6 +269,10 @@ TEST(RenderView, AViewFramedBeforeItHasItsSizeFramesAgainAtItsFirstRealSize)
     paint(view);
     const auto& box = view.sceneLayers().bounds;
     ASSERT_FALSE(box.empty());
+    // The camera counts in device pixels: 345 x 545 at ratio 1.
+    const double width = view.framebuffer().width();
+    const double height = view.framebuffer().height();
+    ASSERT_EQ(state.camera.viewportWidth(), view.framebuffer().width());
     for (int corner = 0; corner < 8; ++corner) {
         const katana::math::Vec3 p((corner & 1) ? box.max.x : box.min.x,
                                    (corner & 2) ? box.max.y : box.min.y,
@@ -275,9 +280,9 @@ TEST(RenderView, AViewFramedBeforeItHasItsSizeFramesAgainAtItsFirstRealSize)
         const auto screen = state.camera.project(p);
         ASSERT_TRUE(screen.has_value());
         EXPECT_GE(screen->x, 0.0);
-        EXPECT_LE(screen->x, 345.0);
+        EXPECT_LE(screen->x, width);
         EXPECT_GE(screen->y, 0.0);
-        EXPECT_LE(screen->y, 545.0);
+        EXPECT_LE(screen->y, height);
     }
 }
 
@@ -306,6 +311,15 @@ TEST(RenderView, TheFramebufferIsTheViewsSizeInDevicePixels)
     ViewState& state = scene.views.add(ViewKind::Model3D);
     const auto view = scene.show(state);
     const double ratio = view->devicePixelRatioF();
+    // 1 in the offscreen suite. ctest runs it again at QT_SCALE_FACTOR=1.25
+    // (qt_render_view_at_125_percent), where 400 x 300 must be 500 x 375 -
+    // and where a ratio Qt did not apply would make the test prove nothing.
+    if (const QString factor = qEnvironmentVariable("QT_SCALE_FACTOR"); !factor.isEmpty()) {
+        EXPECT_DOUBLE_EQ(ratio, factor.toDouble());
+    }
+    RecordProperty("devicePixelRatio", std::to_string(ratio));
+    RecordProperty("framebuffer", std::to_string(view->framebuffer().width()) + "x" +
+                                      std::to_string(view->framebuffer().height()));
     EXPECT_EQ(view->framebuffer().width(), static_cast<int>(std::lround(400 * ratio)));
     EXPECT_EQ(view->framebuffer().height(), static_cast<int>(std::lround(300 * ratio)));
     EXPECT_EQ(state.camera.viewportWidth(), view->framebuffer().width());

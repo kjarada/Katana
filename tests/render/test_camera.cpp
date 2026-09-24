@@ -209,6 +209,69 @@ TEST(RenderCamera, AnOrbitAfterFramingKeepsTheBoxInsideTheFittedDepthRange)
     }
 }
 
+TEST(RenderCamera, FramingALongCorridorFillsTheWidthNotASliverOfIt)
+{
+    // A 12 km x 200 m corridor seen from above in a 1600 x 1000 view. The
+    // corners fit: half-width 6000 over an aspect of 1.6 needs a half-height
+    // of 3750, against the corridor's own 100, so the width decides and the
+    // corridor spans 1 / 1.06 = 94% of it. The bounding sphere (radius 6002)
+    // made the view 2 x 6002 x 1.06 tall, 20 360 m wide: 59%.
+    const katana::math::AABB corridor(Vec3(0.0, 0.0, 10.0), Vec3(12000.0, 200.0, 40.0));
+    for (Projection projection : {Projection::Orthographic, Projection::Perspective}) {
+        Camera camera = defaultCamera(1600, 1000);
+        camera.setProjection(projection);
+        camera.setStandardView(StandardView::Top);
+        ASSERT_TRUE(camera.frame(corridor));
+        const auto west = camera.project(Vec3(0.0, 100.0, 40.0));
+        const auto east = camera.project(Vec3(12000.0, 100.0, 40.0));
+        ASSERT_TRUE(west.has_value());
+        ASSERT_TRUE(east.has_value());
+        EXPECT_GT((east->x - west->x) / 1600.0, 0.9) << static_cast<int>(projection);
+        EXPECT_GE(west->x, 0.0);
+        EXPECT_LE(east->x, 1600.0);
+    }
+}
+
+TEST(RenderCamera, AnOrthographicFrameInATallViewKeepsTheSidesIn)
+{
+    // Audit REN-08: the orthographic height ignored the aspect, so a portrait
+    // view (345 x 545, a docked 3D view beside the plan) cut both sides off.
+    const katana::math::AABB bounds(Vec3(0.0, 0.0, 0.0), Vec3(100.0, 50.0, 0.0));
+    Camera camera = defaultCamera(345, 545);
+    camera.setProjection(Projection::Orthographic);
+    camera.setStandardView(StandardView::Top);
+    ASSERT_TRUE(camera.frame(bounds));
+    for (int corner = 0; corner < 4; ++corner) {
+        const auto screen = camera.project(
+            Vec3((corner & 1) ? 100.0 : 0.0, (corner & 2) ? 50.0 : 0.0, 0.0));
+        ASSERT_TRUE(screen.has_value());
+        EXPECT_GE(screen->x, 0.0);
+        EXPECT_LE(screen->x, 345.0);
+    }
+}
+
+TEST(RenderCamera, FramingOnePointShowsAPatchAroundItNotAMicrometre)
+{
+    // Audit REN-07: a box of one point framed at a radius of 1e-7 m, and no
+    // zooming out recovered a useful view. It is grown to a half-diagonal of
+    // kMinimumFrameRadius (1 m): half 1 / sqrt 3 each way, so points 0.5 m
+    // either side of it are in view and not at the view's edge.
+    const Vec3 point(300000.0, 6250000.0, 42.0);
+    for (Projection projection : {Projection::Orthographic, Projection::Perspective}) {
+        Camera camera = defaultCamera(400, 300);
+        camera.setProjection(projection);
+        camera.setStandardView(StandardView::Top);
+        ASSERT_TRUE(camera.frame(katana::math::AABB(point, point)));
+        EXPECT_GE(camera.worldPerPixel() * 300.0, 2.0 / std::sqrt(3.0));
+        for (const double dx : {-0.5, 0.5}) {
+            const auto screen = camera.project(point + Vec3(dx, 0.0, 0.0));
+            ASSERT_TRUE(screen.has_value());
+            EXPECT_GT(screen->x, 0.0);
+            EXPECT_LT(screen->x, 400.0);
+        }
+    }
+}
+
 TEST(RenderCamera, FramingRejectsAnEmptyOrNonFiniteBox)
 {
     Camera camera = defaultCamera();
