@@ -331,11 +331,16 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
                 // Explode or Offset treating it as a path with two ends. As a
                 // polygon ring does, the repeat becomes the `closed` flag.
                 // Four points at least: three with the ends equal are a line
-                // there and back, which encloses nothing.
+                // there and back, which encloses nothing. The ends must meet
+                // in height too (both absent, or equal): a ramp or helix that
+                // comes back over its start a level higher is an open string,
+                // and closing it would throw away its top height. So this rule
+                // never drops a height, and a closed DXF shape, whose ends are
+                // at one height, still closes.
                 bool closed = false;
-                if (points.size() >= 4 && points.front() == points.back()) {
+                if (points.size() >= 4 && points.front() == points.back() &&
+                    vertices.heights.front() == vertices.heights.back()) {
                     points.pop_back();
-                    heightsLost += vertices.heights.back() != vertices.heights.front() ? 1u : 0u;
                     vertices.heights.pop_back();
                     closed = true;
                 }
