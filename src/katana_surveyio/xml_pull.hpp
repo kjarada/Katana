@@ -55,12 +55,19 @@ class XmlPullReader {
     [[nodiscard]] std::size_t depth() const { return eventDepth_; }
     [[nodiscard]] std::string_view text() const { return text_; }
     [[nodiscard]] bool textIsCData() const { return cdata_; }
+    // True when the current Text holds an '&' (always false for CDATA):
+    // noted while the text is scanned, so a caller need not scan it again to
+    // know whether appendXmlText has anything to decode.
+    [[nodiscard]] bool textHasReference() const { return textHasReference_; }
     // Byte offset in the document at which the current event began.
     [[nodiscard]] std::size_t offset() const { return eventOffset_; }
 
     // The RAW value of attribute `attributeName` on the current start
     // element; false when there is none.
     [[nodiscard]] bool attribute(std::string_view attributeName, std::string_view& rawValue) const;
+    // False when the current start element has no attributes at all, which
+    // is most of them: a caller can skip looking for any.
+    [[nodiscard]] bool hasAttributes() const { return !attributes_.empty(); }
 
     [[nodiscard]] const katana::core::Error& error() const { return error_; }
 
@@ -83,10 +90,28 @@ class XmlPullReader {
     std::string_view text_{};
     std::string_view attributes_{}; // the raw attribute region of the current start tag
     bool cdata_ = false;
+    bool textHasReference_ = false;
     std::size_t eventDepth_ = 0;
     std::size_t eventOffset_ = 0;
     katana::core::Error error_{};
 };
+
+// Byte-wise equality for the short names and values of a survey file.
+// string_view's == is a call to the C library's memcmp, which for the few
+// bytes of a tag name costs more than the comparison; a large job makes
+// millions of them.
+[[nodiscard]] inline bool sameText(std::string_view a, std::string_view b) noexcept
+{
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // Appends `raw` to `out` with the five predefined entities and character
 // references (&#65; &#x41;) replaced by the characters they name. Anything
