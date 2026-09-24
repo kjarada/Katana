@@ -377,7 +377,7 @@ the document that covers it now.
 | Phase 21 (§26) | alignments, profiles, corridors, parcels, grading | `docs/geometry.md`, `docs/cad.md` |
 | Phase 22 (§27) | drawing and plotting | `docs/cad.md`, "Plotting to PDF" |
 | Phase 23 (§28) | application API: the command interpreter | `docs/cad.md`, "Command interpreter" |
-| Phases 24-26 (§29-31) | Python AI layer, AI agent, AI safety | not started; Rules 1 and 2 bind them |
+| Phases 24-26 (§29-30); §31 | Python AI layer, AI agent, production hardening; the AI safety model (a destructive command needs confirmation) | not started, and Rules 1 and 2 bind them; `Command::isDestructive` is in `docs/model.md`, "Command system" |
 | §45; 45.1 to 45.5 | the survey module and instrument formats | `docs/survey.md` |
 | §46 | the audit register | `docs/audit/2026-09-23-defects.md` |
 | §47 | dockable views, per-view layers | `docs/desktop.md`, "The workspace" |
