@@ -24,15 +24,6 @@ std::size_t narrowAsciiUtf16Scalar(const unsigned char* in, std::size_t units, b
     return i;
 }
 
-std::size_t asciiPrefixScalar(const unsigned char* bytes, std::size_t size)
-{
-    std::size_t i = 0;
-    while (i < size && bytes[i] < 0x80) {
-        ++i;
-    }
-    return i;
-}
-
 std::size_t narrowAsciiUtf16(const unsigned char* in, std::size_t units, bool littleEndian,
                              char* out)
 {
@@ -42,16 +33,6 @@ std::size_t narrowAsciiUtf16(const unsigned char* in, std::size_t units, bool li
     }
 #endif
     return narrowAsciiUtf16Scalar(in, units, littleEndian, out);
-}
-
-std::size_t asciiPrefix(const unsigned char* bytes, std::size_t size)
-{
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (activeSimdLevel() == SimdLevel::Avx2) {
-        return katana_avx2_ascii_prefix(bytes, size);
-    }
-#endif
-    return asciiPrefixScalar(bytes, size);
 }
 
 } // namespace katana::core::kernels

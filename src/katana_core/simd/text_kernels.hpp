@@ -21,22 +21,23 @@ extern "C" {
 std::size_t katana_avx2_narrow_ascii_utf16(const unsigned char* in, std::size_t units,
                                            int littleEndian, char* out);
 
-// The length of the leading run of bytes below 0x80 in `bytes[0, size)`.
-std::size_t katana_avx2_ascii_prefix(const unsigned char* bytes, std::size_t size);
+// Whether `bytes[0, size)` is well-formed UTF-8: 1 if it is, 0 if not, and -1,
+// having read nothing, when `size` is under 64 - its last block would begin
+// before the text. Reads nothing outside `bytes[0, size)`.
+int katana_avx2_valid_utf8(const unsigned char* bytes, std::size_t size);
 
 } // extern "C"
 
 namespace katana::core::kernels {
 
 // The references: what the AVX2 entries must equal, and what a processor
-// without AVX2 runs.
+// without AVX2 runs. (katana_avx2_valid_utf8's reference is the byte loop in
+// text_encoding.cpp, kept there so that isValidUtf8 on a name costs no call.)
 std::size_t narrowAsciiUtf16Scalar(const unsigned char* in, std::size_t units, bool littleEndian,
                                    char* out);
-std::size_t asciiPrefixScalar(const unsigned char* bytes, std::size_t size);
 
 // Dispatch on core::activeSimdLevel().
 std::size_t narrowAsciiUtf16(const unsigned char* in, std::size_t units, bool littleEndian,
                              char* out);
-std::size_t asciiPrefix(const unsigned char* bytes, std::size_t size);
 
 } // namespace katana::core::kernels

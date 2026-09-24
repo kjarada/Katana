@@ -1,5 +1,6 @@
 #include "katana/core/text_encoding.hpp"
 
+#include "katana/core/cpu_features.hpp"
 #include "simd/text_kernels.hpp"
 
 #include <algorithm>
@@ -18,15 +19,13 @@ namespace {
 // ASCII characters; more would only slow a wrong guess down.
 constexpr std::size_t kSniffBytes = 4096;
 
-// isValidUtf8 hands a run of ASCII to the kernel only once it has seen
-// kAsciiProbe bytes of it one by one, and only while a whole kernel block
-// (32 bytes) remains after them. Text in another language has runs of one to
-// three bytes - a space, a digit - between its characters, and a call into the
-// kernel for each such run was measured 2-4x slower than this loop
-// (BM_IsValidUtf8Mixed); a run that has lasted 16 bytes is most likely a line
-// of keywords and numbers, where the kernel is ten times faster.
-constexpr std::size_t kAsciiProbe = 16;
-constexpr std::size_t kAsciiBlock = 32;
+// isValidUtf8 takes the AVX2 validator only from this many bytes. The kernel
+// ends on a whole 32-byte block that must start inside the text, so it needs
+// 64. A shorter text would need a padded copy, and with one the kernel was
+// measured slower than the byte loop up to about 24 bytes and at most 15 ns
+// faster up to 63: not worth a second tail path, so a name or a label takes
+// the loop and pays no call.
+constexpr std::size_t kValidateMinimum = 64;
 
 // Windows-1252 differs from Latin-1 only in 0x80-0x9F. Source: the Unicode
 // Consortium's mapping table for CP1252 (MAPPINGS/VENDORS/MICSFT/WINDOWS/
@@ -84,7 +83,8 @@ Result<std::string> fromUtf16(std::string_view bytes, bool littleEndian)
         const std::size_t written = out.size();
         std::size_t run = 0;
         out.resize_and_overwrite(written + (units - i), [&](char* buffer, std::size_t) {
-            run = kernels::narrowAsciiUtf16(data + 2 * i, units - i, littleEndian, buffer + written);
+            run = kernels::narrowAsciiUtf16(data + 2 * i, units - i, littleEndian,
+                                            buffer + written);
             return written + run;
         });
         i += run;
@@ -136,12 +136,10 @@ std::string fromWindows1252(std::string_view bytes)
     return out;
 }
 
-} // namespace
-
-bool isValidUtf8(std::string_view text)
+// The byte loop: the reference that katana_avx2_valid_utf8 must equal, and
+// what a processor without AVX2, or a text too short for a block, runs.
+bool validUtf8Scalar(const unsigned char* bytes, std::size_t size)
 {
-    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
-    const std::size_t size = text.size();
     std::size_t i = 0;
     while (i < size) {
         const unsigned char lead = bytes[i];
@@ -150,17 +148,7 @@ bool isValidUtf8(std::string_view text)
         unsigned char highSecond = 0xBF;
 
         if (lead <= 0x7F) {
-            // A run of ASCII: byte by byte for the first kAsciiProbe, then a
-            // block at a time where the processor allows. A short name, or a
-            // space between two accented words, never reaches the call.
-            const std::size_t start = i;
-            const std::size_t probeEnd = std::min(size, start + kAsciiProbe);
-            while (i < probeEnd && bytes[i] <= 0x7F) {
-                ++i;
-            }
-            if (i - start == kAsciiProbe && size - i >= kAsciiBlock) {
-                i += kernels::asciiPrefix(bytes + i, size - i);
-            }
+            i += 1;
             continue;
         }
         if (lead >= 0xC2 && lead <= 0xDF) {
@@ -203,6 +191,21 @@ bool isValidUtf8(std::string_view text)
         i += following + 1;
     }
     return true;
+}
+
+} // namespace
+
+bool isValidUtf8(std::string_view text)
+{
+    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    // 32 bytes at once whatever the language, where the processor allows and
+    // the text is long enough.
+    if (text.size() >= kValidateMinimum && activeSimdLevel() == SimdLevel::Avx2) {
+        return katana_avx2_valid_utf8(bytes, text.size()) == 1;
+    }
+#endif
+    return validUtf8Scalar(bytes, text.size());
 }
 
 const char* toString(TextEncoding encoding)
