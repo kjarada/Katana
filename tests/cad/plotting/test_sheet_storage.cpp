@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -201,16 +202,43 @@ TEST(SheetStorage, ANewerVersionIsRefusedAndNonsenseIsAParseFailure)
 TEST(SheetStorage, AnUnplacedViewportRoundTripsWithItsEmptyRectangle)
 {
     // A viewport not placed yet has Box2's empty value, made of infinities
-    // JSON cannot write; it is stored as null and read back as the same.
+    // JSON cannot write; it is the default, so it is left out, and read back
+    // as the same. A null written by hand reads as it too.
     SheetSet set;
     set.sheets.push_back(namedSheet("UNPLACED"));
     ASSERT_TRUE(set.sheets[0].viewports[0].rect.empty());
     const auto json = sheetSetToJson(set);
     ASSERT_TRUE(json.ok()) << json.error().describe();
-    EXPECT_NE(json->find("\"rect\":null"), std::string::npos);
+    EXPECT_EQ(json->find("rect"), std::string::npos);
     const auto back = sheetSetFromJson(*json);
     ASSERT_TRUE(back.ok()) << back.error().describe();
     EXPECT_TRUE(*back == set);
+    const auto null = sheetSetFromJson(
+        R"({"format":"katana-sheets","version":1,"sheets":[{"viewports":[{"rect":null}]}]})");
+    ASSERT_TRUE(null.ok()) << null.error().describe();
+    EXPECT_TRUE(null->sheets[0].viewports[0].rect == Box2{});
+}
+
+TEST(SheetStorage, OnlyWhatDiffersFromTheDefaultsIsWritten)
+{
+    // One sheet, one viewport, every member at its default but the ids: the
+    // format, the version, the sheet's id and the viewport's id and kind -
+    // keys in the order the JSON writer sorts them.
+    SheetSet set;
+    set.sheets.resize(1);
+    set.sheets[0].id = "s1";
+    set.sheets[0].viewports.resize(1);
+    set.sheets[0].viewports[0].id = "vp1";
+    EXPECT_EQ(*sheetSetToJson(set), R"({"format":"katana-sheets","sheets":[{"id":"s1",)"
+                                    R"("viewports":[{"id":"vp1","kind":"plan"}]}],"version":1})");
+    // A value equal to a default in every bit but the sign is not the
+    // default: -0.0 is written, and reads back as -0.0.
+    set.sheets[0].viewports[0].rotation = -0.0;
+    const auto back = sheetSetFromJson(*sheetSetToJson(set));
+    ASSERT_TRUE(back.ok());
+    EXPECT_TRUE(std::signbit(back->sheets[0].viewports[0].rotation));
+    // Nothing at all: the format and the version.
+    EXPECT_EQ(*sheetSetToJson(SheetSet{}), R"({"format":"katana-sheets","version":1})");
 }
 
 TEST(SheetStorage, TextThatIsNotUtf8OrANumberThatIsNotFiniteCannotBeStored)

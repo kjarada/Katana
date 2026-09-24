@@ -1,7 +1,10 @@
 #include "katana/cad/plotting/sheet_json.hpp"
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -62,15 +65,13 @@ Point2 pointFrom(const Json& json)
     return Point2(json.at(0).get<double>(), json.at(1).get<double>());
 }
 
-// A rectangle as [x0, y0, x1, y1]; the empty rectangle - a viewport not
-// placed on the paper yet - as null. Box2's empty value is made of
-// infinities, which JSON has no numbers for: written as they are they came
-// out as nulls that no reader took back (caught by the round-trip test).
+// A rectangle as [x0, y0, x1, y1]. The empty rectangle - a viewport not
+// placed on the paper yet - is Box2's default, made of infinities JSON has
+// no numbers for; it is left out like every default (viewportJson), and a
+// null is read as it too. Written as they were, the infinities came out as
+// nulls that no reader took back (caught by the round-trip test).
 Json boxJson(const Box2& box)
 {
-    if (box == Box2{}) {
-        return nullptr;
-    }
     return Json::array({box.min.x, box.min.y, box.max.x, box.max.y});
 }
 
@@ -101,9 +102,62 @@ bool allFinite(const Json& json)
     return true;
 }
 
+// A member at its default is left out: most of a generated set's viewports
+// differ from the defaults in a few members only, and writing every member
+// made a 116-sheet set 300 KB of JSON whose writing and reading were most of
+// what an edit cost (bench_sheets.cpp). The reader takes its defaults from a
+// default-constructed value of the same type, so what is left out reads back
+// as exactly what was left out. A default therefore never changes without a
+// version increase - the reader would supply the old defaults to an old set.
+//
+// Doubles are compared bit for bit, so -0.0 is written and reads back as -0.0.
+bool sameBits(double a, double b)
+{
+    return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
+}
+
+void putNumber(Json& json, const char* key, double value, double fallback)
+{
+    if (!sameBits(value, fallback)) {
+        json[key] = value;
+    }
+}
+
+void putFlag(Json& json, const char* key, bool value, bool fallback)
+{
+    if (value != fallback) {
+        json[key] = value;
+    }
+}
+
+void putText(Json& json, const char* key, const std::string& value, const std::string& fallback)
+{
+    if (value != fallback) {
+        json[key] = value;
+    }
+}
+
+// An array or object, left out when it is empty.
+void putList(Json& json, const char* key, Json value)
+{
+    if (!value.empty()) {
+        json[key] = std::move(value);
+    }
+}
+
+void putPoint(Json& json, const char* key, const Point2& value, const Point2& fallback)
+{
+    if (!sameBits(value.x, fallback.x) || !sameBits(value.y, fallback.y)) {
+        json[key] = pointJson(value);
+    }
+}
+
 Json signOffJson(const SignOff& signOff)
 {
-    return Json{{"name", signOff.name}, {"date", signOff.date}};
+    Json json = Json::object();
+    putText(json, "name", signOff.name, {});
+    putText(json, "date", signOff.date, {});
+    return json;
 }
 
 SignOff signOffFrom(const Json& json)
@@ -117,10 +171,11 @@ Json markJson(const WorldMark& mark)
     for (const Point2& point : mark.points) {
         points.push_back(pointJson(point));
     }
-    return Json{{"kind", mark.kind == WorldMark::Kind::MatchLine ? "match_line" : "sheet_outline"},
-                {"points", std::move(points)},
-                {"label", mark.label},
-                {"sheet", mark.sheet}};
+    Json json{{"kind", mark.kind == WorldMark::Kind::MatchLine ? "match_line" : "sheet_outline"}};
+    putList(json, "points", std::move(points));
+    putText(json, "label", mark.label, {});
+    putText(json, "sheet", mark.sheet, {});
+    return json;
 }
 
 WorldMark markFrom(const Json& json)
@@ -142,48 +197,53 @@ WorldMark markFrom(const Json& json)
 
 Json viewportJson(const Viewport& viewport)
 {
+    static const Viewport d;
+    Json json{{"id", viewport.id}, {"kind", toString(viewport.kind)}};
+    if (!(viewport.rect == d.rect)) {
+        json["rect"] = boxJson(viewport.rect);
+    }
+    putNumber(json, "scale", viewport.scale, d.scale);
+    putFlag(json, "auto_scale", viewport.autoScale, d.autoScale);
+    putPoint(json, "centre", viewport.centre, d.centre);
+    putFlag(json, "auto_centre", viewport.autoCentre, d.autoCentre);
+    putNumber(json, "rotation", viewport.rotation, d.rotation);
+    putNumber(json, "vertical_exaggeration", viewport.verticalExaggeration,
+              d.verticalExaggeration);
+    putNumber(json, "tilt_degrees", viewport.tiltDegrees, d.tiltDegrees);
+    const ViewportSource& source = viewport.source;
+    Json sourceJson = Json::object();
+    putText(sourceJson, "alignment", source.alignment, d.source.alignment);
+    putNumber(sourceJson, "chainage_from", source.chainageFrom, d.source.chainageFrom);
+    putNumber(sourceJson, "chainage_to", source.chainageTo, d.source.chainageTo);
+    putNumber(sourceJson, "section_interval", source.sectionInterval, d.source.sectionInterval);
+    putList(sourceJson, "stations", Json(source.stations));
+    putNumber(sourceJson, "section_half_width", source.sectionHalfWidth,
+              d.source.sectionHalfWidth);
+    putList(json, "source", std::move(sourceJson));
     Json hidden = Json::array();
     for (const std::string& layer : viewport.hiddenLayers.hidden()) {
         hidden.push_back(layer);
     }
+    putList(json, "hidden_layers", std::move(hidden));
+    putText(json, "title", viewport.title, d.title);
+    putFlag(json, "north_arrow", viewport.northArrow, d.northArrow);
+    putFlag(json, "scale_bar", viewport.scaleBar, d.scaleBar);
+    putFlag(json, "locked", viewport.locked, d.locked);
+    putText(json, "text", viewport.text, d.text);
     Json marks = Json::array();
     for (const WorldMark& mark : viewport.marks) {
         marks.push_back(markJson(mark));
     }
-    const ViewportSource& source = viewport.source;
-    return Json{
-        {"id", viewport.id},
-        {"kind", toString(viewport.kind)},
-        {"rect", boxJson(viewport.rect)},
-        {"scale", viewport.scale},
-        {"auto_scale", viewport.autoScale},
-        {"centre", pointJson(viewport.centre)},
-        {"auto_centre", viewport.autoCentre},
-        {"rotation", viewport.rotation},
-        {"vertical_exaggeration", viewport.verticalExaggeration},
-        {"tilt_degrees", viewport.tiltDegrees},
-        {"source",
-         {{"alignment", source.alignment},
-          {"chainage_from", source.chainageFrom},
-          {"chainage_to", source.chainageTo},
-          {"section_interval", source.sectionInterval},
-          {"stations", source.stations},
-          {"section_half_width", source.sectionHalfWidth}}},
-        {"hidden_layers", std::move(hidden)},
-        {"title", viewport.title},
-        {"north_arrow", viewport.northArrow},
-        {"scale_bar", viewport.scaleBar},
-        {"locked", viewport.locked},
-        {"text", viewport.text},
-        {"marks", std::move(marks)},
-    };
+    putList(json, "marks", std::move(marks));
+    return json;
 }
 
 Viewport viewportFrom(const Json& json)
 {
+    const Viewport d;
     Viewport viewport;
-    viewport.id = json.value("id", std::string{});
-    const std::string kind = json.value("kind", std::string("plan"));
+    viewport.id = json.value("id", d.id);
+    const std::string kind = json.value("kind", std::string(toString(d.kind)));
     const auto parsedKind = viewportKindFrom(kind);
     if (!parsedKind) {
         throw BadValue{"unknown viewport kind \"" + kind + "\""};
@@ -192,32 +252,33 @@ Viewport viewportFrom(const Json& json)
     if (json.contains("rect")) {
         viewport.rect = boxFrom(json.at("rect"));
     }
-    viewport.scale = json.value("scale", viewport.scale);
-    viewport.autoScale = json.value("auto_scale", false);
+    viewport.scale = json.value("scale", d.scale);
+    viewport.autoScale = json.value("auto_scale", d.autoScale);
     if (json.contains("centre")) {
         viewport.centre = pointFrom(json.at("centre"));
     }
-    viewport.autoCentre = json.value("auto_centre", false);
-    viewport.rotation = json.value("rotation", 0.0);
-    viewport.verticalExaggeration = json.value("vertical_exaggeration", 1.0);
-    viewport.tiltDegrees = json.value("tilt_degrees", viewport.tiltDegrees);
+    viewport.autoCentre = json.value("auto_centre", d.autoCentre);
+    viewport.rotation = json.value("rotation", d.rotation);
+    viewport.verticalExaggeration = json.value("vertical_exaggeration", d.verticalExaggeration);
+    viewport.tiltDegrees = json.value("tilt_degrees", d.tiltDegrees);
     if (json.contains("source")) {
         const Json& source = json.at("source");
-        viewport.source.alignment = source.value("alignment", std::string{});
-        viewport.source.chainageFrom = source.value("chainage_from", 0.0);
-        viewport.source.chainageTo = source.value("chainage_to", 0.0);
-        viewport.source.sectionInterval = source.value("section_interval", 0.0);
-        viewport.source.stations = source.value("stations", std::vector<double>{});
-        viewport.source.sectionHalfWidth = source.value("section_half_width", 0.0);
+        const ViewportSource& s = d.source;
+        viewport.source.alignment = source.value("alignment", s.alignment);
+        viewport.source.chainageFrom = source.value("chainage_from", s.chainageFrom);
+        viewport.source.chainageTo = source.value("chainage_to", s.chainageTo);
+        viewport.source.sectionInterval = source.value("section_interval", s.sectionInterval);
+        viewport.source.stations = source.value("stations", s.stations);
+        viewport.source.sectionHalfWidth = source.value("section_half_width", s.sectionHalfWidth);
     }
     for (const Json& layer : json.value("hidden_layers", Json::array())) {
         viewport.hiddenLayers.hide(layer.get<std::string>());
     }
-    viewport.title = json.value("title", std::string{});
-    viewport.northArrow = json.value("north_arrow", false);
-    viewport.scaleBar = json.value("scale_bar", false);
-    viewport.locked = json.value("locked", false);
-    viewport.text = json.value("text", std::string{});
+    viewport.title = json.value("title", d.title);
+    viewport.northArrow = json.value("north_arrow", d.northArrow);
+    viewport.scaleBar = json.value("scale_bar", d.scaleBar);
+    viewport.locked = json.value("locked", d.locked);
+    viewport.text = json.value("text", d.text);
     for (const Json& mark : json.value("marks", Json::array())) {
         viewport.marks.push_back(markFrom(mark));
     }
@@ -226,33 +287,38 @@ Viewport viewportFrom(const Json& json)
 
 Json sheetJson(const Sheet& sheet)
 {
-    Json viewports = Json::array();
-    for (const Viewport& viewport : sheet.viewports) {
-        viewports.push_back(viewportJson(viewport));
+    static const Sheet d;
+    Json json{{"id", sheet.id}};
+    putText(json, "name", sheet.name, d.name);
+    if (sheet.paper != d.paper) {
+        json["paper"] = paperText(sheet.paper);
     }
+    putFlag(json, "landscape", sheet.landscape, d.landscape);
+    putText(json, "frame", sheet.frame, d.frame);
+    putFlag(json, "frame_legend", sheet.frameLegend, d.frameLegend);
     Json fields = Json::object();
     for (const auto& [name, value] : sheet.fields) {
         fields[name] = value;
     }
-    return Json{{"id", sheet.id},
-                {"name", sheet.name},
-                {"paper", paperText(sheet.paper)},
-                {"landscape", sheet.landscape},
-                {"frame", sheet.frame},
-                {"frame_legend", sheet.frameLegend},
-                {"fields", std::move(fields)},
-                {"viewports", std::move(viewports)}};
+    putList(json, "fields", std::move(fields));
+    Json viewports = Json::array();
+    for (const Viewport& viewport : sheet.viewports) {
+        viewports.push_back(viewportJson(viewport));
+    }
+    putList(json, "viewports", std::move(viewports));
+    return json;
 }
 
 Sheet sheetFrom(const Json& json)
 {
+    const Sheet d;
     Sheet sheet;
-    sheet.id = json.value("id", std::string{});
-    sheet.name = json.value("name", std::string{});
-    sheet.paper = paperFrom(json.value("paper", std::string("A3")));
-    sheet.landscape = json.value("landscape", true);
-    sheet.frame = json.value("frame", std::string(kBuiltInFrameId));
-    sheet.frameLegend = json.value("frame_legend", true);
+    sheet.id = json.value("id", d.id);
+    sheet.name = json.value("name", d.name);
+    sheet.paper = paperFrom(json.value("paper", std::string(paperText(d.paper))));
+    sheet.landscape = json.value("landscape", d.landscape);
+    sheet.frame = json.value("frame", d.frame);
+    sheet.frameLegend = json.value("frame_legend", d.frameLegend);
     for (const auto& [name, value] : json.value("fields", Json::object()).items()) {
         sheet.fields.insert_or_assign(name, value.get<std::string>());
     }
@@ -264,20 +330,22 @@ Sheet sheetFrom(const Json& json)
 
 Json defaultsJson(const SheetDefaults& d)
 {
-    return Json{{"organisation", d.organisation},
-                {"project_lines", d.projectLines},
-                {"client", d.client},
-                {"locator", signOffJson(d.locator)},
-                {"surveyor", signOffJson(d.surveyor)},
-                {"compiler", signOffJson(d.compiler)},
-                {"reviewer", signOffJson(d.reviewer)},
-                {"approver", signOffJson(d.approver)},
-                {"notes", d.notes},
-                {"height_datum", d.heightDatum},
-                {"coordinate_system", d.coordinateSystem},
-                {"model_name", d.modelName},
-                {"set_number", d.setNumber},
-                {"logo_asset", d.logoAsset}};
+    Json json = Json::object();
+    putText(json, "organisation", d.organisation, {});
+    putList(json, "project_lines", Json(d.projectLines));
+    putText(json, "client", d.client, {});
+    putList(json, "locator", signOffJson(d.locator));
+    putList(json, "surveyor", signOffJson(d.surveyor));
+    putList(json, "compiler", signOffJson(d.compiler));
+    putList(json, "reviewer", signOffJson(d.reviewer));
+    putList(json, "approver", signOffJson(d.approver));
+    putText(json, "notes", d.notes, {});
+    putText(json, "height_datum", d.heightDatum, {});
+    putText(json, "coordinate_system", d.coordinateSystem, {});
+    putText(json, "model_name", d.modelName, {});
+    putText(json, "set_number", d.setNumber, {});
+    putText(json, "logo_asset", d.logoAsset, {});
+    return json;
 }
 
 SheetDefaults defaultsFrom(const Json& json)
@@ -318,12 +386,11 @@ Result<std::string> sheetSetToJson(const SheetSet& set)
     for (const Sheet& sheet : set.sheets) {
         sheets.push_back(sheetJson(sheet));
     }
-    const Json root{{"format", kFormat},
-                    {"version", kSheetSetVersion},
-                    {"defaults", defaultsJson(set.defaults)},
-                    {"numbering", set.numbering},
-                    {"revisions", std::move(revisions)},
-                    {"sheets", std::move(sheets)}};
+    Json root{{"format", kFormat}, {"version", kSheetSetVersion}};
+    putList(root, "defaults", defaultsJson(set.defaults));
+    putText(root, "numbering", set.numbering, SheetSet{}.numbering);
+    putList(root, "revisions", std::move(revisions));
+    putList(root, "sheets", std::move(sheets));
     if (!allFinite(root)) {
         return makeError(ErrorCode::InvalidArgument,
                          "the sheet set holds a number that is not finite (an infinity or NaN)");

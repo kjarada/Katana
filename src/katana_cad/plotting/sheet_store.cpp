@@ -3,7 +3,8 @@
 // only carries the JSON; everything that knows what a sheet is lives in
 // plotting/.
 
-#include <optional>
+#include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -25,17 +26,18 @@ namespace {
 // migration.
 constexpr std::string_view kSheetsKey = "sheets";
 
-// One sheet-set change: the stored JSON before and after, applied by the
-// document. nullopt is "no sheets key", so undoing the first sheet ever added
-// leaves the metadata exactly as it was.
+// One sheet-set change: the document's state before and after, applied by
+// the document. Each side is the stored JSON together with the set parsed
+// from it (Document::SheetCache), so an undo or redo puts the text back in
+// the metadata and the parsed set back in the cache without parsing - the
+// parse was most of what an edit of a large set cost (bench_sheets.cpp).
 class SheetSetCommand final : public katana::commands::Command {
   public:
-    using Apply = std::function<void(const std::optional<std::string>&)>;
+    // Called with true to apply the state after the change, false before.
+    using Apply = std::function<void(bool after)>;
 
-    SheetSetCommand(std::string name, std::optional<std::string> before,
-                    std::optional<std::string> after, Apply apply)
-        : name_(std::move(name)), before_(std::move(before)), after_(std::move(after)),
-          apply_(std::move(apply))
+    SheetSetCommand(std::string name, Apply apply)
+        : name_(std::move(name)), apply_(std::move(apply))
     {
     }
 
@@ -46,24 +48,22 @@ class SheetSetCommand final : public katana::commands::Command {
     }
     [[nodiscard]] Status execute(katana::commands::CommandContext&) override
     {
-        apply_(after_);
+        apply_(true);
         return {};
     }
     [[nodiscard]] Status undo(katana::commands::CommandContext&) override
     {
-        apply_(before_);
+        apply_(false);
         return {};
     }
     [[nodiscard]] Status redo(katana::commands::CommandContext&) override
     {
-        apply_(after_);
+        apply_(true);
         return {};
     }
 
   private:
     std::string name_;
-    std::optional<std::string> before_;
-    std::optional<std::string> after_;
     Apply apply_;
 };
 
@@ -71,6 +71,8 @@ class SheetSetCommand final : public katana::commands::Command {
 
 struct Document::SheetCache {
     // What the set was parsed from: whether the key was there, and its text.
+    // A state with no key (present false) is one too, so undoing the first
+    // sheet ever added leaves the metadata exactly as it was.
     bool present = false;
     std::string text;
     plotting::SheetSet set;
@@ -110,6 +112,7 @@ Status Document::sheetSetStatus() const
 
 Status Document::setSheetSet(const plotting::SheetSet& sheets, std::string stepName)
 {
+    // Brings the cache up to date with the metadata: it is the step's "before".
     if (const Status status = sheetSetStatus();
         !status && status.error().code == ErrorCode::Unsupported) {
         return makeError(ErrorCode::CommandRejected,
@@ -117,31 +120,32 @@ Status Document::setSheetSet(const plotting::SheetSet& sheets, std::string stepN
                          "they are",
                          status.error().describe());
     }
-    std::optional<std::string> after;
+    auto after = std::make_shared<SheetCache>();
+    // An empty set is stored as no key at all.
     if (!(sheets == plotting::SheetSet{})) {
         auto json = plotting::sheetSetToJson(sheets);
         if (!json) {
             return json.error();
         }
-        after = std::move(*json);
+        after->present = true;
+        after->text = std::move(*json);
+        after->set = sheets;
     }
-    std::optional<std::string> before;
-    if (const auto found = metadata_.unknownKeys.find(std::string(kSheetsKey));
-        found != metadata_.unknownKeys.end()) {
-        before = found->second;
-    }
-    if (before == after) {
+    std::shared_ptr<const SheetCache> before = sheetCache_;
+    if (before->present == after->present && before->text == after->text) {
         return {}; // nothing changed, and nothing to undo
     }
-    auto apply = [this](const std::optional<std::string>& text) {
-        if (text) {
-            metadata_.unknownKeys.insert_or_assign(std::string(kSheetsKey), *text);
+    auto apply = [this, before = std::move(before),
+                  after = std::shared_ptr<const SheetCache>(std::move(after))](bool toAfter) {
+        const std::shared_ptr<const SheetCache>& state = toAfter ? after : before;
+        if (state->present) {
+            metadata_.unknownKeys.insert_or_assign(std::string(kSheetsKey), state->text);
         } else {
             metadata_.unknownKeys.erase(std::string(kSheetsKey));
         }
+        sheetCache_ = state;
     };
-    return execute(std::make_unique<SheetSetCommand>(std::move(stepName), std::move(before),
-                                                     std::move(after), std::move(apply)));
+    return execute(std::make_unique<SheetSetCommand>(std::move(stepName), std::move(apply)));
 }
 
 } // namespace katana::cad
