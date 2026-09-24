@@ -25,6 +25,9 @@ namespace {
     "    float4 forwardMode;  // xyz: unit view direction, w: 1 = light per pixel\n"          \
     "    float4 params;       // x: exaggeration, y: its datum rel. origin, z: device\n"      \
     "                         // pixels per logical pixel, w: cloud point size\n"             \
+    "    float4 markPull;     // x: pull per pixel of reach (perspective: a fraction\n"       \
+    "                         // of the depth; orthographic: world units), y: clip z\n"      \
+    "                         // of the eye (perspective) or of the view direction\n"        \
     "};\n"                                                                                    \
     "float3 exaggerate(float3 p)\n"                                                           \
     "{\n"                                                                                     \
@@ -108,6 +111,31 @@ QuadVertex hiddenCorner()
     return o;
 }
 
+// MARK PULL (gpu_renderer.cpp, kMarkPull): a mark reaching `reach` device
+// pixels from its centre is moved towards the eye along its own ray by
+// (reach - 1) pixels' worth of world at its depth, times the pull. Along the
+// ray, so it stays on the same pixels and only its depth changes. In clip
+// space that is a blend towards the eye, (0, 0, markPull.y, 0), by the
+// fraction markPull.x per pixel (in perspective a pixel's worth of world
+// grows with the depth), or a step along the view direction, whose clip z is
+// markPull.y (orthographic). A mark so near the eye that the pull would put
+// it in front of the near plane is left where it is.
+float4 pulledTowardsEye(float4 c, float reach)
+{
+    float amount = (reach - 1.0) * markPull.x;
+    if (amount <= 0.0) {
+        return c; // a 1 px line at 100%: the dense TIN's edges skip the rest
+    }
+    float4 p = c;
+    if (eyeRel.w > 0.5) {
+        float s = min(amount, 0.5);
+        p = float4(c.xy * (1.0 - s), lerp(c.z, markPull.y, s), c.w * (1.0 - s));
+    } else {
+        p.z = c.z - amount * markPull.y;
+    }
+    return p.w - p.z < 0.0 ? c : p;
+}
+
 struct LineSetup
 {
     float4 ca;
@@ -123,6 +151,9 @@ struct LineSetup
 LineSetup setupLine(float4 ca, float4 cb, float4 colorA, float4 colorB, float width)
 {
     LineSetup s;
+    s.halfWidth = max(width, 1.0) * params.z * 0.5;
+    ca = pulledTowardsEye(ca, s.halfWidth + 0.5);
+    cb = pulledTowardsEye(cb, s.halfWidth + 0.5);
     // Reversed Z: a point is in front of the near plane when its depth z/w is
     // at most 1, i.e. w - z >= 0. Clip the segment there before dividing.
     float da = ca.w - ca.z;
@@ -143,7 +174,6 @@ LineSetup setupLine(float4 ca, float4 cb, float4 colorA, float4 colorB, float wi
     float2 d = sb - sa;
     s.len = length(d);
     s.dir = s.len > 1e-6 ? d / s.len : float2(1.0, 0.0);
-    s.halfWidth = max(width, 1.0) * params.z * 0.5;
     // Both ends past the same edge of the view by more than the quad reaches:
     // nothing of the line can show, so it is dropped before the rasteriser.
     float2 reach = halfSize + s.halfWidth + 0.5;
@@ -272,13 +302,14 @@ struct End { float4 clip : TEXCOORD0; float4 color : TEXCOORD1; float size : TEX
 void main(point End v[1], inout TriangleStream<QuadVertex> strip)
 {
     float halfSize = max(v[0].size, 1.0) * params.z * 0.5;
-    if (spriteHidden(v[0].clip, halfSize)) {
+    float4 c = pulledTowardsEye(v[0].clip, halfSize + 0.5);
+    if (spriteHidden(c, halfSize)) {
         return;
     }
-    strip.Append(spriteCorner(v[0].clip, v[0].color, halfSize, float2(-1.0, -1.0)));
-    strip.Append(spriteCorner(v[0].clip, v[0].color, halfSize, float2(-1.0, 1.0)));
-    strip.Append(spriteCorner(v[0].clip, v[0].color, halfSize, float2(1.0, -1.0)));
-    strip.Append(spriteCorner(v[0].clip, v[0].color, halfSize, float2(1.0, 1.0)));
+    strip.Append(spriteCorner(c, v[0].color, halfSize, float2(-1.0, -1.0)));
+    strip.Append(spriteCorner(c, v[0].color, halfSize, float2(-1.0, 1.0)));
+    strip.Append(spriteCorner(c, v[0].color, halfSize, float2(1.0, -1.0)));
+    strip.Append(spriteCorner(c, v[0].color, halfSize, float2(1.0, 1.0)));
 }
 )";
 
@@ -324,8 +355,8 @@ struct VSIn { float3 pos : TEXCOORD0; float4 color : TEXCOORD1; float size : TEX
               uint corner : SV_VertexID; };
 QuadVertex main(VSIn i)
 {
-    float4 c = mul(mvp, float4(exaggerate(i.pos), 1.0));
     float halfSize = max(i.size, 1.0) * params.z * 0.5;
+    float4 c = pulledTowardsEye(mul(mvp, float4(exaggerate(i.pos), 1.0)), halfSize + 0.5);
     if (spriteHidden(c, halfSize)) {
         return hiddenCorner();
     }
@@ -337,8 +368,8 @@ const char* const kCloudInstancedVertex = R"(
 struct VSIn { float3 pos : TEXCOORD0; float4 color : TEXCOORD1; uint corner : SV_VertexID; };
 QuadVertex main(VSIn i)
 {
-    float4 c = mul(mvp, float4(exaggerate(i.pos), 1.0));
     float halfSize = max(params.w, 1.0) * params.z * 0.5;
+    float4 c = pulledTowardsEye(mul(mvp, float4(exaggerate(i.pos), 1.0)), halfSize + 0.5);
     if (spriteHidden(c, halfSize)) {
         return hiddenCorner();
     }

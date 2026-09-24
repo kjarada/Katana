@@ -20,7 +20,7 @@
 //
 // UPLOADS happen only when the scene changes. setDrawList packs the list
 // (gpu_scene.hpp) and marks it dirty; the next render() uploads it once. Every
-// other frame writes one 144-byte uniform block - the camera - and draws.
+// other frame writes one 160-byte uniform block - the camera - and draws.
 //
 // The renderer owns no render target. It is handed a QRhi, a render pass
 // descriptor to build pipelines against, and each frame a command buffer and
