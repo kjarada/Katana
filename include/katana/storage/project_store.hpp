@@ -37,6 +37,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/storage/survey_job.hpp"
 
 namespace katana::storage {
 
@@ -90,6 +91,12 @@ struct ProjectContents {
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
     katana::entity::EntityId nextEntityId = 1;
+    // The survey jobs (survey_job.hpp), in id order. Saved and loaded in the
+    // same transaction as the entities they created, so a job can never name
+    // entities a crash left unsaved. Schema version 10 adds their table; until
+    // that lands, save() REFUSES contents holding a job (Unsupported) rather
+    // than write a project that silently loses it, and load() returns none.
+    std::vector<SurveyJob> surveyJobs{};
 };
 
 [[nodiscard]] ProjectContents captureModel(const katana::entity::Model& model,

@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/cad/selection.hpp"
@@ -180,6 +181,23 @@ class Document {
     [[nodiscard]] const katana::storage::ProjectMetadata& metadata() const { return metadata_; }
     void setMetadata(katana::storage::ProjectMetadata metadata);
 
+    // ---- survey jobs (cad/survey_job.hpp) --------------------------------------
+    //
+    // The field files imported as jobs, in id order, kept so their reduction
+    // and adjustment can be revisited. Changed ONLY by the survey job
+    // commands, which are undoable - there is deliberately no setter; the
+    // commands come in through SurveyJobAccess. Saved with the project
+    // (storage::ProjectContents::surveyJobs); cleared by newDocument() and
+    // replaced by open().
+    [[nodiscard]] const std::vector<katana::storage::SurveyJob>& surveyJobs() const
+    {
+        return surveyJobs_;
+    }
+    // nullptr when there is no job with that id.
+    [[nodiscard]] const katana::storage::SurveyJob* findSurveyJob(std::string_view id) const;
+    // Counts every change to the job list, for a panel that lists the jobs.
+    [[nodiscard]] std::uint64_t surveyJobsGeneration() const { return surveyJobsGeneration_; }
+
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
     // The registration lasts as long as the handle does - keep it as a member
@@ -187,6 +205,8 @@ class Document {
     [[nodiscard]] ListenerHandle addListener(Listener listener);
 
   private:
+    friend class SurveyJobAccess;
+
     void rebuildStack();
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();
@@ -211,6 +231,8 @@ class Document {
     std::string currentStyle_{};
     std::shared_ptr<ListenerHandle::Registry> listeners_;
     bool metadataModified_ = false;
+    std::vector<katana::storage::SurveyJob> surveyJobs_;
+    std::uint64_t surveyJobsGeneration_ = 0;
 };
 
 } // namespace katana::cad
