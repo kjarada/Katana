@@ -6,7 +6,8 @@
 // A geocentric vector is converted at its base: the base's global position
 // (a GnssGlobalPositionObservation of it in the file, or the far end of an
 // earlier vector) and base + delta both go through the context's
-// geocentricToGrid, and the vector in grid is their difference. The
+// geocentricToGrid (or its geodeticToGrid after GRS80, when that is the one
+// the drawing gives), and the vector in grid is their difference. The
 // difference is taken on the drawing's own projection, so the grid scale and
 // the convergence are in it; no scale factor is applied to it again.
 //
@@ -35,17 +36,41 @@ void rejectRow(Engine& engine, std::size_t index, std::string reason)
     row.rejectionReason = std::move(reason);
 }
 
-// Whether an antenna height can be reduced to the mark as a vertical offset,
-// and a short description for the report.
-bool reducible(const GnssAntenna& antenna)
+} // namespace
+
+std::optional<GridPosition> gridOfGeocentric(const ReductionContext& context,
+                                             const GeocentricCoordinate& point)
+{
+    if (context.geocentricToGrid) {
+        return context.geocentricToGrid(point);
+    }
+    if (context.geodeticToGrid) {
+        return context.geodeticToGrid(geodeticFromGeocentric(point));
+    }
+    return std::nullopt;
+}
+
+std::optional<GridPosition> gridOfGeodetic(const ReductionContext& context,
+                                           const GeodeticCoordinate& point)
+{
+    if (context.geodeticToGrid) {
+        return context.geodeticToGrid(point);
+    }
+    if (context.geocentricToGrid) {
+        return context.geocentricToGrid(geocentricFromGeodetic(point));
+    }
+    return std::nullopt;
+}
+
+bool reducibleAntenna(const GnssAntenna& antenna)
 {
     switch (antenna.method) {
     case AntennaHeightMethod::Vertical:
     case AntennaHeightMethod::PhaseCentre:
         return true;
     case AntennaHeightMethod::Unknown:
-        // Nothing stated and nothing to reduce: the file's vector is taken as
-        // it is. A height with no method could be slant: not guessed.
+        // Nothing stated and nothing to reduce: the value is taken as it is.
+        // A height with no method could be slant: not guessed.
         return antenna.height == 0.0;
     case AntennaHeightMethod::Slant:
     case AntennaHeightMethod::Other:
@@ -62,8 +87,6 @@ std::string antennaWords(const GnssAntenna& antenna)
     }
     return words;
 }
-
-} // namespace
 
 void convertGnssVectors(Engine& engine, const std::vector<std::size_t>& rows)
 {
@@ -116,7 +139,9 @@ void convertGnssVectors(Engine& engine, const std::vector<std::size_t>& rows)
     if (pending.empty()) {
         return;
     }
-    if (!context.geocentricToGrid) {
+    // Either conversion will do: a drawing that converts latitude and
+    // longitude converts X, Y, Z after GRS80, as the base's own position is.
+    if (!context.geocentricToGrid && !context.geodeticToGrid) {
         for (const std::size_t i : pending) {
             rejectRow(engine, rows[i], "the drawing's coordinate system cannot convert it to grid");
         }
@@ -146,8 +171,8 @@ void convertGnssVectors(Engine& engine, const std::vector<std::size_t>& rows)
             const GeocentricCoordinate to{from.x + vector.delta.x, from.y + vector.delta.y,
                                           from.z + vector.delta.z};
             global.try_emplace(vector.to, to);
-            const std::optional<GridPosition> gridFrom = context.geocentricToGrid(from);
-            const std::optional<GridPosition> gridTo = context.geocentricToGrid(to);
+            const std::optional<GridPosition> gridFrom = gridOfGeocentric(context, from);
+            const std::optional<GridPosition> gridTo = gridOfGeocentric(context, to);
             if (!gridFrom || !gridTo) {
                 rejectRow(engine, rows[i], "the drawing's projection cannot convert it to grid");
                 engine.warn("GNSS vector " + vector.from + " -> " + vector.to +
@@ -205,7 +230,7 @@ void convertGnssVectors(Engine& engine, const std::vector<std::size_t>& rows)
                 engine.warn("The drawing gives no geoid separation, so GNSS height differences "
                             "are ellipsoidal (the geoid's slope over the vector is in them).");
             }
-            if (reducible(vector.fromAntenna) && reducible(vector.toAntenna)) {
+            if (reducibleAntenna(vector.fromAntenna) && reducibleAntenna(vector.toAntenna)) {
                 const double antennas = vector.fromAntenna.height - vector.toAntenna.height;
                 height.corrections.push_back(AppliedCorrection{
                     CorrectionKind::InstrumentAndTargetHeight, antennas, std::nullopt,
@@ -262,13 +287,20 @@ void convertGnssVectors(Engine& engine, const std::vector<std::size_t>& rows)
         }
         pending = std::move(still);
     }
+    // The base's global position must come as a GNSS position observation
+    // (or the far end of another vector). A reader that keeps a keyed-in
+    // latitude and longitude only as the point's metadata has not handed one
+    // over, so the sentence says what is missing from the observations, not
+    // that the file has no such position anywhere.
     for (const std::size_t i : pending) {
         const auto& vector = std::get<GnssGeocentricBaselineObservation>(observations[i]);
-        rejectRow(engine, rows[i], "its base has no global position to convert it at");
+        rejectRow(engine, rows[i], "its base has no global position given as an observation");
         engine.warn("GNSS vector " + vector.from + " -> " + vector.to +
-                        " was not used: the file gives its base " + vector.from +
-                        " no global (latitude, longitude or X, Y, Z) position, and one is "
-                        "needed to turn an earth-centred vector into grid.",
+                        " was not used: its base " + vector.from +
+                        " has no global position (latitude, longitude or X, Y, Z) among the "
+                        "observations read, and one is needed to turn an earth-centred vector "
+                        "into grid. A position the file only keys in for the base is not yet "
+                        "read as one.",
                     vector.source);
     }
 }

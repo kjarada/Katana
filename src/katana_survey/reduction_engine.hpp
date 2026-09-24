@@ -120,11 +120,39 @@ struct GridVector {
     bool radiated = false; // placed its far end, or checked it
 };
 
+// A GNSS position of a point converted to grid and taken down to the mark,
+// one per position observation: a point occupied twice has two, and each is
+// checked against the first (radiation) or enters the network with its own
+// value.
+struct GlobalGridPosition {
+    std::string_view point;
+    double northing = 0.0;
+    double easting = 0.0;
+    std::optional<double> height{}; // of the mark; absent when the antenna could not be reduced
+    double sigmaHorizontal = 0.0;
+    double sigmaVertical = 0.0;
+    std::size_t row = 0;
+    const SourceRecord* source = nullptr;
+};
+
 // Per setup, after phase B.
 struct SetupState {
     bool positioned = false;
     std::optional<double> orientation{}; // added to a circle reading to give an azimuth
     bool orientationAssumed = false;     // from a set circle, not from coordinates
+    // Whether a circle set on a NAMED backsight that has no position may
+    // stand in for its grid azimuth. Off until nothing else can place the
+    // backsight: a controller records the circle it set (often 0 00 00)
+    // whether or not it is a grid azimuth, so taking it at once would orient
+    // the setup wrongly and leave the right orientation, which a later setup
+    // may give by radiating the backsight, unused.
+    bool acceptCircleAsSet = false;
+    // Notices already given for this setup: orientAndRadiate runs again
+    // after the backsight is placed and after an adjustment, and the report
+    // should say each thing once.
+    bool warnedHeight = false;
+    bool warnedGeoid = false;
+    bool warnedScale = false;
     std::size_t reportIndex = 0;
     std::vector<std::size_t> pointings{}; // indices into Engine::pointings
 };
@@ -139,6 +167,10 @@ struct Engine {
     std::vector<RecordedAngle> angles;
     std::vector<SetupState> setups;
     std::vector<GridVector> vectors;
+    // Indexed like raw.observations: the converted GNSS position of each
+    // position observation, empty for every other kind and for one that
+    // could not be converted.
+    std::vector<std::optional<GlobalGridPosition>> globalPositions;
 
     std::unordered_map<std::string_view, Position> positions;
     // The order points were first positioned in: the order of the output.
@@ -220,6 +252,12 @@ struct Engine {
 // that already has one becomes a check. After an adjustment moved the
 // stations, `reradiate` names the side shots, and only those are placed again
 // (overwriting what the first pass gave them).
+//
+// The orientation comes from the backsight's coordinates. The circle set on
+// the backsight stands in for its grid azimuth only where no coordinates can
+// come: no backsight is named, or SetupState::acceptCircleAsSet says the
+// named one will not be placed. Otherwise a setup whose backsight has no
+// position yet is left unoriented and radiates nothing, to be tried again.
 void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                       const std::unordered_set<std::string_view>* reradiate = nullptr);
 
@@ -229,6 +267,24 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
                                                   std::string_view target);
 
 // ---- reduction_gnss.cpp ------------------------------------------------------------
+
+// The drawing's grid position of an earth-centred point, through
+// geocentricToGrid or, when the drawing gives only geodeticToGrid, through
+// that after the GRS80 conversion (the ellipsoid GNSS frames use). Absent
+// when the drawing can do neither.
+[[nodiscard]] std::optional<GridPosition> gridOfGeocentric(const ReductionContext& context,
+                                                           const GeocentricCoordinate& point);
+// The same for a geodetic point.
+[[nodiscard]] std::optional<GridPosition> gridOfGeodetic(const ReductionContext& context,
+                                                         const GeodeticCoordinate& point);
+
+// Whether an antenna height can be taken off as a vertical offset: a
+// vertical or phase-centre height, or no height at all. A slant height or
+// one to a mark the model does not name cannot, and neither can a height
+// with no stated method (it could be slant).
+[[nodiscard]] bool reducibleAntenna(const GnssAntenna& antenna);
+// "1.500 m Vertical (bottom of mount)", for the report.
+[[nodiscard]] std::string antennaWords(const GnssAntenna& antenna);
 
 // Turns the file's GNSS vectors into grid vectors: a grid baseline as it is,
 // a geocentric one through the context at its base's global position.

@@ -7,10 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "katana/survey/reduction.hpp"
 #include "test_reduction_support.hpp"
@@ -64,7 +66,108 @@ SurveyProject largeJob(std::size_t setups, std::size_t targets, bool foresights 
     return project;
 }
 
+// Setups whose stations are placed one at a time, the shape of a job whose
+// stations were resected in the field: each stands on a point whose file
+// coordinates are the controller's own (Calculated, so not control), and
+// backsights a reference object RO<s> that nothing positions. Every station
+// falls back to its file coordinates in turn, one per round, and every setup
+// then waits for its RO. With `circle` the file records the circle set on
+// the RO (0 00 00) and each setup is in the end oriented on it; without, each
+// is given up with a warning.
+SurveyProject placedOneAtATime(std::size_t setups, std::size_t targets, bool circle)
+{
+    SurveyProject project;
+    for (std::size_t s = 1; s <= setups; ++s) {
+        const std::string station = "T" + std::to_string(s);
+        const std::string ro = "RO" + std::to_string(s);
+        project.points.push_back(point(station, 0.0, 100.0 * static_cast<double>(s), 10.0,
+                                       CoordinateSource::Calculated));
+        project.unpositionedPoints.push_back(unpositioned(ro));
+        std::vector<Shot> shots;
+        std::size_t index = 1;
+        shots.push_back(Shot{ro, index++, Face::Left, deg(0), deg(90), 50.0, 1.5});
+        shots.push_back(Shot{ro, index++, Face::Right, deg(180), deg(90), 50.0, 1.5});
+        for (std::size_t t = 0; t < targets; ++t) {
+            const std::string target = "Q" + std::to_string(s) + "_" + std::to_string(t);
+            project.unpositionedPoints.push_back(unpositioned(target));
+            const double direction = deg(10.0 + 20.0 * static_cast<double>(t));
+            const double distance = 5.0 + 2.5 * static_cast<double>(t);
+            shots.push_back(Shot{target, index++, Face::Left, direction, deg(90), distance, 1.8});
+            shots.push_back(Shot{target, index++, Face::Right,
+                                 katana::math::normalizeAngle(direction + deg(180)), deg(90),
+                                 distance, 1.8});
+        }
+        SurveyStation surveyStation = setup("setup" + std::to_string(s), station, 1.55, ro, shots);
+        if (circle) {
+            surveyStation.backsightAzimuth = 0.0;
+        }
+        project.stations.push_back(std::move(surveyStation));
+    }
+    return project;
+}
+
+// The faster of two runs, so that a moment's load from elsewhere on the
+// machine does not decide a ratio.
+double bestSeconds(const SurveyProject& project, const ReductionSettings& settings)
+{
+    double best = 1e30;
+    for (int run = 0; run < 2; ++run) {
+        const auto start = std::chrono::steady_clock::now();
+        const auto outcome = reduceAndAdjust(project, settings, {});
+        const double seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        EXPECT_TRUE(outcome.ok());
+        best = std::min(best, seconds);
+    }
+    return best;
+}
+
 } // namespace
+
+TEST(ReductionPerformance, SetupsPlacedOneAtATimeCostLinearlyInTheirNumber)
+{
+    // Four times the setups must cost about four times as long. Trying every
+    // waiting setup again whenever any point was placed made it quadratic -
+    // sixteen times as long - and 1 000 setups of 30 shots took 12 s.
+    // Below 9 leaves room for timing noise on either side of 4.
+    ReductionSettings settings = bareSettings();
+    for (const bool circle : {false, true}) {
+        const SurveyProject small = placedOneAtATime(200, 5, circle);
+        const SurveyProject large = placedOneAtATime(800, 5, circle);
+        const double smallSeconds = bestSeconds(small, settings);
+        const double largeSeconds = bestSeconds(large, settings);
+        std::printf("[ reduction ] setups placed one at a time%s: 200 in %.3f s, 800 in %.3f s "
+                    "(ratio %.1f)\n",
+                    circle ? ", oriented on the circle as set" : ", never oriented", smallSeconds,
+                    largeSeconds, largeSeconds / smallSeconds);
+        EXPECT_LT(largeSeconds / smallSeconds, 9.0) << (circle ? "with" : "without") << " circle";
+    }
+
+    // What the runs computed: without a circle each setup is given up once;
+    // with one, each is oriented on it and radiates its RO and its targets.
+    // Setup 1's first target: reading 10 00 00 is azimuth 10 (orientation
+    // 0 - 0), 5 m from T1 (N 0, E 100): N = 5 cos 10 = 4.924039,
+    // E = 100 + 5 sin 10 = 100.868241.
+    const auto unoriented = reduceAndAdjust(placedOneAtATime(50, 5, false), settings, {});
+    ASSERT_TRUE(unoriented.ok());
+    std::size_t givenUp = 0;
+    for (const ReportMessage& warning : unoriented->report.warnings) {
+        givenUp += warning.text.find("has no position and no circle setting was recorded") !=
+                           std::string::npos
+                       ? 1
+                       : 0;
+    }
+    EXPECT_EQ(givenUp, 50U);
+    EXPECT_TRUE(unoriented->points.empty());
+
+    const auto oriented = reduceAndAdjust(placedOneAtATime(50, 5, true), settings, {});
+    ASSERT_TRUE(oriented.ok());
+    EXPECT_EQ(oriented->points.size(), 50U * 6U);
+    const ComputedPoint* first = findPoint(*oriented, "Q1_0");
+    ASSERT_NE(first, nullptr);
+    EXPECT_NEAR(first->northing, 4.924039, 1e-6);
+    EXPECT_NEAR(first->easting, 100.868241, 1e-6);
+}
 
 TEST(ReductionPerformance, AHundredThousandObservationsReduceAndEveryTargetIsComputed)
 {
