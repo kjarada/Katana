@@ -82,13 +82,11 @@ class ToolHost {
     // Steps back one input inside the tool (the U inside LINE); never the
     // document's undo.
     Outcome undo();
-    // Esc: ends the tool. A tool whose Enter commits work it holds - a chain
-    // of lines, the parts a Trim has cut - is sent Enter first, so Esc keeps
-    // that work, as AutoCAD keeps the segments of a LINE; every other tool is
-    // dropped with nothing done (see escapeKeepsWork). Such a tool at a value
-    // prompt (Fillet's radius, Chamfer's distances) is first stepped back to
-    // the prompt whose Enter commits, because Enter at a value prompt takes
-    // its default, which Esc must never do. No-op when idle.
+    // Esc: ends the tool, keeping what the tool's own cancel() says it has
+    // already placed - a chain of lines, the parts a Trim has cut, the
+    // copies Copy has put down - as AutoCAD keeps the segments of a LINE,
+    // and executing it as one command. Everything else goes with the tool.
+    // No-op when idle.
     void cancel();
     // Ends the running tool WITHOUT committing anything (onFinished, as for
     // Esc): for when the document under it is being replaced, and its picks
@@ -111,6 +109,13 @@ class ToolHost {
     std::function<void(const std::string& toolId)> onStarted;
     // The tool ended: finished without asking to restart, or cancelled.
     std::function<void(const std::string& toolId)> onFinished;
+    // A transparent command typed while a tool runs (isTransparentCommand):
+    // it is the VIEW's - ZOOM, PAN - and goes here instead of to the tool,
+    // which stays at the same step, as AutoCAD runs 'ZOOM inside LINE.
+    // Answers whether it was carried out. Unset, or answering false, the
+    // host says the command cannot run inside the tool, and the tool is not
+    // sent it either: "Z" is never a malformed point.
+    std::function<bool(const std::string& command)> onTransparent;
 
   private:
     // (Re)creates the tool from info_ with a context read NOW: the current
@@ -131,16 +136,10 @@ class ToolHost {
     double pickTolerance_ = 0.0;
 };
 
-// True for a tool whose Enter only ever commits work it has collected - a
-// LINE or PLINE chain, the cuts of a Trim or Extend, Offset's copies, a run of
-// Fillets or Chamfers - so Esc sends it Enter rather than losing that work.
-// False for the rest, whose Enter at some step applies a DEFAULT (Move's "use
-// the first point as the displacement", Join's "join what is selected"), which
-// Esc must never do.
-//
-// A list, because the tool interface has no "commit on cancel" of its own;
-// the Modify Edit report asked for one, and a virtual cancel() on
-// InteractiveTool would replace this list (outstanding for the lead).
-[[nodiscard]] bool escapeKeepsWork(std::string_view toolId);
+// True for text typed while a tool runs that is a command for the view, not
+// an answer for the tool: ZOOM, Z and PAN in any case, with or without
+// AutoCAD's leading apostrophe ('ZOOM), and 'P (a bare P is Rotate's and
+// Scale's [Points] option), with any arguments after the verb ("ZOOM E").
+[[nodiscard]] bool isTransparentCommand(std::string_view text);
 
 } // namespace katana::qt::tools

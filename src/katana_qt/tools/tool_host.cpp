@@ -1,9 +1,10 @@
 #include "tools/tool_host.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <utility>
+
+#include "katana/core/text.hpp"
 
 namespace katana::qt::tools {
 
@@ -12,22 +13,21 @@ using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Status;
 
-bool escapeKeepsWork(std::string_view toolId)
+bool isTransparentCommand(std::string_view text)
 {
-    // Each checked against the tool's enter() at every step it can be in
-    // when cancel() sends Enter: Enter commits what was collected, ends with
-    // nothing, or only moves the tool on a step (Trim's edges, Offset's
-    // distance), which cancel() then drops. The exceptions are Fillet's and
-    // Chamfer's value prompts, whose Enter defaults a setting; cancel() steps
-    // back out of those before it sends Enter, so Enter is never sent at a
-    // value prompt. Copy is NOT here although its placed copies are collected
-    // work, because at its second-point prompt with none placed yet Enter
-    // copies by the base point as a displacement.
-    static constexpr std::array<std::string_view, 7> kKeep = {
-        "draw.line",     "draw.polyline", "modify.trim",   "modify.extend",
-        "modify.offset", "modify.fillet", "modify.chamfer",
+    std::string_view word = katana::core::trimmed(text);
+    const bool apostrophe = !word.empty() && word.front() == '\'';
+    if (apostrophe) {
+        word.remove_prefix(1);
+    }
+    word = word.substr(0, word.find(' '));
+    const auto is = [&](std::string_view verb) {
+        return katana::core::equalsIgnoringCase(word, verb);
     };
-    return std::ranges::find(kKeep, toolId) != kKeep.end();
+    // A bare P is Rotate's and Scale's [Points] option, so only 'P - the
+    // apostrophe AutoCAD marks a transparent command with - is PAN. No tool
+    // offers Z.
+    return is("ZOOM") || is("Z") || is("PAN") || (apostrophe && is("P"));
 }
 
 ToolHost::ToolHost(cad::Document& document) : document_(document) {}
@@ -83,7 +83,22 @@ ToolHost::Outcome ToolHost::entity(katana::entity::EntityId id, const Point2& at
 
 ToolHost::Outcome ToolHost::typed(std::string_view text)
 {
-    return tool_ != nullptr ? apply(cad::routeTypedInput(*tool_, text)) : idle();
+    if (tool_ == nullptr) {
+        return idle();
+    }
+    if (isTransparentCommand(text)) {
+        // The view's, not the tool's: the tool stays at its step and its
+        // prompt is shown again, as AutoCAD resumes LINE after 'ZOOM.
+        const std::string command(katana::core::trimmed(text));
+        if (onTransparent && onTransparent(command)) {
+            report(onPrompt, prompt());
+            return Outcome::Continue;
+        }
+        report(onRejected, command + " cannot run inside " + info_->name +
+                               "; press Esc to end the tool first.");
+        return Outcome::Rejected;
+    }
+    return apply(cad::routeTypedInput(*tool_, text));
 }
 
 ToolHost::Outcome ToolHost::enter() { return tool_ != nullptr ? apply(tool_->enter()) : idle(); }
@@ -95,34 +110,13 @@ void ToolHost::cancel()
     if (tool_ == nullptr) {
         return;
     }
-    if (escapeKeepsWork(info_->id)) {
-        // Out of a value prompt first. Enter there takes the prompt's default
-        // - at Chamfer's second distance it stores both distances for every
-        // later Chamfer - or only returns to the lines (Fillet's radius), and
-        // then the corners a Multiple session made would go with the tool.
-        // Undo at those prompts only steps back towards the lines, never
-        // touching the session or the defaults (CornerTool::undo); a value
-        // prompt still showing after that is left rather than defaulted.
-        constexpr int kMostStepsBack = 4; // SecondDistance -> FirstDistance -> First is 2
-        for (int stepped = 0;
-             stepped < kMostStepsBack && tool_->expects() == cad::ToolInput::Value; ++stepped) {
-            if (tool_->undo().outcome != Outcome::Continue) {
-                break;
-            }
-        }
-        if (tool_->expects() == cad::ToolInput::Value) {
-            end();
-            return;
-        }
-        cad::ToolStep step = tool_->enter();
-        // Only a finished step's command is work to keep. A Continue here is
-        // Enter moving the tool on a step (Trim's edges, Offset's distance)
-        // and a Rejected changed nothing; either way the tool is dropped next.
-        if (step.outcome == Outcome::Done) {
-            step.restart = false;
-            apply(std::move(step));
-            return; // apply ended the tool
-        }
+    // The tool says what of its work stays (InteractiveTool::cancel). A
+    // Continue or a Rejected keeps nothing; the tool ends either way.
+    cad::ToolStep step = tool_->cancel();
+    if (step.outcome == Outcome::Done && (step.command || step.selection)) {
+        step.restart = false;
+        apply(std::move(step)); // ends the tool, as any finished step does
+        return;
     }
     end();
 }
@@ -174,6 +168,14 @@ ToolHost::Outcome ToolHost::apply(cad::ToolStep step)
         }
         if (executed) {
             report(onMessage, step.message);
+            if (step.selection) {
+                // What a selecting tool found, left selected: pruned, so an
+                // id the step's command removed is not held.
+                cad::SelectionSet& selection = document_.selection();
+                selection.set(std::move(*step.selection));
+                (void)selection.prune(document_.model().entities);
+                document_.notifySelectionChanged();
+            }
         }
         if (generation_ != from) {
             break;

@@ -200,6 +200,9 @@ class LineTool final : public InteractiveTool {
         return finish();
     }
 
+    // Esc keeps the chain drawn so far, as AutoCAD keeps a LINE's segments.
+    ToolStep cancel() override { return keepWorkOnEscape(*this); }
+
     ToolStep undo() override
     {
         if (points_.empty()) {
@@ -313,6 +316,9 @@ class PolylineTool final : public InteractiveTool {
         }
         return finish(false);
     }
+
+    // Esc keeps the chain drawn so far, as AutoCAD keeps a LINE's segments.
+    ToolStep cancel() override { return keepWorkOnEscape(*this); }
 
     ToolStep undo() override
     {
