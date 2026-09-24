@@ -316,7 +316,7 @@ SurveyImportWizard::SurveyImportWizard(SurveyImportContext context, QWidget* par
     task_->onCancelled = [this] { showMessage("Cancelled: nothing was changed."); };
 
     goTo(FilePage);
-    resize(900, 680);
+    resize(960, 760);
 }
 
 // ---- the pages ---------------------------------------------------------------------------
@@ -614,6 +614,7 @@ QWidget* SurveyImportWizard::buildReductionPage()
     splitter->addWidget(previewPane);
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
+    splitter->setSizes({420, 280});
     layout->addWidget(splitter, 1);
     connect(previewButton_, &QPushButton::clicked, this, [this] { runPreview({}); });
     options_->onChanged = [this] {
