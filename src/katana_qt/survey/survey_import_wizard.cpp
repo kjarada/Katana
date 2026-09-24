@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -14,7 +15,9 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTimer>
@@ -22,15 +25,24 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
+#include <set>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/survey_job.hpp"
 #include "katana/cad/survey_points.hpp"
 #include "katana/core/text.hpp"
 #include "katana/surveyio/format.hpp"
+#include "katana/surveyio/reader.hpp"
+#include "survey/reduction_options_widget.hpp"
+#include "survey/reduction_report_view.hpp"
+#include "survey/survey_job_support.hpp"
+#include "survey/survey_task.hpp"
 #include "survey/survey_templates.hpp"
 #include "theme.hpp"
 #include "view_workspace.hpp"
@@ -158,7 +170,79 @@ Result<std::optional<int>> epsgField(const QLineEdit* field, const char* what)
     return std::optional<int>{static_cast<int>(*code)};
 }
 
+// "50.2 MB", "812 KB": a file's size as the busy row says it.
+QString sizeText(std::int64_t bytes)
+{
+    if (bytes >= 1'000'000) {
+        return QString("%1 MB").arg(static_cast<double>(bytes) / 1e6, 0, 'f', 1);
+    }
+    return QString("%1 KB").arg(std::max<std::int64_t>(1, (bytes + 999) / 1000));
+}
+
+QString unitsText(const survey::DeclaredUnits& units)
+{
+    const auto angular = [](survey::AngularUnit unit) -> QString {
+        switch (unit) {
+        case survey::AngularUnit::Unknown:
+            return "angles not stated";
+        default:
+            return QString("angles in %1").arg(qs(survey::toString(unit)));
+        }
+    };
+    const QString linear = units.linear == survey::LinearUnit::Unknown
+                               ? QString("lengths not stated")
+                               : QString("lengths in %1").arg(qs(survey::toString(units.linear)));
+    return linear + ", " + angular(units.angular);
+}
+
+QTreeWidgetItem* contentRow(QTreeWidget* tree, const QString& what, const QString& detail)
+{
+    auto* item = new QTreeWidgetItem(tree);
+    item->setText(0, what);
+    item->setText(1, detail);
+    item->setToolTip(1, detail);
+    return item;
+}
+
+QTreeWidgetItem* contentChild(QTreeWidgetItem* parent, const QString& what, const QString& detail)
+{
+    auto* item = new QTreeWidgetItem(parent);
+    item->setText(0, what);
+    item->setText(1, detail);
+    item->setToolTip(1, detail);
+    return item;
+}
+
+// Warnings listed one by one on the Content step; the rest are counted. A
+// damaged file can have hundreds of thousands, and the list is for reading.
+constexpr std::size_t kListedWarnings = 1'000;
+
 } // namespace
+
+SurveyContent surveyContentOf(const survey::SurveyProject& project)
+{
+    SurveyContent content;
+    content.setups = project.stations.size();
+    const auto count = [&content](const survey::Observation& observation) {
+        ++content.observations;
+        ++content.observationsByKind[survey::observationKindName(observation)];
+    };
+    for (const survey::SurveyStation& station : project.stations) {
+        for (const survey::Observation& observation : station.observations) {
+            count(observation);
+        }
+    }
+    for (const survey::Observation& observation : project.observations) {
+        count(observation);
+    }
+    content.positionedPoints = project.points.size();
+    content.unpositionedPoints = project.unpositionedPoints.size();
+    content.features = project.features.size();
+    content.controlPoints = project.controlPoints.size();
+    content.gnssSessions = project.gnssSessions.size();
+    content.traverses = project.traverses.size();
+    return content;
+}
 
 SurveyImportWizard::SurveyImportWizard(SurveyImportContext context, QWidget* parent)
     : QDialog(parent), context_(std::move(context))
@@ -175,13 +259,19 @@ SurveyImportWizard::SurveyImportWizard(SurveyImportContext context, QWidget* par
     layout->addWidget(step_);
 
     pages_ = new QStackedWidget(this);
+    // In the order of the Page enum; path() says which a file goes through.
     pages_->addWidget(buildFilePage());
     pages_->addWidget(buildFormatPage());
     pages_->addWidget(buildLayoutPage());
+    pages_->addWidget(buildContentPage());
     pages_->addWidget(buildSystemPage());
+    pages_->addWidget(buildReductionPage());
     pages_->addWidget(buildOptionsPage());
     pages_->addWidget(buildReportPage());
     layout->addWidget(pages_, 1);
+
+    task_ = new SurveyTaskBar(this);
+    layout->addWidget(task_);
 
     message_ = new QLabel(this);
     message_->setObjectName("message");
@@ -209,20 +299,24 @@ SurveyImportWizard::SurveyImportWizard(SurveyImportContext context, QWidget* par
     buttons->addWidget(close);
     layout->addLayout(buttons);
 
-    connect(back_, &QPushButton::clicked, this, [this] { goTo(pages_->currentIndex() - 1); });
-    connect(next_, &QPushButton::clicked, this, [this] {
-        const int page = pages_->currentIndex();
-        if (const auto status = leave(page); !status) {
-            showError(status.error());
-            return;
-        }
-        goTo(page + 1);
-    });
+    connect(back_, &QPushButton::clicked, this,
+            [this] { goTo(previousPage(pages_->currentIndex())); });
+    connect(next_, &QPushButton::clicked, this, [this] { advance(); });
     connect(import_, &QPushButton::clicked, this, [this] { importNow(); });
     connect(close, &QPushButton::clicked, this, [this] { hide(); });
+    // While a file is read or reduced, nothing that would start another or
+    // leave the page is pressed; Cancel is.
+    task_->onBusyChanged = [this](bool busy) {
+        const int page = pages_->currentIndex();
+        back_->setEnabled(!busy && page > FilePage);
+        next_->setEnabled(!busy && page < ReportPage);
+        import_->setEnabled(!busy && page == ReportPage && !blocked_);
+        previewButton_->setEnabled(!busy);
+    };
+    task_->onCancelled = [this] { showMessage("Cancelled: nothing was changed."); };
 
     goTo(FilePage);
-    resize(820, 620);
+    resize(900, 680);
 }
 
 // ---- the pages ---------------------------------------------------------------------------
@@ -232,8 +326,9 @@ QWidget* SurveyImportWizard::buildFilePage()
     auto* page = new QWidget(this);
     auto* layout = new QVBoxLayout(page);
     layout->addWidget(mutedLabel(
-        "Choose a file of surveyed points. The next step says what Katana makes of it and, "
-        "when it cannot be sure, asks you: a file is never read with a format nobody chose.",
+        "Choose a file of surveyed points, or a field file from an instrument or a GNSS "
+        "receiver. The next step says what Katana makes of it and, when it cannot be sure, asks "
+        "you: a file is never read with a format nobody chose.",
         page));
     auto* row = new QHBoxLayout();
     file_ = new QLineEdit(page);
@@ -245,6 +340,8 @@ QWidget* SurveyImportWizard::buildFilePage()
     connect(browse, &QPushButton::clicked, this, [this] {
         const QString path = QFileDialog::getOpenFileName(
             this, "Import Survey Points", file_->text(),
+            "Survey files (*.csv *.txt *.tsv *.pnt *.xyz *.gsi *.jxl *.rw5 *.raw *.gt7 *.gt6 "
+            "*.dc *.x01 *.xcf *.rnx *.crx *.obs *.??o *.??d);;"
             "Point files (*.csv *.txt *.tsv *.pnt *.xyz);;All files (*)");
         if (!path.isEmpty()) {
             file_->setText(path);
@@ -464,10 +561,80 @@ QWidget* SurveyImportWizard::buildLayoutPage()
     return page;
 }
 
+QWidget* SurveyImportWizard::buildContentPage()
+{
+    auto* page = new QWidget(this);
+    auto* layout = new QVBoxLayout(page);
+    contentSummary_ = new QLabel(page);
+    contentSummary_->setObjectName("contentSummary");
+    contentSummary_->setWordWrap(true);
+    layout->addWidget(contentSummary_);
+    content_ = new QTreeWidget(page);
+    content_->setObjectName("content");
+    content_->setHeaderLabels({"In the file", "What was read"});
+    content_->header()->setStretchLastSection(true);
+    content_->setColumnWidth(0, 260);
+    content_->setWordWrap(true);
+    layout->addWidget(content_, 1);
+    layout->addWidget(mutedLabel(
+        "What the reader made of the file, before anything is reduced or drawn. Every record "
+        "it could not read is a warning naming the record; nothing is dropped without a word.",
+        page));
+    return page;
+}
+
+QWidget* SurveyImportWizard::buildReductionPage()
+{
+    auto* page = new QWidget(this);
+    auto* layout = new QVBoxLayout(page);
+    auto* splitter = new QSplitter(Qt::Vertical, page);
+    auto* scroll = new QScrollArea(splitter);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    options_ = new ReductionOptionsWidget(scroll);
+    scroll->setWidget(options_);
+    auto* previewPane = new QWidget(splitter);
+    auto* previewLayout = new QVBoxLayout(previewPane);
+    previewLayout->setContentsMargins(0, 0, 0, 0);
+    auto* row = new QHBoxLayout();
+    previewButton_ = new QPushButton("Preview", previewPane);
+    previewButton_->setObjectName("previewReduction");
+    previewButton_->setAutoDefault(false);
+    previewButton_->setToolTip("Reduce and adjust with these options and show the report here; "
+                               "nothing is drawn");
+    row->addWidget(previewButton_);
+    row->addWidget(mutedLabel("Runs the reduction as the import would and shows its report "
+                              "below. Nothing is drawn until Import.",
+                              previewPane),
+                   1);
+    previewLayout->addLayout(row);
+    previewReport_ = new ReductionReportView("previewReport", previewPane);
+    previewLayout->addWidget(previewReport_, 1);
+    splitter->addWidget(scroll);
+    splitter->addWidget(previewPane);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 1);
+    layout->addWidget(splitter, 1);
+    connect(previewButton_, &QPushButton::clicked, this, [this] { runPreview({}); });
+    options_->onChanged = [this] {
+        if (outcome_ != nullptr && !previewIsCurrent()) {
+            previewReport_->showNote("The options have changed since the preview: press Preview "
+                                     "to run the reduction again.");
+        }
+    };
+    return page;
+}
+
 QWidget* SurveyImportWizard::buildSystemPage()
 {
     auto* page = new QWidget(this);
     auto* layout = new QVBoxLayout(page);
+    systemSummary_ = new QLabel(page);
+    systemSummary_->setObjectName("systemSummary");
+    systemSummary_->setWordWrap(true);
+    systemSummary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    systemSummary_->setVisible(false);
+    layout->addWidget(systemSummary_);
     layout->addWidget(mutedLabel(
         "A point file does not say what its numbers are: choose the unit they are in (there is "
         "no default - a wrong unit scales the whole survey). The coordinate system is recorded "
@@ -524,8 +691,8 @@ QWidget* SurveyImportWizard::buildOptionsPage()
     layout->addLayout(form);
     layout->addWidget(mutedLabel(
         "Refusing is the default: an import of ids the drawing already has is more often the "
-        "wrong file than a wanted update. Survey codes need a loaded 12d mapfile (Format > Load "
-        "12d Customisation) and are applied to the imported points only, as their own undoable "
+        "wrong file than a wanted update. Survey codes need a loaded survey code file (Format > "
+        "Load Customisation) and are applied to the imported points only, as their own undoable "
         "step.",
         page));
     layout->addStretch(1);
@@ -538,12 +705,20 @@ QWidget* SurveyImportWizard::buildReportPage()
     auto* layout = new QVBoxLayout(page);
     layout->addWidget(mutedLabel(
         "What the import will do. Import makes it one command: one Undo removes it all.", page));
-    report_ = new QPlainTextEdit(page);
+    auto* splitter = new QSplitter(Qt::Vertical, page);
+    report_ = new QPlainTextEdit(splitter);
     report_->setObjectName("report");
     report_->setReadOnly(true);
     report_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     report_->setLineWrapMode(QPlainTextEdit::NoWrap);
-    layout->addWidget(report_, 1);
+    // The reduction report, for a field file: what will happen to the data.
+    importReport_ = new ReductionReportView("importReport", splitter);
+    importReport_->setVisible(false);
+    splitter->addWidget(report_);
+    splitter->addWidget(importReport_);
+    splitter->setStretchFactor(0, 0);
+    splitter->setStretchFactor(1, 1);
+    layout->addWidget(splitter, 1);
     return page;
 }
 
@@ -557,17 +732,52 @@ void SurveyImportWizard::showEvent(QShowEvent* event)
 
 // ---- moving between pages --------------------------------------------------------------------
 
+std::vector<int> SurveyImportWizard::path() const
+{
+    if (readerPath_) {
+        return {FilePage,   FormatPage,  ContentPage, SystemPage,
+                ReductionPage, OptionsPage, ReportPage};
+    }
+    return {FilePage, FormatPage, LayoutPage, SystemPage, OptionsPage, ReportPage};
+}
+
+int SurveyImportWizard::nextPage(int page) const
+{
+    const std::vector<int> pages = path();
+    const auto at = std::ranges::find(pages, page);
+    return at == pages.end() || at + 1 == pages.end() ? page : *(at + 1);
+}
+
+int SurveyImportWizard::previousPage(int page) const
+{
+    const std::vector<int> pages = path();
+    const auto at = std::ranges::find(pages, page);
+    return at == pages.end() || at == pages.begin() ? FilePage : *(at - 1);
+}
+
 void SurveyImportWizard::goTo(int page)
 {
     page = std::clamp(page, 0, Pages - 1);
-    static const char* const titles[] = {"Choose the file",       "The file's format",
-                                         "Columns and delimiter", "Units and coordinate system",
-                                         "Options",               "Report"};
-    step_->setText(QString("Step %1 of %2: %3").arg(page + 1).arg(Pages).arg(titles[page]));
+    static const char* const titles[] = {"Choose the file",
+                                         "The file's format",
+                                         "Columns and delimiter",
+                                         "What the file holds",
+                                         "Units and coordinate system",
+                                         "Reduction and adjustment",
+                                         "Options",
+                                         "Report"};
+    const std::vector<int> pages = path();
+    const auto at = std::ranges::find(pages, page);
+    const auto number = at == pages.end() ? 0 : (at - pages.begin()) + 1;
+    step_->setText(QString("Step %1 of %2: %3")
+                       .arg(number)
+                       .arg(pages.size())
+                       .arg(titles[page]));
     pages_->setCurrentIndex(page);
-    back_->setEnabled(page > 0);
-    next_->setEnabled(page < ReportPage);
-    import_->setEnabled(page == ReportPage && !blocked_);
+    const bool busy = task_->busy();
+    back_->setEnabled(!busy && page > 0);
+    next_->setEnabled(!busy && page < ReportPage);
+    import_->setEnabled(!busy && page == ReportPage && !blocked_);
     next_->setDefault(page < ReportPage);
     import_->setDefault(page == ReportPage);
     if (page == OptionsPage) {
@@ -581,13 +791,50 @@ void SurveyImportWizard::goTo(int page)
     message_->clear();
 }
 
+void SurveyImportWizard::advance()
+{
+    if (task_->busy()) {
+        return;
+    }
+    const int page = pages_->currentIndex();
+    // The steps whose work may run on a pool thread go on from the work's
+    // continuation, not from here.
+    if (page == FormatPage) {
+        if (const auto status = chooseFormat(); !status) {
+            showError(status.error());
+            return;
+        }
+        if (readerPath_) {
+            readWithReader();
+            return;
+        }
+        goTo(LayoutPage);
+        return;
+    }
+    if (page == OptionsPage && readerPath_) {
+        if (previewIsCurrent()) {
+            prepareReaderReport();
+            goTo(ReportPage);
+            return;
+        }
+        runPreview([this] {
+            prepareReaderReport();
+            goTo(ReportPage);
+        });
+        return;
+    }
+    if (const auto status = leave(page); !status) {
+        showError(status.error());
+        return;
+    }
+    goTo(nextPage(page));
+}
+
 Status SurveyImportWizard::leave(int page)
 {
     switch (page) {
     case FilePage:
         return readFile();
-    case FormatPage:
-        return chooseFormat();
     case LayoutPage: {
         const auto layout = layoutFromFields();
         if (!layout) {
@@ -611,8 +858,24 @@ Status SurveyImportWizard::leave(int page)
         }
         return {};
     }
+    case ContentPage:
+        prepareSystemForReader();
+        return {};
     case SystemPage:
+        if (readerPath_) {
+            prepareReduction();
+            return {};
+        }
         return parseAndTransform();
+    case ReductionPage: {
+        // The options must make sense before the page is left; the reduction
+        // itself runs on Preview or on the way to the Report step.
+        const auto settings = options_->settings();
+        if (!settings) {
+            return settings.error();
+        }
+        return {};
+    }
     case OptionsPage:
         prepareReport();
         return {};
@@ -632,16 +895,27 @@ Status SurveyImportWizard::readFile()
         return makeError(ErrorCode::FileImportFailure, "the file cannot be opened",
                          path.toStdString() + ": " + file.errorString().toStdString());
     }
-    const QByteArray bytes = file.readAll();
+    // A large file is not read here, on the GUI thread: detection needs only
+    // its head, and its reader reads it whole on a pool thread (Content).
+    const qint64 size = file.size();
+    bytesComplete_ = size <= kBackgroundReadBytes;
+    const QByteArray bytes =
+        bytesComplete_ ? file.readAll()
+                       : file.read(static_cast<qint64>(surveyio::kProbeBytes));
     bytes_.assign(bytes.constData(), static_cast<std::size_t>(bytes.size()));
     fileName_ = QFileInfo(path).fileName().toStdString();
     parsed_.reset();
     project_.reset();
+    read_.reset();
+    raw_.reset();
+    sourceBytes_.reset();
+    outcome_.reset();
+    ++readGeneration_;
 
     const std::string_view sample =
         std::string_view(bytes_).substr(0, std::min(bytes_.size(), surveyio::kProbeBytes));
     detection_ = surveyio::detectFormat(
-        surveyio::probeOf(sample, fileName_, bytes_.size() > surveyio::kProbeBytes));
+        surveyio::probeOf(sample, fileName_, size > static_cast<qint64>(surveyio::kProbeBytes)));
     if (detection_->outcome() == surveyio::DetectionOutcome::Empty) {
         return makeError(ErrorCode::FileImportFailure, "the file is empty", fileName_);
     }
@@ -663,23 +937,44 @@ Status SurveyImportWizard::readFile()
     if (!identified) {
         format_->addItem("(choose the format)");
     }
+    // Every registered format, the candidates first with their evidence:
+    // what Katana can read at all is worth seeing when the file is not what
+    // the person thought, and each line carries its record - what the format
+    // carries and the parser's version.
+    const auto addRow = [this](const surveyio::FormatDescriptor& descriptor,
+                               const QString& confidence, const QString& evidence) {
+        auto* item = new QTreeWidgetItem(candidates_);
+        item->setText(0, qs(descriptor.humanName));
+        item->setText(1, confidence);
+        item->setText(2, evidence);
+        item->setToolTip(2, evidence);
+        item->setText(3, qs(surveyio::describeFormat(descriptor)));
+        item->setToolTip(3, item->text(3));
+        return item;
+    };
+    std::set<std::string> listed;
     for (const surveyio::FormatCandidate& candidate : detection_->candidates()) {
         const auto descriptor = surveyio::formatRegistry().find(candidate.formatId);
-        const QString name =
-            descriptor ? qs(descriptor->humanName) : qs(candidate.formatId);
-        auto* item = new QTreeWidgetItem(candidates_);
-        item->setText(0, name);
-        item->setText(1, QString::number(candidate.confidence, 'f', 2));
-        item->setText(2, qs(candidate.evidence));
-        item->setToolTip(2, qs(candidate.evidence));
-        // What the format carries and the parser's version, for every
-        // candidate and not only the chosen one: two formats a file could be
-        // may differ in exactly that.
+        const QString name = descriptor ? qs(descriptor->humanName) : qs(candidate.formatId);
         if (descriptor) {
-            item->setText(3, qs(surveyio::describeFormat(*descriptor)));
-            item->setToolTip(3, item->text(3));
+            addRow(*descriptor, QString::number(candidate.confidence, 'f', 2),
+                   qs(candidate.evidence));
         }
+        listed.insert(candidate.formatId);
         format_->addItem(name, qs(candidate.formatId));
+    }
+    for (const surveyio::FormatDescriptor& descriptor : surveyio::formatRegistry().formats()) {
+        if (listed.contains(descriptor.id)) {
+            continue;
+        }
+        QTreeWidgetItem* item = addRow(descriptor, "-", "not detected in this file");
+        item->setForeground(0, theme::textMuted());
+        item->setForeground(2, theme::textMuted());
+        // Still choosable: a detection can be wrong, and the choice is the
+        // person's. A format that cannot import is listed, not offered.
+        if (descriptor.canImport) {
+            format_->addItem(qs(descriptor.humanName), qs(descriptor.id));
+        }
     }
     if (identified) {
         const auto chosen = detection_->format();
@@ -717,14 +1012,43 @@ Status SurveyImportWizard::chooseFormat()
     if (!descriptor) {
         return descriptor.error();
     }
-    // The one reader this wizard drives. Every other registered format has a
-    // descriptor and a probe but no parser yet, so it is refused by name
-    // rather than handed to the delimited reader.
-    if (descriptor->id != surveyio::kDelimitedPointsFormatId || !descriptor->canImport) {
-        return makeError(ErrorCode::Unsupported,
-                         "Katana cannot import this format yet: only delimited text points "
-                         "have a reader",
+    if (!descriptor->canImport) {
+        return makeError(ErrorCode::Unsupported, "Katana cannot import this format",
                          descriptor->humanName);
+    }
+    // A format with a reader of its own is read whole by it (the instrument
+    // path); delimited points are read through the layout the person
+    // confirms. Anything else is refused by name, never handed to the
+    // delimited reader.
+    if (surveyio::formatRegistry().reader(descriptor->id) != nullptr) {
+        readerPath_ = true;
+        formatId_ = descriptor->id;
+        return {};
+    }
+    if (descriptor->id != surveyio::kDelimitedPointsFormatId) {
+        return makeError(ErrorCode::Unsupported,
+                         "Katana has no reader for this format: export the points as a "
+                         "delimited text file instead",
+                         descriptor->humanName);
+    }
+    readerPath_ = false;
+    formatId_ = descriptor->id;
+    systemSummary_->setVisible(false);
+    for (QWidget* field : std::initializer_list<QWidget*>{unit_, declared_, target_}) {
+        field->setEnabled(true);
+    }
+    importReport_->setVisible(false);
+    if (!bytesComplete_) {
+        // A large coordinate file: the layout page needs all of it, read here
+        // as it always was.
+        QFile file(file_->text().trimmed());
+        if (!file.open(QIODevice::ReadOnly)) {
+            return makeError(ErrorCode::FileImportFailure, "the file cannot be opened",
+                             fileName_ + ": " + file.errorString().toStdString());
+        }
+        const QByteArray bytes = file.readAll();
+        bytes_.assign(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+        bytesComplete_ = true;
     }
     auto proposal = surveyio::proposeLayout(bytes_, false);
     if (!proposal) {
@@ -1005,6 +1329,10 @@ void SurveyImportWizard::prepareReport()
 
 void SurveyImportWizard::importNow()
 {
+    if (readerPath_) {
+        importJob();
+        return;
+    }
     if (!project_) {
         return;
     }
@@ -1068,6 +1396,412 @@ void SurveyImportWizard::showMessage(const QString& text)
 {
     message_->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
     message_->setText(text);
+}
+
+// ---- the instrument path -----------------------------------------------------------------------
+
+void SurveyImportWizard::readWithReader()
+{
+    const QString path = file_->text().trimmed();
+    const QFileInfo info(path);
+    const std::string name = fileName_;
+    const std::string id = formatId_;
+    // The bytes the File step read, when it read them all; a large file is
+    // read on the pool thread instead.
+    std::shared_ptr<const std::string> have =
+        bytesComplete_ ? std::make_shared<const std::string>(bytes_) : nullptr;
+    const std::filesystem::path folder(info.absolutePath().toStdWString());
+    const std::uint64_t generation = ++readGeneration_;
+    const bool background = info.size() > kBackgroundReadBytes;
+    const auto descriptor = surveyio::formatRegistry().find(id);
+    const QString format = descriptor ? qs(descriptor->humanName) : qs(id);
+    message_->clear();
+    // Runs on a pool thread for a large file: it touches nothing of this
+    // dialog or the drawing, only what it was given, until its continuation.
+    task_->run(
+        QString("Reading %1 (%2) as %3").arg(qs(name), sizeText(info.size()), format), background,
+        [this, path, name, id, have, folder, generation]() -> SurveyTaskBar::Finish {
+            std::shared_ptr<const std::string> bytes = have;
+            if (bytes == nullptr) {
+                QFile file(path);
+                if (!file.open(QIODevice::ReadOnly)) {
+                    return [this, error = makeError(ErrorCode::FileImportFailure,
+                                                    "the file cannot be opened",
+                                                    path.toStdString() + ": " +
+                                                        file.errorString().toStdString())] {
+                        showError(error);
+                    };
+                }
+                auto whole = std::make_shared<std::string>();
+                whole->resize(static_cast<std::size_t>(file.size()));
+                const qint64 got = file.read(whole->data(), static_cast<qint64>(whole->size()));
+                whole->resize(static_cast<std::size_t>(std::max<qint64>(got, 0)));
+                bytes = std::move(whole);
+            }
+            surveyio::ReadOptions options;
+            // The job's other files - a DBX folder, a RINEX navigation file -
+            // by name, from the folder the file is in and nowhere else.
+            options.siblings = surveyio::siblingsInFolder(folder);
+            auto read =
+                surveyio::readSurvey(surveyio::formatRegistry(), id, *bytes, name, options);
+            if (!read) {
+                return [this, error = read.error(), generation] {
+                    if (generation == readGeneration_) {
+                        showError(error);
+                    }
+                };
+            }
+            auto result = std::make_shared<surveyio::ReadResult>(std::move(*read));
+            SurveyContent counts = surveyContentOf(result->project);
+            return [this, bytes, result, counts, generation] {
+                if (generation != readGeneration_) {
+                    return;
+                }
+                sourceBytes_ = bytes;
+                read_ = result;
+                // The project inside the result, kept alive by it.
+                raw_ = std::shared_ptr<const survey::SurveyProject>(result, &result->project);
+                contentCounts_ = counts;
+                outcome_.reset();
+                showContent();
+                goTo(ContentPage);
+            };
+        });
+}
+
+void SurveyImportWizard::showContent()
+{
+    const surveyio::ReadResult& read = *read_;
+    const SurveyContent& counts = contentCounts_;
+    const auto descriptor = surveyio::formatRegistry().find(read.formatId);
+    contentSummary_->setText(
+        QString("%1 (parser %2) read %3 record(s) of %4; %5 skipped, each with a warning.")
+            .arg(descriptor ? qs(descriptor->humanName) : qs(read.formatId),
+                 qs(read.parserVersion))
+            .arg(read.recordsRead)
+            .arg(qs(fileName_))
+            .arg(read.recordsSkipped));
+    content_->clear();
+    const auto number = [](std::size_t n) { return QString::number(n); };
+    contentRow(content_, "Setups", number(counts.setups));
+    QTreeWidgetItem* observations =
+        contentRow(content_, "Observations", number(counts.observations));
+    for (const auto& [kind, n] : counts.observationsByKind) {
+        contentChild(observations, qs(kind), number(n));
+    }
+    contentRow(content_, "Points with coordinates", number(counts.positionedPoints));
+    contentRow(content_, "Points without coordinates", number(counts.unpositionedPoints));
+    contentRow(content_, "Coded features", number(counts.features));
+    QTreeWidgetItem* control =
+        contentRow(content_, "Control the file declares", number(counts.controlPoints));
+    for (const survey::ControlPoint& point : raw_->controlPoints) {
+        contentChild(control, qs(point.pointId), QString());
+    }
+    if (counts.traverses > 0) {
+        contentRow(content_, "Traverses", number(counts.traverses));
+    }
+    QTreeWidgetItem* sessions =
+        contentRow(content_, "GNSS sessions", number(counts.gnssSessions));
+    for (const survey::GnssSession& session : raw_->gnssSessions) {
+        QString detail = QString("receiver %1, antenna %2, %3 epoch(s)")
+                             .arg(session.receiverType.empty() ? QString("not stated")
+                                                               : qs(session.receiverType),
+                                  session.antenna.type.empty() ? QString("not stated")
+                                                               : qs(session.antenna.type))
+                             .arg(session.epochCount);
+        if (session.firstEpoch.year != 0) {
+            detail += QString(", %1 to %2").arg(qs(survey::toString(session.firstEpoch)),
+                                                qs(survey::toString(session.lastEpoch)));
+        }
+        contentChild(sessions,
+                     session.markerName.empty() ? QString("(no marker name)")
+                                                : qs(session.markerName),
+                     detail);
+    }
+    QTreeWidgetItem* siblings =
+        contentRow(content_, "Files read beside it", number(read.siblingsRead.size()));
+    for (const surveyio::SiblingFile& sibling : read.siblingsRead) {
+        contentChild(siblings, qs(sibling.name),
+                     sizeText(static_cast<std::int64_t>(sibling.bytes.size())));
+    }
+    contentRow(content_, "Units the file states", unitsText(raw_->units));
+    contentRow(content_, "Coordinate system the file declares",
+               raw_->coordinateSystem.unknown ? QString("not stated")
+                                              : qs(raw_->coordinateSystem.name));
+    QTreeWidgetItem* missing =
+        contentRow(content_, "Not in the file", number(read.notCarried.size()));
+    for (const std::string& line : read.notCarried) {
+        contentChild(missing, qs(line), QString());
+    }
+    QTreeWidgetItem* warnings = contentRow(content_, "Warnings", number(read.warnings.size()));
+    const std::size_t listed = std::min(read.warnings.size(), kListedWarnings);
+    for (std::size_t i = 0; i < listed; ++i) {
+        const surveyio::ReadWarning& warning = read.warnings[i];
+        contentChild(warnings,
+                     QString("%1 record %2").arg(qs(warning.fileName)).arg(warning.record),
+                     qs(warning.message));
+    }
+    if (listed < read.warnings.size()) {
+        contentChild(warnings, "...",
+                     QString("%1 more, in the reduction report")
+                         .arg(read.warnings.size() - listed));
+    }
+    if (!read.warnings.empty()) {
+        warnings->setForeground(0, theme::error());
+        warnings->setForeground(1, theme::error());
+    }
+    // Open what there is to read; the counts alone say the rest.
+    for (QTreeWidgetItem* item : {observations, missing, warnings, siblings}) {
+        item->setExpanded(item->childCount() > 0 && item->childCount() <= 50);
+    }
+    content_->resizeColumnToContents(0);
+}
+
+void SurveyImportWizard::prepareSystemForReader()
+{
+    // The reader states the file's units and has converted to metres and
+    // radians; nothing is transformed - the observations are reduced into the
+    // drawing's system, which is what the reduction's scale factor, geoid and
+    // GNSS conversions come from.
+    for (QWidget* field : std::initializer_list<QWidget*>{unit_, declared_, target_}) {
+        field->setEnabled(false);
+    }
+    const std::string& drawing = context_.document->metadata().coordinateSystem;
+    systemSummary_->setText(
+        QString("The file's own units: %1 - converted to metres and radians as it was read.\n"
+                "The file declares: %2.\n"
+                "The observations are reduced into the drawing's coordinate system: %3.\n"
+                "Nothing is transformed; the fields below are for coordinate files.")
+            .arg(unitsText(raw_->units),
+                 raw_->coordinateSystem.unknown ? QString("no coordinate system")
+                                                : qs(raw_->coordinateSystem.name),
+                 drawing.empty() ? QString("none set - a local drawing, so no scale factor from "
+                                           "a projection, geoid or GNSS conversion is available")
+                                 : qs(drawing)));
+    systemSummary_->setVisible(true);
+}
+
+Result<survey::ReductionContext> SurveyImportWizard::contextForReduction() const
+{
+    auto context = cad::reductionContextFor(*context_.document);
+    if (!context) {
+        return context.error();
+    }
+    context->input = reportInputFor(*read_, fileName_);
+    context->createdUtc =
+        QDateTime::currentDateTimeUtc().toString(Qt::ISODate).toStdString();
+    return context;
+}
+
+void SurveyImportWizard::prepareReduction()
+{
+    // The options start from the defaults and the control the file declares,
+    // once per file read: going back and forth keeps what the person set.
+    if (optionsGeneration_ != readGeneration_) {
+        survey::ReductionSettings settings;
+        settings.control = survey::controlFromFile(*raw_);
+        options_->setSettings(settings);
+        options_->setProject(*raw_);
+        optionsGeneration_ = readGeneration_;
+        previewReport_->showNote("Press Preview to reduce and adjust with these options and "
+                                 "read the report here before importing.");
+    }
+    // The drawing's points, as they are now.
+    auto context = cad::reductionContextFor(*context_.document);
+    options_->setDrawingPoints(context ? context->drawingPoints
+                                       : std::vector<survey::SurveyPoint>{});
+    if (!context) {
+        showError(context.error());
+    }
+}
+
+bool SurveyImportWizard::previewIsCurrent() const
+{
+    if (outcome_ == nullptr || outcomeRead_ != readGeneration_ ||
+        outcomeRevision_ != context_.document->modelRevision() ||
+        outcomeSystem_ != context_.document->metadata().coordinateSystem) {
+        return false;
+    }
+    const auto settings = options_->settings();
+    return settings && *settings == outcomeSettings_;
+}
+
+void SurveyImportWizard::runPreview(std::function<void()> then)
+{
+    if (raw_ == nullptr || read_ == nullptr) {
+        return;
+    }
+    const auto settings = options_->settings();
+    if (!settings) {
+        showError(settings.error());
+        return;
+    }
+    auto context = contextForReduction();
+    if (!context) {
+        showError(context.error());
+        return;
+    }
+    const std::shared_ptr<const survey::SurveyProject> raw = raw_;
+    const std::size_t size = surveySize(*raw);
+    const std::uint64_t generation = readGeneration_;
+    const std::uint64_t revision = context_.document->modelRevision();
+    std::string system = context_.document->metadata().coordinateSystem;
+    std::vector<survey::SurveyPoint> drawingPoints = context->drawingPoints;
+    message_->clear();
+    previewReport_->showNote("Reducing and adjusting...");
+    task_->run(
+        QString("Reducing and adjusting %1 observation(s) and point(s)").arg(size),
+        size > kBackgroundObservations,
+        [this, raw, settings = *settings, context = std::move(*context), generation, revision,
+         system = std::move(system), drawingPoints = std::move(drawingPoints),
+         then = std::move(then)]() mutable -> SurveyTaskBar::Finish {
+            auto outcome = survey::reduceAndAdjust(*raw, settings, context);
+            if (!outcome) {
+                return [this, error = outcome.error()] {
+                    previewReport_->showNote("The reduction could not run: " +
+                                             qs(error.describe()));
+                    showError(error);
+                };
+            }
+            auto shared = std::make_shared<const survey::ReductionOutcome>(std::move(*outcome));
+            // Rendered here, off the GUI thread; cut to what a view can lay out.
+            std::string html =
+                survey::renderHtml(displayReport(shared->report, kReportRowsOnScreen));
+            return [this, shared, html = std::move(html), settings, generation, revision,
+                    system = std::move(system), drawingPoints = std::move(drawingPoints),
+                    then = std::move(then)]() mutable {
+                if (generation != readGeneration_) {
+                    return;
+                }
+                outcome_ = shared;
+                outcomeSettings_ = settings;
+                outcomeDrawingPoints_ = std::move(drawingPoints);
+                outcomeRead_ = generation;
+                outcomeRevision_ = revision;
+                outcomeSystem_ = std::move(system);
+                previewReport_->setReportHtml(html);
+                importReport_->setReportHtml(html);
+                showMessage(QString("Preview: %1 point(s); %2; %3 observation(s) rejected.")
+                                .arg(shared->points.size())
+                                .arg(qs(adjustmentSummary(shared->report)))
+                                .arg(rejectedObservations(shared->report)));
+                if (then) {
+                    then();
+                }
+            };
+        });
+}
+
+void SurveyImportWizard::prepareReaderReport()
+{
+    const surveyio::ReadResult& read = *read_;
+    const auto descriptor = surveyio::formatRegistry().find(read.formatId);
+    const survey::ReductionReport& report = outcome_->report;
+    QString text;
+    text += QString("File: %1\n").arg(qs(fileName_));
+    text += QString("Format: %1 (parser %2)\n")
+                .arg(descriptor ? qs(descriptor->humanName) : qs(read.formatId),
+                     qs(read.parserVersion));
+    text += QString("Records read: %1, skipped: %2, warnings: %3\n")
+                .arg(read.recordsRead)
+                .arg(read.recordsSkipped)
+                .arg(read.warnings.size());
+    text += QString("Adjustment: %1\n").arg(qs(adjustmentSummary(report)));
+    text += QString("Points computed: %1; observations rejected: %2; reduction warnings: %3\n")
+                .arg(outcome_->points.size())
+                .arg(rejectedObservations(report))
+                .arg(report.warnings.size());
+    text += QString("Layer: %1%2\n")
+                .arg(layer_->text().trimmed(),
+                     layerPerCode_->isChecked() ? ", a layer per code beneath it" : "");
+    text += QString("Ids the drawing already has: %1\n")
+                .arg(existing_->currentText());
+    text += "Import keeps the file as a survey job: Survey > Survey Jobs adjusts it again.\n";
+    report_->setPlainText(text);
+    importReport_->setVisible(true);
+    blocked_ = outcome_ == nullptr;
+}
+
+void SurveyImportWizard::importJob()
+{
+    if (read_ == nullptr || raw_ == nullptr || sourceBytes_ == nullptr) {
+        return;
+    }
+    // The drawing may have changed since the preview (the dialog is not
+    // modal): the reduction is run again then, as the preview ran it.
+    if (!previewIsCurrent()) {
+        runPreview([this] { importJob(); });
+        return;
+    }
+    auto context = contextForReduction();
+    if (!context) {
+        showError(context.error());
+        return;
+    }
+    cad::SurveyImportOptions options;
+    options.layer = layer_->text().trimmed().toStdString();
+    options.layerPerCode = layerPerCode_->isChecked();
+    const auto policy =
+        policies()[static_cast<std::size_t>(std::max(0, existing_->currentIndex()))];
+
+    const surveyio::ReadResult& read = *read_;
+    const std::string now = context->createdUtc;
+    cad::SurveyJobImport request;
+    request.job.name = fileName_;
+    request.job.formatId = read.formatId;
+    request.job.parserVersion = read.parserVersion;
+    request.job.sourceFileName = fileName_;
+    request.job.sourceBytes = *sourceBytes_;
+    for (const surveyio::SiblingFile& sibling : read.siblingsRead) {
+        request.job.siblingFiles.push_back({sibling.name, sibling.bytes});
+    }
+    request.job.settings = outcomeSettings_;
+    request.job.layer = options.layer;
+    request.job.importedUtc = now;
+    request.raw = *raw_;
+    request.context = std::move(*context);
+    request.importOptions = options;
+    request.existingPoints = policy;
+    // The reduction the preview ran on a pool thread, not a second one here.
+    auto reduce = precomputedReduction(
+        {outcome_, outcomeSettings_, {}, outcomeDrawingPoints_});
+    auto command =
+        std::make_unique<cad::ImportSurveyJobCommand>(*context_.document, std::move(request),
+                                                     std::move(reduce));
+    cad::ImportSurveyJobCommand* job = command.get();
+    cad::Document& document = *context_.document;
+    if (const auto status = document.execute(std::move(command)); !status) {
+        showError(status.error());
+        return;
+    }
+    const std::vector<katana::entity::EntityId> created = document.lastCreatedEntities();
+    const survey::ReductionReport* report = job->report();
+    const auto descriptor = surveyio::formatRegistry().find(read.formatId);
+    const QString summary =
+        QString("Imported survey job %1 from %2 (%3, parser %4): %5 point(s) on %6; %7; %8 "
+                "observation(s) rejected; %9 warning(s). One command - Undo removes it; the "
+                "reduction report is in Survey > Survey Jobs.")
+            .arg(qs(job->jobId()), qs(fileName_),
+                 descriptor ? qs(descriptor->humanName) : qs(read.formatId),
+                 qs(read.parserVersion))
+            .arg(outcome_->points.size())
+            .arg(qs(options.layer),
+                 report != nullptr ? qs(adjustmentSummary(*report)) : QString("-"))
+            .arg(report != nullptr ? rejectedObservations(*report) : 0)
+            .arg(read.warnings.size() + (report != nullptr ? report->warnings.size() : 0));
+    context_.log(summary, false);
+    if (context_.views != nullptr) {
+        context_.views->zoomExtentsAll();
+    }
+    if (applyCodes_->isChecked() && applyCodes_->isEnabled() &&
+        context_.applySurveyCodes != nullptr && !created.empty()) {
+        document.selection().set(created);
+        document.notifySelectionChanged();
+        context_.applySurveyCodes->trigger();
+    }
+    blocked_ = true;
+    goTo(FilePage);
+    hide();
 }
 
 } // namespace katana::qt
