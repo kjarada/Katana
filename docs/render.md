@@ -42,7 +42,7 @@ this work, and each fixed below:
 | A stray 800 m square; 70-95 ms a frame on it | fixed grid of 162 full-length lines | sized to the scene, on the datum, one line per cell ([Grid](#grid)) |
 | The grid drawn across a flat pad or a pond floor (found in review) | the grid on the datum, drawn with depth, exactly in the plane of a surface flat at its lowest, which the slope-scaled offset pushes behind it | the grid is a backdrop that writes no depth ([Layers](#the-scene-in-layers)) |
 | Draped linework dashed where TIN edges cross it (found in review) | edge and line each at one depth across their width; at a low angle a pixel of slope beats the half footprint between their biases | the edges write no depth ([Layers](#the-scene-in-layers)) |
-| Survey points on a slope drawn 5x3 or notched (found in review) | a point's square tested pixel by pixel at its centre's depth | decided once, at its centre, and drawn whole ([Points](#lines-points-fill)) |
+| Survey points on a slope, or on the strings through them, drawn 5x3, notched or as ragged bars (found in review) | a point's square tested pixel by pixel at its centre's depth | decided once, at its centre, against the solids before it, and drawn whole ([Points](#lines-points-fill)) |
 | Beaded 1-2 px lines on a 125% display | framebuffer in logical pixels, scaled up | device pixels ([HiDPI](#hidpi)) |
 | A corridor as a sliver; sides cut off in a tall view | framed by the bounding sphere, before the view had a size | projected corners, re-framed at the first real size ([Framing](#framing)) |
 | A click in plan cost 104-178 ms in an open 3D view | every notification rebuilt the whole scene | the scene in layers; a selection rebuilds only its overlay ([Layers](#the-scene-in-layers)) |
@@ -197,27 +197,36 @@ through, and one whose codes AND to non-zero is dropped.
   exactly size x size wherever the point falls. It drew floor(c - h) to
   floor(c + h), one pixel too many on each axis (audit REN-10).
 * **A point is decided once, at its centre, and drawn whole**
-  (`Rasterizer::rasterisePoints`). Its square has one depth, the centre's;
+  (`Rasterizer::decidePoints`). Its square has one depth, the centre's;
   tested pixel by pixel against the surface it is draped on it lost its lower
   rows, because at elevation e the surface under a row k pixels below the
   centre is about k / tan(e) footprints nearer, past the surface's one-pixel
   push and the point's 1.5-footprint pull once k > 1: 6.4% of the pixels of
   draped survey points at the iso view, 20% at 0.25 rad and 25% at 0.12
   (`RenderDepth.SurveyPointsLyingOnASlopedSurfaceAreDrawnWhole`). A bigger
-  pull would show points through the walls in front of them instead. Points
-  come last in every tile, so once the pass's triangles and lines are drawn
-  the depth buffer they are tested against is final: each point reads it at
-  the pixel of its square nearest its centre (in parallel, read-only), and the
-  visible ones are then filled tile by tile in index order - the same on any
-  number of threads. Between two points of one pass the nearer still wins pixel
-  by pixel (a per-tile mask of the pixels a point has drawn), and a point
-  behind a building stays hidden
+  pull would show points through the walls in front of them instead.
+  **Solids hide a point; the linework of its own pass does not.** A list with
+  points is swept in two parts: its filled triangles first, then every point
+  is decided at the pixel of its square nearest its centre against that depth
+  - the earlier passes and the list's solids - and then one sweep draws the
+  lines and the points, the visible points whole. Decided after its own
+  pass's lines, a survey point tied with the string through its centre (same
+  pass, same pull) and vanished: the kerb points of `plot_PW_example_data`
+  at 12 notches in did, where before the review they drew as ragged bars
+  (`RenderDepth.SurveyPointsOnTheVerticesOfDrapedStringsAreDrawnWholeOverThem`).
+  Stream order is kept in every tile - filled triangles, line quads, points -
+  so nothing else changes, and the frame is the same on any number of
+  threads. The 3D view's drawing pass has no filled triangles and takes one
+  sweep, as before; a single list with solids and points takes two.
+  Between two points of one pass the nearer still wins pixel by pixel (a
+  per-tile mask of the pixels a point has drawn), and a point behind a
+  building stays hidden
   (`RenderDepth.APointOnTheGroundBehindABuildingIsHidden`). The price: a
   visible point draws over up to half its size of a nearer silhouette beside
-  its centre. Up to 4 096 points both steps run on the calling thread: a pool
-  dispatch wakes every worker and waits for each, and two of them made
-  `BM_SceneFrame` 5-9% slower on the median for its 400 points; inline it
-  measures as before. The pixels are the same either way
+  its centre. Up to 4 096 points the decisions are made on the calling
+  thread: a pool dispatch wakes every worker and waits for each, and two
+  extra dispatches made `BM_SceneFrame` 5-9% slower on the median for its
+  400 points. The pixels are the same either way
   (`RenderDepth.PointsDrawTheSamePixelsOnTheCallingThreadAndAcrossThreads`).
 * **A pass may write no depth** (`RenderOptions::depthWrite`): it draws where
   the test passes and leaves the depth buffer as it found it, so later passes
@@ -281,7 +290,15 @@ does. Two of the passes **write no depth**:
   crossed: 2.2%, 9.2% and 17.2% of the line pixels at 0.61, 0.25 and 0.12 rad
   (`SceneFrame.DrawingLinesDrapedOnASurfaceCrossItsEdgesUnbroken`). Nearer
   terrain still hides the edges, and linework is tested against the surface
-  alone, which it beats everywhere.
+  alone, which it beats everywhere. Painted in order, a later surface's
+  edges would cover an earlier one's where the two coincide (a design
+  repeating the existing triangles outside the works), while in the terrain
+  the surface drawn first wins that tie and is the one seen; so
+  `buildTerrain` emits the edges surface by surface in reverse, and the
+  edges on top are the seen surface's
+  (`SceneFrame.OfTwoCoincidentSurfacesTheEdgesShownAreThoseOfTheSurfaceShown`;
+  without it, `plot_PW_example_data`'s dark edges went pale under the design
+  surface's weaker ones).
 
 A GPU renderer must draw the layers in this order, with the same two passes'
 depth writes off.
@@ -412,27 +429,37 @@ repetitions), 2026-09-24:
 
 Measured the same way against the binary built before them (the last row of
 the table above), with a second copy of the new one as the A/A control; CPU
-ms, minimum / median of 27 samples (9 alternating rounds x 3 repetitions):
+ms, minimum / median:
 
-| Benchmark | before | after | after, A/A copy | before / after, median |
-|---|---|---|---|---|
-| `BM_SceneFrame/256` | 8.91 / 10.58 | 9.31 / 10.95 | 9.90 / 10.85 | 0.97, inside the A/A spread of the minimum (6%) |
-| `BM_SceneFrame/512` | 16.20 / 20.30 | 16.45 / 20.29 | 18.97 / 20.61 | 1.00 |
-| `BM_SceneFrame`, both point steps dispatched to the pool (256 / 512) | | 10.88 / 11.48, 19.26 / 21.46 | | 0.92 / 0.95: why they run inline |
-| `BM_RenderGroundFramedSerial/256` (the fill loop and its depth-write test) | 42.28 / 48.27 | 33.81 / 51.32 | 32.32 / 47.90 | 0.94, inside the A/A spread (7%) |
-| `BM_RenderGroundFramedSerial/724` | 199.15 / 247.04 | 126.14 / 241.48 | 136.97 / 245.33 | 1.02 |
+| Benchmark (samples) | before | after | after, A/A copy |
+|---|---|---|---|
+| `BM_SceneFrame/256` (27) | 9.66 / 11.54 | 9.60 / 10.95 | 9.74 / 11.38 |
+| `BM_SceneFrame/512` (27) | 17.09 / 25.21 | 17.52 / 26.12 | 17.42 / 19.96 |
+| `BM_RenderGroundFramedSerial/256` (21) | 34.73 / 43.59 | 22.94 / 40.69 | 28.32 / 45.39 |
+| `BM_RenderGroundFramedSerial/724` (21) | 146.77 / 244.35 | 113.59 / 211.54 | 110.61 / 195.15 |
+| `BM_SceneLayersFrame/64` (21) | - | 14.63 / 24.12 | 11.68 / 28.45 |
+| `BM_SceneLayersFrame/256` (21) | - | 13.62 / 25.29 | 15.47 / 25.77 |
+| `BM_SceneLayersFrame/512` (21) | - | 20.73 / 40.76 | 26.93 / 43.14 |
 
-The two ground rows were run on the build that still dispatched the point
-steps: its fill loop is this one, and the ground has no points. The
-five-round run over every render benchmark before these rows had an A/A
-spread of up to 1.6x on a minimum (`BM_SceneFrame/512`: 33.01 against 21.20
-for one binary), so only the nine-round rows are recorded. `BM_SceneLayersFrame`
-is new with this change: it draws the same survey as `BM_SceneFrame` through
+No row is slower than before by more than its A/A spread: `BM_SceneFrame`
+draws one list with solids and points, so it now sweeps twice, and its
+minimums are within 3%; the serial fill (the depth-write test in the fill
+loop) did not move. None is claimed faster either - this laptop's A/A
+spread reached 1.6x on a minimum in a five-round run. While both point steps
+were still dispatched to the pool, `BM_SceneFrame` measured 5-9% slower on
+the median (10.88 / 11.48 and 19.26 / 21.46), which is why the decisions of
+up to 4 096 points are made inline. `BM_SceneLayersFrame` is new with these
+fixes: it draws the same survey as `BM_SceneFrame` through
 `cad::renderLayers` - five passes, the edges drawn at 64 cells - which is
-what a paint of the 3D view costs; it has no before. Five rounds, CPU ms
-minimum / median, with its A/A copy: 64 cells (edges drawn) 15.56 / 17.11
-and 15.72 / 17.47; 256 cells 15.48 / 18.45 and 14.50 / 17.36; 512 cells
-24.11 / 28.98 and 24.28 / 28.27.
+what a paint of the 3D view costs; it has no before.
+
+What the fixes changed in the headless pictures of the four archives
+(against the build before them, 1200x800): `plot_PW_example_data` about
+16 000 pixels at 12 notches in, perspective and orthographic - its yellow
+survey points along the kerbs whole 5 x 5 squares over the strings instead
+of ragged bars, and its draped contours unbroken across the TIN edges -
+3 169 from the top and 243-421 at the iso and low views; every other view of
+every archive under 530 pixels.
 
 ### The real archives (headless widget, 1200x800)
 
@@ -474,10 +501,12 @@ read them as sizes, not ratios). What changed, looking at the pictures:
   large flat site fills more of the view than the far half.
 * `draw_list.hpp` still describes `DrawLine::depthBias` as NDC depth; it is
   pixel footprints of view distance (above).
-* The GPU renderer must match three rules of this path: the grid and edges
-  passes write no depth; a point sprite is decided at its centre and drawn
-  whole (or pulled by its half size in pixels of depth slope, which shows it
-  through thin walls); and the layers are drawn in `renderLayers`' order.
+* The GPU renderer must match four rules of this path: the grid and edges
+  passes write no depth; the edges come surface by surface in reverse (as
+  `buildTerrain` emits them); a point sprite is decided at its centre against
+  the solids before it, not its own pass's lines, and drawn whole (a larger
+  pull instead shows points through thin walls); and the layers are drawn in
+  `renderLayers`' order.
 * A mesh styled ShadedWithEdges (meshes default to Shaded) keeps its edges in
   the terrain list, where they write depth: linework at its own heights lying
   exactly in a mesh face can still lose pixels where it crosses a mesh edge.

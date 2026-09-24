@@ -568,8 +568,8 @@ TEST(RenderDepth, APassThatWritesNoDepthIsCoveredByWhateverIsDrawnAfterIt)
 
 TEST(RenderDepth, PointsDrawTheSamePixelsOnTheCallingThreadAndAcrossThreads)
 {
-    // Up to 4096 points are decided and filled on the calling thread (a
-    // dispatch costs more; rasterisePoints), more across the pool. The same
+    // Up to 4096 points are decided on the calling thread (a dispatch costs
+    // more; decidePoints), more across the pool. The same
     // frame both ways: 64 x 64 = 4096 points on the sloped site, then the
     // same plus one point 50 m under the ground in the middle of the view -
     // 4097, so the pool's path, and hidden, so it adds no pixel. Colour and
