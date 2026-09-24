@@ -60,6 +60,7 @@
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/dxf/reader.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/style_catalogue.hpp"
@@ -2094,6 +2095,10 @@ QString importFilter()
 void MainWindow::importPath(const QString& path)
 {
     const std::filesystem::path file = toPath(path);
+    if (katana::dxf::isDxfPath(file)) {
+        importDxfFile(file);
+        return;
+    }
     switch (interop::kindForPath(file)) {
     case interop::SourceKind::Vector:
         importVectorFile(file);
@@ -2405,6 +2410,10 @@ void MainWindow::importFile()
         return;
     }
     const std::filesystem::path path = toPath(selected);
+    if (katana::dxf::isDxfPath(path)) {
+        importDxfFile(path);
+        return;
+    }
     switch (interop::kindForPath(path)) {
     case interop::SourceKind::Vector:
         importVectorFile(path);
@@ -2781,9 +2790,11 @@ void MainWindow::exportVectorFile()
 
     const std::filesystem::path path = toPath(selected);
     interop::VectorExportOptions options;
-    if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
+    if (interop::kindForPath(path) == interop::SourceKind::Archive12d ||
+        katana::dxf::isDxfPath(path)) {
         // A 12d archive has none of the GDAL formats' choices - it keeps arcs
-        // as arcs and every property - so the only question is how much.
+        // as arcs and every property - and nor has the native DXF writer, so
+        // the only question is how much.
         if (!document_.selection().empty()) {
             const auto answer = QMessageBox::question(
                 this, "Export",
@@ -2814,6 +2825,9 @@ void MainWindow::exportVectorFile()
 bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
                                  interop::VectorExportOptions options)
 {
+    if (katana::dxf::isDxfPath(path)) {
+        return exportDxfFile(path, options);
+    }
     if (interop::kindForPath(path) == interop::SourceKind::Archive12d) {
         // A 12d archive carries what the other formats cannot: the alignments
         // and the surfaces of the session go with the drawing.
@@ -3131,6 +3145,10 @@ std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
 
 void MainWindow::importWithOptions(const QString& path)
 {
+    if (katana::dxf::isDxfPath(toPath(path))) {
+        importDxfFile(toPath(path)); // none of GDAL's options apply to it
+        return;
+    }
     auto dialog = makeImportOptions(path);
     if (dialog == nullptr) {
         return; // reported

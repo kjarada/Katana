@@ -8,6 +8,7 @@ katana_add_test_suite(dxf
         test_reader.cpp
         test_writer.cpp
         test_robustness.cpp
+        test_import_command.cpp
 )
 target_compile_definitions(katana_dxf_tests PRIVATE
     KATANA_DXF_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
