@@ -270,47 +270,20 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
     }
     rebuildIfNeeded();
 
-    // The depth range is fitted to what is drawn EVERY frame: after an orbit,
-    // a pan or a zoom it was left where frame() put it, and eight wheel
-    // notches out pushed the model past the far plane.
-    katana::math::AABB depthBox = layers_.bounds;
-    depthBox.expand(layers_.grid.bounds());
-    camera().fitDepthRange(depthBox);
-    const bool drawEdges = katana::cad::SceneBuilder::fadeEdges(layers_, camera());
-
+    // The depth range fitted, the edges faded and the layers drawn in their
+    // order and with their depth rules: cad::renderLayers, so the tests draw
+    // exactly what the view does.
     katana::render::RenderOptions options;
     options.background =
         katana::render::rgba(kBackground.red(), kBackground.green(), kBackground.blue());
-    // One depth buffer, layer after layer in a fixed order, so equal depths
-    // resolve the same way every frame (the first drawn wins, Rule 7).
-    stats_ = katana::render::RenderStats{};
     std::string failure;
-    const auto pass = [&](const katana::render::DrawList& list) {
-        if (!failure.empty() || (list.empty() && !options.clear)) {
-            return;
-        }
-        const auto result = rasterizer_.render(list, camera(), framebuffer_, options);
-        if (!result) {
-            failure = result.error().describe();
-            return;
-        }
-        stats_.vertices += result->vertices;
-        stats_.trianglesSubmitted += result->trianglesSubmitted;
-        stats_.trianglesRasterised += result->trianglesRasterised;
-        stats_.linesSubmitted += result->linesSubmitted;
-        stats_.pointsSubmitted += result->pointsSubmitted;
-        stats_.fragments += result->fragments;
-        stats_.binEntries += result->binEntries;
-        stats_.tiles = result->tiles;
-        options.clear = false;
-    };
-    pass(layers_.grid);
-    pass(layers_.terrain);
-    if (drawEdges) {
-        pass(layers_.edges);
+    if (auto result = katana::cad::renderLayers(layers_, camera(), rasterizer_, framebuffer_,
+                                                options)) {
+        stats_ = *result;
+    } else {
+        stats_ = katana::render::RenderStats{};
+        failure = result.error().describe();
     }
-    pass(layers_.entities);
-    pass(layers_.selection);
 
     if (!failure.empty()) {
         painter.fillRect(rect(), QColor(60, 20, 20));
