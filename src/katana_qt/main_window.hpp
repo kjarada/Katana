@@ -276,6 +276,12 @@ class MainWindow final : public QMainWindow {
     // it failed, which has been reported too.
     bool exportDrawingTo(const std::filesystem::path& path,
                          katana::interop::VectorExportOptions options);
+    // A .dxf, read and written natively rather than through GDAL
+    // (main_window_dxf.cpp). The export honours the options' entities,
+    // layers and origin shift; the rest are GDAL's.
+    void importDxfFile(const std::filesystem::path& path);
+    bool exportDxfFile(const std::filesystem::path& path,
+                       const katana::interop::VectorExportOptions& options);
 
     // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ---------------
     // The imports ask for a file of their kind, describe it, and offer its

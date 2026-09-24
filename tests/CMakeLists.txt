@@ -1041,3 +1041,23 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# A .dxf through the window both ways goes to the native module, not GDAL:
+# the hand-written R2000 fixture imported (9 entities - see
+# tests/dxf/test_reader.cpp) and the drawing exported from the command line,
+# each reported in the native module's words.
+if(TARGET katana)
+    add_test(NAME qt_dxf_import_and_export_go_through_the_native_module_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_dxf"
+            "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf"
+            "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_dxf_export.dxf"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_dxf_headless.png"
+            "-DEXPECT=Imported 9 entities from r2000_site\\.dxf \\(DXF R2000\\).*Exported 9 entities and 3 layers to qt_dxf_export\\.dxf \\(DXF R2000\\)"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_dxf_import_and_export_go_through_the_native_module_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

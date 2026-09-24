@@ -1,7 +1,7 @@
 # Headless command-line front end. Proves the engine is complete without a GUI.
-add_executable(katana_cli main.cpp)
+add_executable(katana_cli main.cpp dxf_verbs.cpp dxf_verbs.hpp)
 katana_target_defaults(katana_cli)
-target_link_libraries(katana_cli PRIVATE katana_cad katana_archive12d)
+target_link_libraries(katana_cli PRIVATE katana_cad katana_archive12d katana_dxf)
 
 # Interoperability is optional: with -DKATANA_BUILD_IO=OFF the CLI still builds
 # and simply has no IMPORT/EXPORT verbs, which is what the sanitizer job needs.
@@ -194,6 +194,24 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.the_help_names_the_customisation_files_by_what_they_are PROPERTIES
         PASS_REGULAR_EXPRESSION "a loaded library linestyle or ByLayer.*CUSTOMISE \\[REPLACE\\] <file> \\[<file>\\.\\.\\.\\]  load style${_eol} +libraries \\(\\.4d\\) and survey code files \\(\\.mapfile\\)"
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
+endif()
+
+# A .dxf through the command line both ways, natively - no GDAL, so it runs
+# in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
+# area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;
+# exported, a new drawing, imported back. Three layers go out: 0, Survey and
+# Survey/Kerb - the last as "Survey$Kerb" with its path beside it.
+if(KATANA_BUILD_TESTS)
+    set(_dxf "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dxf")
+    add_test(NAME cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LAYER NEW Survey/Kerb #FF0000"
+                -c "LAYER SET Survey/Kerb" -c "RECT 0,0 30,20" -c "CIRCLE 15,10 5"
+                -c "TEXT 5,5 2.5 \"LOT 42\"" -c "EXPORT \"${_dxf}\"" -c "NEW"
+                -c "IMPORT \"${_dxf}\"" -c "LIST")
+    set_tests_properties(cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "exported 3 entities and 3 layers \\(DXF R2000.*imported 3 entities from cli round trip\\.dxf \\(DXF R2000\\).*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
 endif()
 
 # INFO, COPC and IMPORT ... LOCAL, on the sample GIS data. Expected values are

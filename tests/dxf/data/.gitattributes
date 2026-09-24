@@ -1,0 +1,3 @@
+# The fixtures are exact bytes: one has CRLF line ends on purpose, and a
+# checkout that rewrote them would test something else.
+*.dxf -text
