@@ -64,9 +64,24 @@ class RenderViewWidget final : public QWidget {
     void setContext(const ViewContext& context);
     [[nodiscard]] katana::cad::ViewState& state() const { return state_; }
     [[nodiscard]] katana::render::Camera& camera() { return state_.camera; }
-    // Lines in the last scene built: the headless checks' proof that a layer
-    // hidden in this view left it, and that an edit reached this view.
-    [[nodiscard]] std::size_t lastSceneLineCount() const { return list_.lines.size(); }
+    // Lines in the last scene built, every layer counted: the headless
+    // checks' proof that a layer hidden in this view left it, and that an
+    // edit reached this view.
+    [[nodiscard]] std::size_t lastSceneLineCount() const
+    {
+        return layers_.grid.lines.size() + layers_.terrain.lines.size() +
+               layers_.edges.lines.size() + layers_.entities.lines.size() +
+               layers_.selection.lines.size();
+    }
+    // The scene as last built, by layer.
+    [[nodiscard]] const katana::cad::SceneLayers& sceneLayers() const { return layers_; }
+    // How many times each layer has been built: the proof that a selection
+    // click rebuilds the overlay and nothing under it.
+    [[nodiscard]] int terrainBuilds() const { return terrainBuilds_; }
+    [[nodiscard]] int entityBuilds() const { return entityBuilds_; }
+    [[nodiscard]] int selectionBuilds() const { return selectionBuilds_; }
+    // The framebuffer the last paint rendered, in device pixels.
+    [[nodiscard]] const katana::render::Framebuffer& framebuffer() const { return framebuffer_; }
     // True when the last scene built had nothing to show - no drawn entity,
     // surface or mesh, only the grid. What the framing goes by.
     [[nodiscard]] bool sceneEmpty() const { return sceneEmpty_; }
@@ -89,10 +104,12 @@ class RenderViewWidget final : public QWidget {
         return context_.options.verticalExaggeration;
     }
 
-    // Milliseconds the last frame took, and what it contained. Shown in the
-    // status bar: PLAN.MD section 32 sets a 16 ms budget, and a number you can
-    // see is the only kind anyone acts on.
+    // Milliseconds the last paint took - any scene build it did, the render
+    // and the blit - and what it contained. Shown in the status bar: a number
+    // you can see is the only kind anyone acts on, and a number that left out
+    // the build hid the 60-115 ms a selection click cost.
     [[nodiscard]] double lastFrameMilliseconds() const { return lastFrameMs_; }
+    [[nodiscard]] double lastBuildMilliseconds() const { return lastBuildMs_; }
     [[nodiscard]] const katana::render::RenderStats& lastStats() const { return stats_; }
 
     // Raised when this view is clicked or the user moves the keyboard focus
@@ -119,6 +136,15 @@ class RenderViewWidget final : public QWidget {
 
   private:
     void rebuildIfNeeded();
+    // A document notification: the drawing changed (its revision moved), or
+    // only something else did - the selection, the current layer.
+    void documentChanged();
+    // Sizes the framebuffer and the camera for the widget's size in DEVICE
+    // pixels. False when it could not.
+    bool resizeTarget();
+    [[nodiscard]] double pixelRatio() const;
+    // The elevation ramp's legend, when a surface is coloured by it.
+    void drawLegend(QPainter& painter) const;
     // Registers with the context's document, or ends the registration when
     // there is none; a no-op when it is the document already listened to.
     void listenTo(katana::cad::Document* document);
@@ -133,15 +159,25 @@ class RenderViewWidget final : public QWidget {
     katana::cad::ViewState& state_;
 
     katana::cad::SceneBuilder builder_;
-    katana::render::DrawList list_;
-    // The grid on its own, to tell an empty scene from one with something in
-    // it (rebuildIfNeeded). Kept so its buffers are reused.
-    katana::render::DrawList gridOnly_;
+    katana::cad::SceneLayers layers_;
     katana::render::Rasterizer rasterizer_;
     katana::render::Framebuffer framebuffer_;
     katana::render::RenderStats stats_;
     double lastFrameMs_ = 0.0;
-    bool sceneDirty_ = true;
+    double lastBuildMs_ = 0.0;
+    // What needs building before the next paint, layer by layer; each one
+    // dirties the layers built from it (rebuildIfNeeded).
+    bool terrainDirty_ = true;
+    bool entitiesDirty_ = true;
+    bool selectionDirty_ = true;
+    int terrainBuilds_ = 0;
+    int entityBuilds_ = 0;
+    int selectionBuilds_ = 0;
+    // The drawing's revision the entities were built from.
+    std::uint64_t builtRevision_ = 0;
+    // Until the user moves the camera, a resize frames the scene again: the
+    // first frame is often made before the dock has its real size.
+    bool refitOnResize_ = false;
     bool sceneEmpty_ = true;
     bool emptyMessageShown_ = false;
     // The first paint frames the scene unless the camera was framed already
