@@ -353,7 +353,8 @@ class Writer {
             if (attribute.type != "text" && attribute.type != "integer") {
                 return makeError(ErrorCode::InvalidArgument,
                                  "an attribute of type \"" + attribute.type +
-                                     "\" is neither text nor integer, the two kinds a mapfile holds",
+                                     "\" is neither text nor integer, the two kinds a survey "
+                                     "code file holds",
                                  "rule \"" + key_ + "\"");
             }
             if (attribute.name.empty()) {
