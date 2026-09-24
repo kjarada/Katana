@@ -636,6 +636,17 @@ TEST(SheetGenerators, APlotFrameSheetIsPlacedByTheFramesOutlineNotByItsFileOrigi
                                       Point2(-197.0, 470.0), Point2(-197.0, 50.0)},
                                      "FRAMES", "MOVED"))
                     .ok());
+    // The first frame mirrored across x = 0: along is (-1, 0) and its last
+    // corner is up at (0, 297), to the RIGHT of along - so up is (0, 1),
+    // not along's left (0, -1). The window's centre is (-216.5, 161),
+    // inside the mirrored outline, and the plan is turned half a turn (the
+    // direction of (-420, 0)).
+    ASSERT_TRUE(model.entities
+                    .add(frameEntity(moved,
+                                     {Point2(0.0, 0.0), Point2(-420.0, 0.0),
+                                      Point2(-420.0, 297.0), Point2(0.0, 297.0)},
+                                     "FRAMES", "MIRRORED"))
+                    .ok());
     // An outline that is no longer the frame's four corners - here a
     // triangle - cannot say where its paper is.
     ASSERT_TRUE(model.entities
@@ -646,7 +657,7 @@ TEST(SheetGenerators, APlotFrameSheetIsPlacedByTheFramesOutlineNotByItsFileOrigi
     std::vector<std::string> skipped;
     const auto sheets = sheetsFromPlotFrames(model, {}, &skipped);
     ASSERT_TRUE(sheets.ok()) << sheets.error().describe();
-    ASSERT_EQ(sheets->size(), 2u);
+    ASSERT_EQ(sheets->size(), 3u);
     ASSERT_EQ(skipped.size(), 1u);
     EXPECT_NE(skipped.front().find("outline"), std::string::npos) << skipped.front();
 
@@ -660,6 +671,11 @@ TEST(SheetGenerators, APlotFrameSheetIsPlacedByTheFramesOutlineNotByItsFileOrigi
     EXPECT_EQ((*sheets)[1].name, "MOVED");
     EXPECT_NEAR(turned.rotation, std::numbers::pi / 2.0, 1e-15);
     expectPoint(turned.centre, -61.0, 266.5);
+
+    const Viewport& mirrored = (*sheets)[2].viewports.front();
+    EXPECT_EQ((*sheets)[2].name, "MIRRORED");
+    EXPECT_NEAR(mirrored.rotation, std::numbers::pi, 1e-15);
+    expectPoint(mirrored.centre, -216.5, 161.0);
 }
 
 // ---- smartLayout -----------------------------------------------------------------------
