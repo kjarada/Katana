@@ -343,6 +343,7 @@ struct TargetRecord {
 
 struct AntennaRecord {
     std::optional<double> measuredHeight;
+    std::optional<double> reducedHeight;
     std::string measurementType;
     std::string equipmentId;
 };
@@ -682,28 +683,51 @@ survey::GnssAntenna JobXmlReader::antennaFor(std::string_view antennaId) const
     if (found == antennas_.end()) {
         return antenna;
     }
-    antenna.height = found->second.measuredHeight.value_or(0.0);
-    const auto gear = equipment_.find(found->second.equipmentId);
-    if (gear == equipment_.end()) {
+    const AntennaRecord& record = found->second;
+    antenna.height = record.measuredHeight.value_or(0.0);
+    std::string method;
+    if (const auto gear = equipment_.find(record.equipmentId); gear != equipment_.end()) {
+        antenna.type = gear->second.antennaType;
+        antenna.serialNumber = gear->second.antennaSerial;
+        method = gear->second.measurementMethod;
+    }
+    antenna.measuredTo = method;
+    if (record.reducedHeight) {
+        // ReducedHeight is the controller's vertical height from the mark to
+        // the antenna phase centre - measured against a real export: the APC
+        // of an ECEF position lies exactly ReducedHeight above the mark the
+        // controller reduced it to (0.0000 m horizontally, 0.0000 m in
+        // height). It is what a reduction needs, whatever the words for the
+        // measuring point were, so it is carried as a phase-centre height and
+        // the measured one is kept in the words.
+        antenna.height = *record.reducedHeight;
+        antenna.method = survey::AntennaHeightMethod::PhaseCentre;
+        antenna.measuredTo = (method.empty() ? std::string("measured") : method + ", measured") +
+                             (record.measuredHeight ? " " + std::to_string(*record.measuredHeight) + " m"
+                                                    : std::string{}) +
+                             "; height reduced to the phase centre by the controller";
         return antenna;
     }
-    antenna.type = gear->second.antennaType;
-    antenna.serialNumber = gear->second.antennaSerial;
-    antenna.measuredTo = gear->second.measurementMethod;
-    // The method names are Trimble's own ("BottomOfAntennaMount",
-    // "CenterOfBumper", ...). Only the unambiguous ones are mapped; the rest
-    // are Other with the words kept in measuredTo, because a slant height read
-    // as a vertical one is an error nobody sees.
-    const std::string_view method = gear->second.measurementMethod;
+    // Without it, the words decide, and they are Trimble's own - and
+    // translated: a Polish controller writes "Spod mocowania anteny" for the
+    // bottom of the antenna mount. Only unambiguous English names are mapped;
+    // anything else is Other with the words kept in measuredTo, because a
+    // slant height read as a vertical one is an error nobody sees.
+    std::string squeezed;
+    for (const char c : method) {
+        if (c != ' ') {
+            squeezed.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c);
+        }
+    }
     if (method.empty()) {
         antenna.method = survey::AntennaHeightMethod::Unknown;
-    } else if (method.find("PhaseCent") != std::string_view::npos) {
+    } else if (squeezed.find("phasecent") != std::string::npos) {
         antenna.method = survey::AntennaHeightMethod::PhaseCentre;
-    } else if (method.find("Bumper") != std::string_view::npos ||
-               method.find("Slant") != std::string_view::npos ||
-               method.find("Notch") != std::string_view::npos) {
+    } else if (squeezed.find("bumper") != std::string::npos ||
+               squeezed.find("slant") != std::string::npos ||
+               squeezed.find("notch") != std::string::npos) {
         antenna.method = survey::AntennaHeightMethod::Slant;
-    } else if (method == "BottomOfAntennaMount") {
+    } else if (squeezed == "bottomofantennamount") {
         antenna.method = survey::AntennaHeightMethod::Vertical;
     } else {
         antenna.method = survey::AntennaHeightMethod::Other;
@@ -761,6 +785,7 @@ void JobXmlReader::readFieldBookRecord(std::string_view name, std::string_view i
     } else if (name == "AntennaRecord") {
         AntennaRecord antenna;
         antenna.measuredHeight = number(record, "MeasuredHeight");
+        antenna.reducedHeight = number(record, "ReducedHeight");
         antenna.measurementType = text(record, "MeasurementType");
         antenna.equipmentId = text(record, "GPSEquipmentID");
         antennas_[std::string(id)] = std::move(antenna);
@@ -993,9 +1018,15 @@ void JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
     const std::string description1 = text(record, "Description1");
     const std::string description2 = text(record, "Description2");
 
-    // Feature and attribute library values, and notes: point metadata.
+    // Feature and attribute library values, notes and how the point was
+    // measured: point metadata. Built only for a point not yet described by
+    // a point record, or a record that carries features or notes - a later shot to the same
+    // point would only try to add keys the point already has, and building a
+    // map per shot to throw it away is most of the cost of a large job.
+    const std::map<std::string, std::string>* known = metadataOf(name);
+    const bool fresh = known == nullptr || !known->contains("jxl.method");
     std::map<std::string, std::string> extra;
-    {
+    if (fresh || record.has("Features") || record.has("Notes")) {
         std::string attributeName;
         for (std::size_t i = 0; i < record.size(); ++i) {
             const std::string_view path = record.path(i);
@@ -1028,13 +1059,19 @@ void JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
     if (!description2.empty()) {
         extra["description2"] = description2;
     }
-    if (!method.empty()) {
+    // The file a keyed-in point was imported from, as the controller recorded
+    // it: a name to show, never a path to open.
+    if (const std::optional<std::string_view> imported = record.take("Source");
+        imported && !trimmed(*imported).empty()) {
+        extra["jxl.source"] = survey::sourceFileName(trimmed(*imported));
+    }
+    if (fresh && !method.empty()) {
         extra["jxl.method"] = method;
     }
-    if (!surveyMethod.empty()) {
+    if (fresh && !surveyMethod.empty()) {
         extra["jxl.surveyMethod"] = surveyMethod;
     }
-    if (!classification.empty()) {
+    if (fresh && !classification.empty()) {
         extra["jxl.classification"] = classification;
     }
 

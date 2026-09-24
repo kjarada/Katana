@@ -406,7 +406,13 @@ TEST(TrimbleJobXml, anRtkVectorBecomesAGeocentricBaselineWithCovarianceAndBothAn
     EXPECT_EQ(vector.covariance, (survey::GnssCovariance3{4.0e-5, 9.0e-5, 1.6e-4, 1.0e-6, -2.0e-6, 3.0e-6}));
     EXPECT_EQ(vector.solution, survey::GnssSolution::Fixed);
     EXPECT_EQ(vector.referenceFrame, "WGS 84");
-    EXPECT_EQ(vector.fromAntenna.height, 1.65);
+    // The base antenna record states a ReducedHeight (1.720, measured 1.650):
+    // the controller's height to the phase centre, carried as such.
+    EXPECT_EQ(vector.fromAntenna.height, 1.72);
+    EXPECT_EQ(vector.fromAntenna.method, survey::AntennaHeightMethod::PhaseCentre);
+    EXPECT_NE(vector.fromAntenna.measuredTo.find("measured 1.65 m"), std::string::npos)
+        << vector.fromAntenna.measuredTo;
+    // The rover's states none: the measured height and the method's words.
     EXPECT_EQ(vector.toAntenna.height, 2.0);
     EXPECT_EQ(vector.toAntenna.type, "R12i Internal");
     EXPECT_EQ(vector.toAntenna.method, survey::AntennaHeightMethod::Vertical);
