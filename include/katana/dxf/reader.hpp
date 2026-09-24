@@ -66,8 +66,16 @@ inline constexpr std::string_view kMetaBlock = "dxf.block";
 inline constexpr std::string_view kMetaLinetype = "dxf.linetype";
 inline constexpr std::string_view kMetaLineweight = "dxf.lineweight";
 // The registered application name of the extended data this module writes
-// and reads: a layer's full Katana path, which a DXF layer name cannot hold.
+// and reads, for what the format's own groups cannot hold: a layer's full
+// Katana path (a DXF layer name cannot hold a "/"), the heights of an entity
+// known at only some of its vertices (the format has no "no height"), and a
+// colour no index is (R2000 has no true colour). Each follows its word: the
+// path its text, the heights the `elevations` list's text in pieces, the
+// colour "#RRGGBB".
 inline constexpr std::string_view kApplicationName = "KATANA";
+inline constexpr std::string_view kExtendedPath = "path";
+inline constexpr std::string_view kExtendedHeights = "elevations";
+inline constexpr std::string_view kExtendedColour = "colour";
 
 struct ImportOptions {
     // Largest distance a chord may stand off the arc it replaces, in model

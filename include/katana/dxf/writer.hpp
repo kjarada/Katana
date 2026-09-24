@@ -22,16 +22,23 @@
 //   Dimension                 exploded: extension lines, the dimension line,
 //                             two ticks and the measurement as TEXT.
 //
-// Layers go into the LAYER table with their colour (the nearest of the 255
-// indexed colours - R2000 has no true colour), visibility, lock, linetype and
-// lineweight; linetypes with patterns into LTYPE. A layer path is not a legal
-// DXF layer name - "/" is one of the characters the format refuses in a
-// symbol name - so "survey/kerb" is written "survey$kerb", the separator
-// bound references use, and the full path goes beside it as extended data
-// that this module's reader takes back. See layerNameFor.
+// Layers go into the LAYER table with their colour, visibility, lock,
+// linetype and lineweight; linetypes with patterns into LTYPE. Colours, the
+// layers' and the entities', are the nearest of the 255 indexed colours:
+// R2000 has no true colour.
 //
-// Entity colours are indexed colours too. Properties are not written: DXF has
-// no place for them that other programs read.
+// WHAT THE FORMAT CANNOT HOLD goes beside the entity or layer as extended
+// data under the registered application KATANA, which other programs pass by
+// and this module's reader takes back (reader.hpp, kExtendedPath and after):
+// a layer's path - "/" is one of the characters the format refuses in a
+// symbol name, so "survey/kerb" is written "survey$kerb", the separator bound
+// references use (see layerNameFor); a colour no index is exactly; and the
+// heights of an entity known at only some of its vertices, which is written
+// in plan, since the format has no "no height" and a Z of 0 would be a false
+// level.
+//
+// Properties are not written: DXF has no place for them that other programs
+// read.
 //
 // Strings are ASCII: a character outside it is written \U+XXXX, which every
 // release from R2000 reads, and the degree, plus-minus and diameter signs as
