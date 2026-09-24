@@ -332,7 +332,7 @@ TEST(SymbolLibrary, TheDetailsPaneStatesTheSurveyMarksPrintSizeWorkedByHandAt1To
     EXPECT_EQ(labelText(dialog, "detailPrint"),
               QStringLiteral("2 × 2 mm at 1:500, 1 × 1 m on the ground"));
     EXPECT_EQ(labelText(dialog, "detailExtent"), QStringLiteral("1 × 1 m"));
-    EXPECT_EQ(labelText(dialog, "detailUnits"), QStringLiteral("worldstyle: metres on the ground"));
+    EXPECT_EQ(labelText(dialog, "detailUnits"), QStringLiteral("World units: metres on the ground"));
     EXPECT_EQ(labelText(dialog, "detailMode"),
               QStringLiteral("vertex: drawn at each vertex of a string"));
     EXPECT_EQ(labelText(dialog, "detailOrigin"), QStringLiteral("(0, 0)"));

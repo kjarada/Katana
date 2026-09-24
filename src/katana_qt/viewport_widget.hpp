@@ -276,7 +276,7 @@ class ViewportWidget final : public QWidget {
     // Draws the definition along the entity's plan shape through the shared
     // style painter. FALSE when no pattern was laid - too fine, too long or
     // nothing to lay it along - so the caller draws the plain line instead:
-    // a 12d linestyle replaces the line rather than decorating it.
+    // a library linestyle replaces the line rather than decorating it.
     [[nodiscard]] bool drawLineStyle(QPainter& painter, const StylePaintTarget& target,
                                      const katana::cad::FlatDefinition& definition,
                                      const katana::entity::Geometry& geometry) const;
@@ -286,7 +286,7 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] double plainMarkHalfWidth() const;
     void drawSymbol(QPainter& painter, const StylePaintTarget& target, const std::string& symbol,
                     const Point2& centre, double size) const;
-    // Flattened 12d definitions, kept between frames and keyed on the
+    // Flattened library definitions, kept between frames and keyed on the
     // document's library generation, so thousands of coded points do not
     // re-flatten their symbol every frame. Mutable because painting is
     // logically const.

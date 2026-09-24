@@ -194,14 +194,16 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
 
     // Files: what comes into the buffer and what goes out of it.
     auto* files = new QHBoxLayout;
-    auto* importButton = new QPushButton(tr("Import Mapfile..."), this);
+    auto* importButton = new QPushButton(tr("Import Code File..."), this);
     importButton->setObjectName(QStringLiteral("importMapfile"));
-    importButton->setToolTip(tr("Read a 12d mapfile and merge its rules into the rules being "
-                                "edited, for review before Apply"));
+    importButton->setToolTip(tr("Read a survey code file (.mapfile) and merge its rules into "
+                                "the rules being edited, for review before Apply"));
     importReplace_ = new QCheckBox(tr("Replace instead of merging"), this);
     importReplace_->setObjectName(QStringLiteral("importReplace"));
-    auto* exportButton = new QPushButton(tr("Export Mapfile..."), this);
+    auto* exportButton = new QPushButton(tr("Export Code File..."), this);
     exportButton->setObjectName(QStringLiteral("exportMapfile"));
+    exportButton->setToolTip(tr("Write the rules being edited to a survey code file "
+                                "(.mapfile)"));
     auto* csvButton = new QPushButton(tr("Export Code List CSV..."), this);
     csvButton->setObjectName(QStringLiteral("exportCodeList"));
     files->addWidget(importButton);
@@ -240,12 +242,12 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
 
     connect(importButton, &QPushButton::clicked, this, [this] {
         if (!interactive_) {
-            log(tr("Import Mapfile needs a file chosen in an interactive session"), true);
+            log(tr("Import Code File needs a file chosen in an interactive session"), true);
             return;
         }
         const QString path = QFileDialog::getOpenFileName(
-            this, tr("Import Mapfile"), {},
-            tr("12d mapfiles (*.mapfile *.map *.xml);;All files (*)"));
+            this, tr("Import Survey Code File"), {},
+            tr("Survey code files (*.mapfile *.map *.xml);;All files (*)"));
         if (path.isEmpty()) {
             return;
         }
@@ -257,11 +259,11 @@ SurveyCodeManagerDialog::SurveyCodeManagerDialog(CustomisationContext context, Q
     });
     connect(exportButton, &QPushButton::clicked, this, [this] {
         if (!interactive_) {
-            log(tr("Export Mapfile needs a file chosen in an interactive session"), true);
+            log(tr("Export Code File needs a file chosen in an interactive session"), true);
             return;
         }
-        const QString path = QFileDialog::getSaveFileName(this, tr("Export Mapfile"), {},
-                                                          tr("12d mapfiles (*.mapfile)"));
+        const QString path = QFileDialog::getSaveFileName(
+            this, tr("Export Survey Code File"), {}, tr("Survey code files (*.mapfile)"));
         if (path.isEmpty()) {
             return;
         }
@@ -1085,7 +1087,7 @@ void SurveyCodeManagerDialog::explain(const std::string& code)
     if (!linestyle.name.empty()) {
         QString state;
         if (linestyle.plain) {
-            state = tr("12d's plain line: needs no definition");
+            state = tr("the plain continuous line: needs no definition");
         } else if (linestyle.defined && linestyle.vertexMode) {
             state = tr("a vertex symbol, not a linestyle: drawn as a plain line");
         } else if (linestyle.defined) {
