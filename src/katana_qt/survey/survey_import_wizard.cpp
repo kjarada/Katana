@@ -1476,12 +1476,14 @@ void SurveyImportWizard::showContent()
     const SurveyContent& counts = contentCounts_;
     const auto descriptor = surveyio::formatRegistry().find(read.formatId);
     contentSummary_->setText(
-        QString("%1 (parser %2) read %3 record(s) of %4; %5 skipped, each with a warning.")
+        QString("%1 (parser %2) read %3 record(s) of %4; %5")
             .arg(descriptor ? qs(descriptor->humanName) : qs(read.formatId),
                  qs(read.parserVersion))
             .arg(read.recordsRead)
             .arg(qs(fileName_))
-            .arg(read.recordsSkipped));
+            .arg(read.recordsSkipped == 0
+                     ? QString("none skipped.")
+                     : QString("%1 skipped, each with a warning below.").arg(read.recordsSkipped)));
     content_->clear();
     const auto number = [](std::size_t n) { return QString::number(n); };
     contentRow(content_, "Setups", number(counts.setups));
