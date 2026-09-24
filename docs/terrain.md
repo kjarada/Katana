@@ -115,12 +115,12 @@ query box by 5 cm loses only sub-millimetre boundary slivers and is not caught.
 `TheAnswerDoesNotDependOnHowTheGridBucketsTriangles` translates the whole site
 12 345 m so every triangle lands in a different cell.
 
-**Still open.** 2 141 ms is not fast; it is 5.7x less slow. The remaining cost
-is now spread across roughly two million pair clips rather than concentrated in
-one call, so the next step - if the measurement justifies one - is the
-`TaskPool`, which this loop suits: existing triangles are independent and the
-only shared state is the compensated sums, which would need per-range
-accumulators combined in index order to keep Rule 7.
+**Since done.** 2 141 ms was not fast; it was 5.7x less slow. The remaining
+cost was spread across roughly two million pair clips, which the `TaskPool`
+suits: existing triangles are independent and the only shared state is the
+compensated sums. It now runs on the pool with per-block sums combined in block
+order - see *compareSurfaces and contours on the TaskPool* below: about 220 ms
+on this benchmark, and the same bits at any thread count.
 
 **`buildTin` is second, and it is the one every user reaches** — it runs on
 import and on every surface rebuild. 1681 ms at 400 000 points is over
@@ -140,7 +140,8 @@ millisecond in surface queries — `extractSection`'s per-sample cost is not wor
 attacking. Contours cost ~45 ms fixed plus a small per-band amount: 25× the
 bands (5.0 m → 0.2 m interval) costs only 1.97× the time, which is the signature
 of a single pass over the triangles rather than one pass per level. That is the
-right shape already.
+right shape already. (The levels are since traced in parallel, and the fixed
+part was mostly the level range of each triangle being found twice; see below.)
 
 ### Why a fixed-seed LCG rather than `<random>`
 
@@ -150,6 +151,190 @@ give different points on a different standard library and the timings could not
 be compared with the ones in this table. The LCG constants (Press et al.,
 *Numerical Recipes* 3rd ed., section 7.1) are plain arithmetic on `uint32_t` and
 produce an identical sequence everywhere.
+
+## compareSurfaces and contours on the TaskPool
+
+Both were serial on a 16-thread machine, and both are embarrassingly parallel.
+Both now take an optional `core::TaskPool*` (null: `TaskPool::shared()`), as the
+rasteriser does, and both give the **same bits at any thread count** - Rule 7 -
+which `TaskPool(0)` against 1, 2, 3, 7 and 15 workers asserts bit for bit in
+`test_volume.cpp` and `test_contours.cpp`.
+
+**compareSurfaces.** The existing surface is cut into blocks of a *fixed* 256
+triangles. Each block clips its triangles against their design candidates and
+sums its own pieces in index order (existing triangle ascending, candidates in
+ascending id, fan pieces in order) into its own compensated sums; the block sums
+are then combined in block order. The sequence of floating-point operations is
+therefore set by the data alone. The block size must never follow the thread
+count, or that would stop being true. 256 triangles are a few hundred
+microseconds of clipping, so the dispatch cost is noise, and 200k triangles
+still make about 800 blocks to balance. Each block's sums fill one cache line
+(`alignas(64)`), because neighbouring blocks are written by different threads.
+
+One consequence is stated rather than hidden: summing per block changes the
+last bits compared with the old single running sum. Both are compensated sums of
+the same terms, and every hand-worked test passed unchanged. The new order is
+now fixed, and it is the same on every machine and at every thread count.
+
+**contours.** Each triangle's level range (a `floor` and two settling loops at
+each end) is found once, in parallel, into its own slot. The old code found it
+twice, once per bucketing pass, and that was most of the "~45 ms fixed" above.
+The CSR bucketing stays serial and in triangle order, so every bucket is
+ascending, as `LevelTracer::trace` documents. Levels are then traced in parallel
+into one list per level, and the lists are joined in level order. A tracer's
+visited stamps only need to be unique per level within the array it uses, so
+each chunk of levels has its own array and numbers its levels from 1. Chunks
+are sized to about four per thread, which bounds the arrays alive at once (4
+bytes per triangle each) by the thread count. The chunking cannot change a
+result.
+
+Measured with `tools/compare_benchmarks.py --alternate 3`, 9 samples per cell,
+min / median in ms. The machine was on AC with the CPU at 100% from other
+agents, so these are ratios under load, not quiet-machine figures.
+
+| Benchmark | before | before, again (A/A) | after | after, serial |
+| --- | --- | --- | --- | --- |
+| `BM_CompareSurfaces` 200k vs 50k | 2013 / 2276 | 2092 / 2340 | **210 / 220** | 1960 / 2098 |
+| `BM_Contours/50` (5 m) | 57.0 / 63.2 | 52.8 / 56.1 | **9.7 / 11.4** | 38.9 / 41.9 |
+| `BM_Contours/10` (1 m) | 62.9 / 74.9 | 68.2 / 75.5 | **16.7 / 18.1** | 50.1 / 56.2 |
+| `BM_Contours/2` (0.2 m) | 102 / 115 | 101 / 133 | **32.5 / 40.5** | 92.3 / 100.5 |
+
+That is **9.6x** for the comparison, and **3.1-5.9x** for contours, of which
+10-32% comes from finding the level ranges once (the serial column). The serial
+comparison is the old cost within the A/A spread: the blocks cost nothing.
+
+On real survey data - the 229 462-triangle TIN of the owner's *Test 4 with Tin*
+archive, against a design re-triangulated from every third vertex raised 0.3 m
+(840 819 overlay pieces) - the same code, serial against parallel, with an A/A
+control:
+
+| Benchmark | serial | serial again | parallel | parallel again |
+| --- | --- | --- | --- | --- |
+| `BM_ArchiveTinCompareSurfaces` | 1535 / 1695 | 1570 / 1642 | **181 / 190** | 179 / 192 |
+| `BM_ArchiveTinContours/10` (1 m, 1 056 contours) | 19.5 / 23.8 | 19.6 / 20.6 | **11.6 / 13.0** | 11.3 / 12.7 |
+| `BM_ArchiveTinContours/1` (0.1 m, 10 752) | 84.1 / 92.2 | 73.3 / 80.3 | **35.7 / 41.3** | 30.5 / 34.1 |
+
+The archive benchmarks read the file named by `KATANA_BENCH_TIN_12DA` (and the
+section ones `KATANA_BENCH_DRAWING_12DA`), and they skip with a message when it
+is unset. Survey data does not belong in the repository.
+
+**Not done, and why.** Contours on a real TIN scale less well (1.7-2.6x) than
+the comparison, because the serial CSR bucketing and the few long levels at a
+1 m interval are left: the bucket fill must stay in triangle order, and a
+parallel fill needs per-chunk offsets for every level, up to 100 000 levels. At
+12-41 ms it was not worth that memory. `buildTin` was not split: CGAL's
+constrained Delaunay insertion is sequential, and Rule 7 requires the one
+triangulation a serial build gives. Tiling the input (`TiledTerrain`) changes
+the triangles along every seam, so it is a different surface, not a faster
+route to the same one. The TIN build is therefore taken off the GUI thread
+instead (*Background jobs*, below).
+
+## Section crossings
+
+`extractSection` intersected every alignment segment with every segment of
+every entity in the model. Now only entities that carry a plan curve (line,
+polyline, arc, circle) are considered, and three cheap tests run before any
+intersection:
+
+1. the entity's box against the alignment's;
+2. the box against each alignment segment's;
+3. for polyline edges, whether both ends lie on the same side of the alignment
+   segment's line.
+
+`SectionOptions::spatialIndex` (the document's `spatialIndex()`) narrows the
+entities to the alignment's neighbourhood when the query is small enough to be
+worth it (`detail::worthIndexing`). Every test has a margin of 10 x `kGeometric`,
+because `intersect()` accepts a crossing within `kGeometric` of both curves. A
+fence stopping 5e-8 short of the alignment is still found, and with the margin
+set to zero that test fails (checked by doing it). Its polyline form, on a
+horizontal and a diagonal alignment, fails the same way when the side test has
+no margin. Entities are visited in
+ascending id on both paths, so ties at one station keep their order.
+
+| `--alternate 3`, min / median ms | old search | boxes only | boxes and side | the same, again |
+| --- | --- | --- | --- | --- |
+| 28k-entity survey drawing, 60 m cross section | 15.3 / 20.9 | 4.1 / 5.4 | **4.2 / 5.2** | 4.2 / 5.1 |
+| the same, with the document's index | 14.7 / 21.1 | 0.003 | **0.003** | 0.003 |
+| 28k-entity drawing, its full diagonal | 20.9 / 26.3 | 17.9 / 28.0 | **8.0 / 10.1** | 7.4 / 9.8 |
+| 30k generated strings, 60 m cross section | 18.1 / 18.6 | 4.6 / 7.4 | **4.6 / 5.1** | 4.6 / 5.7 |
+| the same, with the index | 19.3 / 22.3 | 0.02 | **0.02** | 0.02 |
+| 30k generated strings, 1.4 km diagonal | 27.4 / 30.7 | 26.7 / 34.3 | **9.0 / 10.0** | 8.5 / 9.6 |
+
+A cross section is 4x faster from the box tests alone, and about 5 000x faster
+with the index. A long section (the diagonal, whose box covers the whole
+drawing, so the box tests reject nothing) is 2.6-3x faster from the same-side
+test. The first A/B, run before the side test existed, showed the diagonal
+unchanged (30.8 before, 31.4 after, 31.7 again).
+
+## Background jobs
+
+Long computations no longer run on the GUI thread behind a wait cursor.
+`katana::qt::JobRunner` (`src/katana_qt/jobs.hpp`) runs a work function on its
+own `std::jthread`. The contract that keeps the single-threaded document safe:
+
+* **Work is pure.** It computes from inputs the job owns, copied on the GUI
+  thread before it starts: never the document, a widget, or reference data
+  that could be removed while it runs. It returns an `Apply` step.
+* **Apply runs on the GUI thread.** It is delivered through
+  `QMetaObject::invokeMethod` with a lambda (no moc) and changes the document as
+  one command, or hands the result to the window. Nothing a job computed is
+  visible before it is applied.
+* **Cancel is cooperative, and a cancelled job never applies.** Work that
+  watches `JobControl::stopRequested()` ends early. Work that cannot, such as a
+  CGAL triangulation, runs to its end, and its result is then discarded.
+* **Failure is never lost.** An `Error` returned by the work, or anything it or
+  the Apply step throws (a `std::exception` or not), arrives in the job's
+  `Finished` callback as `JobOutcome::Failed` with the message.
+* **Progress costs the event loop nothing.** The worker stores it in atomics,
+  and a 10 ms timer, running only while there are jobs, reads them into the
+  status bar (a label, a progress bar that shows *busy* until a job reports a
+  fraction, and Cancel). The same timer measures the longest event-loop pause
+  while jobs run.
+* **Destroying the runner** stops and joins its jobs and drops completions not
+  yet delivered, so an Apply may safely capture the window that owns it.
+  `JobRunner::of(window)` finds or creates a window's runner by object name, so
+  the window needs no member for it.
+
+Surface From Point Cloud, Raster and Drawing are jobs. The cloud's ground points
+and the drawing's points and breaklines are copied on the GUI thread (the
+document is single-threaded). The raster is read by the job, from its path:
+GDAL keeps its error handlers per thread, and the reader opens its own dataset.
+A headless run (`--action`, `--trigger`) waits for the job, pumping a real
+event loop, so the screenshot or report that follows sees the surface. It also
+logs the longest event-loop pause.
+
+The wait is `QEventLoop::exec()`, quit by the job's completion. The first
+version called `processEvents(WaitForMoreEvents)`, and on Windows, outside
+`exec()`, that slept through both the worker's post and the timer and never
+returned.
+
+Measured (Debug, offscreen, three runs; `test_jobs.cpp` records them): a
+60 000-point `buildTin` as a job took 2.79-2.90 s of work, and the GUI loop's
+longest pause was 10-11 ms, one timer tick. A 400 ms job paused it 11-14 ms. The
+control test blocks the GUI thread for 250 ms while a job runs, and the measure
+reads at least 250 ms, so a measure that always read zero would fail it. Surface
+From Point Cloud on `samples/gis/survey_scan.las` (29 512 ground points)
+triangulated in 1.28 s in the background, and the event loop paused at most
+24 ms, the Apply step included.
+
+On real data (Release, headless, three runs), Surface From Drawing on the
+owner's *Test 4 without tin* archive (27 886 entities, giving 197 287 vertices
+and 394 561 triangles) triangulated in 2.27-2.77 s on the job. Before, the GUI
+thread was blocked for all of that. Adding the result took 10-12 ms of GUI time.
+The longest event-loop pause during the job was 342-444 ms. That pause is the
+plan view repainting the 28k-entity drawing, which the event loop is now free
+to do while the build runs; it is not the job. The control: the same 0.11 s
+Surface From Point Cloud job pauses the loop 20-22 ms with the 20-entity sample
+drawing loaded, and 325-362 ms with this drawing loaded as well. That repaint
+cost is the plan view's (`docs/performance.md`).
+
+Also still on the GUI thread after a surface lands: the 3D view rebuilds its
+scene on the next paint. That too is the render view's cost, not the build's.
+
+Only one job at a time gets the shared `TaskPool`. A `parallelRanges` issued
+while the pool is busy runs inline, so a compareSurfaces job and a 3D frame at
+the same moment will make one of them serial. That is slower, never wrong, and
+it cannot deadlock (`task_pool.hpp`).
 
 ## Where the compensated sum lives now
 
