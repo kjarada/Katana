@@ -48,7 +48,10 @@ bool same(double a, double b)
 }
 
 bool same(const Point2& a, const Point2& b) { return same(a.x, b.x) && same(a.y, b.y); }
-bool same(const Vec3& a, const Vec3& b) { return same(a.x, b.x) && same(a.y, b.y) && same(a.z, b.z); }
+bool same(const Vec3& a, const Vec3& b)
+{
+    return same(a.x, b.x) && same(a.y, b.y) && same(a.z, b.z);
+}
 bool same(const Box2& a, const Box2& b) { return same(a.min, b.min) && same(a.max, b.max); }
 bool same(const AABB& a, const AABB& b) { return same(a.min, b.min) && same(a.max, b.max); }
 
@@ -101,7 +104,8 @@ TEST(PointBatch, A3dTransformGivesTheValuesWorkedByHandAtEveryLevel)
         }
         atSimdLevel(level, [&] { transformPoints(m, points); });
         for (int k = 0; k <= 10; ++k) {
-            EXPECT_EQ(points[static_cast<std::size_t>(k)], Vec3(2.0 * k + 10.0, -2.0 * k + 20.0, k + 30.0))
+            EXPECT_EQ(points[static_cast<std::size_t>(k)],
+                      Vec3(2.0 * k + 10.0, -2.0 * k + 20.0, k + 30.0))
                 << "k " << k << " at " << katana::core::toString(level);
         }
     }
@@ -134,15 +138,19 @@ TEST(PointBatch, TransformsEqualTransformPointOnEveryPointBitForBitAtEveryLevel)
     Random random;
     for (int round = 0; round < 300; ++round) {
         const std::size_t count = static_cast<std::size_t>(round % 71);
-        const Mat4 m4 = Mat4::translation(Vec3(random.uniform(-1e5, 1e5), random.uniform(-1e5, 1e5), 3.0)) *
-                        Mat4::rotation(Vec3(random.uniform(-1, 1), random.uniform(-1, 1), 1.0), random.uniform(-3, 3)) *
+        const Vec3 shift(random.uniform(-1e5, 1e5), random.uniform(-1e5, 1e5), 3.0);
+        const Vec3 axis(random.uniform(-1, 1), random.uniform(-1, 1), 1.0);
+        const Mat4 m4 = Mat4::translation(shift) *
+                        Mat4::rotation(axis, random.uniform(-3, 3)) *
                         Mat4::scaling(Vec3(1.0001, 0.9999, 1.5));
-        const Mat3 m3 = Mat3::translation(Point2(random.uniform(-1e5, 1e5), random.uniform(-1e5, 1e5))) *
+        const Point2 shift2(random.uniform(-1e5, 1e5), random.uniform(-1e5, 1e5));
+        const Mat3 m3 = Mat3::translation(shift2) *
                         Mat3::rotation(random.uniform(-3, 3));
         std::vector<Vec3> in3;
         std::vector<Point2> in2;
         for (std::size_t i = 0; i < count; ++i) {
-            in3.emplace_back(random.coordinate(300000.0), random.coordinate(6250000.0), random.coordinate(40.0));
+            in3.emplace_back(random.coordinate(300000.0), random.coordinate(6250000.0),
+                             random.coordinate(40.0));
             in2.emplace_back(random.coordinate(300000.0), random.coordinate(6250000.0));
         }
         auto scalar3 = in3;
@@ -280,7 +288,8 @@ TEST(PointBatch, BoundsEqualTheExpandLoopBitForBitAtEveryLevel)
             // Centred on zero now and then, so zeros can be the extremes.
             const double centre = round % 5 == 0 ? 0.0 : 300000.0;
             flat.emplace_back(random.coordinate(centre), random.coordinate(-centre));
-            solid.emplace_back(random.coordinate(centre), random.coordinate(centre), random.coordinate(0.0));
+            solid.emplace_back(random.coordinate(centre), random.coordinate(centre),
+                               random.coordinate(0.0));
         }
         Box2 loop2;
         for (const Point2& p : flat) {
@@ -290,10 +299,16 @@ TEST(PointBatch, BoundsEqualTheExpandLoopBitForBitAtEveryLevel)
         for (const Vec3& p : solid) {
             loop3.expand(p);
         }
-        ASSERT_TRUE(same(atSimdLevel(SimdLevel::Scalar, [&] { return boundsOf(flat); }), loop2)) << round;
-        ASSERT_TRUE(same(atSimdLevel(SimdLevel::Avx2, [&] { return boundsOf(flat); }), loop2)) << round;
-        ASSERT_TRUE(same(atSimdLevel(SimdLevel::Scalar, [&] { return boundsOf(solid); }), loop3)) << round;
-        ASSERT_TRUE(same(atSimdLevel(SimdLevel::Avx2, [&] { return boundsOf(solid); }), loop3)) << round;
+        const auto flatAt = [&](SimdLevel level) {
+            return atSimdLevel(level, [&] { return boundsOf(flat); });
+        };
+        const auto solidAt = [&](SimdLevel level) {
+            return atSimdLevel(level, [&] { return boundsOf(solid); });
+        };
+        ASSERT_TRUE(same(flatAt(SimdLevel::Scalar), loop2)) << round;
+        ASSERT_TRUE(same(flatAt(SimdLevel::Avx2), loop2)) << round;
+        ASSERT_TRUE(same(solidAt(SimdLevel::Scalar), loop3)) << round;
+        ASSERT_TRUE(same(solidAt(SimdLevel::Avx2), loop3)) << round;
     }
 }
 
@@ -317,7 +332,8 @@ TEST(PointBatch, APolylineAndAMeshAreBoundedThroughTheBatchPath)
             continue;
         }
         const Box2 box = atSimdLevel(level, [&] { return line.boundingBox(); });
-        EXPECT_EQ(box, Box2(Point2(0.0, -3.0), Point2(19.0, 19.0))) << katana::core::toString(level);
+        EXPECT_EQ(box, Box2(Point2(0.0, -3.0), Point2(19.0, 19.0)))
+            << katana::core::toString(level);
         const AABB cube = atSimdLevel(level, [&] { return mesh.bounds(); });
         EXPECT_EQ(cube.min, Vec3(0.0, -19.0, 0.0)) << katana::core::toString(level);
         EXPECT_EQ(cube.max, Vec3(19.0, 0.0, 9.5)) << katana::core::toString(level);
