@@ -37,3 +37,10 @@ add_custom_target(run-benchmarks
 if(KATANA_BUILD_QT_APP AND TARGET katana)
     add_subdirectory(qt)
 endif()
+
+# The GPU renderer's frame time (benchmarks/gpu): an executable of its own,
+# because it needs a QGuiApplication and Qt's private QRhi headers, which the
+# plain benchmarks above must not depend on.
+if(TARGET katana_gpu)
+    add_subdirectory(gpu)
+endif()

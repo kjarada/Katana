@@ -66,6 +66,11 @@ set(KATANA_ALLOWED_app
     "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;gis;pointcloud;interop")
 set(KATANA_ALLOWED_qt
     "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;gis;pointcloud;interop;app")
+# The GPU renderer (src/katana_qt/gpu, docs/gpu.md) lives under katana_qt for
+# Qt's sake, but it is the software rasteriser's twin behind the same seam: it
+# may see a DrawList, a Camera and the point cloud's plain types, and never a
+# Document - so it gets render's rule, not qt's.
+set(KATANA_ALLOWED_gpu "core;math;geometry;render;pointcloud")
 
 # src/<directory> -> layer
 set(KATANA_SRC_LAYER_katana_core core)
@@ -86,6 +91,8 @@ set(KATANA_SRC_LAYER_katana_io gis)
 set(KATANA_SRC_LAYER_katana_interop interop)
 set(KATANA_SRC_LAYER_katana_app app)
 set(KATANA_SRC_LAYER_katana_qt qt)
+# src/<directory>/<subdirectory> -> a narrower layer than its directory's.
+set(KATANA_SRC_SUBLAYERS "katana_qt/gpu=gpu")
 
 set(KATANA_THIRD_PARTY_PATTERN
     "#[ \t]*include[ \t]*[<\"](Eigen/|CGAL/|proj\\.h|sqlite3\\.h|gdal|ogr|cpl_|pdal/|nlohmann/|Q[A-Z]|vulkan/)")
@@ -144,7 +151,16 @@ foreach(_dir IN LISTS _src_dirs)
         set(_layer "${KATANA_SRC_LAYER_${_name}}")
         file(GLOB_RECURSE _sources "${_dir}/*.cpp" "${_dir}/*.hpp")
         foreach(_source IN LISTS _sources)
-            _check_file("${_source}" "${_layer}" FALSE)
+            set(_source_layer "${_layer}")
+            foreach(_sublayer IN LISTS KATANA_SRC_SUBLAYERS)
+                string(REPLACE "=" ";" _pair "${_sublayer}")
+                list(GET _pair 0 _prefix)
+                list(GET _pair 1 _narrower)
+                if(_source MATCHES "/src/${_prefix}/")
+                    set(_source_layer "${_narrower}")
+                endif()
+            endforeach()
+            _check_file("${_source}" "${_source_layer}" FALSE)
         endforeach()
     endif()
 endforeach()
