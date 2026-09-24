@@ -80,7 +80,7 @@ TEST(SurveyCoding, ACodedPointGetsTheModelTheStyleAndTheAttributesTheMapfileGive
 
     const auto* first = document.model().entities.find(water);
     ASSERT_NE(first, nullptr);
-    EXPECT_EQ(first->layer, "SURVEY SERVICES") << "12d's model is Katana's layer";
+    EXPECT_EQ(first->layer, "SURVEY SERVICES") << "a rule's model is Katana's layer";
     EXPECT_EQ(first->style, "WATR Main");
     // The `*` rule's attribute reaches both, because attributes accumulate.
     EXPECT_EQ(std::get<std::string>(first->properties.at("DepthLocation")), "Top of Pipe");
@@ -187,8 +187,8 @@ TEST(SurveyCoding, AnEntityWithNoCodeOrANumberForOneIsLeftAlone)
 
 TEST(SurveyCoding, ANameTheLibraryDoesNotDefineIsStillRecordedAndIsReported)
 {
-    // A customisation need not be self-contained. The name is what 12d says
-    // this is, so it is kept and draws plainly until a library defines it.
+    // A customisation need not be self-contained. The name is what the rules
+    // say this is, so it is kept and draws plainly until a library defines it.
     Document document;
     document.setSurveyMap(waterAndBollards());
     addCodedPoint(document, Point2(0, 0), "WM01");
@@ -230,7 +230,7 @@ TEST(SurveyCoding, TheColourCallbackDecidesTheColourAndWithoutOneNoneIsGuessed)
     ASSERT_NE(style, nullptr);
     EXPECT_FALSE(style->color.has_value()) << "no resolver, so the colour is left alone";
     EXPECT_EQ(style->description, "sui water potable")
-        << "the 12d colour name is kept whatever Katana makes of it";
+        << "the colour name is kept whatever Katana makes of it";
 
     Document second;
     second.setSurveyMap(waterAndBollards());
@@ -464,8 +464,8 @@ TEST(SurveyCodingStyles, RenamingACodedStyleThenApplyingCodesAgainReusesItInstea
 
 TEST(SurveyCodingStyles, AnImportedStringWhoseCodeIsOnlyInItsMetadataIsCodedAndKeepsItsSymbol)
 {
-    // A 12da import records a string's name - its code, in a coded survey -
-    // as metadata "12d.name", and gives it a style named after its 12d
+    // An archive import records a string's name - its code, in a coded
+    // survey - as metadata "12d.name", and gives it a style named after its
     // linestyle: here a symbol style, beside the style "0" the import makes
     // for plain strings. Reading the code from the metadata WITHOUT the
     // appearance rule would move this point onto "0" and lose its symbol.
@@ -474,14 +474,14 @@ TEST(SurveyCodingStyles, AnImportedStringWhoseCodeIsOnlyInItsMetadataIsCodedAndK
     katana::entity::Style plain;
     plain.name = "0";
     plain.linetype = "0";
-    plain.description = "12d linestyle";
+    plain.description = "library linestyle";
     ASSERT_TRUE(document.execute(cmd::createStyle(plain)).ok());
     katana::entity::Style imported;
     imported.name = "CULT Bollard";
     imported.linetype = "CULT Bollard";
     imported.symbol = "CULT Bollard";
     imported.symbolSize = 1.5;
-    imported.description = "12d symbol";
+    imported.description = "library symbol";
     ASSERT_TRUE(document.execute(cmd::createStyle(imported)).ok());
 
     katana::entity::Entity point;
@@ -538,9 +538,9 @@ TEST(SurveyCodingStyles, AStyleIsReusedOnlyWhenAllFourPartsOfTheAppearanceAgree)
 
 TEST(SurveyCodingStyles, AnImportedStyleWithNoColourIsReusedForACodeWhoseColourNameHasNoRgb)
 {
-    // The import-then-code path: a 12da import gives a string a style named
-    // after its linestyle, with no colour and the description "12d
-    // linestyle". WM* says "sui water potable", which testColour (like
+    // The import-then-code path: an archive import gives a string a style
+    // named after its linestyle, with no colour and a description that is
+    // not a colour name. WM* says "sui water potable", which testColour (like
     // Katana) has no RGB for, so the code draws as WATR Main with no colour -
     // exactly what the imported style draws. Matching the colour NAME against
     // the description made a second, identical "WATR Main (sui water
@@ -550,7 +550,7 @@ TEST(SurveyCodingStyles, AnImportedStyleWithNoColourIsReusedForACodeWhoseColourN
     katana::entity::Style imported;
     imported.name = "WATR Main";
     imported.linetype = "WATR Main";
-    imported.description = "12d linestyle";
+    imported.description = "library linestyle";
     ASSERT_TRUE(document.execute(cmd::createStyle(imported)).ok());
     katana::entity::Entity point;
     point.geometry = katana::entity::PointGeometry{Point2(5, 5)};
@@ -604,7 +604,7 @@ TEST(SurveyCodingStyles, RenamingACodedStyleAndRewritingItsDescriptionThenApplyi
 TEST(SurveyCodingStyles, AStyleMadeForOneUnknownColourIsNotTakenByAnotherWhateverTheOrderOfCoding)
 {
     // WM* and WR* draw alike in Katana - WATR Main with no RGB for either
-    // colour - but they are different 12d colours, and a fresh drawing gives
+    // colour - but they are different colour names, and a fresh drawing gives
     // each its own style. By hand: appearances are named in a fixed order,
     // and "sui water potable" sorts before "sui water recycled" ('p' < 'r'),
     // so potable takes the bare "WATR Main" and recycled, finding it taken,
@@ -647,7 +647,8 @@ TEST(SurveyCodingStyles, OfTwoStylesThatDrawACodeAlikeTheOneDescribedByItsColour
     Document document;
     document.setSurveyMap(realShapes());
     for (const auto& [name, description] :
-         {std::pair{"A water", "12d linestyle"}, std::pair{"Water main", "sui water potable"}}) {
+         {std::pair{"A water", "library linestyle"},
+          std::pair{"Water main", "sui water potable"}}) {
         katana::entity::Style style;
         style.name = name;
         style.linetype = "WATR Main";
@@ -889,7 +890,7 @@ TEST(CustomisationCoverage, ABuiltInSymbolIsNeverListedAsUnresolved)
 TEST(CustomisationCoverage, AStyleThatTakesItsLinetypeFromItsLayerNamesNoDefinition)
 {
     // "ByLayer" as a style's linetype means "whatever the layer draws with"
-    // (decision D2), not a 12d linestyle called ByLayer: reporting it as in
+    // (decision D2), not a library linestyle called ByLayer: reporting it as in
     // no loaded library sent people looking for a definition that is not
     // meant to exist.
     Document document;

@@ -271,10 +271,12 @@ bool runCustomise(katana::cad::Document& document,
         document.styleLibrary(), document.surveyMap(), *loaded, mode);
     // What each file did to what was loaded before it: a person loading their
     // own symbol file wants to see it ADDED to the rest, not put in its place.
+    // The kind is said in the words the help and the window use ("survey code
+    // file", "style library"), not the reader's name for the format.
     for (const katana::archive12d::FileMerge& file : merged.files) {
         const bool map = file.kind == katana::archive12d::CustomisationFile::MapFile;
         std::cout << "  " << (file.name.empty() ? std::string("(no file)") : file.name) << ": "
-                  << katana::archive12d::toString(file.kind) << ", " << file.added.size()
+                  << (map ? "survey code file" : "style library") << ", " << file.added.size()
                   << " added, " << file.replaced.size() << " replaced"
                   << (map ? " (codes, once for each section)" : "");
         if (!file.replaced.empty()) {

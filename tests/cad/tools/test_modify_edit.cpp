@@ -99,7 +99,7 @@ std::vector<std::optional<double>> heights(ToolDriver& driver, EntityId id, std:
     return katana::entity::heightsOf(entityOf(driver, id).properties, count);
 }
 
-// An entity carrying a height per vertex, as the 12d import writes a 3D string.
+// An entity carrying a height per vertex, as the archive import writes a 3D string.
 EntityId with3DHeights(ToolDriver& driver, Geometry geometry,
                        std::vector<std::optional<double>> vertexHeights)
 {

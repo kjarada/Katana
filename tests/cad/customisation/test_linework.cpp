@@ -315,7 +315,7 @@ TEST(Linework, TwoStringsOfOneCodeMakeTwoLinesOnTheRulesLayerInTheStyleCodesWoul
               (std::vector<Point2>{Point2(0, 0), Point2(10, 0), Point2(20, 0)}));
     EXPECT_EQ(shapeOf(*lines[1]).vertices, (std::vector<Point2>{Point2(0, 10), Point2(10, 10)}));
     for (const Entity* line : lines) {
-        EXPECT_EQ(line->layer, "SURVEY SERVICES") << "12d's model is Katana's layer";
+        EXPECT_EQ(line->layer, "SURVEY SERVICES") << "a rule's model is Katana's layer";
         // applySurveyCodes names a style after the rule's linestyle.
         EXPECT_EQ(line->style, "WATR Main");
     }
