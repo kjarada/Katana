@@ -189,6 +189,12 @@ void ViewWorkspace::buildContent(View& view, ViewState& state)
         };
         wireTools(*plan, id);
         plan->onActivated = [this, id] { activate(id); };
+        // The plan view's frame time, as the 3D and section views report theirs.
+        plan->onFrameStats = [this](const QString& text) {
+            if (onFrameStats) {
+                onFrameStats(text);
+            }
+        };
         view.plan = plan;
         break;
     }
