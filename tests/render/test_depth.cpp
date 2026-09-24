@@ -565,3 +565,67 @@ TEST(RenderDepth, APassThatWritesNoDepthIsCoveredByWhateverIsDrawnAfterIt)
     EXPECT_EQ(countPixels(*target, kGround), alone);
     EXPECT_EQ(countPixels(*target, kDesign), 0u);
 }
+
+TEST(RenderDepth, PointsDrawTheSamePixelsOnTheCallingThreadAndAcrossThreads)
+{
+    // Up to 4096 points are decided and filled on the calling thread (a
+    // dispatch costs more; rasterisePoints), more across the pool. The same
+    // frame both ways: 64 x 64 = 4096 points on the sloped site, then the
+    // same plus one point 50 m under the ground in the middle of the view -
+    // 4097, so the pool's path, and hidden, so it adds no pixel. Colour and
+    // depth must match byte for byte on 0, 3 and 7 workers, and the points
+    // must still be whole.
+    DrawList ground;
+    addPlane(ground, 0.0, 0.0, 400.0, 400.0, 0.0, 40, kGround, 0.05, 0.02);
+    DrawList points;
+    for (int j = 0; j < 64; ++j) {
+        for (int i = 0; i < 64; ++i) {
+            const double x = 3.0 + 6.2 * i;
+            const double y = 3.0 + 6.2 * j;
+            points.addPoint(points.addVertex(Vec3(x, y, 0.05 * x + 0.02 * y), kPoint), kPointSize,
+                            kEntityBias);
+        }
+    }
+    DrawList inlineScene = ground;
+    append(inlineScene, points);
+    DrawList pooledScene = inlineScene;
+    pooledScene.addPoint(pooledScene.addVertex(Vec3(200.0, 200.0, 14.0 - 50.0), kPoint),
+                         kPointSize, kEntityBias);
+
+    Camera camera;
+    camera.setViewportSize(800, 600);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    camera.setOrientation(camera.azimuth(), 0.25);
+    ASSERT_TRUE(camera.frame(ground.bounds()));
+    // Framed on the ground alone, so the depth range must reach the point
+    // under it too, and the point must be on the image, or it is clipped
+    // before it is counted and both scenes take the same path.
+    katana::math::AABB bounds = pooledScene.bounds();
+    ASSERT_TRUE(camera.fitDepthRange(bounds));
+    const auto under = camera.project(Vec3(200.0, 200.0, 14.0 - 50.0));
+    ASSERT_TRUE(under.has_value());
+    ASSERT_TRUE(under->x > 0.0 && under->x < 800.0 && under->y > 0.0 && under->y < 600.0)
+        << "the hidden point is off the image, so this proves nothing";
+    const std::size_t alone = countPixels(render(points, camera), kPoint);
+    ASSERT_GT(alone, 20000u);
+
+    const auto draw = [&camera](const DrawList& list, std::size_t workers) {
+        auto target = Framebuffer::create(camera.viewportWidth(), camera.viewportHeight());
+        EXPECT_TRUE(target.ok());
+        TaskPool pool(workers);
+        RenderOptions options;
+        options.background = kBackground;
+        options.pool = &pool;
+        Rasterizer rasterizer;
+        EXPECT_TRUE(rasterizer.render(list, camera, *target, options).ok());
+        return std::move(*target);
+    };
+    const Framebuffer reference = draw(inlineScene, 3);
+    EXPECT_EQ(countPixels(reference, kPoint), alone);
+    for (std::size_t workers : {std::size_t{0}, std::size_t{3}, std::size_t{7}}) {
+        SCOPED_TRACE(workers);
+        const Framebuffer pooled = draw(pooledScene, workers);
+        EXPECT_EQ(pooled.color(), reference.color());
+        EXPECT_EQ(pooled.depth(), reference.depth());
+    }
+}
