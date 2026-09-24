@@ -240,7 +240,10 @@ exist:
 - a citation of a removed document (the root plan, the root contributor
   instructions, the root readme);
 
-and every document in `docs/` must be listed in `docs/index.md`. Documents
+and every document in `docs/` must be listed in `docs/index.md`, and
+`docs/headless.md` must name every switch `src/katana_qt/main.cpp` parses and
+every `-D` variable `tools/check_screenshot.cmake` reads - a new switch is
+documented in the commit that adds it. Documents
 still being brought up to this standard are named in the script's
 `NOT_YET_CHECKED` list, which shrinks as each is fixed.
 
