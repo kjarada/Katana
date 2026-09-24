@@ -18,6 +18,8 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "katana/survey/data_model.hpp"
@@ -76,6 +78,12 @@ class RawProjectBuilder {
 
     // Provenance of one record.
     [[nodiscard]] katana::survey::SourceRecord source(std::size_t record) const;
+    // The same, assigned into an existing record (its strings' buffers reused).
+    void stampSource(katana::survey::SourceRecord& target, std::size_t record) const
+    {
+        target = sourceTemplate_;
+        target.recordNumber = record;
+    }
 
     // A warning about a record that WAS read (in part or in full).
     void warn(std::size_t record, std::string message);
@@ -117,7 +125,19 @@ class RawProjectBuilder {
     [[nodiscard]] katana::survey::SurveyStation* currentStation();
     // The next pointing number of the current setup (1, 2, ...).
     [[nodiscard]] std::size_t nextPointing();
-    void addStationObservation(katana::survey::Observation observation);
+    // A new observation of kind T at the end of the current setup, with its
+    // provenance filled in and every other field default, for the caller to
+    // fill. Built where it will live because a survey::Observation is a
+    // 576-byte variant: making one on the stack and handing it over costs two
+    // moves of it and of its six strings, three times a shot.
+    template <typename T>
+    T& stationObservation(std::size_t record)
+    {
+        T& observation = *std::get_if<T>(&result_.project.stations.back().observations.emplace_back(
+            std::in_place_type<T>));
+        stampSource(observation.source, record);
+        return observation;
+    }
     void addLooseObservation(katana::survey::Observation observation);
     void addStationNote(std::string_view note);
 
@@ -169,6 +189,7 @@ class RawProjectBuilder {
     // (measured: 1.2 us per std::unordered_map insert on this toolchain).
     // 0 is an empty slot; otherwise index + 1. Kept at most half full.
     std::vector<std::uint32_t> pointSlots_;
+    std::uint32_t lastPoint_ = kNotFound; // the point entry() found or made last
     IdIndex stationIndex_;
     IdIndex occupations_; // setups begun on each point
     IdIndex featureIndex_;

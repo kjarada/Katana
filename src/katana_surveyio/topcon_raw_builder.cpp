@@ -192,8 +192,14 @@ void RawProjectBuilder::placePoint(std::uint32_t index)
 
 RawProjectBuilder::PointEntry& RawProjectBuilder::entry(std::string_view id, std::size_t record)
 {
+    // A shot names its target, then codes it, describes it or notes it: the
+    // same point several times in a row, which needs no hashing.
+    if (lastPoint_ != kNotFound && points_[lastPoint_].id == id) {
+        return points_[lastPoint_];
+    }
     const std::size_t hash = std::hash<std::string_view>{}(id);
     if (const std::uint32_t found = findPoint(id, hash); found != kNotFound) {
+        lastPoint_ = found;
         return points_[found];
     }
     if ((points_.size() + 1) * 2 > pointSlots_.size()) {
@@ -208,6 +214,7 @@ RawProjectBuilder::PointEntry& RawProjectBuilder::entry(std::string_view id, std
     created.hash = hash;
     created.sourceRecord = record;
     placePoint(index);
+    lastPoint_ = index;
     return created;
 }
 
@@ -343,11 +350,6 @@ std::size_t RawProjectBuilder::nextPointing()
     return pointingCounters_.empty() ? 0 : ++pointingCounters_.back();
 }
 
-void RawProjectBuilder::addStationObservation(survey::Observation observation)
-{
-    result_.project.stations.back().observations.push_back(std::move(observation));
-}
-
 void RawProjectBuilder::addLooseObservation(survey::Observation observation)
 {
     result_.project.observations.push_back(std::move(observation));
@@ -386,18 +388,19 @@ ReadResult RawProjectBuilder::finish()
             out.description = std::move(point.description);
             out.metadata = std::move(point.metadata);
             out.coordinateSource = point.coordinateSource;
-            out.source = source(point.sourceRecord);
+            stampSource(out.source, point.sourceRecord);
         } else {
             survey::UnpositionedPoint& out = project.unpositionedPoints.emplace_back();
             out.id = std::move(point.id);
             out.code = std::move(point.code);
             out.description = std::move(point.description);
             out.metadata = std::move(point.metadata);
-            out.source = source(point.sourceRecord);
+            stampSource(out.source, point.sourceRecord);
         }
     }
     points_.clear();
     pointSlots_.clear();
+    lastPoint_ = kNotFound;
     return std::move(result_);
 }
 

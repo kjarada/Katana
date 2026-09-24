@@ -809,8 +809,9 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
     const double hi = instrumentHeight_;
     const double th = targetHeight.value_or(rodHeight_);
     const survey::ObservationPrecision& precision = builder_.options().precision;
-    const std::string at = station->setup.pointId;
-    const std::string to(*target);
+    // Nothing below begins a setup, so the station and its id stay put.
+    const std::string& at = station->setup.pointId;
+    const std::string_view to = *target;
     builder_.mentionPoint(to, n);
 
     // The face of this pointing: the record type says so for a set, the
@@ -843,9 +844,12 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
     if (ar || al) {
         // Angle right is the clockwise circle reading (see the file comment);
         // angle left the anticlockwise one.
-        const double direction = ar ? wrapToCircle(*ar) : wrapToCircle(-*al);
-        builder_.addStationObservation(survey::HorizontalDirectionObservation{
-            at, to, direction, precision.direction, builder_.source(n), pointing});
+        auto& observation = builder_.stationObservation<survey::HorizontalDirectionObservation>(n);
+        observation.at = at;
+        observation.to = to;
+        observation.direction = ar ? wrapToCircle(*ar) : wrapToCircle(-*al);
+        observation.sigma = precision.direction;
+        observation.pointing = pointing;
         horizontal = true;
     } else if (az || bearing) {
         std::optional<double> azimuth;
@@ -873,8 +877,11 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
             }
         }
         if (azimuth) {
-            builder_.addStationObservation(survey::AzimuthObservation{
-                at, to, *azimuth, precision.direction, builder_.source(n)});
+            auto& observation = builder_.stationObservation<survey::AzimuthObservation>(n);
+            observation.from = at;
+            observation.to = to;
+            observation.azimuth = *azimuth;
+            observation.sigma = precision.direction;
             horizontal = true;
         }
     } else if (dr || dl) {
@@ -883,10 +890,13 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
             builder_.warn(n, "a deflection angle needs the setup's backsight point, which is not "
                              "stated; the horizontal angle is not imported");
         } else {
-            const double angleRight = dr ? wrapToCircle(kPi + *dr) : wrapToCircle(kPi - *dl);
-            builder_.addStationObservation(survey::HorizontalAngleObservation{
-                at, station->backsightPointId, to, angleRight, precision.direction,
-                builder_.source(n), pointing});
+            auto& observation = builder_.stationObservation<survey::HorizontalAngleObservation>(n);
+            observation.at = at;
+            observation.from = station->backsightPointId;
+            observation.to = to;
+            observation.angle = dr ? wrapToCircle(kPi + *dr) : wrapToCircle(kPi - *dl);
+            observation.sigma = precision.direction;
+            observation.pointing = pointing;
             horizontal = true;
         }
     }
@@ -895,27 +905,38 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
     }
 
     if (zenith) {
-        builder_.addStationObservation(survey::ZenithAngleObservation{
-            at, to, *zenith, precision.zenith, hi, th, builder_.source(n), pointing});
+        auto& observation = builder_.stationObservation<survey::ZenithAngleObservation>(n);
+        observation.from = at;
+        observation.to = to;
+        observation.angle = *zenith;
+        observation.sigma = precision.zenith;
+        observation.instrumentHeight = hi;
+        observation.targetHeight = th;
+        observation.pointing = pointing;
     } else if (va) {
         if (std::abs(*va) > kPi / 2.0) {
             builder_.warn(n, "vertical angle beyond 90 degrees; it is not imported");
         } else {
-            builder_.addStationObservation(survey::VerticalAngleObservation{
-                at, to, *va, precision.zenith, hi, th, builder_.source(n), pointing});
+            auto& observation = builder_.stationObservation<survey::VerticalAngleObservation>(n);
+            observation.from = at;
+            observation.to = to;
+            observation.angle = *va;
+            observation.sigma = precision.zenith;
+            observation.instrumentHeight = hi;
+            observation.targetHeight = th;
+            observation.pointing = pointing;
         }
     } else if (ce) {
         // Line of sight to ground: the instrument above its mark, the target
         // above its own.
-        survey::LevelDifferenceObservation difference;
-        difference.from = at;
-        difference.to = to;
-        difference.heightDifference = *ce + hi - th;
-        difference.sigma = std::hypot(precision.heightMeasurement, precision.heightMeasurement);
-        difference.length = hd.value_or(0.0) > 0.0 ? *hd : 0.0;
-        difference.source = builder_.source(n);
-        if (std::isfinite(difference.heightDifference)) {
-            builder_.addStationObservation(difference);
+        const double heightDifference = *ce + hi - th;
+        if (std::isfinite(heightDifference)) {
+            auto& difference = builder_.stationObservation<survey::LevelDifferenceObservation>(n);
+            difference.from = at;
+            difference.to = to;
+            difference.heightDifference = heightDifference;
+            difference.sigma = std::hypot(precision.heightMeasurement, precision.heightMeasurement);
+            difference.length = hd.value_or(0.0) > 0.0 ? *hd : 0.0;
         } else {
             builder_.warn(n, "the change in elevation and heights do not add up to a finite "
                              "height difference; it is not imported");
@@ -928,7 +949,7 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
                                  " m read as no distance measured");
             return;
         }
-        survey::DistanceObservation observation;
+        auto& observation = builder_.stationObservation<survey::DistanceObservation>(n);
         observation.from = at;
         observation.to = to;
         observation.distance = value;
@@ -936,9 +957,7 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
         observation.kind = kind;
         observation.instrumentHeight = hi;
         observation.targetHeight = th;
-        observation.source = builder_.source(n);
         observation.pointing = pointing;
-        builder_.addStationObservation(std::move(observation));
     };
     if (sd) {
         distance(*sd, survey::DistanceKind::Slope, "SD");
