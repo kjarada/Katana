@@ -346,9 +346,28 @@ Result<Section> extractSection(const Polyline2& alignment,
                 }
                 const Segment2 along = cleaned.segment(s);
                 if (polyline != nullptr) {
+                    // A long alignment's box covers most of the drawing, so
+                    // for it the box test rejects little. The sharper test:
+                    // an edge with both ends on the same side of the
+                    // alignment's line, each further than the margin from it,
+                    // cannot come within kGeometric of it. The cross product
+                    // is the distance times the segment's length, hence the
+                    // scaled threshold; its rounding (about 1e-16 of the
+                    // product of two lengths) is far inside the margin.
+                    const katana::geometry::Vec2 direction = along.delta();
+                    const double across = margin * direction.length();
+                    const auto side = [&](const Point2& p) {
+                        return direction.cross(p - along.start);
+                    };
                     for (std::size_t i = 0; i < polyline->segmentCount(); ++i) {
                         const Segment2 edge = polyline->segment(i);
                         if (!edge.boundingBox().intersects(alongBoxes[s])) {
+                            continue;
+                        }
+                        const double sideStart = side(edge.start);
+                        const double sideEnd = side(edge.end);
+                        if ((sideStart > across && sideEnd > across) ||
+                            (sideStart < -across && sideEnd < -across)) {
                             continue;
                         }
                         const auto piece = intersect(along, edge);
