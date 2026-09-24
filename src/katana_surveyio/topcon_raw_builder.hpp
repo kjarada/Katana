@@ -170,6 +170,7 @@ class RawProjectBuilder {
     // 0 is an empty slot; otherwise index + 1. Kept at most half full.
     std::vector<std::uint32_t> pointSlots_;
     IdIndex stationIndex_;
+    IdIndex occupations_; // setups begun on each point
     IdIndex featureIndex_;
     std::vector<std::size_t> pointingCounters_;
 };

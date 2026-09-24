@@ -364,3 +364,19 @@ TEST(TopconGts, AReadOfALargeSyntheticJobReadsEveryRecordAndReportsItsRate)
     std::cout << "GTS-7 throughput: " << mb << " MB, " << shots << " shots, " << seconds
               << " s, " << mb / seconds << " MB/s (readSurvey, including validateProject)\n";
 }
+
+TEST(TopconGts, APointOccupiedManyTimesGivesNumberedSetupsInLinearTime)
+{
+    // Numbering by search from 2 each time would make this 200 million
+    // string comparisons; counted per point it is 20,000 steps.
+    std::string bytes = "UNITS M,D\n";
+    for (int occupation = 0; occupation < 20000; ++occupation) {
+        bytes += "STN A,1.50000,STAT\n";
+    }
+    const auto result = topcon_test::read(kGts7, bytes, "many.gt7");
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    ASSERT_EQ(result->project.stations.size(), 20000u);
+    EXPECT_EQ(result->project.stations[0].setup.id, "A");
+    EXPECT_EQ(result->project.stations[1].setup.id, "A (2)");
+    EXPECT_EQ(result->project.stations[19999].setup.id, "A (20000)");
+}

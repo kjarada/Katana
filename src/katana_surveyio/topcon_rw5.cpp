@@ -914,7 +914,12 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
         difference.sigma = std::hypot(precision.heightMeasurement, precision.heightMeasurement);
         difference.length = hd.value_or(0.0) > 0.0 ? *hd : 0.0;
         difference.source = builder_.source(n);
-        builder_.addStationObservation(difference);
+        if (std::isfinite(difference.heightDifference)) {
+            builder_.addStationObservation(difference);
+        } else {
+            builder_.warn(n, "the change in elevation and heights do not add up to a finite "
+                             "height difference; it is not imported");
+        }
     }
 
     const auto distance = [&](double value, survey::DistanceKind kind, std::string_view tag) {

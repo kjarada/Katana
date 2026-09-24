@@ -629,8 +629,13 @@ void Gts7Reader::measurement(std::string_view word, const Fields& f, std::size_t
         difference.sigma = std::hypot(precision.heightMeasurement, precision.heightMeasurement);
         difference.length = flat.value_or(0.0) > 0.0 ? *flat : 0.0;
         difference.source = builder_.source(n);
-        builder_.addStationObservation(difference);
-        any = true;
+        if (std::isfinite(difference.heightDifference)) {
+            builder_.addStationObservation(difference);
+            any = true;
+        } else {
+            builder_.warn(n, "the vertical distance and heights do not add up to a finite "
+                             "height difference; it is not imported");
+        }
     }
     if (!any) {
         builder_.skip(n, std::string(word) + " record with no readable value");

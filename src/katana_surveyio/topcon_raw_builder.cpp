@@ -304,9 +304,18 @@ survey::SurveyStation& RawProjectBuilder::beginStation(std::string_view pointId,
                                                        std::size_t record)
 {
     mentionPoint(pointId, record);
+    // The n-th occupation of a point is "<point> (n)". Counted per point, so
+    // a file that occupies one point a hundred thousand times costs a
+    // hundred thousand steps, not the square of it; the loop only runs on
+    // when the file itself uses such a name for another setup.
+    std::uint32_t& occupations = occupations_[std::string(pointId)];
     std::string id(pointId);
-    for (std::size_t occupation = 2; stationIndex_.find(id) != stationIndex_.end(); ++occupation) {
-        id = std::string(pointId) + " (" + std::to_string(occupation) + ")";
+    if (occupations > 0 || stationIndex_.contains(id)) {
+        do {
+            id = std::string(pointId) + " (" + std::to_string(++occupations) + ")";
+        } while (stationIndex_.contains(id));
+    } else {
+        ++occupations;
     }
     stationIndex_.emplace(id, static_cast<std::uint32_t>(result_.project.stations.size()));
     // Setups of one job tend to be alike: room for as many observations as
