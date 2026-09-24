@@ -7,7 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
+#include <charconv>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,16 +22,24 @@ namespace {
 
 using katana::math::kPi;
 
+// std::to_chars rather than snprintf: a report of 100 000 observations
+// formats about a million numbers, and the C library's printf was most of
+// the time it took.
 std::string fixed(double value, int decimals)
 {
     char buffer[64];
-    std::snprintf(buffer, sizeof buffer, "%.*f", decimals, value);
-    return buffer;
+    const auto result =
+        std::to_chars(buffer, buffer + sizeof buffer, value, std::chars_format::fixed, decimals);
+    return std::string(buffer, result.ptr);
 }
 
+// "+0.0" for anything that rounds to zero, whatever its sign: a residual of
+// -1e-15 is not a negative millimetre.
 std::string signedFixed(double value, int decimals)
 {
-    return (value >= 0.0 ? "+" : "") + fixed(value, decimals);
+    const std::string digits = fixed(std::abs(value), decimals);
+    const bool zero = digits.find_first_not_of("0.") == std::string::npos;
+    return (value < 0.0 && !zero ? "-" : "+") + digits;
 }
 
 // 123°45'06.7" (seconds to `decimals`), rounding carried into the minutes.
@@ -49,10 +57,16 @@ std::string dms(double radians, int decimals = 1)
     const long long degrees = whole / unitsPerDegree;
     const long long minutes = (whole % unitsPerDegree) / unitsPerMinute;
     const double seconds = static_cast<double>(whole % unitsPerMinute) / scale;
-    char buffer[64];
-    std::snprintf(buffer, sizeof buffer, "%s%lld\xC2\xB0%02lld'%0*.*f\"", negative ? "-" : "",
-                  degrees, minutes, decimals > 0 ? decimals + 3 : 2, decimals, seconds);
-    return buffer;
+    std::string text = negative ? "-" : "";
+    text += std::to_string(degrees);
+    text += "\xC2\xB0";
+    text += minutes < 10 ? "0" : "";
+    text += std::to_string(minutes);
+    text += '\'';
+    text += seconds < 10.0 ? "0" : "";
+    text += fixed(seconds, decimals);
+    text += '"';
+    return text;
 }
 
 std::string seconds(double radians, int decimals = 1)

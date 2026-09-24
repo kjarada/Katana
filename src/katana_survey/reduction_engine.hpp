@@ -140,6 +140,41 @@ struct Engine {
         report.warnings.push_back(ReportMessage{std::move(text), std::move(source)});
     }
 
+    // A notice that is the same sentence for many setups ("the file does not
+    // say whether the prism constant is in the distances") is collected and
+    // written once, naming the setups: a thousand identical lines would bury
+    // the one warning that matters.
+    void warnSetup(const SurveyStation& station, std::string text)
+    {
+        const auto [it, inserted] = setupNoticeSlot.try_emplace(text, setupNotices.size());
+        if (inserted) {
+            setupNotices.push_back({std::move(text), {}});
+        }
+        setupNotices[it->second].second.push_back(&station);
+    }
+
+    void flushSetupNotices()
+    {
+        for (auto& [text, stations] : setupNotices) {
+            std::string who;
+            if (stations.size() == 1) {
+                who = "Setup " + stations.front()->setup.id;
+            } else {
+                who = std::to_string(stations.size()) + " setups (";
+                for (std::size_t i = 0; i < stations.size() && i < 5; ++i) {
+                    who += (i == 0 ? "" : ", ") + stations[i]->setup.id;
+                }
+                who += stations.size() > 5 ? ", ...)" : ")";
+            }
+            warn(who + ": " + text, stations.front()->source);
+        }
+        setupNotices.clear();
+        setupNoticeSlot.clear();
+    }
+
+    std::vector<std::pair<std::string, std::vector<const SurveyStation*>>> setupNotices;
+    std::unordered_map<std::string, std::size_t> setupNoticeSlot;
+
     Position* find(std::string_view id)
     {
         const auto it = positions.find(id);
