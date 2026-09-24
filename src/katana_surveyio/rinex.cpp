@@ -45,6 +45,7 @@
 #include <bitset>
 #include <charconv>
 #include <cmath>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <string>
@@ -54,6 +55,7 @@
 
 #include "katana/core/text.hpp"
 #include "katana/surveyio/format.hpp"
+#include "katana/surveyio/reader.hpp"
 #include "katana/surveyio/rinex.hpp"
 #include "rinex_internal.hpp"
 
@@ -484,6 +486,7 @@ class ObservationReader {
     void warn(std::size_t record, std::string message);
     void finish();
     void readNavigation();
+    void noteCompaction();
     [[nodiscard]] survey::SourceRecord sourceAt(std::size_t record) const;
     [[nodiscard]] std::string markerIdFromFileName() const;
 
@@ -491,6 +494,14 @@ class ObservationReader {
     std::string fileName_;
     const ReadOptions& options_;
     LineCursor cursor_;
+    // A Compact RINEX file, expanded: bytes_ is then its text, and every line
+    // number a warning or source record gives is mapped back to the compact
+    // file's own line.
+    std::optional<rinex::CompactExpansion> compact_{};
+    [[nodiscard]] std::size_t fileLine(std::size_t record) const
+    {
+        return compact_ ? compact_->lines.compactLine(record) : record;
+    }
 
     rinex::VersionRecord version_{};
     bool versionTwo_ = false;
@@ -527,7 +538,7 @@ class ObservationReader {
 void ObservationReader::warn(std::size_t record, std::string message)
 {
     if (result_.warnings.size() < kMaxListedWarnings) {
-        result_.warnings.push_back(ReadWarning{fileName_, record, std::move(message)});
+        result_.warnings.push_back(ReadWarning{fileName_, fileLine(record), std::move(message)});
     } else {
         ++suppressedWarnings_;
     }
@@ -536,7 +547,7 @@ void ObservationReader::warn(std::size_t record, std::string message)
 survey::SourceRecord ObservationReader::sourceAt(std::size_t record) const
 {
     return survey::SourceRecord{toString(Manufacturer::OpenStandard), std::string(kHumanName),
-                                version_.versionText, fileName_, record};
+                                version_.versionText, fileName_, fileLine(record)};
 }
 
 std::string ObservationReader::markerIdFromFileName() const
@@ -1502,12 +1513,51 @@ void ObservationReader::readNavigation()
     }
 }
 
+// A compact file's own account: how it was expanded, what could not be, and
+// its records counted as the lines of the file the person has.
+void ObservationReader::noteCompaction()
+{
+    rinex::CompactExpansion& compact = *compact_;
+    result_.project.metadata["compression"] =
+        compact.description + "; expanded to RINEX as it was read";
+    // The expansion's own warnings come first: they say which epochs never
+    // reached the reader at all.
+    result_.warnings.insert(result_.warnings.begin(),
+                            std::make_move_iterator(compact.warnings.begin()),
+                            std::make_move_iterator(compact.warnings.end()));
+    if (compact.optionalLines > 0) {
+        warn(0, std::to_string(compact.optionalLines) +
+                    " Compact RINEX optional records ('&' lines, reserved for future use) were "
+                    "skipped");
+    }
+    // Every expanded line comes from one compact line, and the clock offset
+    // lines are read as part of their epoch, so the compact file's lines are
+    // what the expansion skipped plus what the reader skipped, and the rest.
+    // (A RINEX 2 satellite whose observations wrap is one compact line but
+    // two expanded ones; the reader skipping it counts two - a count that can
+    // only overstate the loss.)
+    const std::size_t skipped = std::min(compact.compactLines, compact.linesSkipped +
+                                                                   compact.optionalLines +
+                                                                   result_.recordsSkipped);
+    result_.recordsSkipped = skipped;
+    result_.recordsRead = compact.compactLines - skipped;
+}
+
 Result<ReadResult> ObservationReader::read()
 {
     if (bytes_.empty()) {
         return makeError(ErrorCode::FileImportFailure, fileName_ + " is empty");
     }
-    if (const rinex::Packing packing = rinex::packingOf(bytes_); packing != rinex::Packing::Plain) {
+    if (const rinex::Packing packing = rinex::packingOf(bytes_); packing == rinex::Packing::Hatanaka) {
+        Result<rinex::CompactExpansion> expansion =
+            rinex::expandCompactRinex(bytes_, fileName_, kMaxSurveyFileBytes);
+        if (!expansion) {
+            return expansion.error();
+        }
+        compact_ = std::move(*expansion);
+        bytes_ = compact_->text;
+        cursor_ = LineCursor(bytes_);
+    } else if (packing != rinex::Packing::Plain) {
         return makeError(ErrorCode::Unsupported, rinex::packingRefusal(packing, fileName_));
     }
     std::string_view line;
@@ -1617,6 +1667,9 @@ Result<ReadResult> ObservationReader::read()
     readBody();
     finish();
     readNavigation();
+    if (compact_) {
+        noteCompaction();
+    }
     if (suppressedWarnings_ > 0) {
         result_.warnings.push_back(ReadWarning{fileName_, 0,
                                                std::to_string(suppressedWarnings_) +
@@ -1680,9 +1733,24 @@ FormatSignature probeRinexObservation(const ProbeInput& input)
         }
         return ruledOut();
     }
-    case rinex::Packing::Hatanaka:
-        return {0.95, "Compact RINEX (Hatanaka) header 'CRINEX VERS / TYPE'; it has to be "
-                      "converted with CRX2RNX first"};
+    case rinex::Packing::Hatanaka: {
+        // The RINEX header it wraps starts on its third line.
+        std::string evidence = "Compact RINEX (Hatanaka) header 'CRINEX VERS / TYPE'";
+        rinex::LineCursor lines(bytes);
+        std::string_view line;
+        for (int i = 0; i < 3 && lines.next(line); ++i) {
+        }
+        if (lines.lineNumber() == 3) {
+            if (const std::optional<rinex::VersionRecord> inner = rinex::versionRecord(line)) {
+                if (inner->fileType != 'O') {
+                    return {0.75, evidence + " around a RINEX '" + inner->typeText +
+                                      "' file, which Compact RINEX does not hold"};
+                }
+                evidence += " around RINEX " + inner->versionText + " observation data";
+            }
+        }
+        return {0.99, evidence + "; it is expanded as it is read"};
+    }
     case rinex::Packing::Plain:
         break;
     }

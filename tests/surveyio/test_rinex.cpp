@@ -219,16 +219,7 @@ TEST(RinexFormat, TheProbeRulesOutEverySurveyFixtureThatIsNotRinex)
 
 TEST(RinexFormat, PackedFilesAreRecognisedAndRefusedWithTheStepThatUnpacksThem)
 {
-    // Hatanaka: its own header record first; the probe knows it for RINEX, the
-    // reader says to run CRX2RNX.
-    const std::string hatanaka = fixture("test2560.24d");
-    EXPECT_DOUBLE_EQ(probeConfidence(hatanaka, "test2560.24d"), 0.95);
-    const Result<ReadResult> crx = readRinex(hatanaka, "test2560.24d");
-    ASSERT_FALSE(crx.ok());
-    EXPECT_EQ(crx.error().code, ErrorCode::Unsupported);
-    EXPECT_NE(crx.error().message.find("Hatanaka"), std::string::npos);
-    EXPECT_NE(crx.error().message.find("CRX2RNX"), std::string::npos);
-
+    // (Hatanaka-compressed files are expanded, not refused: test_rinex_compact.cpp.)
     // gzip and Unix compress: only the name can say RINEX is inside.
     const std::string gzip("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03", 10);
     EXPECT_DOUBLE_EQ(probeConfidence(gzip, "TEST00AUS_R_20242561000_01H_30S_MO.rnx.gz"), 0.8);
@@ -922,6 +913,10 @@ const std::vector<std::string>& allFixtures()
                                                 "ROVR00AUS_R_20242561100_01H_01S_GO.rnx",
                                                 "BASE00AUS_R_20242561200_01H_30S_MO.rnx",
                                                 "test2560.24d",
+                                                "TEST00AUS_R_20242561000_01H_30S_MO.crx",
+                                                "ROVR00AUS_R_20242561100_01H_01S_GO.crx",
+                                                "BASE00AUS_R_20242561200_01H_30S_MO.crx",
+                                                "rinex305_example1.crx",
                                                 "rinex305_example1.rnx",
                                                 "test2560.24n",
                                                 "BASE00AUS_R_20242561200_01H_MN.rnx"};
