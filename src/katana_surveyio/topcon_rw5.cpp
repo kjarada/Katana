@@ -44,6 +44,15 @@
 //     its state is Unknown.
 //   * The description after "--" is the point's description; its first word
 //     is the field code that strings the point into a feature.
+//   * OF (off-centre shot) does not say which shot it corrects, so it is not
+//     applied to one: its AR, ZE and SD are kept as written in the setup's
+//     metadata, with a warning. FE (foresight elevation), listed by [SCE]
+//     without a record, is kept in the target point's metadata.
+//   * Nothing in a record is dropped without a word: a field no handler asks
+//     for is warned about at its first record and counted at the end, a note
+//     on a record with no use for one joins the setup's notes, and a shot
+//     giving two of a group [SCE] says to give one of (AR/AL/AZ/BR/DR/DL,
+//     ZE/VA/CE, SD/HD) reads the first and names the others.
 //
 // Records the specifications define that carry no survey observation or
 // coordinate - stake-out, cut sheets, slope staking, calibration, projection
@@ -52,6 +61,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <map>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -97,11 +108,17 @@ struct Record {
     bool overflow = false;
     std::string_view note; // the text after "--", commas and all
     bool hasNote = false;
+    // The fields a handler has looked at, one bit each. A field no handler
+    // asked for is one this reader does not know, and Rw5Reader::record says
+    // so rather than let it vanish.
+    mutable std::uint32_t looked = 0;
+    mutable bool noteLooked = false;
 
     [[nodiscard]] std::optional<std::string_view> find(std::string_view tag) const
     {
         for (std::size_t i = 0; i < count; ++i) {
             if (fields[i].tag == tag) {
+                looked |= 1u << i;
                 return fields[i].value;
             }
         }
@@ -181,8 +198,6 @@ constexpr std::array kNotImported = {
     NotImported{"DL", "a defined location is a computed design point"},
     NotImported{"MD", "a multiple-distance record names no target point"},
     NotImported{"OE", "an offset delta is a stake-out result"},
-    NotImported{"OF", "an off-centre shot needs the reduction to move its target, which the model "
-                      "cannot hold"},
     NotImported{"RD", "a repeat-directional record names no target point"},
     NotImported{"RE", "a remote elevation names no target point"},
     NotImported{"RS", "a resection observation is not imported: its setup is not stated until "
@@ -222,9 +237,9 @@ constexpr std::array kNotImported = {
 };
 
 // Every record type the reader or kNotImported knows, for the probe.
-constexpr std::array<std::string_view, 29> kImported = {
+constexpr std::array<std::string_view, 30> kImported = {
     "JB", "MO", "OC", "BK", "LS", "SS", "TR", "OB", "BD", "BR", "FD", "FR", "SK", "RB", "RF",
-    "SP", "AP", "GS", "GR", "FC", "DP", "AT", "CS", "GPS", "BP", "BL", "CV", "EP", "AH"};
+    "SP", "AP", "GS", "GR", "FC", "DP", "AT", "CS", "GPS", "BP", "BL", "CV", "EP", "AH", "OF"};
 
 bool isKnownType(std::string_view type)
 {
@@ -260,6 +275,7 @@ class Rw5Reader {
 
   private:
     void record(std::string_view line, std::size_t n);
+    void dispatch(const Record& r, std::size_t n);
     void mode(const Record& r, std::size_t n);
     void job(const Record& r, std::size_t n);
     void occupy(const Record& r, std::size_t n);
@@ -275,7 +291,10 @@ class Rw5Reader {
     void geodeticPosition(const Record& r, std::size_t n);
     void antennaHeight(const Record& r, std::size_t n);
     void equipment(const Record& r, std::size_t n);
+    void offCentre(const Record& r, std::size_t n);
     void finishVector();
+    void unreadFields(const Record& r, std::size_t n);
+    void reportUnreadFields();
 
     // Values in the file's units, converted; a failure is a warning naming the
     // field, and nullopt. Linear values need a stated unit: before the first
@@ -316,6 +335,16 @@ class Rw5Reader {
     std::size_t vectorRecord_ = 0;
     std::string vectorNote_;
     std::size_t lastGnss_ = std::string_view::npos; // index in project().observations
+
+    // Fields no handler reads, by "<record type> <tag>": the record of the
+    // first and how many records carried one. Warned once at the first and
+    // summed at the end, so a collector that writes an unknown field on
+    // every shot gives two warnings, not one per shot.
+    struct Unread {
+        std::size_t first = 0;
+        std::size_t records = 0;
+    };
+    std::map<std::string, Unread, std::less<>> unread_;
 };
 
 std::optional<double> Rw5Reader::real(std::optional<std::string_view> value, std::string_view tag,
@@ -422,6 +451,7 @@ Result<ReadResult> Rw5Reader::read(std::string_view bytes)
         return *fatal_;
     }
     finishVector();
+    reportUnreadFields();
     if (!builder_.project().stations.empty()) {
         if (!instrumentHeightStated_) {
             builder_.notCarried("no instrument heights (no LS record states HI)");
@@ -472,6 +502,17 @@ void Rw5Reader::record(std::string_view line, std::size_t n)
         builder_.warn(n, "record has more fields than any RW5 record defines; the extra fields "
                          "were not read");
     }
+    const std::size_t skippedBefore = builder_.recordsSkipped();
+    dispatch(r, n);
+    // A record skipped as a whole has already been warned about; one that
+    // was read must not lose a field quietly.
+    if (!fatal_ && builder_.recordsSkipped() == skippedBefore) {
+        unreadFields(r, n);
+    }
+}
+
+void Rw5Reader::dispatch(const Record& r, std::size_t n)
+{
     const std::string_view type = r.type;
     if (type == "MO") {
         mode(r, n);
@@ -551,6 +592,8 @@ void Rw5Reader::record(std::string_view line, std::size_t n)
         antennaHeight(r, n);
     } else if (type == "EQ") {
         equipment(r, n);
+    } else if (type == "OF") {
+        offCentre(r, n);
     } else {
         for (const NotImported& known : kNotImported) {
             if (known.type == type) {
@@ -658,6 +701,7 @@ void Rw5Reader::job(const Record& r, std::size_t)
 void Rw5Reader::describePoint(std::string_view id, const Record& r, std::size_t n)
 {
     lastPoint_ = std::string(id);
+    r.noteLooked = true;
     if (!r.hasNote || r.note.empty()) {
         return;
     }
@@ -803,9 +847,45 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
     const std::optional<double> sd = linear(r.find("SD"), "SD", n);
     const std::optional<double> hd = linear(r.find("HD"), "HD", n);
     const std::optional<std::string_view> bearing = r.find("BR");
+    // [SCE] lists FE, foresight elevation, among the field headers without
+    // saying which record carries it: the elevation the collector computed
+    // for the target, kept with the point.
+    const std::optional<double> fe = linear(r.find("FE"), "FE", n);
     if (fatal_) {
         return;
     }
+    // [SCE]: a shot records ONE of each group. A record with two says two
+    // things; the first in the specification's order is read and the rest
+    // named, never dropped without a word.
+    const auto oneOf = [&](std::initializer_list<std::pair<std::string_view, bool>> group) {
+        std::string_view used;
+        std::string extra;
+        for (const auto& [tag, present] : group) {
+            if (!present) {
+                continue;
+            }
+            if (used.empty()) {
+                used = tag;
+            } else {
+                extra += extra.empty() ? std::string(tag) : ", " + std::string(tag);
+            }
+        }
+        if (!extra.empty()) {
+            builder_.warn(n, "the record gives " + std::string(used) + " and also " + extra +
+                                 ", where the specification allows one; " + std::string(used) +
+                                 " is read and " + extra + " is not imported");
+        }
+    };
+    oneOf({{"AR", ar.has_value()},
+           {"AL", al.has_value()},
+           {"AZ", az.has_value()},
+           {"BR", bearing.has_value()},
+           {"DR", dr.has_value()},
+           {"DL", dl.has_value()}});
+    oneOf({{"ZE", ze.has_value()}, {"VA", va.has_value()}, {"CE", ce.has_value()}});
+    // CE is a height difference and HD its horizontal partner: the pair is
+    // one choice of the vertical group, so only SD with HD is a conflict.
+    oneOf({{"SD", sd.has_value()}, {"HD", hd.has_value() && !ce}});
     const double hi = instrumentHeight_;
     const double th = targetHeight.value_or(rodHeight_);
     const survey::ObservationPrecision& precision = builder_.options().precision;
@@ -966,6 +1046,10 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
     }
     if (type == "TR") {
         builder_.addPointMetadata(to, "traverse foresight", "record " + std::to_string(n));
+    }
+    if (fe) {
+        builder_.addPointMetadata(to, "foresight elevation (collector, m)",
+                                  katana::core::formatExactReal(*fe));
     }
     describePoint(to, r, n);
     builder_.countRead();
@@ -1145,6 +1229,7 @@ void Rw5Reader::vectorRecord(const Record& r, std::size_t n)
     const char which = r.type[1];
     if (which == '0') {
         finishVector();
+        r.noteLooked = true;
         vectorNote_ = std::string(trimmed(r.note));
         builder_.countRead();
         return;
@@ -1362,6 +1447,77 @@ void Rw5Reader::equipment(const Record& r, std::size_t)
         builder_.project().metadata[role + " receiver serial"] = std::string(*serial);
     }
     builder_.countRead();
+}
+
+void Rw5Reader::offCentre(const Record& r, std::size_t n)
+{
+    // [SCE] OF: the angle right, the actual zenith and the slope distance of
+    // an off-centre shot (a tree, a pole). The specification does not say
+    // which shot it corrects, so it is not tied to one: the values are kept,
+    // as written, with the setup they were observed from.
+    survey::SurveyStation* station = builder_.currentStation();
+    if (station == nullptr) {
+        builder_.skip(n, "off-centre shot before any setup");
+        return;
+    }
+    std::string values;
+    for (const std::string_view tag : {"AR", "ZE", "SD"}) {
+        if (const std::optional<std::string_view> value = r.find(tag)) {
+            values += (values.empty() ? "" : ", ") + std::string(tag) + " " + std::string(*value);
+        }
+    }
+    r.noteLooked = true;
+    if (r.hasNote && !r.note.empty()) {
+        values += (values.empty() ? "note " : ", note ") + std::string(r.note);
+    }
+    station->metadata["off-centre shot, record " + std::to_string(n) + " (file units)"] = values;
+    builder_.warn(n, "the off-centre shot is kept in setup '" + station->setup.id +
+                         "' metadata but not applied: the specification does not say which "
+                         "shot it corrects");
+    builder_.countRead();
+}
+
+void Rw5Reader::unreadFields(const Record& r, std::size_t n)
+{
+    if (r.hasNote && !r.noteLooked && !r.note.empty()) {
+        // A note on a record whose handler has no use for one (a backsight,
+        // a mode record): kept with the setup like a note line.
+        builder_.addStationNote(std::string(r.type) + " note: " + std::string(r.note));
+    }
+    const std::uint32_t all = r.count >= 32 ? UINT32_MAX : (1u << r.count) - 1u;
+    if ((r.looked & all) == all) {
+        return;
+    }
+    for (std::size_t i = 0; i < r.count; ++i) {
+        if ((r.looked & (1u << i)) != 0) {
+            continue;
+        }
+        std::string key(r.type);
+        key += ' ';
+        key += r.fields[i].tag;
+        auto [entry, first] = unread_.try_emplace(std::move(key));
+        ++entry->second.records;
+        if (first) {
+            entry->second.first = n;
+            builder_.warn(n, "field '" + std::string(r.fields[i].tag) + "' (value '" +
+                                 std::string(r.fields[i].value.substr(0, 40)) + "') is not one "
+                                 "the RW5 specifications define for a " +
+                                 std::string(r.type) + " record; it is not imported, here or "
+                                 "on any later " + std::string(r.type) + " record");
+        }
+    }
+}
+
+void Rw5Reader::reportUnreadFields()
+{
+    for (const auto& [key, unread] : unread_) {
+        if (unread.records > 1) {
+            builder_.warn(0, "the '" + key.substr(key.find(' ') + 1) + "' field of " +
+                                 key.substr(0, key.find(' ')) + " records was not imported on " +
+                                 std::to_string(unread.records) + " records, the first record " +
+                                 std::to_string(unread.first));
+        }
+    }
 }
 
 // ---- Registration ---------------------------------------------------------------

@@ -277,6 +277,29 @@ TEST(TopconGts, AMeasurementWithNoShotHeaderIsASkippedRecordNamingItsLine)
     EXPECT_EQ(result->recordsSkipped, 2u);
 }
 
+TEST(TopconGts, FieldsPastTheOnesTheFormatDefinesAreWarnedAtTheFirstAndCounted)
+{
+    const auto result = topcon_test::read(kGts7,
+                                          "UNITS M,D\n"                   // 1
+                                          "STN A,1.5,STAT,X9\n"           // 2: STN has 3
+                                          "SS B,1.6,KB,1\n"               // 3
+                                          "SD 10.0000,90.0000,5.000,7\n"  // 4: SD has 3
+                                          "SS C,1.6,KB,1\n"               // 5
+                                          "SD 20.0000,90.0000,6.000,8\n", // 6
+                                          "extra.gt7");
+    ASSERT_TRUE(result.ok()) << result.error().describe();
+    EXPECT_EQ(result->recordsRead, 6u);
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 2, "past the 3 the GTS-7 format "
+                                                            "defines ('X9')"));
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 4, "('7')"));
+    EXPECT_FALSE(topcon_test::anyWarningContains(*result, 6, "past the"));
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 0, "2 SD records carry fields"));
+    EXPECT_TRUE(topcon_test::anyWarningContains(*result, 0, "the first is record 4"));
+    EXPECT_FALSE(topcon_test::anyWarningContains(*result, 0, "STN records carry"));
+    // The measurements themselves are read in full.
+    EXPECT_EQ(result->project.stations.at(0).observations.size(), 6u);
+}
+
 TEST(TopconGts, Gts6IsRecognisedAndRefusedWithWhatToExportInstead)
 {
     const Detection detection = detectFormat(probeOf(kGts6Sample, "job.raw"));
