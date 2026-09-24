@@ -26,6 +26,7 @@
 #include "katana/geometry/mesh.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
+#include "katana/render/rasterizer.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
 namespace katana::cad {
@@ -229,7 +230,9 @@ class SceneBuilder {
   public:
     // Appends the whole scene to `out`, which is cleared first: grid, terrain,
     // edges at full strength, and the drawing with the selection in the
-    // selection style.
+    // selection style. One list cannot carry the depth rules renderLayers
+    // draws the grid and the edges with, so a surface flat at the datum shows
+    // the grid through it here; a view draws SceneLayers.
     void build(const Document& document, const std::vector<SceneSurface>& surfaces,
                const SceneOptions& options, katana::render::DrawList& out,
                const std::vector<SceneMesh>& meshes = {});
@@ -278,6 +281,33 @@ class SceneBuilder {
     std::vector<Point2> chord_; // tessellation scratch, reused
     std::vector<katana::render::Vec3> normals_; // per-vertex normal scratch, reused
 };
+
+// One frame of `layers` as the 3D view draws it: the depth range fitted to
+// the layers and the grid, the edges faded for `camera` (fadeEdges), then one
+// pass per layer in declaration order into one depth buffer, each with its
+// own depth rule:
+//
+//   grid       a backdrop, writing no depth, so the model always covers it.
+//              It stands on the datum, exactly in the plane of a surface
+//              that is flat at its lowest (a pad, a pond floor), where the
+//              surface's slope push lost to it: the whole grid showed
+//              through a flat pad.
+//   terrain    written.
+//   edges      tested against the terrain but not written. An edge and a
+//              line draped across it both lie in the surface, each at one
+//              depth across its width; off their centres those differ by up
+//              to a pixel of the surface's slope, more than the half a
+//              footprint between their biases at a low angle, so the edge
+//              drawn first broke every draped line it crossed.
+//   entities   written.
+//   selection  written.
+//
+// `options.clear` is honoured by the first pass only. Stops at, and returns,
+// the first failure.
+[[nodiscard]] katana::core::Result<katana::render::RenderStats>
+renderLayers(SceneLayers& layers, katana::render::Camera& camera,
+             katana::render::Rasterizer& rasterizer, katana::render::Framebuffer& target,
+             katana::render::RenderOptions options = {});
 
 // The elevation ramp's colour at t in [0, 1] (clamped): what the legend of a
 // view draws, so it cannot disagree with the surfaces.
