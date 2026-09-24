@@ -321,4 +321,26 @@ void BM_SceneFrame(benchmark::State& state)
 }
 BENCHMARK(BM_SceneFrame)->Arg(256)->Arg(512)->Unit(benchmark::kMillisecond);
 
+// What a selection click costs the 3D view: the overlay of the selected
+// entities alone (SceneBuilder::buildSelection), the terrain and the drawing
+// under it built once beforehand as the view keeps them. Compare with
+// BM_SceneBuild, which is what every click cost when any document
+// notification rebuilt the whole scene.
+void BM_SceneSelectionBuild(benchmark::State& state)
+{
+    const auto survey = syntheticSurvey(static_cast<int>(state.range(0)));
+    katana::cad::SceneBuilder builder;
+    katana::cad::SceneOptions options;
+    katana::cad::SceneLayers layers;
+    builder.buildTerrain(survey->surfaces, {}, options, layers);
+    builder.buildEntities(survey->document, survey->surfaces, options, layers);
+    survey->document.selection().add(survey->document.model().entities.ids().front());
+    for (auto _ : state) {
+        builder.buildSelection(survey->document, survey->surfaces, options, layers);
+        benchmark::DoNotOptimize(layers.selection.positions.data());
+    }
+    state.counters["lines"] = static_cast<double>(layers.selection.lines.size());
+}
+BENCHMARK(BM_SceneSelectionBuild)->Arg(256)->Arg(512)->Unit(benchmark::kMillisecond);
+
 } // namespace
