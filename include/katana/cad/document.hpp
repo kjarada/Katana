@@ -200,9 +200,10 @@ class Document {
     // Broad-phase index over the entities, kept in step with the model
     // (PLAN.MD Phase 18). Maintained incrementally from the per-entity changes
     // an ordinary command reports, and rebuilt whole - which is what chooses
-    // the cell size from the data - when the model is replaced and when a
-    // command is a BULK change (applyToSpatialIndex has the rule), so that an
-    // import leaves the same index as opening the saved result would.
+    // the cell size from the data - when the model is replaced, when the
+    // drawing has doubled or halved since the cell was chosen, and when boxes
+    // too big for the cell pile up (applyToSpatialIndex has the rules), so
+    // that an import leaves the same index as opening the saved result would.
     //
     // Pass it to snap(), pickEntity() and pickInBox(). They give the same
     // answer without it, only slower, so a caller that has no Document loses
@@ -280,7 +281,8 @@ class Document {
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();
     // The index after one command: incremental for an ordinary edit, a
-    // whole rebuild for a bulk one.
+    // whole rebuild when the drawing has doubled or halved since the cell was
+    // chosen, or when boxes too big for the cell have piled up.
     void applyToSpatialIndex(const std::vector<katana::entity::ChangeEvent>& changes);
     // The DocumentChange table bits of every table whose revision moved
     // since the last call (or rememberTables), and remembers the new ones.
@@ -303,6 +305,9 @@ class Document {
     // size (its last rebuild). 0 until the first rebuild: an index that has
     // never been rebuilt is on the default cell, which was chosen for no data.
     std::size_t indexChosenFor_ = 0;
+    // How many boxes that rebuild had to put on the oversized list: some data
+    // needs a few whatever the cell (applyToSpatialIndex, the overflow rule).
+    std::size_t indexOversizedAtRebuild_ = 0;
     // Each table's revision when tablesChanged() last looked.
     struct TableRevisions {
         std::uint64_t layers = 0;
