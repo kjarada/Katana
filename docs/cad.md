@@ -878,10 +878,11 @@ colour; a name `archive12d::standardColour` does not know leaves the entity
 pen as it is rather than guessing. A one-point stroke is a library `dot`, painted
 round whatever the cap (a flat cap draws a zero-length line as nothing). Style
 texts are clamped at 2000 px, the plain-text ceiling in
-`ViewportWidget::drawText` (a font asked for at hundreds of thousands of
+`PlanPainter::drawText` (a font asked for at hundreds of thousands of
 pixels makes the raster engine allocate glyphs larger than any screen), and
-not drawn under 3 px. The plot reaches the painter through
-`ViewportWidget::drawEntities`, which `plotToPdf` reuses.
+not drawn under 3 px. The screen and the plot reach the painter through the
+same `paintPlan` (`src/katana_qt/plan_painter.hpp`, docs/plan_view.md); a
+plot calls it from `plotPlanToPdf`, which needs no widget.
 
 **White prints black (decision D7).** `PlotSettings::whiteToBlack`, on by
 default, and `cad::paperColour`: a pen whose every channel is at least 230 of
