@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <thread>
 
 #include <QImage>
 #include <QMouseEvent>
@@ -555,4 +556,41 @@ TEST(PlanView, ASelectionChangedWithoutANotificationIsStillDrawn)
     document.selection().set(document.lastCreatedEntities());
     katana::qt::test::paint(view);
     EXPECT_EQ(view.drawingPaintCount(), first + 1);
+}
+
+// ---- off the GUI thread ----------------------------------------------------------------
+
+TEST(PlanPainter, TwoThreadsPaintingTheSameDrawingAtOnceEachPaintWhatTheGuiThreadPaints)
+{
+    // The painter reads its arguments and writes only its painter and its
+    // cache, so two worker threads, each with its own cache, painting the
+    // same model at the same time onto their own images - what a sheet set
+    // plotted in the background does - must each get exactly the GUI
+    // thread's image: lines, a hatched square, text and sprite-stamped
+    // symbols.
+    Model model;
+    katana::entity::Style style;
+    style.name = "pit";
+    style.symbol = "square";
+    style.symbolSize = 4.0;
+    ASSERT_TRUE(model.styles.add(style));
+    for (int i = 0; i < 30; ++i) {
+        add(model, entityOf(Segment2{Point2(-90.0 + 6.0 * i, -40.0), Point2(-60.0 + 4.0 * i, 40.0)}));
+        Entity point = entityOf(katana::entity::PointGeometry{Point2(-80.0 + 5.3 * i, 10.0)});
+        point.style = "pit";
+        add(model, point);
+    }
+    add(model, entityOf(katana::entity::TextGeometry{Point2(-50.0, -20.0), "LOT 7", 12.0, 0.2}));
+    const PlanFrame frame = frameOf(200.0, 100.0, 1.0, Point2(0.0, 0.0));
+    PlanPaintOptions options;
+    options.symbolSprites = true;
+    const QImage expected = painted(model, frame, options);
+    QImage first;
+    QImage second;
+    {
+        std::jthread one([&] { first = painted(model, frame, options); });
+        std::jthread two([&] { second = painted(model, frame, options); });
+    }
+    EXPECT_TRUE(first == expected);
+    EXPECT_TRUE(second == expected);
 }

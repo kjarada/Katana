@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 
+#include <QByteArray>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -32,6 +33,8 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/view_set.hpp"
+#include "katana/entity/model.hpp"
+#include "katana/interop/archive12d.hpp"
 #include "survey_drawing.hpp"
 #include "viewport_widget.hpp"
 
@@ -307,4 +310,93 @@ BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_none, 5.0, kZoomedCentre, false, false,
 BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_clip, 5.0, kZoomedCentre, false, true, false)
     ->Unit(benchmark::kMillisecond)->UseRealTime();
 BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_all, 5.0, kZoomedCentre, true, true, true)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+// Zoomed in twenty-five times: a contour of 400 vertices across the site
+// shows about 16 of them, and clipping drops the other 96%.
+BENCHMARK_CAPTURE(BM_PlanPainter, deep_none, 25.0, kZoomedCentre, false, false, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, deep_clip, 25.0, kZoomedCentre, false, true, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+
+namespace {
+
+// One of the owner's real archives, when KATANA_BENCH_ARCHIVE names one: tens
+// of megabytes of someone's survey cannot be committed, and the generated
+// drawing's 400-vertex contours are not the case clipping was measured on (a
+// scratch harness found 221 ms in 159 partly visible strings of the archive
+// with a TIN, zoomed to a fifth of its extent). Built straight into a model,
+// with no library: the case measured.
+struct ArchiveFixture {
+    katana::entity::Model model;
+    Box2 extent;
+    bool ok = false;
+    std::string why = "KATANA_BENCH_ARCHIVE is not set";
+};
+
+ArchiveFixture& archiveFixture()
+{
+    static std::unique_ptr<ArchiveFixture> made = [] {
+        auto f = std::make_unique<ArchiveFixture>();
+        const QByteArray path = qgetenv("KATANA_BENCH_ARCHIVE");
+        if (path.isEmpty()) {
+            return f;
+        }
+        auto imported =
+            katana::interop::importArchive12d(std::filesystem::path(QString::fromUtf8(path).toStdWString()));
+        if (!imported) {
+            f->why = imported.error().describe();
+            return f;
+        }
+        for (const katana::entity::Layer& layer : imported->layersNeeded) {
+            (void)f->model.layers.add(layer);
+        }
+        for (const katana::entity::Style& style : imported->stylesNeeded) {
+            (void)f->model.styles.add(style);
+        }
+        for (katana::entity::Entity& entity : imported->entities) {
+            (void)f->model.entities.add(std::move(entity));
+        }
+        f->extent = imported->bounds;
+        f->ok = !f->extent.empty();
+        return f;
+    }();
+    return *made;
+}
+
+void BM_PlanPainterArchive(benchmark::State& state, double zoom, bool clip)
+{
+    ArchiveFixture& f = archiveFixture();
+    if (!f.ok) {
+        state.SkipWithError(f.why.c_str());
+        return;
+    }
+    katana::qt::PlanFrame frame;
+    frame.transform.resize(kWidth, kHeight);
+    frame.transform.fit(f.extent, 0.02);
+    frame.transform.scale *= zoom;
+    frame.transform.center = f.extent.center();
+    katana::qt::PlanPaintOptions options;
+    options.clipLines = clip;
+    katana::qt::PlanSource source;
+    source.model = &f.model;
+    katana::qt::PlanPaintCache cache;
+    QImage image(kWidth, kHeight, QImage::Format_ARGB32_Premultiplied);
+    katana::qt::PlanPaintStats stats;
+    double direction = 1.0;
+    for (auto _ : state) {
+        frame.transform.panByPixels(direction, 0.0);
+        direction = -direction;
+        QPainter painter(&image);
+        painter.fillRect(image.rect(), QColor(0x1e, 0x23, 0x29));
+        stats = katana::qt::paintPlan(painter, source, frame, options, cache);
+    }
+    state.counters["entitiesDrawn"] = static_cast<double>(stats.entitiesDrawn);
+    state.counters["clipped"] = static_cast<double>(stats.linesClipped);
+}
+
+} // namespace
+
+BENCHMARK_CAPTURE(BM_PlanPainterArchive, zoomed_none, 5.0, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainterArchive, zoomed_clip, 5.0, true)
     ->Unit(benchmark::kMillisecond)->UseRealTime();
