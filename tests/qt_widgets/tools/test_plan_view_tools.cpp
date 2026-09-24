@@ -200,7 +200,8 @@ TEST(PlanViewTools, EscAfterOneClickCreatesNothingAndEndsTheTool)
 TEST(PlanViewTools, EscAfterASegmentKeepsTheLinesDrawnAsAutoCadDoes)
 {
     // A LINE's segments are finished work once both ends are given; Esc
-    // ends the tool, and keeps them (ToolHost::cancel, escapeKeepsWork).
+    // ends the tool, and keeps them (ToolHost::cancel, the Line tool's own
+    // InteractiveTool::cancel).
     PlanFixture plan;
     ASSERT_TRUE(plan.view.startTool("draw.line").ok());
     plan.press(200, 150); // (0, 0)
@@ -684,4 +685,61 @@ TEST(PlanViewTools, SelectIsReportedToTheWindowEvenWithNothingRunning)
     ASSERT_EQ(reported.size(), 3u);
     EXPECT_EQ(reported[1], Tool::Line);
     EXPECT_EQ(reported[2], Tool::Select);
+}
+
+// ---- the everyday tools in a real view -----------------------------------------------
+
+TEST(PlanViewTools, EscAfterTwoCopiesKeepsBothAsOneUndoStep)
+{
+    // Copy's placed copies are work the user clicked for; Esc keeps them
+    // now, where the host's old list dropped them.
+    PlanFixture plan;
+    ASSERT_TRUE(plan.document.execute(katana::commands::createLine(Point2(0, 0), Point2(1, 0)))
+                    .ok());
+    plan.document.selection().add(plan.document.lastCreatedEntities().front());
+    ASSERT_TRUE(plan.view.startTool("modify.copy").ok());
+    plan.press(200, 150); // base (0, 0)
+    plan.press(250, 150); // (5, 0)
+    plan.press(300, 150); // (10, 0)
+    plan.escape();
+    EXPECT_FALSE(plan.view.toolActive());
+    EXPECT_EQ(plan.entities().size(), 3u);
+    EXPECT_EQ(plan.undoSteps(), 2u) << "the line, then one step for both copies";
+}
+
+TEST(PlanViewTools, DistanceBetweenTwoClicksReachesTheLogAsAnInverse)
+{
+    PlanFixture plan;
+    std::vector<QString> messages;
+    plan.view.onToolMessage = [&](const QString& text) { messages.push_back(text); };
+    ASSERT_TRUE(plan.view.startTool("inquiry.distance").ok());
+    plan.press(200, 150); // (0, 0)
+    plan.press(230, 110); // (3, 4)
+    ASSERT_EQ(messages.size(), 1u);
+    // sqrt(3^2 + 4^2) = 5, and nothing drawn.
+    EXPECT_TRUE(messages.front().contains("Horizontal distance 5.000")) << messages.front().toStdString();
+    EXPECT_TRUE(plan.entities().empty());
+    EXPECT_TRUE(plan.view.toolActive()) << "ready for the next measurement";
+}
+
+TEST(PlanViewTools, MatchPropertiesTakesTheSourceByAClickAndTheTargetsBySelection)
+{
+    PlanFixture plan;
+    katana::entity::Layer road;
+    road.name = "ROAD";
+    ASSERT_TRUE(plan.document.execute(katana::commands::createLayer(road)).ok());
+    katana::entity::Entity source;
+    source.geometry = Segment2{Point2(0, 0), Point2(10, 0)};
+    source.layer = "ROAD";
+    ASSERT_TRUE(plan.document.execute(katana::commands::createEntities({source})).ok());
+    ASSERT_TRUE(plan.document.execute(katana::commands::createLine(Point2(0, 5), Point2(10, 5)))
+                    .ok());
+    const EntityId target = plan.document.lastCreatedEntities().front();
+    ASSERT_TRUE(plan.view.startTool("modify.match_properties").ok());
+    plan.press(250, 150); // on the source, (5, 0)
+    plan.press(250, 100); // on the target, (5, 5)
+    plan.enter();
+    EXPECT_FALSE(plan.view.toolActive());
+    EXPECT_EQ(plan.document.model().entities.find(target)->layer, "ROAD");
+    EXPECT_TRUE(plan.errors.empty()) << plan.errors.front().toStdString();
 }

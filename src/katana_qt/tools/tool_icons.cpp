@@ -125,7 +125,9 @@ bool paintTool(std::string_view toolId, const ToolInk& ink)
 {
     return paintDrawLineIcon(toolId, ink) || paintDrawCurveIcon(toolId, ink) ||
            paintModifyTransformIcon(toolId, ink) || paintModifyEditIcon(toolId, ink) ||
-           paintAnnotateIcon(toolId, ink) || paintInquiryIcon(toolId, ink);
+           paintAnnotateIcon(toolId, ink) || paintInquiryIcon(toolId, ink) ||
+           paintDrawDivideIcon(toolId, ink) || paintModifyLengthIcon(toolId, ink) ||
+           paintPropertyIcon(toolId, ink) || paintSelectIcon(toolId, ink);
 }
 
 void paint(QPainter& painter, std::string_view toolId, const QRectF& rect, const QColor& neutral,

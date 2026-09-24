@@ -8,6 +8,7 @@
 #include <limits>
 
 #include "katana/entity/entity_geometry.hpp"
+#include "families.hpp"
 #include "modify_edit_support.hpp"
 
 namespace katana::cad::tools::modify_edit {
@@ -260,6 +261,9 @@ class OffsetTool final : public InteractiveTool {
         }
         return ToolStep::rejected("'" + std::string(text) + "' is not an option here.");
     }
+
+    // Esc keeps what the session has done: its Enter only ever commits.
+    ToolStep cancel() override { return keepWorkOnEscape(*this); }
 
     ToolStep enter() override
     {
