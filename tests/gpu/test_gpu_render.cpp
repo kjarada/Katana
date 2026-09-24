@@ -23,11 +23,14 @@
 #include <numbers>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "gpu/scene_origin.hpp"
+#include "gpu/shader_library.hpp"
 #include "gpu_test_support.hpp"
 
 using katana::math::Vec3;
+using katana::qt::gpu::Expansion;
 using katana::qt::gpu::FrameSettings;
 using katana::qt::gpu::GpuDevice;
 using katana::qt::gpu::GpuSceneData;
@@ -495,4 +498,153 @@ TEST_P(GpuRender, ZoomingFarOutNeverClipsTheSceneAway)
         drawn += brightness(pixel) > 0 ? 1 : 0;
     }
     EXPECT_GT(drawn, 0u);
+}
+
+// The two ways of widening lines and points (shader_library.hpp, Expansion)
+// run the same HLSL functions on the same inputs - once in a geometry shader,
+// once per corner in a vertex shader - so they must draw the same picture.
+TEST_P(GpuRender, TheGeometryShaderAndInstancingDrawTheSameLinesPointsAndCloud)
+{
+    constexpr int kWidth = 96;
+    constexpr int kHeight = 64;
+    katana::qt::gpu::OffscreenOptions instancedOptions;
+    instancedOptions.expansion = Expansion::Instanced;
+    auto geometry = device(kWidth, kHeight);
+    if (!geometry) {
+        GTEST_SKIP() << skipReason;
+    }
+    auto instanced = makeGpu(kWidth, kHeight, GetParam(), skipReason, instancedOptions);
+    ASSERT_NE(instanced, nullptr) << skipReason;
+    // Every Direct3D 11 device has a geometry stage (feature level 10 and up),
+    // so the preferred way is the one used.
+    EXPECT_EQ(geometry->renderer().expansion(), Expansion::GeometryShader);
+    EXPECT_EQ(instanced->renderer().expansion(), Expansion::Instanced);
+
+    DrawList list;
+    list.addSegment(Vec3(-40.0, 0.5, 0.0), Vec3(40.0, 0.5, 0.0), rgba(255, 255, 255));
+    list.addSegment(Vec3(-20.5, -25.0, 0.0), Vec3(-20.5, 25.0, 0.0), rgba(255, 200, 0), 3.0f);
+    list.addSegment(Vec3(0.0, -25.0, 0.0), Vec3(40.0, 15.0, 0.0), rgba(0, 200, 255));
+    list.addPoint(list.addVertex(Vec3(30.5, -20.5, 0.0), rgba(255, 0, 255)), 5.0f);
+    std::vector<Vec3> cloud;
+    for (int i = 0; i < 12; ++i) {
+        cloud.emplace_back(-35.0 + 6.0 * i, 20.0, 0.0);
+    }
+    katana::qt::gpu::PointCloudData packed;
+    katana::qt::gpu::packPointCloud(cloud, {}, rgba(120, 255, 120), Vec3(), 0, packed);
+    const Camera camera = planCamera(kWidth, kHeight);
+    FrameSettings settings = blackBackground();
+    settings.cloudPointSize = 4.0;
+
+    geometry->renderer().setDrawList(list);
+    geometry->renderer().setPointCloud(packed);
+    instanced->renderer().setDrawList(list);
+    instanced->renderer().setPointCloud(packed);
+    const Image fromGeometry = render(*geometry, camera, settings);
+    const Image fromInstances = render(*instanced, camera, settings);
+    saveForLooking(label("expansion_geometry"), fromGeometry, kWidth, kHeight);
+    saveForLooking(label("expansion_instanced"), fromInstances, kWidth, kHeight);
+
+    const auto result = compare(fromGeometry, fromInstances, kWidth, kHeight, kBlack, 128);
+    SCOPED_TRACE(describe(result));
+    EXPECT_GT(result.coveredA, 250u);
+    // The compiler may order the same arithmetic differently in the two
+    // stages, moving a corner by a float's last bit; that can flip only a
+    // pixel whose centre lies exactly on a quad's edge, and in this picture
+    // only the diagonal's two sides put centres there - a handful at most.
+    EXPECT_LE(result.differingPixels, 4u);
+}
+
+// A cloud point is a round sprite of FrameSettings::cloudPointSize logical
+// pixels whatever its distance, drawn relative to the cloud's own origin.
+TEST_P(GpuRender, CloudPointsAreRoundSpritesOfTheirScreenSizeAtSurveyCoordinates)
+{
+    constexpr int kWidth = 64;
+    constexpr int kHeight = 48;
+    auto gpu = device(kWidth, kHeight);
+    if (!gpu) {
+        GTEST_SKIP() << skipReason;
+    }
+    // Three points in a row at MGA coordinates, 16 pixels apart in the plan
+    // camera moved there, each on a pixel centre (the camera's half-integer
+    // grid).
+    const Vec3 survey(300000.0, 6250000.0, 50.0);
+    std::vector<Vec3> points{survey + Vec3(-15.5, 0.5, 0.0), survey + Vec3(0.5, 0.5, 0.0),
+                             survey + Vec3(16.5, 0.5, 0.0)};
+    katana::qt::gpu::PointCloudData cloud;
+    katana::qt::gpu::packPointCloud(points, {}, rgba(255, 255, 255), survey, 0, cloud);
+    gpu->renderer().setPointCloud(cloud);
+    Camera camera = planCamera(kWidth, kHeight);
+    camera.setTarget(survey);
+    FrameSettings settings = blackBackground();
+    settings.cloudPointSize = 6.0;
+    const Image image = render(*gpu, camera, settings);
+    saveForLooking(label("cloud"), image, kWidth, kHeight);
+
+    // A disc of radius 3 around each point's pixel. Its coverage fades over
+    // the pixel either side of that radius, so at least half coverage means
+    // a centre within 3 px: pi * 3^2 = 28.3 px of area, which a pixel grid
+    // fills with between the 21 whole pixels inside radius 2.6 and the 37
+    // inside radius 3.4 (counted by hand on the grid).
+    const auto discAt = [&](int cx, int cy) {
+        std::size_t count = 0;
+        for (int y = cy - 5; y <= cy + 5; ++y) {
+            for (int x = cx - 5; x <= cx + 5; ++x) {
+                count += brightness(image[static_cast<std::size_t>(y) * kWidth + x]) >= 383 ? 1 : 0;
+            }
+        }
+        return count;
+    };
+    // World (x, 0.5) is pixel column x + 32 - 0.5, row 23.
+    for (const int column : {16, 32, 48}) {
+        SCOPED_TRACE(column);
+        EXPECT_GE(brightness(image[23u * kWidth + static_cast<std::size_t>(column)]), 760);
+        const std::size_t disc = discAt(column, 23);
+        EXPECT_GE(disc, 21u);
+        EXPECT_LE(disc, 37u);
+    }
+}
+
+// The seam precompiled shaders will use: the same shaders serialized (as qsb
+// would write them) and read back through SerializedShaderLibrary draw the
+// same frame as the runtime library.
+TEST_P(GpuRender, SerializedShadersDrawWhatTheRuntimeShadersDraw)
+{
+    constexpr int kWidth = 96;
+    constexpr int kHeight = 72;
+    auto runtime = device(kWidth, kHeight);
+    if (!runtime) {
+        GTEST_SKIP() << skipReason;
+    }
+    auto table = katana::qt::gpu::SerializedShaderLibrary::serialize(
+        katana::qt::gpu::runtimeHlslShaders());
+    ASSERT_TRUE(table.ok()) << table.error().describe();
+    const katana::qt::gpu::SerializedShaderLibrary serialized(std::move(*table));
+    katana::qt::gpu::OffscreenOptions options;
+    options.shaders = &serialized;
+    auto precompiled = makeGpu(kWidth, kHeight, GetParam(), skipReason, options);
+    ASSERT_NE(precompiled, nullptr) << skipReason;
+
+    const DrawList list = site(Vec3());
+    const Camera camera = siteCamera(Vec3(), kWidth, kHeight);
+    runtime->renderer().setDrawList(list);
+    precompiled->renderer().setDrawList(list);
+    const Image a = render(*runtime, camera, blackBackground());
+    const Image b = render(*precompiled, camera, blackBackground());
+    const auto result = compare(a, b, kWidth, kHeight, kBlack, 128);
+    SCOPED_TRACE(describe(result));
+    EXPECT_GT(result.coveredA, 1000u);
+    // The same source compiled the same way on the same device.
+    EXPECT_EQ(result.differingPixels, 0u);
+}
+
+// A blob that is not a serialized shader is an error when it is asked for,
+// never an empty pipeline.
+TEST(SerializedShaderLibrary, ReportsABlobThatDoesNotDeserialize)
+{
+    katana::qt::gpu::SerializedShaderLibrary::BlobTable table;
+    table[0][0].vertex = QByteArrayLiteral("not a shader");
+    const katana::qt::gpu::SerializedShaderLibrary library(std::move(table));
+    auto stages = library.program(katana::qt::gpu::Program::Triangles, Expansion::GeometryShader);
+    ASSERT_FALSE(stages.ok());
+    EXPECT_NE(stages.error().describe().find("do not deserialize"), std::string::npos);
 }

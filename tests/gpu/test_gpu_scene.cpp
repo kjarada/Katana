@@ -69,14 +69,17 @@ TEST(PackDrawList, GivesEachLineItsEndpointsColoursAndWidthAndEachPointItsSize)
     packDrawList(list, scene);
     // Box x [-2, 2], y [0, 4]: centre (0, 2, 0).
     ASSERT_EQ(scene.lines.size(), 2u);
-    EXPECT_EQ(scene.lines[0].ax, -2.0f);
-    EXPECT_EQ(scene.lines[0].ay, -2.0f);
-    EXPECT_EQ(scene.lines[0].bx, 2.0f);
-    EXPECT_EQ(scene.lines[0].by, 2.0f);
-    EXPECT_EQ(scene.lines[0].colorA, rgba(10, 20, 30));
-    EXPECT_EQ(scene.lines[0].colorB, rgba(40, 50, 60));
-    EXPECT_EQ(scene.lines[0].width, 3.0f);
-    EXPECT_EQ(scene.lines[1].width, 1.0f);
+    EXPECT_EQ(scene.lines[0].a.x, -2.0f);
+    EXPECT_EQ(scene.lines[0].a.y, -2.0f);
+    EXPECT_EQ(scene.lines[0].b.x, 2.0f);
+    EXPECT_EQ(scene.lines[0].b.y, 2.0f);
+    EXPECT_EQ(scene.lines[0].a.color, rgba(10, 20, 30));
+    EXPECT_EQ(scene.lines[0].b.color, rgba(40, 50, 60));
+    // The width at both ends, so each end is a whole vertex of a line list.
+    EXPECT_EQ(scene.lines[0].a.width, 3.0f);
+    EXPECT_EQ(scene.lines[0].b.width, 3.0f);
+    EXPECT_EQ(scene.lines[1].a.width, 1.0f);
+    EXPECT_EQ(scene.lines[1].b.width, 1.0f);
     ASSERT_EQ(scene.points.size(), 1u);
     EXPECT_EQ(scene.points[0].size, 5.0f);
     EXPECT_EQ(scene.points[0].y, 2.0f);

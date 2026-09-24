@@ -12,8 +12,9 @@
 //     for perspective;
 //   * 4x multisampling (the render target's choice; see OffscreenGpu and
 //     GpuSceneView);
-//   * lines and points widened in the vertex shader and antialiased
-//     analytically in the fragment shader;
+//   * lines and points widened into screen-space quads on the GPU - by a
+//     geometry shader, or by instancing where there is none (Expansion) -
+//     and antialiased analytically in the fragment shader;
 //   * optionally, lighting per pixel from face normals (LightingMode);
 //   * vertical exaggeration as a uniform, so changing it rebuilds nothing.
 //
@@ -97,16 +98,21 @@ class GpuRenderer {
     GpuRenderer& operator=(const GpuRenderer&) = delete;
 
     // Creates the pipelines for render targets compatible with `pass` at
-    // `sampleCount` samples per pixel. Fails with RenderingFailure when a
-    // shader does not compile or a pipeline cannot be made: the caller falls
-    // back to the software path rather than drawing nothing.
-    [[nodiscard]] katana::core::Status initialise(QRhi* rhi, QRhiRenderPassDescriptor* pass,
-                                                  int sampleCount,
-                                                  const ShaderLibrary& shaders = runtimeHlslShaders());
+    // `sampleCount` samples per pixel, widening lines and points the
+    // `preferred` way, or by instancing when the device has no geometry
+    // stage. Fails with RenderingFailure when a shader does not compile or a
+    // pipeline cannot be made: the caller falls back to the software path
+    // rather than drawing nothing.
+    [[nodiscard]] katana::core::Status
+    initialise(QRhi* rhi, QRhiRenderPassDescriptor* pass, int sampleCount,
+               const ShaderLibrary& shaders = runtimeHlslShaders(),
+               Expansion preferred = Expansion::GeometryShader);
     // Drops every GPU resource (the QRhi is going away, or the target format
     // changed). The packed scene is kept and re-uploaded after initialise().
     void releaseResources();
     [[nodiscard]] bool initialised() const;
+    // How lines and points are widened since initialise().
+    [[nodiscard]] Expansion expansion() const;
 
     // Packs `list` for the GPU; it is uploaded by the next render().
     void setDrawList(const katana::render::DrawList& list);

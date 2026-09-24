@@ -61,8 +61,9 @@ void packDrawList(const DrawList& list, const katana::math::Vec3& origin, GpuSce
         }
         const GpuVertex& a = out.vertices[line.a];
         const GpuVertex& b = out.vertices[line.b];
-        out.lines.push_back(GpuLine{a.x, a.y, a.z, a.color, b.x, b.y, b.z, b.color,
-                                    std::max(line.width, 1.0f), 0.0f});
+        const float width = std::max(line.width, 1.0f);
+        out.lines.push_back(GpuLine{GpuLineEnd{a.x, a.y, a.z, a.color, width},
+                                    GpuLineEnd{b.x, b.y, b.z, b.color, width}});
     }
 
     out.points.reserve(list.points.size());
