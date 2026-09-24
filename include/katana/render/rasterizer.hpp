@@ -113,9 +113,23 @@ class Rasterizer {
         Rgba color = 0;
     };
 
+    // A vertex after the divide: pixel coordinates, reversed depth and 1/w.
+    // Worked out once per vertex in stage 1 wherever the vertex needs no
+    // clipping, rather than once per triangle corner in stage 2: a TIN vertex
+    // is a corner of about six triangles, and the divide is the dearest step.
+    struct ScreenVertex {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        float invW = 0.0f;
+        Rgba color = 0;
+    };
+
     // A triangle ready to rasterise: pixel coordinates, NDC depth, and 1/w for
     // perspective-correct colour. Floats throughout - screen space needs
     // nothing more, and halving the working set is what keeps a tile in cache.
+    // The AVX2 fill kernel reads it through a float pointer, in this order
+    // (src/katana_render/simd/raster_kernels.hpp).
     struct ScreenTriangle {
         float x[3]{};
         float y[3]{};
@@ -148,7 +162,7 @@ class Rasterizer {
     };
     [[nodiscard]] static DepthPull depthPullFor(const Camera& camera);
 
-    void transformVertices(const DrawList& list, const Camera& camera,
+    void transformVertices(const DrawList& list, const Camera& camera, const Framebuffer& target,
                            katana::core::TaskPool& pool);
     void buildScreenPrimitives(const DrawList& list, const Framebuffer& target,
                                const RenderOptions& options, katana::core::TaskPool& pool);
@@ -168,6 +182,8 @@ class Rasterizer {
     // need no clipping; codes that AND to non-zero are outside one plane
     // together, so the primitive cannot be seen.
     std::vector<std::uint8_t> clipCodes_;
+    // Parallel to clip_: the projected vertex, meaningful where its code is 0.
+    std::vector<ScreenVertex> screen_;
 
     // Stage 2 output, one bucket per primitive chunk so the bucket a primitive
     // lands in - and therefore the order a tile sees it in - depends only on
@@ -178,12 +194,19 @@ class Rasterizer {
         std::size_t lineStart = 0;
         std::vector<ScreenPoint> points;
         // tileBins[t] holds indices into `triangles` (below kPointTag) and into
-        // `points` (with kPointTag set), in submission order.
+        // `points` (with kPointTag set), in submission order. A triangle
+        // spanning several tiles is binned only in those it can reach.
         std::vector<std::vector<std::uint32_t>> tileBins;
         RenderStats stats;
     };
     static constexpr std::uint32_t kPointTag = 0x8000'0000u;
 
+    // chunks_[0, activeChunks_) hold this frame. The vector never shrinks: the
+    // 3D view draws several lists a frame through one Rasterizer
+    // (cad::renderLayers), each with its own chunk count, and letting it
+    // shrink freed every bin and triangle buffer of the larger passes only to
+    // allocate them again in the next frame.
+    std::size_t activeChunks_ = 0;
     std::vector<Chunk> chunks_;
     std::vector<RenderStats> tileStats_;
 };

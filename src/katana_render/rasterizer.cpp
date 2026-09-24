@@ -3,10 +3,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <functional>
 #include <string>
 
+#include "katana/core/cpu_features.hpp"
 #include "katana/core/task_pool.hpp"
+
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+#include "simd/raster_kernels.hpp"
+#endif
 
 namespace katana::render {
 
@@ -133,26 +139,80 @@ constexpr std::size_t kClipPlanes = 5;
 
 // ---- stage 1: transform ---------------------------------------------------------
 
-void Rasterizer::transformVertices(const DrawList& list, const Camera& camera, TaskPool& pool)
+namespace {
+
+// Below this many vertices a range is transformed one vertex at a time: the
+// AVX2 kernel takes four a step and hands the rest back, and for a handful the
+// call is the whole cost. Measured with BM_RenderGroundFramed (docs/performance.md,
+// "SIMD: the software rasteriser").
+constexpr std::size_t kTransformBatchMinimum = 16;
+
+} // namespace
+
+void Rasterizer::transformVertices(const DrawList& list, const Camera& camera,
+                                   const Framebuffer& target, TaskPool& pool)
 {
     const katana::math::Mat4 mvp = camera.viewProjection();
     clip_.resize(list.positions.size());
     clipCodes_.resize(list.positions.size());
+    screen_.resize(list.positions.size());
+    const float width = static_cast<float>(target.width());
+    const float height = static_cast<float>(target.height());
+
+    // One vertex: the matrix in double, clip coordinates rounded to float, its
+    // clip code and - where the code is 0, so that no primitive using it will
+    // be cut - its projection, exactly as project() in stage 2 would make it.
+    const auto transformOne = [&](std::size_t i) {
+        const Point3& p = list.positions[i];
+        const katana::math::Vec4 c = mvp * katana::math::Vec4(p.x, p.y, p.z, 1.0);
+        ClipVertex& out = clip_[i];
+        out.x = static_cast<float>(c.x);
+        out.y = static_cast<float>(c.y);
+        out.z = static_cast<float>(c.z);
+        out.w = static_cast<float>(c.w);
+        out.color = i < list.colors.size() ? list.colors[i] : rgba(255, 255, 255);
+        clipCodes_[i] = clipCodeOf(out.x, out.y, out.z, out.w);
+        if (clipCodes_[i] == 0u) {
+            ScreenVertex& screen = screen_[i];
+            const float invW = 1.0f / out.w;
+            screen.x = (out.x * invW * 0.5f + 0.5f) * width;
+            screen.y = (0.5f - out.y * invW * 0.5f) * height; // screen +y is down
+            screen.z = out.z * invW;
+            screen.invW = invW;
+            screen.color = out.color;
+        }
+    };
+
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    // The kernel reads positions as packed doubles and writes both vertex
+    // arrays as five 32-bit words a vertex, in these orders.
+    static_assert(sizeof(Point3) == 3 * sizeof(double));
+    static_assert(sizeof(ClipVertex) == 5 * sizeof(float) && offsetof(ClipVertex, color) == 16);
+    static_assert(sizeof(ScreenVertex) == 5 * sizeof(float) && offsetof(ScreenVertex, color) == 16);
+    const bool batched = katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+    const std::array<double, 16> matrix = mvp.data;
+#endif
 
     // Read straight out of the SoA position array. Nothing else is touched, so
     // this streams at memory bandwidth rather than striding over colours.
     const std::size_t count = list.positions.size();
     pool.parallelRanges(0, count, 4096, [&](std::size_t lo, std::size_t hi) {
-        for (std::size_t i = lo; i < hi; ++i) {
-            const Point3& p = list.positions[i];
-            const katana::math::Vec4 c = mvp * katana::math::Vec4(p.x, p.y, p.z, 1.0);
-            ClipVertex& out = clip_[i];
-            out.x = static_cast<float>(c.x);
-            out.y = static_cast<float>(c.y);
-            out.z = static_cast<float>(c.z);
-            out.w = static_cast<float>(c.w);
-            out.color = i < list.colors.size() ? list.colors[i] : rgba(255, 255, 255);
-            clipCodes_[i] = clipCodeOf(out.x, out.y, out.z, out.w);
+        std::size_t i = lo;
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+        if (batched && hi - lo >= kTransformBatchMinimum) {
+            const std::size_t whole = (hi - lo) / 4 * 4;
+            const std::size_t colorCount =
+                list.colors.size() > lo ? list.colors.size() - lo : std::size_t{0};
+            katana_avx2_transform_vertices(
+                matrix.data(), &list.positions[lo].x, whole,
+                colorCount > 0 ? list.colors.data() + lo : nullptr, colorCount, width, height,
+                reinterpret_cast<float*>(clip_.data() + lo), clipCodes_.data() + lo,
+                reinterpret_cast<float*>(screen_.data() + lo));
+            i = lo + whole;
+        }
+#endif
+        for (; i < hi; ++i) {
+            transformOne(i);
         }
     });
 }
@@ -202,8 +262,13 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
         list.triangles.size() + list.lines.size() + list.points.size();
     const std::size_t chunkCount = chunkCountFor(primitiveCount);
 
-    chunks_.resize(chunkCount);
-    for (Chunk& chunk : chunks_) {
+    // Grown, never shrunk (activeChunks_ says why).
+    if (chunks_.size() < chunkCount) {
+        chunks_.resize(chunkCount);
+    }
+    activeChunks_ = chunkCount;
+    for (std::size_t i = 0; i < chunkCount; ++i) {
+        Chunk& chunk = chunks_[i];
         chunk.triangles.clear();
         chunk.points.clear();
         chunk.lineStart = 0;
@@ -281,24 +346,19 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
             return;
         }
 
-        // Fans a convex polygon whose every vertex is inside all five planes
-        // into screen triangles.
-        const auto emitPolygon = [&](const ClipVertex* polygon, std::size_t count,
-                                     float depthBias) {
-            for (std::size_t i = 1; i + 1 < count; ++i) {
-                const ProjectedVertex p0 = project(polygon[0]);
-                const ProjectedVertex p1 = project(polygon[i]);
-                const ProjectedVertex p2 = project(polygon[i + 1]);
-
+        // One projected triangle, all of it inside the five planes.
+        const auto emitTriangle = [&](const ProjectedVertex& p0, const ProjectedVertex& p1,
+                                      const ProjectedVertex& p2, float depthBias) {
+            {
                 const float area = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
                 if (!(std::abs(area) > 0.0f)) {
-                    continue; // zero area or NaN: nothing to fill
+                    return; // zero area or NaN: nothing to fill
                 }
                 if (cull && area >= 0.0f) {
                     // Screen +y points down, so a counter-clockwise world
                     // triangle has a NEGATIVE screen-space area. Cull the other
                     // sign.
-                    continue;
+                    return;
                 }
                 ScreenTriangle screen;
                 // SLOPE-SCALED OFFSET (what a GPU calls polygon offset): a
@@ -339,6 +399,26 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 chunk.triangles.push_back(screen);
                 ++chunk.stats.trianglesRasterised;
             }
+        };
+
+        // Fans a convex polygon whose every vertex is inside all five planes
+        // into screen triangles. Each vertex is projected once; the fan used to
+        // project its hub again for every triangle, to the same bits.
+        const auto emitPolygon = [&](const ClipVertex* polygon, std::size_t count,
+                                     float depthBias) {
+            std::array<ProjectedVertex, 3 + kClipPlanes> projected;
+            for (std::size_t i = 0; i < count; ++i) {
+                projected[i] = project(polygon[i]);
+            }
+            for (std::size_t i = 1; i + 1 < count; ++i) {
+                emitTriangle(projected[0], projected[i], projected[i + 1], depthBias);
+            }
+        };
+        // Stage 1 projected every vertex that needs no clipping, to the bits
+        // project() gives.
+        const auto projectedAt = [this](std::size_t index) {
+            const ScreenVertex& v = screen_[index];
+            return ProjectedVertex{v.x, v.y, v.z, v.invW, v.color};
         };
 
         // A triangle that crosses at least one plane: Sutherland-Hodgman, one
@@ -398,11 +478,11 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 if ((ca & cb & cc) != 0u) {
                     continue; // all three outside one plane: nothing of it can show
                 }
-                const std::array<ClipVertex, 3> v{clip_[t.a], clip_[t.b], clip_[t.c]};
                 if ((ca | cb | cc) == 0u) {
-                    emitPolygon(v.data(), 3, 0.0f); // the common case: nothing to cut
+                    // The common case: nothing to cut.
+                    emitTriangle(projectedAt(t.a), projectedAt(t.b), projectedAt(t.c), 0.0f);
                 } else {
-                    emitClippedTriangle(v, 0.0f);
+                    emitClippedTriangle({clip_[t.a], clip_[t.b], clip_[t.c]}, 0.0f);
                 }
                 // Triangles come first in the stream, so the line quads that
                 // follow start here (rasteriseTiles sweeps them apart).
@@ -473,8 +553,8 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                         b.z = b.w;
                     }
                 }
-                ProjectedVertex p0 = project(a);
-                ProjectedVertex p1 = project(b);
+                ProjectedVertex p0 = (ca | cb) == 0u ? projectedAt(line.a) : project(a);
+                ProjectedVertex p1 = (ca | cb) == 0u ? projectedAt(line.b) : project(b);
                 // The line's depth bias is a VIEW-SPACE distance, depthBias
                 // pixel footprints towards the eye (draw_list.hpp). Under the
                 // reversed projections that is an affine map of the depth
@@ -563,8 +643,7 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
             if (clipCodes_[point.a] != 0u) {
                 continue;
             }
-            const ClipVertex& v = clip_[point.a];
-            const ProjectedVertex p = project(v);
+            const ProjectedVertex p = projectedAt(point.a);
             ScreenPoint screen;
             screen.x = p.x;
             screen.y = p.y;
@@ -578,6 +657,161 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
     binPrimitives(target, pool);
 }
 
+// ---- conservative coverage --------------------------------------------------------
+//
+// The fill decides coverage per pixel in float (rasteriseTiles): w0 and w1 from
+// edge functions times 1/area, w2 = 1 - w0 - w1, and a pixel is in when none is
+// negative. Whatever skips pixels ahead of that - a tile the triangle cannot
+// reach, the part of a row outside it, the edge tests where every pixel is
+// inside - must skip only pixels the float test would have decided the same
+// way, or the frame changes. So the decisions below are made on the EXACT edge
+// functions, in double, with a margin M that bounds how far the float ones can
+// stray from them.
+//
+// With R the largest distance, on either axis, between a vertex and a pixel
+// centre of the rectangle, every factor in an edge function is at most R in
+// size, each edge function at most 2 R^2 and the doubled area at most 8 R^2.
+// Rounding each float operation once (u = 2^-24) moves w0 * area and
+// w1 * area by at most about 10 u R^2 each, the float area by 24 u R^2, and
+// w2 * area - which is the third edge function plus those errors, because the
+// three edge functions add up to the area exactly - by about 55 u R^2 in all.
+// M = 256 u (R^2 + 1) is over four times that, and the double arithmetic
+// here is exact to parts in 2^53, far inside it. Where s E_k(p) < -M the float
+// test rejects p, where every s E_k(p) > M it accepts p, and between the two
+// the pixel goes to the float test as before. s is the sign of the float area
+// the fill divides by, which on a sliver need not be that of the exact one.
+
+namespace {
+
+// Edge k runs between vertices kEdgeFrom[k] and kEdgeTo[k]: E_0 is the
+// numerator of the fill's w0, E_1 of its w1, and E_2 the exact third.
+constexpr std::array<std::size_t, 3> kEdgeFrom{1, 2, 0};
+constexpr std::array<std::size_t, 3> kEdgeTo{2, 0, 1};
+
+struct EdgeSetup {
+    std::array<double, 3> x{};
+    std::array<double, 3> y{};
+    double sign = 0.0;
+    double margin = 0.0;
+    bool usable = false; // false: a coordinate is not finite; decide nothing
+
+    // s E_k at the pixel centre (px, py).
+    [[nodiscard]] double at(std::size_t k, double px, double py) const
+    {
+        const std::size_t i = kEdgeFrom[k];
+        const std::size_t j = kEdgeTo[k];
+        return sign * ((x[i] - px) * (y[j] - py) - (x[j] - px) * (y[i] - py));
+    }
+};
+
+// The setup for a triangle with float corners (tx, ty) and float doubled area
+// `area` over the pixels [minX, maxX] x [minY, maxY].
+[[nodiscard]] EdgeSetup edgeSetup(const float* tx, const float* ty, float area, int minX, int maxX,
+                                  int minY, int maxY)
+{
+    EdgeSetup e;
+    for (std::size_t v = 0; v < 3; ++v) {
+        e.x[v] = static_cast<double>(tx[v]);
+        e.y[v] = static_cast<double>(ty[v]);
+    }
+    const double pxLo = static_cast<double>(minX) + 0.5;
+    const double pxHi = static_cast<double>(maxX) + 0.5;
+    const double pyLo = static_cast<double>(minY) + 0.5;
+    const double pyHi = static_cast<double>(maxY) + 0.5;
+    const double reach = std::max({std::max({e.x[0], e.x[1], e.x[2]}) - pxLo,
+                                   pxHi - std::min({e.x[0], e.x[1], e.x[2]}),
+                                   std::max({e.y[0], e.y[1], e.y[2]}) - pyLo,
+                                   pyHi - std::min({e.y[0], e.y[1], e.y[2]})});
+    e.margin = 0x1p-16 * (reach * reach + 1.0); // 256 u (R^2 + 1), u = 2^-24
+    e.sign = area > 0.0f ? 1.0 : -1.0;
+    e.usable = std::isfinite(e.margin);
+    return e;
+}
+
+// True when no pixel centre of the rectangle can pass the float test: one edge
+// function is below -M at all four corners, and so, being affine, all over it.
+[[nodiscard]] bool cannotReach(const EdgeSetup& e, int minX, int maxX, int minY, int maxY)
+{
+    if (!e.usable) {
+        return false;
+    }
+    const double pxLo = static_cast<double>(minX) + 0.5;
+    const double pxHi = static_cast<double>(maxX) + 0.5;
+    const double pyLo = static_cast<double>(minY) + 0.5;
+    const double pyHi = static_cast<double>(maxY) + 0.5;
+    for (std::size_t k = 0; k < 3; ++k) {
+        if (e.at(k, pxLo, pyLo) < -e.margin && e.at(k, pxHi, pyLo) < -e.margin &&
+            e.at(k, pxLo, pyHi) < -e.margin && e.at(k, pxHi, pyHi) < -e.margin) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// True when every pixel centre of the rectangle passes the float test: every
+// edge function is above M at all four corners.
+[[nodiscard]] bool coversAll(const EdgeSetup& e, int minX, int maxX, int minY, int maxY)
+{
+    if (!e.usable) {
+        return false;
+    }
+    const double pxLo = static_cast<double>(minX) + 0.5;
+    const double pxHi = static_cast<double>(maxX) + 0.5;
+    const double pyLo = static_cast<double>(minY) + 0.5;
+    const double pyHi = static_cast<double>(maxY) + 0.5;
+    for (std::size_t k = 0; k < 3; ++k) {
+        if (!(e.at(k, pxLo, pyLo) > e.margin && e.at(k, pxHi, pyLo) > e.margin &&
+              e.at(k, pxLo, pyHi) > e.margin && e.at(k, pxHi, pyHi) > e.margin)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// For each row minY + r, the pixels spans[2 r] .. spans[2 r + 1] (first > last
+// when none) that can pass the float test - the rest of [minX, maxX] cannot.
+// Along a row E_k is affine in the pixel centre, E_k = K - px g, so each edge
+// bounds px from one side (or rules the whole row in or out when g is 0).
+// Returns false when no row has a pixel.
+bool rowSpans(const EdgeSetup& e, int minX, int maxX, int minY, int maxY, int* spans)
+{
+    bool any = false;
+    for (int y = minY; y <= maxY; ++y) {
+        int* span = spans + 2 * static_cast<std::ptrdiff_t>(y - minY);
+        double lo = static_cast<double>(minX);
+        double hi = static_cast<double>(maxX);
+        if (e.usable) {
+            const double py = static_cast<double>(y) + 0.5;
+            for (std::size_t k = 0; k < 3 && lo <= hi; ++k) {
+                const std::size_t i = kEdgeFrom[k];
+                const std::size_t j = kEdgeTo[k];
+                // s E_k >= -M  <=>  s g px <= s K + M.
+                const double bound =
+                    e.sign * (e.x[i] * (e.y[j] - py) - e.x[j] * (e.y[i] - py)) + e.margin;
+                const double slope = e.sign * (e.y[j] - e.y[i]);
+                if (slope > 0.0) {
+                    hi = std::min(hi, std::floor(bound / slope - 0.5));
+                } else if (slope < 0.0) {
+                    lo = std::max(lo, std::ceil(bound / slope - 0.5));
+                } else if (bound < 0.0) {
+                    hi = lo - 1.0;
+                }
+            }
+        }
+        if (lo <= hi) {
+            span[0] = static_cast<int>(lo);
+            span[1] = static_cast<int>(hi);
+            any = true;
+        } else {
+            span[0] = 0;
+            span[1] = -1;
+        }
+    }
+    return any;
+}
+
+} // namespace
+
 void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
 {
     const int tilesAcross = target.tilesAcross();
@@ -588,7 +822,7 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
 
     // Per chunk, so no two threads ever append to the same bin.
     const std::size_t tiles = target.tileCount();
-    pool.parallelFor(0, chunks_.size(), [&](std::size_t chunkIndex) {
+    pool.parallelFor(0, activeChunks_, [&](std::size_t chunkIndex) {
         Chunk& chunk = chunks_[chunkIndex];
         // Each chunk owns its bins, so resizing and clearing them here keeps
         // that cost parallel instead of serial in the caller.
@@ -625,7 +859,45 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
             const float maxX = std::max({t.x[0], t.x[1], t.x[2]});
             const float minY = std::min({t.y[0], t.y[1], t.y[2]});
             const float maxY = std::max({t.y[0], t.y[1], t.y[2]});
-            binBox(minX, minY, maxX, maxY, static_cast<std::uint32_t>(i));
+            if (!(maxX >= 0.0f) || !(maxY >= 0.0f) ||
+                minX >= static_cast<float>(target.width()) ||
+                minY >= static_cast<float>(target.height())) {
+                continue; // entirely off screen, as binBox says
+            }
+            const int x0 = pixelFloor(minX, 0, target.width() - 1) / Framebuffer::kTileSize;
+            const int y0 = pixelFloor(minY, 0, target.height() - 1) / Framebuffer::kTileSize;
+            const int x1 = pixelFloor(maxX, 0, target.width() - 1) / Framebuffer::kTileSize;
+            const int y1 = pixelFloor(maxY, 0, target.height() - 1) / Framebuffer::kTileSize;
+            if (x0 == x1 && y0 == y1) {
+                binBox(minX, minY, maxX, maxY, static_cast<std::uint32_t>(i));
+                continue;
+            }
+            // Spanning tiles: a long line or a large or thin triangle, whose
+            // box holds tiles it never reaches - most of them, for a line
+            // across the view. Each tile is tested over the pixels the fill
+            // would visit there (rasteriseTiles), and left out only when the
+            // fill would find nothing in it.
+            const float area =
+                (t.x[1] - t.x[0]) * (t.y[2] - t.y[0]) - (t.x[2] - t.x[0]) * (t.y[1] - t.y[0]);
+            for (int ty = y0; ty <= y1; ++ty) {
+                for (int tx = x0; tx <= x1; ++tx) {
+                    const std::size_t tileIndex =
+                        static_cast<std::size_t>(ty) * static_cast<std::size_t>(tilesAcross) +
+                        static_cast<std::size_t>(tx);
+                    const TileRect rect = target.tile(tileIndex);
+                    const int px0 = pixelFloor(minX, rect.x0, rect.x1);
+                    const int px1 = pixelFloor(maxX, rect.x0 - 1, rect.x1 - 1);
+                    const int py0 = pixelFloor(minY, rect.y0, rect.y1);
+                    const int py1 = pixelFloor(maxY, rect.y0 - 1, rect.y1 - 1);
+                    if (px0 <= px1 && py0 <= py1 &&
+                        cannotReach(edgeSetup(t.x, t.y, area, px0, px1, py0, py1), px0, px1, py0,
+                                    py1)) {
+                        continue;
+                    }
+                    chunk.tileBins[tileIndex].push_back(static_cast<std::uint32_t>(i));
+                    ++chunk.stats.binEntries;
+                }
+            }
         }
         for (std::size_t i = 0; i < chunk.points.size(); ++i) {
             const ScreenPoint& p = chunk.points[i];
@@ -636,6 +908,21 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
 }
 
 // ---- stage 3: rasterise ---------------------------------------------------------
+
+namespace {
+
+// Where a triangle's box in a tile holds fewer pixels than this, the fill
+// visits every pixel of the box, as it always did. From here it first bounds
+// each row to the pixels that can be inside (rowSpans), and from
+// kKernelMinimumPixels takes the AVX2 kernel. A dense TIN framed whole is
+// fractions of a pixel a triangle, where any setup is pure cost; a surface seen
+// from inside it, or a line across the view, is hundreds of pixels a box.
+// Measured with BM_RenderTriangles (docs/performance.md, "SIMD: the software
+// rasteriser").
+constexpr long kSpanMinimumPixels = 32;
+constexpr long kKernelMinimumPixels = 32;
+
+} // namespace
 
 void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& options,
                                 TaskPool& pool)
@@ -648,9 +935,20 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
     const int stride = target.width();
     const bool depthWrite = options.depthWrite;
 
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    // The kernel reads a ScreenTriangle as 16 32-bit words (raster_kernels.hpp).
+    static_assert(offsetof(ScreenTriangle, y) == 3 * sizeof(float) &&
+                  offsetof(ScreenTriangle, z) == 6 * sizeof(float) &&
+                  offsetof(ScreenTriangle, invW) == 9 * sizeof(float) &&
+                  offsetof(ScreenTriangle, color) == 12 * sizeof(float) &&
+                  offsetof(ScreenTriangle, depthBias) == 15 * sizeof(float));
+    const bool kernel = katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+#endif
+
     bool anyPoints = false;
     bool anyFilled = false;
-    for (const Chunk& chunk : chunks_) {
+    for (std::size_t c = 0; c < activeChunks_; ++c) {
+        const Chunk& chunk = chunks_[c];
         anyPoints = anyPoints || !chunk.points.empty();
         anyFilled = anyFilled || chunk.lineStart > 0;
     }
@@ -681,10 +979,14 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
             std::array<std::uint8_t, static_cast<std::size_t>(kTile) * kTile> drawn;
             bool drawnCleared = false;
 
+            // The pixels of each row a triangle can cover (rowSpans).
+            std::array<int, 2 * static_cast<std::size_t>(kTile)> spans;
+
             // Chunks in index order, primitives in index order within a chunk:
             // the visit order is a pure function of the draw list, so ties at
             // equal depth always resolve the same way (Rule 7).
-            for (const Chunk& chunk : chunks_) {
+            for (std::size_t chunkIndex = 0; chunkIndex < activeChunks_; ++chunkIndex) {
+                const Chunk& chunk = chunks_[chunkIndex];
                 const std::size_t first = what == Sweep::LinesThenPoints ? chunk.lineStart : 0;
                 const std::size_t last =
                     what == Sweep::Filled ? chunk.lineStart : chunk.triangles.size();
@@ -757,13 +1059,46 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
                     }
                     const float invArea = 1.0f / area;
 
+                    // A box of a few pixels is filled whole. A larger one is
+                    // bounded row by row first, to the pixels whose centres
+                    // can be inside, which every pixel the float test would
+                    // accept is (see "conservative coverage").
+                    const long boxPixels =
+                        static_cast<long>(maxX - minX + 1) * static_cast<long>(maxY - minY + 1);
+                    if (boxPixels < kSpanMinimumPixels) {
+                        for (int y = minY; y <= maxY; ++y) {
+                            spans[2 * static_cast<std::size_t>(y - minY)] = minX;
+                            spans[2 * static_cast<std::size_t>(y - minY) + 1] = maxX;
+                        }
+                    } else {
+                        const EdgeSetup edges = edgeSetup(t.x, t.y, area, minX, maxX, minY, maxY);
+                        if (!rowSpans(edges, minX, maxX, minY, maxY, spans.data())) {
+                            continue;
+                        }
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+                        if (kernel && boxPixels >= kKernelMinimumPixels) {
+                            // Eight pixels a step, each shaded to the bits of
+                            // the loop below; where the whole box is inside,
+                            // without the edge tests.
+                            stats.fragments += katana_avx2_shade_rows(
+                                t.x, invArea, spans.data(), minY, maxY - minY + 1,
+                                coversAll(edges, minX, maxX, minY, maxY) ? 1 : 0,
+                                depthWrite ? 1 : 0, colorBase, depthBase,
+                                static_cast<std::size_t>(stride));
+                            continue;
+                        }
+#endif
+                    }
+
                     for (int y = minY; y <= maxY; ++y) {
                         const float py = static_cast<float>(y) + 0.5f;
                         Rgba* row =
                             colorBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
                         float* depthRow =
                             depthBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
-                        for (int x = minX; x <= maxX; ++x) {
+                        const int rowFirst = spans[2 * static_cast<std::size_t>(y - minY)];
+                        const int rowLast = spans[2 * static_cast<std::size_t>(y - minY) + 1];
+                        for (int x = rowFirst; x <= rowLast; ++x) {
                             const float px = static_cast<float>(x) + 0.5f;
 
                             // No top-left rule: a pixel exactly on a shared edge
@@ -871,8 +1206,8 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
 void Rasterizer::decidePoints(const Framebuffer& target, TaskPool& pool)
 {
     std::size_t pointCount = 0;
-    for (const Chunk& chunk : chunks_) {
-        pointCount += chunk.points.size();
+    for (std::size_t c = 0; c < activeChunks_; ++c) {
+        pointCount += chunks_[c].points.size();
     }
     const int width = target.width();
     const int height = target.height();
@@ -909,11 +1244,11 @@ void Rasterizer::decidePoints(const Framebuffer& target, TaskPool& pool)
     // is the same either way.
     constexpr std::size_t kPointsInline = 4096;
     if (pointCount <= kPointsInline) {
-        for (std::size_t i = 0; i < chunks_.size(); ++i) {
+        for (std::size_t i = 0; i < activeChunks_; ++i) {
             decide(i);
         }
     } else {
-        pool.parallelFor(0, chunks_.size(), decide);
+        pool.parallelFor(0, activeChunks_, decide);
     }
 }
 
@@ -989,14 +1324,15 @@ Result<RenderStats> Rasterizer::render(const DrawList& list, const Camera& camer
     }
 
     depthPull_ = depthPullFor(camera);
-    transformVertices(list, camera, pool);
+    transformVertices(list, camera, target, pool);
     buildScreenPrimitives(list, target, options, pool);
     rasteriseTiles(target, options, pool);
 
     RenderStats total;
     total.vertices = list.positions.size();
     total.tiles = target.tileCount();
-    for (const Chunk& chunk : chunks_) {
+    for (std::size_t c = 0; c < activeChunks_; ++c) {
+        const Chunk& chunk = chunks_[c];
         total.trianglesSubmitted += chunk.stats.trianglesSubmitted;
         total.trianglesRasterised += chunk.stats.trianglesRasterised;
         total.linesSubmitted += chunk.stats.linesSubmitted;

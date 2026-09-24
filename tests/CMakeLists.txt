@@ -100,7 +100,7 @@ endif()
 # here on one that has it; `avx2` runs every public caller of a kernel on the
 # AVX2 path. (Where the processor has no AVX2, the avx2 run is refused by the
 # override, says so, and runs scalar.)
-foreach(_suite core geometry)
+foreach(_suite core geometry render)
     if(TARGET katana_${_suite}_tests)
         foreach(_level scalar avx2)
             add_test(NAME simd_${_level}.${_suite} COMMAND katana_${_suite}_tests)
