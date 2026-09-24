@@ -6,6 +6,7 @@ file(GLOB _cad_tool_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*
 file(GLOB _cad_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
 # The sheet model's tests (docs/plotting.md), globbed as its sources are.
 file(GLOB _cad_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
+file(GLOB _cad_survey_job_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_survey_job*.cpp")
 
 katana_add_test_suite(cad
     LIBS katana_cad
@@ -13,6 +14,7 @@ katana_add_test_suite(cad
         ${_cad_tool_tests}
         ${_cad_customisation_tests}
         ${_cad_plotting_tests}
+        ${_cad_survey_job_tests}
 )
 # The Modify > Edit family's tests reach its internal header
 # (tools/modify_edit_support.hpp: EditSession, drawable) the way the family's

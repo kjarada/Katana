@@ -1,5 +1,8 @@
 #include "katana/survey/data_model.hpp"
 
+#include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <initializer_list>
 #include <set>
@@ -77,6 +80,29 @@ std::string checkStations(const std::vector<std::string>& ids)
     return {};
 }
 
+// A covariance the file did not state is allowed (the reduction weights the
+// value from ObservationPrecision); a stated one needs a positive diagonal.
+std::string checkCovariance(const GnssCovariance3& covariance)
+{
+    if (!covariance.stated()) {
+        return {};
+    }
+    if (std::string reason = checkFinite({{"covariance XY", covariance.xy},
+                                          {"covariance XZ", covariance.xz},
+                                          {"covariance YZ", covariance.yz}});
+        !reason.empty()) {
+        return reason;
+    }
+    for (const auto& [name, variance] : {std::pair{"variance X", covariance.xx},
+                                         std::pair{"variance Y", covariance.yy},
+                                         std::pair{"variance Z", covariance.zz}}) {
+        if (!std::isfinite(variance) || !(variance > 0.0)) {
+            return std::string(name) + " must be a positive finite variance";
+        }
+    }
+    return {};
+}
+
 // First non-empty reason wins.
 std::string firstOf(std::initializer_list<std::string> reasons)
 {
@@ -149,6 +175,37 @@ std::string valueProblem(const Observation& observation)
                                 o.length >= 0.0 ? std::string{}
                                                 : std::string("length must not be negative")});
             },
+            [](const HorizontalDirectionObservation& o) {
+                return firstOf(
+                    {checkFinite({{"direction", o.direction}}), checkSigmas({{"sigma", o.sigma}})});
+            },
+            [](const GnssGlobalPositionObservation& o) {
+                if (o.geocentric.has_value() == o.geodetic.has_value()) {
+                    return std::string(
+                        "a GNSS position must be either geocentric or geodetic, not both or neither");
+                }
+                std::string reason;
+                if (o.geocentric) {
+                    reason = checkFinite({{"X", o.geocentric->x},
+                                          {"Y", o.geocentric->y},
+                                          {"Z", o.geocentric->z}});
+                } else {
+                    reason = firstOf(
+                        {checkFinite({{"latitude", o.geodetic->latitude},
+                                      {"longitude", o.geodetic->longitude},
+                                      {"ellipsoidal height", o.geodetic->ellipsoidalHeight}}),
+                         std::abs(o.geodetic->latitude) <= kHalfPi
+                             ? std::string{}
+                             : std::string("latitude must lie in [-pi/2, pi/2]")});
+                }
+                return firstOf({reason, checkCovariance(o.covariance)});
+            },
+            [](const GnssGeocentricBaselineObservation& o) {
+                return firstOf({checkFinite({{"delta X", o.delta.x},
+                                             {"delta Y", o.delta.y},
+                                             {"delta Z", o.delta.z}}),
+                                checkCovariance(o.covariance)});
+            },
         },
         observation);
 }
@@ -165,15 +222,113 @@ Status missingPoint(std::string_view pointId, std::string context)
                      std::move(context));
 }
 
-Status checkProjectObservation(const Observation& observation, const PointIdSet& points,
+// The ids of a project's points as views into the project, sorted once and
+// searched by bisection.
+//
+// Every import is validated (surveyio::readSurvey), so this is on the import
+// path of every file. The earlier std::set<std::string> copied every id and
+// referencedPoints() copied every observation's ids again; on a synthetic job
+// of 2,000 setups and 600,000 raw observations that was 2.5 s of a Debug build
+// before a single value had been looked at.
+class PointIds {
+  public:
+    void reserve(std::size_t count) { ids_.reserve(count); }
+    void add(std::string_view id) { ids_.push_back(id); }
+    // Sorts; true when no id occurs twice.
+    [[nodiscard]] bool seal()
+    {
+        std::sort(ids_.begin(), ids_.end());
+        return std::adjacent_find(ids_.begin(), ids_.end()) == ids_.end();
+    }
+    [[nodiscard]] bool contains(std::string_view id) const
+    {
+        return std::binary_search(ids_.begin(), ids_.end(), id);
+    }
+
+  private:
+    std::vector<std::string_view> ids_;
+};
+
+// The points an observation names, as views: never more than three.
+struct PointRefs {
+    std::array<std::string_view, 3> ids{};
+    std::size_t count = 0;
+};
+
+PointRefs referencedPointViews(const Observation& observation)
+{
+    return std::visit(
+        Overloaded{
+            [](const HorizontalAngleObservation& o) { return PointRefs{{o.at, o.from, o.to}, 3}; },
+            [](const HorizontalDirectionObservation& o) { return PointRefs{{o.at, o.to, {}}, 2}; },
+            [](const GnssPositionObservation& o) { return PointRefs{{o.point, {}, {}}, 1}; },
+            [](const GnssGlobalPositionObservation& o) {
+                return PointRefs{{o.point, {}, {}}, 1};
+            },
+            [](const auto& o) { return PointRefs{{o.from, o.to, {}}, 2}; },
+        },
+        observation);
+}
+
+// validateObservation() plus "every point it names is in the project", without
+// a heap allocation on the path every valid observation takes. A failure is
+// worded by validateObservation() itself, so the two cannot disagree.
+Status checkProjectObservation(const Observation& observation, const PointIds& points,
                                const std::string& context)
 {
-    if (Status status = validateObservation(observation); !status.ok()) {
-        return status;
+    const PointRefs refs = referencedPointViews(observation);
+    bool stationsUsable = true;
+    for (std::size_t i = 0; i < refs.count && stationsUsable; ++i) {
+        stationsUsable = !refs.ids[i].empty();
+        for (std::size_t j = i + 1; j < refs.count && stationsUsable; ++j) {
+            stationsUsable = refs.ids[i] != refs.ids[j];
+        }
     }
-    for (const std::string& id : referencedPoints(observation)) {
-        if (!points.contains(id)) {
-            return missingPoint(id, context + ": " + describe(observation));
+    if (!stationsUsable || !valueProblem(observation).empty()) {
+        return validateObservation(observation);
+    }
+    for (std::size_t i = 0; i < refs.count; ++i) {
+        if (!points.contains(refs.ids[i])) {
+            return missingPoint(refs.ids[i], context + ": " + describe(observation));
+        }
+    }
+    return {};
+}
+
+// The per-point checks. Duplicates are looked for only when the sorted ids
+// have already shown there is one, and then in file order, so the error is
+// the one the file's order makes first - the same one on every run.
+Status checkPoints(const SurveyProject& project, bool lookForDuplicates)
+{
+    PointIdSet seen;
+    for (const SurveyPoint& point : project.points) {
+        if (point.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a point has an empty id",
+                             describeSource(point.source));
+        }
+        if (lookForDuplicates && !seen.insert(point.id).second) {
+            return makeError(ErrorCode::AlreadyExists, "duplicate point id '" + point.id + "'",
+                             describeSource(point.source));
+        }
+        std::string reason = checkFinite({{"northing", point.northing}, {"easting", point.easting}});
+        if (reason.empty() && point.elevation) {
+            reason = checkFinite({{"elevation", *point.elevation}});
+        }
+        if (!reason.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "point '" + point.id + "': " + reason,
+                             describeSource(point.source));
+        }
+    }
+    for (const UnpositionedPoint& point : project.unpositionedPoints) {
+        if (point.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "an unpositioned point has an empty id",
+                             describeSource(point.source));
+        }
+        if (lookForDuplicates && !seen.insert(point.id).second) {
+            return makeError(ErrorCode::AlreadyExists,
+                             "duplicate point id '" + point.id +
+                                 "' (a point may not be both positioned and unpositioned)",
+                             describeSource(point.source));
         }
     }
     return {};
@@ -214,6 +369,102 @@ std::string describeSource(const SourceRecord& source)
         text += " (" + format + ")";
     }
     return text;
+}
+
+const char* toString(CorrectionState state)
+{
+    switch (state) {
+    case CorrectionState::Unknown:
+        return "not stated";
+    case CorrectionState::Applied:
+        return "applied by the instrument";
+    case CorrectionState::NotApplied:
+        return "not applied";
+    }
+    return "not stated";
+}
+
+const char* toString(Face face)
+{
+    switch (face) {
+    case Face::Unknown:
+        return "unknown face";
+    case Face::Left:
+        return "face left";
+    case Face::Right:
+        return "face right";
+    }
+    return "unknown face";
+}
+
+const char* toString(AntennaHeightMethod method)
+{
+    switch (method) {
+    case AntennaHeightMethod::Unknown:
+        return "not stated";
+    case AntennaHeightMethod::Vertical:
+        return "vertical to the antenna reference point";
+    case AntennaHeightMethod::Slant:
+        return "slant";
+    case AntennaHeightMethod::PhaseCentre:
+        return "to the phase centre";
+    case AntennaHeightMethod::Other:
+        return "other";
+    }
+    return "not stated";
+}
+
+const char* toString(GnssSolution solution)
+{
+    switch (solution) {
+    case GnssSolution::Unknown:
+        return "not stated";
+    case GnssSolution::Fixed:
+        return "fixed";
+    case GnssSolution::Float:
+        return "float";
+    case GnssSolution::Differential:
+        return "differential";
+    case GnssSolution::Autonomous:
+        return "autonomous";
+    }
+    return "not stated";
+}
+
+std::string toString(const SurveyTimestamp& timestamp)
+{
+    if (!timestamp.known()) {
+        return {};
+    }
+    // Shortest text that reads back as the same double, so a stored second is
+    // not rounded to whatever a fixed precision thought was enough.
+    std::array<char, 64> second{};
+    const auto written =
+        std::to_chars(second.data(), second.data() + second.size(), timestamp.second);
+    const std::string_view secondText(
+        second.data(), written.ec == std::errc{} ? static_cast<std::size_t>(written.ptr - second.data()) : 0);
+    auto twoDigits = [](int value) {
+        std::string text = std::to_string(value);
+        return text.size() < 2 ? "0" + text : text;
+    };
+    std::string text = std::to_string(timestamp.year) + "-" + twoDigits(timestamp.month) + "-" +
+                       twoDigits(timestamp.day) + "T" + twoDigits(timestamp.hour) + ":" +
+                       twoDigits(timestamp.minute) + ":";
+    // Two integer digits, as ISO 8601 has them: "05.5", not "5.5".
+    if (timestamp.second < 10.0) {
+        text += '0';
+    }
+    text += secondText;
+    if (!timestamp.timeSystem.empty()) {
+        text += ' ';
+        text += timestamp.timeSystem;
+    }
+    return text;
+}
+
+double distanceSigma(const ObservationPrecision& precision, double distance)
+{
+    return std::hypot(precision.distanceConstant, precision.distancePpm * 1e-6 * distance);
 }
 
 const char* toString(CoordinateSource source)
@@ -302,6 +553,16 @@ std::string observationKindName(const Observation& observation)
             [](const GnssBaselineObservation&) { return std::string("GNSS baseline"); },
             [](const GnssPositionObservation&) { return std::string("GNSS position"); },
             [](const LevelDifferenceObservation&) { return std::string("level difference"); },
+            [](const HorizontalDirectionObservation&) {
+                return std::string("horizontal direction");
+            },
+            [](const GnssGlobalPositionObservation& o) {
+                return std::string(o.geocentric ? "GNSS geocentric position"
+                                                : "GNSS geodetic position");
+            },
+            [](const GnssGeocentricBaselineObservation&) {
+                return std::string("GNSS geocentric baseline");
+            },
         },
         observation);
 }
@@ -313,6 +574,8 @@ std::vector<std::string> referencedPoints(const Observation& observation)
         Overloaded{
             [](const HorizontalAngleObservation& o) { return Ids{o.at, o.from, o.to}; },
             [](const GnssPositionObservation& o) { return Ids{o.point}; },
+            [](const GnssGlobalPositionObservation& o) { return Ids{o.point}; },
+            [](const HorizontalDirectionObservation& o) { return Ids{o.at, o.to}; },
             [](const auto& o) { return Ids{o.from, o.to}; },
         },
         observation);
@@ -335,8 +598,26 @@ Observation normalizedObservation(Observation observation)
         angle->angle = normalizeAngle(angle->angle);
     } else if (auto* azimuth = std::get_if<AzimuthObservation>(&observation)) {
         azimuth->azimuth = normalizeAngle(azimuth->azimuth);
+    } else if (auto* direction = std::get_if<HorizontalDirectionObservation>(&observation)) {
+        direction->direction = normalizeAngle(direction->direction);
     }
     return observation;
+}
+
+const Pointing* observationPointing(const Observation& observation)
+{
+    return std::visit(
+        Overloaded{
+            [](const DistanceObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const HorizontalAngleObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const VerticalAngleObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const ZenithAngleObservation& o) -> const Pointing* { return &o.pointing; },
+            [](const HorizontalDirectionObservation& o) -> const Pointing* {
+                return &o.pointing;
+            },
+            [](const auto&) -> const Pointing* { return nullptr; },
+        },
+        observation);
 }
 
 const SourceRecord& observationSource(const Observation& observation)
@@ -419,36 +700,17 @@ DeclaredCoordinateSystem DeclaredCoordinateSystem::epsg(int code, std::string na
 
 Status validateProject(const SurveyProject& project)
 {
-    PointIdSet points;
+    PointIds points;
+    points.reserve(project.points.size() + project.unpositionedPoints.size());
     for (const SurveyPoint& point : project.points) {
-        if (point.id.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "a point has an empty id",
-                             describeSource(point.source));
-        }
-        if (!points.insert(point.id).second) {
-            return makeError(ErrorCode::AlreadyExists, "duplicate point id '" + point.id + "'",
-                             describeSource(point.source));
-        }
-        std::string reason = checkFinite({{"northing", point.northing}, {"easting", point.easting}});
-        if (reason.empty() && point.elevation) {
-            reason = checkFinite({{"elevation", *point.elevation}});
-        }
-        if (!reason.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "point '" + point.id + "': " + reason,
-                             describeSource(point.source));
-        }
+        points.add(point.id);
     }
     for (const UnpositionedPoint& point : project.unpositionedPoints) {
-        if (point.id.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "an unpositioned point has an empty id",
-                             describeSource(point.source));
-        }
-        if (!points.insert(point.id).second) {
-            return makeError(ErrorCode::AlreadyExists,
-                             "duplicate point id '" + point.id +
-                                 "' (a point may not be both positioned and unpositioned)",
-                             describeSource(point.source));
-        }
+        points.add(point.id);
+    }
+    const bool unique = points.seal();
+    if (Status status = checkPoints(project, !unique); !status.ok()) {
+        return status;
     }
 
     PointIdSet stationIds;
@@ -478,19 +740,47 @@ Status validateProject(const SurveyProject& project)
                              "station " + setup.id + ": backsight azimuth is not finite",
                              describeSource(station.source));
         }
+        const std::string context = "station " + setup.id;
         for (const Observation& observation : station.observations) {
-            if (Status status =
-                    checkProjectObservation(observation, points, "station " + setup.id);
+            if (Status status = checkProjectObservation(observation, points, context);
                 !status.ok()) {
                 return status;
             }
         }
     }
 
+    const std::string looseContext = "project observation";
     for (const Observation& observation : project.observations) {
-        if (Status status = checkProjectObservation(observation, points, "project observation");
+        if (Status status = checkProjectObservation(observation, points, looseContext);
             !status.ok()) {
             return status;
+        }
+    }
+
+    PointIds positioned;
+    if (!project.controlPoints.empty()) {
+        positioned.reserve(project.points.size());
+        for (const SurveyPoint& point : project.points) {
+            positioned.add(point.id);
+        }
+        (void)positioned.seal(); // duplicates were refused above
+    }
+    for (const ControlPoint& control : project.controlPoints) {
+        if (!positioned.contains(control.pointId)) {
+            return makeError(ErrorCode::NotFound,
+                             "control point '" + control.pointId +
+                                 "' is not a positioned point of the project",
+                             "control needs a published value to hold");
+        }
+        for (const auto& [name, component] :
+             {std::pair{"northing", &control.northing}, std::pair{"easting", &control.easting},
+              std::pair{"elevation", &control.elevation}}) {
+            if (component->constraint == ControlConstraint::Weighted &&
+                (!std::isfinite(component->sigma) || !(component->sigma > 0.0))) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "control point '" + control.pointId + "': the weighted " +
+                                     name + " needs a positive standard deviation");
+            }
         }
     }
 
