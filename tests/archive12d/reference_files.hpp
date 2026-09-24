@@ -1,18 +1,18 @@
 #pragma once
 
-// The reference customisation the survey coding work was measured against
-// (PLAN.MD 20.3), for the tests that use it.
+// The customisation the build compiles in (KATANA_CUSTOMISATION_DIR,
+// resources/customisation/ by default) - the one the survey coding work was
+// measured against (PLAN.MD 20.3) - for the tests that read its files.
 //
 // It is real third-party material under its own licence and is NOT part of
 // this repository, so every test that uses it SKIPS when it is absent: the
 // suite must stay green without it.
 //
 // Files are found BY GLOBBING the directory and asked what they are by
-// looking inside them, never by name. Two reasons, and both matter. The names
-// of a customisation carry whoever it was written for, which has no place in
-// this source; and the extension does not say what a file is anyway - three
-// of the four reference files end in `.4d`, and two of those are mapfiles
-// while the third is a style library.
+// looking inside them, never by name: the extension does not say what a file
+// is, since `.4d` is the extension of both a style library and, as files are
+// found, a survey code file. The names the built-in customisation must have
+// are tested once, against builtinCustomisation (test_customisation.cpp).
 
 #include <algorithm>
 #include <filesystem>
@@ -40,7 +40,7 @@ struct ReferenceCustomisation {
 [[nodiscard]] inline ReferenceCustomisation referenceCustomisation()
 {
     ReferenceCustomisation found;
-    const std::filesystem::path directory{KATANA_12D_REFERENCE_FILES};
+    const std::filesystem::path directory{KATANA_CUSTOMISATION_FILES};
     std::error_code ignored;
     if (!std::filesystem::is_directory(directory, ignored)) {
         return found;
@@ -79,7 +79,7 @@ struct ReferenceCustomisation {
 [[nodiscard]] inline std::vector<std::filesystem::path> referencePaths()
 {
     std::vector<std::filesystem::path> paths;
-    const std::filesystem::path directory{KATANA_12D_REFERENCE_FILES};
+    const std::filesystem::path directory{KATANA_CUSTOMISATION_FILES};
     std::error_code ignored;
     if (!std::filesystem::is_directory(directory, ignored)) {
         return paths;
