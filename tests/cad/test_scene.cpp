@@ -1193,3 +1193,57 @@ TEST(SceneFrame, DrawingLinesDrapedOnASurfaceCrossItsEdgesUnbroken)
         }
     }
 }
+
+TEST(SceneFrame, OfTwoCoincidentSurfacesTheEdgesShownAreThoseOfTheSurfaceShown)
+{
+    // A design surface often repeats the existing one's triangles outside
+    // the works. Coincident, the surface drawn first wins the tie and is the
+    // one seen; its edges won too while edges wrote depth. Writing none, the
+    // second surface's edges - drawn later, and in a real archive fainter,
+    // its triangles being smaller on average - painted over the edges of
+    // the surface seen. The edges are emitted surface by surface in reverse,
+    // so painted in order the first surface's are on top. Here the two
+    // differ only in their flat colour, so the second's edges have their own
+    // colours and not one pixel of them may show.
+    const TinSurface ground =
+        gridTin(0.0, 0.0, 200.0, 10, [](double x, double y) { return 0.03 * x + 0.01 * y; });
+    SceneSurface first;
+    first.surface = &ground;
+    first.style = SurfaceStyle::ShadedWithEdges;
+    first.coloring = SurfaceColoring::Flat;
+    first.flatColor = katana::render::rgba(90, 150, 90);
+    SceneSurface second = first;
+    second.flatColor = katana::render::rgba(150, 90, 150);
+    Document document;
+    SceneLayers layers = layersOf(document, {first, second}, plainOptions());
+    ASSERT_EQ(layers.edgeRuns.size(), 2u);
+
+    Camera camera;
+    camera.setViewportSize(800, 600);
+    camera.setStandardView(StandardView::IsoSouthWest);
+    ASSERT_TRUE(camera.frame(layers.bounds));
+    const Framebuffer seen = frameOf(layers, camera);
+    // The colours each surface's edges were drawn in this frame (fadeEdges
+    // sets them for the camera).
+    const auto inkOf = [&layers](const SceneLayers::EdgeRun& run) {
+        std::vector<Rgba> inks(layers.edges.colors.begin() + run.first,
+                               layers.edges.colors.begin() + run.first + run.count);
+        std::sort(inks.begin(), inks.end());
+        inks.erase(std::unique(inks.begin(), inks.end()), inks.end());
+        return inks;
+    };
+    const auto countOf = [&seen](const std::vector<Rgba>& inks) {
+        return static_cast<std::size_t>(
+            std::count_if(seen.color().begin(), seen.color().end(), [&inks](Rgba c) {
+                return std::binary_search(inks.begin(), inks.end(), c);
+            }));
+    };
+    const std::vector<Rgba> firstInk = inkOf(layers.edgeRuns[0]);
+    const std::vector<Rgba> secondInk = inkOf(layers.edgeRuns[1]);
+    for (Rgba c : secondInk) {
+        ASSERT_FALSE(std::binary_search(firstInk.begin(), firstInk.end(), c))
+            << "the two surfaces share an edge colour, so this proves nothing";
+    }
+    EXPECT_GT(countOf(firstInk), 2000u) << "the first surface's edges were not drawn";
+    EXPECT_EQ(countOf(secondInk), 0u);
+}
