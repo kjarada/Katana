@@ -8,11 +8,14 @@
 // queries stayed 36x slower until the project was reopened - because opening
 // is what rebuilt the index and chose a cell size from the data.
 //
-// The rule these tests pin down (Document::applyToSpatialIndex):
-//   * a command that touches at least a tenth of the drawing rebuilds it;
-//   * so does a drawing that has grown to twice the size its cell was chosen
-//     for - which includes the empty drawing, whose cell was chosen for none;
-//   * anything else - the ordinary click - is incremental.
+// The rules these tests pin down (Document::applyToSpatialIndex):
+//   * a drawing that has grown to twice, or shrunk to half, the size its cell
+//     was chosen for is rebuilt - which includes the empty drawing, whose
+//     cell was chosen for none;
+//   * so is one whose oversized list has grown past twice what the last
+//     rebuild left plus a hundredth of the drawing;
+//   * anything else is incremental - the ordinary click, and a command that
+//     touches many entities without changing what the cell was chosen for.
 //
 // The cell sizes below are worked out by hand from SpatialIndex's rule: the
 // cell is twice the mean box side, (sum of width + height) / (2 n) * 2.
@@ -84,26 +87,54 @@ TEST(DocumentIndex, AnImportIntoAnEmptyDrawingChoosesTheCellSizeFromWhatItImport
     EXPECT_EQ(document.spatialIndex().size(), 2u);
 }
 
-TEST(DocumentIndex, AChangeToATenthOfTheDrawingRebuildsTheIndexAndASmallerOneDoesNot)
+TEST(DocumentIndex, ScalingEveryEntityKeepsTheCellUntilTheBoxesNoLongerFitIt)
 {
     Document document;
     // 100 lines 10 long: mean side 100 * 10 / (2 * 100) = 5, cell 10.
     import(document, horizontalLines(100, 10.0));
     ASSERT_EQ(document.spatialIndex().cellSize(), 10.0);
+    std::vector<katana::entity::EntityId> all;
+    document.model().entities.forEach([&](const Entity& entity) { all.push_back(entity.id); });
 
-    // 5 more, 1000 long: 5 is under a tenth of the 105 after, and 105 is
-    // under twice the 100 the cell was chosen for, so they are inserted into
-    // the grid as it is and the cell stays 10.
-    import(document, horizontalLines(5, 1000.0, 200.0));
+    // Every entity scaled by 2 about the origin: each line is now 20 long, 2
+    // cells, and fits the grid as it is. A rebuild would have chosen 20
+    // (mean side 100 * 20 / 200 = 10); the cell is still 10, so there was
+    // none - the command touched the whole drawing and changed no cell choice
+    // worth an O(n) rebuild.
+    ASSERT_TRUE(document.execute(cmd::scaleEntities(all, Point2(0.0, 0.0), 2.0)).ok());
     EXPECT_EQ(document.spatialIndex().cellSize(), 10.0);
-    EXPECT_EQ(document.spatialIndex().size(), 105u);
+    EXPECT_EQ(document.spatialIndex().oversizedCount(), 0u);
 
-    // 20 more: 20 is at least a tenth of the 125 after, so the index is
-    // rebuilt. Sum of sides 100 * 10 + 25 * 1000 = 26000 over 125 boxes,
-    // mean side 26000 / 250 = 104, cell 208.
-    import(document, horizontalLines(20, 1000.0, 300.0));
-    EXPECT_EQ(document.spatialIndex().cellSize(), 208.0);
-    EXPECT_EQ(document.spatialIndex().size(), 125u);
+    // By 1000 more: each line is 20,000 long, 2,001 cells of 10 - past the
+    // 1,024 a box may cover - so all 100 go on the oversized list, which is
+    // over 2 * 0 + 100 / 100 = 1. Rebuilt: mean side 100 * 20000 / 200 =
+    // 10000, cell 20000, and nothing is oversized any more.
+    ASSERT_TRUE(document.execute(cmd::scaleEntities(all, Point2(0.0, 0.0), 1000.0)).ok());
+    EXPECT_EQ(document.spatialIndex().cellSize(), 20000.0);
+    EXPECT_EQ(document.spatialIndex().oversizedCount(), 0u);
+    EXPECT_EQ(document.spatialIndex().size(), 100u);
+}
+
+TEST(DocumentIndex, BoxesTooBigForTheCellRebuildItOnceTheyAreMoreThanAHundredthOfTheDrawing)
+{
+    Document document;
+    // 100 lines 10 long: cell 10, nothing oversized.
+    import(document, horizontalLines(100, 10.0));
+    ASSERT_EQ(document.spatialIndex().cellSize(), 10.0);
+
+    // A line 19,900 long is 1,991 cells of 10, past the 1,024 a box may
+    // cover: oversized. One of them is not more than 2 * 0 + 101 / 100 = 1.
+    ASSERT_TRUE(document.execute(cmd::createLine(Point2(0.0, 500.0), Point2(19900.0, 500.0))).ok());
+    EXPECT_EQ(document.spatialIndex().oversizedCount(), 1u);
+    EXPECT_EQ(document.spatialIndex().cellSize(), 10.0);
+
+    // Two are more than 2 * 0 + 102 / 100 = 1: rebuilt. Sum of sides
+    // 100 * 10 + 2 * 19900 = 40800 over 102 boxes, mean 40800 / 204 = 200,
+    // cell 400 - where a 19,900 line is 50 cells and fits.
+    ASSERT_TRUE(document.execute(cmd::createLine(Point2(0.0, 600.0), Point2(19900.0, 600.0))).ok());
+    EXPECT_EQ(document.spatialIndex().cellSize(), 400.0);
+    EXPECT_EQ(document.spatialIndex().oversizedCount(), 0u);
+    EXPECT_EQ(document.spatialIndex().size(), 102u);
 }
 
 TEST(DocumentIndex, ADrawingThatDoublesOneEntityAtATimeHasItsCellChosenAgain)
