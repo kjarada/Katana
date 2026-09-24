@@ -325,3 +325,65 @@ TEST_F(SurveyJobStorage, SettingsWrittenByANewerVersionAreRefusedRatherThanHalfR
     EXPECT_EQ(contents.error().code, ErrorCode::Unsupported);
     EXPECT_NE(contents.error().message.find("job-1"), std::string::npos);
 }
+
+// The packed lists are read back from a file that may have been damaged or
+// edited by hand, so every shortened form of a sound one must fail the load
+// with an error - never read past its end, never crash, never load as a
+// different job.
+TEST_F(SurveyJobStorage, EveryTruncationOfThePackedListsIsRefusedCleanly)
+{
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(contentsWith({fullJob("job-1")})).ok());
+    }
+    std::int64_t placedSize = 0;
+    std::int64_t createdSize = 0;
+    {
+        auto raw = SqliteDatabase::open(projectDir() / "project.db");
+        ASSERT_TRUE(raw.ok());
+        auto sizes = raw->prepare(
+            "SELECT length(placed_points), length(created_entities) FROM survey_jobs");
+        ASSERT_TRUE(sizes.ok());
+        ASSERT_TRUE(*sizes->step());
+        placedSize = sizes->columnInt64(0);
+        createdSize = sizes->columnInt64(1);
+        ASSERT_TRUE(raw->execute("CREATE TABLE sound AS SELECT placed_points, created_entities"
+                                 " FROM survey_jobs")
+                        .ok());
+    }
+    ASSERT_GT(placedSize, 60);
+    ASSERT_EQ(createdSize, 32); // four ids of eight bytes
+    const auto loadAfter = [&](const std::string& sql) {
+        {
+            auto raw = SqliteDatabase::open(projectDir() / "project.db");
+            EXPECT_TRUE(raw.ok());
+            EXPECT_TRUE(raw->execute("UPDATE survey_jobs SET placed_points = (SELECT"
+                                     " placed_points FROM sound), created_entities = (SELECT"
+                                     " created_entities FROM sound);" + sql)
+                            .ok());
+        }
+        auto store = ProjectStore::open(projectDir());
+        EXPECT_TRUE(store.ok());
+        return store->load();
+    };
+    for (std::int64_t keep = 0; keep < placedSize; ++keep) {
+        const auto contents = loadAfter("UPDATE survey_jobs SET placed_points = substr(" +
+                                        std::string("placed_points, 1, ") + std::to_string(keep) +
+                                        ")");
+        ASSERT_FALSE(contents.ok()) << "placed points cut to " << keep << " bytes";
+    }
+    for (std::int64_t keep = 1; keep < createdSize; ++keep) {
+        if (keep % 8 == 0) {
+            continue; // a whole number of ids is a shorter list, not damage
+        }
+        const auto contents = loadAfter("UPDATE survey_jobs SET created_entities = substr(" +
+                                        std::string("created_entities, 1, ") +
+                                        std::to_string(keep) + ")");
+        ASSERT_FALSE(contents.ok()) << "created entities cut to " << keep << " bytes";
+    }
+    // And the sound bytes still load: the loop did not pass by always failing.
+    const auto sound = loadAfter("");
+    ASSERT_TRUE(sound.ok()) << sound.error().describe();
+    EXPECT_EQ(sound->surveyJobs.front(), fullJob("job-1"));
+}

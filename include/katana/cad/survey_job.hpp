@@ -164,6 +164,12 @@ struct SurveyJobChanges {
 // replaced; the report shows each point's shift from the previous run. Undo
 // puts every point, the settings and the report back.
 //
+// Only the job's own points are touched (SurveyJob::placedPoints). One the
+// person has moved, re-levelled or deleted since the job placed it is found
+// by comparing the two, named in the report and in changes(), and kept or
+// overwritten as SurveyJobReadjustment::handEdits says. A new point whose id
+// a point the job did not create already has is not drawn, and said so.
+//
 // NotFound for a job the document does not have; the reader's or the
 // reduction's own error otherwise, with nothing changed.
 class ReadjustSurveyJobCommand final : public katana::commands::Command {
