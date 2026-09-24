@@ -1088,6 +1088,79 @@ TEST(InteropHeights, AVerticalStepLosesAHeightAndSaysSo)
     EXPECT_TRUE(warned(read->warnings, "1 vertices were dropped")) << "the lost height is reported";
 }
 
+TEST(InteropHeights, AStringThatComesBackOverItsStartAtAnotherHeightStaysOpenWithEveryHeight)
+{
+    // A ramp that climbs round a 20 m square and ends one level above where
+    // it began: its ends meet in plan only. Closing it would drop the last
+    // vertex, and height 14 with it, for a ring the string never was.
+    const TempDir dir("heights-ramp");
+    const auto path = dir.file("ramp.geojson");
+    writeText(path, R"({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"id": "ramp"},
+         "geometry": {"type": "LineString",
+                      "coordinates": [[0, 0, 10], [20, 0, 11], [20, 20, 12],
+                                      [0, 20, 13], [0, 0, 14]]}},
+        {"type": "Feature", "properties": {"id": "pad"},
+         "geometry": {"type": "LineString",
+                      "coordinates": [[0, 0, 7], [20, 0, 7], [20, 20, 7],
+                                      [0, 20, 7], [0, 0, 7]]}}]})");
+
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 2u);
+    for (const Entity& entity : read->entities) {
+        const auto* polyline = std::get_if<Polyline2>(&entity.geometry);
+        ASSERT_NE(polyline, nullptr);
+        if (std::get<std::string>(entity.properties.at("id")) == "ramp") {
+            EXPECT_FALSE(polyline->closed) << "its ends are 4 m apart in height";
+            ASSERT_EQ(polyline->vertices.size(), 5u);
+            EXPECT_EQ(polyline->vertices.back(), Point2(0, 0));
+            // By hand: the file's five heights, one per vertex, in order.
+            const auto heights = heightsOf(entity.properties, 5);
+            for (std::size_t i = 0; i < 5; ++i) {
+                EXPECT_EQ(heights[i], std::optional<double>(10.0 + static_cast<double>(i)));
+            }
+        } else {
+            // The same square with its ends at one height IS a ring - how a
+            // closed 3D polyline comes out of a DXF - so it still closes,
+            // with its four corners.
+            EXPECT_TRUE(polyline->closed);
+            ASSERT_EQ(polyline->vertices.size(), 4u);
+            for (const auto& z : heightsOf(entity.properties, 4)) {
+                EXPECT_EQ(z, std::optional<double>(7.0));
+            }
+        }
+    }
+    EXPECT_FALSE(warned(read->warnings, "vertices were dropped")) << "no height was lost";
+}
+
+TEST(InteropHeights, AnOpen3DStringThatReturnsOverItsStartInPlanComesBackOpen)
+{
+    // Katana's own open string, round-tripped: the export writes its five
+    // vertices with their heights, and the import must not read the equal
+    // ends in plan as a ring.
+    const TempDir dir("heights-ramp-trip");
+    const auto path = dir.file("ramp.geojson");
+    Entity ramp;
+    Polyline2 polyline;
+    polyline.vertices = {Point2(0, 0), Point2(20, 0), Point2(20, 20), Point2(0, 20), Point2(0, 0)};
+    ramp.geometry = polyline;
+    katana::entity::setHeights(ramp.properties, {10.0, 11.0, 12.0, 13.0, 14.0});
+    const Model model = modelWith({ramp});
+
+    const auto written = exportVector(model, path);
+    ASSERT_TRUE(written.ok()) << written.error().describe();
+    const auto read = importVector(path);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->entities.size(), 1u);
+    const auto* back = std::get_if<Polyline2>(&read->entities.front().geometry);
+    ASSERT_NE(back, nullptr);
+    EXPECT_FALSE(back->closed);
+    EXPECT_EQ(back->vertices, polyline.vertices);
+    const auto heights = heightsOf(read->entities.front().properties, 5);
+    EXPECT_EQ(heights.back(), std::optional<double>(14.0)) << "the top of the ramp is kept";
+}
+
 TEST(InteropHeights, AStringHeightedAtOnlySomeVerticesGoesInPlanWithItsHeightsKept)
 {
     // A 3D geometry needs a height at every vertex; writing 0 for the missing
