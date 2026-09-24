@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <string>
 
 #include "katana/core/task_pool.hpp"
@@ -781,11 +782,31 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
 // of the pass the nearer still wins pixel by pixel.
 void Rasterizer::rasterisePoints(Framebuffer& target, bool depthWrite, TaskPool& pool)
 {
-    const bool anyPoints = std::any_of(chunks_.begin(), chunks_.end(),
-                                       [](const Chunk& chunk) { return !chunk.points.empty(); });
-    if (!anyPoints) {
+    std::size_t pointCount = 0;
+    for (const Chunk& chunk : chunks_) {
+        pointCount += chunk.points.size();
+    }
+    if (pointCount == 0) {
         return;
     }
+    // A dispatch wakes every worker and waits for each to report back, which
+    // costs more than deciding and filling a few thousand points: with both
+    // steps dispatched, a 1600 x 1000 frame of a survey with 400 points
+    // (BM_SceneFrame) measured 5-9% slower on the median than before points
+    // were decided at their centre; inline, it measured the same. Up to
+    // kPointsInline points both steps run on this thread, in the same index
+    // order, so the pixels are the same either way.
+    constexpr std::size_t kPointsInline = 4096;
+    const auto forEach = [&pool, pointCount](std::size_t count,
+                                             const std::function<void(std::size_t)>& body) {
+        if (pointCount <= kPointsInline) {
+            for (std::size_t i = 0; i < count; ++i) {
+                body(i);
+            }
+        } else {
+            pool.parallelFor(0, count, body);
+        }
+    };
     const int width = target.width();
     const int height = target.height();
     Rgba* const colorBase = target.color().data();
@@ -798,7 +819,7 @@ void Rasterizer::rasterisePoints(Framebuffer& target, bool depthWrite, TaskPool&
     // floor(c + h), one pixel too many on each axis (audit REN-10).
     const auto ceilIn = [](float v, int lo, int hi) { return -pixelFloor(-v, -hi, -lo); };
 
-    pool.parallelFor(0, chunks_.size(), [&](std::size_t chunkIndex) {
+    forEach(chunks_.size(), [&](std::size_t chunkIndex) {
         for (ScreenPoint& p : chunks_[chunkIndex].points) {
             const int x0 = ceilIn(p.x - p.half - 0.5f, 0, width);
             const int x1 = ceilIn(p.x + p.half - 0.5f, 0, width) - 1;
@@ -823,7 +844,7 @@ void Rasterizer::rasterisePoints(Framebuffer& target, bool depthWrite, TaskPool&
     });
 
     constexpr int kTile = Framebuffer::kTileSize;
-    pool.parallelFor(0, target.tileCount(), [&](std::size_t tileIndex) {
+    forEach(target.tileCount(), [&](std::size_t tileIndex) {
         const TileRect rect = target.tile(tileIndex);
         if (rect.empty()) {
             return;
