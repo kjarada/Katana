@@ -322,6 +322,25 @@ TEST(TopconGts, TheGtsProbesRuleOutRw5AndCoordinateFiles)
     }
 }
 
+TEST(TopconGts, TheGtsProbesDoNotClaimLeicaTrimbleRinexOrLandXmlFiles)
+{
+    for (const topcon_test::ForeignSample& sample : topcon_test::kForeignSamples) {
+        const ProbeInput input = probeOf(sample.bytes, sample.name);
+        for (const auto& probed : formatRegistry().probeAll(input)) {
+            if (probed.formatId == kGts7 || probed.formatId == kGts6) {
+                EXPECT_LT(probed.signature.confidence, 0.5) << sample.name << " as "
+                                                            << probed.formatId << ": "
+                                                            << probed.signature.evidence;
+            }
+        }
+        const Detection detection = detectFormat(input);
+        if (detection.format()) {
+            EXPECT_NE(detection.format()->id, kGts7) << sample.name;
+            EXPECT_NE(detection.format()->id, kGts6) << sample.name;
+        }
+    }
+}
+
 TEST(TopconGts, EveryTruncationAndRandomBytesGiveAnErrorOrAResultNeverACrash)
 {
     const std::size_t reads =
