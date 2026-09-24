@@ -91,7 +91,8 @@ TEST(RenderRasterizer, AnEmptyListLeavesTheClearedBackground)
     ASSERT_TRUE(stats.ok()) << stats.error().describe();
     EXPECT_EQ(stats->fragments, 0u);
     EXPECT_EQ(countPixels(*target, kBackground), 64u * 48u);
-    EXPECT_FLOAT_EQ(target->depthAt(10, 10), 1.0f) << "depth must clear to the far plane";
+    EXPECT_FLOAT_EQ(target->depthAt(10, 10), 0.0f)
+        << "depth must clear to the far plane, which reversed Z puts at 0";
 }
 
 TEST(RenderRasterizer, FillsExactlyTheAreaOfAnAxisAlignedTriangle)
@@ -487,28 +488,38 @@ TEST(RenderRasterizer, DepthBiasLiftsWireframeOffTheSurfaceItBounds)
         return countPixels(*target, kGreen);
     };
 
-    const std::size_t biased = renderWith(1.0e-4f);
+    // One pixel footprint towards the eye (DrawLine::depthBias is in those
+    // since the depth-range fit; it was NDC depth, 1e-4 here).
+    const std::size_t biased = renderWith(1.0f);
     EXPECT_GT(biased, 100u) << "a biased edge must win against the surface it lies in";
 }
 
-TEST(RenderRasterizer, PointsAreDrawnAtTheirRequestedPixelSize)
+TEST(RenderRasterizer, PointsAreDrawnAtExactlyTheirRequestedPixelSize)
 {
-    auto target = Framebuffer::create(64, 64);
-    ASSERT_TRUE(target.ok());
-    Camera camera = planCamera(64, 64);
-    TaskPool pool(0);
-
-    DrawList list;
-    const auto v = list.addVertex(Vec3(0.0, 0.0, 0.0), kGreen);
-    list.addPoint(v, 5.0f);
-
-    Rasterizer rasterizer;
-    const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
-    ASSERT_TRUE(stats.ok()) << stats.error().describe();
-    EXPECT_EQ(stats->pointsSubmitted, 1u);
-    const std::size_t filled = countPixels(*target, kGreen);
-    EXPECT_GE(filled, 16u);
-    EXPECT_LE(filled, 36u) << "a 5 px point must not smear across the image";
+    // planCamera: one unit per pixel, the origin at the image's centre
+    // (32, 32) and world +y up the screen. A point covers the pixels whose
+    // CENTRES (i + 0.5) lie in [c - size/2, c + size/2).
+    //   size 5 at world (0.5, 0.5) -> screen (32.5, 31.5): x in [30, 35)
+    //     holds centres 30.5..34.5, five of them; y likewise: 25 pixels.
+    //   size 4 at world (0, 0) -> screen (32, 32): [30, 34) holds 30.5..33.5,
+    //     four: 16 pixels.
+    // It drew floor(c - h)..floor(c + h), a pixel too many each way: 36 and
+    // 25 (audit REN-10).
+    const auto drawn = [](const Vec3& at, float size) {
+        auto target = Framebuffer::create(64, 64);
+        EXPECT_TRUE(target.ok());
+        Camera camera = planCamera(64, 64);
+        TaskPool pool(0);
+        DrawList list;
+        list.addPoint(list.addVertex(at, kGreen), size);
+        Rasterizer rasterizer;
+        const auto stats = rasterizer.render(list, camera, *target, serialOptions(pool));
+        EXPECT_TRUE(stats.ok());
+        EXPECT_EQ(stats->pointsSubmitted, 1u);
+        return countPixels(*target, kGreen);
+    };
+    EXPECT_EQ(drawn(Vec3(0.5, 0.5, 0.0), 5.0f), 25u);
+    EXPECT_EQ(drawn(Vec3(0.0, 0.0, 0.0), 4.0f), 16u);
 }
 
 TEST(RenderRasterizer, BackfaceCullingDiscardsOnlyTheFarSide)

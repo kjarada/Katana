@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <string>
 
 #include "katana/core/task_pool.hpp"
@@ -53,10 +54,11 @@ constexpr std::size_t kMaxChunks = 64;
 // Clipping happens in clip space, before the divide, against five planes. A
 // vertex is inside where every planeDistance() below is >= 0.
 //
-// The NEAR plane is clip z >= 0. With the Vulkan depth range camera.cpp builds
-// (z/w = 0 at the near plane), that is exactly w >= near for a perspective
-// projection and z_eye <= -near for an orthographic one, and setDepthRange()
-// refuses near <= 0, so every kept vertex has w > 0 and the divide is safe.
+// The NEAR plane is clip z <= w. With the REVERSED depth range camera.cpp
+// builds (z/w = 1 at the near plane, 0 at the far), that is exactly w >= near
+// for a perspective projection and z_eye <= -near for an orthographic one, and
+// setDepthRange() refuses near <= 0, so every kept vertex has w > 0 and the
+// divide is safe.
 // This used to clip at w > 1e-6 instead, which kept the reciprocal finite and
 // nothing else: a vertex cut there projects with 1/w = 1e6 to a screen
 // coordinate beyond INT_MAX, and the float-to-int conversion in the binning is
@@ -84,8 +86,14 @@ constexpr std::size_t kMaxChunks = 64;
 // float at the end costs nothing.
 //
 // The far plane is not clipped: nothing numerical goes wrong beyond it, and the
-// per-pixel depth test already rejects depth > 1.
+// per-pixel depth test already rejects depth <= 0 (the cleared value).
 constexpr float kGuardBand = 2.0f;
+
+// How many pixels of its own depth slope a filled triangle is pushed back by
+// (the slope-scaled offset in buildScreenPrimitives). One covers a line a
+// pixel either side of its centre; each more would let linework behind a
+// wall show through one more pixel of the wall's silhouette.
+constexpr float kSlopeOffsetPixels = 1.0f;
 constexpr std::size_t kClipPlanes = 5;
 
 // Signed distance of a clip-space vertex from `plane`, >= 0 inside. Double for
@@ -96,7 +104,7 @@ constexpr std::size_t kClipPlanes = 5;
     const double band = kGuardBand * static_cast<double>(w);
     switch (plane) {
     case 0:
-        return static_cast<double>(z);
+        return static_cast<double>(w) - static_cast<double>(z); // reversed Z: near is z = w
     case 1:
         return band + static_cast<double>(x);
     case 2:
@@ -198,6 +206,7 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
     for (Chunk& chunk : chunks_) {
         chunk.triangles.clear();
         chunk.points.clear();
+        chunk.lineStart = 0;
         chunk.stats = RenderStats{};
     }
     if (chunkCount == 0) {
@@ -248,6 +257,16 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
     };
 
     const bool cull = options.backfaceCull;
+    const DepthPull pull = depthPull_;
+    // depth -> depth pulled `pixels` footprints towards the eye, clamped to
+    // the near plane so a biased line touching it still draws.
+    const auto pullTowardsEye = [pull](float depth, float pixels) {
+        if (pixels == 0.0f) {
+            return depth;
+        }
+        const float pulled = depth + pixels * (pull.scale * depth + pull.offset);
+        return std::min(pulled, 1.0f);
+    };
 
     // The bin step needs each chunk's own triangle/point index, so the chunk
     // boundaries are over the combined primitive stream: triangles first, then
@@ -282,6 +301,26 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                     continue;
                 }
                 ScreenTriangle screen;
+                // SLOPE-SCALED OFFSET (what a GPU calls polygon offset): a
+                // filled triangle is pushed AWAY by its own depth change over
+                // kSlopeOffsetPixels. Linework lying on a surface is drawn a
+                // pixel or two wide, so its pixels sample the surface up to
+                // a pixel off the line; seen at a grazing angle the surface
+                // there is nearer than the line by a whole pixel's worth of
+                // depth slope, and no constant bias can cover that without
+                // also showing lines through buildings. Pushing the surface
+                // by its OWN slope covers exactly that and nothing more.
+                // Screen-space constant per triangle, so the fill loop only
+                // adds it.
+                if (depthBias == 0.0f) {
+                    const float dzdx =
+                        ((p1.z - p0.z) * (p2.y - p0.y) - (p2.z - p0.z) * (p1.y - p0.y)) / area;
+                    const float dzdy =
+                        ((p1.x - p0.x) * (p2.z - p0.z) - (p2.x - p0.x) * (p1.z - p0.z)) / area;
+                    screen.depthBias = -kSlopeOffsetPixels * std::max(std::abs(dzdx), std::abs(dzdy));
+                } else {
+                    screen.depthBias = depthBias;
+                }
                 screen.x[0] = p0.x;
                 screen.y[0] = p0.y;
                 screen.z[0] = p0.z;
@@ -297,7 +336,6 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 screen.z[2] = p2.z;
                 screen.invW[2] = p2.invW;
                 screen.color[2] = p2.color;
-                screen.depthBias = depthBias;
                 chunk.triangles.push_back(screen);
                 ++chunk.stats.trianglesRasterised;
             }
@@ -334,7 +372,7 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                         // never zero and t is in [0, 1].
                         ClipVertex cutVertex = lerpClip(current, next, dc / (dc - dn));
                         if (plane == 0) {
-                            cutVertex.z = 0.0f; // on the near plane exactly: depth 0
+                            cutVertex.z = cutVertex.w; // on the near plane exactly: depth 1
                         }
                         scratch[kept++] = cutVertex;
                     }
@@ -366,6 +404,9 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 } else {
                     emitClippedTriangle(v, 0.0f);
                 }
+                // Triangles come first in the stream, so the line quads that
+                // follow start here (rasteriseTiles sweeps them apart).
+                chunk.lineStart = chunk.triangles.size();
                 continue;
             }
             const std::size_t lineIndex = index - list.triangles.size();
@@ -424,16 +465,23 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                     a = lerpClip(a0, b0, t0);
                     b = lerpClip(a0, b0, t1);
                     // As for a triangle: an end cut by the near plane is ON it,
-                    // depth exactly 0, not a rounding error either side.
+                    // depth exactly 1, not a rounding error either side.
                     if (nearCutsA) {
-                        a.z = 0.0f;
+                        a.z = a.w;
                     }
                     if (nearCutsB) {
-                        b.z = 0.0f;
+                        b.z = b.w;
                     }
                 }
-                const ProjectedVertex p0 = project(a);
-                const ProjectedVertex p1 = project(b);
+                ProjectedVertex p0 = project(a);
+                ProjectedVertex p1 = project(b);
+                // The line's depth bias is a VIEW-SPACE distance, depthBias
+                // pixel footprints towards the eye (draw_list.hpp). Under the
+                // reversed projections that is an affine map of the depth
+                // itself (pullTowardsEye), so it is applied to the two ends
+                // and interpolates exactly along the line.
+                p0.z = pullTowardsEye(p0.z, line.depthBias);
+                p1.z = pullTowardsEye(p1.z, line.depthBias);
                 float dx = p1.x - p0.x;
                 float dy = p1.y - p0.y;
                 const float length = std::sqrt(dx * dx + dy * dy);
@@ -491,7 +539,9 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                         screen.invW[k] = vs[k]->invW;
                         screen.color[k] = vs[k]->color;
                     }
-                    screen.depthBias = line.depthBias;
+                    // Already pulled per vertex; a line has no slope of its
+                    // own across its width to offset.
+                    screen.depthBias = 0.0f;
                     chunk.triangles.push_back(screen);
                     ++chunk.stats.trianglesRasterised;
                 };
@@ -518,7 +568,7 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
             ScreenPoint screen;
             screen.x = p.x;
             screen.y = p.y;
-            screen.z = p.z - point.depthBias;
+            screen.z = pullTowardsEye(p.z, point.depthBias);
             screen.half = std::max(point.size, 1.0f) * 0.5f;
             screen.color = p.color;
             chunk.points.push_back(screen);
@@ -587,7 +637,8 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
 
 // ---- stage 3: rasterise ---------------------------------------------------------
 
-void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
+void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& options,
+                                TaskPool& pool)
 {
     const std::size_t tiles = target.tileCount();
     tileStats_.assign(tiles, RenderStats{});
@@ -595,132 +646,309 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
     Rgba* const colorBase = target.color().data();
     float* const depthBase = target.depth().data();
     const int stride = target.width();
+    const bool depthWrite = options.depthWrite;
 
-    pool.parallelFor(0, tiles, [&](std::size_t tileIndex) {
-        const TileRect rect = target.tile(tileIndex);
-        if (rect.empty()) {
-            return;
-        }
-        RenderStats& stats = tileStats_[tileIndex];
+    bool anyPoints = false;
+    bool anyFilled = false;
+    for (const Chunk& chunk : chunks_) {
+        anyPoints = anyPoints || !chunk.points.empty();
+        anyFilled = anyFilled || chunk.lineStart > 0;
+    }
 
-        // Chunks in index order, primitives in index order within a chunk: the
-        // visit order is a pure function of the draw list, so ties at equal
-        // depth always resolve the same way (Rule 7).
-        for (const Chunk& chunk : chunks_) {
-            for (const std::uint32_t tag : chunk.tileBins[tileIndex]) {
-                if ((tag & kPointTag) != 0u) {
-                    const ScreenPoint& p = chunk.points[tag & ~kPointTag];
-                    const int x0 = pixelFloor(p.x - p.half, rect.x0, rect.x1);
-                    const int x1 = pixelFloor(p.x + p.half, rect.x0 - 1, rect.x1 - 1);
-                    const int y0 = pixelFloor(p.y - p.half, rect.y0, rect.y1);
-                    const int y1 = pixelFloor(p.y + p.half, rect.y0 - 1, rect.y1 - 1);
-                    for (int y = y0; y <= y1; ++y) {
-                        Rgba* row = colorBase + static_cast<std::size_t>(y) *
-                                                    static_cast<std::size_t>(stride);
-                        float* depthRow = depthBase + static_cast<std::size_t>(y) *
-                                                          static_cast<std::size_t>(stride);
-                        for (int x = x0; x <= x1; ++x) {
-                            if (p.z < depthRow[x] && p.z >= 0.0f && p.z <= 1.0f) {
-                                depthRow[x] = p.z;
+    // What one sweep over the tiles draws. A list without points is drawn in
+    // one. With points, its filled triangles are drawn first, then every point
+    // is decided (decidePoints, which says why there), then the lines and the
+    // points. Primitives keep their stream order either way: filled triangles
+    // come before line quads, and line quads before points, in every tile.
+    enum class Sweep { Everything, Filled, LinesThenPoints };
+    constexpr int kTile = Framebuffer::kTileSize;
+    // The pixels whose CENTRES lie in [c - h, c + h): exactly size x size for
+    // a whole size wherever the point falls. Pixel i's centre is i + 0.5, so
+    // i runs from ceil(c - h - 0.5) to ceil(c + h - 0.5) - 1; ceil(v) is
+    // -floor(-v), which keeps the conversion clamped. It drew floor(c - h)..
+    // floor(c + h), one pixel too many on each axis (audit REN-10).
+    const auto ceilIn = [](float v, int lo, int hi) { return -pixelFloor(-v, -hi, -lo); };
+
+    const auto sweep = [&](Sweep what) {
+        pool.parallelFor(0, tiles, [&](std::size_t tileIndex) {
+            const TileRect rect = target.tile(tileIndex);
+            if (rect.empty()) {
+                return;
+            }
+            RenderStats& stats = tileStats_[tileIndex];
+            // Which pixels of this tile a point of this pass has drawn: there
+            // the nearer point wins; anywhere else its centre has decided.
+            std::array<std::uint8_t, static_cast<std::size_t>(kTile) * kTile> drawn;
+            bool drawnCleared = false;
+
+            // Chunks in index order, primitives in index order within a chunk:
+            // the visit order is a pure function of the draw list, so ties at
+            // equal depth always resolve the same way (Rule 7).
+            for (const Chunk& chunk : chunks_) {
+                const std::size_t first = what == Sweep::LinesThenPoints ? chunk.lineStart : 0;
+                const std::size_t last =
+                    what == Sweep::Filled ? chunk.lineStart : chunk.triangles.size();
+                const bool points = what == Sweep::LinesThenPoints && !chunk.points.empty();
+                if (first >= last && !points) {
+                    continue; // nothing of this chunk in this sweep
+                }
+                for (const std::uint32_t tag : chunk.tileBins[tileIndex]) {
+                    if ((tag & kPointTag) != 0u) {
+                        if (!points) {
+                            continue;
+                        }
+                        const ScreenPoint& p = chunk.points[tag & ~kPointTag];
+                        if (!p.visible) {
+                            continue;
+                        }
+                        if (!drawnCleared) {
+                            drawn.fill(0u);
+                            drawnCleared = true;
+                        }
+                        const int x0 = ceilIn(p.x - p.half - 0.5f, rect.x0, rect.x1);
+                        const int x1 = ceilIn(p.x + p.half - 0.5f, rect.x0, rect.x1) - 1;
+                        const int y0 = ceilIn(p.y - p.half - 0.5f, rect.y0, rect.y1);
+                        const int y1 = ceilIn(p.y + p.half - 0.5f, rect.y0, rect.y1) - 1;
+                        for (int y = y0; y <= y1; ++y) {
+                            Rgba* row = colorBase + static_cast<std::size_t>(y) *
+                                                        static_cast<std::size_t>(stride);
+                            float* depthRow = depthBase + static_cast<std::size_t>(y) *
+                                                              static_cast<std::size_t>(stride);
+                            std::uint8_t* drawnRow =
+                                drawn.data() + static_cast<std::size_t>(y - rect.y0) * kTile;
+                            for (int x = x0; x <= x1; ++x) {
+                                std::uint8_t& mine = drawnRow[x - rect.x0];
+                                // Without depth writes the pass is painted in
+                                // order, as its triangles are.
+                                if (depthWrite && mine != 0u && !(p.z > depthRow[x])) {
+                                    continue;
+                                }
+                                mine = 1u;
+                                if (depthWrite) {
+                                    depthRow[x] = p.z;
+                                }
                                 row[x] = p.color;
                                 ++stats.fragments;
                             }
                         }
+                        continue;
                     }
-                    continue;
-                }
+                    if (tag < first || tag >= last) {
+                        continue;
+                    }
 
-                const ScreenTriangle& t = chunk.triangles[tag];
-                const int minX =
-                    pixelFloor(std::min({t.x[0], t.x[1], t.x[2]}), rect.x0, rect.x1);
-                const int maxX =
-                    pixelFloor(std::max({t.x[0], t.x[1], t.x[2]}), rect.x0 - 1, rect.x1 - 1);
-                const int minY =
-                    pixelFloor(std::min({t.y[0], t.y[1], t.y[2]}), rect.y0, rect.y1);
-                const int maxY =
-                    pixelFloor(std::max({t.y[0], t.y[1], t.y[2]}), rect.y0 - 1, rect.y1 - 1);
-                if (minX > maxX || minY > maxY) {
-                    continue;
-                }
+                    const ScreenTriangle& t = chunk.triangles[tag];
+                    const int minX =
+                        pixelFloor(std::min({t.x[0], t.x[1], t.x[2]}), rect.x0, rect.x1);
+                    const int maxX =
+                        pixelFloor(std::max({t.x[0], t.x[1], t.x[2]}), rect.x0 - 1, rect.x1 - 1);
+                    const int minY =
+                        pixelFloor(std::min({t.y[0], t.y[1], t.y[2]}), rect.y0, rect.y1);
+                    const int maxY =
+                        pixelFloor(std::max({t.y[0], t.y[1], t.y[2]}), rect.y0 - 1, rect.y1 - 1);
+                    if (minX > maxX || minY > maxY) {
+                        continue;
+                    }
 
-                const float area = (t.x[1] - t.x[0]) * (t.y[2] - t.y[0]) -
-                                   (t.x[2] - t.x[0]) * (t.y[1] - t.y[0]);
-                if (!(std::abs(area) > 0.0f)) {
-                    continue;
-                }
-                const float invArea = 1.0f / area;
+                    const float area = (t.x[1] - t.x[0]) * (t.y[2] - t.y[0]) -
+                                       (t.x[2] - t.x[0]) * (t.y[1] - t.y[0]);
+                    if (!(std::abs(area) > 0.0f)) {
+                        continue;
+                    }
+                    const float invArea = 1.0f / area;
 
-                for (int y = minY; y <= maxY; ++y) {
-                    const float py = static_cast<float>(y) + 0.5f;
-                    Rgba* row =
-                        colorBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
-                    float* depthRow =
-                        depthBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
-                    for (int x = minX; x <= maxX; ++x) {
-                        const float px = static_cast<float>(x) + 0.5f;
+                    for (int y = minY; y <= maxY; ++y) {
+                        const float py = static_cast<float>(y) + 0.5f;
+                        Rgba* row =
+                            colorBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+                        float* depthRow =
+                            depthBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+                        for (int x = minX; x <= maxX; ++x) {
+                            const float px = static_cast<float>(x) + 0.5f;
 
-                        // No top-left rule: a pixel exactly on a shared edge
-                        // is covered by both triangles rather than by exactly
-                        // one. With an opaque, strictly-less depth test that
-                        // costs a redundant write and changes no pixel, so the
-                        // extra branches are not paid for. It would have to be
-                        // added before any blended pass.
-                        //
-                        // Barycentrics from edge functions. Normalising by the
-                        // signed area makes the sign test independent of
-                        // winding, so a triangle is filled whichever way round
-                        // it is - the caller opted in or out of culling long
-                        // before this point.
-                        const float w0 = ((t.x[1] - px) * (t.y[2] - py) -
-                                          (t.x[2] - px) * (t.y[1] - py)) *
-                                         invArea;
-                        const float w1 = ((t.x[2] - px) * (t.y[0] - py) -
-                                          (t.x[0] - px) * (t.y[2] - py)) *
-                                         invArea;
-                        const float w2 = 1.0f - w0 - w1;
-                        if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
-                            continue;
+                            // No top-left rule: a pixel exactly on a shared edge
+                            // is covered by both triangles rather than by exactly
+                            // one. With an opaque, strictly-less depth test that
+                            // costs a redundant write and changes no pixel, so the
+                            // extra branches are not paid for. It would have to be
+                            // added before any blended pass.
+                            //
+                            // Barycentrics from edge functions. Normalising by the
+                            // signed area makes the sign test independent of
+                            // winding, so a triangle is filled whichever way round
+                            // it is - the caller opted in or out of culling long
+                            // before this point.
+                            const float w0 = ((t.x[1] - px) * (t.y[2] - py) -
+                                              (t.x[2] - px) * (t.y[1] - py)) *
+                                             invArea;
+                            const float w1 = ((t.x[2] - px) * (t.y[0] - py) -
+                                              (t.x[0] - px) * (t.y[2] - py)) *
+                                             invArea;
+                            const float w2 = 1.0f - w0 - w1;
+                            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+                                continue;
+                            }
+
+                            // Reversed Z: larger is nearer, the buffer is cleared
+                            // to 0 (the far plane) and the test is strictly
+                            // greater, so the first of two equal depths still
+                            // wins (Rule 7). Clamped at the near plane, which a
+                            // pull towards the eye can overshoot; NaN fails.
+                            const float depth = std::min(
+                                w0 * t.z[0] + w1 * t.z[1] + w2 * t.z[2] + t.depthBias, 1.0f);
+                            if (!(depth > depthRow[x])) {
+                                continue;
+                            }
+
+                            // Perspective-correct colour: interpolate c/w and 1/w
+                            // and divide. Under an orthographic projection every
+                            // invW is equal and this reduces to the linear case.
+                            const float invW = w0 * t.invW[0] + w1 * t.invW[1] + w2 * t.invW[2];
+                            Rgba color;
+                            if (invW > 0.0f) {
+                                const float s = 1.0f / invW;
+                                const auto channel = [&](int shift) {
+                                    const float c =
+                                        (w0 * static_cast<float>((t.color[0] >> shift) & 0xFFu) *
+                                             t.invW[0] +
+                                         w1 * static_cast<float>((t.color[1] >> shift) & 0xFFu) *
+                                             t.invW[1] +
+                                         w2 * static_cast<float>((t.color[2] >> shift) & 0xFFu) *
+                                             t.invW[2]) *
+                                        s;
+                                    return static_cast<Rgba>(
+                                        static_cast<std::uint8_t>(std::clamp(c, 0.0f, 255.0f) + 0.5f));
+                                };
+                                color = (channel(24) << 24) | (channel(16) << 16) |
+                                        (channel(8) << 8) | channel(0);
+                            } else {
+                                color = t.color[0];
+                            }
+
+                            if (depthWrite) {
+                                depthRow[x] = depth;
+                            }
+                            row[x] = color;
+                            ++stats.fragments;
                         }
-
-                        const float depth =
-                            w0 * t.z[0] + w1 * t.z[1] + w2 * t.z[2] - t.depthBias;
-                        if (!(depth >= 0.0f) || depth > 1.0f || !(depth < depthRow[x])) {
-                            continue;
-                        }
-
-                        // Perspective-correct colour: interpolate c/w and 1/w
-                        // and divide. Under an orthographic projection every
-                        // invW is equal and this reduces to the linear case.
-                        const float invW = w0 * t.invW[0] + w1 * t.invW[1] + w2 * t.invW[2];
-                        Rgba color;
-                        if (invW > 0.0f) {
-                            const float s = 1.0f / invW;
-                            const auto channel = [&](int shift) {
-                                const float c =
-                                    (w0 * static_cast<float>((t.color[0] >> shift) & 0xFFu) *
-                                         t.invW[0] +
-                                     w1 * static_cast<float>((t.color[1] >> shift) & 0xFFu) *
-                                         t.invW[1] +
-                                     w2 * static_cast<float>((t.color[2] >> shift) & 0xFFu) *
-                                         t.invW[2]) *
-                                    s;
-                                return static_cast<Rgba>(
-                                    static_cast<std::uint8_t>(std::clamp(c, 0.0f, 255.0f) + 0.5f));
-                            };
-                            color = (channel(24) << 24) | (channel(16) << 16) |
-                                    (channel(8) << 8) | channel(0);
-                        } else {
-                            color = t.color[0];
-                        }
-
-                        depthRow[x] = depth;
-                        row[x] = color;
-                        ++stats.fragments;
                     }
                 }
             }
+        });
+    };
+
+    if (!anyPoints) {
+        sweep(Sweep::Everything);
+        return;
+    }
+    if (anyFilled) {
+        sweep(Sweep::Filled);
+    }
+    decidePoints(target, pool);
+    sweep(Sweep::LinesThenPoints);
+}
+
+// ---- points -----------------------------------------------------------------------
+
+// A point is a size x size square at ONE depth, its centre's. Tested pixel by
+// pixel, a point lying on a surface lost its lower rows to it: seen at
+// elevation e, the surface under a row k pixels below the centre is nearer
+// than the centre by about k / tan(e) pixel footprints, which neither the
+// surface's one-pixel slope push nor the point's 1.5-footprint pull covers
+// once k > 1 - 6% of the pixels of draped survey points at the iso view, 20%
+// at 0.25 rad. Pulling points further would show them through the walls in
+// front of them instead. So a point is decided ONCE, at the pixel of its
+// square nearest its centre, and then drawn whole (rasteriseTiles).
+//
+// Decided against the earlier passes and this pass's FILLED triangles, and
+// not its lines: solids hide a point, the linework it is drawn with does not.
+// A survey point usually sits on the strings through it, in the same pass
+// with the same pull, and decided after them it tied with a string crossing
+// its centre pixel and vanished whole - the survey points along the kerbs of
+// a real archive did. The depth buffer read here is final for what it holds,
+// the fill that follows goes tile by tile in index order, and the frame is
+// the same on any number of threads (Rule 7).
+void Rasterizer::decidePoints(const Framebuffer& target, TaskPool& pool)
+{
+    std::size_t pointCount = 0;
+    for (const Chunk& chunk : chunks_) {
+        pointCount += chunk.points.size();
+    }
+    const int width = target.width();
+    const int height = target.height();
+    const float* const depthBase = target.depth().data();
+    const auto ceilIn = [](float v, int lo, int hi) { return -pixelFloor(-v, -hi, -lo); };
+    const auto decide = [&](std::size_t chunkIndex) {
+        for (ScreenPoint& p : chunks_[chunkIndex].points) {
+            const int x0 = ceilIn(p.x - p.half - 0.5f, 0, width);
+            const int x1 = ceilIn(p.x + p.half - 0.5f, 0, width) - 1;
+            const int y0 = ceilIn(p.y - p.half - 0.5f, 0, height);
+            const int y1 = ceilIn(p.y + p.half - 0.5f, 0, height) - 1;
+            if (x0 > x1 || y0 > y1) {
+                p.visible = false; // no pixel of it on the image
+                continue;
+            }
+            // floor(c) is always one of the square's pixels (its centre is
+            // within half a pixel of c, and h >= 0.5); clamped into the part
+            // on the image when the centre is off it.
+            const int cx = pixelFloor(p.x, x0, x1);
+            const int cy = pixelFloor(p.y, y0, y1);
+            const float under = depthBase[static_cast<std::size_t>(cy) *
+                                              static_cast<std::size_t>(width) +
+                                          static_cast<std::size_t>(cx)];
+            // Reversed Z: strictly nearer, and not past the near plane; NaN
+            // fails both.
+            p.visible = p.z > under && p.z <= 1.0f;
         }
-    });
+    };
+    // A dispatch wakes every worker and waits for each to report back, which
+    // costs more than a few thousand of these reads: an extra two dispatches
+    // made a 1600 x 1000 frame of a survey with 400 points (BM_SceneFrame)
+    // 5-9% slower on the median. Up to kPointsInline points they are decided
+    // on this thread; each decision reads only the depth buffer, so the result
+    // is the same either way.
+    constexpr std::size_t kPointsInline = 4096;
+    if (pointCount <= kPointsInline) {
+        for (std::size_t i = 0; i < chunks_.size(); ++i) {
+            decide(i);
+        }
+    } else {
+        pool.parallelFor(0, chunks_.size(), decide);
+    }
+}
+
+// ---- depth bias ---------------------------------------------------------------------
+
+// A line's bias is `pixels` footprints of view distance towards the eye, where
+// a footprint is the world size of one pixel at the line's own depth
+// (Camera::worldPerPixelAt). As a change of reversed depth d:
+//
+//   perspective   d = n (f - z) / ((f - n) z) for eye distance z, so
+//                 dd/dz = -n f / ((f - n) z^2); a footprint is z * 2 tan(fov/2)
+//                 / H, and the pull is pixels * (2 tan(fov/2) / H) * (d + n / (f - n))
+//   orthographic  d = (f - z) / (f - n); a footprint is orthoHeight / H, so the
+//                 pull is pixels * (orthoHeight / H) / (f - n), a constant
+//
+// both of the form pixels * (scale * d + offset). It used to be a constant in
+// NDC depth, which after a depth-range fit was anything from 1 to 25 times the
+// depth span of a whole scene: a biased line drawn on the ground behind a
+// 25 m building showed through all of it.
+Rasterizer::DepthPull Rasterizer::depthPullFor(const Camera& camera)
+{
+    DepthPull pull;
+    const double height = static_cast<double>(camera.viewportHeight());
+    const double range = camera.farPlane() - camera.nearPlane();
+    if (!(height > 0.0) || !(range > 0.0)) {
+        return pull;
+    }
+    if (camera.projection() == Projection::Orthographic) {
+        pull.offset = static_cast<float>(camera.orthographicHeight() / height / range);
+        return pull;
+    }
+    const double angle = 2.0 * std::tan(camera.fieldOfView() * 0.5) / height;
+    pull.scale = static_cast<float>(angle);
+    pull.offset = static_cast<float>(angle * camera.nearPlane() / range);
+    return pull;
 }
 
 // ---- entry point ----------------------------------------------------------------
@@ -755,14 +983,15 @@ Result<RenderStats> Rasterizer::render(const DrawList& list, const Camera& camer
                     static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
                 std::fill(colorBase + row + rect.x0, colorBase + row + rect.x1,
                           options.background);
-                std::fill(depthBase + row + rect.x0, depthBase + row + rect.x1, 1.0f);
+                std::fill(depthBase + row + rect.x0, depthBase + row + rect.x1, 0.0f);
             }
         });
     }
 
+    depthPull_ = depthPullFor(camera);
     transformVertices(list, camera, pool);
     buildScreenPrimitives(list, target, options, pool);
-    rasteriseTiles(target, pool);
+    rasteriseTiles(target, options, pool);
 
     RenderStats total;
     total.vertices = list.positions.size();

@@ -9,7 +9,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
+#include <string>
+
+#include <QApplication>
+#include <QWheelEvent>
 
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -178,4 +184,143 @@ TEST(RenderView, ADrawingWhoseLayersAreAllHiddenIsNotCalledEmpty)
     paint(*view);
     ASSERT_TRUE(view->sceneEmpty());
     EXPECT_FALSE(view->emptyMessageShown());
+}
+
+// ---- responsiveness and the look (docs/render.md) -----------------------------------
+
+namespace {
+
+// Pixels of the last paint that are not the view's background.
+std::size_t drawnPixels(const RenderViewWidget& view)
+{
+    const auto& fb = view.framebuffer();
+    const katana::render::Rgba background = fb.colorAt(0, 0);
+    return static_cast<std::size_t>(std::count_if(
+        fb.color().begin(), fb.color().end(), [background](auto c) { return c != background; }));
+}
+
+} // namespace
+
+TEST(RenderView, ASelectionClickRebuildsTheOverlayAndNothingUnderIt)
+{
+    // Every document notification rebuilt the whole scene: 60-115 ms on a
+    // 229k-triangle surface to recolour one line. A selection leaves the
+    // model's revision where it was, so only the overlay is rebuilt.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    const auto view = scene.show(state);
+    ASSERT_EQ(view->terrainBuilds(), 1);
+    ASSERT_EQ(view->entityBuilds(), 1);
+    ASSERT_EQ(view->selectionBuilds(), 1);
+
+    scene.document.selection().add(scene.document.model().entities.ids().back());
+    scene.document.notifySelectionChanged();
+    paint(*view);
+    EXPECT_EQ(view->terrainBuilds(), 1);
+    EXPECT_EQ(view->entityBuilds(), 1);
+    EXPECT_EQ(view->selectionBuilds(), 2);
+    EXPECT_EQ(view->sceneLayers().selection.lines.size(), 1u);
+
+    // An edit is a model change: the drawing is rebuilt, the terrain is not.
+    ASSERT_TRUE(scene.document
+                    .execute(katana::commands::createLine(Point2(0.0, 50.0), Point2(100.0, 0.0)))
+                    .ok());
+    paint(*view);
+    EXPECT_EQ(view->terrainBuilds(), 1);
+    EXPECT_EQ(view->entityBuilds(), 2);
+}
+
+TEST(RenderView, EightWheelNotchesOutStillShowTheModel)
+{
+    // The depth range was fixed at the frame, so zooming out pushed the
+    // model past the far plane and the view went blank. Without the grid,
+    // what is drawn is the line alone.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    ViewContext context = scene.context();
+    context.options.drawGrid = false;
+    RenderViewWidget view(context, state);
+    view.resize(400, 300);
+    paint(view);
+    ASSERT_GT(drawnPixels(view), 0u);
+    const QPointF centre(200.0, 150.0);
+    for (int notch = 0; notch < 8; ++notch) {
+        QWheelEvent wheel(centre, centre, QPoint(), QPoint(0, -120), Qt::NoButton,
+                          Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(&view, &wheel);
+    }
+    paint(view);
+    EXPECT_GT(drawnPixels(view), 0u);
+}
+
+TEST(RenderView, AViewFramedBeforeItHasItsSizeFramesAgainAtItsFirstRealSize)
+{
+    // The window zooms a new view to extents before the dock has laid it
+    // out; the frame fitted that size, and a tall thin view then cut the
+    // sides off. Until the user moves the camera a resize frames again, so
+    // every corner of the drawing's box is inside the 345 x 545 view.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    view.resize(900, 120);
+    paint(view);
+    view.zoomExtents();
+    view.resize(345, 545);
+    paint(view);
+    const auto& box = view.sceneLayers().bounds;
+    ASSERT_FALSE(box.empty());
+    // The camera counts in device pixels: 345 x 545 at ratio 1.
+    const double width = view.framebuffer().width();
+    const double height = view.framebuffer().height();
+    ASSERT_EQ(state.camera.viewportWidth(), view.framebuffer().width());
+    for (int corner = 0; corner < 8; ++corner) {
+        const katana::math::Vec3 p((corner & 1) ? box.max.x : box.min.x,
+                                   (corner & 2) ? box.max.y : box.min.y,
+                                   (corner & 4) ? box.max.z : box.min.z);
+        const auto screen = state.camera.project(p);
+        ASSERT_TRUE(screen.has_value());
+        EXPECT_GE(screen->x, 0.0);
+        EXPECT_LE(screen->x, width);
+        EXPECT_GE(screen->y, 0.0);
+        EXPECT_LE(screen->y, height);
+    }
+}
+
+TEST(RenderView, TheFrameLabelCountsTheSceneBuildWhenAPaintDidOne)
+{
+    // The label showed the rasteriser alone, which hid the build a click
+    // cost. It is the whole paint, and says so when a build was part of it.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    RenderViewWidget view(scene.context(), state);
+    QString label;
+    view.onFrameStats = [&label](const QString& text) { label = text; };
+    view.resize(400, 300);
+    paint(view);
+    EXPECT_TRUE(label.contains("scene")) << label.toStdString();
+    EXPECT_GE(view.lastFrameMilliseconds(), view.lastBuildMilliseconds());
+    paint(view);
+    EXPECT_FALSE(label.contains("scene")) << "nothing was rebuilt: " << label.toStdString();
+}
+
+TEST(RenderView, TheFramebufferIsTheViewsSizeInDevicePixels)
+{
+    // At the display's own resolution: a 125% display drew at 80% and
+    // scaled the image up, beading every 1 px line into 1-2 px steps.
+    OneLine scene;
+    ViewState& state = scene.views.add(ViewKind::Model3D);
+    const auto view = scene.show(state);
+    const double ratio = view->devicePixelRatioF();
+    // 1 in the offscreen suite. ctest runs it again at QT_SCALE_FACTOR=1.25
+    // (qt_render_view_at_125_percent), where 400 x 300 must be 500 x 375 -
+    // and where a ratio Qt did not apply would make the test prove nothing.
+    if (const QString factor = qEnvironmentVariable("QT_SCALE_FACTOR"); !factor.isEmpty()) {
+        EXPECT_DOUBLE_EQ(ratio, factor.toDouble());
+    }
+    RecordProperty("devicePixelRatio", std::to_string(ratio));
+    RecordProperty("framebuffer", std::to_string(view->framebuffer().width()) + "x" +
+                                      std::to_string(view->framebuffer().height()));
+    EXPECT_EQ(view->framebuffer().width(), static_cast<int>(std::lround(400 * ratio)));
+    EXPECT_EQ(view->framebuffer().height(), static_cast<int>(std::lround(300 * ratio)));
+    EXPECT_EQ(state.camera.viewportWidth(), view->framebuffer().width());
 }
