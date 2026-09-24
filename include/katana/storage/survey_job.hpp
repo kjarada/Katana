@@ -78,6 +78,13 @@ struct SurveyJob {
     // listed - the job still made it - so that re-adjusting can keep the
     // deletion rather than silently draw the point again.
     std::vector<SurveyJobPoint> placedPoints{};
+    // How the import drew the job's points - a layer per field code or not,
+    // the property names, provenance - as versioned text written and read by
+    // cad (cad::SurveyImportOptions without the layer, which is `layer`
+    // above). Kept so that a point a re-adjustment draws later goes where
+    // and as the job's other points went. Storage keeps it as it is and never
+    // reads it; empty means the defaults.
+    std::string importOptions{};
 
     friend bool operator==(const SurveyJob&, const SurveyJob&) = default;
 };

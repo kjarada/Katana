@@ -241,9 +241,11 @@ constexpr Migration kMigrations[] = {
     // (a DBX job is binary, a GSI file may be in any code page) and a TEXT
     // column would invite SQLite or a reader to re-encode it. The settings
     // are their versioned text form (serialiseReductionSettings), so a later
-    // setting needs no migration. The entity ids and the placed points are
-    // packed binary (see encodeEntityIds / encodePlacedPoints): a job of a
-    // hundred thousand points is one row, not a hundred thousand. Ordinary
+    // setting needs no migration, and so are the import's drawing options
+    // (cad writes and reads that text; storage only keeps it). The entity ids
+    // and the placed points are packed binary (see encodeEntityIds /
+    // encodePlacedPoints): a job of a hundred thousand points is one row, not
+    // a hundred thousand. Ordinary
     // rowid tables, because a WITHOUT ROWID table stores a whole row in its
     // b-tree and suits small rows, not a 50 MB file.
     {10, R"sql(
@@ -262,7 +264,8 @@ constexpr Migration kMigrations[] = {
             report_text        TEXT NOT NULL,
             report_html        TEXT NOT NULL,
             report_created_utc TEXT NOT NULL,
-            imported_utc       TEXT NOT NULL
+            imported_utc       TEXT NOT NULL,
+            import_options     TEXT NOT NULL
         );
 
         CREATE TABLE survey_job_files (
@@ -1246,8 +1249,8 @@ Status writeSurveyJobs(SqliteDatabase& database, const std::vector<SurveyJob>& j
     auto insertJob = database.prepare(
         "INSERT INTO survey_jobs (position, id, name, format_id, parser_version,"
         " source_file_name, source_bytes, settings, layer, created_entities, placed_points,"
-        " report_text, report_html, report_created_utc, imported_utc)"
-        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)");
+        " report_text, report_html, report_created_utc, imported_utc, import_options)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)");
     if (!insertJob) {
         return insertJob.error();
     }
@@ -1270,7 +1273,7 @@ Status writeSurveyJobs(SqliteDatabase& database, const std::vector<SurveyJob>& j
                     10, asBytes(created))(11, asBytes(placed))(
                     12, std::string_view(job.reportText))(13, std::string_view(job.reportHtml))(
                     14, std::string_view(job.reportCreatedUtc))(
-                    15, std::string_view(job.importedUtc))
+                    15, std::string_view(job.importedUtc))(16, std::string_view(job.importOptions))
                     .run();
             !status) {
             return makeError(status.error().code,
@@ -1308,7 +1311,7 @@ Result<std::vector<SurveyJob>> readSurveyJobs(SqliteDatabase& database)
     auto select = database.prepare(
         "SELECT id, name, format_id, parser_version, source_file_name, source_bytes, settings,"
         " layer, created_entities, placed_points, report_text, report_html,"
-        " report_created_utc, imported_utc FROM survey_jobs ORDER BY position");
+        " report_created_utc, imported_utc, import_options FROM survey_jobs ORDER BY position");
     if (!select) {
         return select.error();
     }
@@ -1356,6 +1359,7 @@ Result<std::vector<SurveyJob>> readSurveyJobs(SqliteDatabase& database)
         job.reportHtml = select->columnText(11);
         job.reportCreatedUtc = select->columnText(12);
         job.importedUtc = select->columnText(13);
+        job.importOptions = select->columnText(14);
         jobs.push_back(std::move(job));
     }
 
