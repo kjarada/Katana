@@ -14,10 +14,10 @@ code comments say the same things next to the lines they govern.
 * The **3D and Elevation views** are docks of the view workspace
   (`katana_qt/view_workspace.cpp`), each a `RenderViewWidget`. The widget owns a
   camera (in the view's `cad::ViewState`) and a framebuffer and nothing else:
-  `SceneBuilder` builds the scene in layers, the software `Rasterizer` draws
-  them into one depth buffer, and the framebuffer's bytes are blitted as a
-  `QImage` without a copy. (The tiled viewport this page used to describe is
-  gone; the views dock, float and tab.)
+  `SceneBuilder` builds the scene in layers, `cad::renderLayers` draws them
+  with the software `Rasterizer` into one depth buffer, and the framebuffer's
+  bytes are blitted as a `QImage` without a copy. (The tiled viewport this page
+  used to describe is gone; the views dock, float and tab.)
 * A GPU renderer is being built against `DrawList` and `Camera`; it replaces
   the rasteriser and nothing above it. The software rasteriser stays: every
   pixel it writes can be asserted in a unit test on a machine with no GPU, and
@@ -40,6 +40,9 @@ this work, and each fixed below:
 | One elevation, two colours | a colour ramp per surface | one ramp over all visible surfaces, with a legend |
 | Flat, plastic terrain; opposite walls alike | ambient 0.35 + 0.65 abs(n . l) | hillshade: NW sun, hemispheric ambient, no abs() ([Lighting](#lighting)) |
 | A stray 800 m square; 70-95 ms a frame on it | fixed grid of 162 full-length lines | sized to the scene, on the datum, one line per cell ([Grid](#grid)) |
+| The grid drawn across a flat pad or a pond floor (found in review) | the grid on the datum, drawn with depth, exactly in the plane of a surface flat at its lowest, which the slope-scaled offset pushes behind it | the grid is a backdrop that writes no depth ([Layers](#the-scene-in-layers)) |
+| Draped linework dashed where TIN edges cross it (found in review) | edge and line each at one depth across their width; at a low angle a pixel of slope beats the half footprint between their biases | the edges write no depth ([Layers](#the-scene-in-layers)) |
+| Survey points on a slope drawn 5x3 or notched (found in review) | a point's square tested pixel by pixel at its centre's depth | decided once, at its centre, and drawn whole ([Points](#lines-points-fill)) |
 | Beaded 1-2 px lines on a 125% display | framebuffer in logical pixels, scaled up | device pixels ([HiDPI](#hidpi)) |
 | A corridor as a sliver; sides cut off in a tall view | framed by the bounding sphere, before the view had a size | projected corners, re-framed at the first real size ([Framing](#framing)) |
 | A click in plan cost 104-178 ms in an open 3D view | every notification rebuilt the whole scene | the scene in layers; a selection rebuilds only its overlay ([Layers](#the-scene-in-layers)) |
@@ -149,14 +152,16 @@ size cut the sides off a tall view.
    in parallel over a fixed number of chunks.
 3. **Rasterise** one task per tile. A tile owns its pixels, so there is no lock,
    no atomic and no false sharing, and its colour and depth stay in cache.
+   Points come after every triangle and line of the pass, whole or not at all
+   ([below](#lines-points-fill)).
 
 **Determinism (Rule 7).** Chunks are contiguous ranges of the primitive stream
 and a tile visits them in index order, so a tile sees its primitives in
 DrawList order whatever the chunk count. With a strict depth test the frame is
 reproducible bit for bit; `ThreadCountDoesNotChangeASinglePixel` renders the
 same scene with 0, 1, 3 and 7 workers and compares the buffers byte for byte.
-The widget draws its layers one after another into the same buffer in a fixed
-order, so the same holds for a whole view.
+`cad::renderLayers` draws the layers one after another into the same buffer
+in a fixed order, so the same holds for a whole view.
 
 ### Clipping (rewritten 2026-09-23, audit REN-01)
 
@@ -191,6 +196,34 @@ through, and one whose codes AND to non-zero is dropped.
 * **Points** cover the pixels whose centres lie in [c - size/2, c + size/2):
   exactly size x size wherever the point falls. It drew floor(c - h) to
   floor(c + h), one pixel too many on each axis (audit REN-10).
+* **A point is decided once, at its centre, and drawn whole**
+  (`Rasterizer::rasterisePoints`). Its square has one depth, the centre's;
+  tested pixel by pixel against the surface it is draped on it lost its lower
+  rows, because at elevation e the surface under a row k pixels below the
+  centre is about k / tan(e) footprints nearer, past the surface's one-pixel
+  push and the point's 1.5-footprint pull once k > 1: 6.4% of the pixels of
+  draped survey points at the iso view, 20% at 0.25 rad and 25% at 0.12
+  (`RenderDepth.SurveyPointsLyingOnASlopedSurfaceAreDrawnWhole`). A bigger
+  pull would show points through the walls in front of them instead. Points
+  come last in every tile, so once the pass's triangles and lines are drawn
+  the depth buffer they are tested against is final: each point reads it at
+  the pixel of its square nearest its centre (in parallel, read-only), and the
+  visible ones are then filled tile by tile in index order - the same on any
+  number of threads. Between two points of one pass the nearer still wins pixel
+  by pixel (a per-tile mask of the pixels a point has drawn), and a point
+  behind a building stays hidden
+  (`RenderDepth.APointOnTheGroundBehindABuildingIsHidden`). The price: a
+  visible point draws over up to half its size of a nearer silhouette beside
+  its centre. Up to 4 096 points both steps run on the calling thread: a pool
+  dispatch wakes every worker and waits for each, and two of them made
+  `BM_SceneFrame` 5-9% slower on the median for its 400 points; inline it
+  measures as before. The pixels are the same either way
+  (`RenderDepth.PointsDrawTheSamePixelsOnTheCallingThreadAndAcrossThreads`).
+* **A pass may write no depth** (`RenderOptions::depthWrite`): it draws where
+  the test passes and leaves the depth buffer as it found it, so later passes
+  are tested as if it were not there, and within it what is drawn later covers
+  what was drawn earlier
+  (`RenderDepth.APassThatWritesNoDepthIsCoveredByWhateverIsDrawnAfterIt`).
 * **No top-left fill rule** and no blending: a pixel exactly on a shared edge
   is written twice to the same result. It must be added before any blended
   pass. No anti-aliasing yet.
@@ -222,7 +255,36 @@ selection or current-layer change, so the widget rebuilds the overlay alone
 (`RenderView.ASelectionClickRebuildsTheOverlayAndNothingUnderIt`). A vertical
 exaggeration change rebuilds every layer, because every one of them is built at
 exaggerated heights. `SceneBuilder::build` still makes the whole scene as one
-list for callers that want that (the benchmarks, headless tools).
+list for callers that want that (the benchmarks, headless tools); one list
+cannot carry the depth rules below, so there a surface flat at the datum shows
+the grid through it.
+
+`cad::renderLayers` draws one frame of the layers: it fits the depth range to
+them and the grid, fades the edges, then draws the five in the order above.
+The widget calls it and nothing else, so the tests draw exactly what the view
+does. Two of the passes **write no depth**:
+
+* **The grid is a backdrop.** It stands on the datum, exactly in the plane of
+  a surface that is flat at its lowest (a pad, a pond or basin floor). Drawn
+  with depth it beat that surface, which the slope-scaled offset pushes back,
+  and its whole pattern showed across a flat pad: grid lines on 7 894 of
+  131 804 pad pixels at the perspective iso view and 12 331-13 392 of about
+  320 355 from the top (`SceneFrame.AFlatSurfaceAtTheDatumCoversTheGridStandingUnderIt`).
+  Drawn first and writing no depth, it is covered by the model everywhere.
+  Seen from below the datum it is still behind the terrain: it is a reference,
+  not an object.
+* **The edges are tested against the terrain but not written.** An edge (1
+  footprint) and a line draped across it (1.5) both lie in the surface, each
+  at one depth across its width; off their centres those differ by up to a
+  pixel of the surface's slope, which at a low angle is more than the half
+  footprint between them. The edge, drawn first, broke every draped line it
+  crossed: 2.2%, 9.2% and 17.2% of the line pixels at 0.61, 0.25 and 0.12 rad
+  (`SceneFrame.DrawingLinesDrapedOnASurfaceCrossItsEdgesUnbroken`). Nearer
+  terrain still hides the edges, and linework is tested against the surface
+  alone, which it beats everywhere.
+
+A GPU renderer must draw the layers in this order, with the same two passes'
+depth writes off.
 
 ### Linework in 3D
 
@@ -282,14 +344,20 @@ lit by its winding, so the far side of a wall is darker
 ### Grid
 
 Sized to the scene: a 1-2-5 spacing for about 16 cells over its larger side,
-15% past it on every side, at most 200 cells a side; standing on the **datum**,
-so it is under the model rather than at z = 0; the x and y axes drawn only
+15% past it on every side, at most 200 cells a side; standing on the **datum**
+(the lowest visible surface or mesh) rather than at z = 0, and drawn as a
+backdrop ([Layers](#the-scene-in-layers)), so it is under the model even where
+a surface lies on the datum; the x and y axes drawn only
 where the real origin is in range (survey data is kilometres from it, and axes
 through the scene's centre looked like axes and meant nothing); faded into the
 background towards its rim. Each line is emitted **cell by cell**: a
 full-length line's quad touches every tile its bounding box does, and the old
 fixed grid's 162 long diagonals cost 70-95 ms a frame at 1600x1000-1920x1080,
 95% of a small scene's time; cut into cells the same grid measured about 3 ms.
+With no depth written, a later grid line covers an earlier one where they
+cross, so the plain lines are emitted first, then every fifth, then the axes:
+no plain line breaks an axis
+(`CadScene.TheGridDrawsItsAxesLastSoNoOtherGridLineBreaksThem`).
 
 ### HiDPI
 
@@ -340,6 +408,32 @@ repetitions), 2026-09-24:
   (1.51x), and the time per pixel did not rise. `BM_RenderGroundWithin`,
   which places its camera itself, is unchanged within the noise.
 
+### The review fixes: grid backdrop, edges without depth, whole points
+
+Measured the same way against the binary built before them (the last row of
+the table above), with a second copy of the new one as the A/A control; CPU
+ms, minimum / median of 27 samples (9 alternating rounds x 3 repetitions):
+
+| Benchmark | before | after | after, A/A copy | before / after, median |
+|---|---|---|---|---|
+| `BM_SceneFrame/256` | 8.91 / 10.58 | 9.31 / 10.95 | 9.90 / 10.85 | 0.97, inside the A/A spread of the minimum (6%) |
+| `BM_SceneFrame/512` | 16.20 / 20.30 | 16.45 / 20.29 | 18.97 / 20.61 | 1.00 |
+| `BM_SceneFrame`, both point steps dispatched to the pool (256 / 512) | | 10.88 / 11.48, 19.26 / 21.46 | | 0.92 / 0.95: why they run inline |
+| `BM_RenderGroundFramedSerial/256` (the fill loop and its depth-write test) | 42.28 / 48.27 | 33.81 / 51.32 | 32.32 / 47.90 | 0.94, inside the A/A spread (7%) |
+| `BM_RenderGroundFramedSerial/724` | 199.15 / 247.04 | 126.14 / 241.48 | 136.97 / 245.33 | 1.02 |
+
+The two ground rows were run on the build that still dispatched the point
+steps: its fill loop is this one, and the ground has no points. The
+five-round run over every render benchmark before these rows had an A/A
+spread of up to 1.6x on a minimum (`BM_SceneFrame/512`: 33.01 against 21.20
+for one binary), so only the nine-round rows are recorded. `BM_SceneLayersFrame`
+is new with this change: it draws the same survey as `BM_SceneFrame` through
+`cad::renderLayers` - five passes, the edges drawn at 64 cells - which is
+what a paint of the 3D view costs; it has no before. Five rounds, CPU ms
+minimum / median, with its A/A copy: 64 cells (edges drawn) 15.56 / 17.11
+and 15.72 / 17.47; 256 cells 15.48 / 18.45 and 14.50 / 17.36; 512 cells
+24.11 / 28.98 and 24.28 / 28.27.
+
 ### The real archives (headless widget, 1200x800)
 
 A scratch harness drove `RenderViewWidget` offscreen over each archive and
@@ -380,6 +474,13 @@ read them as sizes, not ratios). What changed, looking at the pictures:
   large flat site fills more of the view than the far half.
 * `draw_list.hpp` still describes `DrawLine::depthBias` as NDC depth; it is
   pixel footprints of view distance (above).
+* The GPU renderer must match three rules of this path: the grid and edges
+  passes write no depth; a point sprite is decided at its centre and drawn
+  whole (or pulled by its half size in pixels of depth slope, which shows it
+  through thin walls); and the layers are drawn in `renderLayers`' order.
+* A mesh styled ShadedWithEdges (meshes default to Shaded) keeps its edges in
+  the terrain list, where they write depth: linework at its own heights lying
+  exactly in a mesh face can still lose pixels where it crosses a mesh edge.
 * The open render defects of the audit are in `docs/audit/2026-09-23-defects.md`,
   section REN; REN-02, 05, 06, 07, 08 and 10 are fixed here and need their
   status changed there.
