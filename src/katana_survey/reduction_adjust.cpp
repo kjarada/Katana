@@ -76,17 +76,35 @@ std::optional<double> meanDistance(const Engine& engine, std::size_t setupIndex,
     return sum / static_cast<double>(count);
 }
 
-void rejectPointingRows(Engine& engine, const ReducedPointing& pointing, const std::string& reason)
+// Which of a pointing's reduced values a network observation was made from:
+// a rejection marks those raw rows and no others (a rejected distance does
+// not make the direction of the same pointing any less used).
+enum class PointingPart { Direction, Distance, Height };
+
+std::vector<std::size_t> partRows(const ReducedPointing& pointing, PointingPart part)
 {
-    for (std::size_t i = 0; i < pointing.rawRowCount; ++i) {
-        ReportObservation& row = engine.report.observations[pointing.rawRows[i]];
-        row.rejected = true;
-        row.rejectionReason = reason;
+    std::vector<std::size_t> rows;
+    if (part == PointingPart::Direction) {
+        rows.assign(pointing.directionRows.begin(),
+                    pointing.directionRows.begin() +
+                        static_cast<std::ptrdiff_t>(pointing.directionRowCount));
+    } else if (part == PointingPart::Distance) {
+        rows.assign(pointing.distanceRows.begin(),
+                    pointing.distanceRows.begin() +
+                        static_cast<std::ptrdiff_t>(pointing.distanceRowCount));
+    } else if (pointing.heightRow) {
+        rows.push_back(*pointing.heightRow);
     }
-    if (pointing.heightRow) {
-        ReportObservation& row = engine.report.observations[*pointing.heightRow];
-        row.rejected = true;
-        row.rejectionReason = reason;
+    return rows;
+}
+
+void markRows(Engine& engine, const std::vector<std::size_t>& rows, bool rejected,
+              const std::string& reason)
+{
+    for (const std::size_t index : rows) {
+        ReportObservation& row = engine.report.observations[index];
+        row.rejected = rejected;
+        row.rejectionReason = rejected ? reason : std::string{};
     }
 }
 
@@ -441,6 +459,7 @@ struct NetworkObservation {
     std::string label;
     SourceRecord source;
     const ReducedPointing* pointing = nullptr;
+    PointingPart part = PointingPart::Direction;
 };
 
 struct OutlierVerdict {
@@ -554,6 +573,11 @@ adjustWithOutliers(Engine& engine, const NetworkInputs& inputs, const std::strin
     std::vector<bool> excluded(inputs.observations.size(), false);
     std::vector<ReportResidual> rejectedResiduals;
     std::vector<std::size_t> included;
+    // The last rejection, so that one which leaves the network unsolvable (the
+    // only distance to a point) can be put back.
+    std::optional<std::size_t> lastRejected;
+    std::vector<std::size_t> lastRows;
+    bool stopRejecting = false;
     report.method = method;
 
     while (true) {
@@ -562,6 +586,18 @@ adjustWithOutliers(Engine& engine, const NetworkInputs& inputs, const std::strin
             return network.error();
         }
         Result<AdjustmentResult> result = adjust(*network, options);
+        if (!result && lastRejected) {
+            engine.warn(report.rejectedOutliers.back() +
+                        " was put back: without it the network cannot be adjusted (" +
+                        result.error().message + ").");
+            excluded[*lastRejected] = false;
+            markRows(engine, lastRows, false, {});
+            report.rejectedOutliers.pop_back();
+            rejectedResiduals.pop_back();
+            lastRejected.reset();
+            stopRejecting = true;
+            continue;
+        }
         if (!result) {
             return result.error();
         }
@@ -577,7 +613,8 @@ adjustWithOutliers(Engine& engine, const NetworkInputs& inputs, const std::strin
                 worst = i;
             }
         }
-        if (settings.autoRejectOutliers && worst && result->statistics.degreesOfFreedom > 1) {
+        if (settings.autoRejectOutliers && !stopRejecting && worst &&
+            result->statistics.degreesOfFreedom > 1) {
             const ResidualRecord& residual = result->residuals[*worst];
             const std::size_t observationIndex = included[residual.index];
             SourceRecord source;
@@ -598,9 +635,12 @@ adjustWithOutliers(Engine& engine, const NetworkInputs& inputs, const std::strin
             const std::string reason = "rejected by the " + critical + ", value " +
                                        formatNumber(*verdicts[*worst].statistic, 2);
             report.rejectedOutliers.push_back(rejected.observation);
+            lastRows.clear();
             if (const ReducedPointing* pointing = inputs.observations[observationIndex].pointing) {
-                rejectPointingRows(engine, *pointing, reason);
+                lastRows = partRows(*pointing, inputs.observations[observationIndex].part);
+                markRows(engine, lastRows, true, reason);
             }
+            lastRejected = observationIndex;
             engine.warn(rejected.observation + " " + reason + "; the adjustment was run again "
                                                               "without it.",
                         source);
@@ -872,7 +912,8 @@ Status adjustAsNetwork(Engine& engine)
                                                normalizeAngle(*pointing.direction -
                                                               *referenceDirection),
                                                sigma, source},
-                    label(s, "angle", reference, pointing.target), source, &pointing});
+                    label(s, "angle", reference, pointing.target), source, &pointing,
+                    PointingPart::Direction});
             }
             if (horizontalTarget && pointing.gridDistance) {
                 DistanceObservation distance;
@@ -883,7 +924,8 @@ Status adjustAsNetwork(Engine& engine)
                 distance.kind = DistanceKind::Horizontal;
                 distance.source = source;
                 horizontalInputs.observations.push_back(NetworkObservation{
-                    distance, label(s, "distance", {}, pointing.target), source, &pointing});
+                    distance, label(s, "distance", {}, pointing.target), source, &pointing,
+                    PointingPart::Distance});
             }
             if (levels && pointing.heightDifference && pointing.slope && pointing.zenith &&
                 levelPresent.count(at) != 0 && levelPresent.count(pointing.target) != 0) {
@@ -896,7 +938,8 @@ Status adjustAsNetwork(Engine& engine)
                     LevelDifferenceObservation{at, std::string(pointing.target),
                                                *pointing.heightDifference, sigma,
                                                pointing.gridDistance.value_or(0.0), source},
-                    label(s, "height difference", {}, pointing.target), source, &pointing});
+                    label(s, "height difference", {}, pointing.target), source, &pointing,
+                    PointingPart::Height});
             }
         }
     }

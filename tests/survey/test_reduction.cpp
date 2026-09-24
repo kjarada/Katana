@@ -359,3 +359,19 @@ TEST(Reduction, IdenticalInputsGiveIdenticalOutcomes)
     EXPECT_EQ(a->report, b->report);
     EXPECT_EQ(a->reduced, b->reduced);
 }
+
+TEST(Reduction, TheExcludeOutsideToleranceSettingSurvivesTheTextForm)
+{
+    // The one setting this builder added to the contract: it must round-trip
+    // like every other, and text written before it existed must read as off.
+    ReductionSettings settings;
+    settings.faceTolerances.excludeOutside = true;
+    const auto parsed = parseReductionSettings(serialiseReductionSettings(settings));
+    ASSERT_TRUE(parsed.ok()) << parsed.error().describe();
+    EXPECT_TRUE(parsed->faceTolerances.excludeOutside);
+    EXPECT_EQ(*parsed, settings);
+
+    const auto older = parseReductionSettings("katana-reduction-settings=1\nfaces=average\n");
+    ASSERT_TRUE(older.ok());
+    EXPECT_FALSE(older->faceTolerances.excludeOutside);
+}
