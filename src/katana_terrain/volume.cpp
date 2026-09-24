@@ -1,5 +1,6 @@
 #include "katana/terrain/volume.hpp"
 
+#include "katana/core/task_pool.hpp"
 #include "katana/geometry/spatial_index.hpp"
 
 #include <algorithm>
@@ -74,6 +75,18 @@ class SignedIntegral {
         (lonePositive ? positiveArea_ : negativeArea_).add(tipArea);
         (lonePositive ? negative_ : positive_).add(restVolume);
         (lonePositive ? negativeArea_ : positiveArea_).add(area - tipArea);
+    }
+
+    // Folds another integral's four sums into this one's. Used to combine the
+    // per-block integrals of compareSurfaces in block order; each block's sum
+    // arrives as its compensated value, so the combination is itself a
+    // compensated sum of a fixed sequence of terms.
+    void merge(const SignedIntegral& other)
+    {
+        positive_.add(other.positive());
+        negative_.add(other.negative());
+        positiveArea_.add(other.positiveArea());
+        negativeArea_.add(other.negativeArea());
     }
 
     [[nodiscard]] double positive() const { return positive_.value(); }
@@ -218,7 +231,8 @@ Result<DatumVolume> volumeToDatum(const TinSurface& surface, double datum)
     return result;
 }
 
-Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinSurface& design)
+Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinSurface& design,
+                                          katana::core::TaskPool* pool)
 {
     if (existing.empty() || design.empty()) {
         return makeError(ErrorCode::InvalidArgument, "both surfaces must have triangles");
@@ -249,65 +263,106 @@ Result<SurfaceComparison> compareSurfaces(const TinSurface& existing, const TinS
     katana::geometry::SpatialIndex index;
     index.rebuild(entries);
 
-    SignedIntegral integral;
-    detail::CompensatedSum planArea;
-    std::vector<katana::geometry::SpatialId> candidates;
-    std::array<Point2, 8> piece{};
+    // The existing triangles are cut into blocks of a FIXED size, and the
+    // block, not the thread, is the unit of summation: each block sums its own
+    // pieces in index order - existing triangles ascending, and for each its
+    // design candidates in ascending id order (SpatialIndex sorts them) - and
+    // the block sums are then combined in block order. The sequence of
+    // floating-point operations is therefore fixed by the data alone, and the
+    // answer is the same bits on one thread or sixteen (Rule 7; the
+    // TaskPool(1) tests in test_volume.cpp hold it to that). The partition
+    // must never be derived from the thread count, or it would not be.
+    //
+    // 256 triangles is a few hundred microseconds of clipping, so dispatch is
+    // noise, and a 200k-triangle surface still makes ~800 blocks for sixteen
+    // threads to balance over.
+    constexpr std::size_t kBlockTriangles = 256;
+    // One cache line each: neighbouring blocks are written by different
+    // threads, and sharing a line would have them invalidate each other.
+    struct alignas(64) BlockSums {
+        SignedIntegral integral;
+        detail::CompensatedSum planArea;
+        std::size_t pieces = 0;
+    };
+    const std::size_t existingCount = existing.triangleCount();
+    const std::size_t blockCount = (existingCount + kBlockTriangles - 1) / kBlockTriangles;
+    std::vector<BlockSums> blocks(blockCount);
 
-    // Existing triangles in index order, and for each one its design candidates
-    // in ascending id order (SpatialIndex guarantees that sort), so the terms
-    // reach the compensated sums in a fixed order and the result does not
-    // depend on how the grid happened to bucket anything - Rule 7.
-    for (std::size_t te = 0; te < existing.triangleCount(); ++te) {
-        const Triangle2 planExisting = existing.planTriangle(te);
-        const Box2 boxExisting = planExisting.boundingBox();
-        if (!boxExisting.intersects(region)) {
-            continue;
-        }
-        // Hoisted out of the candidate and fan loops below: a degenerate
-        // triangle has no plane to evaluate, so every piece cut from it was
-        // already being dropped one at a time.
-        if (planExisting.isDegenerate()) {
-            continue;
-        }
-        const double twiceAreaExisting = planExisting.twiceSignedArea();
-        const std::array<Point2, 3> subject = orientedCorners(planExisting);
-        index.query(boxExisting, candidates);
-        for (const katana::geometry::SpatialId id : candidates) {
-            const auto td = static_cast<std::uint32_t>(id);
-            const Triangle2 planDesign = design.planTriangle(td);
-            if (planDesign.isDegenerate()) {
-                continue;
-            }
-            const double twiceAreaDesign = planDesign.twiceSignedArea();
-            const std::array<Point2, 3> window = orientedCorners(planDesign);
-            const std::size_t corners = clipTriangleToTriangle(subject, window, piece);
-            if (corners < 3) {
-                continue;
-            }
-            // The clipped region is convex, so a fan from its first vertex
-            // covers it exactly once with no coordinates that are not already
-            // on its boundary.
-            for (std::size_t i = 1; i + 1 < corners; ++i) {
-                const std::array<Point2, 3> part{piece[0], piece[i], piece[i + 1]};
-                const double area = Triangle2{part[0], part[1], part[2]}.signedArea();
-                if (!(area > 0.0)) {
+    const auto compareBlocks = [&](std::size_t firstBlock, std::size_t endBlock) {
+        // Per call, not shared: the index query and the clipper each need a
+        // buffer, and a chunk of blocks runs on one thread.
+        std::vector<katana::geometry::SpatialId> candidates;
+        std::array<Point2, 8> piece{};
+        for (std::size_t block = firstBlock; block < endBlock; ++block) {
+            BlockSums& sums = blocks[block];
+            const std::size_t first = block * kBlockTriangles;
+            const std::size_t end = std::min(first + kBlockTriangles, existingCount);
+            for (std::size_t te = first; te < end; ++te) {
+                const Triangle2 planExisting = existing.planTriangle(te);
+                const Box2 boxExisting = planExisting.boundingBox();
+                if (!boxExisting.intersects(region)) {
                     continue;
                 }
-                // `part` lies inside both triangles by construction, so both
-                // planes are evaluated with barycentric weights in [0, 1] and
-                // neither surface has to be searched for the triangle to use.
-                const std::array<double, 3> zExisting =
-                    planeElevations(existing, static_cast<std::uint32_t>(te), planExisting,
-                                    twiceAreaExisting, part);
-                const std::array<double, 3> zDesign =
-                    planeElevations(design, td, planDesign, twiceAreaDesign, part);
-                integral.add(area, {zDesign[0] - zExisting[0], zDesign[1] - zExisting[1],
-                                    zDesign[2] - zExisting[2]});
-                planArea.add(area);
-                ++result.overlayTriangleCount;
+                // Hoisted out of the candidate and fan loops below: a
+                // degenerate triangle has no plane to evaluate, so every piece
+                // cut from it was already being dropped one at a time.
+                if (planExisting.isDegenerate()) {
+                    continue;
+                }
+                const double twiceAreaExisting = planExisting.twiceSignedArea();
+                const std::array<Point2, 3> subject = orientedCorners(planExisting);
+                index.query(boxExisting, candidates);
+                for (const katana::geometry::SpatialId id : candidates) {
+                    const auto td = static_cast<std::uint32_t>(id);
+                    const Triangle2 planDesign = design.planTriangle(td);
+                    if (planDesign.isDegenerate()) {
+                        continue;
+                    }
+                    const double twiceAreaDesign = planDesign.twiceSignedArea();
+                    const std::array<Point2, 3> window = orientedCorners(planDesign);
+                    const std::size_t corners = clipTriangleToTriangle(subject, window, piece);
+                    if (corners < 3) {
+                        continue;
+                    }
+                    // The clipped region is convex, so a fan from its first
+                    // vertex covers it exactly once with no coordinates that
+                    // are not already on its boundary.
+                    for (std::size_t i = 1; i + 1 < corners; ++i) {
+                        const std::array<Point2, 3> part{piece[0], piece[i], piece[i + 1]};
+                        const double area = Triangle2{part[0], part[1], part[2]}.signedArea();
+                        if (!(area > 0.0)) {
+                            continue;
+                        }
+                        // `part` lies inside both triangles by construction, so
+                        // both planes are evaluated with barycentric weights in
+                        // [0, 1] and neither surface has to be searched for the
+                        // triangle to use.
+                        const std::array<double, 3> zExisting =
+                            planeElevations(existing, static_cast<std::uint32_t>(te),
+                                            planExisting, twiceAreaExisting, part);
+                        const std::array<double, 3> zDesign =
+                            planeElevations(design, td, planDesign, twiceAreaDesign, part);
+                        sums.integral.add(area, {zDesign[0] - zExisting[0],
+                                                 zDesign[1] - zExisting[1],
+                                                 zDesign[2] - zExisting[2]});
+                        sums.planArea.add(area);
+                        ++sums.pieces;
+                    }
+                }
             }
         }
+    };
+    // Everything the blocks read - both surfaces and the index - is immutable
+    // here, and each block writes only its own BlockSums.
+    katana::core::TaskPool& workers = pool != nullptr ? *pool : katana::core::TaskPool::shared();
+    workers.parallelRanges(0, blockCount, 1, compareBlocks);
+
+    SignedIntegral integral;
+    detail::CompensatedSum planArea;
+    for (const BlockSums& sums : blocks) {
+        integral.merge(sums.integral);
+        planArea.add(sums.planArea.value());
+        result.overlayTriangleCount += sums.pieces;
     }
     result.fill = integral.positive();
     result.cut = integral.negative();
