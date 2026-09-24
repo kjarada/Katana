@@ -630,13 +630,19 @@ TEST(LeicaGsi, AShotAtTheOccupiedPointIsAWarningNotAnInvalidObservation)
 TEST(LeicaGsi, ADigitalLevelsBlocksAreCountedNotReadAsTotalStationShots)
 {
     // Page 40's example: "32...8+02505387 330.08+00125972" - a staff distance
-    // and a staff reading, three-digit word 330.
-    const std::string text = "110001+0000A110 32...8+02505387 330.08+00125972 \r\n";
+    // and a staff reading, three-digit word 330 - after the DNA section's
+    // special code block for line levelling BF, "410000+?......1".
+    const std::string text = "410000+?......1 \r\n"
+                             "110001+0000A110 32...8+02505387 330.08+00125972 \r\n";
     Result<ReadResult> read = readText(text);
     ASSERT_TRUE(read.ok()) << read.error().message;
     EXPECT_TRUE(read->project.stations.empty());
-    EXPECT_NE(unpositioned(read->project, "A110"), nullptr);
-    EXPECT_NE(warningAbout(*read, 1, "levelling"), nullptr) << allWarnings(*read);
+    const survey::UnpositionedPoint* a110 = unpositioned(read->project, "A110");
+    ASSERT_NE(a110, nullptr);
+    EXPECT_NE(warningAbout(*read, 2, "levelling"), nullptr) << allWarnings(*read);
+    // The levelling method is not the point's code, and the import says so.
+    EXPECT_TRUE(a110->code.empty());
+    EXPECT_NE(warningAbout(*read, 1, "special code block"), nullptr) << allWarnings(*read);
 }
 
 TEST(LeicaGsi, CarriageReturnOnlyAndLineFeedOnlyFilesReadAlike)

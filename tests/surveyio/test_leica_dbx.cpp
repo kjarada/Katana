@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <random>
 #include <string>
 #include <string_view>
 
@@ -107,4 +108,46 @@ TEST(LeicaDbx, AJobFileOnItsOwnIsRefusedWithTheSameAdvice)
     EXPECT_NE(read.error().message.find("looks like a file of a Leica DBX job"),
               std::string::npos);
     EXPECT_NE(read.error().message.find(kExportAdvice), std::string::npos);
+}
+
+TEST(LeicaDbx, NoOtherFormatsFixtureIsTakenForADbxJob)
+{
+    // Every fixture in this tree outside the DBX folder, whoever wrote it:
+    // none of them is a DBX file, so the probe must rule each one out.
+    const std::filesystem::path data = dbxFolder().parent_path().parent_path();
+    std::size_t others = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(data)) {
+        if (!entry.is_regular_file() || entry.path().parent_path() == dbxFolder()) {
+            continue;
+        }
+        const std::string bytes = slurp(entry.path());
+        EXPECT_EQ(dbxConfidence(std::string_view(bytes).substr(0, kProbeBytes),
+                                entry.path().filename().string()),
+                  0.0)
+            << entry.path().string();
+        ++others;
+    }
+    EXPECT_GT(others, 0U);
+}
+
+TEST(LeicaDbx, RandomBytesUnderAJobsNamesAreProbedAndRefusedWithoutACrash)
+{
+    // The reader looks at no byte of the file, and the probe only at whether
+    // it is binary; both must still answer for any content, of any length.
+    std::mt19937 random(20260924); // fixed: a failure must be repeatable
+    std::uniform_int_distribution<int> byte(0, 255);
+    for (int round = 0; round < 200; ++round) {
+        std::string noise(static_cast<std::size_t>(round * 37 % 5000), '\0');
+        for (char& c : noise) {
+            c = static_cast<char>(byte(random));
+        }
+        for (const char* name : {"JOB.XCF", "job.x01", "job.x13"}) {
+            const double confidence = dbxConfidence(noise, name);
+            EXPECT_GE(confidence, 0.0) << name << " round " << round;
+            EXPECT_LE(confidence, 1.0) << name << " round " << round;
+            Result<ReadResult> read = readSurvey(formatRegistry(), kLeicaDbxFormatId, noise, name);
+            ASSERT_FALSE(read.ok());
+            EXPECT_EQ(read.error().code, ErrorCode::Unsupported);
+        }
+    }
 }
