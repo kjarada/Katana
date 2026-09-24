@@ -16,7 +16,4 @@ add_library(katana_terrain STATIC
     super_surface.cpp
 )
 katana_target_defaults(katana_terrain)
-# Contour level ranges and the containment test of locate(), four triangles
-# per step (docs/terrain.md, "SIMD").
-katana_add_simd_sources(katana_terrain AVX2 simd/terrain_avx2.cpp)
 target_link_libraries(katana_terrain PUBLIC katana_geometry PRIVATE CGAL::CGAL)
