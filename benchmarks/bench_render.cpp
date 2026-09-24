@@ -343,4 +343,53 @@ void BM_SceneSelectionBuild(benchmark::State& state)
 }
 BENCHMARK(BM_SceneSelectionBuild)->Arg(256)->Arg(512)->Unit(benchmark::kMillisecond);
 
+// One frame as the 3D view draws it (cad::renderLayers): the depth range
+// fitted, the edges faded, and one pass per layer, the grid and the edges
+// writing no depth. BM_SceneFrame draws the same scene as ONE list through
+// the rasteriser alone; this is what a paint pays for it. cells = 64 is 8,192
+// triangles, under kDenseSurfaceTriangles, so the edges pass is drawn too.
+void BM_SceneLayersFrame(benchmark::State& state)
+{
+    const auto survey = syntheticSurvey(static_cast<int>(state.range(0)));
+    katana::cad::SceneBuilder builder;
+    katana::cad::SceneOptions options;
+    katana::cad::SceneLayers layers;
+    builder.buildTerrain(survey->surfaces, {}, options, layers);
+    builder.buildEntities(survey->document, survey->surfaces, options, layers);
+    builder.buildSelection(survey->document, survey->surfaces, options, layers);
+    builder.buildGrid(options, layers);
+
+    constexpr int kFrameWidth = 1600;
+    constexpr int kFrameHeight = 1000;
+    Camera camera;
+    camera.setViewportSize(kFrameWidth, kFrameHeight);
+    camera.setStandardView(katana::render::StandardView::IsoSouthWest);
+    if (!camera.frame(layers.bounds)) {
+        std::abort();
+    }
+    auto target = Framebuffer::create(kFrameWidth, kFrameHeight);
+    if (!target.ok()) {
+        state.SkipWithError("framebuffer");
+        return;
+    }
+    Rasterizer rasterizer;
+    TaskPool pool;
+    RenderOptions renderOptions;
+    renderOptions.pool = &pool;
+    std::uint64_t triangles = 0;
+    for (auto _ : state) {
+        const auto stats =
+            katana::cad::renderLayers(layers, camera, rasterizer, *target, renderOptions);
+        if (!stats.ok()) {
+            state.SkipWithError("render failed");
+            return;
+        }
+        triangles = stats->trianglesRasterised;
+        benchmark::DoNotOptimize(target->color().data());
+    }
+    state.counters["rasterised"] = static_cast<double>(triangles);
+    state.counters["edges"] = static_cast<double>(layers.edges.lines.size());
+}
+BENCHMARK(BM_SceneLayersFrame)->Arg(64)->Arg(256)->Arg(512)->Unit(benchmark::kMillisecond);
+
 } // namespace
