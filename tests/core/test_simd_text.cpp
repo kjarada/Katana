@@ -46,7 +46,8 @@ std::vector<std::uint16_t> ascii(std::size_t count, char ch)
     return std::vector<std::uint16_t>(count, static_cast<std::uint16_t>(ch));
 }
 
-std::vector<std::uint16_t> operator+(std::vector<std::uint16_t> a, const std::vector<std::uint16_t>& b)
+std::vector<std::uint16_t> operator+(std::vector<std::uint16_t> a,
+                                     const std::vector<std::uint16_t>& b)
 {
     a.insert(a.end(), b.begin(), b.end());
     return a;
@@ -81,7 +82,8 @@ TEST(SimdText, AnAsciiRunLongerThanABlockIsNarrowedByteForByteAtEveryLevel)
 {
     // 70 'A', U+00E9, 5 'b'. U+00E9 in UTF-8: 0xE9 = 000 1110 1001 splits as
     // 00011 / 101001, giving 110 00011 = C3 and 10 101001 = A9.
-    const std::string bytes = utf16(ascii(70, 'A') + std::vector<std::uint16_t>{0x00E9} + ascii(5, 'b'), true);
+    const std::string bytes =
+        utf16(ascii(70, 'A') + std::vector<std::uint16_t>{0x00E9} + ascii(5, 'b'), true);
     const std::string expected = std::string(70, 'A') + "\xC3\xA9" + "bbbbb";
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
@@ -98,7 +100,8 @@ TEST(SimdText, BigEndianAsciiIsTakenFromTheSecondByteOfEachUnit)
     KATANA_REQUIRE_AVX2();
     // FE FF, then 33 'x' as 00 78, U+00E9 as 00 E9, then 40 'y': the block of
     // units 32-63 holds the non-ASCII unit at its second place.
-    const std::string bytes = utf16(ascii(33, 'x') + std::vector<std::uint16_t>{0x00E9} + ascii(40, 'y'), false);
+    const std::string bytes =
+        utf16(ascii(33, 'x') + std::vector<std::uint16_t>{0x00E9} + ascii(40, 'y'), false);
     const std::string expected = std::string(33, 'x') + "\xC3\xA9" + std::string(40, 'y');
     const Outcome avx2 = decodeAt(SimdLevel::Avx2, bytes);
     ASSERT_TRUE(avx2.ok) << avx2.text;
@@ -139,15 +142,18 @@ TEST(SimdText, AMalformedSurrogateIsReportedAtTheSameByteAtEveryLevel)
     KATANA_REQUIRE_AVX2();
     // A lone low surrogate after 37 ASCII units: unit 37 of the text after the
     // mark begins at byte 2 x 37 = 74 of it.
-    const std::string lowAlone = utf16(ascii(37, 'a') + std::vector<std::uint16_t>{0xDC00} + ascii(30, 'a'), true);
+    const std::string lowAlone =
+        utf16(ascii(37, 'a') + std::vector<std::uint16_t>{0xDC00} + ascii(30, 'a'), true);
     const Outcome lowScalar = decodeAt(SimdLevel::Scalar, lowAlone);
     ASSERT_FALSE(lowScalar.ok);
-    EXPECT_NE(lowScalar.text.find("low surrogate with no high"), std::string::npos) << lowScalar.text;
+    EXPECT_NE(lowScalar.text.find("low surrogate with no high"), std::string::npos)
+        << lowScalar.text;
     EXPECT_NE(lowScalar.text.find("[byte 74]"), std::string::npos) << lowScalar.text;
     EXPECT_EQ(decodeAt(SimdLevel::Avx2, lowAlone), lowScalar);
 
     // A high surrogate followed by 'a' at unit 40: byte 80.
-    const std::string highAlone = utf16(ascii(40, 'a') + std::vector<std::uint16_t>{0xD800, 'a'} + ascii(30, 'a'), true);
+    const std::string highAlone =
+        utf16(ascii(40, 'a') + std::vector<std::uint16_t>{0xD800, 'a'} + ascii(30, 'a'), true);
     const Outcome highScalar = decodeAt(SimdLevel::Scalar, highAlone);
     ASSERT_FALSE(highScalar.ok);
     EXPECT_NE(highScalar.text.find("[byte 80]"), std::string::npos) << highScalar.text;
@@ -157,7 +163,8 @@ TEST(SimdText, AMalformedSurrogateIsReportedAtTheSameByteAtEveryLevel)
     const std::string truncated = utf16(ascii(64, 'a') + std::vector<std::uint16_t>{0xD83D}, true);
     const Outcome truncatedScalar = decodeAt(SimdLevel::Scalar, truncated);
     ASSERT_FALSE(truncatedScalar.ok);
-    EXPECT_NE(truncatedScalar.text.find("ends in the middle"), std::string::npos) << truncatedScalar.text;
+    EXPECT_NE(truncatedScalar.text.find("ends in the middle"), std::string::npos)
+        << truncatedScalar.text;
     EXPECT_EQ(decodeAt(SimdLevel::Avx2, truncated), truncatedScalar);
 }
 
