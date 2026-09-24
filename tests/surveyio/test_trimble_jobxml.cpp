@@ -767,6 +767,16 @@ TEST(TrimbleJobXml, aLargeSyntheticJobReadsEveryShotAndReportsItsThroughput)
         megabytes = static_cast<std::size_t>(std::strtoul(requested, nullptr, 10));
     }
     const std::string job = syntheticJob(megabytes * 1024 * 1024);
+    // The reader alone first (the parser's own speed), then through
+    // readSurvey, which adds the project validation every import pays.
+    const FormatReader reader = formatRegistry().reader(kId);
+    ASSERT_TRUE(reader);
+    const auto readerStart = std::chrono::steady_clock::now();
+    Result<ReadResult> direct = reader(job, "big.jxl", ReadOptions{});
+    const auto readerSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - readerStart).count();
+    ASSERT_TRUE(direct.ok()) << direct.error().describe();
+    direct = ReadResult{}; // not timed: the next read should not share the heap with this one
     const auto start = std::chrono::steady_clock::now();
     Result<ReadResult> read = readJxl(job, "big.jxl");
     const auto seconds =
@@ -780,7 +790,9 @@ TEST(TrimbleJobXml, aLargeSyntheticJobReadsEveryShotAndReportsItsThroughput)
     EXPECT_EQ(observations, read->project.stations.size() * 600);
     EXPECT_TRUE(read->warnings.empty());
     const double mb = static_cast<double>(job.size()) / (1024.0 * 1024.0);
-    std::cout << "[ throughput ] JobXML: " << mb << " MB, " << observations << " observations in "
-              << seconds << " s = " << mb / seconds << " MB/s (readSurvey, validation included)\n";
+    std::cout << "[ throughput ] JobXML: " << mb << " MB, " << observations << " observations; reader "
+              << readerSeconds << " s = " << mb / readerSeconds << " MB/s; readSurvey (validation "
+              << "included) " << seconds << " s = " << mb / seconds << " MB/s\n";
+    RecordProperty("reader_megabytes_per_second", std::to_string(mb / readerSeconds));
     RecordProperty("megabytes_per_second", std::to_string(mb / seconds));
 }
