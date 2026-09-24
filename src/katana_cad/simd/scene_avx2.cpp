@@ -187,11 +187,20 @@ inline __m128i ramp(__m256d z, const double* params)
     const __m128i lower =
         _mm_min_epi32(_mm256_cvttpd_epi32(clamped), _mm_set1_epi32(static_cast<int>(k::kRampSegments) - 1));
     const __m256d f = sub(clamped, _mm256_cvtepi32_pd(lower));
+    // Each row of the table is four doubles, one register: picking entry
+    // `lower` is a permute of its 32-bit halves (2 lower, 2 lower + 1), which
+    // costs a fraction of a gather from memory.
+    const __m256i twice = _mm256_slli_epi64(_mm256_cvtepu32_epi64(lower), 1);
+    const __m256i pick =
+        _mm256_or_si256(twice, _mm256_slli_epi64(_mm256_add_epi64(twice, _mm256_set1_epi64x(1)), 32));
     const double* table = params + k::kParamRampTable;
+    const auto row = [&](std::size_t index) {
+        const __m256i entries = _mm256_castpd_si256(_mm256_loadu_pd(table + index * k::kRampSegments));
+        return _mm256_castsi256_pd(_mm256_permutevar8x32_epi32(entries, pick));
+    };
     const auto blend = [&](std::size_t channel) {
-        const __m256d a = _mm256_i32gather_pd(table + (2 * channel) * k::kRampSegments, lower, 8);
-        const __m256d step =
-            _mm256_i32gather_pd(table + (2 * channel + 1) * k::kRampSegments, lower, 8);
+        const __m256d a = row(2 * channel);
+        const __m256d step = row(2 * channel + 1);
         return _mm256_cvttpd_epi32(add(add(a, mul(step, f)), _mm256_set1_pd(0.5)));
     };
     return pack(Channels{_mm_set1_epi32(0xFF), blend(0), blend(1), blend(2)});

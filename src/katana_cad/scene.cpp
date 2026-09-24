@@ -70,11 +70,14 @@ template <typename T> void grow(std::vector<T>& list, std::size_t extra)
 }
 
 // Below these the scalar loop is as quick as the kernel with its setup, so
-// small surfaces, meshes and fades take it at every level. Measured with
-// BM_SceneKernelBreakEven (benchmarks/bench_scene.cpp): see docs/performance.md.
+// small surfaces, meshes and fades take it at every level. Measured with the
+// thresholds at 1 (BM_SceneKernelBreakEven*, BM_SceneFadeEdges/1-4 in
+// benchmarks/bench_scene.cpp; docs/performance.md): a surface of 4 to 25
+// vertices was within the noise either way, a mesh of 2 faces and a fade of
+// 10 edge vertices already 2.5x and 3x quicker by kernel.
 constexpr std::size_t kSurfaceKernelMinimum = 16; // vertices
-constexpr std::size_t kMeshKernelMinimum = 8;     // faces
-constexpr std::size_t kFadeKernelMinimum = 16;    // edge vertices
+constexpr std::size_t kMeshKernelMinimum = 2;     // faces
+constexpr std::size_t kFadeKernelMinimum = 8;     // edge vertices
 #endif
 
 // Green (flat) through yellow to red (steep). 1:1 (45 degrees) is the red end,
