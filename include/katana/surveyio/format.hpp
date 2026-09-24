@@ -14,6 +14,7 @@
 // survey::DeclaredUnits.
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -80,6 +81,8 @@ struct FormatContent {
     bool stations = false;         // instrument setups with their backsights
     bool features = false;         // coded strings
     bool coordinateSystem = false; // the file declares one (declares, never transforms)
+    bool instrumentSettings = false; // survey::InstrumentSettings per setup
+    bool gnss = false;               // GNSS positions, vectors or sessions
 
     friend bool operator==(const FormatContent&, const FormatContent&) = default;
 };
@@ -153,6 +156,88 @@ struct FormatSignature {
 // then a value that allocates nothing per format.
 using FormatProbe = FormatSignature (*)(const ProbeInput&);
 
+// ---- Readers ---------------------------------------------------------------------
+//
+// A format that can be imported in one step registers a READER beside its
+// probe: bytes in, a survey::SurveyProject out. readSurvey() (reader.hpp) is
+// how anything calls one; it adds the checks every reader would otherwise
+// repeat (size caps, the sibling-file rule, validateProject) and stamps the
+// result with the format's id and parser version.
+
+// Another file of the same job, by name and content.
+struct SiblingFile {
+    std::string name; // a file NAME, never a path
+    std::string bytes;
+
+    friend bool operator==(const SiblingFile&, const SiblingFile&) = default;
+};
+
+// Returns the bytes of the file called `name` IN THE SAME FOLDER as the file
+// being read. Some formats are more than one file: a Leica DBX job is a folder
+// of files that name each other; a RINEX observation file has its navigation
+// file beside it.
+//
+// SECURITY. A reader passes a NAME it found in the file, and the name is
+// untrusted: the lookup refuses anything survey::sourceFileName() would
+// change (a directory, "..", a drive, an alternate data stream), and the
+// implementations in reader.hpp read only regular files in the one folder,
+// capped in size. NotFound when there is no such file - a reader that can do
+// without it goes on with a warning; one that cannot fails, naming the file.
+using SiblingLookup = std::function<katana::core::Result<std::string>(std::string_view name)>;
+
+struct ReadOptions {
+    // Empty: no sibling can be read (a single file handed over on its own).
+    SiblingLookup siblings{};
+    // Standard deviations for observations whose file states none: every
+    // observation must carry sigma > 0 (survey::validateObservation). The
+    // reduction replaces them with the person's own (reduction_settings.hpp),
+    // so these only have to be sensible, not right.
+    katana::survey::ObservationPrecision precision{};
+};
+
+// A warning with the place it is about, so a person can open the file at the
+// record. `record` is 1-based: a line for a text format, a record or block for
+// a binary one; 0 when the warning is about the file as a whole.
+struct ReadWarning {
+    std::string fileName{}; // the file read, or the sibling the warning is about
+    std::size_t record = 0;
+    std::string message{};
+
+    friend bool operator==(const ReadWarning&, const ReadWarning&) = default;
+};
+
+// "job.gsi record 12: target height 99.999 read as unset" - one phrasing, so
+// seven readers do not invent seven.
+[[nodiscard]] std::string describe(const ReadWarning& warning);
+
+struct ReadResult {
+    katana::survey::SurveyProject project{};
+    // A record that cannot be read is a WARNING naming it, never a silently
+    // dropped value; an unreadable FILE is an error in the Result instead.
+    std::vector<ReadWarning> warnings{};
+    std::size_t recordsRead = 0;
+    // Records the format defines that this reader does not handle, counted
+    // (see ImportResult::recordsSkipped).
+    std::size_t recordsSkipped = 0;
+    // What this FILE did not carry that an import usually needs, in words:
+    // "no instrument heights", "no atmospheric settings - the atmospheric
+    // correction state is unknown". Shown before the import and in the report.
+    std::vector<std::string> notCarried{};
+
+    // Filled by readSurvey(), not by the reader:
+    std::string formatId{};
+    std::string parserVersion{};
+    std::vector<SiblingFile> siblingsRead{}; // every sibling the reader fetched, in fetch order
+};
+
+// A reader: the file's bytes, its NAME (survey::sourceFileName already
+// applied) and the options. A plain function pointer for the reason given
+// beside FormatProbe. It must not open anything itself; other files come
+// through ReadOptions::siblings.
+using FormatReader = katana::core::Result<ReadResult> (*)(std::string_view bytes,
+                                                          std::string_view fileName,
+                                                          const ReadOptions& options);
+
 // ---- The registry ----------------------------------------------------------------
 
 // The formats one program knows about.
@@ -166,14 +251,21 @@ using FormatProbe = FormatSignature (*)(const ProbeInput&);
 class FormatRegistry {
   public:
     // InvalidArgument when the descriptor is not usable: an empty or non-slug id,
-    // an empty human name or parser version, no probe, or a format that can
-    // neither import nor export. AlreadyExists when the id is taken - two parsers
-    // answering to one name is a programming error, not a preference.
-    katana::core::Status add(FormatDescriptor descriptor, FormatProbe probe);
+    // an empty human name or parser version, no probe, a format that can
+    // neither import nor export, or a reader for a format that cannot import.
+    // AlreadyExists when the id is taken - two parsers answering to one name is
+    // a programming error, not a preference. `reader` may be null: a format
+    // can be detected without being readable in one step (see reader.hpp for
+    // the delimited-points format, which is read through its column layout).
+    katana::core::Status add(FormatDescriptor descriptor, FormatProbe probe,
+                             FormatReader formatReader = nullptr);
 
     [[nodiscard]] std::vector<FormatDescriptor> formats() const;
     [[nodiscard]] katana::core::Result<FormatDescriptor> find(std::string_view id) const;
     [[nodiscard]] bool contains(std::string_view id) const;
+    // The reader registered for `id`, or nullptr when there is none (or no
+    // such format).
+    [[nodiscard]] FormatReader reader(std::string_view id) const;
     [[nodiscard]] std::size_t size() const { return formats_.size(); }
     [[nodiscard]] bool empty() const { return formats_.empty(); }
 
@@ -190,6 +282,7 @@ class FormatRegistry {
     struct Entry {
         FormatDescriptor descriptor;
         FormatProbe probe = nullptr;
+        FormatReader reader = nullptr;
     };
     std::map<std::string, Entry, std::less<>> formats_;
 };
@@ -230,7 +323,16 @@ class FormatRegistry {
 //         return format;
 //     }
 //
-//     const katana::surveyio::FormatRegistration kRegistration{descriptor(), &probeGsi};
+//     katana::core::Result<katana::surveyio::ReadResult>
+//     readGsi(std::string_view bytes, std::string_view fileName,
+//             const katana::surveyio::ReadOptions& options)
+//     {
+//         ... stream over `bytes` with std::from_chars; a bad record is a
+//         ReadWarning naming it, never a dropped value ...
+//     }
+//
+//     const katana::surveyio::FormatRegistration kRegistration{descriptor(), &probeGsi,
+//                                                              &readGsi};
 //
 //     } // namespace
 //
@@ -254,7 +356,8 @@ class FormatRegistration {
     // and a format that silently failed to register would show up as "this file
     // is not recognised" months later - the silent failure PLAN.MD section 36
     // forbids. Failing at start-up with the reason is the loud alternative.
-    FormatRegistration(FormatDescriptor descriptor, FormatProbe probe);
+    FormatRegistration(FormatDescriptor descriptor, FormatProbe probe,
+                       FormatReader reader = nullptr);
 
     FormatRegistration(const FormatRegistration&) = delete;
     FormatRegistration& operator=(const FormatRegistration&) = delete;

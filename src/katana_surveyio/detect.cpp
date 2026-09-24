@@ -120,7 +120,8 @@ std::string describeFormat(const FormatDescriptor& descriptor)
 
 // ---- FormatRegistry --------------------------------------------------------------
 
-Status FormatRegistry::add(FormatDescriptor descriptor, FormatProbe probe)
+Status FormatRegistry::add(FormatDescriptor descriptor, FormatProbe probe,
+                           FormatReader formatReader)
 {
     if (std::string reason = idProblem(descriptor.id); !reason.empty()) {
         return makeError(ErrorCode::InvalidArgument, std::move(reason), descriptor.humanName);
@@ -144,6 +145,12 @@ Status FormatRegistry::add(FormatDescriptor descriptor, FormatProbe probe)
         return makeError(ErrorCode::InvalidArgument, "format '" + descriptor.id +
                                                          "' can neither import nor export");
     }
+    if (formatReader != nullptr && !descriptor.canImport) {
+        // A reader for a format that says it cannot be imported: one of the two
+        // is wrong, and the application would disagree with itself about it.
+        return makeError(ErrorCode::InvalidArgument,
+                         "format '" + descriptor.id + "' has a reader but says it cannot import");
+    }
     for (const std::string& extension : descriptor.extensions) {
         const bool usable =
             !extension.empty() && extension.front() != '.' &&
@@ -164,7 +171,7 @@ Status FormatRegistry::add(FormatDescriptor descriptor, FormatProbe probe)
     // The id is copied before the descriptor is moved from: the order in which a
     // call's arguments are evaluated is unspecified.
     std::string id = descriptor.id;
-    formats_.emplace(std::move(id), Entry{std::move(descriptor), probe});
+    formats_.emplace(std::move(id), Entry{std::move(descriptor), probe, formatReader});
     return {};
 }
 
@@ -193,6 +200,12 @@ bool FormatRegistry::contains(std::string_view id) const
     return formats_.contains(id);
 }
 
+FormatReader FormatRegistry::reader(std::string_view id) const
+{
+    const auto found = formats_.find(id);
+    return found == formats_.end() ? nullptr : found->second.reader;
+}
+
 std::vector<FormatRegistry::ProbeResult> FormatRegistry::probeAll(const ProbeInput& input) const
 {
     std::vector<ProbeResult> results;
@@ -209,10 +222,11 @@ FormatRegistry& formatRegistry()
     return registry;
 }
 
-FormatRegistration::FormatRegistration(FormatDescriptor descriptor, FormatProbe probe)
+FormatRegistration::FormatRegistration(FormatDescriptor descriptor, FormatProbe probe,
+                                       FormatReader reader)
 {
     const std::string id = descriptor.id;
-    if (Status status = formatRegistry().add(std::move(descriptor), probe); !status.ok()) {
+    if (Status status = formatRegistry().add(std::move(descriptor), probe, reader); !status.ok()) {
         throw std::logic_error("surveyio: format '" + id +
                                "' could not be registered: " + status.error().describe());
     }
