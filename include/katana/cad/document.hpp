@@ -29,6 +29,10 @@
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/storage/project_store.hpp"
 
+namespace katana::cad::plotting {
+struct SheetSet;
+}
+
 namespace katana::cad {
 
 // What one Document notification is about.
@@ -265,6 +269,23 @@ class Document {
     [[nodiscard]] const katana::storage::ProjectMetadata& metadata() const { return metadata_; }
     void setMetadata(katana::storage::ProjectMetadata metadata);
 
+    // ---- sheets (docs/plotting.md) -------------------------------------------
+    //
+    // The project's sheet set, kept as versioned JSON under the metadata key
+    // "sheets" - the storage layer carries it as a key it does not read, so a
+    // project gains sheets with no schema change - and parsed once per
+    // change. An empty set when the project has none, or when its sheets
+    // cannot be read; sheetSetStatus() then says why, and setSheetSet refuses
+    // to overwrite sheets a newer Katana wrote.
+    [[nodiscard]] const plotting::SheetSet& sheetSet() const;
+    [[nodiscard]] katana::core::Status sheetSetStatus() const;
+    // Replaces the sheet set as ONE undoable step named `stepName`; every
+    // sheet edit (include/katana/cad/plotting/sheet_commands.hpp) is one.
+    // Undo returns the exact set before it, and a save in between keeps
+    // isModified() honest the way any other command does.
+    [[nodiscard]] katana::core::Status setSheetSet(const plotting::SheetSet& sheets,
+                                                   std::string stepName = "SET_SHEETS");
+
     // Called after anything observable changed: model, selection, current
     // layer, project. Listeners must not mutate the document re-entrantly.
     // The registration lasts as long as the handle does - keep it as a member
@@ -327,6 +348,11 @@ class Document {
     std::string currentStyle_{};
     std::shared_ptr<ListenerHandle::Registry> listeners_;
     bool metadataModified_ = false;
+    // The parsed sheet set and the JSON it was parsed from (sheet_store.cpp).
+    // Never changed once made: an undo step shares it, so undo and redo swap
+    // a pointer instead of parsing the set again.
+    struct SheetCache;
+    mutable std::shared_ptr<const SheetCache> sheetCache_;
 };
 
 } // namespace katana::cad
