@@ -575,6 +575,11 @@ class JobXmlReader {
     std::vector<survey::UnpositionedPoint> named_;
     ById<PointSlot> points_;
     std::size_t lastSetupShots_ = 0; // observations on the previous setup, a capacity hint
+    PointSlot* touched_ = nullptr;    // the slot the point record being read named or positioned
+    std::string lastStationId_;       // the setup and target the previous shot named
+    StationState* lastStation_ = nullptr;
+    std::string lastTargetId_;
+    const TargetRecord* lastTarget_ = nullptr;
 
     // What was not read, for the warnings at the end.
     std::map<std::string, std::size_t, std::less<>> skippedKinds_;
@@ -1156,10 +1161,16 @@ void JobXmlReader::readPointRecord(std::string_view id, RecordBuffer& record)
     const std::string_view name = trimmed(record.take("Name").value_or(std::string_view{}));
     const PointSlot* slot = slotOf(name);
     const bool fresh = slot == nullptr || !slot->described;
+    touched_ = nullptr;
     readPointRecordBody(id, record, fresh);
     if (fresh && !name.empty()) {
-        if (PointSlot* after = slotOf(name)) {
-            const std::map<std::string, std::string>* metadata = metadataOf(name);
+        // The body leaves the slot it named or positioned in touched_, so it
+        // is not looked up again; a record it refused may leave none.
+        if (PointSlot* after = touched_ != nullptr ? touched_ : slotOf(name)) {
+            const std::map<std::string, std::string>* metadata =
+                after->positioned != kNone ? &positioned_[after->positioned].metadata
+                : after->named != kNone    ? &named_[after->named].metadata
+                                           : nullptr;
             after->described = metadata != nullptr && metadata->contains("jxl.method");
         }
     }
@@ -1263,6 +1274,7 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
     // the code, description and metadata of this record where it has none.
     auto describeNamed = [&]() {
         PointSlot& slot = slotFor(name);
+        touched_ = &slot;
         if (slot.positioned == kNone && slot.named == kNone) {
             slot.named = named_.size();
             survey::UnpositionedPoint& added = named_.emplace_back();
@@ -1309,7 +1321,8 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
                                          : survey::CoordinateSource::Calculated;
             const bool control = classification == "Control";
             addPositioned(std::move(point), control, id);
-            if (control && slotFor(name).control &&
+            touched_ = &slotFor(name);
+            if (control && touched_->control &&
                 std::none_of(result_.project.controlPoints.begin(),
                              result_.project.controlPoints.end(),
                              [&](const survey::ControlPoint& c) { return c.pointId == name; })) {
@@ -1326,15 +1339,24 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
     // ---- Terrestrial observation.
     if (record.has("Circle")) {
         describeNamed();
+        // Shots come in runs from one setup to one kind of target, so the
+        // last setup and target found are kept and a shot naming the same
+        // ones skips the look-up. The pointers stay good: the maps are
+        // node-based, and a later record with the same ID replaces the value
+        // in the same node.
         const std::string_view stationId = view("StationID");
-        const auto stationFound = stations_.find(stationId);
-        if (stationFound == stations_.end()) {
-            warn(line, "observation to " + name + " names setup record " + std::string(stationId) +
-                           ", which is not in the file; it was not read");
-            record.markAllUsed();
-            return;
+        if (lastStation_ == nullptr || !detail::sameText(lastStationId_, stationId)) {
+            const auto stationFound = stations_.find(stationId);
+            if (stationFound == stations_.end()) {
+                warn(line, "observation to " + name + " names setup record " +
+                               std::string(stationId) + ", which is not in the file; it was not read");
+                record.markAllUsed();
+                return;
+            }
+            lastStationId_.assign(stationId);
+            lastStation_ = &stationFound->second;
         }
-        StationState& state = stationFound->second;
+        StationState& state = *lastStation_;
         survey::SurveyStation& station = result_.project.stations[state.index];
         const std::string& at = station.setup.pointId;
         if (name == at) {
@@ -1345,9 +1367,12 @@ void JobXmlReader::readPointRecordBody(std::string_view id, RecordBuffer& record
         (void)record.take("BackBearingID"); // the setup's orientation, already on the station
 
         const std::string_view targetId = view("TargetID");
-        const auto targetFound = targets_.find(targetId);
-        const TargetRecord* target =
-            targetFound == targets_.end() ? nullptr : &targetFound->second;
+        if (lastTarget_ == nullptr || !detail::sameText(lastTargetId_, targetId)) {
+            const auto targetFound = targets_.find(targetId);
+            lastTarget_ = targetFound == targets_.end() ? nullptr : &targetFound->second;
+            lastTargetId_.assign(targetId);
+        }
+        const TargetRecord* target = lastTarget_;
         if (target == nullptr && !targetId.empty()) {
             warn(line, "observation to " + name + " names target record " + std::string(targetId) +
                            ", which is not in the file; target height 0 was used");
