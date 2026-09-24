@@ -13,6 +13,13 @@
 //
 // The camera is the HOST's (a ViewState's, like RenderViewWidget's), held by
 // reference: switching between this view and the software one keeps the view.
+// Two things make that true. The widget leaves the camera in LOGICAL pixels,
+// as RenderViewWidget keeps it, and draws each frame through a copy sized to
+// the device pixels it draws - so the software view taking over after a
+// failure finds a camera its rasteriser accepts. And it frames the scene on
+// its first frame only when the host has not said the camera is framed
+// already (setCameraFramed, fed from ViewState::cameraFramed) - so a view
+// rebuilt over a ViewState keeps the user's orbit and zoom.
 //
 // No Q_OBJECT (Katana has no moc): QRhiWidget's renderFailed signal is
 // connected to a lambda, and what the host needs to hear comes out through
@@ -60,8 +67,20 @@ class GpuSceneView final : public QRhiWidget {
     void setOrbitAllowed(bool allowed) { orbitAllowed_ = allowed; }
 
     // Frames the scene: onZoomExtents when the host set it (the host knows
-    // what "the scene" is), otherwise the packed draw list's bounds.
+    // what "the scene" is), otherwise the packed draw list's bounds - and
+    // nothing, for now, when that list is empty.
     void zoomExtents();
+
+    // Whether the camera already frames the scene, so the first frame must
+    // leave it alone: the host passes ViewState::cameraFramed (for a state
+    // whose cameraKind matches its kind, as RenderViewWidget checks) before
+    // the widget first draws. False, the default, frames on the first frame.
+    void setCameraFramed(bool framed);
+    // True once the camera frames something drawn - framed by this widget,
+    // or said to be by the host - for the host to write back into
+    // ViewState::cameraFramed. A frame of an empty scene does not count: the
+    // first draw list with something in it is framed again.
+    [[nodiscard]] bool cameraFramed() const { return framed_ && !framedEmpty_; }
 
     // True once the widget has failed to render; the host should swap in the
     // software view (chooseRenderer's rule 4).
@@ -69,7 +88,9 @@ class GpuSceneView final : public QRhiWidget {
     [[nodiscard]] const GpuFrameStats& lastStats() const { return stats_; }
 
     // Raised once, the first time rendering fails (QRhiWidget::renderFailed,
-    // a pipeline that does not build, a backend other than Direct3D 11).
+    // a pipeline that does not build, a backend other than Direct3D 11). The
+    // camera is in the widget's logical pixels then, as the software view
+    // wants it; a software view of a different size must still set its own.
     std::function<void(const QString& reason)> onRenderFailed;
     // Raised when the view is clicked, so a workspace can make it active.
     std::function<void()> onActivated;
@@ -89,11 +110,15 @@ class GpuSceneView final : public QRhiWidget {
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
   private:
     void fail(const QString& reason);
     // zoomExtents() without asking for a repaint, for the first frame.
     void frameScene();
+    // The host's camera in this widget's logical pixels, as RenderViewWidget
+    // keeps it: what the mouse moves it by, and what the software view needs.
+    void keepCameraLogical();
     // Device pixels per logical pixel of the colour buffer actually drawn.
     [[nodiscard]] double pixelRatio() const;
 
@@ -102,7 +127,13 @@ class GpuSceneView final : public QRhiWidget {
     FrameSettings settings_;
     GpuFrameStats stats_;
     bool failed_ = false;
+    // The first frame frames the scene unless this is set: by a frame of
+    // something, by the host (setCameraFramed), or by the host's framing hook.
     bool framed_ = false;
+    // The last framing was of an empty draw list (the host's hook framed
+    // whatever it frames for nothing): the first list with something in it
+    // clears framed_, so that it is framed in its turn.
+    bool framedEmpty_ = false;
     bool orbitAllowed_ = true;
 
     // Our own render target (setAutoRenderTarget(false)): the widget's colour
