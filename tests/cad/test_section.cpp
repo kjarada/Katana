@@ -14,6 +14,8 @@
 #include <cmath>
 
 #include "katana/cad/section.hpp"
+#include "katana/cad/spatial_query.hpp"
+#include "katana/geometry/spatial_index.hpp"
 
 using katana::cad::extractSection;
 using katana::cad::SampleReason;
@@ -545,3 +547,115 @@ TEST(CadSection, ADesignProfileRejectsAnEmptyNameAndAnEmptySection)
     EXPECT_EQ(section.surfaces.size(), 1u) << "a refused append changes nothing";
 }
 
+
+// ---- the crossing search: box rejection and the document's index -----------------------
+
+namespace {
+
+// Every entity's broad-phase box, as Document::rebuildSpatialIndex stores it.
+katana::geometry::SpatialIndex indexOf(const katana::entity::Model& model)
+{
+    std::vector<katana::geometry::SpatialEntry> entries;
+    model.entities.forEach([&](const katana::entity::Entity& entity) {
+        entries.push_back({static_cast<katana::geometry::SpatialId>(entity.id),
+                           katana::cad::detail::queryExtents(model, entity)});
+    });
+    katana::geometry::SpatialIndex index;
+    index.rebuild(entries);
+    return index;
+}
+
+katana::entity::EntityId addOn(katana::entity::Model& model, katana::entity::Geometry geometry)
+{
+    katana::entity::Entity entity;
+    entity.geometry = std::move(geometry);
+    entity.layer = "0";
+    const auto added = model.entities.add(entity);
+    EXPECT_TRUE(added.ok());
+    return added.ok() ? added.value() : katana::entity::kInvalidEntityId;
+}
+
+} // namespace
+
+TEST(CadSection, CrossingsAreTheSameWithTheDocumentsIndexAsWithoutIt)
+{
+    // An L-shaped alignment: (0, 50) east to (100, 50), then north to
+    // (100, 100). Station s on the first leg is at x = s; on the second leg
+    // station 100 + d is at y = 50 + d.
+    //
+    // Expected crossings, worked by hand:
+    //   fence   x = 30 from y 20 to 80        -> station 30
+    //   post    x = 40 from y 50 (touching) to 90 -> station 40
+    //   string  polyline (60,0) (60,40) (60,60) -> its second edge, station 60
+    //   manhole circle centre (70,50) r 5      -> stations 65 and 75
+    //   kerb    y = 80 from x 90 to 110        -> second leg at y 80: 100 + 30 = 130
+    // plus 2000 short strings scattered over y in [200, 900], none of which
+    // reaches the alignment (it never goes above y = 100).
+    katana::entity::Model model;
+    ASSERT_TRUE(model.layers.ensure("0").ok());
+    const auto fence = addOn(model, katana::geometry::Segment2{Point2(30, 20), Point2(30, 80)});
+    const auto post = addOn(model, katana::geometry::Segment2{Point2(40, 50), Point2(40, 90)});
+    const auto string = addOn(model, lineFrom({Point2(60, 0), Point2(60, 40), Point2(60, 60)}));
+    const auto manhole = addOn(model, katana::geometry::Circle2{Point2(70, 50), 5.0});
+    const auto kerb = addOn(model, katana::geometry::Segment2{Point2(90, 80), Point2(110, 80)});
+    for (int i = 0; i < 2000; ++i) {
+        // A fixed, spread-out pattern rather than random numbers: the answer
+        // must not depend on a generator.
+        const double x = static_cast<double>((i * 37) % 1000);
+        const double y = 200.0 + static_cast<double>((i * 53) % 700);
+        addOn(model, lineFrom({Point2(x, y), Point2(x + 3.0, y + 2.0), Point2(x + 5.0, y)}));
+    }
+    const katana::geometry::SpatialIndex index = indexOf(model);
+
+    const Polyline2 alignment = lineFrom({Point2(0, 50), Point2(100, 50), Point2(100, 100)});
+    SectionOptions options;
+    options.interval = 10.0;
+    const auto scanned = extractSection(alignment, {}, &model, options);
+    options.spatialIndex = &index;
+    const auto indexed = extractSection(alignment, {}, &model, options);
+    ASSERT_TRUE(scanned.ok()) << scanned.error().describe();
+    ASSERT_TRUE(indexed.ok()) << indexed.error().describe();
+
+    const std::vector<std::pair<double, katana::entity::EntityId>> expected = {
+        {30.0, fence}, {40.0, post}, {60.0, string}, {65.0, manhole}, {75.0, manhole},
+        {130.0, kerb}};
+    for (const auto* section : {&scanned.value(), &indexed.value()}) {
+        ASSERT_EQ(section->crossings.size(), expected.size());
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            EXPECT_NEAR(section->crossings[i].station, expected[i].first, 1e-9) << i;
+            EXPECT_EQ(section->crossings[i].entity, expected[i].second) << i;
+        }
+    }
+    // Not merely close: the same crossings, bit for bit, in the same order.
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(scanned->crossings[i].station, indexed->crossings[i].station) << i;
+        EXPECT_EQ(scanned->crossings[i].plan, indexed->crossings[i].plan) << i;
+    }
+}
+
+TEST(CadSection, ACrossingWithinToleranceOfTheAlignmentSurvivesTheBoxTest)
+{
+    // A fence that stops 5e-8 short of the alignment y = 50. intersect()
+    // accepts a crossing within kGeometric (1e-7) of both segments, so this
+    // one is reported at x = 20 - but the fence's exact box ends below the
+    // alignment's, and a box test without a margin would have thrown it away
+    // before intersect() was ever asked.
+    katana::entity::Model model;
+    ASSERT_TRUE(model.layers.ensure("0").ok());
+    const auto fence =
+        addOn(model, katana::geometry::Segment2{Point2(20, 10), Point2(20, 50.0 - 5e-8)});
+    const katana::geometry::SpatialIndex index = indexOf(model);
+
+    for (const katana::geometry::SpatialIndex* withIndex :
+         {static_cast<const katana::geometry::SpatialIndex*>(nullptr), &index}) {
+        SectionOptions options;
+        options.interval = 10.0;
+        options.spatialIndex = withIndex;
+        const auto section =
+            extractSection(lineFrom({Point2(0, 50), Point2(100, 50)}), {}, &model, options);
+        ASSERT_TRUE(section.ok()) << section.error().describe();
+        ASSERT_EQ(section->crossings.size(), 1u);
+        EXPECT_EQ(section->crossings[0].entity, fence);
+        EXPECT_NEAR(section->crossings[0].station, 20.0, 1e-9);
+    }
+}
