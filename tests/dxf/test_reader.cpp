@@ -519,3 +519,87 @@ TEST(DxfReaderLayers, LayerNamesAreMatchedWithoutRegardToLetterCase)
     ASSERT_EQ(imported->layers.size(), 1u);
     EXPECT_EQ(imported->entities.front().layer, "Kerb");
 }
+
+// ---- blocks ------------------------------------------------------------------------
+
+TEST(DxfReaderBlocks, ANestedBlockIsPlacedThroughBothInsertsAndInheritsThroughBoth)
+{
+    // INNER: a line (0,0)-(1,0) on layer 0, colour ByBlock. OUTER: INNER
+    // inserted at (10,0) turned 90 degrees, on layer 0, ByBlock. The drawing:
+    // OUTER at (100,100), twice the size, on SITE in red.
+    // INNER in OUTER: (0,0)-(0,1), moved to (10,0)-(10,1). OUTER placed:
+    // (20,0)-(20,2), moved to (120,100)-(120,102). Layer 0 under layer 0
+    // under SITE is SITE; ByBlock under ByBlock under red is red.
+    const std::string text = "  0\nSECTION\n  2\nBLOCKS\n"
+                             "  0\nBLOCK\n  2\nINNER\n 10\n0\n 20\n0\n"
+                             "  0\nLINE\n  8\n0\n 62\n0\n 10\n0\n 20\n0\n 11\n1\n 21\n0\n"
+                             "  0\nENDBLK\n"
+                             "  0\nBLOCK\n  2\nOUTER\n 10\n0\n 20\n0\n"
+                             "  0\nINSERT\n  8\n0\n 62\n0\n  2\nINNER\n 10\n10\n 20\n0\n 50\n90\n"
+                             "  0\nENDBLK\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nINSERT\n  8\nSITE\n 62\n1\n  2\nOUTER\n 10\n100\n 20\n100\n"
+                             " 41\n2\n 42\n2\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 1u);
+    const Entity& line = imported->entities[0];
+    const Segment2& segment = std::get<Segment2>(line.geometry);
+    EXPECT_NEAR(segment.start.x, 120.0, 1e-12);
+    EXPECT_NEAR(segment.start.y, 100.0, 1e-12);
+    EXPECT_NEAR(segment.end.x, 120.0, 1e-12);
+    EXPECT_NEAR(segment.end.y, 102.0, 1e-12);
+    EXPECT_EQ(line.layer, "SITE");
+    EXPECT_EQ(line.color, rgb(255, 0, 0));
+    EXPECT_EQ(katana::entity::toString(line.metadata.at(std::string(dxf::kMetaBlock))),
+              "OUTER/INNER");
+}
+
+TEST(DxfReaderBlocks, AnArrayInsertPlacesEveryCopy)
+{
+    // Two columns 10 apart, three rows 5 apart: points at x 0 and 10, y 0, 5, 10.
+    const std::string text = "  0\nSECTION\n  2\nBLOCKS\n"
+                             "  0\nBLOCK\n  2\nDOT\n 10\n0\n 20\n0\n"
+                             "  0\nPOINT\n 10\n0\n 20\n0\n"
+                             "  0\nENDBLK\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nINSERT\n  2\nDOT\n 10\n0\n 20\n0\n 70\n2\n 71\n3\n 44\n10\n 45\n5\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 6u);
+    std::vector<Point2> points;
+    for (const Entity& entity : imported->entities) {
+        points.push_back(std::get<PointGeometry>(entity.geometry).position);
+    }
+    for (const Point2& expected : {Point2(0.0, 0.0), Point2(10.0, 0.0), Point2(0.0, 5.0),
+                                   Point2(10.0, 5.0), Point2(0.0, 10.0), Point2(10.0, 10.0)}) {
+        EXPECT_NE(std::find(points.begin(), points.end(), expected), points.end())
+            << expected.x << "," << expected.y;
+    }
+}
+
+TEST(DxfReaderBlocks, ACircleInABlockScaledUnevenlyIsTheEllipseItDraws)
+{
+    // A unit circle inserted twice as wide as it is high: the ellipse
+    // (x/2)^2 + y^2 = 1, chorded. The chords are worked in the block's own
+    // units at the tolerance over the largest scale, 0.0005 on radius 1: a
+    // step of 2 acos(0.9995) = 0.06325, so 2 pi needs ceil(99.3) = 100.
+    const std::string text = "  0\nSECTION\n  2\nBLOCKS\n"
+                             "  0\nBLOCK\n  2\nRING\n 10\n0\n 20\n0\n"
+                             "  0\nCIRCLE\n 10\n0\n 20\n0\n 40\n1\n"
+                             "  0\nENDBLK\n  0\nENDSEC\n"
+                             "  0\nSECTION\n  2\nENTITIES\n"
+                             "  0\nINSERT\n  2\nRING\n 10\n0\n 20\n0\n 41\n2\n 42\n1\n"
+                             "  0\nENDSEC\n  0\nEOF\n";
+    const auto imported = dxf::readDxf(text);
+    ASSERT_TRUE(imported.ok());
+    ASSERT_EQ(imported->entities.size(), 1u);
+    const Polyline2& ellipse = std::get<Polyline2>(imported->entities[0].geometry);
+    EXPECT_TRUE(ellipse.closed);
+    ASSERT_EQ(ellipse.vertices.size(), 100u);
+    for (const Point2& vertex : ellipse.vertices) {
+        EXPECT_NEAR((vertex.x / 2.0) * (vertex.x / 2.0) + vertex.y * vertex.y, 1.0, 1e-12);
+    }
+}
