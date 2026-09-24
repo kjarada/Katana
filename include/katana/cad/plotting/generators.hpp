@@ -135,8 +135,8 @@ struct LayoutRequest {
 //   - a plan along an alignment with its long section: plan-and-profile
 //     sheets, the plan above (MainBelow) and the long section of the same
 //     chainages below at the same horizontal scale;
-//   - a plan of an area: one sheet at the fitted scale ("auto"), or tiles at
-//     a fixed scale too coarse for one sheet;
+//   - a plan of an area: one sheet at the fitted scale ("auto"), or at a
+//     fixed scale, tiles when the area does not fit one sheet at it;
 //   - the 3D snapshot and legend beside a lone plan (MainRight, MainTwoRight),
 //     or on a sheet of their own when the first sheet is full;
 //   - cross sections on sheets of their own after the rest.
