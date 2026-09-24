@@ -496,6 +496,7 @@ any `#pragma omp` other than `omp simd`.
 | UTF-8 validation | `isValidUtf8`, for texts of 64 bytes or more | 32 bytes: three nibble-table lookups (VPSHUFB) on each byte and the one before it, two saturating subtractions for leads two and three back, one XOR; a 64-byte step of pure ASCII is one OR and one movemask | main's byte loop, unchanged |
 | `geometry::transformPoints` (Mat4 with Vec3, Mat3 with Point2, in place) | the batch API | 4 points: 3 loads, 6 permutes or blends, 9 multiplies and 9 adds, 6 permutes back (2D: no transpose) | `math::transformPoint` on each point |
 | `geometry::boundsOf` (Point2, Vec3) | `Polyline2::boundingBox`, `TriangleMesh::bounds`, for 16 points or more | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
+| `geometry::projectToPixels` (float offsets to pixels) | the plan view's cloud splat, 512 points a call, from 4 points | 4 points: two float-to-double widenings, 2 subtractions, 2 multiplies, an add and a subtraction, 4 range compares, 2 truncating conversions blended with "no pixel" | the loop in `point_splat.cpp`; see "Point clouds in the plan view" below |
 
 Both text kernels are on the real import path. The interop archive import
 decodes the file and then calls `readArchive`, which validates the whole
@@ -665,3 +666,109 @@ is 4-6x faster than main.
 - **Surfacing the level.** A command-line or About line saying which level
   is in force would let a person see it; today only `simdSelection()` and a
   refused override's stderr line do.
+
+## Point clouds in the plan view (2026-09-24)
+
+The plan view draws a cloud by writing pixels into an image, which is then
+composited over the drawing. Before this change the splat read x and y from
+the stored 40-byte point structs, one point after another, and allocated and
+filled a new window-sized image for each cloud on every frame. It now draws
+from a display copy (`geometry/point_splat.hpp`, `point_splat.cpp`), and the
+stored cloud is not changed.
+
+- **The display copy.** Float offsets from a double origin in the middle of
+  the cloud, as structure-of-arrays: x, y and colour, 12 bytes a point. It is
+  built on the first frame that shows a layer in a colour mode, and kept in
+  `PlanPaintCache`. A 20-million-point cloud costs 240 MB more for it. The
+  copy is built in fixed chunks across the task pool, and what each chunk
+  finds is combined in chunk order, so it is the same at every thread count.
+- **Tiles.** The copy is a grid of tiles of about 1,024 points each. A frame
+  projects the bounds of each tile and skips any tile that cannot reach the
+  image. The projection is monotone, so this is exact, not a guess.
+- **Bands.** The image's rows are split into one band per pool thread, and a
+  band writes only its own rows.
+- **The AVX2 kernel** (`simd/splat_avx2.cpp`) projects 4 points a step. Each
+  float offset is widened to double exactly, and the arithmetic is then the
+  scalar loop's, in the same order, never fused. Points go through it 512 at
+  a time into a buffer on the stack, and the scatter reads them from there.
+  It is used from 4 points: with it allowed from 1 point,
+  `BM_ProjectToPixels` gave 0.21 ms against the loop's 0.23 for 65,536
+  points in calls of 4, 0.14 against 0.18 in calls of 8, and 0.06 against
+  0.15 on the splat's 512-point blocks, with an A/A spread of 0-0.01 ms.
+- **The layer image** is kept between frames and reallocated only when the
+  view is resized. Only the rows the cloud can reach are cleared, drawn and
+  composited.
+- **A point budget.** `PlanPaintOptions::cloudPointBudget` defaults to
+  `kSplatPointBudget`, 4 million points. When more points than that lie in
+  tiles on the view, each tile draws the same share of its points. Within a
+  tile the points are ordered coarse to fine: the first point in each cell of
+  a 1x1 grid, then 2x2, then 4x4 and so on, then the rest. So a tile's share
+  is spread over the whole tile rather than clumped. 4 million is 2.5 points
+  per pixel on a 1600 x 1000 view. At that budget a 20-million-point frame
+  costs about what a 4-million-point one does. `PlanPaintStats` reports the
+  points in view and the points drawn.
+
+**Which point wins a pixel (Rule 7).** Where points overlap, the one later in
+the display copy is on top. That order is tile by tile, finer levels over
+coarser within a tile, and within a level the file's order. Each band visits
+points in that order, so every pixel sees the same sequence of writes at
+every thread count. The splat's image is the same at 1, 2, 3 and 16 threads
+and at both SIMD levels (`SplatCloud.TheImageIsTheSameAtEveryThreadCountAndSimdLevel`,
+`PlanPainterCloud.AFrameIsTheSameAtBothSimdLevels`).
+
+**What changes against the old all-double splat:**
+
+- *Position.* Storing an offset as a float moves it by at most half a
+  float's spacing. For a 1.5 km cloud that is 0.03 mm. A point changes pixel
+  only when it lies that close to a pixel edge, and then by one pixel. On
+  300,000 points at a 1.9 m pixel, 3 of 200,639 lit pixels differed. The test
+  (`PlanPainterCloud.FloatOffsetsMoveAFewPointsOnPixelEdgesByOnePixelAndNoneFurther`)
+  requires every difference to be within one pixel of a point the old splat
+  drew, and allows at most 1 in 10,000 lit pixels to differ. A point 1 km
+  from the origin can be off by 0.06 mm. That would show against the
+  linework only when zoomed in past about 10,000 pixels a metre.
+- *Order.* Where two points of different colours fall on one pixel, the old
+  splat showed the later one in the file and the new one shows the later one
+  in the display copy. Coincident points keep the file's order. Points that
+  share a pixel but not a cell of the level grid may swap.
+- *Budget.* Above the budget, fewer points are drawn by design.
+- *Left out.* Points whose x or y is not finite could never be drawn, and
+  are now left out of the copy.
+
+**Measured**, Release, 1600 x 1000, 16 threads (i7-1270P), `bench_plan_cloud.cpp`,
+interleaved with `tools/compare_benchmarks.py --alternate 3` against main's
+painter built from the same benchmark source, with a second copy of each
+binary as the A/A control. The table gives the minimum in ms, and the A/A
+spread is the difference between the two copies.
+
+| benchmark | main, A / A' | now, A / A' | main / now |
+|---|---|---|---|
+| 2M points, extents | 17.44 / 16.36 | 4.66 / 4.66 | 3.5-3.7x |
+| 10M, extents (budget draws 4M) | 58.47 / 66.41 | 7.30 / 7.22 | 8.0-9.2x |
+| 20M, extents (budget draws 4M) | 122.27 / 116.25 | 8.09 / 8.39 | 14-15x |
+| 10M, zoomed in 8x | 126.72 / 109.05 | 3.20 / 3.38 | 32-40x |
+| the owner's LAS archive (178 points, two clouds) | 5.77 / 5.69 | 0.78 / 0.75 | 7.3-7.7x |
+| first frame, 2M | 93.51 / 91.77 | 63.06 / 67.15 | 1.4x |
+| first frame, 20M | 918.21 / 960.40 | 766.30 / 794.79 | 1.2x |
+
+The A/A spread was 1-16% for main and 0-6% now. Main's noisiest rows were
+the zoomed view and 10M. On the small archive, the gain is all in the kept
+image: main allocated and filled two 6.4 MB layers a frame.
+
+**What the kernel alone is worth.** In one binary, with the level forced by
+`KATANA_SIMD`, alternated over 3 rounds, taking the minimum of the medians:
+2M points at extents took 5.04 / 5.20 ms at AVX2 against 5.93 / 7.41 scalar,
+and 10M took 7.76 / 7.90 against 8.24 / 8.29. So the kernel gives 1.06x on
+10M, with an A/A spread of 1-2%, and 1.14-1.47x on 2M, where the scalar
+runs were noisy (25% A/A). The first probe predicted this. Once tiles,
+threads and the budget have done their work, the frame waits on the
+scattered writes, not the arithmetic. The kernel pays 2.5x on the
+projection itself, and that is a small part of the frame.
+
+The first frame builds the display copy. When the copy was built on one
+thread it cost 1.7-2.4x main's first frame (colours only). Parallel chunks,
+colours shared across the pool, and scratch arrays first touched by the
+parallel passes made it 1.2-1.4x faster than main's (table above).
+
+Not done: points in the 3D view (a GPU job), and a budget chosen from the
+machine's measured speed rather than a constant.

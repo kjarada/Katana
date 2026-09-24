@@ -83,8 +83,9 @@ inline constexpr std::size_t kSplatTilePoints = 1024;
 
 // Points projected a frame when more than this many lie in tiles on the image:
 // then each such tile draws the same share of its points, coarse levels first.
-// Measured in docs/performance.md: about what a frame can splat in 25-30 ms,
-// and more points than a 1600 x 1000 view has pixels.
+// Four million is 2.5 points a pixel on a 1600 x 1000 view, and a
+// twenty-million-point cloud at extents then takes about 8 ms a frame on the
+// owner's 16-thread laptop (docs/performance.md).
 inline constexpr std::size_t kSplatPointBudget = 4'000'000;
 
 struct SplatView {

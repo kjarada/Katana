@@ -124,7 +124,7 @@ class LevelScope {
   public:
     explicit LevelScope(SimdLevel level) : previous_(katana::core::activeSimdLevel())
     {
-        ok_ = katana::core::setSimdLevel(level).has_value();
+        ok_ = static_cast<bool>(katana::core::setSimdLevel(level));
     }
     ~LevelScope() { (void)katana::core::setSimdLevel(previous_); }
     LevelScope(const LevelScope&) = delete;
@@ -142,9 +142,10 @@ TEST(PlanPainterCloud, FloatOffsetsMoveAFewPointsOnPixelEdgesByOnePixelAndNoneFu
 {
     // One colour, so which point is on top cannot show: only where each point
     // lands. At this view a pixel is about 1.9 m; the stored offsets are
-    // within 750 m of the origin, where a float's spacing is 2^-14 m, so a
-    // point moves only when it lies within about 0.06 mm of a pixel edge -
-    // about 3 in 100,000 points on each axis.
+    // within 750 m of the origin, where a float's spacing is at most 2^-14 m,
+    // so storing one moves it at most 0.03 mm, 1.6e-5 of a pixel. A point
+    // changes pixel only when it lies that close to a pixel edge, and then by
+    // one pixel.
     katana::interop::ReferenceData reference;
     (void)reference.add(cloudOf(PointColorMode::Flat));
     const PointCloudLayer& cloud = reference.pointClouds().front();
@@ -174,8 +175,9 @@ TEST(PlanPainterCloud, FloatOffsetsMoveAFewPointsOnPixelEdgesByOnePixelAndNoneFu
         }
     }
     EXPECT_GT(lit, 100'000);
-    // Measured: see docs/performance.md. Ten in a hundred thousand is three
-    // times what the float spacing predicts.
+    // Measured: 3 of 200,639 lit pixels. One in ten thousand (20 here) is room
+    // for that, and still fails if the offsets lose precision - stored from a
+    // far origin, or projected in float.
     EXPECT_LE(differing, lit / 10'000) << differing << " of " << lit << " lit pixels differ";
 }
 
