@@ -89,7 +89,11 @@ function(_check_file file layer is_public)
     file(STRINGS "${file}" _lines REGEX "#[ \t]*include")
     file(RELATIVE_PATH _rel "${KATANA_ROOT}" "${file}")
     foreach(_line IN LISTS _lines)
-        if(_line MATCHES "#[ \t]*include[ \t]*\"katana/([a-z_]+)/")
+        # Digits included: a module name may carry them (archive12d), and a
+        # pattern of letters alone matched nothing at all for such a name, so
+        # `cad` including "katana/archive12d/..." - which the table above
+        # forbids - passed unseen.
+        if(_line MATCHES "#[ \t]*include[ \t]*\"katana/([a-z0-9_]+)/")
             set(_dep "${CMAKE_MATCH_1}")
             if(NOT _dep STREQUAL layer)
                 list(FIND KATANA_ALLOWED_${layer} "${_dep}" _index)

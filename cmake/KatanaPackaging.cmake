@@ -39,11 +39,26 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
 # src/katana_archive12d/CMakeLists.txt and tools/embed_customisation.py), so
 # there is nothing to install beside it: its linestyles, symbols and survey
 # codes travel inside the executable and need no files at run time.
+#
+# Its SOURCES are a different matter and must never be installed. The folders
+# it is compiled from (resources/customisation, and the reference files under
+# docs/) are third-party material kept untracked on the owner's machine: they
+# are inputs to the build, not part of the product, and a bundle is something
+# that gets handed to other people. No install rule here takes anything from
+# resources/ or docs/; the test packaging_installs_only_present_first_party_files
+# (tools/check_install_rules.cmake) fails if one ever does.
 
-install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION .)
-if(EXISTS "${PROJECT_SOURCE_DIR}/LICENSE")
-    install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION .)
-endif()
+# Only files that exist. An install rule naming a missing file is not skipped:
+# `cmake --install` stops at it, after the programs are copied and before the
+# runtime DLLs are, and leaves a tree that does not start. A top-level file
+# this used to install unconditionally was deleted from the repository, and
+# every bundle and package failed that way until the rule was made
+# conditional. The same test fails on a rule that names a missing file.
+foreach(_katana_top_level_file LICENSE)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/${_katana_top_level_file}")
+        install(FILES "${PROJECT_SOURCE_DIR}/${_katana_top_level_file}" DESTINATION .)
+    endif()
+endforeach()
 
 # --- runtime dependencies ------------------------------------------------------
 #
