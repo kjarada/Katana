@@ -88,6 +88,11 @@ struct FaceTolerances {
     double horizontal = 4.84813681109536e-05; // radians: 10" = 10 * pi / 648000
     double zenith = 9.69627362219072e-05;     // radians: 20"
     double distance = 0.005;                  // metres
+    // Off: a pair outside a tolerance is used, flagged in the report and
+    // warned about. On: it is excluded, both faces, and the report says why.
+    // Off by default for the reason auto-reject is: throwing a measurement
+    // away is the person's decision.
+    bool excludeOutside = false;
 
     friend bool operator==(const FaceTolerances&, const FaceTolerances&) = default;
 };
