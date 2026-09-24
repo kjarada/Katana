@@ -1311,10 +1311,17 @@ void seedGnss(Engine& engine, const Observation& observation, std::size_t rowInd
         sigmaVertical = position->sigmaElevation;
     } else if (const auto* global = std::get_if<GnssGlobalPositionObservation>(&observation)) {
         pointId = global->point;
+        // The form the file gave, through the matching conversion; failing
+        // that, the other form on the GRS80 ellipsoid (the one GNSS frames
+        // use) through the other conversion.
         if (global->geocentric && context.geocentricToGrid) {
             grid = context.geocentricToGrid(*global->geocentric);
         } else if (global->geodetic && context.geodeticToGrid) {
             grid = context.geodeticToGrid(*global->geodetic);
+        } else if (global->geodetic && context.geocentricToGrid) {
+            grid = context.geocentricToGrid(geocentricFromGeodetic(*global->geodetic));
+        } else if (global->geocentric && context.geodeticToGrid) {
+            grid = context.geodeticToGrid(geodeticFromGeocentric(*global->geocentric));
         }
         if (!grid) {
             engine.warn("GNSS position of " + global->point +
@@ -1522,19 +1529,29 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
             reduceSetup(engine, s, shots, byPointing);
         }
     }
-    // Observations belonging to no setup, and GNSS positions.
-    for (const Observation& observation : raw.observations) {
-        recordLoose(engine, observation, static_cast<std::size_t>(-1), {});
-        seedGnss(engine, observation, engine.report.observations.size() - 1);
+    // Observations belonging to no setup, GNSS positions, and GNSS vectors in
+    // grid terms.
+    {
+        std::vector<std::size_t> looseRows;
+        looseRows.reserve(raw.observations.size());
+        for (const Observation& observation : raw.observations) {
+            recordLoose(engine, observation, static_cast<std::size_t>(-1), {});
+            looseRows.push_back(engine.report.observations.size() - 1);
+            seedGnss(engine, observation, looseRows.back());
+        }
+        convertGnssVectors(engine, looseRows);
     }
 
-    // Phase B: setups in file order as their stations become known; a setup
-    // whose point nothing positions falls back to the file's own coordinates
-    // for that point, and the report says so.
+    // Phase B: setups in file order as their stations become known, and GNSS
+    // vectors as their bases do (a setup may stand on an RTK point, a vector
+    // may start at a point a setup radiated); a setup whose point nothing
+    // positions falls back to the file's own coordinates for that point, and
+    // the report says so.
     std::vector<bool> done(raw.stations.size(), false);
     std::size_t remaining = raw.stations.size();
+    radiateGnssVectors(engine);
     while (remaining > 0) {
-        bool progress = false;
+        bool progress = radiateGnssVectors(engine);
         for (std::size_t s = 0; s < raw.stations.size(); ++s) {
             if (done[s] || !engine.find(raw.stations[s].setup.pointId)) {
                 continue;
@@ -1581,6 +1598,7 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
             break;
         }
     }
+    radiateGnssVectors(engine);
 
     engine.flushSetupNotices();
 
