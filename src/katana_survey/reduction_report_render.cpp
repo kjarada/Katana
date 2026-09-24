@@ -111,11 +111,28 @@ std::string sourceText(const SourceRecord& source)
     return text;
 }
 
+// A correction's size in the unit a surveyor reads it in: seconds and
+// millimetres for the small ones, degrees-minutes-seconds and metres for an
+// orientation or a slope reduction ("-100 00 01", not "-360001.0\"").
+std::string correctionAmount(double amount, bool angular)
+{
+    if (angular) {
+        if (std::abs(amount) < 60.0 * kPi / 648000.0) {
+            return seconds(amount);
+        }
+        return (amount < 0.0 ? "-" : "+") + dms(std::abs(amount));
+    }
+    if (std::abs(amount) < 1.0) {
+        return millimetres(amount);
+    }
+    return signedFixed(amount, 4) + " m";
+}
+
 std::string correctionText(const AppliedCorrection& correction, bool angular)
 {
     std::string text = toString(correction.kind);
     text += ' ';
-    text += angular ? seconds(correction.amount) : millimetres(correction.amount);
+    text += correctionAmount(correction.amount, angular);
     if (correction.factor) {
         text += " (x" + fixed(*correction.factor, 8) + ")";
     }
@@ -595,7 +612,16 @@ void renderHtmlTable(std::string& out, const Table& table)
         out += "<tr>";
         for (std::size_t c = 0; c < cells.size(); ++c) {
             const bool head = table.keyValue && c == 0;
-            out += head ? "<th>" : (isAlarm(cells[c]) ? "<td class=\"alarm\">" : "<td>");
+            // A long cell (a correction chain, a sentence) wraps instead of
+            // pushing the reduced value off a printed page.
+            const bool note = cells[c].size() > kMaxColumn;
+            if (head) {
+                out += "<th>";
+            } else if (isAlarm(cells[c])) {
+                out += note ? "<td class=\"alarm note\">" : "<td class=\"alarm\">";
+            } else {
+                out += note ? "<td class=\"note\">" : "<td>";
+            }
             escape(out, cells[c]);
             out += head ? "</th>" : "</td>";
         }
@@ -636,6 +662,7 @@ std::string renderHtml(const ReductionReport& report)
            "th,td{border:1px solid #ccc;padding:2px 6px;text-align:left;vertical-align:top;"
            "white-space:nowrap}\n"
            "td:nth-last-child(2),td:last-child{white-space:normal}\n"
+           "td.note{white-space:normal;min-width:22em}\n"
            "thead th{background:#eee}table.kv th{background:#f5f5f5;font-weight:600}\n"
            "td.alarm{color:#a00;font-weight:600}p.empty{color:#666}\n"
            "@media print{body{margin:0;font-size:8pt}section{break-inside:auto}"

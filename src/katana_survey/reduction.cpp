@@ -354,8 +354,7 @@ void reduceSingle(Engine& engine, ReducedPointing& pointing, const Shot& shot)
         double direction = shot.direction->direction;
         if (shot.face == Face::Right) {
             direction = normalizeAngle(direction - kPi);
-            correct(engine, shot.directionRow, CorrectionKind::FaceMean,
-                    normalizeAngleSigned(direction - shot.direction->direction), std::nullopt,
+            correct(engine, shot.directionRow, CorrectionKind::FaceMean, -kPi, std::nullopt,
                     "face right only");
         }
         pointing.direction = normalizeAngle(direction);
@@ -411,7 +410,8 @@ void reducePair(Engine& engine, std::size_t setupIndex, ReducedPointing& pointin
         double r = right.direction->direction;
         // A reading half a turn from its partner is raw face right; one within
         // a quarter turn was already reduced by the file.
-        if (std::abs(normalizeAngleSigned(r - l)) > kHalfPi) {
+        const bool folded = std::abs(normalizeAngleSigned(r - l)) > kHalfPi;
+        if (folded) {
             r -= kPi;
         }
         const double difference = normalizeAngleSigned(r - l);
@@ -421,9 +421,11 @@ void reducePair(Engine& engine, std::size_t setupIndex, ReducedPointing& pointin
         pointing.sigmaDirection = settings.apriori.direction / std::sqrt(2.0);
         correct(engine, left.directionRow, CorrectionKind::FaceMean,
                 normalizeAngleSigned(mean - l));
+        // Written as -180 deg and the small part, the way it is worked in a
+        // field book, rather than wrapped to +179 59 58.
         correct(engine, right.directionRow, CorrectionKind::FaceMean,
-                normalizeAngleSigned(mean - right.direction->direction), std::nullopt,
-                "less 180 deg");
+                (folded ? -kPi : 0.0) + normalizeAngleSigned(mean - r), std::nullopt,
+                folded ? "less 180 deg" : "");
         setReduced(engine, left.directionRow, mean);
         setReduced(engine, right.directionRow, mean);
     } else if (left.direction || right.direction) {
@@ -431,8 +433,7 @@ void reducePair(Engine& engine, std::size_t setupIndex, ReducedPointing& pointin
         double direction = one.direction->direction;
         if (&one == &right) {
             direction = normalizeAngle(direction - kPi);
-            correct(engine, one.directionRow, CorrectionKind::FaceMean,
-                    normalizeAngleSigned(direction - one.direction->direction), std::nullopt,
+            correct(engine, one.directionRow, CorrectionKind::FaceMean, -kPi, std::nullopt,
                     "face right only");
         }
         pointing.direction = normalizeAngle(direction);

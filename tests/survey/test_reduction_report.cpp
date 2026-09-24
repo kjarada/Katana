@@ -118,7 +118,37 @@ TEST(ReductionReportHtml, ARejectedObservationIsMarkedAsAnAlarm)
     const auto outcome = reduceAndAdjust(project, settings, {});
     ASSERT_TRUE(outcome.ok());
     const std::string html = renderHtml(outcome->report);
-    EXPECT_NE(html.find("<td class=\"alarm\">REJECTED: face pair outside tolerance"),
+    // A long cell, so it also wraps (class note).
+    EXPECT_NE(html.find("<td class=\"alarm note\">REJECTED: face pair outside tolerance"),
               std::string::npos);
     EXPECT_NE(renderText(outcome->report).find("OUTSIDE TOLERANCE"), std::string::npos);
+}
+
+TEST(ReductionReportText, LargeCorrectionsReadInDegreesAndMetresSmallOnesInSecondsAndMillimetres)
+{
+    // An orientation of -100 00 01 is -360 001", which nobody reads; a slope
+    // reduction of -12.3456 m is -12 345.6 mm. A face mean of 1.5" and an
+    // atmospheric 1.6 mm stay in seconds and millimetres.
+    ReductionReport report;
+    ReportObservation direction;
+    direction.kind = "horizontal direction";
+    direction.angular = true;
+    direction.raw = deg(55);
+    direction.corrections = {
+        AppliedCorrection{CorrectionKind::FaceMean, arcSeconds(1.5), std::nullopt, {}},
+        AppliedCorrection{CorrectionKind::Orientation, -deg(100, 0, 1), std::nullopt, {}}};
+    direction.reduced = deg(315, 0, 0.5);
+    ReportObservation distance;
+    distance.kind = "slope distance";
+    distance.raw = 100.0;
+    distance.corrections = {
+        AppliedCorrection{CorrectionKind::Atmospheric, 0.0016, 1.000016, {}},
+        AppliedCorrection{CorrectionKind::SlopeToHorizontal, -12.3456, std::nullopt, {}}};
+    distance.reduced = 87.656;
+    report.observations = {direction, distance};
+    const std::string text = renderText(report);
+    EXPECT_NE(text.find("face left / face right mean +1.5\""), std::string::npos);
+    EXPECT_NE(text.find("orientation -100\xC2\xB0" "00'01.0\""), std::string::npos);
+    EXPECT_NE(text.find("atmospheric +1.6 mm"), std::string::npos);
+    EXPECT_NE(text.find("slope to horizontal -12.3456 m"), std::string::npos);
 }
