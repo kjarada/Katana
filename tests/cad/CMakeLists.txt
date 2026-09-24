@@ -4,12 +4,15 @@
 file(GLOB _cad_tool_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
 # The customisation managers' tests, globbed as their sources are.
 file(GLOB _cad_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
+# The sheet model's tests (docs/plotting.md), globbed as its sources are.
+file(GLOB _cad_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
 
 katana_add_test_suite(cad
     LIBS katana_cad
     SOURCES test_cad.cpp test_indexed_queries.cpp test_dashing.cpp test_dimension_draw.cpp test_section.cpp test_viewport_layout.cpp test_scene.cpp test_hatching.cpp test_corridor.cpp test_grading.cpp test_parcel.cpp test_plot.cpp test_symbols.cpp test_style_drawing.cpp test_survey_coding.cpp test_survey_import.cpp test_layer_inheritance.cpp test_layer_overrides.cpp test_view_set.cpp test_survey_tools.cpp
         ${_cad_tool_tests}
         ${_cad_customisation_tests}
+        ${_cad_plotting_tests}
 )
 # The Modify > Edit family's tests reach its internal header
 # (tools/modify_edit_support.hpp: EditSession, drawable) the way the family's
