@@ -67,9 +67,9 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
-# The whole main window with a 12d customisation loaded into it: the two
-# libraries and the mapfile read, resolved against each other, and reported.
-# This is the path the Format > Load 12d Customisation menu item takes, so what
+# The whole main window with a customisation loaded into it: the two
+# libraries and the survey code file read, resolved against each other, and
+# reported. This is the path the Format > Load Customisation menu item takes, so what
 # ctest exercises is what a person gets (PLAN.MD 20.3). It runs without the
 # files when they are not in the checkout - they carry their author's licence
 # notice - and then proves only that the switch does no harm.
@@ -137,8 +137,8 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
-    # The styles and linetypes manager (PLAN.MD 20.2 slice 3), opened over a
-    # 12d import so that its tables hold real linestyles and symbols. What it
+    # The styles and linetypes manager (PLAN.MD 20.2 slice 3), opened over an
+    # archive import so that its tables hold real linestyles and symbols. What it
     # protects is that the dialog builds, lays out and PAINTS - its tables,
     # its form, its two previews - which is otherwise only ever checked by a
     # person opening the menu.
@@ -471,9 +471,9 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # ---- the window's wiring of the managers' foundations ----------------------
     #
-    # Format > Load 12d Customisation merges (audit QT-21), through the window's
+    # Format > Load Customisation merges (audit QT-21), through the window's
     # CUSTOMISE line, which runs the menu item's applyCustomisation: the
-    # hand-written fixture mapfile REPLACES the map, then the symbol fixture
+    # hand-written fixture survey code file REPLACES the map, then the symbol fixture
     # alone is MERGED in - and the map must still be there. By hand, from the
     # fixtures' head comments: test_survey.mapfile has 11 rules, and
     # test_symbols.4d 4 definitions, all named TEST ..., which no other

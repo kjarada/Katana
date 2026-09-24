@@ -239,7 +239,7 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // come through it cleanly (MainWindow::toggleLayerThroughPanel). It is the
 // regression test for a crash on the first click of that box.
 //
-// --customise loads 12d linestyle and symbol libraries and mapfiles before
+// --customise loads linestyle and symbol libraries and survey code files before
 // anything is drawn, so a screenshot shows the drawing as the customisation
 // says it should look. It takes every path until the next switch, because a
 // customisation is several files and which is which is decided by looking
@@ -427,7 +427,7 @@ int main(int argc, char* argv[])
     katana::qt::MainWindow window;
     window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
-    // --customise on the command line is merged in next, as Format > Load 12d
+    // --customise on the command line is merged in next, as Format > Load
     // Customisation would, and so is loaded when a project is opened: its
     // record of what it was drawn with is compared with what is loaded.
     window.loadDefaultCustomisation();

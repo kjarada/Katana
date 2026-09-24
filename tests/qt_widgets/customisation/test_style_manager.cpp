@@ -68,8 +68,8 @@ katana::entity::StyleLibrary testLibrary()
 
 // The drawing:
 //   linetype  DASHED {1, -0.5}
-//   styles    "Old 12d"  linetype "Old 12d Kerb", symbol "Old 12d Pit",
-//                        hatch "Old 12d Hatch" - three names NOTHING defines -
+//   styles    "Old Survey"  linetype "Old Survey Kerb", symbol "Old Survey Pit",
+//                        hatch "Old Survey Hatch" - three names NOTHING defines -
 //                        weight 0.1234 and symbol size 0.03125, which no
 //                        spin box here shows exactly; worn by nothing
 //             Kerb       TEST Dashed Kerb (the library's), 0.35; one point
@@ -90,13 +90,13 @@ struct Manager : ::testing::Test {
         must(katana::commands::createLinetype(dashed));
 
         Style old;
-        old.name = "Old 12d";
-        old.linetype = "Old 12d Kerb";
-        old.symbol = "Old 12d Pit";
-        old.hatchPattern = "Old 12d Hatch";
+        old.name = "Old Survey";
+        old.linetype = "Old Survey Kerb";
+        old.symbol = "Old Survey Pit";
+        old.hatchPattern = "Old Survey Hatch";
         old.lineWeight = 0.1234;
         old.symbolSize = 0.03125;
-        old.description = "from 12d";
+        old.description = "from the survey";
         must(katana::commands::createStyle(old));
         must(katana::commands::createStyle(style("Kerb", "TEST Dashed Kerb")));
         must(katana::commands::createStyle(style("Fence", "DASHED")));
@@ -165,35 +165,35 @@ struct Manager : ::testing::Test {
 TEST_F(Manager, SavingAStyleNamingUndefinedNamesUneditedChangesNothingAndPushesNoUndoStep)
 {
     // Audit QT-02: the old form showed a name it could not list as the
-    // previous row's, and Save wrote that back - every 12d style whose
+    // previous row's, and Save wrote that back - every imported style whose
     // library was not loaded lost its linetype and symbol.
     StyleManagerDialog dialog(context);
-    const Style before = stored("Old 12d");
+    const Style before = stored("Old Survey");
     const std::size_t stepsBefore = steps();
 
-    dialog.selectStyles({"Old 12d"});
-    ASSERT_EQ(dialog.selectedStyles(), std::vector<std::string>{"Old 12d"});
+    dialog.selectStyles({"Old Survey"});
+    ASSERT_EQ(dialog.selectedStyles(), std::vector<std::string>{"Old Survey"});
     // The form shows the stored names, kept and marked, not a neighbour's.
     NamePicker* linetype = picker(dialog, "styleLinetype");
     NamePicker* symbol = picker(dialog, "styleSymbol");
-    EXPECT_EQ(linetype->currentName(), "Old 12d Kerb");
+    EXPECT_EQ(linetype->currentName(), "Old Survey Kerb");
     EXPECT_FALSE(linetype->currentIsDefined());
-    EXPECT_EQ(symbol->currentName(), "Old 12d Pit");
+    EXPECT_EQ(symbol->currentName(), "Old Survey Pit");
     EXPECT_FALSE(symbol->currentIsDefined());
-    EXPECT_TRUE(child<QComboBox>(dialog, "styleHatch")->currentText().startsWith("Old 12d Hatch"));
+    EXPECT_TRUE(child<QComboBox>(dialog, "styleHatch")->currentText().startsWith("Old Survey Hatch"));
 
     // A person touches the description, retyping what was there, and saves.
     auto* description = child<QLineEdit>(dialog, "styleDescription");
     description->selectAll();
-    typeText(description, "from 12d");
+    typeText(description, "from the survey");
     click(dialog, "styleSave");
     katana::qt::test::processEvents();
 
     // Field by field first, so a failure says which one moved.
-    const Style& after = stored("Old 12d");
-    EXPECT_EQ(after.linetype, "Old 12d Kerb");
-    EXPECT_EQ(after.symbol, "Old 12d Pit");
-    EXPECT_EQ(after.hatchPattern, "Old 12d Hatch");
+    const Style& after = stored("Old Survey");
+    EXPECT_EQ(after.linetype, "Old Survey Kerb");
+    EXPECT_EQ(after.symbol, "Old Survey Pit");
+    EXPECT_EQ(after.hatchPattern, "Old Survey Hatch");
     EXPECT_EQ(after.lineWeight, 0.1234) << "not what a spin box rounds it to";
     EXPECT_EQ(after.symbolSize, 0.03125);
     EXPECT_EQ(after, before) << "every field, byte for byte";
@@ -202,17 +202,17 @@ TEST_F(Manager, SavingAStyleNamingUndefinedNamesUneditedChangesNothingAndPushesN
     // And Save pressed again on the reloaded, untouched form: still nothing.
     click(dialog, "styleSave");
     katana::qt::test::processEvents();
-    EXPECT_EQ(stored("Old 12d"), before);
+    EXPECT_EQ(stored("Old Survey"), before);
     EXPECT_EQ(steps(), stepsBefore);
-    EXPECT_EQ(picker(dialog, "styleLinetype")->currentName(), "Old 12d Kerb");
+    EXPECT_EQ(picker(dialog, "styleLinetype")->currentName(), "Old Survey Kerb");
 }
 
 TEST_F(Manager, ChangingOnlyTheDescriptionOfAStyleNamingUndefinedNamesKeepsEveryOtherField)
 {
     // The audit's own scenario for QT-02: change only the description.
     StyleManagerDialog dialog(context);
-    const Style before = stored("Old 12d");
-    dialog.selectStyles({"Old 12d"});
+    const Style before = stored("Old Survey");
+    dialog.selectStyles({"Old Survey"});
     auto* description = child<QLineEdit>(dialog, "styleDescription");
     description->selectAll();
     typeText(description, "kerb and channel");
@@ -222,9 +222,9 @@ TEST_F(Manager, ChangingOnlyTheDescriptionOfAStyleNamingUndefinedNamesKeepsEvery
 
     Style expected = before;
     expected.description = "kerb and channel";
-    EXPECT_EQ(stored("Old 12d").linetype, "Old 12d Kerb");
-    EXPECT_EQ(stored("Old 12d").symbol, "Old 12d Pit");
-    EXPECT_EQ(stored("Old 12d"), expected);
+    EXPECT_EQ(stored("Old Survey").linetype, "Old Survey Kerb");
+    EXPECT_EQ(stored("Old Survey").symbol, "Old Survey Pit");
+    EXPECT_EQ(stored("Old Survey"), expected);
     EXPECT_EQ(steps(), stepsBefore + 1);
 }
 
@@ -267,7 +267,7 @@ TEST_F(Manager, MergingAStyleThroughTheDialogIsOneUndoStepThatUndoRestores)
     auto* prompt = child<QWidget>(dialog, "promptPanel");
     ASSERT_FALSE(prompt->isHidden()) << "the target is asked for in the dialog, not a box";
     auto* choice = child<QComboBox>(dialog, "promptChoice");
-    // Fence itself is not offered: the targets are Kerb and Old 12d.
+    // Fence itself is not offered: the targets are Kerb and Old Survey.
     ASSERT_EQ(choice->count(), 2);
     choice->setCurrentIndex(choice->findText("Kerb"));
     click(dialog, "promptOk");
@@ -339,22 +339,22 @@ TEST_F(Manager, PurgeListsWhatNothingUsesAndDeletesTheCheckedItemsAsOneStep)
     auto* panel = child<QWidget>(dialog, "purgePanel");
     ASSERT_FALSE(panel->isHidden());
     auto* list = child<QListWidget>(dialog, "purgeList");
-    // Old 12d is worn by nothing; Kerb and Fence are worn, and DASHED is
+    // Old Survey is worn by nothing; Kerb and Fence are worn, and DASHED is
     // named by Fence.
     std::vector<QString> items;
     for (int row = 0; row < list->count(); ++row) {
         items.push_back(list->item(row)->text());
     }
-    EXPECT_NE(std::ranges::find(items, QString("Style  Old 12d")), items.end());
+    EXPECT_NE(std::ranges::find(items, QString("Style  Old Survey")), items.end());
     EXPECT_EQ(std::ranges::find(items, QString("Style  Kerb")), items.end());
     EXPECT_EQ(std::ranges::find(items, QString("Linetype  DASHED")), items.end());
 
     click(dialog, "purgeOk");
     katana::qt::test::processEvents();
-    EXPECT_FALSE(document.model().styles.contains("Old 12d"));
+    EXPECT_FALSE(document.model().styles.contains("Old Survey"));
     EXPECT_EQ(steps(), stepsBefore + 1);
     ASSERT_TRUE(document.undo().ok());
-    EXPECT_EQ(stored("Old 12d").linetype, "Old 12d Kerb");
+    EXPECT_EQ(stored("Old Survey").linetype, "Old Survey Kerb");
 }
 
 TEST_F(Manager, ApplyToSelectionUsesTheDrawingsSelectionAsItIsWhenPressed)
@@ -455,7 +455,7 @@ TEST_F(Manager, ALibraryLinestyleIsReadOnlyAndMakesANewStyleUsingIt)
     dialog.selectLinetype("TEST Dashed Kerb", LinetypeOrigin::Library);
     EXPECT_FALSE(child<QPushButton>(dialog, "linetypeDelete")->isEnabled());
     EXPECT_FALSE(child<QPushButton>(dialog, "linetypeRename")->isEnabled());
-    EXPECT_TRUE(child<QLabel>(dialog, "libraryDetails")->text().contains("paperstyle"));
+    EXPECT_TRUE(child<QLabel>(dialog, "libraryDetails")->text().contains("Paper linestyle"));
 
     click(dialog, "newStyleUsing");
     auto* name = child<QLineEdit>(dialog, "promptName");
@@ -470,15 +470,15 @@ TEST_F(Manager, ALibraryLinestyleIsReadOnlyAndMakesANewStyleUsingIt)
 
 TEST_F(Manager, DiagnosticsListTheUndefinedNamesAndSelectTheirUsers)
 {
-    // Old 12d names three undefined names, but only its linetype and symbol
+    // Old Survey names three undefined names, but only its linetype and symbol
     // are resolved names (a hatch is not); nothing wears it, so give one
     // entity that style.
-    must(katana::commands::setEntityStyle({kerbPoint}, "Old 12d"));
+    must(katana::commands::setEntityStyle({kerbPoint}, "Old Survey"));
     StyleManagerDialog dialog(context);
     auto* table = child<QTableView>(dialog, "diagnosticTable");
     ASSERT_EQ(table->model()->rowCount(), 2);
-    EXPECT_EQ(table->model()->index(0, 1).data().toString(), "Old 12d Kerb");
-    EXPECT_EQ(table->model()->index(1, 1).data().toString(), "Old 12d Pit");
+    EXPECT_EQ(table->model()->index(0, 1).data().toString(), "Old Survey Kerb");
+    EXPECT_EQ(table->model()->index(1, 1).data().toString(), "Old Survey Pit");
     table->selectRow(0);
     click(dialog, "diagnosticSelectUsers");
     EXPECT_EQ(document.selection().ids(), std::vector<katana::entity::EntityId>{kerbPoint});
@@ -530,13 +530,13 @@ TEST_F(Manager, TheChipsAndTheSearchFilterTheStylesAndTheChipsCountThem)
     auto* page = child<QWidget>(dialog, "stylesPage");
     auto* table = child<QTableView>(dialog, "styleTable");
     ASSERT_EQ(table->model()->rowCount(), 3);
-    // Used: Kerb (1 point) and Fence (2); unused: Old 12d; missing: Old 12d.
+    // Used: Kerb (1 point) and Fence (2); unused: Old Survey; missing: Old Survey.
     auto* missing = child<QToolButton>(*page, "filterMissing");
     EXPECT_EQ(missing->text(), "Missing (1)");
     EXPECT_EQ(child<QToolButton>(*page, "filterUsed")->text(), "Used (2)");
     missing->click();
     ASSERT_EQ(table->model()->rowCount(), 1);
-    EXPECT_EQ(table->model()->index(0, 0).data(katana::qt::kSortRole).toString(), "Old 12d");
+    EXPECT_EQ(table->model()->index(0, 0).data(katana::qt::kSortRole).toString(), "Old Survey");
 
     child<QToolButton>(*page, "filterAll")->click();
     // The search folds case, and looks in the linetype too: "dashed" is
@@ -548,18 +548,18 @@ TEST_F(Manager, TheChipsAndTheSearchFilterTheStylesAndTheChipsCountThem)
 TEST_F(Manager, LoadingALibraryThatDefinesAMissingNameReloadsTheMarksOnce)
 {
     StyleManagerDialog dialog(context);
-    dialog.selectStyles({"Old 12d"});
+    dialog.selectStyles({"Old Survey"});
     EXPECT_FALSE(picker(dialog, "styleLinetype")->currentIsDefined());
 
-    // A customisation load elsewhere brings "Old 12d Kerb" as a linestyle.
+    // A customisation load elsewhere brings "Old Survey Kerb" as a linestyle.
     katana::entity::StyleLibrary library = document.styleLibrary();
     katana::entity::LineStyle kerb = *library.find("TEST Dashed Kerb");
-    kerb.name = "Old 12d Kerb";
+    kerb.name = "Old Survey Kerb";
     ASSERT_TRUE(library.add(kerb).ok());
     document.setStyleLibrary(std::move(library));
     katana::qt::test::processEvents();
 
-    EXPECT_EQ(dialog.selectedStyles(), std::vector<std::string>{"Old 12d"});
+    EXPECT_EQ(dialog.selectedStyles(), std::vector<std::string>{"Old Survey"});
     EXPECT_TRUE(picker(dialog, "styleLinetype")->currentIsDefined());
     auto* page = child<QWidget>(dialog, "stylesPage");
     // Its symbol is still undefined, so the style is still "missing".

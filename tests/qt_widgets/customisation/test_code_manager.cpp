@@ -1,5 +1,5 @@
 // The survey code manager, driven as a person drives it - through its widgets,
-// found by objectName - over the committed hand-written 12d customisation in
+// found by objectName - over the committed hand-written customisation in
 // tests/archive12d/data/customisation, loaded into the Document as a session
 // customisation. What is asserted is the Document and the buffer.
 //
@@ -252,7 +252,7 @@ TEST(SurveyCodeManager, TestingACodeShowsTheRuleThatSetItsLayer)
     ASSERT_NE(testCode, nullptr);
     ASSERT_NE(fields, nullptr);
     testCode->setText(QStringLiteral("WM01"));
-    // WM01 meets WM* (rule #0) and `*` (rule #10); its layer - 12d's model -
+    // WM01 meets WM* (rule #0) and `*` (rule #10); its layer - the "model" field -
     // comes from #0.
     const QTreeWidgetItem* model = rowWithText(*fields, 0, QStringLiteral("model"));
     ASSERT_NE(model, nullptr);
@@ -532,7 +532,7 @@ TEST(SurveyCodeManager, AnExportedMapfileIsUtf16WithAByteOrderMarkAndReadsBackAs
 
     const std::string bytes = readBytes(path);
     ASSERT_GE(bytes.size(), 4u);
-    // FF FE, then '<' as 3C 00: UTF-16 little-endian, as 12d writes.
+    // FF FE, then '<' as 3C 00: UTF-16 little-endian, as the format's own writers write.
     EXPECT_EQ(static_cast<unsigned char>(bytes[0]), 0xFFu);
     EXPECT_EQ(static_cast<unsigned char>(bytes[1]), 0xFEu);
     EXPECT_EQ(bytes[2], '<');
@@ -731,7 +731,7 @@ TEST(SurveyCodeManager, EnterInAFieldPressesNoButton)
     SurveyCodeManagerDialog dialog(f.context);
     ASSERT_TRUE(katana::qt::test::showActive(dialog));
     // Every field a person types a name into and confirms with Enter: none
-    // may reach a dialog default button - the first button, Import Mapfile,
+    // may reach a dialog default button - the first button, Import Code File,
     // would open a file dialog, and Delete or Apply would edit.
     for (const char* name : {"testCode", "ruleModel", "ruleKey", "lineworkStart"}) {
         auto* field = child<QLineEdit>(dialog, name);
