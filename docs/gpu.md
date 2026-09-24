@@ -301,7 +301,8 @@ from QRhi timestamps (`UseManualTime`); `Wall` rows are from beginning the frame
 to the GPU finishing it; `Cpu` rows are the software rasteriser on every core,
 as the 3D view runs it, on the same list, camera and size. The scene cases need
 `KATANA_BENCH_SCENE` to name a `.12da` (survey data, not in the repository) and
-skip without it. The laptop is shared and on battery, so every figure below is
+skip without it; `KATANA_BENCH_SCENE_IMAGES=<dir>` also saves that scene's frame
+from each renderer, to look at what was timed. The laptop is shared and on battery, so every figure below is
 from `tools/compare_benchmarks.py --alternate` with an A/A control (the same
 binary twice), and ratios mean more than absolutes.
 
