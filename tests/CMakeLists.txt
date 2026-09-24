@@ -58,6 +58,59 @@ foreach(_suite IN LISTS _suites)
     endif()
 endforeach()
 
+# The SIMD kernel guard (cmake/KatanaSimd.cmake, tools/check_simd_kernels.cmake).
+# The sources check reads files, like `layering`; the objects check reads what
+# the compiler produced for each *_avx2.cpp in THIS build's configuration, which
+# is where the inline-copy hazard would actually show.
+add_test(NAME simd_kernel_sources
+    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
+            -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
+get_property(_simd_object_libraries GLOBAL PROPERTY KATANA_SIMD_OBJECT_LIBRARIES)
+if(_simd_object_libraries AND NOT MSVC)
+    set(_simd_objects "")
+    foreach(_library IN LISTS _simd_object_libraries)
+        list(APPEND _simd_objects "$<JOIN:$<TARGET_OBJECTS:${_library}>,|>")
+    endforeach()
+    list(JOIN _simd_objects "|" _simd_objects)
+    add_test(NAME simd_kernel_objects
+        COMMAND ${CMAKE_COMMAND} "-DOBJECTS=${_simd_objects}" "-DNM=${CMAKE_NM}"
+                "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
+
+    # The same kernels compiled as the linux-sanitize preset compiles them, with
+    # AddressSanitizer, in EVERY build: that preset is not run on the owner's
+    # Windows machine, and without katana_simd_kernel_options keeping ASan's
+    # module constructor out, its simd_kernel_objects failed every time. Only
+    # compiled, never linked, so a toolchain without the ASan runtime (MinGW)
+    # still checks it.
+    get_property(_simd_kernel_sources GLOBAL PROPERTY KATANA_SIMD_KERNEL_SOURCES)
+    add_library(katana_simd_kernels_under_asan OBJECT ${_simd_kernel_sources})
+    katana_target_defaults(katana_simd_kernels_under_asan)
+    target_compile_options(katana_simd_kernels_under_asan PRIVATE -fsanitize=address)
+    katana_simd_kernel_options(katana_simd_kernels_under_asan)
+    add_test(NAME simd_kernel_objects_under_asan
+        COMMAND ${CMAKE_COMMAND}
+                "-DOBJECTS=$<JOIN:$<TARGET_OBJECTS:katana_simd_kernels_under_asan>,|>"
+                "-DNM=${CMAKE_NM}" "-DOBJDUMP=${CMAKE_OBJDUMP}"
+                -P ${PROJECT_SOURCE_DIR}/tools/check_simd_kernels.cmake)
+endif()
+
+# The suites with kernels in them, run again with the level forced through the
+# KATANA_SIMD override. `scalar` is what a processor without AVX2 runs, proved
+# here on one that has it; `avx2` runs every public caller of a kernel on the
+# AVX2 path. (Where the processor has no AVX2, the avx2 run is refused by the
+# override, says so, and runs scalar.)
+foreach(_suite core geometry)
+    if(TARGET katana_${_suite}_tests)
+        foreach(_level scalar avx2)
+            add_test(NAME simd_${_level}.${_suite} COMMAND katana_${_suite}_tests)
+            set_tests_properties(simd_${_level}.${_suite} PROPERTIES
+                ENVIRONMENT_MODIFICATION
+                    "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};KATANA_SIMD=set:${_level}")
+        endforeach()
+    endif()
+endforeach()
+
 # The view widgets on their own, headlessly (tests/qt_widgets/). Not found by
 # the loop above: the application has no katana_qt library, so the suite
 # compiles the widgets' sources itself and is configured whenever the

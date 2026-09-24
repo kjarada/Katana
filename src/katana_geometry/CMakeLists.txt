@@ -9,6 +9,8 @@ add_library(katana_geometry STATIC
     polygon.cpp
     editing.cpp
     mesh.cpp
+    point_batch.cpp
 )
 katana_target_defaults(katana_geometry)
+katana_add_simd_sources(katana_geometry AVX2 simd/points_avx2.cpp)
 target_link_libraries(katana_geometry PUBLIC katana_math)

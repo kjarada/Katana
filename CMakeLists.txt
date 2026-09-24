@@ -67,6 +67,7 @@ set(KATANA_BENCHMARK_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/benchmarks")
 
 include(GNUInstallDirs)
 include(KatanaTargetDefaults)
+include(KatanaSimd)
 include(KatanaSanitizers)
 include(KatanaStaticAnalysis)
 include(KatanaThirdParty)

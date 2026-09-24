@@ -1,5 +1,8 @@
 #include "katana/core/text_encoding.hpp"
 
+#include "katana/core/cpu_features.hpp"
+#include "simd/text_kernels.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -15,6 +18,14 @@ namespace {
 // first model, a coordinate list its first rows - so 4 KB is already hundreds of
 // ASCII characters; more would only slow a wrong guess down.
 constexpr std::size_t kSniffBytes = 4096;
+
+// isValidUtf8 takes the AVX2 validator only from this many bytes. The kernel
+// ends on a whole 32-byte block that must start inside the text, so it needs
+// 64. A shorter text would need a padded copy, and with one the kernel was
+// measured slower than the byte loop up to about 24 bytes and at most 15 ns
+// faster up to 63: not worth a second tail path, so a name or a label takes
+// the loop and pays no call.
+constexpr std::size_t kValidateMinimum = 64;
 
 // Windows-1252 differs from Latin-1 only in 0x80-0x9F. Source: the Unicode
 // Consortium's mapping table for CP1252 (MAPPINGS/VENDORS/MICSFT/WINDOWS/
@@ -50,37 +61,60 @@ Result<std::string> fromUtf16(std::string_view bytes, bool littleEndian)
         return makeError(ErrorCode::ParseFailure,
                          "the file is UTF-16 but has an odd number of bytes, so it is truncated");
     }
+    const auto* data = reinterpret_cast<const unsigned char*>(bytes.data());
+    const std::size_t units = bytes.size() / 2;
     const auto unit = [&](std::size_t index) -> std::uint32_t {
-        const auto a = static_cast<unsigned char>(bytes[index]);
-        const auto b = static_cast<unsigned char>(bytes[index + 1]);
-        return littleEndian ? static_cast<std::uint32_t>(a | (b << 8))
-                            : static_cast<std::uint32_t>((a << 8) | b);
+        const std::uint32_t a = data[2 * index];
+        const std::uint32_t b = data[2 * index + 1];
+        return littleEndian ? (a | (b << 8)) : ((a << 8) | b);
     };
 
     std::string out;
     // These formats are almost entirely ASCII, which halves in UTF-8.
-    out.reserve(bytes.size() / 2 + 16);
-    for (std::size_t i = 0; i < bytes.size(); i += 2) {
-        std::uint32_t codePoint = unit(i);
-        if (codePoint >= 0xD800 && codePoint <= 0xDBFF) {
-            if (i + 3 >= bytes.size()) {
-                return makeError(ErrorCode::ParseFailure,
-                                 "the file ends in the middle of a UTF-16 surrogate pair");
+    out.reserve(units + 16);
+    std::size_t i = 0;
+    while (i < units) {
+        // The run of ASCII units, which is nearly all of any file read here, a
+        // whole block at a time where the processor allows (the kernel is the
+        // loop below restricted to ASCII, and equals it byte for byte). Room
+        // for the whole remainder is offered because the run's length is not
+        // known until it ends; resize_and_overwrite keeps only what was
+        // written, and initialises nothing.
+        const std::size_t written = out.size();
+        std::size_t run = 0;
+        out.resize_and_overwrite(written + (units - i), [&](char* buffer, std::size_t) {
+            run = kernels::narrowAsciiUtf16(data + 2 * i, units - i, littleEndian,
+                                            buffer + written);
+            return written + run;
+        });
+        i += run;
+
+        // Then everything up to the next ASCII unit, one code point at a time.
+        for (; i < units; ++i) {
+            std::uint32_t codePoint = unit(i);
+            if (codePoint < 0x80) {
+                break;
             }
-            const std::uint32_t low = unit(i + 2);
-            if (low < 0xDC00 || low > 0xDFFF) {
+            if (codePoint >= 0xD800 && codePoint <= 0xDBFF) {
+                if (i + 1 >= units) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "the file ends in the middle of a UTF-16 surrogate pair");
+                }
+                const std::uint32_t low = unit(i + 1);
+                if (low < 0xDC00 || low > 0xDFFF) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "malformed UTF-16: a high surrogate with no low surrogate",
+                                     "byte " + std::to_string(2 * i));
+                }
+                codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (low - 0xDC00);
+                ++i;
+            } else if (codePoint >= 0xDC00 && codePoint <= 0xDFFF) {
                 return makeError(ErrorCode::ParseFailure,
-                                 "malformed UTF-16: a high surrogate with no low surrogate",
-                                 "byte " + std::to_string(i));
+                                 "malformed UTF-16: a low surrogate with no high surrogate",
+                                 "byte " + std::to_string(2 * i));
             }
-            codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (low - 0xDC00);
-            i += 2;
-        } else if (codePoint >= 0xDC00 && codePoint <= 0xDFFF) {
-            return makeError(ErrorCode::ParseFailure,
-                             "malformed UTF-16: a low surrogate with no high surrogate",
-                             "byte " + std::to_string(i));
+            appendUtf8(out, codePoint);
         }
-        appendUtf8(out, codePoint);
     }
     return out;
 }
@@ -102,12 +136,10 @@ std::string fromWindows1252(std::string_view bytes)
     return out;
 }
 
-} // namespace
-
-bool isValidUtf8(std::string_view text)
+// The byte loop: the reference that katana_avx2_valid_utf8 must equal, and
+// what a processor without AVX2, or a text too short for a block, runs.
+bool validUtf8Scalar(const unsigned char* bytes, std::size_t size)
 {
-    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
-    const std::size_t size = text.size();
     std::size_t i = 0;
     while (i < size) {
         const unsigned char lead = bytes[i];
@@ -159,6 +191,21 @@ bool isValidUtf8(std::string_view text)
         i += following + 1;
     }
     return true;
+}
+
+} // namespace
+
+bool isValidUtf8(std::string_view text)
+{
+    const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    // 32 bytes at once whatever the language, where the processor allows and
+    // the text is long enough.
+    if (text.size() >= kValidateMinimum && activeSimdLevel() == SimdLevel::Avx2) {
+        return katana_avx2_valid_utf8(bytes, text.size()) == 1;
+    }
+#endif
+    return validUtf8Scalar(bytes, text.size());
 }
 
 const char* toString(TextEncoding encoding)

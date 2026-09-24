@@ -287,3 +287,381 @@ know it can pass through and an AND to know it cannot be seen.
 - No benchmark covers a 12da read.
 - `Importer::tallyFor` (`domain_import.cpp`) is a linear scan per element, the
   third instance of that shape. About 1% of an import, left alone.
+
+## SIMD: kernels chosen at run time (2026-09-24)
+
+The program ships for baseline x86-64 and has to start on any 64-bit PC. A few
+small kernels now process four doubles, or 32 bytes, per instruction on a
+processor with AVX2. Which path runs is decided once, at start-up, and every
+kernel gives exactly the same bits as the scalar code it replaces. This
+section covers the policy, the mechanism, the hazard that shapes both, and
+what was measured.
+
+### The policy
+
+- **The shipped build stays at the baseline.** Nothing is compiled with
+  `-march=x86-64-v3`. Putting that flag on the whole build was measured
+  before this work, in an interleaved A/B/A run against the release binary.
+  No benchmark moved outside the A/A spread. The hot code here is arrays of
+  structs of doubles, maps and branches, and the auto-vectoriser does not
+  help with those. SIMD has to be written by hand.
+- **SIMD code lives in kernel files and is chosen at run time.** Each kernel
+  has a scalar reference. That reference is the code as it was before, and
+  it is what a processor without AVX2 runs.
+- **Every kernel is bit-identical to its scalar reference.** This includes
+  signed zeros and which values count as NaN. It does not include a NaN's
+  payload (see below). This rule is what lets a test switch the level. It is
+  also why each lane does the reference's operations in the reference's
+  order and never fuses a multiply with an add. `-ffp-contract=off` stays on
+  for kernel files. `-mfma` is only there so that the flag set matches
+  x86-64-v3. The object check fails the build if a fused instruction ever
+  appears.
+
+### Dispatch
+
+`include/katana/core/cpu_features.hpp`:
+
+- `detectedSimdLevel()` uses `__builtin_cpu_supports("avx2")` and `("fma")`.
+  libgcc sets these only when XGETBV shows that the operating system saves
+  the YMM registers. So the answer means "this process may execute AVX2",
+  not just "the chip has it".
+- `activeSimdLevel()` is what every kernel family asks. After the first call
+  it costs one relaxed atomic load.
+- **`KATANA_SIMD=scalar|avx2`** is read once, on first use. `scalar` is how a
+  machine that has AVX2 proves the path a machine without it would take.
+  Asking for a level the processor cannot run, or giving a word that is not
+  a level, is refused and not acted on. The refusal is written once to
+  stderr and kept in `simdSelection().note`. The program does not fault, and
+  it does not quietly run scalar under an AVX2 label.
+- `setSimdLevel()` is the in-process form of the override, used by tests and
+  benchmarks. Switching is legitimate at any time only because the levels
+  are bit-identical.
+
+Each caller dispatches in a baseline file with
+`if (activeSimdLevel() == SimdLevel::Avx2)`. Short inputs skip the dispatch,
+and the thresholds are measured, not guessed (see "Measured" below; the first
+guesses were wrong in both places):
+
+- `boundsOf` below `kBoundsBatchMinimum` (16 points) is the `expand()` loop,
+  inline in `point_batch.hpp`, so a drawing's strings (about six vertices
+  each) cost no call at all. From 16 points it calls the batch code, which
+  takes the kernel. The kernel with its call and its zero-sign fix-up breaks
+  even with the loop at about 12-16 points.
+- `isValidUtf8` takes the kernel from 64 bytes (`kValidateMinimum` in
+  `text_encoding.cpp`). The kernel ends on a whole 32-byte block that begins
+  inside the text, so it needs 64. A padded copy for shorter texts was
+  measured and does not pay: slower than the byte loop up to about 24
+  bytes, and at most 15 ns faster up to 63. So names and labels take main's
+  byte loop at every level, with no extra call.
+- `transformPoints` takes the kernel from 8 points (two kernel steps). It has
+  no caller in the program yet, so its break-even has not been measured.
+
+Not used, and why:
+
+- **`target_clones`** needs ifunc, which MinGW does not have. It does not
+  compile.
+- **Highway 1.4** is installed, builds with GCC 16, links statically and
+  dispatched to AVX2 in a probe. It has not been adopted yet. It would be a
+  new third-party dependency to vet, and six kernel entries, the largest
+  about 150 lines, do not need it. It is worth revisiting if the kernels
+  multiply or a second architecture matters. Its per-target namespaces are
+  its own answer to the hazard below.
+
+### The inline-copy hazard
+
+An inline function can be used by two object files compiled with different
+`-m` flags. Examples are a template member, anything defined in a header, or
+`std::span::data`. Each object then carries its own out-of-line copy of the
+function (a COMDAT), and the linker keeps only one of them for the whole
+program: whichever it meets first. If it keeps the AVX2 object's copy,
+baseline code calls AVX2 instructions. The program then faults on a processor
+without AVX2, far from any kernel, and only in some link orders. This was
+demonstrated with this toolchain. A shared header function was compiled into
+both an x86-64-v3 object and a baseline one, and the baseline `main` ended up
+calling a copy with 20 VEX instructions in it.
+
+An unoptimised build makes it certain rather than possible. A 12-line bounds
+kernel compiled at `-O0 -mavx2` behaved as follows:
+
+- Written with `std::simd` (GCC 16, C++26), it left seven functions out of
+  line with external linkage. Two of them were
+  `std::span<double const>::data() const` and
+  `std::integral_constant<int, 4>::operator()() const`.
+- Written with `std::experimental::simd`, it left
+  `simd<double, _VecBuiltin<32>>::size()`.
+
+At `-O3` both versions inlined everything. That was the optimiser's choice,
+not a guarantee.
+
+So a kernel file follows these rules:
+
+1. It is named `*_avx2.cpp` and added with
+   `katana_add_simd_sources(<target> AVX2 <files>)` (`cmake/KatanaSimd.cmake`).
+   The helper compiles it into an OBJECT library with `-mavx2 -mfma` added to
+   the project's own flags, and links the objects into the target. The
+   helper refuses any other name. The option `KATANA_SIMD_KERNELS=OFF`, or
+   any architecture other than x86-64, leaves only the scalar references.
+2. It includes only `<immintrin.h>`, `<cstddef>`, `<cstdint>` and its own
+   `*_kernels.hpp`, which holds declarations only. GCC's intrinsics are
+   `gnu_inline` and `always_inline`, so they are never emitted out of line.
+3. It uses raw pointers at the boundary. Everything except the entry points
+   sits in an anonymous namespace. The entry points have C linkage and a
+   `katana_avx2_` prefix.
+4. It has no namespace-scope object with a dynamic initialiser. Such an
+   initialiser runs at start-up, on every machine.
+
+### The guard
+
+Every `ctest` run includes three checks, all in `tools/check_simd_kernels.cmake`:
+
+- **`simd_kernel_sources`** reads source files, like `layering` does. It
+  checks rule 2 for each `src/**/*_avx2.cpp` and for its declarations header,
+  which may contain no braces other than `extern "C"` and namespace blocks.
+  It also enforces the OpenMP rule below.
+- **`simd_kernel_objects`** reads the objects this build actually produced,
+  so it applies in Debug and Release alike. `nm` must find no externally
+  visible code symbol other than `katana_avx2_*`, and at least one entry per
+  object. `objdump -h` must find no `.ctors` or `.init_array` section.
+  `objdump -d` must find no `vfmadd`, `vfmsub`, `vfnmadd` or `vfnmsub`.
+- **`simd_kernel_objects_under_asan`** runs the same object check on the
+  kernels compiled a second time with `-fsanitize=address`, as the
+  `linux-sanitize` preset compiles them. They are only compiled, never
+  linked, so it runs on MinGW too, which has no ASan runtime. It exists
+  because that preset cannot be run on the owner's machine, and it was
+  broken: ASan puts a module constructor into every object (`.ctors.65436`
+  on MinGW, `.init_array.00099` on Linux), and `simd_kernel_objects` failed
+  on it every time. `katana_simd_kernel_options` now compiles kernel objects
+  with `-fno-sanitize=address`. UBSan adds no constructor and stays. The
+  price is that ASan would not report a kernel reading past the end of its
+  input. The kernels guard against that by their structure (whole blocks
+  only while a whole block remains, then a scalar tail, or in the UTF-8
+  validator a last block that ends exactly at the text's end), and the tests
+  run lengths across every block edge. Without the flag this check fails on
+  both kernel objects with "has a static initialiser (.ctors)".
+
+The object check is the one that matters, because it checks what the compiler
+did rather than what the source intended. It was run on four deliberately bad
+objects and rejected each one, giving the reason:
+
+- the `-O0` `std::simd` kernel above;
+- the `-O0` TS kernel;
+- a kernel built with `-ffp-contract=fast` (`vfmadd213pd`);
+- a kernel with a namespace-scope `__m256d` constant (`.ctors`).
+
+The source check was run on a tree built to break the rules. It rejected
+`<vector>`, a `katana/` header, a function body in a declarations header,
+`-fopenmp` in a CMakeLists, and `#pragma omp parallel for`. One ordinary test,
+`SimdLevel.OrdinaryCodeIsCompiledForTheBaselineSoTheProgramStartsOnAnyX64Machine`,
+fails if the files every target compiles are ever built with AVX enabled.
+
+### The facade, `core/simd.hpp`
+
+The facade is `std::simd` where libstdc++ sets `__glibcxx_simd` (GCC 16 in
+C++26 mode; `__cpp_lib_simd` is deliberately undefined there), and
+`std::experimental::simd` otherwise. So a `KATANA_CXX_STANDARD=23` build still
+compiles.
+
+It is for ordinary files, which are compiled for the baseline. There a
+vector is 2 doubles, 4 floats or 16 bytes. It is portable, needs no dispatch
+and carries no hazard. It is not for kernel files: the `-O0` probe above is
+why, and the source check refuses it there.
+
+`minOf` and `maxOf` are written as compare-and-select, which is `std::min` and
+`std::max` lane by lane. The TS's own `min` and `max` are marked
+`finite-math-only,no-signed-zeros`, which leaves the result for NaNs and
+zeros up to the optimiser. No production code uses the facade yet. It exists
+so that the next vectorised loop is written once for both standards. The
+rasteriser's pixel loop is the obvious one: it was measured bit-identical and
+2.2-2.5x faster on large triangles with 8-lane `std::simd`, and it would be
+written as a kernel file.
+
+### OpenMP: no threading, `-fopenmp-simd` only as a hint
+
+`core::TaskPool` is the only thread pool. OpenMP would add nothing it lacks.
+libgomp already ships, because GDAL and PDAL use it, and an OpenMP region run
+straight after a TaskPool job showed no conflict. But OpenMP reductions
+combine in no fixed order, which breaks the bit-identical rule. Running both
+pools at once would also put 31 threads on 16 cores.
+
+`-fopenmp-simd` needs no runtime and only gives the vectoriser permission, so
+it is allowed, though nothing uses it now. `simd_kernel_sources` fails on
+`-fopenmp`, `OpenMP::` or `find_package(OpenMP)` in any build file, and on
+any `#pragma omp` other than `omp simd`.
+
+### The kernels
+
+| kernel | called from | one AVX2 step | scalar reference |
+|---|---|---|---|
+| UTF-16 to UTF-8, ASCII runs | `decodeText`, both byte orders | 32 units: two loads, one test, pack, permute, one store | the unit loop, which takes over at the first non-ASCII unit and reports errors at the same byte as before |
+| UTF-8 validation | `isValidUtf8`, for texts of 64 bytes or more | 32 bytes: three nibble-table lookups (VPSHUFB) on each byte and the one before it, two saturating subtractions for leads two and three back, one XOR; a 64-byte step of pure ASCII is one OR and one movemask | main's byte loop, unchanged |
+| `geometry::transformPoints` (Mat4 with Vec3, Mat3 with Point2, in place) | the batch API | 4 points: 3 loads, 6 permutes or blends, 9 multiplies and 9 adds, 6 permutes back (2D: no transpose) | `math::transformPoint` on each point |
+| `geometry::boundsOf` (Point2, Vec3) | `Polyline2::boundingBox`, `TriangleMesh::bounds`, for 16 points or more | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
+
+Both text kernels are on the real import path. The interop archive import
+decodes the file and then calls `readArchive`, which validates the whole
+decoded text again. `decodeText` also validates the whole of a file that has
+no byte order mark, to tell UTF-8 from Windows-1252.
+
+**Why validation is a whole validator, not an ASCII fast path.** The first
+version looked for runs of ASCII and handed them to a kernel. That made text
+dense with accented, Cyrillic or CJK characters 2-4.5x slower than main,
+because it paid a call for every short run between two characters. A 16-byte
+byte-by-byte probe before the call only narrowed that: in one binary against
+main's own loop (21 alternating rounds, minimum ms) it was still 1.44x main
+on accented text, 1.15x on Cyrillic and 1.25x on CJK. Every other placement
+of an ASCII check tried there (a run counter, an 8-byte SWAR skip, a check at
+the start of each run, a check at aligned positions) cost 10-40% on one of
+those shapes, because main's loop is already about one cycle a byte and any
+work per run or per character is a large share of that. The validator judges
+every byte against the three before it, whatever the language, using the
+lookup algorithm of J. Keiser and D. Lemire ("Validating UTF-8 in less than
+one instruction per byte", Software: Practice and Experience, 2021). It never
+branches on where one character ends. The last 32 bytes of a text are judged
+again with the 32 before them, so there is no padded partial block. Judging a
+byte twice gives the same answer. The result is a yes or a no, and it is the
+same yes or no as the byte loop's.
+
+Keeping the results bit-identical required three details:
+
+- **MINPD and MAXPD** return their second operand unless the first is
+  strictly less (or greater). With the new value first, that is exactly
+  `expand()`'s `std::min(acc, v)`, so a NaN is passed over just as the loop
+  passes over it.
+- **Which zero is kept.** When the extreme is zero, the loop keeps the first
+  zero it met (`-0 < +0` is false). The kernel folds its lanes in a different
+  order, so `boundsOf` takes the value from the kernel and the sign from the
+  first zero in the array. One test places its zeros so that a kernel that
+  merely folded its lanes would fail it. With the fix-up disabled, that test
+  and the random property test both fail.
+- **NaN payloads.** A result that is NaN must be NaN at every level, but
+  which payload it carries is not compared. IEEE leaves the payload to
+  operand order, and GCC may swap the operands of a commutative operation
+  even in the scalar reference.
+
+The tests hold every kernel to its reference through the public function,
+running at each level in one process (`tests/core/test_simd_text.cpp`,
+`tests/geometry/test_point_batch.cpp`). This covers 3000 generated UTF-16
+inputs, every position of a bad byte across the first three 64-byte steps,
+text dense with accented letters at every ASCII run length from 0 to 40 and
+every cut near its end, and for the validator: sixteen kinds of error worked
+by hand at block edges, all 65,536 byte pairs at six places (18,304 valid at
+each, counted by hand), every lead C0-FF with sixteen kinds of follower, and
+6000 generated texts with damage. A scratch run, not committed, compared the
+validator with main's loop on 225 million texts at `-O3` and `-O0`, with no
+difference. There are also 300 transforms and 600 bounds over arrays of
+every length up to 70 with zeros, NaN and infinities. The hand-worked bounds
+cases are 17-20 points long and assert that they reach `kBoundsBatchMinimum`,
+so that at the AVX2 level they test the kernel and not the inline loop; with
+the minimum set to 24 they fail on that assertion.
+`PointBatch.AnArrayShorterThanTheBatchMinimumIsBoundedInlineWithoutACall`
+bounds three points in `static_assert`s, which compile only while the short
+path is inline. ctest also runs the whole core and geometry suites
+a second time under `KATANA_SIMD=scalar` and under `KATANA_SIMD=avx2`
+(`simd_scalar.*`, `simd_avx2.*`). Mutations were tried to confirm that the
+tests have teeth: disabling the zero fix-up; changing the text kernel's lane
+permute from `0xD8` to `0x00`; and five in the validator (the surrogate bit
+dropped from a table, a character left open before a step of ASCII not
+counted, the last block judged without the 32 bytes before it, a character
+open at the text's end not counted, and the rule for a four-byte lead's
+continuations dropped). Each one failed the tests; the validator's each
+failed three to five of them.
+
+### Measured
+
+The machine was an i7-1270P on AC power, with other agents' builds running
+throughout. Only the ratios and the A/A spreads below mean anything; the
+absolute times do not.
+
+**Benchmarks** (`benchmarks/bench_simd.cpp`). Every benchmark is run twice,
+once per level: `BM_x/scalar` and `BM_x/avx2`. The comparison ran three
+binaries in alternating rounds:
+
+- `main`: the file compiled against main's sources, with no SIMD layer, so
+  both members time the old code;
+- `new`: this branch;
+- `new again`: a byte-identical copy of `new`, as the A/A control.
+
+The command was
+`python tools/compare_benchmarks.py --alternate 6 "BM_(DecodeUtf16|IsValidUtf8|TransformPoints[23]Batch|BoundsOfPoints|PolylineBoundingBoxes)" main=... new=... new_again=...`,
+giving 18 samples per cell. Each cell is min / median in ms.
+
+| benchmark | main | new, scalar | new, avx2 | new again, avx2 (A/A) |
+|---|---|---|---|---|
+| `DecodeUtf16Archive` (8 MB of UTF-16 in an archive's shape) | 13.95 / 20.92 | 3.32 / 4.52 | 1.43 / 2.24 | 1.41 / 2.30 |
+| `DecodeUtf16Mixed` (a non-ASCII character every 4th) | 6.72 / 10.77 | 4.28 / 7.79 | 4.27 / 9.41 | 4.96 / 8.62 |
+| `IsValidUtf8Archive` (4 MB) | 1.99 / 3.21 | 1.08 / 2.55 | 0.13 / 0.25 | 0.16 / 0.24 |
+| `IsValidUtf8Names` (10,000 short names) | 0.09 / 0.19 | 0.09 / 0.29 | 0.12 / 0.28 | 0.09 / 0.27 |
+| `BoundsOfPoints2` (65,536 points) | 0.20 / 0.26 | 0.22 / 0.27 | 0.03 / 0.04 | 0.02 / 0.04 |
+| `BoundsOfPoints3` (65,536 points) | 0.22 / 0.27 | 0.22 / 0.24 | 0.04 / 0.05 | 0.04 / 0.08 |
+| `PolylineBoundingBoxes` (28,000 strings, 2-10 vertices) | 0.61 / 0.88 | 0.65 / 0.95 | 0.68 / 0.99 | 0.62 / 1.55 |
+| `TransformPoints2Batch` (65,536 points, in place) | - | 0.08 / 0.12 | 0.04 / 0.06 | 0.02 / 0.07 |
+| `TransformPoints3Batch` (65,536 points, in place) | - | 0.11 / 0.19 | 0.09 / 0.20 | 0.07 / 0.12 |
+
+The main column comes from the `/scalar` member, since both members ran the
+old code there. The two transform rows have no main figure. On main they
+timed a copy from one array into another, while here they transform one
+array in place. That is different memory traffic, so the rows are compared
+only across levels.
+
+How to read the table:
+
+- **Decoding.** Most of the gain on decoding comes from the scalar path, not
+  from AVX2. The old loop appended one `char` at a time to a `std::string`,
+  checking capacity for every unit. The new structure narrows a whole run
+  into the string's buffer through `resize_and_overwrite`. That alone is
+  about 4x (13.95 to 3.32 ms at the minimum), and AVX2 halves what is left
+  (3.32 to 1.43). Main to AVX2 is 9.8x at the minimum and 9.3x at the
+  median. The A/A control agrees to within 3%.
+- **The adversarial mix.** The mix enters and leaves the fast path every
+  few units. It is not slower than main at either level (4.3 against 6.7 ms
+  at the minimum). The AVX2 and scalar medians sit inside the A/A spread.
+- **Validation.** Validating a long text with AVX2 is about 8x faster by
+  the minimum and 10x by the median than the scalar loop, which is the same
+  code as main's. Short names are unchanged within the noise, because they
+  never reach the kernel.
+- **Bounds.** Bounds of a large array are 5-7x faster. A drawing's strings,
+  mostly under the 8-point minimum, are unchanged within the A/A spread,
+  which is wide on that row (0.99 against 1.55 ms median for one binary run
+  twice).
+- **Transforms.** The 2D transform is about 2x faster. The 3D transform is
+  1.2-1.6x faster by the minimum, and its medians are inside the noise. With
+  its transpose it does 12 shuffles for 18 arithmetic instructions, over
+  data that is 1.5 MB and does not fit in L2 cache. It is a batch API with
+  no production caller today, and it is recorded here as a small win, not a
+  large one.
+
+**Real archives.** A scratch harness, not committed, timed three of the
+owner's real archives. It compiled main's `text_encoding.cpp` into a renamed
+namespace and linked it beside the new one. It then ran five arms in
+alternating order, 7 rounds each: main's code, new scalar, new AVX2, and a
+second new scalar and new AVX2 as A/A controls. All five arms produced
+byte-identical text on all three archives, and every text validated.
+Each cell is min / median in ms.
+
+| archive (UTF-16LE) | main decode | new scalar decode | new AVX2 decode (A/A) | main validate | new AVX2 validate (A/A) |
+|---|---|---|---|---|---|
+| 55 MB, 229k-triangle TIN | 140.8 / 168.5 | 24.9 / 30.5 | 9.2 / 11.8 (10.6 / 12.4) | 12.0 / 18.7 | 1.5 / 2.5 (2.0 / 2.7) |
+| 58 MB, meshes | 135.7 / 164.7 | 33.5 / 38.4 | 11.2 / 14.0 (11.4 / 14.0) | 19.4 / 23.9 | 2.0 / 3.0 (2.0 / 2.9) |
+| 33 MB, 27,886-entity drawing | 87.3 / 112.8 | 16.4 / 24.2 | 7.3 / 8.3 (5.5 / 7.8) | 9.8 / 27.6 | 1.2 / 1.9 (0.9 / 1.6) |
+
+Decoding the largest real archive fell from about 141-169 ms to 9-12 ms,
+14-15x. That is close to the ~15 ms estimated before the work. Its second
+full pass, the UTF-8 validation that `readArchive` runs on the decoded text,
+fell 7-8x. Together that is about 150-190 ms of every large import down to
+about 11-15 ms. A processor without AVX2 still gets the scalar column, which
+is 4-6x faster than main.
+
+### Not done, and where next
+
+- **The archive lexer** (`lexer.cpp`) is the other flat loop on the import
+  path. It is not a kernel candidate, because it works one token at a time
+  and a token is a number or a short run of spaces. A kernel call per token
+  cannot pay for itself. What would pay is classifying 64 bytes at a time
+  into bitmaps of delimiters for the whole buffer, as simdjson does. That is
+  a rewrite of the lexer, not a kernel added to it.
+- **The rasteriser's pixel loop and the plan view's point-cloud splat** are
+  measured candidates in files other work owns now. Both would be kernel
+  files under the rules above.
+- **Surfacing the level.** A command-line or About line saying which level
+  is in force would let a person see it; today only `simdSelection()` and a
+  refused override's stderr line do.
