@@ -9,8 +9,7 @@ switches that run the window headlessly are `docs/headless.md`.
 
 ## The window
 
-`katana` (the target in `src/katana_qt`) is a `QMainWindow` around a
-workspace of views, with dockable Layers, Properties, Command Line and
+The window (`MainWindow`) is a `QMainWindow` around a workspace of views, with dockable Layers, Properties, Command Line and
 Reference Data panels. Its menu bar reads in the order a CAD user reads it -
 File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to

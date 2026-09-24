@@ -8,11 +8,11 @@ the style and symbol resolution every view, plot and preview draws through.
 
 Until 2026-09-24 this document also held the desktop application, the
 interactive tools and the headless driver. Code comments cite their sections
-as `docs/cad.md`; each now lives here:
+as `docs/cad.md`; this table says where each one went:
 
 | Section cited as `docs/cad.md, "..."` | Now in |
 |---|---|
-| "Desktop application", "Failure modes" (closing the window), "The look of the application", "The workspace", "The dock chrome", "The layer manager", "The attribute manager", "The Format menu", "Styles and Linetypes", "Symbol Library", "Survey Code Manager", "Panels refresh on the event loop", "The rules a dialog or panel follows" | `docs/desktop.md` |
+| "Desktop application" (now "The window"), "Failure modes" (closing the window), "The look of the application", "The workspace", "The dock chrome", "The layer manager", "The attribute manager", "The Format menu", "Styles and Linetypes", "Symbol Library", "Survey Code Manager", "Panels refresh on the event loop", "The rules a dialog or panel follows" | `docs/desktop.md` |
 | "Interactive tools", "The five families", "The tool host" | `docs/tools.md` |
 | "Headless front end", `--screenshot` and the driver switches, "a headless session never opens a modal box" | `docs/headless.md` |
 
