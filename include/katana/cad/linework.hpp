@@ -6,7 +6,8 @@
 // three dots. The mapfile says WHICH codes are lines (`SurveyRule::breakline`)
 // and how they are drawn; this is what actually joins them. Civil 3D ("Process
 // Linework"), TBC ("Process Feature Codes"), Carlson ("Field to Finish") and
-// 12d's field reduction all do it, and until this Katana had nothing.
+// other survey packages' field reduction all do it, and until this Katana had
+// nothing.
 //
 // Three decisions the rest of this header builds on:
 //
@@ -17,11 +18,11 @@
 //    reported rather than used for grouping: two names are two strings whatever
 //    they split into, because "WM01" and "WM1" are two strings in the field.
 //
-// 2. CONTROL CODES ARE DATA. A 12d mapfile has no start/end/close codes - 12d
-//    strings by name alone - so what "ST" means is not in any file Katana
-//    reads. `LineworkCodes` holds the spellings, with defaults that are common
-//    field conventions and nothing more. They are configurable, and they are
-//    NOT 12d mapfile data.
+// 2. CONTROL CODES ARE DATA. A survey code file has no start/end/close codes
+//    - it forms strings by name alone - so what "ST" means is not in any
+//    file Katana reads. `LineworkCodes` holds the spellings, with defaults
+//    that are common field conventions and nothing more. They are
+//    configurable, and they are NOT survey code file data.
 //
 // 3. NOTHING IS DROPPED SILENTLY. Every point that is not in a line is in the
 //    report with the reason, and every token that was not understood is in the
@@ -36,7 +37,7 @@
 //     chorded.
 //   * A polyline has no Z of its own. Heights are kept per vertex in the
 //     `elevations` property through `entity::setHeights`, the one writer the
-//     12d import and the survey import share; a point with no height gives its
+//     archive import and the survey import share; a point with no height gives its
 //     vertex no height (absent is not zero).
 //
 // The lines are styled by CALLING `applySurveyCodes` on them, when the command
@@ -91,7 +92,7 @@ struct StringName {
 // The spellings of the control codes a point's code may carry after its string
 // name: "KB1 ST", "FL CL", "KB1 BC", "FN3 JPN 105".
 //
-// CONFIGURABLE, NOT 12D MAPFILE DATA. The defaults are spellings common in
+// CONFIGURABLE, NOT SURVEY CODE FILE DATA. The defaults are spellings common in
 // field practice, chosen so that an untouched table does something sensible;
 // no product's file was copied for them:
 //   ST   start   - "start", the usual two-letter field abbreviation
@@ -295,7 +296,7 @@ struct LineworkResult {
 // carries a control code. Its string name groups it; the order orders it;
 // "ST" begins a new line at it, "END" ends the line at it, "CL" ends and
 // closes, "RECT" ends it as a rectangle. The line goes on the rule's model
-// (12d's model is Katana's layer), or the first point's layer when the rule
+// (a rule's model is Katana's layer), or the first point's layer when the rule
 // names none.
 //
 // Curves. "BC" begins a curve at a point and "EC" ends it; each consecutive

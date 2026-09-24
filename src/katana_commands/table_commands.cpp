@@ -426,7 +426,7 @@ template <typename T> class DeleteItemCommand final : public Command {
 // second copy of those rules here.
 //
 // Undo is NOT the reverse rename. The new name may already have holders the
-// table does not know of - a style naming a 12d library linestyle, entities
+// table does not know of - a style naming a library linestyle, entities
 // wearing a style that is "not in the style table" - and repointing every
 // holder of the new name back would move those too. So undo puts back the
 // before-images of what execute() moved, as MergeItemCommand does.

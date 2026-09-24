@@ -103,16 +103,16 @@ editStylesCommand(const katana::entity::Model& model, const std::vector<std::str
 
 enum class LinetypeOrigin {
     Drawing, // a model Linetype: a dash pattern, saved with the project
-    Library, // a non-vertex 12d definition of the session's StyleLibrary (D2)
+    Library, // a non-vertex library definition of the session's StyleLibrary (D2)
 };
 
-// What draws the line: a Katana dash pattern, or a 12d definition laid by
+// What draws the line: a Katana dash pattern, or a library definition laid by
 // its units.
 enum class LinetypeRowKind {
     Dash,     // model Linetype; continuous when its pattern is empty
-    Paper,    // 12d `paperstyle`: millimetres on the plot
-    World,    // 12d `worldstyle`: model units
-    TwoPoint, // 12d `twoptstyle`: stretched between two anchors
+    Paper,    // Paper linestyle (`paperstyle`): millimetres on the plot
+    World,    // World linestyle (`worldstyle`): model units
+    TwoPoint, // Two-point linestyle (`twoptstyle`): stretched between two anchors
 };
 
 [[nodiscard]] std::string_view toString(LinetypeOrigin origin);
