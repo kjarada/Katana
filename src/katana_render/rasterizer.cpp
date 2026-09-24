@@ -752,7 +752,8 @@ struct EdgeSetup {
 
 // True when every pixel centre of the rectangle passes the float test: every
 // edge function is above M at all four corners.
-[[nodiscard]] bool coversAll(const EdgeSetup& e, int minX, int maxX, int minY, int maxY)
+// Used only by the AVX2 path: [[maybe_unused]] keeps a build without kernels warning-free.
+[[nodiscard, maybe_unused]] bool coversAll(const EdgeSetup& e, int minX, int maxX, int minY, int maxY)
 {
     if (!e.usable) {
         return false;
