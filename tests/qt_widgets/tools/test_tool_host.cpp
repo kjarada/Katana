@@ -160,6 +160,29 @@ TEST(ToolHost, ABarePIsAnOptionForTheToolAndOnlyTheApostropheFormIsPan)
     EXPECT_FALSE(isTransparentCommand("P")); // Rotate's and Scale's [Points]
     EXPECT_FALSE(isTransparentCommand("ZOOMY"));
     EXPECT_FALSE(isTransparentCommand("10,0"));
+    // At a prompt for a value a bare word is the answer; 'Z is still ZOOM.
+    EXPECT_FALSE(isTransparentCommand("Z", true));
+    EXPECT_TRUE(isTransparentCommand("'Z", true));
+}
+
+TEST(ToolHost, AWordTypedAtAValuePromptIsTheToolsAnswerEvenWhenItReadsZoom)
+{
+    // Quick Select's layer prompt takes any name, "Z" included; only 'Z
+    // goes to the view from there.
+    Document document;
+    ToolHost host(document);
+    std::vector<std::string> transparent;
+    host.onTransparent = [&](const std::string& command) {
+        transparent.push_back(command);
+        return true;
+    };
+    ASSERT_TRUE(host.start("select.quick").ok());
+    EXPECT_EQ(host.typed("Any"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(host.typed("'Z"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(transparent, (std::vector<std::string>{"'Z"}));
+    EXPECT_EQ(host.typed("Z"), ToolHost::Outcome::Continue); // the layer, "Z"
+    EXPECT_EQ(transparent.size(), 1u);
+    EXPECT_NE(host.prompt().find("Condition"), std::string::npos) << host.prompt();
 }
 
 TEST(ToolHost, ASelectingToolsAnswerIsLeftInTheDocumentsSelection)

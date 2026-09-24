@@ -824,6 +824,18 @@ if(TARGET katana)
             "-DEXPECT=Horizontal distance 5.000"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dist_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Quick Select is a form asked at the command line, one question at a
+    # time with a default for Enter, so a headless run fills it as a person
+    # does and no dialog waits on anyone: kind Line, Enter for any layer and
+    # for no condition. One line drawn, one selected.
+    add_test(NAME qt_quick_select_is_answered_at_the_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE 0,0 10,0|>CIRCLE 5,5 2|>SELECT NONE|>QSELECT|>Line|>|>"
+            "-DEXPECT=1 entity selected: Lines on any layer, in the drawing"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/quick_select_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     add_test(NAME qt_every_shortcut_and_menu_letter_reaches_one_thing_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
