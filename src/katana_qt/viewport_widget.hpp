@@ -37,6 +37,7 @@
 #include "katana/interop/reference_data.hpp"
 
 #include "customisation/style_painter.hpp"
+#include "plan_painter.hpp"
 #include "tools/tool_host.hpp"
 
 class QPainter;
@@ -63,14 +64,18 @@ class ViewportWidget final : public QWidget {
     // the widget being rebuilt when the view changes kind and back.
     [[nodiscard]] const katana::cad::ViewTransform& viewTransform() const { return state_.plan; }
 
-    // Plots the drawing to a PDF: the same drawing code as the screen, painted
-    // through a sheet transform, with every line as wide as its layer's line
-    // weight says in millimetres (PLAN.MD Phase 22). Entities, hatches and
-    // alignments; not rasters or point clouds, which at plot resolution would
-    // be enormous and are a later slice. Fails with FileExportFailure when the
-    // file cannot be written, and with whatever cad::sheetFor refuses.
+    // Plots the drawing as this view shows it - its hidden layers and
+    // reference layers - through plotPlanToPdf (plan_painter.hpp): the same
+    // painter as the screen, on paper. Fails as that does.
     [[nodiscard]] katana::core::Status plotToPdf(const QString& path,
                                                  const katana::cad::PlotSettings& settings);
+    // `settings` fitted to what this view draws (drawnBounds, as Zoom Extents
+    // frames it): the first standard scale the drawing fits the printable
+    // area at, centred on it; the sheet otherwise as given. What Plot's Fit
+    // plots. Fails with InvalidArgument when the view draws nothing, and
+    // with whatever cad::fitScale refuses.
+    [[nodiscard]] katana::core::Result<katana::cad::PlotSettings>
+    fittedPlot(katana::cad::PlotSettings settings) const;
 
     // `state` belongs to the workspace's ViewSet and outlives this widget: it
     // is what survives when the view changes kind or its dock floats, so the
@@ -85,6 +90,33 @@ class ViewportWidget final : public QWidget {
     // headless checks, which cannot look at pixels, to prove that a layer
     // hidden in one view is gone from that view and from no other.
     [[nodiscard]] std::size_t lastDrawnEntityCount() const { return lastDrawnEntities_; }
+
+    // ---- what a frame costs -------------------------------------------------
+    // The drawing is painted into an image kept between paints, and a paint
+    // whose view, drawing, layers, library, selection, reference layers and
+    // meshes are all as they were only lays that image down and draws the
+    // view's own furniture over it (tool previews, the snap marker, the
+    // selection box, the prompt). A mouse move then costs the furniture, not
+    // the drawing: measured on a 27.6k-entity survey drawing it was a whole
+    // repaint every move. How many times the drawing itself has been painted,
+    // for the tests that prove a move does not repaint it.
+    [[nodiscard]] std::size_t drawingPaintCount() const { return drawingPaints_; }
+    // The last paint, whole, and the last time the drawing was painted, in
+    // milliseconds: what onFrameStats reports.
+    [[nodiscard]] double lastFrameMilliseconds() const { return lastFrameMs_; }
+    [[nodiscard]] double lastDrawingMilliseconds() const { return lastDrawingMs_; }
+    // Raised after every paint with the view's statistics - "Plan  N drawn
+    // X ms", the drawing's own time and whether this frame reused it - as the
+    // 3D view reports its triangles and frame time.
+    std::function<void(const QString&)> onFrameStats;
+
+    // Every plan view's lines on screen as a cosmetic one-pixel pen instead
+    // of the 1.5 px hairline: 5-8x cheaper to stroke (docs/plan_view.md). A
+    // process-wide choice, the View menu's "Thin screen lines (faster)", on
+    // by default; plots keep their paper-millimetre weights either way.
+    // Views read it at their next paint; the caller repaints them.
+    static void setThinScreenLines(bool thin);
+    [[nodiscard]] static bool thinScreenLines();
 
     // Legacy: Select stops the running tool; the others start their
     // catalogue tool (toolId).
@@ -263,52 +295,38 @@ class ViewportWidget final : public QWidget {
     void run(katana::commands::CommandPtr command);
     void updatePrompt();
 
-    void drawGrid(QPainter& painter) const;
-    void drawRasters(QPainter& painter) const;
-    void drawPointClouds(QPainter& painter) const;
-    void drawEntities(QPainter& painter) const;
-    // Dash patterns already built THIS FRAME, by linetype name and pen width.
-    // A pattern also depends on the view scale, which is constant within a
-    // frame, so the cache is cleared at the top of every drawEntities. It is
-    // mutable because drawing does not change the document.
-    mutable std::map<std::pair<std::string, double>, QList<qreal>> dashCache_;
-    void drawGeometry(QPainter& painter, const katana::entity::Geometry& geometry) const;
-    // Draws the definition along the entity's plan shape through the shared
-    // style painter. FALSE when no pattern was laid - too fine, too long or
-    // nothing to lay it along - so the caller draws the plain line instead:
-    // a library linestyle replaces the line rather than decorating it.
-    [[nodiscard]] bool drawLineStyle(QPainter& painter, const StylePaintTarget& target,
-                                     const katana::cad::FlatDefinition& definition,
-                                     const katana::entity::Geometry& geometry) const;
-    // Model units to one plot millimetre, which is what a paper linestyle uses.
-    [[nodiscard]] double paperScale() const;
-    // The plain point mark's half-width in model units at the current scale.
-    [[nodiscard]] double plainMarkHalfWidth() const;
-    void drawSymbol(QPainter& painter, const StylePaintTarget& target, const std::string& symbol,
-                    const Point2& centre, double size) const;
-    // Flattened library definitions, kept between frames and keyed on the
-    // document's library generation, so thousands of coded points do not
-    // re-flatten their symbol every frame. Mutable because painting is
-    // logically const.
-    mutable katana::cad::DefinitionCache definitions_;
-    void drawMeshFootprints(QPainter& painter) const;
-    // `height` in model units; `rotation` in radians, counter-clockwise.
-    // Fills a closed polyline with the hatch pattern resolved for the entity
-    // being drawn, if any. `screen` is that boundary already transformed, so a
-    // solid fill costs nothing beyond the polygon the caller built anyway.
-    void drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,
-                   const QPolygonF& screen) const;
+    // What the plan painter draws from and through (plan_painter.hpp): the
+    // document with the window's reference data and meshes, this view's
+    // transform and hidden layers, and the screen.
+    [[nodiscard]] PlanSource paintSource() const;
+    [[nodiscard]] PlanFrame paintFrame() const;
+    [[nodiscard]] PlanPaintOptions screenOptions() const;
 
-    // Every alignment in the document, as an amber overlay above the drawing:
-    // the centreline, a tick and a chainage label at each key station (the
-    // ends and every TS, SC, CS, ST), and the name at the start. An overlay
-    // rather than an entity because an alignment is a definition other things
-    // are cut along, not a line in the drawing - the same reason a surface is
-    // not an entity.
-    void drawAlignments(QPainter& painter) const;
-
-    void drawText(QPainter& painter, const Point2& position, const std::string& text,
-                  double height, double rotation) const;
+    // Everything the kept drawing image depends on: when any of it differs
+    // from the last paint's, the drawing is painted again. The document's
+    // notifications count every command, undo, selection change, library
+    // and current-layer change; the fingerprints catch what changes without
+    // one - a reference layer shown or hidden in its panel, a mesh's style.
+    struct DrawingKey {
+        double centreX = 0.0;
+        double centreY = 0.0;
+        double scale = 0.0;
+        double width = 0.0;
+        double height = 0.0;
+        double deviceRatio = 0.0;
+        std::uint64_t notifications = 0;
+        std::uint64_t modelRevision = 0;
+        std::uint64_t libraryGeneration = 0;
+        std::uint64_t selection = 0;
+        std::uint64_t references = 0;
+        std::uint64_t meshes = 0;
+        katana::cad::LayerOverrides layers;
+        std::set<std::uint64_t> hiddenReferences;
+        bool grid = false;
+        bool thinLines = false;
+        friend bool operator==(const DrawingKey&, const DrawingKey&) = default;
+    };
+    [[nodiscard]] DrawingKey drawingKey(double deviceRatio) const;
     void drawPreview(QPainter& painter) const;
     // The running tool's prompt and what has been typed for it, in a band
     // along the bottom of the view.
@@ -354,40 +372,23 @@ class ViewportWidget final : public QWidget {
     katana::interop::ReferenceData* reference_ = nullptr;
     const std::vector<katana::cad::SceneMesh>* meshes_ = nullptr;
 
-    // The dimension style in force for the entity currently being drawn.
-    // Resolved once per entity in drawEntities rather than per draw call, and
-    // held here because drawGeometry's visitor is handed only the geometry.
-    // Mutable because painting is logically const, like the caches below.
-    mutable katana::entity::DimensionStyle dimensionStyle_{};
+    // What the painter keeps between frames - flattened definitions, dash
+    // patterns, fonts, imagery and point-cloud colours - owned here, one per
+    // view, and a second for plots so a plot does not throw away the
+    // screen's. Mutable because painting is logically const.
+    mutable PlanPaintCache paintCache_;
+    PlanPaintCache plotCache_;
 
-    // The hatch pattern in force for the entity currently being drawn, or null
-    // when it is not hatched. Resolved once per entity for the same reason
-    // dimensionStyle_ is, and owned by the document, so this only ever points
-    // at a pattern the model is holding for the duration of the paint.
-    mutable const katana::entity::HatchPattern* hatch_ = nullptr;
-
-    // Device pixels per millimetre of paper while plotting; 0 on screen,
-    // where a line weight has no paper to be millimetres of and every line
-    // is a hairline. Set by plotToPdf for the duration of the plot only.
-    double paperPixelsPerMillimetre_ = 0.0;
-    // The plot's settings while plotting, for the paper colour rule (D7).
-    katana::cad::PlotSettings plotSettings_{};
-
-    // Converting RGBA bytes to a QImage, and a classification to a colour, are
-    // both far too expensive to redo for every frame of a pan. Both are cached
-    // against the layer id (and, for clouds, the colour mode) and rebuilt only
-    // when that changes. Mutable because painting is logically const.
-    struct RasterCache {
-        katana::interop::ReferenceId id = 0;
-        QImage image;
-    };
-    struct CloudCache {
-        katana::interop::ReferenceId id = 0;
-        katana::interop::PointColorMode mode = katana::interop::PointColorMode::Elevation;
-        std::vector<QRgb> colors;
-    };
-    mutable std::vector<RasterCache> rasterCache_;
-    mutable std::vector<CloudCache> cloudCache_;
+    // The drawing as last painted, and what it was painted for.
+    QImage drawing_;
+    std::optional<DrawingKey> drawingKey_;
+    std::size_t drawingPaints_ = 0;
+    // Counted by the document listener: one per notification.
+    std::uint64_t notifications_ = 0;
+    // Counted when the window says its reference data changed.
+    std::uint64_t referenceRevision_ = 0;
+    double lastFrameMs_ = 0.0;
+    double lastDrawingMs_ = 0.0;
 
     bool panning_ = false;
     QPointF lastMouse_;

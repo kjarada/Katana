@@ -31,3 +31,9 @@ add_custom_target(run-benchmarks
             $<TARGET_FILE:katana_benchmarks> --benchmark_min_time=0.2s
     DEPENDS katana_benchmarks
     USES_TERMINAL)
+
+# The plan view's paint and plot (benchmarks/qt/), which need Qt and the
+# application's sources: only where the application is built.
+if(KATANA_BUILD_QT_APP AND TARGET katana)
+    add_subdirectory(qt)
+endif()

@@ -15,6 +15,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 #include <QPdfWriter>
@@ -22,6 +23,7 @@
 #include <QLineF>
 #include <QMarginsF>
 #include <QContextMenuEvent>
+#include <QElapsedTimer>
 #include <QCursor>
 #include <QFont>
 #include <QFontMetrics>
@@ -56,16 +58,11 @@ using katana::geometry::Vec2;
 namespace {
 
 const QColor kBackground(0x1e, 0x23, 0x29);
-const QColor kGridMinor(0x2a, 0x31, 0x39);
-const QColor kGridMajor(0x38, 0x42, 0x4d);
-const QColor kAxis(0x5a, 0x68, 0x75);
-const QColor kSelection(0xff, 0x9f, 0x1c);
 const QColor kPreview(0x4c, 0xc9, 0xf0);
 const QColor kSnapMarker(0xf7, 0xd0, 0x3c);
 
 constexpr double kPickAperturePixels = 8.0;
 constexpr double kSnapAperturePixels = 12.0;
-constexpr double kPointMarkerPixels = 4.0;
 constexpr double kWheelZoomStep = 1.2;
 // Drags shorter than this are clicks, not selection boxes.
 constexpr double kDragThresholdPixels = 4.0;
@@ -91,19 +88,6 @@ constexpr double kInitialScale = 10.0;
 // and its label.
 constexpr int kMinimumWidth = 160;
 constexpr int kMinimumHeight = 120;
-
-QColor toQColor(const katana::entity::Color& color)
-{
-    return QColor(color.r, color.g, color.b, color.a);
-}
-
-// Whether a mesh is drawn at all - in plan as its footprint, and so counted
-// in what Zoom Extents frames. The 3D scene applies the same rule to it.
-bool isShown(const katana::cad::SceneMesh& item)
-{
-    return item.visible && item.mesh != nullptr && !item.mesh->empty() &&
-           item.style != katana::cad::SurfaceStyle::Hidden;
-}
 
 } // namespace
 
@@ -182,7 +166,10 @@ ViewportWidget::ViewportWidget(cad::Document& document, cad::ViewState& state, Q
     if (!state_.planFramed) {
         state_.plan.scale = kInitialScale;
     }
-    documentListener_ = document_.addListener([this] { update(); });
+    documentListener_ = document_.addListener([this] {
+        ++notifications_; // the kept drawing is stale (drawingKey)
+        update();
+    });
     wireToolHost();
     activateOnFocus(*this, [this] {
         if (onActivated) {
@@ -292,54 +279,8 @@ void ViewportWidget::wireToolHost()
 
 Box2 ViewportWidget::drawnBounds() const
 {
-    // What THIS view draws, through the one visibility rule with this view's
-    // hidden layers: the entities' own bounds counted every entity, so a
-    // layer hidden here - or a hidden stray far away - still pulled the frame
-    // out to it.
-    Box2 bounds = cad::drawnExtent(document_.model(), state_.layers);
-    // Zoom Extents means everything the user can see, so imported imagery and
-    // point clouds count. A drawing that is empty except for an orthophoto
-    // would otherwise fit an empty box and leave the photo off screen. Layer
-    // by layer rather than ReferenceData::visibleBounds, because a layer
-    // hidden in this view is not seen here.
-    if (reference_ != nullptr) {
-        for (const katana::interop::RasterOverlay& raster : reference_->rasters()) {
-            if (raster.visible && !state_.hiddenReferences.contains(raster.id)) {
-                bounds.expand(raster.worldBounds());
-            }
-        }
-        for (const katana::interop::PointCloudLayer& cloud : reference_->pointClouds()) {
-            if (cloud.visible && !state_.hiddenReferences.contains(cloud.id)) {
-                bounds.expand(cloud.worldBounds());
-            }
-        }
-    }
-    // A mesh is drawn in plan as its footprint, so it is seen and counts. A
-    // drawing that is nothing but meshes framed an empty box before.
-    if (meshes_ != nullptr) {
-        for (const katana::cad::SceneMesh& item : *meshes_) {
-            if (isShown(item)) {
-                const katana::math::AABB space = item.mesh->bounds();
-                if (!space.empty()) {
-                    bounds.expand(Point2(space.min.x, space.min.y));
-                    bounds.expand(Point2(space.max.x, space.max.y));
-                }
-            }
-        }
-    }
-    // Alignments are drawn but are not entities, so they are in no entity
-    // bound. Found by looking at a screenshot: the sample's access road ran off
-    // the bottom of a view that claimed to show everything.
-    for (const katana::entity::Alignment& alignment : document_.model().alignments.all()) {
-        if (const auto solved = katana::geometry::solveAlignment(alignment.horizontal)) {
-            // A metre is fine enough for a bounding box; the curve cannot
-            // stray further than that from its chords.
-            for (const Point2& vertex : solved->toPolyline(1.0).vertices) {
-                bounds.expand(vertex);
-            }
-        }
-    }
-    return bounds;
+    // What THIS view draws, through the one function a plot fits to as well.
+    return planDrawnBounds(paintSource(), state_.layers, state_.hiddenReferences);
 }
 
 void ViewportWidget::zoomExtents()
@@ -390,8 +331,8 @@ void ViewportWidget::setReferenceData(katana::interop::ReferenceData* reference)
 
 void ViewportWidget::invalidateReferenceCache()
 {
-    rasterCache_.clear();
-    cloudCache_.clear();
+    paintCache_.invalidateReferences();
+    ++referenceRevision_;
     update();
 }
 
@@ -942,29 +883,175 @@ void ViewportWidget::resizeEvent(QResizeEvent* event)
 
 // ---- painting ---------------------------------------------------------------------------
 
+PlanSource ViewportWidget::paintSource() const
+{
+    PlanSource source = planSourceOf(document_);
+    source.reference = reference_;
+    source.meshes = meshes_;
+    return source;
+}
+
+PlanFrame ViewportWidget::paintFrame() const
+{
+    PlanFrame frame;
+    frame.transform = state_.plan;
+    frame.layers = &state_.layers;
+    frame.hiddenReferences = &state_.hiddenReferences;
+    return frame;
+}
+
+PlanPaintOptions ViewportWidget::screenOptions() const
+{
+    PlanPaintOptions options;
+    options.medium = PlanMedium::Screen;
+    // A paper linestyle's millimetre on screen is a millimetre OF SCREEN. It
+    // used to be one pixel, which made every paper linestyle about four
+    // times too small: the ticks of a fence style came out a pixel tall and
+    // vanished into the line they sit on.
+    options.pixelsPerMillimetre = std::max(1.0, logicalDpiX() / 25.4);
+    options.grid = gridVisible_;
+    options.thinLines = thinScreenLines();
+    options.symbolSprites = true;
+    return options;
+}
+
+namespace {
+
+// Whether plan views draw their lines as a cosmetic pixel: the View menu's
+// "Thin screen lines (faster)", on unless the user turns it off.
+bool thinScreenLinesSetting = true;
+
+// FNV-1a, for the fingerprints of what the drawing depends on without the
+// document saying so.
+struct Fingerprint {
+    std::uint64_t value = 1469598103934665603ULL;
+    void add(std::uint64_t word)
+    {
+        for (int byte = 0; byte < 8; ++byte) {
+            value ^= (word >> (8 * byte)) & 0xffU;
+            value *= 1099511628211ULL;
+        }
+    }
+    void add(double number)
+    {
+        std::uint64_t bits = 0;
+        static_assert(sizeof bits == sizeof number);
+        std::memcpy(&bits, &number, sizeof bits);
+        add(bits);
+    }
+};
+
+} // namespace
+
+void ViewportWidget::setThinScreenLines(bool thin)
+{
+    thinScreenLinesSetting = thin;
+}
+
+bool ViewportWidget::thinScreenLines()
+{
+    return thinScreenLinesSetting;
+}
+
+ViewportWidget::DrawingKey ViewportWidget::drawingKey(double deviceRatio) const
+{
+    DrawingKey key;
+    key.centreX = state_.plan.center.x;
+    key.centreY = state_.plan.center.y;
+    key.scale = state_.plan.scale;
+    key.width = state_.plan.widthPixels;
+    key.height = state_.plan.heightPixels;
+    key.deviceRatio = deviceRatio;
+    key.notifications = notifications_;
+    key.modelRevision = document_.modelRevision();
+    key.libraryGeneration = document_.libraryGeneration();
+    // The selection is announced (Document::notifySelectionChanged), but a
+    // caller that changes it and only asks for a repaint must still see it
+    // drawn: a selection is the ids, in order, and hashing even a whole
+    // drawing's is a fraction of a millisecond.
+    Fingerprint selection;
+    for (const katana::entity::EntityId id : document_.selection().ids()) {
+        selection.add(static_cast<std::uint64_t>(id));
+    }
+    key.selection = selection.value;
+    Fingerprint references;
+    references.add(referenceRevision_);
+    if (reference_ != nullptr) {
+        // The panel shows, hides and fades a layer without a notification.
+        for (const katana::interop::RasterOverlay& raster : reference_->rasters()) {
+            references.add(static_cast<std::uint64_t>(raster.id));
+            references.add(static_cast<std::uint64_t>(raster.visible));
+            references.add(raster.opacity);
+        }
+        for (const katana::interop::PointCloudLayer& cloud : reference_->pointClouds()) {
+            references.add(static_cast<std::uint64_t>(cloud.id));
+            references.add(static_cast<std::uint64_t>(cloud.visible));
+            references.add(static_cast<std::uint64_t>(cloud.colorMode));
+            references.add(static_cast<double>(cloud.pointSize));
+            references.add(static_cast<std::uint64_t>(cloud.points.size()));
+        }
+    }
+    key.references = references.value;
+    Fingerprint meshes;
+    if (meshes_ != nullptr) {
+        // The window's vector, which grows and restyles in place.
+        meshes.add(static_cast<std::uint64_t>(meshes_->size()));
+        for (const katana::cad::SceneMesh& mesh : *meshes_) {
+            meshes.add(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(mesh.mesh)));
+            meshes.add(static_cast<std::uint64_t>(mesh.visible));
+            meshes.add(static_cast<std::uint64_t>(mesh.style));
+            meshes.add(static_cast<std::uint64_t>(mesh.flatColor));
+        }
+    }
+    key.meshes = meshes.value;
+    key.layers = state_.layers;
+    key.hiddenReferences = state_.hiddenReferences;
+    key.grid = gridVisible_;
+    key.thinLines = thinScreenLines();
+    return key;
+}
+
 void ViewportWidget::paintEvent(QPaintEvent*)
 {
+    QElapsedTimer frameTimer;
+    frameTimer.start();
     QPainter painter(this);
-    painter.fillRect(rect(), kBackground);
     state_.plan.resize(width(), height());
     if (!state_.planFramed) {
         frameOnFirstPaint();
     }
 
-    // Imagery sits beneath everything: it is a backdrop, and the grid has to
-    // stay legible over it. Point clouds sit above the grid but below the
-    // drawing, so drawn geometry is never obscured by survey returns.
-    drawRasters(painter);
-    if (gridVisible_) {
-        drawGrid(painter);
+    // The drawing, through the one plan painter the plot uses too, into an
+    // image kept until something it depends on changes. The image is the
+    // widget's size in DEVICE pixels, so on a scaled display it is as sharp
+    // as painting the widget directly, and laying it down is a copy.
+    const double deviceRatio = devicePixelRatioF();
+    DrawingKey key = drawingKey(deviceRatio);
+    const bool stale = !drawingKey_.has_value() || *drawingKey_ != key || drawing_.isNull();
+    if (stale) {
+        QElapsedTimer drawingTimer;
+        drawingTimer.start();
+        const QSize pixels(std::max(1, static_cast<int>(std::ceil(width() * deviceRatio))),
+                           std::max(1, static_cast<int>(std::ceil(height() * deviceRatio))));
+        if (drawing_.size() != pixels) {
+            drawing_ = QImage(pixels, QImage::Format_ARGB32_Premultiplied);
+        }
+        drawing_.setDevicePixelRatio(deviceRatio);
+        QPainter layer(&drawing_);
+        layer.fillRect(rect(), kBackground);
+        const PlanPaintStats stats =
+            paintPlan(layer, paintSource(), paintFrame(), screenOptions(), paintCache_);
+        layer.end();
+        lastDrawnEntities_ = stats.entitiesDrawn;
+        drawingKey_ = std::move(key);
+        ++drawingPaints_;
+        lastDrawingMs_ = static_cast<double>(drawingTimer.nsecsElapsed()) / 1.0e6;
     }
-    drawPointClouds(painter);
+    painter.drawImage(QPointF(0.0, 0.0), drawing_);
+
+    // The view's own furniture over the drawing: what a tool is making, the
+    // hint for an empty drawing, the selection box, the snap and the prompt.
     painter.setRenderHint(QPainter::Antialiasing, true);
-    // Beneath the drawing, like a surface: a mesh is context for what is
-    // drawn over it, not a thing to be picked in plan.
-    drawMeshFootprints(painter);
-    drawEntities(painter);
-    drawAlignments(painter);
     drawPreview(painter);
     if (drawingIsEmpty() && !tools_.active()) {
         drawEmptyHint(painter);
@@ -980,6 +1067,19 @@ void ViewportWidget::paintEvent(QPaintEvent*)
     }
     drawSnapMarker(painter);
     drawPrompt(painter);
+
+    lastFrameMs_ = static_cast<double>(frameTimer.nsecsElapsed()) / 1.0e6;
+    if (onFrameStats) {
+        // The drawing's own time, and this frame's when it only laid the
+        // kept drawing down: a mouse move reads "kept", a pan the drawing.
+        onFrameStats(stale ? QString("Plan  %1 drawn  %2 ms")
+                                 .arg(lastDrawnEntities_)
+                                 .arg(lastDrawingMs_, 0, 'f', 1)
+                           : QString("Plan  %1 drawn  %2 ms (kept, %3 ms)")
+                                 .arg(lastDrawnEntities_)
+                                 .arg(lastDrawingMs_, 0, 'f', 1)
+                                 .arg(lastFrameMs_, 0, 'f', 1));
+    }
 }
 
 bool ViewportWidget::drawingIsEmpty() const
@@ -1048,827 +1148,40 @@ void ViewportWidget::drawEmptyHint(QPainter& painter) const
     painter.restore();
 }
 
-void ViewportWidget::drawRasters(QPainter& painter) const
-{
-    if (reference_ == nullptr) {
-        return;
-    }
-    for (const katana::interop::RasterOverlay& raster : reference_->rasters()) {
-        // Hidden in the Reference Data panel, or in this view only.
-        if (!raster.visible || state_.hiddenReferences.contains(raster.id) ||
-            raster.width <= 0 || raster.height <= 0) {
-            continue;
-        }
-
-        // Cache the QImage: rebuilding it from the RGBA bytes every frame would
-        // copy tens of megabytes per repaint.
-        auto cached = std::find_if(
-            rasterCache_.begin(), rasterCache_.end(),
-            [&raster](const RasterCache& entry) { return entry.id == raster.id; });
-        if (cached == rasterCache_.end()) {
-            QImage image(reinterpret_cast<const uchar*>(raster.rgba.data()), raster.width,
-                         raster.height, raster.width * 4, QImage::Format_RGBA8888);
-            // copy(): the QImage above only borrows the vector's buffer, and the
-            // cache must outlive this loop iteration.
-            rasterCache_.push_back(RasterCache{raster.id, image.copy()});
-            // Drawn in this same paint. It used to `continue` and be drawn "on
-            // the next pass" - which nothing asked for, so an imported image
-            // stayed invisible until the mouse happened to move over the view.
-            cached = std::prev(rasterCache_.end());
-        }
-
-        // Pixel -> world is the geotransform; world -> screen is the view. The
-        // composition is itself affine, so it is handed to QPainter as one
-        // transform rather than resampling the image here.
-        //
-        //   world.x = g0 + px*g1 + py*g2       screen.x = w/2 + (world.x - cx)*s
-        //   world.y = g3 + px*g4 + py*g5       screen.y = h/2 - (world.y - cy)*s
-        //
-        // so screen.x = [w/2 + (g0-cx)s] + px*(g1 s) + py*(g2 s)
-        //    screen.y = [h/2 - (g3-cy)s] + px*(-g4 s) + py*(-g5 s)
-        const auto& g = raster.geotransform;
-        const double s = state_.plan.scale;
-        const double dx = 0.5 * width() + (g[0] - state_.plan.center.x) * s;
-        const double dy = 0.5 * height() - (g[3] - state_.plan.center.y) * s;
-        const QTransform transform(g[1] * s, -g[4] * s, g[2] * s, -g[5] * s, dx, dy);
-
-        painter.save();
-        painter.setOpacity(std::clamp(raster.opacity, 0.0, 1.0));
-        painter.setTransform(transform);
-        // Smooth only when magnifying past 1:1; downsampling a huge image with
-        // smoothing on is slow and makes little visible difference.
-        painter.setRenderHint(QPainter::SmoothPixmapTransform,
-                              std::abs(g[1] * s) > 1.0);
-        painter.drawImage(QPointF(0.0, 0.0), cached->image);
-        painter.restore();
-    }
-}
-
-void ViewportWidget::drawPointClouds(QPainter& painter) const
-{
-    if (reference_ == nullptr || width() <= 0 || height() <= 0) {
-        return;
-    }
-
-    for (const katana::interop::PointCloudLayer& cloud : reference_->pointClouds()) {
-        // Hidden in the Reference Data panel, or in this view only.
-        if (!cloud.visible || state_.hiddenReferences.contains(cloud.id) ||
-            cloud.points.empty()) {
-            continue;
-        }
-
-        // Per-point colour depends only on the layer and its mode, so it is
-        // computed once and cached; only the projection is redone per frame.
-        auto cached = std::find_if(cloudCache_.begin(), cloudCache_.end(),
-                                   [&cloud](const CloudCache& entry) {
-                                       return entry.id == cloud.id &&
-                                              entry.mode == cloud.colorMode;
-                                   });
-        if (cached == cloudCache_.end()) {
-            // Drop any stale entry for this layer whose mode has changed.
-            cloudCache_.erase(std::remove_if(cloudCache_.begin(), cloudCache_.end(),
-                                             [&cloud](const CloudCache& entry) {
-                                                 return entry.id == cloud.id;
-                                             }),
-                              cloudCache_.end());
-
-            double minimum = 0.0;
-            double maximum = 1.0;
-            if (cloud.colorMode == katana::interop::PointColorMode::Intensity) {
-                minimum = std::numeric_limits<double>::max();
-                maximum = std::numeric_limits<double>::lowest();
-                for (const auto& point : cloud.points) {
-                    minimum = std::min(minimum, point.intensity);
-                    maximum = std::max(maximum, point.intensity);
-                }
-            } else {
-                minimum = cloud.bounds.minZ;
-                maximum = cloud.bounds.maxZ;
-            }
-
-            CloudCache entry;
-            entry.id = cloud.id;
-            entry.mode = cloud.colorMode;
-            entry.colors.reserve(cloud.points.size());
-            for (const auto& point : cloud.points) {
-                const katana::interop::Rgb rgb =
-                    katana::interop::colorForPoint(point, cloud.colorMode, minimum, maximum);
-                entry.colors.push_back(qRgb(rgb.r, rgb.g, rgb.b));
-            }
-            cloudCache_.push_back(std::move(entry));
-            cached = std::prev(cloudCache_.end());
-        }
-
-        // Splat into an image rather than calling QPainter per point: a
-        // QPainter::drawPoint costs microseconds, which at two million points is
-        // seconds per frame. Writing pixels directly is a handful of
-        // instructions each and keeps panning interactive.
-        QImage layer(width(), height(), QImage::Format_ARGB32_Premultiplied);
-        layer.fill(::Qt::transparent);
-        auto* bits = reinterpret_cast<QRgb*>(layer.bits());
-        const int stride = static_cast<int>(layer.bytesPerLine() / sizeof(QRgb));
-
-        const double s = state_.plan.scale;
-        const double halfWidth = 0.5 * width();
-        const double halfHeight = 0.5 * height();
-        const int radius = std::max(0, static_cast<int>(cloud.pointSize) - 1);
-
-        for (std::size_t i = 0; i < cloud.points.size(); ++i) {
-            const auto& point = cloud.points[i];
-            const double sx = halfWidth + (point.x - state_.plan.center.x) * s;
-            const double sy = halfHeight - (point.y - state_.plan.center.y) * s;
-            // Reject before the cast: converting a coordinate far outside int
-            // range is undefined behaviour, and panning a UTM-scale cloud when
-            // zoomed in produces exactly such values.
-            if (!(sx > -1.0e6 && sx < 1.0e6 && sy > -1.0e6 && sy < 1.0e6)) {
-                continue;
-            }
-            const int px = static_cast<int>(sx);
-            const int py = static_cast<int>(sy);
-            if (px < 0 || py < 0 || px >= width() || py >= height()) {
-                continue;
-            }
-            const QRgb color = cached->colors[i] | 0xff000000u;
-            if (radius == 0) {
-                bits[py * stride + px] = color;
-                continue;
-            }
-            for (int oy = -radius; oy <= radius; ++oy) {
-                const int y = py + oy;
-                if (y < 0 || y >= height()) {
-                    continue;
-                }
-                for (int ox = -radius; ox <= radius; ++ox) {
-                    const int x = px + ox;
-                    if (x >= 0 && x < width()) {
-                        bits[y * stride + x] = color;
-                    }
-                }
-            }
-        }
-        painter.drawImage(0, 0, layer);
-    }
-}
-
-void ViewportWidget::drawGrid(QPainter& painter) const
-{
-    const double spacing = cad::gridSpacing(state_.plan.scale);
-    const Box2 visible = state_.plan.visibleWorldBounds();
-    const auto firstIndex = [&](double lo) { return static_cast<long long>(std::floor(lo / spacing)); };
-    const auto lastIndex = [&](double hi) { return static_cast<long long>(std::ceil(hi / spacing)); };
-
-    // Every fifth line is a major line so that distances can be read off.
-    for (long long i = firstIndex(visible.min.x); i <= lastIndex(visible.max.x); ++i) {
-        painter.setPen(QPen(i % 5 == 0 ? kGridMajor : kGridMinor, 1));
-        const double x = toScreen(Point2(static_cast<double>(i) * spacing, 0.0)).x();
-        painter.drawLine(QPointF(x, 0.0), QPointF(x, height()));
-    }
-    for (long long i = firstIndex(visible.min.y); i <= lastIndex(visible.max.y); ++i) {
-        painter.setPen(QPen(i % 5 == 0 ? kGridMajor : kGridMinor, 1));
-        const double y = toScreen(Point2(0.0, static_cast<double>(i) * spacing)).y();
-        painter.drawLine(QPointF(0.0, y), QPointF(width(), y));
-    }
-    const QPointF origin = toScreen(Point2(0.0, 0.0));
-    painter.setPen(QPen(kAxis, 1));
-    painter.drawLine(QPointF(origin.x(), 0.0), QPointF(origin.x(), height()));
-    painter.drawLine(QPointF(0.0, origin.y()), QPointF(width(), origin.y()));
-}
-
-void ViewportWidget::drawEntities(QPainter& painter) const
-{
-    const auto& model = document_.model();
-    const Box2 visible = state_.plan.visibleWorldBounds();
-    const cad::SelectionSet& selection = document_.selection();
-    const bool plotting = paperPixelsPerMillimetre_ > 0.0;
-    const double paper = paperScale();
-
-    // How far each style's symbol reaches from the point it is put at, at
-    // this frame's scale. A symbol is culled by what it DRAWS, not by its
-    // insertion point: one library symbol draws 434 m from its point and the
-    // plot stamps up to 388 m, and culling on the point dropped every one
-    // whose point was just off screen while its strokes were in view. The index is
-    // asked for the view grown by the furthest reach, and each entity then by
-    // its own style's.
-    std::map<std::string, double, std::less<>> symbolReach;
-    double furthestReach = 0.0;
-    model.styles.forEach([&](const katana::entity::Style& style) {
-        if (style.symbol.empty()) {
-            return;
-        }
-        const Box2 box = cad::drawnExtent(cad::pointSymbolDrawing(
-            definitions_, document_.styleLibrary(), document_.libraryGeneration(), style.symbol,
-            Point2(0.0, 0.0), style.symbolSize, 0.0, paper, plainMarkHalfWidth()));
-        if (box.empty()) {
-            return;
-        }
-        const double reach = std::max({std::abs(box.min.x), std::abs(box.max.x),
-                                       std::abs(box.min.y), std::abs(box.max.y)});
-        symbolReach.emplace(style.name, reach);
-        furthestReach = std::max(furthestReach, reach);
-    });
-
-    // Through the spatial index (PLAN.MD Phase 18). This runs on EVERY repaint
-    // - every pan, every zoom - not just on a click, so it is the scan that
-    // mattered most. Measured in Release at 500 000 entities zoomed to 1% of
-    // the extent: 22.3 ms scanning, 0.090 ms indexed. forEachCandidate falls
-    // back to the ordered scan for a zoomed-out repaint, where asking the
-    // index for everything would be slower than walking the model once.
-    // A dash pattern is a function of the linetype, the pen width and the
-    // VIEW SCALE. The scale is fixed for a frame and changes between them,
-    // so the cache lives exactly one frame.
-    dashCache_.clear();
-    lastDrawnEntities_ = 0;
-    std::vector<katana::geometry::SpatialId> scratch;
-    cad::detail::forEachCandidate(
-        model, &document_.spatialIndex(), visible.inflated(furthestReach), scratch,
-        [&](const Entity& entity) {
-        // The layer is resolved ONCE and the visibility rule is asked about
-        // that, rather than looking it up again inside isDrawn.
-        const katana::entity::ResolvedLayer layer = model.layers.resolve(entity.layer);
-        // This box test is NOT the one forEachCandidate already did:
-        // queryExtents is deliberately wider than the geometry (an arc offers
-        // its centre for snapping), so this is the tighter, drawing-specific
-        // filter and removing it would paint entities that are off screen.
-        // Except for a dimension, whose DRAWING - label, arrows, extension
-        // overshoot - reaches beyond its geometry's box, which holds only the
-        // measured points and the dimension line: culling on that box dropped
-        // a dimension whose label alone was on screen (audit QT-25). Its
-        // query extent is exactly the drawing's box. A style's symbol widens
-        // the box by its reach, for the same reason.
-        const bool dimension =
-            std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry);
-        Box2 drawn = dimension ? cad::detail::queryExtents(model, entity)
-                               : katana::entity::boundingBox(entity.geometry);
-        if (const auto reach = symbolReach.find(entity.style); reach != symbolReach.end()) {
-            drawn = drawn.inflated(reach->second);
-        }
-        if (!cad::isDrawn(layer, entity, state_.layers) || !drawn.intersects(visible)) {
-            return;
-        }
-        ++lastDrawnEntities_;
-        // Through the one resolution chain, so this agrees with the 3D view
-        // and so that a named style can finally change how an entity looks -
-        // Style::color was stored and validated and read by nothing.
-        const auto display = katana::entity::resolveDisplay(model, entity);
-        // One answer to what the linetype NAME draws (decisions D2 and D8): a
-        // library linestyle's own strokes, a model linetype's dashes, or a
-        // plain line - never a symbol laid along the line as a pattern.
-        const cad::ResolvedLinetype pattern = cad::resolveLinePattern(
-            model, document_.styleLibrary(), display.linetype, display.symbol);
-        // The selection and the fading of a locked layer are screen furniture:
-        // they say what the user is working on, and a plot of a drawing
-        // printed them in orange dashes and half tone (audit QT-26).
-        const bool selected = !plotting && selection.contains(entity.id);
-        QPen entityPen; // the entity's pen WITHOUT a model linetype's dashes
-        if (selected) {
-            entityPen = QPen(kSelection, 2, Qt::DashLine);
-            painter.setPen(entityPen);
-        } else {
-            // On paper, white and near-white print black (D7): white is a new
-            // layer's colour and a third of the reference mapfile's, and it
-            // would vanish into the sheet.
-            QColor color = toQColor(plotting ? cad::paperColour(display.color, plotSettings_)
-                                             : display.color);
-            if (!plotting && layer.locked) {
-                color.setAlpha(110); // locked layers, and their children, read as background
-            }
-            // On screen every line is a 1.5 px hairline: a screen has no
-            // paper for a line weight to be millimetres of. On a plot the
-            // width is Layer::lineWeight - "millimetres on paper" - which
-            // means what it says for the first time (PLAN.MD Phase 22).
-            const double penWidthPixels = plotting
-                                              ? display.lineWeight * paperPixelsPerMillimetre_
-                                              : 1.5;
-            entityPen = QPen(color, penWidthPixels);
-            QPen pen = entityPen;
-            // Dashes are MODEL lengths: a 0.5 m dash stays half a metre of
-            // ground at every zoom, so the pixel pattern is recomputed from
-            // the view scale each frame. Qt's array is in units of PEN WIDTH,
-            // not pixels, which is why the width is passed in rather than
-            // assumed - at 1.5 px a pattern that forgot it would be half again
-            // too long.
-            // The pattern depends only on the linetype, the view scale and
-            // the pen width, and the view scale is fixed for a whole frame.
-            // Computing it per entity rebuilt the same handful of patterns
-            // tens of thousands of times a frame and allocated twice for each.
-            // Only a MODEL linetype dashes the pen: a library linestyle of the
-            // same name wins, and its strokes are drawn undashed (D2).
-            if (pattern.kind == cad::LinetypeKind::ModelLinetype) {
-                const auto key = std::make_pair(display.linetype, penWidthPixels);
-                auto cached = dashCache_.find(key);
-                if (cached == dashCache_.end()) {
-                    cad::DashOptions dash;
-                    dash.viewScale = state_.plan.scale;
-                    const auto dashes = cad::qtDashPattern(*pattern.linetype, dash, penWidthPixels);
-                    cached = dashCache_.emplace(key, QList<qreal>(dashes.begin(), dashes.end()))
-                                 .first;
-                }
-                if (!cached->second.isEmpty()) {
-                    pen.setDashPattern(cached->second);
-                }
-            }
-            painter.setPen(pen);
-        }
-        // A library definition is painted in the entity's colour and width with
-        // a FLAT cap, so a 3 mm dash plots 3 mm rather than 3 mm and a pen
-        // width (QPen's square cap); the painter draws its dots round.
-        StylePaintTarget target;
-        target.view = state_.plan;
-        target.entityPen = entityPen;
-        target.entityPen.setCapStyle(Qt::FlatCap);
-        target.paper = plotting ? &plotSettings_ : nullptr;
-        target.entityPenOnly = selected;
-        // Resolved once above and reused: resolveHatchPattern used to do a
-        // second full resolveDisplay of its own, and the dimension style was
-        // looked up for every entity although only a dimension can use it.
-        hatch_ = cad::resolveHatchPattern(model, display);
-        if (std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry)) {
-            dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
-        }
-        if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry);
-            point != nullptr && !display.symbol.empty()) {
-            drawSymbol(painter, target, display.symbol, point->position, display.symbolSize);
-            return;
-        }
-        // A library linestyle IS the line, gaps and all: "move 0 0 / draw 3 0 /
-        // move 5 0" is a three-unit dash followed by a two-unit gap, and a
-        // fence style carries the fence as well as its ticks. So it REPLACES
-        // the plain line rather than being drawn over it. Drawing both filled
-        // in every gap, which made every linestyle look continuous. A
-        // pattern too fine to see or too long to lay is the plain line, and
-        // so is one that is not laid for any other reason: never nothing.
-        bool drawnByStyle = false;
-        if (pattern.kind == cad::LinetypeKind::LibraryDefinition) {
-            if (const auto flat = definitions_.find(document_.styleLibrary(),
-                                                    document_.libraryGeneration(),
-                                                    pattern.definition->name);
-                flat != nullptr) {
-                drawnByStyle = drawLineStyle(painter, target, *flat, entity.geometry);
-            }
-        }
-        // A hatch is painted inside drawGeometry, so an entity carrying one
-        // is drawn anyway and puts up with a doubled outline. A 12da never
-        // brings a hatch; this is for a drawing given one in Katana.
-        if (!drawnByStyle || hatch_ != nullptr) {
-            drawGeometry(painter, entity.geometry);
-        }
-        // A line whose style names a symbol carries it at EVERY vertex (D8),
-        // as the archive import intends: a fence line's posts, a string of
-        // drill holes. The line above is drawn as well.
-        if (!display.symbol.empty()) {
-            for (const Point2& vertex : cad::symbolVertices(entity.geometry)) {
-                drawSymbol(painter, target, display.symbol, vertex, display.symbolSize);
-            }
-        }
-    });
-}
-
 void ViewportWidget::setMeshes(const std::vector<katana::cad::SceneMesh>* meshes)
 {
     meshes_ = meshes;
     update();
 }
 
-// A mesh in plan is its FOOTPRINT - the hull of its vertices - and not its
-// triangles: 1 453 meshes of 90 656 triangles arrive from one real archive,
-// and drawing those in plan would bury the drawing they are context for. The
-// 3D view is where a mesh is looked at.
-void ViewportWidget::drawMeshFootprints(QPainter& painter) const
-{
-    if (meshes_ == nullptr) {
-        return;
-    }
-    for (const katana::cad::SceneMesh& item : *meshes_) {
-        if (!isShown(item)) {
-            continue;
-        }
-        const auto hull = item.mesh->planHull();
-        if (hull.size() < 2) {
-            continue;
-        }
-        const QColor colour(katana::render::redOf(item.flatColor),
-                            katana::render::greenOf(item.flatColor),
-                            katana::render::blueOf(item.flatColor));
-        QColor outline = colour;
-        outline.setAlpha(190);
-        painter.setPen(QPen(outline, 1, Qt::DashLine));
-        QColor fill = colour;
-        fill.setAlpha(40);
-        QPolygonF polygon;
-        polygon.reserve(static_cast<int>(hull.size()) + 1);
-        for (const auto& vertex : hull) {
-            polygon << toScreen(vertex);
-        }
-        // Two points are a wall seen from above: a line, with nothing to fill.
-        if (hull.size() == 2) {
-            painter.drawPolyline(polygon);
-            continue;
-        }
-        painter.setBrush(fill);
-        painter.drawPolygon(polygon);
-        painter.setBrush(Qt::NoBrush);
-    }
-}
-
-double ViewportWidget::paperScale() const
-{
-    // Model units to one plot millimetre, which is what a paper linestyle is
-    // measured in. Dividing by the view scale is what makes such a mark keep
-    // its size on the PAGE as you zoom, which is the whole point of one.
-    //
-    // With no plot scale set, a millimetre is a millimetre OF SCREEN. It used
-    // to be one pixel, which made every paper linestyle about four times too
-    // small: the ticks of a fence style came out a pixel tall and vanished
-    // into the line they sit on, so the feature looked broken when it was
-    // only invisible.
-    const double pixelsPerMillimetre = paperPixelsPerMillimetre_ > 0.0
-                                           ? paperPixelsPerMillimetre_
-                                           : std::max(1.0, logicalDpiX() / 25.4);
-    return pixelsPerMillimetre / std::max(state_.plan.scale, 1e-12);
-}
-
-double ViewportWidget::plainMarkHalfWidth() const
-{
-    // The plain point mark's size, in model units at the current scale, so a
-    // built-in symbol with no size of its own stays a mark and not a blob.
-    return kPointMarkerPixels / std::max(state_.plan.scale, 1e-12);
-}
-
-// A linestyle runs along whatever plan shape the entity has. An arc and a
-// circle are chorded first, because a pattern is laid by distance along a
-// path and a path is what a polyline is.
-bool ViewportWidget::drawLineStyle(QPainter& painter, const StylePaintTarget& target,
-                                   const cad::FlatDefinition& definition,
-                                   const katana::entity::Geometry& geometry) const
-{
-    bool drew = false;
-    // Only the repeats that can reach the view are laid, each exactly where
-    // it falls on the whole line; a pattern finer than two pixels or longer
-    // than the budget is not laid at all, and the caller draws the plain line
-    // (audit CAD-04: the tail of a long line used to vanish silently).
-    cad::LinestyleOptions options;
-    options.paperScale = paperScale();
-    options.viewScale = state_.plan.scale;
-    options.visible = state_.plan.visibleWorldBounds();
-    // A quarter of a pixel, the same accuracy drawGeometry chords to, so a
-    // pattern laid along a curve follows the curve that was drawn.
-    const double chordTolerance = 0.25 / std::max(state_.plan.scale, 1e-12);
-    const auto run = [&](const katana::geometry::Polyline2& shape) {
-        if (shape.vertices.size() < 2) {
-            return;
-        }
-        const cad::LinestyleLayout laid = cad::styleDrawing(definition, shape, options);
-        if (laid.outcome != cad::LinestyleLayout::Outcome::Laid) {
-            return; // too fine, too long or degenerate: the caller draws the plain line
-        }
-        paintStyleDrawing(painter, laid.drawing, target);
-        drew = true;
-    };
-    std::visit(
-        [&](const auto& shape) {
-            using T = std::decay_t<decltype(shape)>;
-            if constexpr (std::is_same_v<T, katana::geometry::Segment2>) {
-                run(katana::geometry::Polyline2{{shape.start, shape.end}, false});
-            } else if constexpr (std::is_same_v<T, katana::geometry::Polyline2>) {
-                run(shape);
-            } else if constexpr (std::is_same_v<T, katana::geometry::Arc2>) {
-                run(katana::geometry::Polyline2{
-                    katana::geometry::chordArc(shape, chordTolerance), false});
-            } else if constexpr (std::is_same_v<T, katana::geometry::Circle2>) {
-                run(katana::geometry::Polyline2{
-                    katana::geometry::chordCircle(shape, chordTolerance), true});
-            }
-            // A point, a text and a mesh have no line to lay a pattern along.
-        },
-        geometry);
-    return drew;
-}
-
-void ViewportWidget::drawSymbol(QPainter& painter, const StylePaintTarget& target,
-                                const std::string& symbol, const Point2& centre,
-                                double size) const
-{
-    // Through the one resolver the previews use: a loaded library definition
-    // first, the sixteen built-in shapes after (PLAN.MD 20.3). Rotation is 0
-    // because nothing in the model carries one yet.
-    const cad::StyleDrawing drawing = cad::pointSymbolDrawing(
-        definitions_, document_.styleLibrary(), document_.libraryGeneration(), symbol, centre,
-        size, 0.0, paperScale(), plainMarkHalfWidth());
-    if (!cad::drawnExtent(drawing).intersects(state_.plan.visibleWorldBounds())) {
-        return; // culled by what it draws, not by where it stands
-    }
-    if (cad::belowSymbolDetail(drawing, state_.plan.scale)) {
-        // Under three pixels a symbol is a smudge: a dot in its pen says a
-        // point is there, for one draw call instead of every stroke.
-        QPen dot = target.entityPen;
-        dot.setCapStyle(Qt::RoundCap);
-        dot.setWidthF(std::max(dot.widthF(), 2.0));
-        const QPen previous = painter.pen();
-        painter.setPen(dot);
-        painter.drawPoint(toScreen(centre));
-        painter.setPen(previous);
-        return;
-    }
-    paintStyleDrawing(painter, drawing, target);
-}
-
-void ViewportWidget::drawGeometry(QPainter& painter,
-                                  const katana::entity::Geometry& geometry) const
-{
-    // Arcs are tessellated in model space so that very large radii, where only a
-    // sliver is on screen, never hand QPainter coordinates in the millions.
-    const auto drawArcPath = [&](const Arc2& arc) {
-        const double radiusPixels = arc.radius * state_.plan.scale;
-        // Chord count for a sagitta under a quarter pixel, within sane bounds.
-        const double stepAngle = radiusPixels > 1.0
-                                     ? 2.0 * std::acos(std::max(0.0, 1.0 - 0.25 / radiusPixels))
-                                     : katana::math::kPi;
-        const int segments = static_cast<int>(
-            std::clamp(std::ceil(std::abs(arc.sweep) / std::max(stepAngle, 1e-4)), 8.0, 2048.0));
-        QPolygonF polygon;
-        polygon.reserve(segments + 1);
-        for (int i = 0; i <= segments; ++i) {
-            polygon << toScreen(arc.pointAt(static_cast<double>(i) / segments));
-        }
-        painter.drawPolyline(polygon);
-    };
-
-    struct Visitor {
-        const ViewportWidget& widget;
-        QPainter& painter;
-        const decltype(drawArcPath)& arcPath;
-
-        void operator()(const katana::entity::PointGeometry& g) const
-        {
-            const QPointF p = widget.toScreen(g.position);
-            const double r = kPointMarkerPixels;
-            painter.drawLine(p + QPointF(-r, 0), p + QPointF(r, 0));
-            painter.drawLine(p + QPointF(0, -r), p + QPointF(0, r));
-        }
-        void operator()(const Segment2& g) const
-        {
-            painter.drawLine(widget.toScreen(g.start), widget.toScreen(g.end));
-        }
-        void operator()(const Arc2& g) const { arcPath(g); }
-        void operator()(const Circle2& g) const
-        {
-            arcPath(Arc2{g.center, g.radius, 0.0, katana::math::kTwoPi});
-        }
-        void operator()(const Polyline2& g) const
-        {
-            QPolygonF polygon;
-            polygon.reserve(static_cast<int>(g.vertices.size()) + 1);
-            for (const auto& vertex : g.vertices) {
-                polygon << widget.toScreen(vertex);
-            }
-            if (g.closed && !g.vertices.empty()) {
-                // The fill goes down before the boundary, so the outline stays
-                // crisp over its own hatching instead of being half covered.
-                widget.drawHatch(painter, g, polygon);
-                polygon << widget.toScreen(g.vertices.front());
-            }
-            painter.drawPolyline(polygon);
-        }
-        void operator()(const katana::entity::TextGeometry& g) const
-        {
-            widget.drawText(painter, g.position, g.text, g.height, g.rotation);
-        }
-        void operator()(const katana::entity::DimensionGeometry& g) const
-        {
-            // Through the shared builder, so this draws exactly what the 3D
-            // view draws and exactly what the cull box covers.
-            //
-            // Everything is in MODEL units now. The previous version drew a
-            // fixed 5-pixel tick and a 12-pixel label, which looks right on
-            // screen and plots at whatever size the paper happens to give it -
-            // a dimension is part of the drawing, not an overlay on it. It also
-            // formatted the number with QString::number, which is LOCALE
-            // DEPENDENT and would put a comma in "1,5" on a European machine.
-            const auto drawing = cad::buildDimension(g, widget.dimensionStyle_);
-            if (drawing.empty()) {
-                return;
-            }
-            const auto line = [this](const Segment2& segment) {
-                painter.drawLine(widget.toScreen(segment.start), widget.toScreen(segment.end));
-            };
-            for (const Segment2& segment : drawing.extensionLines) {
-                line(segment);
-            }
-            line(drawing.dimensionLine);
-            for (const Segment2& stroke : drawing.arrowStrokes) {
-                line(stroke);
-            }
-            for (const std::vector<Point2>& fill : drawing.arrowFills) {
-                QPolygonF polygon;
-                polygon.reserve(static_cast<int>(fill.size()));
-                for (const Point2& point : fill) {
-                    polygon << widget.toScreen(point);
-                }
-                const QBrush previous = painter.brush();
-                painter.setBrush(painter.pen().color());
-                painter.drawPolygon(polygon);
-                painter.setBrush(previous);
-            }
-            widget.drawText(painter, drawing.textAnchor, drawing.text, drawing.textHeight,
-                            drawing.textRotation);
-        }
-    };
-    std::visit(Visitor{*this, painter, drawArcPath}, geometry);
-}
-
-namespace {
-
-// Chainage in the civil convention, kilometres + metres: 1234.5 reads as
-// "1+234.50". Formatted with to_chars rather than snprintf, because snprintf
-// obeys the C locale and would print "1+234,50" on a machine set to one that
-// uses a decimal comma - the same reason the dimension formatter avoids it.
-std::string formatStation(double station)
-{
-    const double magnitude = std::abs(station);
-    const auto kilometres = static_cast<long long>(magnitude / 1000.0);
-    const double metres = magnitude - static_cast<double>(kilometres) * 1000.0;
-    char buffer[32];
-    const auto result =
-        std::to_chars(buffer, buffer + sizeof buffer, metres, std::chars_format::fixed, 2);
-    std::string metresText(buffer, result.ptr);
-    while (metresText.size() < 6) { // "000.00"
-        metresText.insert(metresText.begin(), '0');
-    }
-    return (station < 0.0 ? "-" : "") + std::to_string(kilometres) + "+" + metresText;
-}
-
-} // namespace
-
-void ViewportWidget::drawAlignments(QPainter& painter) const
-{
-    const auto& model = document_.model();
-    if (model.alignments.empty() || !(state_.plan.scale > 0.0)) {
-        return;
-    }
-    // Half a pixel: finer cannot be seen, coarser shows facets on tight curves.
-    const double tolerance = 0.5 / state_.plan.scale;
-    const Box2 visible = state_.plan.visibleWorldBounds();
-    const QColor kAlignment(0xff, 0xb7, 0x4d); // amber: an overlay, not drawing content
-    const double tick = 6.0 / state_.plan.scale;     // screen-constant, like the snap marker
-    const double height = 11.0 / state_.plan.scale;
-
-    for (const katana::entity::Alignment& alignment : model.alignments.all()) {
-        // Solved per repaint. A document has a handful of alignments and the
-        // solve is a few spiral end-points; caching it would need invalidation
-        // on every edit for no measurable gain. Measure before changing this.
-        const auto solved = katana::geometry::solveAlignment(alignment.horizontal);
-        if (!solved) {
-            continue; // the model refused it on the way in; nothing to draw
-        }
-        const Polyline2 line = solved->toPolyline(tolerance);
-        if (line.vertices.size() < 2) {
-            continue;
-        }
-        Box2 box;
-        for (const Point2& vertex : line.vertices) {
-            box.expand(vertex);
-        }
-        if (!box.inflated(tick * 4.0).intersects(visible)) {
-            continue;
-        }
-
-        QPolygonF polygon;
-        polygon.reserve(static_cast<int>(line.vertices.size()));
-        for (const Point2& vertex : line.vertices) {
-            polygon << toScreen(vertex);
-        }
-        painter.setPen(QPen(kAlignment, 2.0));
-        painter.drawPolyline(polygon);
-
-        painter.setPen(QPen(kAlignment, 1.0));
-        // Key stations bunch up - a 10 m spiral puts TS and SC ten metres
-        // apart - and their labels then print over one another into a smear
-        // nobody can read. A label is skipped when it would land within its
-        // own length of the last one drawn; the TICK is always drawn, because
-        // the tick is the information and the label only names it.
-        std::optional<QPointF> lastLabel;
-        const double minimumLabelGapPixels = 70.0; // about one "0+000.00" at this text size
-        for (const double station : solved->keyStations()) {
-            const auto left = solved->pointAtStationOffset(station, tick);
-            const auto right = solved->pointAtStationOffset(station, -tick);
-            const auto direction = solved->directionAtStation(station);
-            const auto label = solved->pointAtStationOffset(station, tick * 1.6);
-            if (!left || !right || !direction || !label) {
-                continue;
-            }
-            painter.drawLine(toScreen(*left), toScreen(*right));
-            const QPointF at = toScreen(*label);
-            if (lastLabel.has_value() &&
-                QLineF(*lastLabel, at).length() < minimumLabelGapPixels) {
-                continue;
-            }
-            lastLabel = at;
-            drawText(painter, *label, formatStation(station), height, *direction);
-        }
-        if (const auto start = solved->pointAtStationOffset(solved->startStation(), -tick * 3.0)) {
-            const auto direction = solved->directionAtStation(solved->startStation());
-            drawText(painter, *start, alignment.name, height * 1.3, direction.value_or(0.0));
-        }
-    }
-}
-
 katana::core::Status ViewportWidget::plotToPdf(const QString& path,
                                                const cad::PlotSettings& settings)
 {
-    auto sheet = cad::sheetFor(settings);
-    if (!sheet) {
-        return sheet.error();
+    // Titled with the project's name when it has one, so a sheet opened on
+    // its own says which drawing it came from.
+    QString title;
+    if (const auto directory = document_.projectDirectory()) {
+        title = QString::fromStdWString(directory->filename().wstring());
     }
-    QPdfWriter writer(path);
-    writer.setResolution(static_cast<int>(settings.dpi));
-    const cad::PaperDimensions paper = cad::paperDimensions(settings.paper, settings.landscape);
-    writer.setPageSize(QPageSize(QSizeF(paper.widthMm, paper.heightMm), QPageSize::Millimeter));
-    // The sheet transform owns the margins; the writer's would shift the page.
-    writer.setPageMargins(QMarginsF(0.0, 0.0, 0.0, 0.0));
-    QPainter painter(&writer);
-    if (!painter.isActive()) {
-        return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
-                                       "could not open the PDF for writing", path.toStdString());
-    }
-
-    // The same drawing members as paintEvent, through the sheet instead of
-    // the screen, with line weights in paper millimetres - then the screen
-    // view is put back exactly as it was. Nothing is painted or processed in
-    // between, so no one sees the view's state holding the sheet.
-    const cad::ViewTransform screen = state_.plan;
-    state_.plan = sheet->view;
-    paperPixelsPerMillimetre_ = sheet->pixelsPerMillimetre;
-    plotSettings_ = settings;
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    drawEntities(painter);
-    drawAlignments(painter);
-    painter.end();
-    state_.plan = screen;
-    paperPixelsPerMillimetre_ = 0.0;
-    return {};
+    return plotPlanToPdf(path, settings, paintSource(), state_.layers, state_.hiddenReferences,
+                         plotCache_, title);
 }
 
-void ViewportWidget::drawHatch(QPainter& painter, const katana::geometry::Polyline2& boundary,
-                                 const QPolygonF& screen) const
+katana::core::Result<cad::PlotSettings> ViewportWidget::fittedPlot(cad::PlotSettings settings) const
 {
-    if (hatch_ == nullptr) {
-        return;
+    // What this view draws - its layers, reference layers, meshes and
+    // alignments - and not the spatial index's bounds, which never shrink,
+    // count every arc's whole circle and hidden layers, and miss alignments
+    // (audit QT-12, GEO-01).
+    const Box2 extent = drawnBounds();
+    auto fitted = cad::fitScale(extent, settings);
+    if (!fitted) {
+        return fitted.error();
     }
-    cad::HatchOptions options;
-    options.viewScale = state_.plan.scale;
-    const QColor color = painter.pen().color();
-
-    switch (cad::hatchDrawing(*hatch_, options)) {
-    case cad::HatchDrawing::None:
-        return;
-    case cad::HatchDrawing::Solid: {
-        // Drawn at partial opacity rather than flat: a solid fill in the
-        // entity's own colour hides the drawing underneath it, and at this zoom
-        // the user is looking at the layout, not at the fill.
-        QColor fill = color;
-        fill.setAlpha(90);
-        painter.fillPath([&] {
-            QPainterPath path;
-            path.addPolygon(screen);
-            path.closeSubpath();
-            return path;
-        }(), fill);
-        return;
-    }
-    case cad::HatchDrawing::Lines:
-        break;
-    }
-
-    // Hatch lines are always solid and hairline, whatever the boundary is
-    // drawn with: a dashed hatch of a dashed boundary is unreadable, and no CAD
-    // package draws one.
-    const QPen previous = painter.pen();
-    painter.setPen(QPen(color, 0));
-    for (const Segment2& line : cad::hatchSegments(boundary, *hatch_)) {
-        painter.drawLine(toScreen(line.start), toScreen(line.end));
-    }
-    painter.setPen(previous);
-}
-
-void ViewportWidget::drawText(QPainter& painter, const Point2& position, const std::string& text,
-                              double height, double rotation) const
-{
-    const double pixels = height * state_.plan.scale;
-    const QPointF anchor = toScreen(position);
-    if (pixels < 3.0) {
-        // Too small to read: a stroke along the baseline keeps it discoverable.
-        const double width = 0.6 * pixels * static_cast<double>(text.size());
-        painter.drawLine(anchor, anchor + QPointF(std::cos(rotation), -std::sin(rotation)) * width);
-        return;
-    }
-    QFont font("Segoe UI");
-    font.setPixelSize(static_cast<int>(std::min(pixels, 2000.0)));
-    painter.save();
-    painter.setFont(font);
-    painter.translate(anchor);
-    painter.rotate(-rotation * katana::math::kRadToDeg); // screen y points down
-    painter.drawText(QPointF(0.0, 0.0), QString::fromStdString(text));
-    painter.restore();
+    settings.scaleDenominator = *fitted;
+    settings.center =
+        Point2(0.5 * (extent.min.x + extent.max.x), 0.5 * (extent.min.y + extent.max.y));
+    return settings;
 }
 
 void ViewportWidget::drawPreview(QPainter& painter) const
@@ -1882,18 +1195,20 @@ void ViewportWidget::drawPreview(QPainter& painter) const
     // dimension or a text previews at its real size. Its style is what new
     // work gets (the current layer and style), and it is never hatched: a
     // closed outline previews as its outline.
-    hatch_ = nullptr;
     katana::entity::Entity drawn;
     drawn.layer = document_.currentAttributes().layer;
     drawn.style = document_.currentAttributes().style;
     painter.setPen(QPen(kPreview, 1, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
+    const PlanFrame frame = paintFrame();
+    const PlanPaintOptions options = screenOptions();
+    katana::entity::DimensionStyle dimensionStyle{};
     for (const katana::entity::Geometry& shape : feedback.shapes) {
         if (std::holds_alternative<katana::entity::DimensionGeometry>(shape)) {
             drawn.geometry = shape;
-            dimensionStyle_ = cad::resolveDimensionStyle(document_.model(), drawn);
+            dimensionStyle = cad::resolveDimensionStyle(document_.model(), drawn);
         }
-        drawGeometry(painter, shape);
+        paintPlanGeometry(painter, frame, options, paintCache_, shape, dimensionStyle);
     }
     // Markers: a small open square, the grip AutoCAD draws at a base point.
     painter.setPen(QPen(kPreview, 1.5));
