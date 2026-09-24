@@ -11,7 +11,6 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
 file(GLOB _qt_customisation_sources CONFIGURE_DEPENDS "${_qt_src}/customisation/*.cpp")
 file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
-file(GLOB _qt_painter_sources CONFIGURE_DEPENDS "${_qt_src}/plan_painter.cpp")
 add_executable(katana_qt_benchmarks
     main.cpp
     bench_plan_paint.cpp
@@ -27,7 +26,7 @@ add_executable(katana_qt_benchmarks
     ${_qt_src}/icons.cpp
     ${_qt_src}/style_manager.cpp
     ${_qt_src}/layer_manager.cpp
-    ${_qt_painter_sources}
+    ${_qt_src}/plan_painter.cpp
     ${_qt_customisation_sources}
     ${_qt_tool_sources}
 )
