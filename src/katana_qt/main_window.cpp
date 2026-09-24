@@ -3523,15 +3523,13 @@ void MainWindow::addSurface(std::string name, katana::terrain::TinSurface surfac
 namespace {
 
 // What a Surface From command's job prepares on its own thread: the points
-// and breaklines to triangulate, and any notes about how they were chosen
-// (a sampling stride, no-data pixels left out) for the log.
-struct PreparedSurface {
-    katana::terrain::TinInput input;
-    QStringList notes;
-};
-
-using SurfaceInput =
-    std::function<katana::core::Result<PreparedSurface>(katana::qt::JobControl&)>;
+// and breaklines to triangulate. Notes about how they were chosen (a sampling
+// stride, no-data pixels left out) go into `notes` as they are found, not
+// into the result, because they matter MOST when the preparation fails: "14
+// 400 no-data pixels left out" is the reason a raster has fewer than three
+// points to triangulate, and a note carried in the result was lost with it.
+using SurfaceInput = std::function<katana::core::Result<katana::terrain::TinInput>(
+    katana::qt::JobControl&, QStringList& notes)>;
 
 // What every Surface From command shares once its inputs are in hand: the
 // triangulation, run as a background job (jobs.hpp) so that the window keeps
@@ -3542,8 +3540,8 @@ using SurfaceInput =
 // copied cloud, a raster path): never the document or a widget, which belong
 // to the GUI thread. `addSurface` runs on the GUI thread with the result and
 // is the only step that touches the window. `log` reports the outcome, which
-// is never silent: the notes, then a failure's message, a cancellation or the
-// time taken.
+// is never silent: the notes - whether or not the job succeeded - then a
+// failure's message, a cancellation or the time taken.
 //
 // A headless session waits for the job, pumping events, because what follows
 // it (a screenshot, a report) must see the surface; it also logs the longest
@@ -3567,16 +3565,15 @@ void startSurfaceJob(katana::qt::JobRunner& runner, bool headless, const QString
         [prepare = std::move(prepare), options, notes, addSurface, log](
             katana::qt::JobControl& control) -> katana::core::Result<JobRunner::Apply> {
             control.setStage("Reading");
-            auto prepared = prepare(control);
-            if (!prepared) {
-                return prepared.error();
+            auto input = prepare(control, *notes);
+            if (!input) {
+                return input.error();
             }
-            *notes = std::move(prepared->notes);
             if (control.stopRequested()) {
                 return JobRunner::Apply{}; // cancelled: the runner discards it anyway
             }
             control.setStage("Triangulating");
-            auto built = katana::terrain::buildTin(prepared->input, options);
+            auto built = katana::terrain::buildTin(*input, options);
             if (!built) {
                 return built.error();
             }
@@ -3665,13 +3662,14 @@ void MainWindow::buildSurfaceFromPointCloud()
     const std::string name = cloud->name;
     startSurfaceJob(
         katana::qt::JobRunner::of(*this), headless_, "Surface From Point Cloud",
-        [source, step](katana::qt::JobControl&) -> katana::core::Result<PreparedSurface> {
-            PreparedSurface prepared;
-            prepared.input.points.reserve(source->points.size() / step + 1);
+        [source, step](katana::qt::JobControl&,
+                       QStringList&) -> katana::core::Result<katana::terrain::TinInput> {
+            katana::terrain::TinInput input;
+            input.points.reserve(source->points.size() / step + 1);
             for (std::size_t i = 0; i < source->points.size(); i += step) {
-                prepared.input.points.push_back(source->points[i]);
+                input.points.push_back(source->points[i]);
             }
-            return prepared;
+            return input;
         },
         options,
         [this, name](katana::terrain::TinSurface&& surface) {
@@ -3706,30 +3704,30 @@ void MainWindow::buildSurfaceFromRaster()
     buildOptions.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
     startSurfaceJob(
         katana::qt::JobRunner::of(*this), headless_, "Surface From Raster",
-        [path, options, name](katana::qt::JobControl&) -> katana::core::Result<PreparedSurface> {
+        [path, options, name](katana::qt::JobControl&, QStringList& notes)
+            -> katana::core::Result<katana::terrain::TinInput> {
             auto elevations = interop::readRasterElevations(path, options);
             if (!elevations) {
                 return elevations.error();
             }
-            PreparedSurface prepared;
             if (elevations->stride > 1) {
-                prepared.notes << QString("Sampling one pixel in %1 along each row and column of "
-                                          "%2: %3 points.")
-                                      .arg(elevations->stride)
-                                      .arg(QString::fromStdString(name))
-                                      .arg(grouped(elevations->points.size()));
+                notes << QString("Sampling one pixel in %1 along each row and column of %2: %3 "
+                                 "points.")
+                             .arg(elevations->stride)
+                             .arg(QString::fromStdString(name))
+                             .arg(grouped(elevations->points.size()));
             }
             if (elevations->noData != 0) {
-                prepared.notes
-                    << QString("%1 no-data pixels left out.").arg(grouped(elevations->noData));
+                notes << QString("%1 no-data pixels left out.").arg(grouped(elevations->noData));
             }
             if (elevations->points.size() < 3) {
                 return katana::core::makeError(
                     katana::core::ErrorCode::InvalidArgument,
                     "that raster has fewer than three pixels with an elevation to triangulate");
             }
-            prepared.input.points = std::move(elevations->points);
-            return prepared;
+            katana::terrain::TinInput input;
+            input.points = std::move(elevations->points);
+            return input;
         },
         buildOptions,
         [this, name](katana::terrain::TinSurface&& surface) {
@@ -3830,10 +3828,9 @@ void MainWindow::buildSurfaceFromDrawing()
     auto owned = std::make_shared<katana::terrain::TinInput>(std::move(input));
     startSurfaceJob(
         katana::qt::JobRunner::of(*this), headless_, "Surface From Drawing",
-        [owned](katana::qt::JobControl&) -> katana::core::Result<PreparedSurface> {
-            PreparedSurface prepared;
-            prepared.input = std::move(*owned);
-            return prepared;
+        [owned](katana::qt::JobControl&,
+                QStringList&) -> katana::core::Result<katana::terrain::TinInput> {
+            return std::move(*owned);
         },
         options,
         [this](katana::terrain::TinSurface&& surface) {
