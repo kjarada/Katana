@@ -5,6 +5,7 @@
 
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QResizeEvent>
 #include <QWheelEvent>
 
 #include <rhi/qrhi.h>
@@ -59,7 +60,20 @@ double GpuSceneView::pixelRatio() const
 void GpuSceneView::setDrawList(const katana::render::DrawList& list)
 {
     renderer_.setDrawList(list);
+    // The last framing was of nothing (the host's hook framed an empty
+    // scene): this list is the first with something in it, so it is framed
+    // at the next frame, as RenderViewWidget frames its first non-empty scene.
+    if (framedEmpty_ && !renderer_.scene().bounds.empty()) {
+        framed_ = false;
+        framedEmpty_ = false;
+    }
     update();
+}
+
+void GpuSceneView::setCameraFramed(bool framed)
+{
+    framed_ = framed;
+    framedEmpty_ = false;
 }
 
 void GpuSceneView::setFrameSettings(const FrameSettings& settings)
@@ -76,13 +90,21 @@ void GpuSceneView::zoomExtents()
 
 void GpuSceneView::frameScene()
 {
-    framed_ = true;
+    keepCameraLogical(); // frame() fits the camera's aspect
+    katana::math::AABB box = renderer_.scene().bounds;
     if (onZoomExtents) {
+        // The host frames whatever it frames for an empty scene, and asks
+        // for a repaint: framed_ is set even then, or every frame would call
+        // it again. framedEmpty_ has the next non-empty list framed anyway.
         onZoomExtents();
+        framed_ = true;
+        framedEmpty_ = box.empty();
         return;
     }
-    katana::math::AABB box = renderer_.scene().bounds;
     if (box.empty()) {
+        // Nothing to frame yet: framed_ stays as it was, so a first frame
+        // that came before the draw list leaves the framing to the frame
+        // after it arrives, rather than to the user pressing E.
         return;
     }
     // What is drawn is exaggerated in the shader; frame what is drawn.
@@ -92,7 +114,21 @@ void GpuSceneView::frameScene()
     const double high = datum + (box.max.z - datum) * k;
     box.min.z = std::min(low, high);
     box.max.z = std::max(low, high);
-    camera_.frame(box);
+    if (camera_.frame(box)) {
+        framed_ = true;
+        framedEmpty_ = false;
+    }
+}
+
+void GpuSceneView::keepCameraLogical()
+{
+    camera_.setViewportSize(std::max(width(), 1), std::max(height(), 1));
+}
+
+void GpuSceneView::resizeEvent(QResizeEvent* event)
+{
+    QRhiWidget::resizeEvent(event);
+    keepCameraLogical();
 }
 
 void GpuSceneView::initialize(QRhiCommandBuffer* /*commands*/)
@@ -152,19 +188,24 @@ void GpuSceneView::render(QRhiCommandBuffer* commands)
     if (failed_ || target_ == nullptr || !renderer_.initialised()) {
         return;
     }
-    const QSize size = target_->pixelSize();
-    // The camera works in the pixels actually drawn - device pixels - so the
-    // image is not upscaled on a HiDPI display, and pan and zoom below scale
-    // the mouse's logical pixels up to match.
-    camera_.setViewportSize(size.width(), size.height());
+    keepCameraLogical();
     if (!framed_) {
         frameScene(); // no update(): this IS the frame
     }
+    // The frame is drawn in the pixels actually drawn - device pixels - so
+    // the image is not upscaled on a HiDPI display. Through a copy: the
+    // host's camera stays in logical pixels, where RenderViewWidget and its
+    // rasteriser keep it. The same view either way, the aspect being the
+    // same to a pixel's rounding; and the mouse moves the host's camera by
+    // logical pixels, which move the world as far as the device pixels would.
+    const QSize size = target_->pixelSize();
+    katana::render::Camera frameCamera = camera_;
+    frameCamera.setViewportSize(size.width(), size.height());
     FrameSettings settings = settings_;
     settings.pixelRatio = pixelRatio();
 
     const auto started = std::chrono::steady_clock::now();
-    auto result = renderer_.render(commands, target_.get(), camera_, settings);
+    auto result = renderer_.render(commands, target_.get(), frameCamera, settings);
     const auto finished = std::chrono::steady_clock::now();
     if (!result) {
         fail(QString::fromStdString(result.error().describe()));
@@ -185,7 +226,7 @@ void GpuSceneView::releaseResources()
     pass_.reset();
 }
 
-// ---- interaction: RenderViewWidget's, in device pixels ------------------------------
+// ---- interaction: RenderViewWidget's, in logical pixels ------------------------------
 
 void GpuSceneView::mousePressEvent(QMouseEvent* event)
 {
@@ -216,8 +257,7 @@ void GpuSceneView::mouseMoveEvent(QMouseEvent* event)
         // any display scale.
         camera_.orbit(-delta.x() * kOrbitPerPixel, delta.y() * kOrbitPerPixel);
     } else {
-        const double ratio = pixelRatio();
-        camera_.panPixels(delta.x() * ratio, delta.y() * ratio);
+        camera_.panPixels(delta.x(), delta.y());
     }
     update();
 }
@@ -233,9 +273,8 @@ void GpuSceneView::wheelEvent(QWheelEvent* event)
         return;
     }
     const double factor = std::pow(1.0 / kZoomPerNotch, notches);
-    const double ratio = pixelRatio();
     const QPointF position = event->position();
-    camera_.dollyAtPixel(factor, position.x() * ratio, position.y() * ratio);
+    camera_.dollyAtPixel(factor, position.x(), position.y());
     update();
     event->accept();
 }

@@ -243,11 +243,23 @@ typo shows in the log.
 empty message, the status line - and gains a child: `makeGpuSceneViewIfChosen(camera,
 currentRendererEnvironment(setting, failedBefore))` returns a `GpuSceneView` when
 the rule says GPU and null (with the reason) otherwise. The view takes the host's
-camera by reference, so switching renderers keeps the view. Then:
+camera by reference, so switching renderers keeps the view. It leaves that
+camera in its own logical pixels, as the software view keeps it, and draws each
+frame through a copy sized to the device pixels it draws. Then:
 
+* Before the first frame, `gpuView->setCameraFramed(state.cameraFramed &&
+  state.cameraKind == state.kind)` - the software view's own test - so a view
+  made over a camera the user has already orbited and zoomed (a renderer
+  switch, a re-tile, a re-dock) keeps it; after a framing, write
+  `gpuView->cameraFramed()` back into `ViewState::cameraFramed`. A frame of an
+  empty list does not count as framed: the first list with something in it is
+  framed in its turn, as the software view does.
 * On a rebuilt scene, `gpuView->setDrawList(list)` - not per frame.
 * `onRenderFailed` - remember the failure for the session (rule 4), delete the
-  GPU child and paint with the rasteriser; log the reason.
+  GPU child and paint with the rasteriser; log the reason. The camera is in the
+  GPU child's logical pixels, which are the host's when the child fills it; a
+  host whose child is smaller calls `camera.setViewportSize(width(), height())`
+  before painting, or the rasteriser refuses the camera.
 * `onZoomExtents` - the host frames as it does today (it knows what "the scene"
   is); `onActivated` - make the cell active; `onFrameStats` - the status line.
 * Vertical exaggeration goes to `FrameSettings` instead of the scene rebuild.
@@ -259,8 +271,10 @@ camera by reference, so switching renderers keeps the view. Then:
 The widget's mouse and keys are `RenderViewWidget`'s (left drag orbits, or pans
 in an elevation view; middle or Shift+left pans; the wheel zooms about the
 cursor by 1.15 a notch; double-click and E frame; 1-5 and 0 standard views; P
-the projection), with pan and zoom in device pixels because the GPU view draws at
-the display's real resolution.
+the projection), in logical pixels as there: the host's camera is in logical
+pixels, and a pan or a zoom about the cursor moves the world the same distance
+whichever pixels it is counted in. Only the frame is drawn at the display's real
+resolution.
 
 Before shipping it, check on the Windows platform what offscreen tests cannot:
 floating a 3D dock creates a new top-level window, which releases GPU resources
@@ -305,9 +319,13 @@ against survey coordinates) is compared pixel for pixel.
 
 * `KATANA_GPU_TEST_IMAGES=<dir>` saves every compared image as a PNG to look at.
 * `KATANA_GPU_TEST_PLATFORM=windows` runs the binary on the desktop platform,
-  where the one case that needs a real `QRhiWidget`
-  (`OnTheDesktopDrawsTheSceneThroughTheHostsCamera`) runs instead of skipping.
-  ctest never sets it.
+  where the cases that need a real `QRhiWidget` frame - the four
+  `GpuSceneView.OnTheDesktop...` cases: drawing through the host's camera,
+  keeping a camera the host says is framed, framing a list that arrives after
+  the first frame, and leaving the camera in logical pixels for the software
+  view - run instead of skipping. ctest never sets it, so run it by hand after
+  changing `gpu_scene_view.*`; the last case can only tell the two pixel sizes
+  apart on a display scaled above 100%.
 
 ## Measurements
 
