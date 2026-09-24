@@ -33,6 +33,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -41,6 +42,8 @@
 #include <vector>
 
 #include <QGuiApplication>
+#include <QImage>
+#include <QString>
 
 #include "gpu/offscreen_gpu.hpp"
 #include "gpu/shader_compiler.hpp"
@@ -492,6 +495,54 @@ BENCHMARK(BM_GpuCloud)
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
 
+// With KATANA_BENCH_SCENE_IMAGES naming a directory, the archive scene's
+// frame from each renderer is saved there (scene_gpu.png, scene_cpu.png) so
+// a person can LOOK at what was timed. Returns false when that was asked for
+// and failed.
+bool saveSceneImages()
+{
+    const QString directory = qEnvironmentVariable("KATANA_BENCH_SCENE_IMAGES");
+    if (directory.isEmpty()) {
+        return true;
+    }
+    const LoadedScene& scene = archiveScene();
+    if (!scene.error.empty()) {
+        std::fprintf(stderr, "no scene to save: %s\n", scene.error.c_str());
+        return false;
+    }
+    OffscreenOptions options;
+    auto gpu = OffscreenGpu::create(kWidth, kHeight, options);
+    if (!gpu) {
+        std::fprintf(stderr, "no GPU: %s\n", gpu.error().describe().c_str());
+        return false;
+    }
+    (*gpu)->renderer().setDrawList(scene.list);
+    std::vector<katana::render::Rgba> pixels;
+    if (!(*gpu)->renderFrame(scene.camera, FrameSettings{}, &pixels)) {
+        return false;
+    }
+    QImage fromGpu(kWidth, kHeight, QImage::Format_ARGB32);
+    for (int y = 0; y < kHeight; ++y) {
+        for (int x = 0; x < kWidth; ++x) {
+            fromGpu.setPixel(x, y, pixels[static_cast<std::size_t>(y) * kWidth + x]);
+        }
+    }
+    auto target = Framebuffer::create(kWidth, kHeight);
+    if (!target.ok()) {
+        return false;
+    }
+    Rasterizer rasterizer;
+    RenderOptions cpuOptions;
+    cpuOptions.background = FrameSettings{}.background;
+    if (!rasterizer.render(scene.list, scene.camera, *target, cpuOptions).ok()) {
+        return false;
+    }
+    QImage fromCpu(reinterpret_cast<const uchar*>(target->color().data()), kWidth, kHeight,
+                   kWidth * 4, QImage::Format_ARGB32);
+    return fromGpu.save(directory + "/scene_gpu.png") &&
+           fromCpu.copy().save(directory + "/scene_cpu.png");
+}
+
 } // namespace
 
 // QRhi needs a QGuiApplication; offscreen, because a benchmark has no window
@@ -502,6 +553,9 @@ int main(int argc, char** argv)
     QGuiApplication application(argc, argv);
     benchmark::Initialize(&argc, argv);
     if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
+        return 1;
+    }
+    if (!saveSceneImages()) {
         return 1;
     }
     benchmark::RunSpecifiedBenchmarks();
