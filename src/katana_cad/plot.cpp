@@ -126,4 +126,18 @@ Result<double> fitScale(const geometry::Box2& extent, const PlotSettings& settin
     return needed;
 }
 
+Result<double> sheetScaleAtLeast(double needed)
+{
+    if (!(needed > 0.0) || !std::isfinite(needed)) {
+        return makeError(ErrorCode::InvalidArgument, "the scale denominator must be positive",
+                         std::to_string(needed));
+    }
+    for (const double standard : kSheetScales) {
+        if (standard >= needed) {
+            return standard;
+        }
+    }
+    return needed;
+}
+
 } // namespace katana::cad

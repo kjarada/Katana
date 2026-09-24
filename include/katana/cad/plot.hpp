@@ -99,6 +99,23 @@ struct Sheet {
 [[nodiscard]] core::Result<double> fitScale(const geometry::Box2& extent,
                                             const PlotSettings& settings);
 
+// The finer ladder a SHEET's viewports are scaled on (docs/plotting.md). A
+// sheet holds details and sections as well as plans, and a cross section at
+// 1 : 100 on a 120 mm cell is 12 m wide - so it needs 1 : 10 to 1 : 75 and the
+// in-between 1 : 125, 1 : 150, 1 : 750 and 1 : 1250 that kStandardScales
+// leaves out, and 1 : 1 to 1 : 5 for a detail. kStandardScales stays as it is:
+// the single-page plot and its tests are built on it.
+inline constexpr std::array<double, 24> kSheetScales{
+    1.0,    2.0,    5.0,    10.0,   20.0,   25.0,    50.0,    75.0,
+    100.0,  125.0,  150.0,  200.0,  250.0,  500.0,   750.0,   1000.0,
+    1250.0, 2000.0, 2500.0, 5000.0, 10000.0, 20000.0, 25000.0, 50000.0};
+
+// The first denominator of kSheetScales that is at least `needed` - the
+// largest standard scale at which something needing 1 : `needed` still fits -
+// or `needed` itself beyond 1 : 50 000, as fitScale does. InvalidArgument for
+// a denominator that is not positive and finite.
+[[nodiscard]] core::Result<double> sheetScaleAtLeast(double needed);
+
 [[nodiscard]] constexpr double millimetresToPixels(double millimetres, double dpi)
 {
     return millimetres * dpi / 25.4; // 25.4 mm to the inch, by definition
