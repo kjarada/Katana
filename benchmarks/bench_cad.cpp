@@ -8,8 +8,13 @@
 #include <benchmark/benchmark.h>
 
 #include <cmath>
+#include <memory>
 
+#include "generated_drawing.hpp"
+#include "katana/cad/document.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/commands/command_stack.hpp"
+#include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/cad/spatial_query.hpp"
 #include "katana/geometry/spatial_index.hpp"
@@ -367,5 +372,153 @@ BENCHMARK(BM_CollectFractionIndexed)
     ->Args({100000, 50})
     ->Args({100000, 70})
     ->Unit(benchmark::kMicrosecond);
+
+} // namespace
+
+// ---- the index after an IMPORT, through the Document ------------------------------
+//
+// Everything above hands a ready-built index to the query. These go through
+// Document::execute, which is where an import lands and where the index is
+// kept in step with the model, because that is where it went wrong: an index
+// fed 27,886 incremental inserts while still on its default one-unit cell was
+// measured at 722,715 buckets and 4,889 oversized entries, the import's
+// execute took 0.87-1.26 s against about 28 ms for the create itself, and a
+// window query was 36x slower until the project was reopened.
+
+namespace {
+
+// The one IMPORT transaction a file import makes: the layer the generated
+// drawing is on (an entity on a layer the drawing lacks is refused), then
+// every entity in one bulk create.
+std::unique_ptr<katana::commands::Transaction>
+importOf(const std::vector<katana::entity::Entity>& entities)
+{
+    auto transaction = std::make_unique<katana::commands::Transaction>("IMPORT");
+    katana::entity::Layer layer;
+    layer.name = "SURVEY";
+    transaction->add(katana::commands::createLayer(layer));
+    transaction->add(katana::commands::createEntities(entities));
+    return transaction;
+}
+
+// What the user waits for when File > Import lands: the execute alone, not
+// the reading of the file and not the document's construction or teardown.
+void BM_ImportExecute(benchmark::State& state)
+{
+    const auto entities =
+        katana::bench::generatedSurveyDrawing(static_cast<std::size_t>(state.range(0)));
+    for (auto _ : state) {
+        state.PauseTiming();
+        auto document = std::make_unique<katana::cad::Document>();
+        auto transaction = importOf(entities);
+        state.ResumeTiming();
+        const auto status = document->execute(std::move(transaction));
+        state.PauseTiming();
+        if (!status) {
+            state.SkipWithError("import failed");
+            break;
+        }
+        document.reset();
+        state.ResumeTiming();
+    }
+}
+BENCHMARK(BM_ImportExecute)
+    ->Arg(katana::bench::kCorridorEntityCount)
+    ->Unit(benchmark::kMillisecond);
+
+// A 1% window query (by area) on the index the import left behind: what
+// every snap, pick and plan repaint pays until the project is reopened.
+void BM_WindowQueryAfterImport(benchmark::State& state)
+{
+    katana::cad::Document document;
+    const auto status = document.execute(
+        importOf(katana::bench::generatedSurveyDrawing(static_cast<std::size_t>(state.range(0)))));
+    if (!status) {
+        state.SkipWithError("import failed");
+        return;
+    }
+    // The middle tenth of each side of the generated 10 km x 8 km extent.
+    const katana::geometry::Box2 window(Point2(304500.0, 6253600.0), Point2(305500.0, 6254400.0));
+    std::vector<katana::geometry::SpatialId> found;
+    for (auto _ : state) {
+        document.spatialIndex().query(window, found);
+        benchmark::DoNotOptimize(found.data());
+    }
+    state.counters["found"] = static_cast<double>(found.size());
+    state.counters["buckets"] = static_cast<double>(document.spatialIndex().bucketCount());
+    state.counters["oversized"] = static_cast<double>(document.spatialIndex().oversizedCount());
+}
+BENCHMARK(BM_WindowQueryAfterImport)
+    ->Arg(katana::bench::kCorridorEntityCount)
+    ->Unit(benchmark::kMicrosecond);
+
+// One line drawn into, and undone from, a drawing that already holds the
+// import: the ordinary click. It must stay incremental - whatever makes an
+// import rebuild the index must not make every click rebuild it.
+void BM_DrawOneLineIntoImportedDrawing(benchmark::State& state)
+{
+    katana::cad::Document document;
+    const auto status = document.execute(
+        importOf(katana::bench::generatedSurveyDrawing(static_cast<std::size_t>(state.range(0)))));
+    if (!status) {
+        state.SkipWithError("import failed");
+        return;
+    }
+    for (auto _ : state) {
+        const auto drawn = document.execute(
+            katana::commands::createLine(Point2(305000.0, 6254000.0), Point2(305012.0, 6254005.0)));
+        const auto undone = document.undo();
+        benchmark::DoNotOptimize(drawn.ok() && undone.ok());
+    }
+}
+BENCHMARK(BM_DrawOneLineIntoImportedDrawing)
+    ->Arg(katana::bench::kCorridorEntityCount)
+    ->Unit(benchmark::kMicrosecond);
+
+// A MOVE, and its undo, of a tenth of the imported drawing, and of one
+// entity fewer. A rule that rebuilt the index for any command touching a
+// tenth of the drawing was tried and measured here: 101 ms against 24 ms
+// (min of 9) - two whole rebuilds for a move that changes no box's size. The
+// rules kept (Document::applyToSpatialIndex) leave both incremental, so the
+// two should cost the same: a step between them is that mistake back.
+void moveAFractionOfAnImport(benchmark::State& state, std::size_t lessBy)
+{
+    katana::cad::Document document;
+    const auto status = document.execute(
+        importOf(katana::bench::generatedSurveyDrawing(static_cast<std::size_t>(state.range(0)))));
+    if (!status) {
+        state.SkipWithError("import failed");
+        return;
+    }
+    // The fewest entities that are a tenth: 2,789 of 27,886 (27,890 >= 27,886),
+    // where 2,788 (27,880) is not.
+    const std::size_t count = (document.model().entities.size() + 9) / 10 - lessBy;
+    std::vector<katana::entity::EntityId> ids;
+    document.model().entities.forEach([&](const katana::entity::Entity& entity) {
+        if (ids.size() < count) {
+            ids.push_back(entity.id);
+        }
+    });
+    for (auto _ : state) {
+        const auto moved = document.execute(katana::commands::moveEntities(ids, {2.5, -1.5}));
+        const auto undone = document.undo();
+        benchmark::DoNotOptimize(moved.ok() && undone.ok());
+    }
+    state.counters["moved"] = static_cast<double>(ids.size());
+}
+void BM_MoveATenthOfAnImport(benchmark::State& state)
+{
+    moveAFractionOfAnImport(state, 0);
+}
+void BM_MoveJustUnderATenthOfAnImport(benchmark::State& state)
+{
+    moveAFractionOfAnImport(state, 1);
+}
+BENCHMARK(BM_MoveATenthOfAnImport)
+    ->Arg(katana::bench::kCorridorEntityCount)
+    ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_MoveJustUnderATenthOfAnImport)
+    ->Arg(katana::bench::kCorridorEntityCount)
+    ->Unit(benchmark::kMillisecond);
 
 } // namespace

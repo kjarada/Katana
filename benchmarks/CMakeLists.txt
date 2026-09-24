@@ -3,10 +3,14 @@ katana_provide_benchmark()
 # Sources are globbed per module so that a module can add benchmarks without
 # touching this file. CONFIGURE_DEPENDS re-globs when files appear.
 file(GLOB _katana_bench_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/bench_*.cpp")
+# The export benchmarks need GDAL, which a -DKATANA_BUILD_IO=OFF build has not.
+if(NOT TARGET katana_interop)
+    list(FILTER _katana_bench_sources EXCLUDE REGEX "bench_interop[.]cpp$")
+endif()
 
 add_executable(katana_benchmarks ${_katana_bench_sources})
 target_link_libraries(katana_benchmarks PRIVATE benchmark::benchmark_main)
-foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_survey katana_terrain katana_cad katana_storage)
+foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_survey katana_terrain katana_cad katana_storage katana_interop)
     if(TARGET ${_lib})
         target_link_libraries(katana_benchmarks PRIVATE ${_lib})
     endif()
