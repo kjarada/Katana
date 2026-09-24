@@ -12,12 +12,12 @@
 // COLOUR is 0xAARRGGBB packed in a std::uint32_t, which is byte-for-byte
 // QImage::Format_ARGB32 on a little-endian machine.
 //
-// DEPTH is normalised [0, 1] with 0 at the near plane (the Vulkan convention,
-// chosen because Phase 15's real backend is Vulkan and because a float depth
-// buffer has far more precision near 0 than spread over [-1, 1]). Smaller is
-// nearer; the test is strictly-less, so of two primitives at exactly the same
-// depth the first rasterised wins, which combined with a fixed binning order is
-// what makes a frame reproducible (Rule 7).
+// DEPTH is normalised [0, 1] and REVERSED: 1 at the near plane, 0 at the far
+// (camera.hpp says why: it keeps a float's precision where the perspective
+// divide needs it). Larger is nearer and the buffer is cleared to 0; the test
+// is strictly-greater, so of two primitives at exactly the same depth the
+// first rasterised wins, which combined with a fixed binning order is what
+// makes a frame reproducible (Rule 7).
 
 #include <cstddef>
 #include <cstdint>
@@ -96,7 +96,7 @@ class Framebuffer {
     [[nodiscard]] Rgba colorAt(int x, int y) const { return color_[index(x, y)]; }
     [[nodiscard]] float depthAt(int x, int y) const { return depth_[index(x, y)]; }
 
-    // Fills colour with `background` and depth with 1 (the far plane).
+    // Fills colour with `background` and depth with 0 (the far plane).
     void clear(Rgba background);
     // Same, but only inside `rect`. Used when a tile is rendered on its own.
     void clearTile(const TileRect& rect, Rgba background);

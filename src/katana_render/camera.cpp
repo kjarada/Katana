@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "katana/math/numerics.hpp"
 
@@ -130,31 +131,104 @@ bool Camera::frame(const katana::math::AABB& bounds, double marginFraction)
     if (bounds.empty() || !bounds.min.isFinite() || !bounds.max.isFinite()) {
         return false;
     }
-    const Vec3 span = bounds.max - bounds.min;
-    // The bounding SPHERE, not the box: it is orientation independent, so
-    // orbiting after a frame() never pushes a corner out of view.
-    const double radius = std::max(0.5 * span.length(), tol::kGeometric);
+    const Point3 centre = bounds.center();
+    Vec3 half = (bounds.max - bounds.min) * 0.5;
+    if (half.length() < kMinimumFrameRadius) {
+        // Grown on every axis to at least r / sqrt(3), so the half-diagonal
+        // reaches the minimum whatever shape the box had (audit REN-07).
+        const double least = kMinimumFrameRadius / 1.7320508075688772;
+        half = Vec3(std::max(half.x, least), std::max(half.y, least), std::max(half.z, least));
+    }
+    const katana::math::AABB box(centre - half, centre + half);
     const double margin = 1.0 + std::max(marginFraction, 0.0);
 
-    setTarget(bounds.center());
+    setTarget(centre);
 
-    const double vertical = radius * 2.0 * margin;
-    setOrthographicHeight(vertical);
+    // Fit the eight projected corners, not the bounding sphere: a sphere is
+    // orientation independent, but it fits a 12 km corridor as if it were
+    // 12 km tall as well. A box projects inside the hull of its corners, so
+    // the corners alone decide. Before the view has a size the aspect is
+    // unknown and taken as square; the view frames again at its first size.
+    const double a = aspect() > 0.0 ? aspect() : 1.0;
+    const double tanV = std::tan(fovY_ * 0.5);
+    const double tanH = tanV * a;
+    const Vec3 s = right();
+    const Vec3 u = up();
+    const Vec3 f = forward();
+    double needed = 0.0;
+    double halfWidth = 0.0;
+    double halfHeight = 0.0;
+    for (int corner = 0; corner < 8; ++corner) {
+        const Vec3 p((corner & 1) != 0 ? box.max.x : box.min.x,
+                     (corner & 2) != 0 ? box.max.y : box.min.y,
+                     (corner & 4) != 0 ? box.max.z : box.min.z);
+        const Vec3 rel = p - centre;
+        const double x = std::abs(rel.dot(s));
+        const double y = std::abs(rel.dot(u));
+        const double z = rel.dot(f); // positive: further from the eye than the target
+        // At eye distance d the corner is d + z in front of the eye and must
+        // sit inside the frustum with the margin to spare.
+        needed = std::max({needed, margin * x / tanH - z, margin * y / tanV - z});
+        halfWidth = std::max(halfWidth, x);
+        halfHeight = std::max(halfHeight, y);
+    }
+    setDistance(std::max(needed, half.length() * 1.0e-3));
+    // The tighter of the two axes, so a portrait view does not crop the
+    // sides (audit REN-08: this ignored the aspect).
+    setOrthographicHeight(2.0 * margin * std::max(halfHeight, halfWidth / a));
+    fitDepthRange(box);
+    return true;
+}
 
-    // Fit the tighter of the two screen axes, or a tall thin window crops the
-    // scene horizontally.
-    const double a = aspect();
-    const double halfVertical = fovY_ * 0.5;
-    const double halfHorizontal = std::atan(std::tan(halfVertical) * (a > 0.0 ? a : 1.0));
-    const double limiting = std::min(halfVertical, halfHorizontal);
-    const double needed = radius * margin / std::max(std::sin(limiting), 1.0e-9);
-    setDistance(needed);
+bool Camera::fitDepthRange(const katana::math::AABB& bounds)
+{
+    if (bounds.empty() || !bounds.min.isFinite() || !bounds.max.isFinite()) {
+        return false;
+    }
+    const Vec3 f = forward();
+    // A little slack either side, so a vertex exactly on a corner is never
+    // cut by rounding and a flat box still has a depth range.
+    const double pad = std::max((bounds.max - bounds.min).length() * 1.0e-3, 1.0e-3);
+    const auto cornerOf = [&bounds](int corner) {
+        return Vec3((corner & 1) != 0 ? bounds.max.x : bounds.min.x,
+                    (corner & 2) != 0 ? bounds.max.y : bounds.min.y,
+                    (corner & 4) != 0 ? bounds.max.z : bounds.min.z);
+    };
 
-    // Keep the whole scene between the planes whatever the projection, with a
-    // near plane that still resolves depth: a near of 1e-4 against a far of
-    // 1e5 wastes the entire float mantissa on the first millimetre.
-    const double far = std::max(needed + radius * 4.0, radius * 8.0);
-    setDepthRange(std::max(far * 1.0e-5, tol::kGeometric), far);
+    if (projection_ == Projection::Orthographic) {
+        // How far the box reaches back towards the eye from the target. The
+        // eye must be further back than that or the near plane cuts the
+        // model, so it is moved back: only the depths change, never what is
+        // seen, because an orthographic ray does not depend on where along
+        // the view direction its origin sits.
+        double reach = -std::numeric_limits<double>::infinity();
+        for (int corner = 0; corner < 8; ++corner) {
+            reach = std::max(reach, -(cornerOf(corner) - target_).dot(f));
+        }
+        standoff_ = std::max(0.0, reach + 2.0 * pad - distance_);
+    } else {
+        standoff_ = 0.0;
+    }
+
+    const Point3 e = eye();
+    double nearest = std::numeric_limits<double>::infinity();
+    double furthest = -std::numeric_limits<double>::infinity();
+    for (int corner = 0; corner < 8; ++corner) {
+        const double depth = (cornerOf(corner) - e).dot(f);
+        nearest = std::min(nearest, depth);
+        furthest = std::max(furthest, depth);
+    }
+    if (!(furthest > 0.0)) {
+        // The whole box is behind the eye: nothing of it can be seen, but the
+        // range must stay valid for whatever else is drawn.
+        setDepthRange(std::max(distance_ * 1.0e-3, tol::kGeometric), std::max(distance_, 1.0));
+        return true;
+    }
+    const double far = furthest + pad;
+    // With the eye inside the box `nearest` is negative and the floor decides;
+    // reversed Z keeps its precision down there (header, Clip).
+    const double near = std::max(nearest - pad, far * kNearFarFloor);
+    setDepthRange(std::max(near, tol::kGeometric), far);
     return true;
 }
 
@@ -221,7 +295,13 @@ Vec3 Camera::right() const
 
 Vec3 Camera::up() const { return right().cross(forward()).normalized(); }
 
-Point3 Camera::eye() const { return target_ - forward() * distance_; }
+Point3 Camera::eye() const
+{
+    // The orthographic standoff moves only the planes (fitDepthRange), so it
+    // applies only while the projection is orthographic.
+    const double back = projection_ == Projection::Orthographic ? standoff_ : 0.0;
+    return target_ - forward() * (distance_ + back);
+}
 
 Mat4 Camera::viewMatrix() const
 {
@@ -245,19 +325,22 @@ Mat4 Camera::projectionMatrix() const
     }
     if (projection_ == Projection::Perspective) {
         const double t = 1.0 / std::tan(fovY_ * 0.5);
-        const double range = near_ - far_;
-        // Depth maps -near -> 0 and -far -> 1 (see the header: Vulkan range).
-        return Mat4(t / a, 0.0, 0.0, 0.0,                  //
-                    0.0, t, 0.0, 0.0,                      //
-                    0.0, 0.0, far_ / range, near_ * far_ / range, //
+        const double range = far_ - near_;
+        // REVERSED Z (see the header): z_clip = near (z_eye + far) / range and
+        // w = -z_eye, so depth = near (far + z_eye) / (range * -z_eye): 1 at
+        // z_eye = -near, 0 at z_eye = -far.
+        return Mat4(t / a, 0.0, 0.0, 0.0,                          //
+                    0.0, t, 0.0, 0.0,                              //
+                    0.0, 0.0, near_ / range, near_ * far_ / range, //
                     0.0, 0.0, -1.0, 0.0);
     }
     const double halfHeight = orthoHeight_ * 0.5;
     const double halfWidth = halfHeight * a;
-    const double range = near_ - far_;
-    return Mat4(1.0 / halfWidth, 0.0, 0.0, 0.0,      //
-                0.0, 1.0 / halfHeight, 0.0, 0.0,     //
-                0.0, 0.0, 1.0 / range, near_ / range, //
+    const double range = far_ - near_;
+    // Reversed and linear: depth = (z_eye + far) / range, 1 at -near, 0 at -far.
+    return Mat4(1.0 / halfWidth, 0.0, 0.0, 0.0,     //
+                0.0, 1.0 / halfHeight, 0.0, 0.0,    //
+                0.0, 0.0, 1.0 / range, far_ / range, //
                 0.0, 0.0, 0.0, 1.0);
 }
 
@@ -312,6 +395,17 @@ double Camera::worldPerPixel() const
     const double visible = projection_ == Projection::Orthographic
                                ? orthoHeight_
                                : 2.0 * distance_ * std::tan(fovY_ * 0.5);
+    return visible / static_cast<double>(height_);
+}
+
+double Camera::worldPerPixelAt(double depth) const
+{
+    if (height_ <= 0) {
+        return 0.0;
+    }
+    const double visible = projection_ == Projection::Orthographic
+                               ? orthoHeight_
+                               : 2.0 * std::max(depth, 0.0) * std::tan(fovY_ * 0.5);
     return visible / static_cast<double>(height_);
 }
 

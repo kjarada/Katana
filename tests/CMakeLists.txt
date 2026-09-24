@@ -1061,3 +1061,17 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# The 3D view at the owner's display scale, 125%: the framebuffer must be in
+# device pixels (500 x 375 for a 400 x 300 view), not the logical size scaled
+# up, which beaded every 1 px line (docs/render.md, HiDPI). The widget suite
+# runs this test at ratio 1, where it cannot tell the two apart.
+if(TARGET katana_qt_widget_tests)
+    add_test(NAME qt_render_view_at_125_percent
+        COMMAND katana_qt_widget_tests
+            --gtest_filter=RenderView.TheFramebufferIsTheViewsSizeInDevicePixels)
+    set_tests_properties(qt_render_view_at_125_percent PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
+        TIMEOUT 120)
+endif()

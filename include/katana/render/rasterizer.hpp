@@ -34,10 +34,10 @@
 //
 // DETERMINISM (Rule 7). The chunk count in stage 2 is a function of the
 // primitive count alone, never of the number of cores, so the order in which a
-// tile visits its primitives is identical on every machine. With a
-// strictly-less depth test that makes the frame reproducible bit for bit -
-// asserted by a test that renders the same scene with 0, 1, 3 and 7 worker
-// threads and compares the buffers.
+// tile visits its primitives is identical on every machine. With a strict
+// depth test (reversed Z: strictly greater) that makes the frame reproducible
+// bit for bit - asserted by a test that renders the same scene with 0, 1, 3
+// and 7 worker threads and compares the buffers.
 //
 // SCRATCH is owned by the Rasterizer and reused, so a viewport redrawing at
 // 60 Hz allocates on the first frame and never again (PLAN.MD section 33).
@@ -67,6 +67,13 @@ struct RenderOptions {
     bool backfaceCull = false;
     // Clears colour and depth first. Off lets a caller compose several passes.
     bool clear = true;
+    // Off draws colour wherever the depth test passes but leaves the depth
+    // buffer as it was, so nothing drawn after is tested against this pass
+    // and, within it, what is drawn later covers what was drawn earlier. For
+    // what must never hide the model: the grid under it, and a surface's
+    // edges, which linework draped on that surface has to cross unbroken
+    // (cad::renderLayers).
+    bool depthWrite = true;
     // null uses TaskPool::shared(). A single-threaded pool renders the same
     // pixels; pass one to make a test independent of the machine.
     katana::core::TaskPool* pool = nullptr;
@@ -112,9 +119,12 @@ class Rasterizer {
     struct ScreenTriangle {
         float x[3]{};
         float y[3]{};
-        float z[3]{};       // NDC depth, already in [0, 1] and screen-linear
+        float z[3]{};       // reversed NDC depth, already in [0, 1] and screen-linear
         float invW[3]{};
         Rgba color[3]{};
+        // Added to the depth (reversed: positive is nearer). The slope-scaled
+        // push of a filled triangle, negative; 0 for a widened line, whose
+        // pull is already in its vertices' depths.
         float depthBias = 0.0f;
     };
 
@@ -124,14 +134,30 @@ class Rasterizer {
         float z = 0.0f;
         float half = 0.5f; // half the square's side, in pixels
         Rgba color = 0;
+        // Decided once, at the centre, after the pass's filled triangles and
+        // before its lines (decidePoints): drawn whole or not at all.
+        bool visible = false;
     };
+
+    // How a line's or a point's depth bias (pixel footprints towards the eye)
+    // becomes a change of reversed depth: pixels * (scale * depth + offset).
+    // Worked out once per frame from the camera (rasterizer.cpp).
+    struct DepthPull {
+        float scale = 0.0f;
+        float offset = 0.0f;
+    };
+    [[nodiscard]] static DepthPull depthPullFor(const Camera& camera);
 
     void transformVertices(const DrawList& list, const Camera& camera,
                            katana::core::TaskPool& pool);
     void buildScreenPrimitives(const DrawList& list, const Framebuffer& target,
                                const RenderOptions& options, katana::core::TaskPool& pool);
     void binPrimitives(const Framebuffer& target, katana::core::TaskPool& pool);
-    void rasteriseTiles(Framebuffer& target, katana::core::TaskPool& pool);
+    void rasteriseTiles(Framebuffer& target, const RenderOptions& options,
+                        katana::core::TaskPool& pool);
+    void decidePoints(const Framebuffer& target, katana::core::TaskPool& pool);
+
+    DepthPull depthPull_;
 
     // Stage 1 output.
     std::vector<ClipVertex> clip_;
@@ -148,6 +174,8 @@ class Rasterizer {
     // its index.
     struct Chunk {
         std::vector<ScreenTriangle> triangles;
+        // triangles[0, lineStart) are filled triangles, the rest line quads.
+        std::size_t lineStart = 0;
         std::vector<ScreenPoint> points;
         // tileBins[t] holds indices into `triangles` (below kPointTag) and into
         // `points` (with kPointTag set), in submission order.
