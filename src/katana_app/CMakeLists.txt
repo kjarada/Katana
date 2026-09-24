@@ -196,6 +196,24 @@ if(KATANA_BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
 endif()
 
+# A .dxf through the command line both ways, natively - no GDAL, so it runs
+# in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
+# area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;
+# exported, a new drawing, imported back. Three layers go out: 0, Survey and
+# Survey/Kerb - the last as "Survey$Kerb" with its path beside it.
+if(KATANA_BUILD_TESTS)
+    set(_dxf "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dxf")
+    add_test(NAME cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LAYER NEW Survey/Kerb #FF0000"
+                -c "LAYER SET Survey/Kerb" -c "RECT 0,0 30,20" -c "CIRCLE 15,10 5"
+                -c "TEXT 5,5 2.5 \"LOT 42\"" -c "EXPORT \"${_dxf}\"" -c "NEW"
+                -c "IMPORT \"${_dxf}\"" -c "LIST")
+    set_tests_properties(cli.a_drawing_exported_to_dxf_and_imported_back_keeps_its_curves_text_and_layer
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "exported 3 entities and 3 layers \\(DXF R2000.*imported 3 entities from cli round trip\\.dxf \\(DXF R2000\\).*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
+endif()
+
 # INFO, COPC and IMPORT ... LOCAL, on the sample GIS data. Expected values are
 # the files' own: terrain.asc's header says 120 x 90 cells of 1.5 from a
 # lower-left corner at (-5, -5), so it spans to (175, 130); `pdal info`
