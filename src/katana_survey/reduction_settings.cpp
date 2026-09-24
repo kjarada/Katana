@@ -304,6 +304,8 @@ constexpr std::array kDoubleKeys{
 constexpr std::array kBoolKeys{
     BoolKey{"curvature_refraction",
             [](ReductionSettings& s) -> bool& { return s.curvatureAndRefraction; }},
+    BoolKey{"faces.tolerance.exclude",
+            [](ReductionSettings& s) -> bool& { return s.faceTolerances.excludeOutside; }},
     BoolKey{"slope_to_horizontal",
             [](ReductionSettings& s) -> bool& { return s.slopeToHorizontal; }},
     BoolKey{"combined_factor.use",
