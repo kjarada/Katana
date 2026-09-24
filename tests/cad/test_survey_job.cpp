@@ -19,6 +19,7 @@
 #include "katana/cad/survey_points.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity.hpp"
+#include "katana/storage/project_store.hpp"
 
 using namespace katana::cad;
 using katana::core::ErrorCode;
@@ -368,6 +369,65 @@ TEST(SurveyJobImportCommand, APointTheDrawingAlreadyHasFollowsTheChosenPolicyAnd
                                 warning.text.find("102") != std::string::npos);
     }
     EXPECT_TRUE(reported);
+}
+
+// A field file the reader accepts (it takes up to 1 GiB) but the project
+// could never save - SQLite holds at most 1,000,000,000 bytes in a value or a
+// row - is refused at the import, with a sentence naming the file, before the
+// reduction runs and before anything is drawn. Accepted, it would make every
+// later save of the whole project fail. The bytes are never written, so the
+// string costs address space, not memory.
+TEST(SurveyJobImportCommand, AFieldFileTooLargeForTheProjectIsRefusedBeforeAnythingIsDone)
+{
+    Document document;
+    auto fake = std::make_shared<FakeReduction>();
+    fake->points = {{"101", {6'250'000.0, 300'000.0, 10.0}}};
+    SurveyJobImport request = importRequest();
+    request.job.sourceBytes.resize_and_overwrite(1'020'000'000,
+                                                 [](char*, std::size_t size) { return size; });
+    const auto revision = document.modelRevision();
+    const auto status = document.execute(
+        std::make_unique<ImportSurveyJobCommand>(document, std::move(request), reductionOf(fake)));
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(status.error().message.find("DAY1.GSI"), std::string::npos)
+        << status.error().message;
+    EXPECT_NE(status.error().message.find("too large"), std::string::npos)
+        << status.error().message;
+    EXPECT_EQ(fake->calls, 0) << "refused before the reduction";
+    EXPECT_TRUE(document.surveyJobs().empty());
+    EXPECT_EQ(document.model().entities.size(), 0U);
+    EXPECT_EQ(document.modelRevision(), revision);
+}
+
+// validate() can see only the file; the report and the point lists come with
+// execute(). A file exactly as large as a job may be, once the rest of what
+// the request holds is counted, passes the first check - and the job it makes
+// does not. It is refused whole: nothing left drawn, no job on the list.
+TEST(SurveyJobImportCommand, AJobItsReportAndPointsTakePastWhatAProjectHoldsIsRefusedWhole)
+{
+    using katana::storage::ProjectStore;
+    Document document;
+    auto fake = std::make_shared<FakeReduction>();
+    fake->points = {{"101", {6'250'000.0, 300'000.0, 10.0}}};
+    SurveyJobImport request = importRequest();
+    SurveyJob rest = request.job;
+    rest.sourceBytes.clear();
+    const std::uint64_t file =
+        ProjectStore::kMaxSurveyJobBytes - ProjectStore::surveyJobRowBytes(rest);
+    request.job.sourceBytes.resize_and_overwrite(file,
+                                                 [](char*, std::size_t size) { return size; });
+    ASSERT_EQ(ProjectStore::surveyJobRowBytes(request.job), ProjectStore::kMaxSurveyJobBytes);
+
+    const auto status = document.execute(
+        std::make_unique<ImportSurveyJobCommand>(document, std::move(request), reductionOf(fake)));
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(status.error().message.find("DAY1.GSI is too large"), std::string::npos)
+        << status.error().message;
+    EXPECT_EQ(fake->calls, 1); // past the first check, refused at the second
+    EXPECT_TRUE(document.surveyJobs().empty());
+    EXPECT_EQ(document.model().entities.size(), 0U);
 }
 
 TEST(SurveyJobImportCommand, AJobSurvivesSavingAndOpeningAndANewDrawingHasNone)
@@ -890,6 +950,55 @@ TEST(SurveyJobReadjustCommand, ADrawingOptionALaterBuildAddedIsSkippedAndTheRest
     const Entity* p102 = entityWith(document, "pt%\nno", "102");
     ASSERT_NE(p102, nullptr);
     EXPECT_EQ(p102->layer, "survey/day1/PEG");
+}
+
+// A job exactly as large as a project keeps, re-adjusted into one more point:
+// the job would no longer fit, so the re-adjustment is refused and changes
+// nothing, rather than leaving every later save of the drawing to fail.
+TEST(SurveyJobReadjustCommand, AReadjustmentThatWouldTakeTheJobPastWhatAProjectHoldsIsRefused)
+{
+    using katana::storage::ProjectStore;
+    Document document;
+    auto fake = std::make_shared<FakeReduction>();
+    const std::string id = importThreePoints(document, fake);
+    SurveyJob& job = SurveyJobAccess::jobs(document).front();
+    const std::uint64_t rest = ProjectStore::surveyJobRowBytes(job) - job.sourceBytes.size();
+    job.sourceBytes.resize_and_overwrite(ProjectStore::kMaxSurveyJobBytes - rest,
+                                         [](char*, std::size_t size) { return size; });
+    ASSERT_EQ(ProjectStore::surveyJobRowBytes(job), ProjectStore::kMaxSurveyJobBytes);
+    const auto settings = job.settings;
+    const auto reportText = job.reportText;
+    const auto placed = job.placedPoints;
+    const auto created = job.createdEntities;
+    std::map<EntityId, Entity> entitiesBefore;
+    document.model().entities.forEach(
+        [&](const Entity& entity) { entitiesBefore.emplace(entity.id, entity); });
+
+    fake->points["104"] = {6'250'040.0, 300'040.0, 12.0};
+    fake->points["101"] = {6'250'000.004, 300'000.0, 10.0};
+    SurveyJobReadjustment request = readjustmentOf(document, HandEditPolicy::Keep);
+    request.settings.method = survey::AdjustmentMethod::Network;
+    // The stored bytes are not compared here: that would read 900 MB.
+    const SurveyJobReader reader = [](const SurveyJob&) -> Result<survey::SurveyProject> {
+        return rawProject("re-read");
+    };
+    const auto status = document.execute(
+        std::make_unique<ReadjustSurveyJobCommand>(document, request, reader, reductionOf(fake)));
+    ASSERT_FALSE(status.ok());
+    EXPECT_EQ(status.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(status.error().message.find("survey job " + id + " (DAY1.GSI) is too large"),
+              std::string::npos)
+        << status.error().message;
+
+    const SurveyJob& after = document.surveyJobs().front();
+    EXPECT_EQ(after.settings, settings);
+    EXPECT_EQ(after.reportText, reportText);
+    EXPECT_EQ(after.placedPoints, placed);
+    EXPECT_EQ(after.createdEntities, created);
+    std::map<EntityId, Entity> entitiesAfter;
+    document.model().entities.forEach(
+        [&](const Entity& entity) { entitiesAfter.emplace(entity.id, entity); });
+    EXPECT_EQ(entitiesAfter, entitiesBefore) << "101 not moved, 104 not drawn";
 }
 
 TEST(SurveyJobReadjustCommand, AReaderOrReductionThatFailsChangesNothing)
