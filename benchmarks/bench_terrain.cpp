@@ -18,8 +18,18 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 
+#include "katana/archive12d/domain.hpp"
+#include "katana/archive12d/reader.hpp"
+#include "katana/cad/section.hpp"
+#include "katana/cad/spatial_query.hpp"
+#include "katana/core/task_pool.hpp"
+#include "katana/geometry/spatial_index.hpp"
 #include "katana/terrain/contours.hpp"
 #include "katana/terrain/super_surface.hpp"
 #include "katana/terrain/tiled_terrain.hpp"
@@ -230,6 +240,23 @@ void BM_Contours(benchmark::State& state)
 }
 BENCHMARK(BM_Contours)->Arg(50)->Arg(10)->Arg(2)->Unit(benchmark::kMillisecond);
 
+// The same on one thread: TaskPool(0) runs every level on the caller. The
+// pair shows what the levels in parallel buy, and - since the answer is
+// bit-identical by construction (test_contours.cpp) - that it costs nothing
+// in exactness.
+void BM_ContoursSerial(benchmark::State& state)
+{
+    static katana::core::TaskPool inlineOnly(0);
+    const TinSurface& surface = sharedSurface();
+    const double interval = static_cast<double>(state.range(0)) * 0.1;
+    for (auto _ : state) {
+        auto lines = katana::terrain::contours(surface, interval, 0.0, 5, &inlineOnly);
+        bool ok = static_cast<bool>(lines);
+        benchmark::DoNotOptimize(ok);
+    }
+}
+BENCHMARK(BM_ContoursSerial)->Arg(50)->Arg(10)->Arg(2)->Unit(benchmark::kMillisecond);
+
 // Cut and fill between two surfaces - the answer an earthworks job exists to
 // produce. volume.hpp promises this samples nothing, so what is measured here
 // is the exact overlay, and any future attempt to speed it up must keep that
@@ -245,6 +272,22 @@ void BM_CompareSurfaces(benchmark::State& state)
     }
 }
 BENCHMARK(BM_CompareSurfaces)->Unit(benchmark::kMillisecond);
+
+// The comparison on one thread (TaskPool(0)): the same blocks, summed the
+// same way, so the same bits as BM_CompareSurfaces - and the serial cost the
+// parallel one is measured against.
+void BM_CompareSurfacesSerial(benchmark::State& state)
+{
+    static katana::core::TaskPool inlineOnly(0);
+    const TinSurface& existing = sharedSurface();
+    const TinSurface& design = sharedDesignSurface();
+    for (auto _ : state) {
+        auto comparison = katana::terrain::compareSurfaces(existing, design, &inlineOnly);
+        bool ok = static_cast<bool>(comparison);
+        benchmark::DoNotOptimize(ok);
+    }
+}
+BENCHMARK(BM_CompareSurfacesSerial)->Unit(benchmark::kMillisecond);
 
 
 // ---------------------------------------------------------------------------
@@ -376,5 +419,294 @@ void BM_TiledTerrainBuildAll(benchmark::State& state)
     state.counters["tiles"] = static_cast<double>(terrain->tileCount());
 }
 BENCHMARK(BM_TiledTerrainBuildAll)->Unit(benchmark::kMillisecond);
+
+// ---------------------------------------------------------------------------
+// Sections: the crossing search
+// ---------------------------------------------------------------------------
+
+// Survey strings scattered over a 1 km site, as a detail survey delivers them:
+// 30 000 short polylines of 2 to 12 vertices. The section is cut 60 m across
+// the middle - a cross section, the common case, and the one where walking
+// every entity in the drawing costs the most per crossing found.
+struct SectionFixture {
+    katana::entity::Model model;
+    katana::geometry::SpatialIndex index;
+};
+
+const SectionFixture& sharedSectionFixture()
+{
+    static const SectionFixture fixture = [] {
+        SectionFixture built;
+        (void)built.model.layers.ensure("0");
+        Lcg rng(777u);
+        for (std::size_t i = 0; i < 30000; ++i) {
+            katana::geometry::Polyline2 line;
+            double x = rng.next() * 1000.0;
+            double y = rng.next() * 1000.0;
+            const std::size_t count = 2 + static_cast<std::size_t>(rng.next() * 11.0);
+            for (std::size_t v = 0; v < count; ++v) {
+                line.vertices.emplace_back(x, y);
+                x += (rng.next() - 0.5) * 20.0;
+                y += (rng.next() - 0.5) * 20.0;
+            }
+            katana::entity::Entity entity;
+            entity.geometry = std::move(line);
+            entity.layer = "0";
+            (void)built.model.entities.add(std::move(entity));
+        }
+        std::vector<katana::geometry::SpatialEntry> entries;
+        built.model.entities.forEach([&](const katana::entity::Entity& entity) {
+            entries.push_back({static_cast<katana::geometry::SpatialId>(entity.id),
+                               katana::cad::detail::queryExtents(built.model, entity)});
+        });
+        built.index.rebuild(entries);
+        return built;
+    }();
+    return fixture;
+}
+
+// Arg 0: a 60 m cross section; 1: the 1.4 km diagonal of the whole site.
+// Crossings only - no surface - so what is timed is the search.
+void runSectionCrossings(benchmark::State& state, bool withIndex)
+{
+    const SectionFixture& fixture = sharedSectionFixture();
+    katana::geometry::Polyline2 alignment;
+    if (state.range(0) == 0) {
+        alignment.vertices = {Point2(470.0, 500.0), Point2(530.0, 500.0)};
+    } else {
+        alignment.vertices = {Point2(0.0, 0.0), Point2(1000.0, 1000.0)};
+    }
+    katana::cad::SectionOptions options;
+    options.interval = 1.0;
+    options.includeSurfaceBreaks = false;
+    options.spatialIndex = withIndex ? &fixture.index : nullptr;
+    std::size_t crossings = 0;
+    for (auto _ : state) {
+        auto section = katana::cad::extractSection(alignment, {}, &fixture.model, options);
+        crossings = section ? section->crossings.size() : 0;
+        benchmark::DoNotOptimize(crossings);
+    }
+    state.counters["crossings"] = static_cast<double>(crossings);
+}
+
+void BM_SectionCrossings(benchmark::State& state) { runSectionCrossings(state, false); }
+BENCHMARK(BM_SectionCrossings)->Arg(0)->Arg(1)->Unit(benchmark::kMillisecond);
+
+void BM_SectionCrossingsIndexed(benchmark::State& state) { runSectionCrossings(state, true); }
+BENCHMARK(BM_SectionCrossingsIndexed)->Arg(0)->Arg(1)->Unit(benchmark::kMillisecond);
+
+// ---------------------------------------------------------------------------
+// Real survey data, when it is on this machine
+// ---------------------------------------------------------------------------
+//
+// Generated ground is regular in ways real ground is not, so the numbers that
+// decide anything are also taken on real archives. Those are survey data that
+// do not belong in the repository; name them in the environment:
+//
+//   KATANA_BENCH_TIN_12DA       a .12da archive holding a TIN (the largest is used)
+//   KATANA_BENCH_DRAWING_12DA   a .12da archive of survey strings (for sections)
+//
+// Unset, these benchmarks skip with a message rather than fail, so the suite
+// still runs anywhere.
+
+std::string readWholeFile(const char* path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+katana::core::Result<katana::archive12d::DomainImport> importArchive(const char* variable)
+{
+    const char* path = std::getenv(variable);
+    if (path == nullptr || *path == 0) {
+        return katana::core::makeError(katana::core::ErrorCode::NotFound,
+                                       std::string(variable) + " is not set");
+    }
+    const std::string bytes = readWholeFile(path);
+    if (bytes.empty()) {
+        return katana::core::makeError(katana::core::ErrorCode::NotFound,
+                                       std::string("cannot read ") + path);
+    }
+    auto archive = katana::archive12d::readArchiveBytes(bytes);
+    if (!archive) {
+        return archive.error();
+    }
+    return katana::archive12d::toDomain(archive.value());
+}
+
+// The archive's largest TIN, and a design derived from it: every third vertex
+// raised 0.3 m and triangulated afresh, so the design's triangles cross the
+// existing ones as a real design's do (a copy of the same triangulation would
+// pair each triangle with itself and measure the easy case).
+struct ArchiveSurfaces {
+    TinSurface existing;
+    TinSurface design;
+    std::string error;
+};
+
+const ArchiveSurfaces& archiveSurfaces()
+{
+    static const ArchiveSurfaces surfaces = [] {
+        ArchiveSurfaces loaded;
+        auto domain = importArchive("KATANA_BENCH_TIN_12DA");
+        if (!domain) {
+            loaded.error = domain.error().describe();
+            return loaded;
+        }
+        std::size_t largest = 0;
+        for (auto& surface : domain->surfaces) {
+            if (surface.surface.triangleCount() > largest) {
+                largest = surface.surface.triangleCount();
+                loaded.existing = std::move(surface.surface);
+            }
+        }
+        if (loaded.existing.empty()) {
+            loaded.error = "the archive holds no TIN";
+            return loaded;
+        }
+        katana::terrain::TinInput input;
+        for (std::size_t v = 0; v < loaded.existing.vertexCount(); v += 3) {
+            const Point3& p = loaded.existing.vertices()[v];
+            input.points.emplace_back(p.x, p.y, p.z + 0.3);
+        }
+        katana::terrain::TinBuildOptions options;
+        options.duplicatePoints = katana::terrain::DuplicatePointPolicy::Average;
+        auto built = katana::terrain::buildTin(input, options);
+        if (!built) {
+            loaded.error = built.error().describe();
+            return loaded;
+        }
+        loaded.design = std::move(built->surface);
+        return loaded;
+    }();
+    return surfaces;
+}
+
+// Arg: the interval in tenths of a metre (10 = 1 m, 1 = 0.1 m), the two the
+// perf map measured on the 229k-triangle archive TIN (279-361 ms and 500-510
+// ms, serial, on a loaded machine).
+void runArchiveContours(benchmark::State& state, katana::core::TaskPool* pool)
+{
+    const ArchiveSurfaces& surfaces = archiveSurfaces();
+    if (!surfaces.error.empty()) {
+        state.SkipWithError(surfaces.error.c_str());
+        return;
+    }
+    const double interval = static_cast<double>(state.range(0)) * 0.1;
+    std::size_t count = 0;
+    for (auto _ : state) {
+        auto lines = katana::terrain::contours(surfaces.existing, interval, 0.0, 5, pool);
+        count = lines ? lines->size() : 0;
+        benchmark::DoNotOptimize(count);
+    }
+    state.counters["contours"] = static_cast<double>(count);
+    state.counters["triangles"] = static_cast<double>(surfaces.existing.triangleCount());
+}
+
+void BM_ArchiveTinContours(benchmark::State& state) { runArchiveContours(state, nullptr); }
+BENCHMARK(BM_ArchiveTinContours)->Arg(10)->Arg(1)->Unit(benchmark::kMillisecond);
+
+void BM_ArchiveTinContoursSerial(benchmark::State& state)
+{
+    static katana::core::TaskPool inlineOnly(0);
+    runArchiveContours(state, &inlineOnly);
+}
+BENCHMARK(BM_ArchiveTinContoursSerial)->Arg(10)->Arg(1)->Unit(benchmark::kMillisecond);
+
+void runArchiveCompare(benchmark::State& state, katana::core::TaskPool* pool)
+{
+    const ArchiveSurfaces& surfaces = archiveSurfaces();
+    if (!surfaces.error.empty()) {
+        state.SkipWithError(surfaces.error.c_str());
+        return;
+    }
+    std::size_t pieces = 0;
+    for (auto _ : state) {
+        auto comparison =
+            katana::terrain::compareSurfaces(surfaces.existing, surfaces.design, pool);
+        pieces = comparison ? comparison->overlayTriangleCount : 0;
+        benchmark::DoNotOptimize(pieces);
+    }
+    state.counters["pieces"] = static_cast<double>(pieces);
+}
+
+void BM_ArchiveTinCompareSurfaces(benchmark::State& state) { runArchiveCompare(state, nullptr); }
+BENCHMARK(BM_ArchiveTinCompareSurfaces)->Unit(benchmark::kMillisecond);
+
+void BM_ArchiveTinCompareSurfacesSerial(benchmark::State& state)
+{
+    static katana::core::TaskPool inlineOnly(0);
+    runArchiveCompare(state, &inlineOnly);
+}
+BENCHMARK(BM_ArchiveTinCompareSurfacesSerial)->Unit(benchmark::kMillisecond);
+
+// The archive's strings in a model, indexed as a document indexes them.
+struct ArchiveDrawing {
+    katana::entity::Model model;
+    katana::geometry::SpatialIndex index;
+    katana::geometry::Box2 bounds;
+    std::string error;
+};
+
+const ArchiveDrawing& archiveDrawing()
+{
+    static const ArchiveDrawing drawing = [] {
+        ArchiveDrawing loaded;
+        auto domain = importArchive("KATANA_BENCH_DRAWING_12DA");
+        if (!domain) {
+            loaded.error = domain.error().describe();
+            return loaded;
+        }
+        for (const auto& layer : domain->layersNeeded) {
+            (void)loaded.model.layers.add(layer);
+        }
+        for (auto& entity : domain->entities) {
+            (void)loaded.model.layers.ensure(entity.layer);
+            (void)loaded.model.entities.add(std::move(entity));
+        }
+        std::vector<katana::geometry::SpatialEntry> entries;
+        loaded.model.entities.forEach([&](const katana::entity::Entity& entity) {
+            entries.push_back({static_cast<katana::geometry::SpatialId>(entity.id),
+                               katana::cad::detail::queryExtents(loaded.model, entity)});
+        });
+        loaded.index.rebuild(entries);
+        loaded.bounds = loaded.index.bounds();
+        return loaded;
+    }();
+    return drawing;
+}
+
+// Arg 0: a 60 m cross section through the centre of the drawing; 1: its full
+// diagonal (the perf map's 13.6 km line). 2 and 3: the same two with the
+// document's index.
+void BM_ArchiveSectionCrossings(benchmark::State& state)
+{
+    const ArchiveDrawing& drawing = archiveDrawing();
+    if (!drawing.error.empty()) {
+        state.SkipWithError(drawing.error.c_str());
+        return;
+    }
+    const Point2 centre = drawing.bounds.center();
+    katana::geometry::Polyline2 alignment;
+    if (state.range(0) % 2 == 0) {
+        alignment.vertices = {Point2(centre.x - 30.0, centre.y),
+                              Point2(centre.x + 30.0, centre.y)};
+    } else {
+        alignment.vertices = {drawing.bounds.min, drawing.bounds.max};
+    }
+    katana::cad::SectionOptions options;
+    options.interval = 1.0;
+    options.includeSurfaceBreaks = false;
+    options.spatialIndex = state.range(0) >= 2 ? &drawing.index : nullptr;
+    std::size_t crossings = 0;
+    for (auto _ : state) {
+        auto section = katana::cad::extractSection(alignment, {}, &drawing.model, options);
+        crossings = section ? section->crossings.size() : 0;
+        benchmark::DoNotOptimize(crossings);
+    }
+    state.counters["crossings"] = static_cast<double>(crossings);
+    state.counters["entities"] = static_cast<double>(drawing.model.entities.size());
+}
+BENCHMARK(BM_ArchiveSectionCrossings)->Arg(0)->Arg(1)->Arg(2)->Arg(3)->Unit(benchmark::kMillisecond);
 
 } // namespace

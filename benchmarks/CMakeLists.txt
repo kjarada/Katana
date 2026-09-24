@@ -6,7 +6,7 @@ file(GLOB _katana_bench_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/b
 
 add_executable(katana_benchmarks ${_katana_bench_sources})
 target_link_libraries(katana_benchmarks PRIVATE benchmark::benchmark_main)
-foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_survey katana_terrain katana_cad katana_storage)
+foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_survey katana_terrain katana_cad katana_storage katana_archive12d)
     if(TARGET ${_lib})
         target_link_libraries(katana_benchmarks PRIVATE ${_lib})
     endif()
