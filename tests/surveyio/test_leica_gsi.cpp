@@ -181,9 +181,16 @@ TEST(LeicaGsi, AStationBlockFollowedByMeasurementsIsOneSetupWithItsInstrumentHei
     // Record 9: "88..10+00001600" = 1.600 m.
     EXPECT_EQ(project.stations[1].setup.pointId, "STN2");
     EXPECT_DOUBLE_EQ(project.stations[1].setup.instrumentHeight, 1.600);
-    // GSI marks no backsight, so none is invented.
+    // GSI marks no backsight. Setup 1's first shot (record 2) is to BS, which
+    // the file has given no coordinates: no backsight is named. Setup 2's
+    // first shot (record 10) is to STN1, positioned by record 1: that is its
+    // backsight. No circle setting is recorded for either.
     EXPECT_TRUE(project.stations[0].backsightPointId.empty());
+    EXPECT_EQ(project.stations[1].backsightPointId, "STN1");
     EXPECT_FALSE(project.stations[0].backsightAzimuth.has_value());
+    EXPECT_FALSE(project.stations[1].backsightAzimuth.has_value());
+    EXPECT_TRUE(says(read.notCarried, "1 of 2 setups took the point of their first shot as the "
+                                      "backsight"));
     EXPECT_EQ(read.recordsRead, 12U);
     EXPECT_EQ(read.recordsSkipped, 0U);
 }
