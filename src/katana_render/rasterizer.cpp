@@ -870,7 +870,14 @@ void Rasterizer::binPrimitives(const Framebuffer& target, TaskPool& pool)
             const int x1 = pixelFloor(maxX, 0, target.width() - 1) / Framebuffer::kTileSize;
             const int y1 = pixelFloor(maxY, 0, target.height() - 1) / Framebuffer::kTileSize;
             if (x0 == x1 && y0 == y1) {
-                binBox(minX, minY, maxX, maxY, static_cast<std::uint32_t>(i));
+                // Pushed here, not through binBox: that would floor the box
+                // again, and on baseline x86-64 each floor is a call to
+                // floorf - on a dense TIN, where nearly every triangle is in
+                // one tile, the four cost the framed 1.05M-triangle grid 10%.
+                chunk.tileBins[static_cast<std::size_t>(y0) * static_cast<std::size_t>(tilesAcross) +
+                               static_cast<std::size_t>(x0)]
+                    .push_back(static_cast<std::uint32_t>(i));
+                ++chunk.stats.binEntries;
                 continue;
             }
             // Spanning tiles: a long line or a large or thin triangle, whose
@@ -917,11 +924,114 @@ namespace {
 // each row to the pixels that can be inside (rowSpans) and, on AVX2, shades
 // them eight at a time. A dense TIN framed whole is fractions of a pixel a
 // triangle, where the double setup is pure cost: with no cutoff the framed
-// 1.05M-triangle grid took 23% longer. A surface seen from inside it, or a
-// line across the view, is hundreds of pixels a box. 16 and 64 measured alike
-// on the dense frames, 16 a little faster on the near ones (docs/performance.md,
+// 1.05M-triangle grid took 23% longer, and at 16 the 131k one, whose
+// triangles are a few pixels, 4% longer. At 64 neither moved outside the A/A
+// spread, and a surface seen from inside it, or a line across the view - both
+// hundreds of pixels a box - kept nearly all of the gain (docs/performance.md,
 // "SIMD: the software rasteriser").
-constexpr long kBoundedFillMinimumPixels = 16;
+constexpr long kBoundedFillMinimumPixels = 64;
+
+// One pixel of the fill, (x + 0.5, py), of triangle t: true when it was
+// written. The reference every fast path reproduces bit for bit - the AVX2
+// kernel lane by lane (src/katana_render/simd/raster_avx2.cpp). A template only
+// so that it can take the class's private ScreenTriangle.
+template <class Triangle>
+[[gnu::always_inline]] inline bool shadePixel(const Triangle& t, float invArea, int x, float py,
+                                              Rgba* row, float* depthRow, bool depthWrite)
+{
+    const float px = static_cast<float>(x) + 0.5f;
+
+    // No top-left rule: a pixel exactly on a shared edge is covered by both
+    // triangles rather than by exactly one. With an opaque, strictly-less depth
+    // test that costs a redundant write and changes no pixel, so the extra
+    // branches are not paid for. It would have to be added before any blended
+    // pass.
+    //
+    // Barycentrics from edge functions. Normalising by the signed area makes
+    // the sign test independent of winding, so a triangle is filled whichever
+    // way round it is - the caller opted in or out of culling long before this
+    // point.
+    const float w0 = ((t.x[1] - px) * (t.y[2] - py) - (t.x[2] - px) * (t.y[1] - py)) * invArea;
+    const float w1 = ((t.x[2] - px) * (t.y[0] - py) - (t.x[0] - px) * (t.y[2] - py)) * invArea;
+    const float w2 = 1.0f - w0 - w1;
+    if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+        return false;
+    }
+
+    // Reversed Z: larger is nearer, the buffer is cleared to 0 (the far plane)
+    // and the test is strictly greater, so the first of two equal depths still
+    // wins (Rule 7). Clamped at the near plane, which a pull towards the eye
+    // can overshoot; NaN fails.
+    const float depth = std::min(w0 * t.z[0] + w1 * t.z[1] + w2 * t.z[2] + t.depthBias, 1.0f);
+    if (!(depth > depthRow[x])) {
+        return false;
+    }
+
+    // Perspective-correct colour: interpolate c/w and 1/w and divide. Under an
+    // orthographic projection every invW is equal and this reduces to the
+    // linear case.
+    const float invW = w0 * t.invW[0] + w1 * t.invW[1] + w2 * t.invW[2];
+    Rgba color;
+    if (invW > 0.0f) {
+        const float s = 1.0f / invW;
+        const auto channel = [&](int shift) {
+            const float c = (w0 * static_cast<float>((t.color[0] >> shift) & 0xFFu) * t.invW[0] +
+                             w1 * static_cast<float>((t.color[1] >> shift) & 0xFFu) * t.invW[1] +
+                             w2 * static_cast<float>((t.color[2] >> shift) & 0xFFu) * t.invW[2]) *
+                            s;
+            return static_cast<Rgba>(static_cast<std::uint8_t>(std::clamp(c, 0.0f, 255.0f) + 0.5f));
+        };
+        color = (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
+    } else {
+        color = t.color[0];
+    }
+
+    if (depthWrite) {
+        depthRow[x] = depth;
+    }
+    row[x] = color;
+    return true;
+}
+
+// A box of kBoundedFillMinimumPixels or more: each row bounded to the pixels
+// that can be inside first (rowSpans, which every pixel shadePixel would
+// accept passes), then those shaded - eight at a time with the AVX2 kernel,
+// which skips the edge tests where the whole box is inside, or one at a time.
+// Out of line so that none of this weighs on the loop for small boxes, which
+// is what a dense TIN is made of. Returns the pixels written.
+template <class Triangle>
+[[gnu::noinline]] std::size_t fillBounded(const Triangle& t, float area, float invArea, int minX,
+                                          int maxX, int minY, int maxY, bool depthWrite,
+                                          Rgba* colorBase, float* depthBase, int stride,
+                                          [[maybe_unused]] bool kernel)
+{
+    std::array<int, 2 * static_cast<std::size_t>(Framebuffer::kTileSize)> spans;
+    const EdgeSetup edges = edgeSetup(t.x, t.y, area, minX, maxX, minY, maxY);
+    if (!rowSpans(edges, minX, maxX, minY, maxY, spans.data())) {
+        return 0;
+    }
+#if defined(KATANA_HAVE_AVX2_KERNELS)
+    if (kernel) {
+        return katana_avx2_shade_rows(t.x, invArea, spans.data(), minY, maxY - minY + 1,
+                                      coversAll(edges, minX, maxX, minY, maxY) ? 1 : 0,
+                                      depthWrite ? 1 : 0, colorBase, depthBase,
+                                      static_cast<std::size_t>(stride));
+    }
+#endif
+    std::size_t written = 0;
+    for (int y = minY; y <= maxY; ++y) {
+        const float py = static_cast<float>(y) + 0.5f;
+        Rgba* row = colorBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+        float* depthRow = depthBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
+        const int last = spans[2 * static_cast<std::size_t>(y - minY) + 1];
+        for (int x = spans[2 * static_cast<std::size_t>(y - minY)]; x <= last; ++x) {
+            if (shadePixel(t, invArea, x, py, row, depthRow, depthWrite)) {
+                ++written;
+            }
+        }
+    }
+    return written;
+}
 
 } // namespace
 
@@ -944,6 +1054,8 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
                   offsetof(ScreenTriangle, color) == 12 * sizeof(float) &&
                   offsetof(ScreenTriangle, depthBias) == 15 * sizeof(float));
     const bool kernel = katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+#else
+    const bool kernel = false;
 #endif
 
     bool anyPoints = false;
@@ -979,9 +1091,6 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
             // the nearer point wins; anywhere else its centre has decided.
             std::array<std::uint8_t, static_cast<std::size_t>(kTile) * kTile> drawn;
             bool drawnCleared = false;
-
-            // The pixels of each row a triangle can cover (rowSpans).
-            std::array<int, 2 * static_cast<std::size_t>(kTile)> spans;
 
             // Chunks in index order, primitives in index order within a chunk:
             // the visit order is a pure function of the draw list, so ties at
@@ -1060,112 +1169,26 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, const RenderOptions& option
                     }
                     const float invArea = 1.0f / area;
 
-                    // A box of a few pixels is filled whole. A larger one is
-                    // bounded row by row first, to the pixels whose centres
-                    // can be inside, which every pixel the float test would
-                    // accept is (see "conservative coverage").
+                    // A box of a few pixels is filled whole, as it always was.
+                    // A larger one is bounded row by row first (fillBounded).
                     const long boxPixels =
                         static_cast<long>(maxX - minX + 1) * static_cast<long>(maxY - minY + 1);
-                    if (boxPixels < kBoundedFillMinimumPixels) {
-                        for (int y = minY; y <= maxY; ++y) {
-                            spans[2 * static_cast<std::size_t>(y - minY)] = minX;
-                            spans[2 * static_cast<std::size_t>(y - minY) + 1] = maxX;
-                        }
-                    } else {
-                        const EdgeSetup edges = edgeSetup(t.x, t.y, area, minX, maxX, minY, maxY);
-                        if (!rowSpans(edges, minX, maxX, minY, maxY, spans.data())) {
-                            continue;
-                        }
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-                        if (kernel) {
-                            // Eight pixels a step, each shaded to the bits of
-                            // the loop below; where the whole box is inside,
-                            // without the edge tests.
-                            stats.fragments += katana_avx2_shade_rows(
-                                t.x, invArea, spans.data(), minY, maxY - minY + 1,
-                                coversAll(edges, minX, maxX, minY, maxY) ? 1 : 0,
-                                depthWrite ? 1 : 0, colorBase, depthBase,
-                                static_cast<std::size_t>(stride));
-                            continue;
-                        }
-#endif
+                    if (boxPixels >= kBoundedFillMinimumPixels) {
+                        stats.fragments += fillBounded(t, area, invArea, minX, maxX, minY, maxY,
+                                                       depthWrite, colorBase, depthBase, stride,
+                                                       kernel);
+                        continue;
                     }
-
                     for (int y = minY; y <= maxY; ++y) {
                         const float py = static_cast<float>(y) + 0.5f;
                         Rgba* row =
                             colorBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
                         float* depthRow =
                             depthBase + static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
-                        const int rowFirst = spans[2 * static_cast<std::size_t>(y - minY)];
-                        const int rowLast = spans[2 * static_cast<std::size_t>(y - minY) + 1];
-                        for (int x = rowFirst; x <= rowLast; ++x) {
-                            const float px = static_cast<float>(x) + 0.5f;
-
-                            // No top-left rule: a pixel exactly on a shared edge
-                            // is covered by both triangles rather than by exactly
-                            // one. With an opaque, strictly-less depth test that
-                            // costs a redundant write and changes no pixel, so the
-                            // extra branches are not paid for. It would have to be
-                            // added before any blended pass.
-                            //
-                            // Barycentrics from edge functions. Normalising by the
-                            // signed area makes the sign test independent of
-                            // winding, so a triangle is filled whichever way round
-                            // it is - the caller opted in or out of culling long
-                            // before this point.
-                            const float w0 = ((t.x[1] - px) * (t.y[2] - py) -
-                                              (t.x[2] - px) * (t.y[1] - py)) *
-                                             invArea;
-                            const float w1 = ((t.x[2] - px) * (t.y[0] - py) -
-                                              (t.x[0] - px) * (t.y[2] - py)) *
-                                             invArea;
-                            const float w2 = 1.0f - w0 - w1;
-                            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
-                                continue;
+                        for (int x = minX; x <= maxX; ++x) {
+                            if (shadePixel(t, invArea, x, py, row, depthRow, depthWrite)) {
+                                ++stats.fragments;
                             }
-
-                            // Reversed Z: larger is nearer, the buffer is cleared
-                            // to 0 (the far plane) and the test is strictly
-                            // greater, so the first of two equal depths still
-                            // wins (Rule 7). Clamped at the near plane, which a
-                            // pull towards the eye can overshoot; NaN fails.
-                            const float depth = std::min(
-                                w0 * t.z[0] + w1 * t.z[1] + w2 * t.z[2] + t.depthBias, 1.0f);
-                            if (!(depth > depthRow[x])) {
-                                continue;
-                            }
-
-                            // Perspective-correct colour: interpolate c/w and 1/w
-                            // and divide. Under an orthographic projection every
-                            // invW is equal and this reduces to the linear case.
-                            const float invW = w0 * t.invW[0] + w1 * t.invW[1] + w2 * t.invW[2];
-                            Rgba color;
-                            if (invW > 0.0f) {
-                                const float s = 1.0f / invW;
-                                const auto channel = [&](int shift) {
-                                    const float c =
-                                        (w0 * static_cast<float>((t.color[0] >> shift) & 0xFFu) *
-                                             t.invW[0] +
-                                         w1 * static_cast<float>((t.color[1] >> shift) & 0xFFu) *
-                                             t.invW[1] +
-                                         w2 * static_cast<float>((t.color[2] >> shift) & 0xFFu) *
-                                             t.invW[2]) *
-                                        s;
-                                    return static_cast<Rgba>(
-                                        static_cast<std::uint8_t>(std::clamp(c, 0.0f, 255.0f) + 0.5f));
-                                };
-                                color = (channel(24) << 24) | (channel(16) << 16) |
-                                        (channel(8) << 8) | channel(0);
-                            } else {
-                                color = t.color[0];
-                            }
-
-                            if (depthWrite) {
-                                depthRow[x] = depth;
-                            }
-                            row[x] = color;
-                            ++stats.fragments;
                         }
                     }
                 }
