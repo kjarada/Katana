@@ -75,12 +75,23 @@ struct PolylineRuns {
     }
 };
 
+// How a segment that crosses the box's boundary is kept: cut at the
+// boundary (Cut), or whole, both its vertices as they are (WholeSegments).
+// WholeSegments is for a renderer that must paint exactly the pixels the
+// unclipped line paints: a segment cut short is the same line in exact
+// arithmetic but not in a rasteriser's fixed-point edges, whose
+// antialiasing then differs by a level or two along its whole length. Kept
+// whole, only the segments that miss the box are dropped - for a long line
+// seen in part, nearly all of it.
+enum class PolylineClip { Cut, WholeSegments };
+
 // Replaces `runs` with the pieces of `vertices` in `box` (see PolylineRuns).
-// An empty box, or fewer than two vertices, gives no runs. `runs` is an
-// out-parameter so that a caller clipping thousands of polylines a frame
-// reuses one buffer.
+// With WholeSegments a run is a stretch of consecutive segments that each
+// meet the box, every point a vertex of the polyline. An empty box, or fewer
+// than two vertices, gives no runs. `runs` is an out-parameter so that a
+// caller clipping thousands of polylines a frame reuses one buffer.
 void clipPolyline(const std::vector<Point2>& vertices, bool closed, const Box2& box,
-                  PolylineRuns& runs);
+                  PolylineRuns& runs, PolylineClip mode = PolylineClip::Cut);
 
 // Sutherland-Hodgman clipping of `subject` against the convex polygon `clip`
 // (either orientation). The result may have no vertices. Fails with

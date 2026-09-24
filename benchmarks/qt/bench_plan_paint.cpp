@@ -121,14 +121,15 @@ void setCounters(benchmark::State& state, const katana::qt::ViewportWidget& widg
     state.counters["entities"] = static_cast<double>(fixture().summary.entities);
 }
 
-// A whole frame at zoom extents: every entity drawn.
-void BM_PlanPaintExtents(benchmark::State& state)
+// Frames of a view `zoom` times closer than the extent, each panned a pixel
+// from the last so that nothing drawn for one can be reused by the next.
+void panningFrames(benchmark::State& state, double zoom, Point2 centreFraction)
 {
     if (!fixture().ok) {
         state.SkipWithError("the survey drawing could not be built");
         return;
     }
-    View view(1.0, Point2(0.5, 0.5));
+    View view(zoom, centreFraction);
     double direction = 1.0;
     for (auto _ : state) {
         view.state->plan.panByPixels(direction, 0.0); // a changed view: nothing reusable
@@ -137,7 +138,32 @@ void BM_PlanPaintExtents(benchmark::State& state)
     }
     setCounters(state, *view.widget);
 }
+
+// The plan view's lines at the 1.5 px hairline it drew before View > Thin
+// screen lines existed, for as long as a benchmark runs: what the speed work
+// bought WITHOUT the look changing, measured against a build from before it.
+struct ThickLines {
+    bool was = katana::qt::ViewportWidget::thinScreenLines();
+    ThickLines() { katana::qt::ViewportWidget::setThinScreenLines(false); }
+    ~ThickLines() { katana::qt::ViewportWidget::setThinScreenLines(was); }
+    ThickLines(const ThickLines&) = delete;
+    ThickLines& operator=(const ThickLines&) = delete;
+};
+
+// A whole frame at zoom extents: every entity drawn, in the product's
+// default look (thin screen lines).
+void BM_PlanPaintExtents(benchmark::State& state)
+{
+    panningFrames(state, 1.0, Point2(0.5, 0.5));
+}
 BENCHMARK(BM_PlanPaintExtents)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+void BM_PlanPaintExtentsThickLines(benchmark::State& state)
+{
+    const ThickLines thick;
+    panningFrames(state, 1.0, Point2(0.5, 0.5));
+}
+BENCHMARK(BM_PlanPaintExtentsThickLines)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 // Zoomed in five times, a fifth of the site across: the contours crossing
 // the view run far beyond it on both sides, which is the case clipping to the
@@ -145,20 +171,16 @@ BENCHMARK(BM_PlanPaintExtents)->Unit(benchmark::kMillisecond)->UseRealTime();
 // strings, 221 ms).
 void BM_PlanPaintZoomed(benchmark::State& state)
 {
-    if (!fixture().ok) {
-        state.SkipWithError("the survey drawing could not be built");
-        return;
-    }
-    View view(5.0, Point2(0.45, 0.55));
-    double direction = 1.0;
-    for (auto _ : state) {
-        view.state->plan.panByPixels(direction, 0.0);
-        direction = -direction;
-        view.frame();
-    }
-    setCounters(state, *view.widget);
+    panningFrames(state, 5.0, Point2(0.45, 0.55));
 }
 BENCHMARK(BM_PlanPaintZoomed)->Unit(benchmark::kMillisecond)->UseRealTime();
+
+void BM_PlanPaintZoomedThickLines(benchmark::State& state)
+{
+    const ThickLines thick;
+    panningFrames(state, 5.0, Point2(0.45, 0.55));
+}
+BENCHMARK(BM_PlanPaintZoomedThickLines)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 // The mouse moving over an unchanged drawing at zoom extents: what every
 // cursor move, snap marker and rubber band costs.
@@ -179,6 +201,9 @@ void BM_PlanPaintCursorMove(benchmark::State& state)
         view.frame();
     }
     setCounters(state, *view.widget);
+    // How many times the drawing itself was painted over the run: once, the
+    // first frame, when the kept drawing layer does its job.
+    state.counters["drawingPaints"] = static_cast<double>(view.widget->drawingPaintCount());
 }
 BENCHMARK(BM_PlanPaintCursorMove)->Unit(benchmark::kMillisecond)->UseRealTime();
 
@@ -210,3 +235,76 @@ void BM_PlanPlotA1(benchmark::State& state)
 BENCHMARK(BM_PlanPlotA1)->Unit(benchmark::kMillisecond)->UseRealTime();
 
 } // namespace
+
+namespace {
+
+// The painter alone (plan_painter.hpp), with each of its screen-speed
+// measures switched on or off, so that one binary says what each buys: the
+// thin cosmetic pen, clipping lines to the view, and symbol sprites. (The
+// once-per-key display resolution and the kept drawing layer cannot be
+// switched off; a build from before them measures those.) The counters say
+// what the paint did: entities drawn, stamps and how many came from a
+// sprite, displays resolved, lines clipped.
+void BM_PlanPainter(benchmark::State& state, double zoom, Point2 centreFraction, bool thin,
+                    bool clip, bool sprites)
+{
+    Fixture& f = fixture();
+    if (!f.ok) {
+        state.SkipWithError("the survey drawing could not be built");
+        return;
+    }
+    const Box2 extent = f.summary.extent;
+    katana::qt::PlanFrame frame;
+    frame.transform.resize(kWidth, kHeight);
+    frame.transform.fit(extent, 0.02);
+    frame.transform.scale *= zoom;
+    frame.transform.center =
+        Point2(extent.min.x + centreFraction.x * (extent.max.x - extent.min.x),
+               extent.min.y + centreFraction.y * (extent.max.y - extent.min.y));
+    katana::qt::PlanPaintOptions options;
+    options.thinLines = thin;
+    options.clipLines = clip;
+    options.symbolSprites = sprites;
+    const katana::qt::PlanSource source = katana::qt::planSourceOf(f.document);
+    katana::qt::PlanPaintCache cache;
+    QImage image(kWidth, kHeight, QImage::Format_ARGB32_Premultiplied);
+    katana::qt::PlanPaintStats stats;
+    double direction = 1.0;
+    for (auto _ : state) {
+        frame.transform.panByPixels(direction, 0.0);
+        direction = -direction;
+        QPainter painter(&image);
+        painter.fillRect(image.rect(), QColor(0x1e, 0x23, 0x29));
+        stats = katana::qt::paintPlan(painter, source, frame, options, cache);
+    }
+    state.counters["entitiesDrawn"] = static_cast<double>(stats.entitiesDrawn);
+    state.counters["stamps"] = static_cast<double>(stats.symbolsStamped);
+    state.counters["sprites"] = static_cast<double>(stats.spritesDrawn);
+    state.counters["displays"] = static_cast<double>(stats.displaysResolved);
+    state.counters["clipped"] = static_cast<double>(stats.linesClipped);
+}
+
+const Point2 kWhole(0.5, 0.5);
+const Point2 kZoomedCentre(0.45, 0.55);
+
+} // namespace
+
+// At extents: nothing on (the 1.5 px pen, every vertex, every stamp
+// stroked), each measure alone, and all three.
+BENCHMARK_CAPTURE(BM_PlanPainter, extents_none, 1.0, kWhole, false, false, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, extents_clip, 1.0, kWhole, false, true, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, extents_sprites, 1.0, kWhole, false, false, true)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, extents_thin, 1.0, kWhole, true, false, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, extents_all, 1.0, kWhole, true, true, true)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+// Zoomed in five times, where clipping is for.
+BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_none, 5.0, kZoomedCentre, false, false, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_clip, 5.0, kZoomedCentre, false, true, false)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();
+BENCHMARK_CAPTURE(BM_PlanPainter, zoomed_all, 5.0, kZoomedCentre, true, true, true)
+    ->Unit(benchmark::kMillisecond)->UseRealTime();

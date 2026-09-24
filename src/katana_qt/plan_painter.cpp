@@ -1124,10 +1124,17 @@ void PlanPainter::strokePolyline(const std::vector<Point2>& vertices, bool close
     }
     // The view grown by more than the pen can reach past a line's end - a
     // square cap is half the width out and half across, 0.71 of it on the
-    // diagonal - and an antialiasing pixel, so a cut end and its cap lie
-    // wholly outside the view and no visible pixel changes.
+    // diagonal - and an antialiasing pixel, so a dropped segment, and the
+    // cap that replaces a join where one was dropped, lie wholly outside the
+    // view and no visible pixel changes.
     const double margin = (strokeWidth(pen) + 2.0) / view_.scale;
-    katana::geometry::clipPolyline(vertices, closed, visible_.inflated(margin), runs_);
+    // Liang-Barsky decides which segments reach the view; each that does is
+    // kept WHOLE, so its pixels are exactly the unclipped line's (a segment
+    // cut at the view's edge rasterises with antialiasing a level or two
+    // different along its whole length). Only the segments that miss the
+    // view are dropped - nearly all of a long string seen in part.
+    katana::geometry::clipPolyline(vertices, closed, visible_.inflated(margin), runs_,
+                                   katana::geometry::PolylineClip::WholeSegments);
     if (runs_.empty()) {
         return;
     }
@@ -1135,26 +1142,19 @@ void PlanPainter::strokePolyline(const std::vector<Point2>& vertices, bool close
     if (runs_.size() > 1 || runs_.points.size() != whole) {
         ++stats_.linesClipped;
     }
-    if (runs_.size() == 1) {
-        QPolygonF polygon;
-        polygon.reserve(static_cast<int>(runs_.points.size()));
-        for (const auto& point : runs_.points) {
-            polygon << toScreen(point);
+    // Each run as a polyline of its own, through the same QPainter call the
+    // whole line went through: a path of several runs is stroked by another
+    // of Qt's code paths, and its antialiasing differs by a level here and
+    // there along every edge.
+    QPolygonF polygon;
+    for (std::size_t run = 0; run < runs_.size(); ++run) {
+        polygon.clear();
+        polygon.reserve(static_cast<int>(runs_.ends[run] - runs_.begin(run)));
+        for (std::size_t i = runs_.begin(run); i < runs_.ends[run]; ++i) {
+            polygon << toScreen(runs_.points[i]);
         }
         painter_.drawPolyline(polygon);
-        return;
     }
-    // Several runs are one path, stroked once, as the whole line was: where
-    // two runs cross or meet (a closed ring's two ends), an antialiased edge
-    // is covered once and not blended twice.
-    QPainterPath path;
-    for (std::size_t run = 0; run < runs_.size(); ++run) {
-        path.moveTo(toScreen(runs_.points[runs_.begin(run)]));
-        for (std::size_t i = runs_.begin(run) + 1; i < runs_.ends[run]; ++i) {
-            path.lineTo(toScreen(runs_.points[i]));
-        }
-    }
-    painter_.strokePath(path, pen);
 }
 
 void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
