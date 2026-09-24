@@ -48,6 +48,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     icons.hpp
     theme.cpp
     theme.hpp
+    jobs.cpp
+    jobs.hpp
 )
 katana_target_defaults(katana)
 # The Survey workbench (PLAN.MD 45 slice 9) is globbed, for the reason
