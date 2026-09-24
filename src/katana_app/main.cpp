@@ -30,6 +30,7 @@
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/entity/tables.hpp"
+#include "dxf_verbs.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
 #include "katana/commands/entity_commands.hpp"
@@ -888,6 +889,15 @@ bool runLine(Session& session, const std::string& line)
         }
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
+    }
+    // A .dxf is read and written natively, with or without GDAL (dxf_verbs.hpp).
+    if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
+        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        if (const std::optional<bool> handled = katana::app::runDxfVerb(
+                session.document, verb,
+                argumentOf(line, space == std::string::npos ? line.size() : space))) {
+            return *handled;
+        }
     }
 #if defined(KATANA_WITH_INTEROP)
     // Interoperability verbs are handled before the interpreter sees the line,
