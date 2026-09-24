@@ -19,6 +19,23 @@ endfunction()
 add_test(NAME layering
     COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR}
             -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
+# The check itself, on a tree that breaks the rule: a check that cannot see a
+# violation passes as quietly as one that finds none. A module name with
+# digits in it (archive12d) was exactly that until the include pattern allowed
+# them.
+add_test(NAME layering_catches_a_cad_file_including_archive12d
+    COMMAND ${CMAKE_COMMAND}
+            -DKATANA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/layering_fixtures/cad_includes_archive
+            -P ${PROJECT_SOURCE_DIR}/tools/check_layering.cmake)
+set_tests_properties(layering_catches_a_cad_file_including_archive12d PROPERTIES
+    PASS_REGULAR_EXPRESSION "reads_an_archive[.]cpp: layer 'cad' must not depend on 'archive12d'")
+
+# What `cmake --install`, the bundle and the package will copy from the
+# sources: every file present, and nothing from the build's third-party inputs
+# (tools/check_install_rules.cmake says why each matters).
+add_test(NAME packaging_installs_only_present_first_party_files
+    COMMAND ${CMAKE_COMMAND} -DKATANA_ROOT=${PROJECT_SOURCE_DIR} -DKATANA_BINARY=${CMAKE_BINARY_DIR}
+            -P ${PROJECT_SOURCE_DIR}/tools/check_install_rules.cmake)
 
 # tests/<name>/ holds the suite of module katana_<name>; it is configured only
 # when that module is.
