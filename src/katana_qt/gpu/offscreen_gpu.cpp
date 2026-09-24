@@ -119,7 +119,12 @@ OffscreenGpu::create(int width, int height, const OffscreenOptions& options)
     if (!p.target->create()) {
         return makeError(ErrorCode::RenderingFailure, "could not create the render target");
     }
-    if (auto status = p.renderer.initialise(p.rhi.get(), p.pass.get(), p.sampleCount); !status) {
+    if (auto status = p.renderer.initialise(p.rhi.get(), p.pass.get(), p.sampleCount,
+                                             options.shaders != nullptr
+                                                 ? *options.shaders
+                                                 : runtimeHlslShaders(),
+                                             options.expansion);
+        !status) {
         return status.error();
     }
     return gpu;

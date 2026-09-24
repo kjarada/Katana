@@ -38,6 +38,12 @@ struct OffscreenOptions {
     int sampleCount = 4;
     // Ask the GPU to time each frame (QRhi::EnableTimestamps).
     bool timestamps = false;
+    // How lines and points are widened; the renderer falls back to Instanced
+    // on a device without a geometry stage (GpuRenderer::initialise).
+    Expansion expansion = Expansion::GeometryShader;
+    // Where the shaders come from; null for runtimeHlslShaders(). Must
+    // outlive create().
+    const ShaderLibrary* shaders = nullptr;
 };
 
 class OffscreenGpu {

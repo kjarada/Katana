@@ -36,10 +36,10 @@ static_assert(sizeof(FrameUniforms) == 144);
 //
 // The slope term does the work: a line quad is flat in depth across its
 // width while the surface under it slopes, and at a grazing angle the surface
-// changes depth by metres per pixel. The quad reaches its width's half plus a
-// pixel of antialiasing fringe from the line (shader_library.cpp), which for a
-// 1 px line is 1.5 px, so the surface is pushed back by two pixels of its own
-// depth slope. The constant term covers a surface seen face on, where the
+// changes depth by metres per pixel. The quad reaches half a pixel of
+// antialiasing fringe past its width's half (shader_library.cpp), which for a
+// 1 px line is 1 px, so pushing the surface back by two pixels of its own
+// depth slope leaves the line a pixel to spare. The constant term covers a surface seen face on, where the
 // slope is zero: for a float depth buffer one unit is 2^(e - 23) of the
 // value's own exponent, so 64 units is a relative 4e-6 to 8e-6 of the depth -
 // millimetres at a kilometre.
@@ -53,40 +53,64 @@ constexpr std::size_t kProgramCount = kAllPrograms.size();
 
 [[nodiscard]] std::size_t indexOf(Program program) { return static_cast<std::size_t>(program); }
 
-[[nodiscard]] QRhiVertexInputLayout layoutFor(Program program)
+// The scene's buffers hold the same bytes whichever way they are drawn
+// (gpu_scene.hpp); only how the GPU steps through them differs. Through a
+// geometry shader a line is two 20-byte vertices of a line list and a point
+// one vertex of a point list; instanced, a line is one 40-byte instance and a
+// point one 24-byte instance of a six-vertex quad.
+[[nodiscard]] QRhiVertexInputLayout layoutFor(Program program, Expansion expansion)
 {
     QRhiVertexInputLayout layout;
     using Attribute = QRhiVertexInputAttribute;
+    using Binding = QRhiVertexInputBinding;
+    const bool instanced = expansion == Expansion::Instanced;
+    const auto binding = [instanced](std::size_t stride) {
+        return instanced ? Binding(static_cast<quint32>(stride), Binding::PerInstance)
+                         : Binding(static_cast<quint32>(stride));
+    };
     switch (program) {
     case Program::Triangles:
-        layout.setBindings({QRhiVertexInputBinding(sizeof(GpuVertex))});
+        layout.setBindings({Binding(sizeof(GpuVertex))});
         layout.setAttributes({Attribute(0, 0, Attribute::Float3, 0),
                               Attribute(0, 1, Attribute::UNormByte4, 12)});
         break;
     case Program::Lines:
-        layout.setBindings(
-            {QRhiVertexInputBinding(sizeof(GpuLine), QRhiVertexInputBinding::PerInstance)});
-        layout.setAttributes({Attribute(0, 0, Attribute::Float3, 0),
-                              Attribute(0, 1, Attribute::UNormByte4, 12),
-                              Attribute(0, 2, Attribute::Float3, 16),
-                              Attribute(0, 3, Attribute::UNormByte4, 28),
-                              Attribute(0, 4, Attribute::Float2, 32)});
+        if (instanced) {
+            layout.setBindings({binding(sizeof(GpuLine))});
+            layout.setAttributes({Attribute(0, 0, Attribute::Float3, 0),
+                                  Attribute(0, 1, Attribute::UNormByte4, 12),
+                                  Attribute(0, 2, Attribute::Float, 16),
+                                  Attribute(0, 3, Attribute::Float3, 20),
+                                  Attribute(0, 4, Attribute::UNormByte4, 32),
+                                  Attribute(0, 5, Attribute::Float, 36)});
+        } else {
+            layout.setBindings({binding(sizeof(GpuLineEnd))});
+            layout.setAttributes({Attribute(0, 0, Attribute::Float3, 0),
+                                  Attribute(0, 1, Attribute::UNormByte4, 12),
+                                  Attribute(0, 2, Attribute::Float, 16)});
+        }
         break;
     case Program::Points:
-        layout.setBindings(
-            {QRhiVertexInputBinding(sizeof(GpuPoint), QRhiVertexInputBinding::PerInstance)});
+        layout.setBindings({binding(sizeof(GpuPoint))});
         layout.setAttributes({Attribute(0, 0, Attribute::Float3, 0),
                               Attribute(0, 1, Attribute::UNormByte4, 12),
-                              Attribute(0, 2, Attribute::Float2, 16)});
+                              Attribute(0, 2, Attribute::Float, 16)});
         break;
     case Program::CloudPoints:
-        layout.setBindings({QRhiVertexInputBinding(sizeof(GpuCloudPoint),
-                                                   QRhiVertexInputBinding::PerInstance)});
+        layout.setBindings({binding(sizeof(GpuCloudPoint))});
         layout.setAttributes({Attribute(0, 0, Attribute::Float3, 0),
                               Attribute(0, 1, Attribute::UNormByte4, 12)});
         break;
     }
     return layout;
+}
+
+[[nodiscard]] QRhiGraphicsPipeline::Topology topologyFor(Program program, Expansion expansion)
+{
+    if (program == Program::Triangles || expansion == Expansion::Instanced) {
+        return QRhiGraphicsPipeline::Triangles;
+    }
+    return program == Program::Lines ? QRhiGraphicsPipeline::Lines : QRhiGraphicsPipeline::Points;
 }
 
 [[nodiscard]] std::array<float, 4> float4(double x, double y, double z, double w)
@@ -100,6 +124,7 @@ constexpr std::size_t kProgramCount = kAllPrograms.size();
 struct GpuRenderer::Resources {
     QRhi* rhi = nullptr;
     int sampleCount = 1;
+    Expansion expansion = Expansion::GeometryShader;
     // Two uniform blocks: the scene and a point cloud are packed against
     // different origins, so each needs its own matrix.
     std::unique_ptr<QRhiBuffer> sceneUniforms;
@@ -147,6 +172,8 @@ GpuRenderer::~GpuRenderer() = default;
 
 bool GpuRenderer::initialised() const { return resources_->rhi != nullptr; }
 
+Expansion GpuRenderer::expansion() const { return resources_->expansion; }
+
 std::size_t GpuRenderer::uploadCount() const { return resources_->uploads; }
 
 const GpuSceneData& GpuRenderer::scene() const { return resources_->scene; }
@@ -154,7 +181,8 @@ const GpuSceneData& GpuRenderer::scene() const { return resources_->scene; }
 void GpuRenderer::releaseResources() { resources_->releaseGpu(); }
 
 katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor* pass,
-                                             int sampleCount, const ShaderLibrary& shaders)
+                                             int sampleCount, const ShaderLibrary& shaders,
+                                             Expansion preferred)
 {
     Resources& r = *resources_;
     r.releaseGpu();
@@ -162,9 +190,17 @@ katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor
         return makeError(ErrorCode::InvalidArgument, "no QRhi or render pass to draw with");
     }
     r.sampleCount = std::max(sampleCount, 1);
+    r.expansion = preferred == Expansion::GeometryShader &&
+                          rhi->isFeatureSupported(QRhi::GeometryShader)
+                      ? Expansion::GeometryShader
+                      : Expansion::Instanced;
 
-    const auto stages = QRhiShaderResourceBinding::VertexStage |
-                        QRhiShaderResourceBinding::FragmentStage;
+    // The geometry shaders read the frame's constants too (the viewport, the
+    // pixel ratio), so the block is bound to that stage when there is one.
+    auto stages = QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage;
+    if (r.expansion == Expansion::GeometryShader) {
+        stages |= QRhiShaderResourceBinding::GeometryStage;
+    }
     r.sceneUniforms.reset(
         rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, sizeof(FrameUniforms)));
     r.cloudUniforms.reset(
@@ -185,15 +221,22 @@ katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor
     }
 
     for (const Program program : kAllPrograms) {
-        auto pair = shaders.program(program);
-        if (!pair) {
+        auto shaderStages = shaders.program(program, r.expansion);
+        if (!shaderStages) {
             r.releaseGpu();
-            return pair.error();
+            return shaderStages.error();
         }
         std::unique_ptr<QRhiGraphicsPipeline> pipeline(rhi->newGraphicsPipeline());
-        pipeline->setShaderStages({{QRhiShaderStage::Vertex, pair->vertex},
-                                   {QRhiShaderStage::Fragment, pair->fragment}});
-        pipeline->setVertexInputLayout(layoutFor(program));
+        if (shaderStages->geometry.isValid()) {
+            pipeline->setShaderStages({{QRhiShaderStage::Vertex, shaderStages->vertex},
+                                       {QRhiShaderStage::Geometry, shaderStages->geometry},
+                                       {QRhiShaderStage::Fragment, shaderStages->fragment}});
+        } else {
+            pipeline->setShaderStages({{QRhiShaderStage::Vertex, shaderStages->vertex},
+                                       {QRhiShaderStage::Fragment, shaderStages->fragment}});
+        }
+        pipeline->setTopology(topologyFor(program, r.expansion));
+        pipeline->setVertexInputLayout(layoutFor(program, r.expansion));
         pipeline->setSampleCount(r.sampleCount);
         pipeline->setDepthTest(true);
         pipeline->setDepthWrite(true);
@@ -220,8 +263,9 @@ katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor
         if (!pipeline->create()) {
             r.releaseGpu();
             return makeError(ErrorCode::RenderingFailure,
-                             std::string("the ") + toString(program) +
-                                 " pipeline could not be created (" + shaders.describe() +
+                             std::string("the ") + toString(program) + " (" +
+                                 toString(r.expansion) + ") pipeline could not be created (" +
+                                 shaders.describe() +
                                  "; the shader compiler's message is in the Qt log)");
         }
         r.pipelines[indexOf(program)] = std::move(pipeline);
@@ -418,28 +462,31 @@ katana::core::Result<GpuFrameStats> GpuRenderer::render(QRhiCommandBuffer* comma
     }
     // Lines and points after the fills they lie on, as the software path
     // orders them, and blended over them.
-    if (!s.lines.empty() && r.lines) {
-        commands->setGraphicsPipeline(r.pipelines[indexOf(Program::Lines)].get());
+    // Through the geometry shader every line is two vertices and every point
+    // one; instanced, each is one instance of a six-vertex quad.
+    const bool instanced = r.expansion == Expansion::Instanced;
+    const auto drawQuads = [&](Program program, QRhiBuffer* buffer, std::size_t count,
+                               quint32 verticesEach) {
+        commands->setGraphicsPipeline(r.pipelines[indexOf(program)].get());
         commands->setShaderResources();
-        const QRhiCommandBuffer::VertexInput input(r.lines.get(), 0);
+        const QRhiCommandBuffer::VertexInput input(buffer, 0);
         commands->setVertexInput(0, 1, &input);
-        commands->draw(6, static_cast<quint32>(s.lines.size()));
+        if (instanced) {
+            commands->draw(6, static_cast<quint32>(count));
+        } else {
+            commands->draw(static_cast<quint32>(count) * verticesEach);
+        }
+    };
+    if (!s.lines.empty() && r.lines) {
+        drawQuads(Program::Lines, r.lines.get(), s.lines.size(), 2);
         stats.lines = s.lines.size();
     }
     if (!s.points.empty() && r.points) {
-        commands->setGraphicsPipeline(r.pipelines[indexOf(Program::Points)].get());
-        commands->setShaderResources();
-        const QRhiCommandBuffer::VertexInput input(r.points.get(), 0);
-        commands->setVertexInput(0, 1, &input);
-        commands->draw(6, static_cast<quint32>(s.points.size()));
+        drawQuads(Program::Points, r.points.get(), s.points.size(), 1);
         stats.points = s.points.size();
     }
     if (drawCloud) {
-        commands->setGraphicsPipeline(r.pipelines[indexOf(Program::CloudPoints)].get());
-        commands->setShaderResources();
-        const QRhiCommandBuffer::VertexInput input(r.cloud.get(), 0);
-        commands->setVertexInput(0, 1, &input);
-        commands->draw(6, static_cast<quint32>(r.cloudData.points.size()));
+        drawQuads(Program::CloudPoints, r.cloud.get(), r.cloudData.points.size(), 1);
         stats.cloudPoints = r.cloudData.points.size();
     }
     commands->endPass();

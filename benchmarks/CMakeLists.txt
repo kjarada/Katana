@@ -21,3 +21,10 @@ add_custom_target(run-benchmarks
             $<TARGET_FILE:katana_benchmarks> --benchmark_min_time=0.2s
     DEPENDS katana_benchmarks
     USES_TERMINAL)
+
+# The GPU renderer's frame time (benchmarks/gpu): an executable of its own,
+# because it needs a QGuiApplication and Qt's private QRhi headers, which the
+# plain benchmarks above must not depend on.
+if(TARGET katana_gpu)
+    add_subdirectory(gpu)
+endif()
