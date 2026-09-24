@@ -629,3 +629,47 @@ TEST(RenderDepth, PointsDrawTheSamePixelsOnTheCallingThreadAndAcrossThreads)
         EXPECT_EQ(pooled.depth(), reference.depth());
     }
 }
+
+TEST(RenderDepth, SurveyPointsOnTheVerticesOfDrapedStringsAreDrawnWholeOverThem)
+{
+    // Survey points usually sit on the strings through them, in the same
+    // pass with the same pull. Decided against a depth buffer that already
+    // held the pass's lines, a point whose centre pixel a string crossed tied
+    // with it and vanished whole - the yellow survey points along the kerbs
+    // of a real archive did at 12 notches in. Solids and earlier passes hide
+    // a point; linework of its own pass does not: it is decided after the
+    // pass's filled triangles and before its lines. The site's 20 x 20
+    // points, each row joined by a string through them, on the sloped plane
+    // drawn first in the same list and as an earlier pass.
+    const SlopedSite site;
+    constexpr Rgba kString = rgba(255, 255, 255);
+    DrawList strings;
+    for (int j = 0; j < 20; ++j) {
+        const double y = 10.0 + 20.0 * j;
+        const auto from = strings.addVertex(Vec3(10.0, y, 0.05 * 10.0 + 0.02 * y), kString);
+        const auto to = strings.addVertex(Vec3(390.0, y, 0.05 * 390.0 + 0.02 * y), kString);
+        strings.addLine(from, to, 2.0f, kEntityBias);
+    }
+    DrawList drawing = strings;
+    append(drawing, site.points);
+    DrawList together = site.ground;
+    append(together, drawing);
+    for (Projection projection : {Projection::Perspective, Projection::Orthographic}) {
+        for (double elevation : {0.61, 0.25, 0.12}) {
+            SCOPED_TRACE(std::to_string(static_cast<int>(projection)) + " at " +
+                         std::to_string(elevation));
+            Camera camera;
+            camera.setViewportSize(1200, 800);
+            camera.setProjection(projection);
+            camera.setStandardView(StandardView::IsoSouthWest);
+            camera.setOrientation(camera.azimuth(), elevation);
+            ASSERT_TRUE(camera.frame(site.bounds));
+
+            const std::size_t alone = countPixels(render(site.points, camera), kPoint);
+            ASSERT_GT(alone, 2000u);
+            EXPECT_EQ(countPixels(render(drawing, camera), kPoint), alone);
+            EXPECT_EQ(countPixels(render(together, camera), kPoint), alone);
+            EXPECT_EQ(countPixels(renderPasses({&site.ground, &drawing}, camera), kPoint), alone);
+        }
+    }
+}
