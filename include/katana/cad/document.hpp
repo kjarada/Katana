@@ -208,6 +208,8 @@ class Document {
     friend class SurveyJobAccess;
 
     void rebuildStack();
+    // The model, the metadata and the survey jobs into `store` in one save.
+    [[nodiscard]] katana::core::Status saveContents(katana::storage::ProjectStore& store);
     // Whole index from the current model; picks the cell size from the data.
     void rebuildSpatialIndex();
     // Incremental maintenance from the changes one command reported.
