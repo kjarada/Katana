@@ -108,7 +108,8 @@ struct Viewport {
 
 struct Sheet {
     // Stable for the sheet's life - "s1", "s2" ... - so a match line or key
-    // plan can refer to it however the sheets are reordered or renamed.
+    // plan can refer to it however the sheets are reordered or renamed; and
+    // not given to a new sheet while a mark still names it (newSheetIds).
     std::string id;
     std::string name;
     PaperSize paper = PaperSize::A3;
@@ -224,9 +225,18 @@ expandTemplate(std::string_view text, const std::map<std::string, std::string, s
 // 10 mm all round when the sheet has no frame (or cannot have one).
 [[nodiscard]] Box2 drawingArea(const Sheet& sheet);
 
-// A viewport id not yet used anywhere in `set`: "vp" and the next number.
+// `count` viewport ids, in order, that no viewport in `set` has: "vp" and the
+// numbers after the highest in use. Ids come from stored JSON unchecked, so
+// one too near the largest count to have `count` numbers after it gives the
+// lowest free numbers instead; nothing here throws or repeats an id.
+[[nodiscard]] std::vector<std::string> newViewportIds(const SheetSet& set, std::size_t count);
+// `count` sheet ids, in order, that no sheet in `set` has and no mark in it
+// names: a sheet removed while a match line or a key-plan outline still leads
+// to it keeps its id from the sheets added after it, so the mark leads
+// nowhere (markLabel prints its label alone) rather than to a stranger.
+[[nodiscard]] std::vector<std::string> newSheetIds(const SheetSet& set, std::size_t count);
+// One of each, as above.
 [[nodiscard]] std::string nextViewportId(const SheetSet& set);
-// A sheet id not yet used in `set`: "s" and the next number.
 [[nodiscard]] std::string nextSheetId(const SheetSet& set);
 // The index of the sheet with id `id`, if there is one.
 [[nodiscard]] std::optional<std::size_t> sheetIndex(const SheetSet& set, std::string_view id);

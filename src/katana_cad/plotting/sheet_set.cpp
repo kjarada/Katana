@@ -69,7 +69,9 @@ std::string orDefault(const std::string& value, const std::string& fallback)
     return value.empty() ? fallback : value;
 }
 
-// The number after `prefix` in `id`, or 0 for an id of another shape.
+// The number after `prefix` in `id`, or 0 for an id of another shape -
+// anything but digits after the prefix, or digits too many for a count, which
+// no id given out here can equal.
 std::size_t numberAfter(std::string_view id, std::string_view prefix)
 {
     if (!id.starts_with(prefix)) {
@@ -80,6 +82,45 @@ std::size_t numberAfter(std::string_view id, std::string_view prefix)
     const char* last = id.data() + id.size();
     const auto parsed = std::from_chars(first, last, number);
     return parsed.ec == std::errc{} && parsed.ptr == last ? number : 0;
+}
+
+// `count` numbers, in order, that `used` does not hold: those after the
+// highest; or, when the highest is too near the largest count to have
+// `count` after it - only an id typed into the stored JSON can be - the
+// lowest free ones. Ids are compared as numbers - "vp01" counts as 1, and 1
+// is not given out beside it - and 0 is never given out.
+std::vector<std::size_t> freshNumbers(std::vector<std::size_t> used, std::size_t count)
+{
+    std::sort(used.begin(), used.end());
+    const std::size_t highest = used.empty() ? 0 : used.back();
+    std::vector<std::size_t> fresh;
+    fresh.reserve(count);
+    if (count <= std::numeric_limits<std::size_t>::max() - highest) {
+        for (std::size_t i = 1; i <= count; ++i) {
+            fresh.push_back(highest + i);
+        }
+        return fresh;
+    }
+    auto taken = used.begin();
+    for (std::size_t candidate = 1; fresh.size() < count; ++candidate) {
+        while (taken != used.end() && *taken < candidate) {
+            ++taken;
+        }
+        if (taken == used.end() || *taken != candidate) {
+            fresh.push_back(candidate);
+        }
+    }
+    return fresh;
+}
+
+std::vector<std::string> idsFrom(std::string_view prefix, const std::vector<std::size_t>& numbers)
+{
+    std::vector<std::string> ids;
+    ids.reserve(numbers.size());
+    for (const std::size_t number : numbers) {
+        ids.push_back(std::string(prefix) + std::to_string(number));
+    }
+    return ids;
 }
 
 } // namespace
@@ -316,24 +357,42 @@ Box2 drawingArea(const Sheet& sheet)
                 Point2(paper.widthMm - kFramelessMarginMm, paper.heightMm - kFramelessMarginMm));
 }
 
-std::string nextViewportId(const SheetSet& set)
+std::vector<std::string> newViewportIds(const SheetSet& set, std::size_t count)
 {
-    std::size_t highest = 0;
+    std::vector<std::size_t> used;
     for (const Sheet& sheet : set.sheets) {
         for (const Viewport& viewport : sheet.viewports) {
-            highest = std::max(highest, numberAfter(viewport.id, "vp"));
+            used.push_back(numberAfter(viewport.id, "vp"));
         }
     }
-    return "vp" + std::to_string(highest + 1);
+    return idsFrom("vp", freshNumbers(std::move(used), count));
+}
+
+std::vector<std::string> newSheetIds(const SheetSet& set, std::size_t count)
+{
+    // The ids marks name count as used as well as the sheets' own: when a
+    // sheet is removed, the match lines and key-plan outlines that led to it
+    // still name it, and a new sheet given its id would be led to by them.
+    std::vector<std::size_t> used;
+    for (const Sheet& sheet : set.sheets) {
+        used.push_back(numberAfter(sheet.id, "s"));
+        for (const Viewport& viewport : sheet.viewports) {
+            for (const WorldMark& mark : viewport.marks) {
+                used.push_back(numberAfter(mark.sheet, "s"));
+            }
+        }
+    }
+    return idsFrom("s", freshNumbers(std::move(used), count));
+}
+
+std::string nextViewportId(const SheetSet& set)
+{
+    return newViewportIds(set, 1).front();
 }
 
 std::string nextSheetId(const SheetSet& set)
 {
-    std::size_t highest = 0;
-    for (const Sheet& sheet : set.sheets) {
-        highest = std::max(highest, numberAfter(sheet.id, "s"));
-    }
-    return "s" + std::to_string(highest + 1);
+    return newSheetIds(set, 1).front();
 }
 
 std::optional<std::size_t> sheetIndex(const SheetSet& set, std::string_view id)
