@@ -1,0 +1,698 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$DWGCODEPAGE
+  3
+ANSI_1252
+  9
+$INSUNITS
+ 70
+6
+  9
+$HANDSEED
+  5
+FF
+  0
+ENDSEC
+  0
+SECTION
+  2
+CLASSES
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LTYPE
+  5
+5
+330
+0
+100
+AcDbSymbolTable
+ 70
+4
+  0
+LTYPE
+  5
+14
+330
+5
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+ByBlock
+ 70
+0
+  3
+
+ 72
+65
+ 73
+0
+ 40
+0.0
+  0
+LTYPE
+  5
+15
+330
+5
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+ByLayer
+ 70
+0
+  3
+
+ 72
+65
+ 73
+0
+ 40
+0.0
+  0
+LTYPE
+  5
+16
+330
+5
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+Continuous
+ 70
+0
+  3
+Solid line
+ 72
+65
+ 73
+0
+ 40
+0.0
+  0
+LTYPE
+  5
+30
+330
+5
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+CENTER2
+ 70
+0
+  3
+Center (.5x) ___ _ ___
+ 72
+65
+ 73
+4
+ 40
+0.9
+ 49
+-0.1
+ 74
+0
+ 49
+0.5
+ 74
+0
+ 49
+-0.1
+ 74
+0
+ 49
+0.2
+ 74
+0
+  0
+LTYPE
+  5
+31
+330
+5
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+DOTTY
+ 70
+0
+  3
+. . . .
+ 72
+65
+ 73
+2
+ 40
+0.2
+ 49
+0.0
+ 74
+0
+ 49
+-0.2
+ 74
+0
+  0
+ENDTAB
+  0
+TABLE
+  2
+LAYER
+  5
+2
+330
+0
+100
+AcDbSymbolTable
+ 70
+3
+  0
+LAYER
+  5
+10
+330
+2
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+370
+-3
+  0
+LAYER
+  5
+32
+330
+2
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+Boundary
+ 70
+4
+ 62
+1
+420
+16744448
+  6
+CENTER2
+370
+50
+  0
+LAYER
+  5
+33
+330
+2
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+Text Layer
+ 70
+0
+ 62
+5
+  6
+DOTTY
+370
+-3
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  5
+20
+330
+1F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*Model_Space
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*Model_Space
+  1
+
+  0
+ENDBLK
+  5
+21
+330
+1F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+40
+330
+3F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*D1
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*D1
+  1
+
+  0
+LINE
+  5
+41
+330
+3F
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+-5.0
+ 30
+0.0
+ 11
+10.0
+ 21
+-5.0
+ 31
+0.0
+  0
+TEXT
+  5
+42
+330
+3F
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+3.5
+ 20
+-4.5
+ 30
+0.0
+ 40
+1.0
+  1
+10.00
+100
+AcDbText
+  0
+ENDBLK
+  5
+43
+330
+3F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LWPOLYLINE
+  5
+50
+330
+1F
+100
+AcDbEntity
+  8
+Boundary
+100
+AcDbPolyline
+ 90
+4
+ 70
+1
+ 38
+7.25
+ 10
+0.0
+ 20
+0.0
+ 10
+10.0
+ 20
+0.0
+ 42
+0.4142135623730951
+ 10
+20.0
+ 20
+10.0
+ 10
+0.0
+ 20
+10.0
+  0
+MTEXT
+  5
+51
+330
+1F
+100
+AcDbEntity
+  8
+Text Layer
+100
+AcDbMText
+ 10
+100.0
+ 20
+200.0
+ 30
+0.0
+ 40
+3.0
+ 41
+50.0
+ 71
+1
+ 72
+5
+  1
+{\fArial|b0|i0|c0|p34;SITE}\PPLAN No.\~3\P\S1/2;
+ 11
+1.0
+ 21
+0.0
+ 31
+0.0
+  0
+LINE
+  5
+52
+330
+1F
+100
+AcDbEntity
+  8
+0
+ 62
+1
+420
+255
+370
+35
+100
+AcDbLine
+ 10
+1.0
+ 20
+2.0
+ 30
+0.0
+ 11
+4.0
+ 21
+6.0
+ 31
+0.0
+  0
+CIRCLE
+  5
+53
+330
+1F
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+5.0
+ 20
+3.0
+ 30
+0.0
+ 40
+2.0
+210
+0.0
+220
+0.0
+230
+-1.0
+  0
+ARC
+  5
+54
+330
+1F
+100
+AcDbEntity
+  8
+0
+100
+AcDbCircle
+ 10
+10.0
+ 20
+0.0
+ 30
+0.0
+ 40
+5.0
+210
+0.0
+220
+0.0
+230
+-1.0
+100
+AcDbArc
+ 50
+0.0
+ 51
+90.0
+  0
+DIMENSION
+  5
+55
+330
+1F
+100
+AcDbEntity
+  8
+Text Layer
+100
+AcDbDimension
+  2
+*D1
+ 10
+10.0
+ 20
+-5.0
+ 30
+0.0
+ 11
+5.0
+ 21
+-4.5
+ 31
+0.0
+ 70
+33
+  1
+
+100
+AcDbAlignedDimension
+ 13
+0.0
+ 23
+0.0
+ 33
+0.0
+ 14
+10.0
+ 24
+0.0
+ 34
+0.0
+  0
+HATCH
+  5
+56
+330
+1F
+100
+AcDbEntity
+  8
+0
+100
+AcDbHatch
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+210
+0.0
+220
+0.0
+230
+1.0
+  2
+SOLID
+ 70
+1
+ 71
+0
+ 91
+0
+ 75
+0
+ 76
+1
+ 98
+0
+  0
+LINE
+  5
+57
+330
+1B
+100
+AcDbEntity
+ 67
+1
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+100.0
+ 21
+0.0
+ 31
+0.0
+  0
+INSERT
+  5
+58
+330
+1F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockReference
+  2
+NOSUCH
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  0
+ENDSEC
+  0
+SECTION
+  2
+OBJECTS
+  0
+DICTIONARY
+  5
+C
+330
+0
+100
+AcDbDictionary
+281
+1
+  0
+ENDSEC
+  0
+EOF

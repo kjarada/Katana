@@ -10,11 +10,17 @@ endif()
 
 add_executable(katana_benchmarks ${_katana_bench_sources})
 target_link_libraries(katana_benchmarks PRIVATE benchmark::benchmark_main)
-foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_survey katana_terrain katana_cad katana_storage katana_interop katana_archive12d)
+foreach(_lib katana_math katana_geometry katana_entity katana_commands katana_survey katana_terrain katana_cad katana_storage katana_interop katana_archive12d katana_dxf)
     if(TARGET ${_lib})
         target_link_libraries(katana_benchmarks PRIVATE ${_lib})
     endif()
 endforeach()
+# bench_dxf.cpp measures GDAL's DXF driver beside the native one, where GDAL
+# is built.
+if(TARGET katana_interop)
+    target_link_libraries(katana_benchmarks PRIVATE katana_interop)
+    target_compile_definitions(katana_benchmarks PRIVATE KATANA_BENCH_WITH_INTEROP=1)
+endif()
 katana_target_defaults(katana_benchmarks)
 set_target_properties(katana_benchmarks PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_BENCHMARK_OUTPUT_DIRECTORY}")
