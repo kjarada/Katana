@@ -630,6 +630,37 @@ TEST(TrimbleJobXml, aSetupWithNoInstrumentHeightOrAtmosphereSaysSoBeforeImport)
 
 // ---- Robustness ---------------------------------------------------------------------------
 
+TEST(TrimbleJobXml, eachShotRecordsTheLineItsRecordStartsOnWhateverTheLineEndings)
+{
+    // one_setup.jxl, counted by hand in an editor: the StationRecord starts
+    // on line 6, the shot to B (PointRecord 5) on line 8, the shot to C
+    // (PointRecord 7) on line 10. Most of its lines are well over the eight
+    // bytes the line counter takes at a time. With CR LF line endings the
+    // lines are the same: a CR is not a new line.
+    std::string lf = readFile(dataDir() / "trimble_jxl" / "one_setup.jxl");
+    std::string crlf;
+    for (const char c : lf) {
+        if (c == '\n') {
+            crlf.push_back('\r');
+        }
+        crlf.push_back(c);
+    }
+    for (const std::string& bytes : {lf, crlf}) {
+        Result<ReadResult> read = readJxl(bytes, "one_setup.jxl");
+        ASSERT_TRUE(read.ok()) << read.error().describe();
+        ASSERT_EQ(read->project.stations.size(), 1u);
+        const survey::SurveyStation& station = read->project.stations.front();
+        EXPECT_EQ(station.source.recordNumber, 6u);
+        const auto toB = observationsOf<survey::DistanceObservation>(station.observations, "B");
+        const auto toC = observationsOf<survey::ZenithAngleObservation>(station.observations, "C");
+        ASSERT_EQ(toB.size(), 1u);
+        ASSERT_EQ(toC.size(), 1u);
+        EXPECT_EQ(toB[0]->source.recordNumber, 8u);
+        EXPECT_EQ(toC[0]->source.recordNumber, 10u);
+        EXPECT_EQ(toC[0]->source.fileName, "one_setup.jxl");
+    }
+}
+
 TEST(TrimbleJobXml, aSmallJobReadsItsAppliedPpmFaceTwoZenithAndFloatVector)
 {
     Result<ReadResult> read =
