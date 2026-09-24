@@ -1,6 +1,7 @@
 #include "katana/cad/customisation_record.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <set>
 #include <system_error>
@@ -38,7 +39,7 @@ std::vector<std::string> customisationRecord(const katana::entity::StyleLibrary&
     });
     std::vector<std::string> names;
     for (const CustomisationSource& file : loaded) {
-        // A mapfile's rules carry no file name, so a loaded mapfile is taken
+        // A survey code file's rules carry no file name, so a loaded one is taken
         // at its word; a library file is recorded only while it still
         // defines something.
         if ((!file.library || sources.contains(file.name)) &&
@@ -56,17 +57,62 @@ std::vector<std::string> customisationRecord(const katana::entity::StyleLibrary&
     return names;
 }
 
+std::uint64_t sourceNameHash(std::string_view name)
+{
+    std::uint64_t hash = 0xcbf29ce484222325ULL; // the FNV-1a 64-bit offset basis
+    for (const char ch : name) {
+        hash ^= static_cast<unsigned char>(ch);
+        hash *= 0x100000001b3ULL; // the FNV 64-bit prime
+    }
+    return hash;
+}
+
+std::span<const RenamedSource> builtinRenames()
+{
+    // Each file's earlier name, hashed by sourceNameHash, and the name it has
+    // now. Written out by a script over the two sets of names when the files
+    // were renamed; the test of this table checks the names it gives now,
+    // which are all it can see.
+    static constexpr std::array<RenamedSource, 4> kRenames{{
+        {0x851e5f2b3efc2d70ULL, "linestyles.4d"},
+        {0x4203f483f25be01eULL, "survey_codes.mapfile"},
+        {0xc03aa2ccdeee0553ULL, "survey_codes_names.mapfile"},
+        {0x01bf8dab227e48e7ULL, "symbols.4d"},
+    }};
+    return kRenames;
+}
+
 std::vector<std::string> customisationNotLoaded(const std::vector<std::string>& recorded,
                                                 const katana::entity::StyleLibrary& library,
                                                 const std::vector<CustomisationSource>& loaded)
 {
+    return customisationNotLoaded(recorded, library, loaded, builtinRenames());
+}
+
+std::vector<std::string> customisationNotLoaded(const std::vector<std::string>& recorded,
+                                                const katana::entity::StyleLibrary& library,
+                                                const std::vector<CustomisationSource>& loaded,
+                                                std::span<const RenamedSource> renamed)
+{
     const std::vector<std::string> now = customisationRecord(library, loaded);
+    const auto isNow = [&](std::string_view name) {
+        return std::find(now.begin(), now.end(), name) != now.end();
+    };
     std::vector<std::string> missing;
     for (const std::string& name : recorded) {
-        if (std::find(now.begin(), now.end(), name) == now.end() &&
-            std::find(missing.begin(), missing.end(), name) == missing.end()) {
-            missing.push_back(name);
+        if (isNow(name) || std::find(missing.begin(), missing.end(), name) != missing.end()) {
+            continue;
         }
+        // Recorded under a name its file no longer has: answered by the file
+        // that has its place, when that file is loaded now.
+        const std::uint64_t hash = sourceNameHash(name);
+        const auto rename =
+            std::find_if(renamed.begin(), renamed.end(),
+                         [&](const RenamedSource& r) { return r.formerName == hash; });
+        if (rename != renamed.end() && isNow(rename->now)) {
+            continue;
+        }
+        missing.push_back(name);
     }
     return missing;
 }
