@@ -4,14 +4,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <span>
 #include <string>
-#include <type_traits>
-
-#include "simd_dispatch.hpp"
 
 namespace katana::terrain {
 
@@ -246,24 +242,9 @@ Result<std::vector<Contour>> contours(const TinSurface& surface, double interval
         std::int64_t first = 0;
         std::int64_t last = -1; // empty when last < first
     };
-    static_assert(std::is_standard_layout_v<LevelRange> &&
-                  sizeof(LevelRange) == 2 * sizeof(std::int64_t) && offsetof(LevelRange, first) == 0 &&
-                  offsetof(LevelRange, last) == sizeof(std::int64_t));
     const auto triangleCount = static_cast<std::uint32_t>(surface.triangleCount());
     std::vector<LevelRange> ranges(triangleCount);
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-    // Asked once, not per chunk: a level switched mid-run would still give the
-    // same bits, but there is no reason to ask 50 times.
-    const bool rangeKernel = detail::avx2Active() && detail::kernelsMayRead(surface);
-#endif
     workers.parallelRanges(0, triangleCount, 4096, [&](std::size_t lo, std::size_t hi) {
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-        if (rangeKernel) {
-            katana_avx2_contour_level_ranges(detail::vertexData(surface), detail::triangleData(surface),
-                                             lo, hi, base, interval, &ranges.data()->first);
-            return;
-        }
-#endif
         for (std::size_t t = lo; t < hi; ++t) {
             const TinTriangle& tri = surface.triangles()[t];
             const double z0 = surface.vertices()[tri[0]].z;

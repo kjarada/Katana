@@ -7,7 +7,6 @@
 
 #include "katana/core/task_pool.hpp"
 
-#include "simd_dispatch.hpp"
 #include "summation.hpp"
 
 namespace katana::terrain {
@@ -35,10 +34,6 @@ constexpr double kLocatorMargin = 2.0 * tol::kGeometric;
 // faster queries and more memory (each triangle is listed in every cell it
 // reaches into); 2 gives ~4 list entries per triangle and ~8 candidates per query.
 constexpr double kTrianglesPerCell = 2.0;
-
-// Fewest candidates in a cell for which locate() hands the containment test to
-// the kernel. MEASURED: see docs/terrain.md, "SIMD".
-constexpr std::size_t kEnclosingKernelMinimum = 4;
 
 // Monotonic in `value`, which is what makes the grid exact: a position inside a
 // triangle's bounding box always maps into the cell range of that box.
@@ -395,34 +390,7 @@ std::optional<SurfaceLocation> TinSurface::locate(const Point2& position) const
 
     // Pass 1: containment by the three edge functions, evaluated on coordinate
     // differences so that large projected coordinates keep their precision.
-    std::uint32_t scalarFirst = first;
-#if defined(KATANA_HAVE_AVX2_KERNELS)
-    // The kernel finds the next candidate the sign tests accept, four at a
-    // time; the sliver test stays here, and a sliver resumes the search after
-    // itself, so the triangle chosen is the one the loop below would choose.
-    if (last - first >= kEnclosingKernelMinimum && detail::avx2Active() &&
-        detail::kernelsMayRead(*this)) {
-        const std::uint32_t* candidates = grid_.cellTriangles.data() + first;
-        const std::size_t count = last - first;
-        for (std::size_t i = 0;; ++i) {
-            double d[3];
-            i = katana_avx2_first_enclosing(detail::vertexData(*this), detail::triangleData(*this),
-                                            candidates, i, count, position.x, position.y, d);
-            if (i == count) {
-                break;
-            }
-            const TinTriangle& tri = triangles_[candidates[i]];
-            const double twiceArea = d[0] + d[1] + d[2];
-            if (isSliver(corner(tri, 0), corner(tri, 1), corner(tri, 2), twiceArea)) {
-                continue;
-            }
-            return SurfaceLocation{candidates[i], {d[1] / twiceArea, d[2] / twiceArea, d[0] / twiceArea},
-                                   true};
-        }
-        scalarFirst = last; // every candidate has been tested
-    }
-#endif
-    for (std::uint32_t i = scalarFirst; i < last; ++i) {
+    for (std::uint32_t i = first; i < last; ++i) {
         const std::uint32_t t = grid_.cellTriangles[i];
         const TinTriangle& tri = triangles_[t];
         const Point2 a = corner(tri, 0);
