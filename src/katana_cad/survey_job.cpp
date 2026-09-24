@@ -357,32 +357,40 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
     State::Plan plan = std::move(*s.pending);
     s.pending.reset();
 
-    SurveyJob job = s.request.job;
-    job.id = newJobId(*s.document, context.model);
-    job.layer = s.request.importOptions.layer;
+    std::string id = newJobId(*s.document, context.model);
+    std::vector<EntityId> created;
+    std::vector<SurveyJobPoint> placed;
     if (plan.draw != nullptr) {
         if (auto status = plan.draw->execute(context); !status) {
             return status;
         }
-        job.createdEntities = plan.draw->createdEntities();
-        auto placed = placedPoints(context.model, job.createdEntities, plan.drawn,
-                                   s.request.importOptions.pointNumberProperty);
-        if (!placed) {
+        created = plan.draw->createdEntities();
+        auto pairs = placedPoints(context.model, created, plan.drawn,
+                                  s.request.importOptions.pointNumberProperty);
+        if (!pairs) {
             (void)plan.draw->undo(context); // all or nothing
-            return placed.error();
+            return pairs.error();
         }
-        job.placedPoints = std::move(*placed);
-    } else {
-        job.createdEntities.clear();
-        job.placedPoints.clear();
+        placed = std::move(*pairs);
     }
 
-    std::string created = s.request.context.createdUtc.empty() ? nowUtc()
-                                                               : s.request.context.createdUtc;
+    // Nothing below can fail, so the request's job - its raw bytes may be
+    // tens of megabytes - is MOVED onto the list rather than copied, and
+    // what only the reduction needed is let go: this command lives on in the
+    // undo history, and a copy of the raw project and of every drawing point
+    // there would be dead weight.
+    SurveyJob job = std::move(s.request.job);
+    job.id = std::move(id);
+    job.layer = s.request.importOptions.layer;
+    job.createdEntities = std::move(created);
+    job.placedPoints = std::move(placed);
+
+    std::string stamp =
+        s.request.context.createdUtc.empty() ? nowUtc() : s.request.context.createdUtc;
     if (job.importedUtc.empty()) {
-        job.importedUtc = created;
+        job.importedUtc = stamp;
     }
-    renderInto(job, plan.outcome.report, std::move(created));
+    renderInto(job, plan.outcome.report, std::move(stamp));
 
     std::vector<SurveyJob>& jobs = SurveyJobAccess::jobs(*s.document);
     s.index = jobs.size();
@@ -391,6 +399,8 @@ Status ImportSurveyJobCommand::execute(CommandContext& context)
     s.onList = true;
     s.report = std::move(plan.outcome.report);
     s.drawCommand = std::move(plan.draw);
+    s.request.raw = {};
+    s.request.context = {};
     SurveyJobAccess::changed(*s.document);
     return {};
 }
@@ -617,7 +627,8 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
             changes.deletedByHand.push_back(placed.pointId);
             warn(plan.report, "Point " + placed.pointId +
                                   " was deleted from the drawing after the job placed it; " +
-                                  (keepEdits ? "it stays deleted." : "it is drawn again.") +
+                                  (keepEdits || now == nullptr ? "it stays deleted."
+                                                               : "it is drawn again.") +
                                   newRunPuts(now));
             if (keepEdits) {
                 kept.push_back(placed);
@@ -826,6 +837,8 @@ Status ReadjustSurveyJobCommand::execute(CommandContext& context)
     s.report = std::move(plan.report);
     s.appliedChanges = std::move(plan.changes);
     s.applied = true;
+    s.request.context = {}; // the drawing's points, needed by the reduction only
+    s.read = {};
     SurveyJobAccess::changed(*s.document);
     return {};
 }
