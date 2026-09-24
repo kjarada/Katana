@@ -46,7 +46,7 @@ LineStyle definition(const char* name, bool atVertices, const char* source,
 //             layer roads naming "MISSING Layer Linestyle"
 //             styles Palm (ByLayer, symbol TREE Palm), Ghost (linetype
 //             "NOPE Linestyle", symbol "NOPE Symbol Manhole"), Cross (symbol
-//             cross, a built-in), Plain (linetype "0", 12d's plain line)
+//             cross, a built-in), Plain (linetype "0", the plain continuous line)
 struct Catalogue : ::testing::Test {
     Document document;
 
@@ -54,9 +54,9 @@ struct Catalogue : ::testing::Test {
     {
         katana::entity::StyleLibrary library;
         for (LineStyle style : {
-                 definition("WATR Main", false, "user_linestyl_test.4d", "Services/WATR"),
-                 definition("CULT Bollard", true, "user_symbols_test.4d", "Culture"),
-                 definition("SEWR Manhole Cover", false, "User_SYMBOLS_test.4d", "Services/SEWR"),
+                 definition("WATR Main", false, "linestyles_test.4d", "Services/WATR"),
+                 definition("CULT Bollard", true, "symbols_test.4d", "Culture"),
+                 definition("SEWR Manhole Cover", false, "SYMBOLS_Test.4d", "Services/SEWR"),
                  definition("TREE Palm", false, "extra.4d"),
                  definition("ELEC Pole", false, "extra.4d"),
                  definition("fence", false, "extra.4d"),
@@ -177,7 +177,7 @@ TEST_F(Catalogue, TheLinetypePickerOffersByLayerFirstThenEveryLinestyleSortedWit
     EXPECT_TRUE(fence->collision);
     const CatalogueEntry* watr = find(choices, "WATR Main");
     ASSERT_NE(watr, nullptr);
-    EXPECT_EQ(watr->sourceFile, "user_linestyl_test.4d");
+    EXPECT_EQ(watr->sourceFile, "linestyles_test.4d");
     EXPECT_EQ(watr->group, "Services/WATR");
     EXPECT_EQ(watr->units, StyleUnits::World);
     EXPECT_FALSE(watr->collision);
@@ -253,7 +253,7 @@ TEST_F(Catalogue, MissingNamesAreTheOnesNothingDefinesWithWhoUsesThemAndWhatIsDr
 {
     const std::vector<MissingName> missing = missingNames(document);
     // Linetypes, ascending: the layer's and Ghost's. Not Palm's ByLayer,
-    // Plain's "0" (12d's plain line), Cross's continuous, nor any library
+    // Plain's "0" (the plain continuous line), Cross's continuous, nor any library
     // name. Then the one symbol: Ghost's. Not "cross" - a built-in draws
     // as itself (audit CAD-17's symptom) - nor TREE Palm, which is defined.
     ASSERT_EQ(missing.size(), 3u);
@@ -345,7 +345,7 @@ TEST_F(Catalogue, ALinetypeNamingOnlyAVertexSymbolIsMissingAsNotALinestyle)
 
 TEST_F(Catalogue, AStyleWhoseLinetypeIsItsOwnSymbolIsTheImportersPatternAndNotMissing)
 {
-    // What the 12da import writes for a symbol string: style, linetype and
+    // What an archive import writes for a symbol string: style, linetype and
     // symbol all the symbol's name. resolveLinePattern draws the line plain
     // and the symbol at every vertex (D8), so neither name is missing -
     // for a `mode vertex` symbol and for one that is not.
