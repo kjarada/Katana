@@ -92,6 +92,8 @@ class GpuSceneView final : public QRhiWidget {
 
   private:
     void fail(const QString& reason);
+    // zoomExtents() without asking for a repaint, for the first frame.
+    void frameScene();
     // Device pixels per logical pixel of the colour buffer actually drawn.
     [[nodiscard]] double pixelRatio() const;
 

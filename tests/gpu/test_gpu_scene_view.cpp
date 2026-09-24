@@ -12,6 +12,7 @@
 #include <QWheelEvent>
 
 #include "gpu/gpu_scene_view.hpp"
+#include "gpu_test_support.hpp"
 
 using katana::qt::gpu::GpuSceneView;
 using katana::qt::gpu::makeGpuSceneViewIfChosen;
@@ -33,7 +34,10 @@ void send(QWidget& widget, QEvent::Type type, QPoint at, Qt::MouseButton button,
 
 TEST(GpuSceneView, UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack)
 {
-    ASSERT_EQ(QGuiApplication::platformName(), QStringLiteral("offscreen"));
+    if (QGuiApplication::platformName() != QStringLiteral("offscreen")) {
+        GTEST_SKIP() << "about the offscreen platform; this run is on "
+                     << QGuiApplication::platformName().toStdString();
+    }
     Camera camera;
     GpuSceneView view(camera);
     view.resize(160, 100);
@@ -54,7 +58,7 @@ TEST(GpuSceneView, TheFactoryBuildsNoGpuViewWhereTheRulesChooseSoftware)
 {
     Camera camera;
     RendererEnvironment environment;
-    environment.platformName = QGuiApplication::platformName().toStdString(); // offscreen
+    environment.platformName = "offscreen";
     RendererDecision decision;
     auto view = makeGpuSceneViewIfChosen(camera, environment, &decision);
     EXPECT_EQ(view, nullptr);
@@ -98,4 +102,55 @@ TEST(GpuSceneView, DraggingOrbitsPansAndTheWheelZoomsTheHostsCameraAsTheSoftware
                       QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
     QApplication::sendEvent(&view, &wheel);
     EXPECT_NEAR(camera.distance(), distance / 1.15, 1e-9);
+}
+
+// Only on the desktop platform (KATANA_GPU_TEST_PLATFORM=windows; ctest
+// runs offscreen, where it skips): the widget itself draws a scene through
+// its host's camera, which the offscreen tests can only prove of the renderer.
+TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
+{
+    if (QGuiApplication::platformName() != QStringLiteral("windows")) {
+        GTEST_SKIP() << "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
+    }
+    katana::render::DrawList list;
+    const auto a = list.addVertex(katana::math::Vec3(-20.0, -20.0, 0.0), katana::render::rgba(220, 60, 60));
+    const auto b = list.addVertex(katana::math::Vec3(20.0, -20.0, 0.0), katana::render::rgba(60, 220, 60));
+    const auto c = list.addVertex(katana::math::Vec3(0.0, 20.0, 8.0), katana::render::rgba(60, 60, 220));
+    list.addTriangle(a, b, c);
+    list.addSegment(katana::math::Vec3(-20.0, -20.0, 0.0), katana::math::Vec3(0.0, 20.0, 8.0),
+                    katana::render::rgba(255, 255, 255), 2.0f);
+
+    Camera camera;
+    camera.setStandardView(katana::render::StandardView::IsoSouthWest);
+    GpuSceneView view(camera);
+    view.resize(320, 200);
+    QString failure;
+    view.onRenderFailed = [&failure](const QString& why) { failure = why; };
+    view.setDrawList(list);
+    const QImage grabbed = view.grabFramebuffer();
+    ASSERT_FALSE(view.failed()) << failure.toStdString();
+    ASSERT_FALSE(grabbed.isNull());
+    // The camera now works in the widget's device pixels.
+    EXPECT_EQ(camera.viewportWidth(), grabbed.width());
+    EXPECT_EQ(camera.viewportHeight(), grabbed.height());
+    EXPECT_EQ(view.lastStats().triangles, 1u);
+    EXPECT_EQ(view.lastStats().lines, 1u);
+    // Framed on its first frame, so the triangle is on screen: count what
+    // differs from the background.
+    const QImage rgb = grabbed.convertToFormat(QImage::Format_ARGB32);
+    const QRgb background = qRgb(28, 30, 36);
+    std::size_t drawn = 0;
+    for (int y = 0; y < rgb.height(); ++y) {
+        for (int x = 0; x < rgb.width(); ++x) {
+            drawn += (rgb.pixel(x, y) & 0xFFFFFFu) != (background & 0xFFFFFFu) ? 1 : 0;
+        }
+    }
+    EXPECT_GT(drawn, static_cast<std::size_t>(rgb.width() * rgb.height() / 20));
+    katana::qt::gpu::testing::Image pixels(static_cast<std::size_t>(rgb.width()) * rgb.height());
+    for (int y = 0; y < rgb.height(); ++y) {
+        for (int x = 0; x < rgb.width(); ++x) {
+            pixels[static_cast<std::size_t>(y) * rgb.width() + x] = rgb.pixel(x, y);
+        }
+    }
+    katana::qt::gpu::testing::saveForLooking("scene_view_windows", pixels, rgb.width(), rgb.height());
 }
