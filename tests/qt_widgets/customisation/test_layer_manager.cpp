@@ -1,4 +1,4 @@
-// The Layers dialog's half of audit QT-02: a layer naming a 12d linestyle no
+// The Layers dialog's half of audit QT-02: a layer naming a library linestyle no
 // loaded library defines - and a hatch pattern and dimension style the model
 // lacks - keeps every name through Save, and an unedited Save is no command.
 
@@ -25,7 +25,7 @@ using katana::qt::NamePicker;
 
 namespace {
 
-// Layer "survey" as a 12d import leaves it when its customisation is not
+// Layer "survey" as an archive import leaves it when its customisation is not
 // loaded: a linetype, a hatch pattern and a dimension style that nothing in
 // this drawing defines, and a weight of 0.125 mm, which the dialog's
 // two-decimal weight box shows as 0.13 (0.125 rounds half away from zero).
@@ -36,9 +36,9 @@ struct LayerDialog : ::testing::Test {
     void SetUp() override
     {
         survey.name = "survey";
-        survey.linetype = "Old 12d Kerb";
-        survey.hatchPattern = "Old 12d Hatch";
-        survey.dimensionStyle = "Old 12d Dimensions";
+        survey.linetype = "Old Survey Kerb";
+        survey.hatchPattern = "Old Survey Hatch";
+        survey.dimensionStyle = "Old Survey Dimensions";
         survey.lineWeight = 0.125;
         survey.color = katana::entity::Color{0, 200, 120, 255};
         const auto status = document.execute(katana::commands::createLayer(survey));
@@ -72,9 +72,9 @@ TEST_F(LayerDialog, SavingALayerNamingUndefinedNamesUneditedKeepsEveryNameAndPus
     ASSERT_NE(save, nullptr);
     save->click();
 
-    EXPECT_EQ(stored().linetype, "Old 12d Kerb");
-    EXPECT_EQ(stored().hatchPattern, "Old 12d Hatch");
-    EXPECT_EQ(stored().dimensionStyle, "Old 12d Dimensions");
+    EXPECT_EQ(stored().linetype, "Old Survey Kerb");
+    EXPECT_EQ(stored().hatchPattern, "Old Survey Hatch");
+    EXPECT_EQ(stored().dimensionStyle, "Old Survey Dimensions");
     EXPECT_EQ(stored().lineWeight, 0.125);
     EXPECT_EQ(stored(), survey);
     EXPECT_EQ(document.history().undoCount(), steps);
@@ -83,7 +83,7 @@ TEST_F(LayerDialog, SavingALayerNamingUndefinedNamesUneditedKeepsEveryNameAndPus
     // NamePicker has no Q_OBJECT, so qobject_cast cannot tell it apart.
     auto* linetype = dynamic_cast<NamePicker*>(dialog.findChild<QComboBox*>("layerLinetype"));
     ASSERT_NE(linetype, nullptr);
-    EXPECT_EQ(linetype->currentName(), "Old 12d Kerb");
+    EXPECT_EQ(linetype->currentName(), "Old Survey Kerb");
     EXPECT_FALSE(linetype->currentIsDefined());
 }
 
@@ -99,8 +99,8 @@ TEST_F(LayerDialog, EditingTheWeightAloneSavesItAndStillKeepsTheUndefinedNames)
 
     EXPECT_EQ(document.history().undoCount(), steps + 1);
     EXPECT_EQ(stored().lineWeight, 0.5);
-    EXPECT_EQ(stored().linetype, "Old 12d Kerb");
-    EXPECT_EQ(stored().hatchPattern, "Old 12d Hatch");
-    EXPECT_EQ(stored().dimensionStyle, "Old 12d Dimensions");
+    EXPECT_EQ(stored().linetype, "Old Survey Kerb");
+    EXPECT_EQ(stored().hatchPattern, "Old Survey Hatch");
+    EXPECT_EQ(stored().dimensionStyle, "Old Survey Dimensions");
     EXPECT_EQ(stored().color, survey.color);
 }

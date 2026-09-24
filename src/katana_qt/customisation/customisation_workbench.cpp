@@ -69,8 +69,8 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
     };
     stylesAction_ =
         make(Icon::FormatStyles, "St&yles and Linetypes...",
-             "The drawing's styles, its dash linetypes and the loaded 12d linestyles: edit, "
-             "merge, rename, find what uses each, and what nothing defines",
+             "The drawing's styles, its dash linetypes and the loaded library linestyles: "
+             "edit, merge, rename, find what uses each, and what nothing defines",
              "formatStyles", kStyleManagerName);
     symbolsAction_ =
         make(Icon::FormatSymbols, "Sym&bol Library...",
@@ -79,8 +79,8 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
              "formatSymbols", kSymbolLibraryName);
     codesAction_ =
         make(Icon::FormatSurveyCodes, "&Survey Code Manager...",
-             "The survey code library (the 12d mapfile): test a code, edit its rules, see the "
-             "drawing's codes and the map's issues, apply the codes, run linework",
+             "The survey code library (the loaded survey code files): test a code, edit its "
+             "rules, see the drawing's codes and their issues, apply the codes, run linework",
              "formatSurveyCodes", kCodeManagerName);
     purgeAction_ = make(Icon::Purge, "&Purge Unused...",
                         "Delete the styles, linetypes and hatch patterns nothing uses, as one "

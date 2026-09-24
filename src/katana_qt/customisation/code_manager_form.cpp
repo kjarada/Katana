@@ -194,7 +194,7 @@ QWidget* SurveyCodeManagerDialog::buildRuleForm()
     auto* mapPage = new QWidget(rulePages_);
     auto* mapForm = new QFormLayout(mapPage);
     ruleModel_ = lineField(mapPage, "ruleModel");
-    ruleModel_->setToolTip(tr("12d's model: the layer the code's entities go on"));
+    ruleModel_->setToolTip(tr("The layer the code's entities go on"));
     ruleModelStatus_ = new QLabel(mapPage);
     ruleModelStatus_->setObjectName(QStringLiteral("ruleModelStatus"));
     ruleColour_ = new QComboBox(mapPage);

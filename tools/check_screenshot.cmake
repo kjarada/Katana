@@ -43,12 +43,13 @@ file(REMOVE "${OUTPUT}")
 # With -DSTYLE_MANAGER=ON the styles and linetypes manager is opened and IT
 # is what the PNG holds, so the dialog is built and painted by a test.
 set(extra)
-# With -DCUSTOMISE_DIR=<directory> every 12d library and mapfile in it is
-# loaded before anything is drawn, so the drawing appears as the customisation
-# says it should (PLAN.MD 20.3). A DIRECTORY rather than a list of files,
-# because a list of paths cannot survive being passed through `cmake -D`
-# without its separators being escaped into the paths themselves - which is
-# exactly what happened, and left this test passing while loading nothing.
+# With -DCUSTOMISE_DIR=<directory> every style or symbol library (.4d) and
+# survey code file (.mapfile) in it is loaded before anything is drawn, so the
+# drawing appears as the customisation says it should (PLAN.MD 20.3). A
+# DIRECTORY rather than a list of files, because a list of paths cannot
+# survive being passed through `cmake -D` without its separators being
+# escaped into the paths themselves - which is exactly what happened, and
+# left this test passing while loading nothing.
 #
 # A customisation that is not in the checkout - the reference one carries its
 # author's licence notice - is reported and the run goes on without it, since
@@ -219,6 +220,38 @@ endif()
 # - and not only that the window painted.
 if(DEFINED EXPECT AND NOT "${out}${err}" MATCHES "${EXPECT}")
     message(FATAL_ERROR "the run did not report /${EXPECT}/:\n${out}\n${err}")
+endif()
+# -DFORBID=<regex> must match NOTHING the run printed: how a test shows that
+# a text is not said anywhere - in a menu a ?-step reported, or in the log.
+# Give it an EXPECT as well, naming what the run must have printed, so that a
+# run which printed nothing at all cannot pass for one that said nothing wrong.
+#
+# The paths this run was given are taken out of what is checked first. The
+# log echoes them - the project that failed to open, a file loaded or
+# imported - and they are where the checkout and the build happen to live,
+# or the name of a fixture's folder: not words the application chose. Left
+# in, a worktree named after the archive work would fail a check of the
+# menus. Only the paths go; the rest of a line that holds one is still
+# checked. The most specific paths are replaced first, so that a fixture
+# folder under the checkout goes whole rather than leaving its tail behind.
+if(DEFINED FORBID)
+    set(_said "${out}${err}")
+    get_filename_component(_app_dir "${APP}" DIRECTORY)
+    get_filename_component(_checkout "${CMAKE_CURRENT_LIST_DIR}" DIRECTORY)
+    foreach(_path "${copy}" "${OUTPUT}" "${CUSTOMISE_DIR}" "${IMPORT}" "${PROJECT}"
+                  "${work}" "${_app_dir}" "${_checkout}")
+        if(_path STREQUAL "")
+            continue()
+        endif()
+        # As given, and with the platform's separators, which is how Qt
+        # writes a path it has made native.
+        file(TO_NATIVE_PATH "${_path}" _native)
+        string(REPLACE "${_path}" "<path>" _said "${_said}")
+        string(REPLACE "${_native}" "<path>" _said "${_said}")
+    endforeach()
+    if(_said MATCHES "${FORBID}")
+        message(FATAL_ERROR "the run reported /${FORBID}/ (\"${CMAKE_MATCH_0}\"), its own paths aside:\n${_said}")
+    endif()
 endif()
 
 if(DEFINED COMPARE)

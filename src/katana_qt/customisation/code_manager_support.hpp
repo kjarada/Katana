@@ -2,7 +2,7 @@
 
 // Small pieces the survey code manager's tabs share: how a linestyle or
 // symbol name a rule gives stands against the loaded library, a colour
-// swatch, and the 12d colour-name field. Internal to the manager's sources.
+// swatch, and the standard colour-name field. Internal to the manager's sources.
 
 #include <string>
 #include <string_view>
@@ -22,7 +22,7 @@ namespace katana::qt {
 
 // What a name in a rule draws as.
 enum class DefinitionState {
-    Plain,     // a linestyle that is 12d's plain line: "0", "1", "continuous"
+    Plain,     // a linestyle that is the plain continuous line: "0", "1", "continuous"
     Defined,   // the library defines it (as the right kind, for a linestyle)
     BuiltIn,   // a symbol no library defines that Katana draws itself
     WrongKind, // a linestyle naming a `mode vertex` definition: draws solid (D2)
@@ -41,7 +41,7 @@ enum class DefinitionState {
 // white and black read on either ground.
 [[nodiscard]] QIcon colourSwatch(const katana::entity::Color& colour, int size);
 
-// Makes `box` the 12d colour-name field: editable, listing
+// Makes `box` the standard colour-name field: editable, listing
 // archive12d::standardColourNames() with swatches, and taking any typed name
 // as it is.
 void makeColourField(QComboBox* box);
