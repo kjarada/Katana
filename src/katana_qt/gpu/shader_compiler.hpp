@@ -5,8 +5,10 @@
 //
 // Handing QRhi HLSL SOURCE (runtimeHlslShaders) makes every QRhi compile it
 // again: the first 3D view, a second one, a 3D dock floated into a window of
-// its own (which starts QRhi afresh), each test's target. Eleven stages take
-// a quarter to a third of a second to compile here (BM_GpuShaderCompile). So
+// its own (which starts QRhi afresh), each test's target. The eleven stages
+// the default expansion draws with take 110-175 ms to compile on the
+// development laptop (BM_GpuShaderCompile), more than the device, target and
+// pipelines together take without them (BM_GpuStartUp/1). So
 // this library calls d3dcompiler_47 - the same compiler QRhi would load, part
 // of every Windows 10 and 11 install - itself, keeps each stage's bytecode
 // for the life of the process, and gives QRhi the bytecode: only the first
