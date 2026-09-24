@@ -92,7 +92,7 @@ struct Field {
 // fields, and a record with more is read up to the cap with a warning.
 struct Record {
     std::string_view type;
-    std::array<Field, 24> fields{};
+    std::array<Field, 16> fields;
     std::size_t count = 0;
     bool overflow = false;
     std::string_view note; // the text after "--", commas and all
@@ -250,7 +250,7 @@ class Rw5Reader {
   public:
     Rw5Reader(std::string_view fileName, const ReadOptions& options)
         : builder_(fileName,
-                   survey::SourceRecord{"Carlson", "RW5", "TDS 3.6+SCE 3.03", std::string(fileName),
+                   survey::SourceRecord{"Carlson", "RW5", "TDS3.6/SCE3.03", std::string(fileName),
                                         0},
                    options)
     {

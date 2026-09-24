@@ -1,5 +1,6 @@
 #include "topcon_raw_builder.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
@@ -161,16 +162,52 @@ void RawProjectBuilder::notCarried(std::string text)
     result_.notCarried.push_back(std::move(text));
 }
 
+std::uint32_t RawProjectBuilder::findPoint(std::string_view id, std::size_t hash) const
+{
+    if (pointSlots_.empty()) {
+        return kNotFound;
+    }
+    const std::size_t mask = pointSlots_.size() - 1;
+    for (std::size_t slot = hash & mask;; slot = (slot + 1) & mask) {
+        const std::uint32_t occupant = pointSlots_[slot];
+        if (occupant == 0) {
+            return kNotFound;
+        }
+        const PointEntry& point = points_[occupant - 1];
+        if (point.hash == hash && point.id == id) {
+            return occupant - 1;
+        }
+    }
+}
+
+void RawProjectBuilder::placePoint(std::uint32_t index)
+{
+    const std::size_t mask = pointSlots_.size() - 1;
+    std::size_t slot = points_[index].hash & mask;
+    while (pointSlots_[slot] != 0) {
+        slot = (slot + 1) & mask;
+    }
+    pointSlots_[slot] = index + 1;
+}
+
 RawProjectBuilder::PointEntry& RawProjectBuilder::entry(std::string_view id, std::size_t record)
 {
-    if (const auto found = pointIndex_.find(id); found != pointIndex_.end()) {
-        return points_[found->second];
+    const std::size_t hash = std::hash<std::string_view>{}(id);
+    if (const std::uint32_t found = findPoint(id, hash); found != kNotFound) {
+        return points_[found];
+    }
+    if ((points_.size() + 1) * 2 > pointSlots_.size()) {
+        pointSlots_.assign(std::max<std::size_t>(1024, pointSlots_.size() * 2), 0);
+        for (std::uint32_t index = 0; index < points_.size(); ++index) {
+            placePoint(index);
+        }
     }
     const auto index = static_cast<std::uint32_t>(points_.size());
     PointEntry& created = points_.emplace_back();
     created.id = std::string(id);
-    created.source = source(record);
-    pointIndex_.emplace(created.id, index);
+    created.hash = hash;
+    created.sourceRecord = record;
+    placePoint(index);
     return created;
 }
 
@@ -181,7 +218,7 @@ void RawProjectBuilder::mentionPoint(std::string_view id, std::size_t record)
 
 bool RawProjectBuilder::hasPoint(std::string_view id) const
 {
-    return pointIndex_.find(id) != pointIndex_.end();
+    return findPoint(id, std::hash<std::string_view>{}(id)) != kNotFound;
 }
 
 void RawProjectBuilder::positionPoint(std::string_view id, double northing, double easting,
@@ -196,7 +233,7 @@ void RawProjectBuilder::positionPoint(std::string_view id, double northing, doub
         point.elevation = elevation;
         point.coordinateSource = how;
         point.positionRecord = record;
-        point.source = source(record);
+        point.sourceRecord = record;
         return;
     }
     if (point.northing == northing && point.easting == easting &&
@@ -272,7 +309,12 @@ survey::SurveyStation& RawProjectBuilder::beginStation(std::string_view pointId,
         id = std::string(pointId) + " (" + std::to_string(occupation) + ")";
     }
     stationIndex_.emplace(id, static_cast<std::uint32_t>(result_.project.stations.size()));
+    // Setups of one job tend to be alike: room for as many observations as
+    // the last one had saves re-growing a vector of 576-byte variants.
+    const std::size_t expected =
+        result_.project.stations.empty() ? 0 : result_.project.stations.back().observations.size();
     survey::SurveyStation& station = result_.project.stations.emplace_back();
+    station.observations.reserve(expected);
     station.setup.id = std::move(id);
     station.setup.pointId = std::string(pointId);
     station.setup.instrumentHeight = instrumentHeight;
@@ -335,18 +377,18 @@ ReadResult RawProjectBuilder::finish()
             out.description = std::move(point.description);
             out.metadata = std::move(point.metadata);
             out.coordinateSource = point.coordinateSource;
-            out.source = std::move(point.source);
+            out.source = source(point.sourceRecord);
         } else {
             survey::UnpositionedPoint& out = project.unpositionedPoints.emplace_back();
             out.id = std::move(point.id);
             out.code = std::move(point.code);
             out.description = std::move(point.description);
             out.metadata = std::move(point.metadata);
-            out.source = std::move(point.source);
+            out.source = source(point.sourceRecord);
         }
     }
     points_.clear();
-    pointIndex_.clear();
+    pointSlots_.clear();
     return std::move(result_);
 }
 
