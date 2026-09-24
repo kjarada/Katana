@@ -10,8 +10,11 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -594,6 +597,22 @@ void ReductionOptionsWidget::showAdvanced(bool shown)
     }
     advanced_->setArrowType(shown ? Qt::DownArrow : Qt::RightArrow);
     advancedOptions_->setVisible(shown);
+    if (!shown) {
+        return;
+    }
+    // Opened below the fold of a page that scrolls, the section would open
+    // out of sight: the page is scrolled to put the fold at the top. On the
+    // event loop, once the section has been laid out.
+    QTimer::singleShot(0, this, [this] {
+        for (QWidget* up = parentWidget(); up != nullptr; up = up->parentWidget()) {
+            auto* area = qobject_cast<QScrollArea*>(up);
+            if (area != nullptr && area->widget() != nullptr) {
+                const int top = advanced_->mapTo(area->widget(), QPoint(0, 0)).y();
+                area->verticalScrollBar()->setValue(std::max(0, top - 6));
+                return;
+            }
+        }
+    });
 }
 
 void ReductionOptionsWidget::showNumber(QLineEdit* field, double shown, double stored)
