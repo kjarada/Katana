@@ -14,6 +14,10 @@
 #include "katana/core/error.hpp"
 #include "katana/terrain/tin_surface.hpp"
 
+namespace katana::core {
+class TaskPool;
+}
+
 namespace katana::terrain {
 
 // Volume between a surface and the horizontal plane z = datum. Cubic metres and
@@ -48,7 +52,14 @@ struct SurfaceComparison {
 // surface and zDesign - zExisting is linear over it. Surfaces that do not overlap
 // give a result with planArea == 0. Fails with InvalidArgument for an empty
 // surface and TriangulationFailure when the overlay cannot be built.
-[[nodiscard]] katana::core::Result<SurfaceComparison> compareSurfaces(const TinSurface& existing,
-                                                                      const TinSurface& design);
+//
+// Runs on `pool` (null: TaskPool::shared()). The existing surface is cut into
+// blocks of a fixed number of triangles, each summed in order, and the block
+// sums are combined in block order, so the result is the same bits at any
+// thread count - TaskPool(0) included (Rule 7). Safe to call from a
+// background job: both surfaces are only read.
+[[nodiscard]] katana::core::Result<SurfaceComparison>
+compareSurfaces(const TinSurface& existing, const TinSurface& design,
+                katana::core::TaskPool* pool = nullptr);
 
 } // namespace katana::terrain
