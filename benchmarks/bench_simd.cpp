@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/core/text_encoding.hpp"
@@ -198,6 +199,49 @@ void BM_IsValidUtf8Names(benchmark::State& state, int level)
 BENCHMARK_CAPTURE(BM_IsValidUtf8Names, scalar, 0)->Unit(benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(BM_IsValidUtf8Names, avx2, 1)->Unit(benchmark::kMicrosecond);
 
+// Text in a language that is not English: runs of ASCII one to three bytes
+// long (a space, a digit, "ab") between multibyte characters, all through the
+// file. A description field in the owner's archives can be all of this. The
+// ASCII fast path must not tax it - an earlier version of isValidUtf8 entered
+// the kernel at the start of every such run and was measured 2-4x slower than
+// the plain loop on it.
+std::string repeatedTo(std::string_view unit, std::size_t bytes)
+{
+    std::string text;
+    text.reserve(bytes + unit.size());
+    while (text.size() < bytes) {
+        text += unit;
+    }
+    return text;
+}
+
+void BM_IsValidUtf8Mixed(benchmark::State& state, int level, int shape)
+{
+    LevelScope scope(state, level);
+    if (!scope.ok()) {
+        return;
+    }
+    // About 2 MB each. 0: "abé " - a 2-byte character in every 5 bytes.
+    // 1: "Точка " - Cyrillic, 2-byte characters with one space in 11 bytes.
+    // 2: "測點 " - CJK, 3-byte characters with one space in 7 bytes.
+    static const std::string texts[3] = {
+        repeatedTo("ab\xC3\xA9 ", 2'000'000),
+        repeatedTo("\xD0\xA2\xD0\xBE\xD1\x87\xD0\xBA\xD0\xB0 ", 2'000'000),
+        repeatedTo("\xE6\xB8\xAC\xE9\xBB\x9E ", 2'000'000),
+    };
+    const std::string& text = texts[shape];
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(katana::core::isValidUtf8(text));
+    }
+    state.SetBytesProcessed(state.iterations() * static_cast<std::int64_t>(text.size()));
+}
+BENCHMARK_CAPTURE(BM_IsValidUtf8Mixed, accented/scalar, 0, 0)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_IsValidUtf8Mixed, accented/avx2, 1, 0)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_IsValidUtf8Mixed, cyrillic/scalar, 0, 1)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_IsValidUtf8Mixed, cyrillic/avx2, 1, 1)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_IsValidUtf8Mixed, cjk/scalar, 0, 2)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_IsValidUtf8Mixed, cjk/avx2, 1, 2)->Unit(benchmark::kMillisecond);
+
 constexpr std::size_t kPoints = 1 << 16;
 
 std::vector<Vec3> points3()
@@ -357,5 +401,43 @@ void BM_PolylineBoundingBoxes(benchmark::State& state, int level)
 }
 BENCHMARK_CAPTURE(BM_PolylineBoundingBoxes, scalar, 0)->Unit(benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(BM_PolylineBoundingBoxes, avx2, 1)->Unit(benchmark::kMicrosecond);
+
+// The same 28k polylines at one length each: where the AVX2 kernel starts to
+// pay for its call and its zero-sign fix-up. boundsOf's batch minimum is set
+// from this sweep (docs/performance.md).
+void BM_PolylineBoundingBoxesOf(benchmark::State& state, int level, int vertices)
+{
+    LevelScope scope(state, level);
+    if (!scope.ok()) {
+        return;
+    }
+    std::vector<katana::geometry::Polyline2> lines(28'000);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        for (int k = 0; k < vertices; ++k) {
+            lines[i].vertices.emplace_back(300000.0 + static_cast<double>(i) * 3.0 + k,
+                                           6250000.0 + k * 0.5);
+        }
+    }
+    for (auto _ : state) {
+        double width = 0.0;
+        for (const auto& line : lines) {
+            width += line.boundingBox().width();
+        }
+        benchmark::DoNotOptimize(width);
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(lines.size()));
+}
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 4/scalar, 0, 4)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 4/avx2, 1, 4)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 8/scalar, 0, 8)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 8/avx2, 1, 8)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 12/scalar, 0, 12)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 12/avx2, 1, 12)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 16/scalar, 0, 16)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 16/avx2, 1, 16)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 20/scalar, 0, 20)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 20/avx2, 1, 20)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 32/scalar, 0, 32)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 32/avx2, 1, 32)->Unit(benchmark::kMicrosecond);
 
 } // namespace

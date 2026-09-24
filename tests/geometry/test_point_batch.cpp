@@ -1,9 +1,13 @@
 // Batch transforms and bounds, held to the point-by-point loops they replace:
 // the same bits at every SIMD level. The AVX2 kernels take four points a step,
-// so sizes run through every remainder and past the dispatch minimum of 8.
+// so sizes run through every remainder and past the dispatch minimums: 8 for
+// transforms, kBoundsBatchMinimum (16) for bounds. A hand-worked bounds case
+// must be at least that long, or at the AVX2 level it would test the inline
+// loop and not the kernel; each one asserts so.
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -17,6 +21,7 @@
 using katana::core::SimdLevel;
 using katana::geometry::Box2;
 using katana::geometry::boundsOf;
+using katana::geometry::kBoundsBatchMinimum;
 using katana::geometry::Point2;
 using katana::geometry::transformPoints;
 using katana::math::AABB;
@@ -161,13 +166,23 @@ TEST(PointBatch, TransformsEqualTransformPointOnEveryPointBitForBitAtEveryLevel)
 
 TEST(PointBatch, BoundsGiveTheBoxWorkedByHandAtEveryLevel)
 {
-    // Nine points, so the AVX2 path takes two steps of four and a tail of one.
-    // Reading down the columns: x from -3.5 to 7, y from -4 to 9.
-    const std::vector<Point2> flat = {{3, -1}, {-2, 5},   {7, 0.5}, {1, 1}, {0.25, -4},
-                                      {6, 2},  {-3.5, 3}, {2, 9},   {4, -2}};
-    // Ten points: x from -8 to 6, y from -6 to 9, z from -4 to 10.
-    const std::vector<Vec3> solid = {{1, 2, 3},    {-1, 0.5, 7}, {4, -6, 2}, {2, 2, 2},   {0.5, 9, -1},
-                                     {3, 3, 3},    {-8, 1, 1},   {5, 5, -4}, {6, -2, 10}, {1, 1, 1}};
+    // Seventeen points, so the AVX2 path takes four steps of four and a tail
+    // of one. Reading down the columns: x from -3.5 (point 6) to 7 (point 16,
+    // the tail); y from -4 (point 4) to 9 (point 13).
+    const std::vector<Point2> flat = {{3, -1},     {-2, 5},  {6, 0.5},   {1, 1},     {0.25, -4},
+                                      {6, 2},      {-3.5, 3}, {2, 8},     {4, -2},    {1.5, 1.5},
+                                      {-1, -1},    {5, 4},   {0.5, 0.75}, {2.5, 9},  {6.5, -3},
+                                      {-3, 7},     {7, 2.5}};
+    // Eighteen points, a tail of two: x from -8 (point 6) to 6.5 (point 17,
+    // the tail); y from -6 (point 2) to 9 (point 4); z from -4 (point 7) to 10
+    // (point 8).
+    const std::vector<Vec3> solid = {{1, 2, 3},    {-1, 0.5, 7},  {4, -6, 2},   {2, 2, 2},
+                                     {0.5, 9, -1}, {3, 3, 3},     {-8, 1, 1},   {5, 5, -4},
+                                     {6, -2, 10},  {1, 1, 1},     {2, 3, 4},    {-2, -1, 5},
+                                     {3, 4, -2},   {1.5, 2.5, 6}, {-4, 0.5, 0.25}, {5.5, -5, 9},
+                                     {0.75, 8, -3}, {6.5, 1, 2}};
+    ASSERT_GE(flat.size(), kBoundsBatchMinimum);
+    ASSERT_GE(solid.size(), kBoundsBatchMinimum);
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
             continue;
@@ -176,7 +191,7 @@ TEST(PointBatch, BoundsGiveTheBoxWorkedByHandAtEveryLevel)
         EXPECT_EQ(box, Box2(Point2(-3.5, -4.0), Point2(7.0, 9.0))) << katana::core::toString(level);
         const AABB cube = atSimdLevel(level, [&] { return boundsOf(solid); });
         EXPECT_EQ(cube.min, Vec3(-8.0, -6.0, -4.0)) << katana::core::toString(level);
-        EXPECT_EQ(cube.max, Vec3(6.0, 9.0, 10.0)) << katana::core::toString(level);
+        EXPECT_EQ(cube.max, Vec3(6.5, 9.0, 10.0)) << katana::core::toString(level);
     }
 }
 
@@ -184,17 +199,19 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
 {
     // expand() replaces its running minimum only by something strictly less,
     // and -0 < +0 is false, so of the zeros the first one met stays. x runs
-    // 1, 2, 3, -0, +0, 5, 6, 7, 8: the minimum is the -0 at place 3.
+    // 1, 2, 3, -0, +0, 5, 6, ..., 16: the minimum is the -0 at place 3.
     //
     // The places are chosen against the AVX2 path, which keeps one running
     // minimum per lane - point i in lane i mod 4 - and folds the lanes 0 to 3
     // at the end: it meets the +0 at place 4 (lane 0) before the -0 at place 3
     // (lane 3), so a kernel that merely folded would answer +0.
-    const double xs[] = {1.0, 2.0, 3.0, -0.0, 0.0, 5.0, 6.0, 7.0, 8.0};
+    const double xs[] = {1.0,  2.0,  3.0,  -0.0, 0.0,  5.0,  6.0,  7.0, 8.0,
+                         9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0};
     std::vector<Point2> points;
     for (const double x : xs) {
         points.emplace_back(x, -x); // y: the maximum is -(-0) = +0 at place 3
     }
+    ASSERT_GE(points.size(), kBoundsBatchMinimum);
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
             continue;
@@ -220,12 +237,16 @@ TEST(PointBatch, WhereTheExtremeIsZeroTheBoundsKeepTheFirstZeroMetAsExpandDoes)
 TEST(PointBatch, BoundsPassOverNaNCoordinatesAsExpandDoes)
 {
     // A NaN compares false with everything, so expand() never takes it:
-    // x = NaN, 3, 1, NaN, 2, 5, 4, NaN, 0.5 has bounds 0.5 to 5.
-    const double xs[] = {kNaN, 3.0, 1.0, kNaN, 2.0, 5.0, 4.0, kNaN, 0.5};
+    // x = NaN, 3, 1, NaN, 2, 5, 4, NaN, 0.5, 1.5, NaN, 2.5, 3.5, NaN, 4.5,
+    // 0.75, NaN has bounds 0.5 to 5 - with a NaN first, some inside the
+    // kernel's steps, and one last, alone in the tail.
+    const double xs[] = {kNaN, 3.0,  1.0, kNaN, 2.0,  5.0, 4.0,  kNaN, 0.5,
+                         1.5,  kNaN, 2.5, 3.5,  kNaN, 4.5, 0.75, kNaN};
     std::vector<Point2> points;
     for (const double x : xs) {
         points.emplace_back(x, 1.0);
     }
+    ASSERT_GE(points.size(), kBoundsBatchMinimum);
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
             continue;
@@ -278,24 +299,62 @@ TEST(PointBatch, BoundsEqualTheExpandLoopBitForBitAtEveryLevel)
 
 TEST(PointBatch, APolylineAndAMeshAreBoundedThroughTheBatchPath)
 {
-    // Twelve vertices, past the dispatch minimum: x = 0..11, y = 11..0 with
-    // one dip to -3 at vertex 5.
+    // Twenty vertices, past the batch minimum: x = 0..19, y = 19..0 with one
+    // dip to -3 at vertex 5. The mesh: (i, -i, i/2), so x 0..19, y -19..0,
+    // z 0..9.5.
     katana::geometry::Polyline2 line;
-    for (int i = 0; i < 12; ++i) {
-        line.vertices.emplace_back(i, i == 5 ? -3.0 : 11.0 - i);
+    for (int i = 0; i < 20; ++i) {
+        line.vertices.emplace_back(i, i == 5 ? -3.0 : 19.0 - i);
     }
     katana::geometry::TriangleMesh mesh;
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < 20; ++i) {
         mesh.vertices.emplace_back(i, -i, i * 0.5);
     }
+    ASSERT_GE(line.vertices.size(), kBoundsBatchMinimum);
+    ASSERT_GE(mesh.vertices.size(), kBoundsBatchMinimum);
     for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
         if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
             continue;
         }
         const Box2 box = atSimdLevel(level, [&] { return line.boundingBox(); });
-        EXPECT_EQ(box, Box2(Point2(0.0, -3.0), Point2(11.0, 11.0))) << katana::core::toString(level);
+        EXPECT_EQ(box, Box2(Point2(0.0, -3.0), Point2(19.0, 19.0))) << katana::core::toString(level);
         const AABB cube = atSimdLevel(level, [&] { return mesh.bounds(); });
-        EXPECT_EQ(cube.min, Vec3(0.0, -11.0, 0.0)) << katana::core::toString(level);
-        EXPECT_EQ(cube.max, Vec3(11.0, 0.0, 5.5)) << katana::core::toString(level);
+        EXPECT_EQ(cube.min, Vec3(0.0, -19.0, 0.0)) << katana::core::toString(level);
+        EXPECT_EQ(cube.max, Vec3(19.0, 0.0, 9.5)) << katana::core::toString(level);
+    }
+}
+
+// The short path is the expand loop compiled into the caller, with no call into
+// the batch code - so plainly that a constant expression can run it. A
+// drawing's strings are mostly shorter than kBoundsBatchMinimum and are bounded
+// for every candidate on every repaint; through a call (and, from 8 points, the
+// kernel) they were measured 15-35% slower than the loop they replaced.
+// Worked by hand: x runs 2, -1, 4; y runs 3, 5, -2; z runs 1, 0.5, 6.
+namespace {
+constexpr std::array<Point2, 3> kShortFlat = {Point2(2.0, 3.0), Point2(-1.0, 5.0),
+                                              Point2(4.0, -2.0)};
+constexpr std::array<Vec3, 3> kShortSolid = {Vec3(2.0, 3.0, 1.0), Vec3(-1.0, 5.0, 0.5),
+                                             Vec3(4.0, -2.0, 6.0)};
+static_assert(kShortFlat.size() < kBoundsBatchMinimum);
+static_assert(boundsOf(kShortFlat) == Box2(Point2(-1.0, -2.0), Point2(4.0, 5.0)));
+static_assert(boundsOf(kShortSolid).min == Vec3(-1.0, -2.0, 0.5));
+static_assert(boundsOf(kShortSolid).max == Vec3(4.0, 5.0, 6.0));
+} // namespace
+
+TEST(PointBatch, AnArrayShorterThanTheBatchMinimumIsBoundedInlineWithoutACall)
+{
+    // The static_asserts above are the test of "inline": they compile only
+    // while the short path is in the header. At run time the same arrays give
+    // the same boxes at every level.
+    for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
+        if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
+            continue;
+        }
+        EXPECT_EQ(atSimdLevel(level, [] { return boundsOf(kShortFlat); }),
+                  Box2(Point2(-1.0, -2.0), Point2(4.0, 5.0)))
+            << katana::core::toString(level);
+        const AABB cube = atSimdLevel(level, [] { return boundsOf(kShortSolid); });
+        EXPECT_EQ(cube.min, Vec3(-1.0, -2.0, 0.5)) << katana::core::toString(level);
+        EXPECT_EQ(cube.max, Vec3(4.0, 5.0, 6.0)) << katana::core::toString(level);
     }
 }

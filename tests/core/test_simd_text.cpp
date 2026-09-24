@@ -240,3 +240,44 @@ TEST(SimdText, Utf8ValidationGivesTheSameAnswerAtEveryLevel)
         }
     }
 }
+
+TEST(SimdText, TextDenseWithMultibyteCharactersValidatesAlikeAtEveryLevel)
+{
+    // isValidUtf8 reads an ASCII run byte by byte for its first 16 bytes and
+    // hands the rest to the kernel only when 32 more remain, so the runs here
+    // are every length from 0 to 40 - short ones between accented letters, as
+    // in a description in another language, and ones that cross the hand-over
+    // - with the text's end at every distance from it.
+    //
+    // Worked by hand: "é" is C3 A9, a whole two-byte character, so any mix of
+    // it and ASCII is valid; a lone 80 is a continuation with no lead; a C3 at
+    // the very end is a lead with nothing after it.
+    for (std::size_t run = 0; run <= 40; ++run) {
+        std::string text;
+        while (text.size() < 160) {
+            text += "\xC3\xA9";
+            text += std::string(run, 'a');
+        }
+        for (std::size_t cut = text.size() - 40; cut <= text.size(); ++cut) {
+            const std::string prefix = text.substr(0, cut);
+            // A cut through the middle of "é" leaves a lead byte with no
+            // continuation. The two broken texts are broken either way: after
+            // "a" an 80 has no lead (and a C3 cut from its A9 has an "a" where
+            // its continuation should be); a text that ends in C3 is cut short.
+            const bool whole = !(cut > 0 && static_cast<unsigned char>(prefix.back()) == 0xC3);
+            const std::string loneContinuation = prefix + "a\x80" + std::string(run, 'b');
+            const std::string truncated = prefix + std::string(run, 'b') + "\xC3";
+            for (const SimdLevel level : {SimdLevel::Scalar, SimdLevel::Avx2}) {
+                if (level == SimdLevel::Avx2 && !katana::test::avx2Available()) {
+                    continue;
+                }
+                EXPECT_EQ(atSimdLevel(level, [&] { return isValidUtf8(prefix); }), whole)
+                    << "run " << run << " cut " << cut << " at " << katana::core::toString(level);
+                EXPECT_FALSE(atSimdLevel(level, [&] { return isValidUtf8(loneContinuation); }))
+                    << "run " << run << " cut " << cut << " at " << katana::core::toString(level);
+                EXPECT_FALSE(atSimdLevel(level, [&] { return isValidUtf8(truncated); }))
+                    << "run " << run << " cut " << cut << " at " << katana::core::toString(level);
+            }
+        }
+    }
+}

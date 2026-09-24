@@ -8,9 +8,12 @@
 // On AVX2 the arithmetic is four doubles an instruction; see
 // docs/performance.md for what that is measured to be worth.
 //
-// Short arrays (a few points) go straight to the scalar loop: a string of six
-// vertices cannot repay even a well-predicted dispatch.
+// Short arrays go straight to the scalar loop: a string of six vertices cannot
+// repay even a well-predicted dispatch. For bounds the loop is right here in
+// the header, so that a drawing's short strings - bounded for every candidate
+// on every repaint - cost no more than the loop they used to be.
 
+#include <cstddef>
 #include <span>
 
 #include "katana/geometry/primitives2d.hpp"
@@ -27,10 +30,44 @@ void transformPoints(const katana::math::Mat4& m, std::span<katana::math::Vec3> 
 // The 2D affine form: points[i] = transformPoint(m, points[i]).
 void transformPoints(const katana::math::Mat3& m, std::span<Point2> points);
 
+// Below this many points boundsOf is the expand loop, inline. Measured with
+// BM_PolylineBoundingBoxesOf: the AVX2 kernel, its call and its zero-sign
+// fix-up break even with the loop at about 14-16 points and win from 20, so
+// under 16 the call would only cost (docs/performance.md).
+inline constexpr std::size_t kBoundsBatchMinimum = 16;
+
+namespace detail {
+// boundsOf for arrays of kBoundsBatchMinimum points or more: the kernel where
+// core::activeSimdLevel() allows, else the same loop.
+[[nodiscard]] Box2 boundsOfBatch(std::span<const Point2> points);
+[[nodiscard]] katana::math::AABB boundsOfBatch(std::span<const katana::math::Vec3> points);
+} // namespace detail
+
 // The box that expand() of every point in order would build: empty for no
 // points, NaN coordinates passed over, and where the extreme is a zero, the
 // sign of the first zero met, as the sequential loop keeps it.
-[[nodiscard]] Box2 boundsOf(std::span<const Point2> points);
-[[nodiscard]] katana::math::AABB boundsOf(std::span<const katana::math::Vec3> points);
+[[nodiscard]] constexpr Box2 boundsOf(std::span<const Point2> points)
+{
+    if (points.size() >= kBoundsBatchMinimum) {
+        return detail::boundsOfBatch(points);
+    }
+    Box2 box;
+    for (const Point2& p : points) {
+        box.expand(p);
+    }
+    return box;
+}
+
+[[nodiscard]] constexpr katana::math::AABB boundsOf(std::span<const katana::math::Vec3> points)
+{
+    if (points.size() >= kBoundsBatchMinimum) {
+        return detail::boundsOfBatch(points);
+    }
+    katana::math::AABB box;
+    for (const katana::math::Vec3& p : points) {
+        box.expand(p);
+    }
+    return box;
+}
 
 } // namespace katana::geometry
