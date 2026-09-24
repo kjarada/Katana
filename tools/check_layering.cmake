@@ -34,6 +34,10 @@ set(KATANA_ALLOWED_commands "core;math;geometry;entity")
 # Pure text handling plus the mapping onto entities, alignments and surfaces, so
 # it sits beside commands and needs no GDAL.
 set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
+# dxf: the drawing exchange format, read and written natively. Text handling
+# plus the mapping onto entities and their tables, beside archive12d and for
+# the same reason: no GDAL, so it builds with -DKATANA_BUILD_IO=OFF.
+set(KATANA_ALLOWED_dxf "core;math;geometry;entity")
 set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
 # gis and pointcloud are both implemented by src/katana_io.
 set(KATANA_ALLOWED_gis "core;pointcloud")
@@ -57,9 +61,9 @@ set(KATANA_ALLOWED_render "core;math;geometry")
 set(KATANA_ALLOWED_cad
     "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage")
 set(KATANA_ALLOWED_app
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;gis;pointcloud;interop")
 set(KATANA_ALLOWED_qt
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;gis;pointcloud;interop;app")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;gis;pointcloud;interop;app")
 
 # src/<directory> -> layer
 set(KATANA_SRC_LAYER_katana_core core)
@@ -73,6 +77,7 @@ set(KATANA_SRC_LAYER_katana_render render)
 set(KATANA_SRC_LAYER_katana_entity entity)
 set(KATANA_SRC_LAYER_katana_commands commands)
 set(KATANA_SRC_LAYER_katana_archive12d archive12d)
+set(KATANA_SRC_LAYER_katana_dxf dxf)
 set(KATANA_SRC_LAYER_katana_storage storage)
 set(KATANA_SRC_LAYER_katana_cad cad)
 set(KATANA_SRC_LAYER_katana_io gis)

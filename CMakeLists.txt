@@ -97,6 +97,7 @@ set(KATANA_MODULES
     katana_surveyio
     katana_terrain
     katana_archive12d
+    katana_dxf
     katana_render
     katana_cad
 )
