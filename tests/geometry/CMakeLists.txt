@@ -11,4 +11,5 @@ katana_add_test_suite(geometry
         test_profile.cpp
         test_editing.cpp
         test_mesh.cpp
+        test_point_batch.cpp
 )
