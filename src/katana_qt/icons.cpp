@@ -825,7 +825,7 @@ void paintIcon(QPainter& painter, Icon which, const QRectF& rect, const QColor& 
         break;
     case Icon::FormatStyles:
         // A linetype table's three rows: continuous, dashed, and in the
-        // accent the one the manager is for - a 12d linestyle, dashed, with
+        // accent the one the manager is for - a library linestyle, dashed, with
         // a symbol (a ring) drawn at its vertex.
         ink.line(3, 5.5, 21, 5.5);
         ink.dashed(polyline({{3, 11.5}, {21, 11.5}}));

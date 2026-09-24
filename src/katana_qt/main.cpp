@@ -12,6 +12,7 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QTextDocumentFragment>
 #include <QTextEdit>
 #include <QToolBar>
@@ -67,16 +68,36 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // rows (their columns joined by " | ", the rows by " ; "). A NAME that is no
 // widget there may be one of the window's actions - a menu item or a tool -
 // reported as its text and whether it is checked, so a test can see which
-// tool the menus and toolbars show running. False, said, for neither.
+// tool the menus and toolbars show running. One of the window's menus
+// (formatMenu), found whatever the target, is its title and its items, each
+// with the status tip it shows - the window makes an item's tooltip from the
+// two - so a test can read everything a menu says without opening it. False,
+// said, for none of these.
 bool reportWidget(const QWidget& target, const QWidget& window, const QString& name)
 {
-    const auto* widget = target.findChild<QWidget*>(name);
+    const QWidget* widget = target.findChild<QWidget*>(name);
+    if (widget == nullptr) {
+        widget = window.findChild<QMenu*>(name);
+    }
     QString text;
     const auto* action = widget == nullptr ? window.findChild<QAction*>(name) : nullptr;
     if (action != nullptr) {
         text = QString(action->text()).remove('&') +
                (action->isCheckable() ? (action->isChecked() ? ", checked" : ", unchecked")
                                       : QString());
+    } else if (const auto* menu = qobject_cast<const QMenu*>(widget)) {
+        QStringList items;
+        for (const QAction* item : menu->actions()) {
+            if (item->isSeparator()) {
+                continue;
+            }
+            QString line = QString(item->text()).remove('&');
+            if (!item->statusTip().isEmpty()) {
+                line += " [" + item->statusTip() + "]";
+            }
+            items << line;
+        }
+        text = QString(menu->title()).remove('&') + ": " + items.join(" ; ");
     } else if (const auto* label = qobject_cast<const QLabel*>(widget)) {
         text = QTextDocumentFragment::fromHtml(label->text()).toPlainText();
     } else if (const auto* line = qobject_cast<const QLineEdit*>(widget)) {
@@ -98,7 +119,8 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
         }
         text = rows.join(" ; ");
     } else {
-        std::fprintf(stderr, "--report: there is no label, field, text, list or action %s\n",
+        std::fprintf(stderr,
+                     "--report: there is no label, field, text, list, action or menu %s\n",
                      qPrintable(name));
         return false;
     }
@@ -183,6 +205,18 @@ bool fillField(QWidget& dialog, const QString& assignment)
         check->setChecked(text == "on");
         return true;
     }
+    // Tabbed pages: the tab whose text is TEXT brought to the front, as a
+    // click on it does (the style manager's managerTabs=Linetypes).
+    if (auto* tabs = qobject_cast<QTabWidget*>(widget)) {
+        for (int tab = 0; tab < tabs->count(); ++tab) {
+            if (QString(tabs->tabText(tab)).remove('&') == text) {
+                tabs->setCurrentIndex(tab);
+                return true;
+            }
+        }
+        std::fprintf(stderr, "--fill: %s has no tab '%s'\n", qPrintable(name), qPrintable(text));
+        return false;
+    }
     // A list, a grid or a tree: the row whose text is TEXT made current and
     // selected, as a click on it does (the symbol library's grid).
     if (auto* view = qobject_cast<QAbstractItemView*>(widget);
@@ -194,8 +228,14 @@ bool fillField(QWidget& dialog, const QString& assignment)
             std::fprintf(stderr, "--fill: %s lists no '%s'\n", qPrintable(name), qPrintable(text));
             return false;
         }
-        view->selectionModel()->setCurrentIndex(found.front(),
-                                                QItemSelectionModel::ClearAndSelect);
+        // A view that selects whole rows selects the row, as its click does:
+        // one cell alone is no selected row to a manager that asks for them
+        // (the style manager's linetypeTable), which then shows nothing.
+        QItemSelectionModel::SelectionFlags flags = QItemSelectionModel::ClearAndSelect;
+        if (view->selectionBehavior() == QAbstractItemView::SelectRows) {
+            flags |= QItemSelectionModel::Rows;
+        }
+        view->selectionModel()->setCurrentIndex(found.front(), flags);
         return true;
     }
     std::fprintf(stderr, "--fill: the dialog has no field %s that takes '%s'\n",
@@ -239,7 +279,7 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // come through it cleanly (MainWindow::toggleLayerThroughPanel). It is the
 // regression test for a crash on the first click of that box.
 //
-// --customise loads 12d linestyle and symbol libraries and mapfiles before
+// --customise loads linestyle and symbol libraries and survey code files before
 // anything is drawn, so a screenshot shows the drawing as the customisation
 // says it should look. It takes every path until the next switch, because a
 // customisation is several files and which is which is decided by looking
@@ -427,7 +467,7 @@ int main(int argc, char* argv[])
     katana::qt::MainWindow window;
     window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
-    // --customise on the command line is merged in next, as Format > Load 12d
+    // --customise on the command line is merged in next, as Format > Load
     // Customisation would, and so is loaded when a project is opened: its
     // record of what it was drawn with is compared with what is loaded.
     window.loadDefaultCustomisation();
