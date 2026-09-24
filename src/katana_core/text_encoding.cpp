@@ -18,9 +18,14 @@ namespace {
 // ASCII characters; more would only slow a wrong guess down.
 constexpr std::size_t kSniffBytes = 4096;
 
-// The shortest remainder for which isValidUtf8 asks the ASCII kernel: one AVX2
-// block. Anything shorter is a name or a label, done faster byte by byte than
-// through a call.
+// isValidUtf8 hands a run of ASCII to the kernel only once it has seen
+// kAsciiProbe bytes of it one by one, and only while a whole kernel block
+// (32 bytes) remains after them. Text in another language has runs of one to
+// three bytes - a space, a digit - between its characters, and a call into the
+// kernel for each such run was measured 2-4x slower than this loop
+// (BM_IsValidUtf8Mixed); a run that has lasted 16 bytes is most likely a line
+// of keywords and numbers, where the kernel is ten times faster.
+constexpr std::size_t kAsciiProbe = 16;
 constexpr std::size_t kAsciiBlock = 32;
 
 // Windows-1252 differs from Latin-1 only in 0x80-0x9F. Source: the Unicode
@@ -145,10 +150,17 @@ bool isValidUtf8(std::string_view text)
         unsigned char highSecond = 0xBF;
 
         if (lead <= 0x7F) {
-            // A run of ASCII: a block at a time where the processor allows.
-            // Only for a run that could fill a block, so the short names and
-            // texts the entity model checks one by one pay nothing for it.
-            i += size - i >= kAsciiBlock ? kernels::asciiPrefix(bytes + i, size - i) : 1;
+            // A run of ASCII: byte by byte for the first kAsciiProbe, then a
+            // block at a time where the processor allows. A short name, or a
+            // space between two accented words, never reaches the call.
+            const std::size_t start = i;
+            const std::size_t probeEnd = std::min(size, start + kAsciiProbe);
+            while (i < probeEnd && bytes[i] <= 0x7F) {
+                ++i;
+            }
+            if (i - start == kAsciiProbe && size - i >= kAsciiBlock) {
+                i += kernels::asciiPrefix(bytes + i, size - i);
+            }
             continue;
         }
         if (lead >= 0xC2 && lead <= 0xDF) {

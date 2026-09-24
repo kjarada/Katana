@@ -25,14 +25,15 @@ static_assert(std::is_standard_layout_v<Vec3> && sizeof(Vec3) == 3 * sizeof(doub
 
 #if defined(KATANA_HAVE_AVX2_KERNELS)
 
-// Below this the kernel spends its time in its scalar tail, and the dispatch is
-// pure cost; a drawing's strings are mostly under it (about six vertices).
-constexpr std::size_t kSimdMinimum = 8;
+// Below this a transform kernel spends its time in its scalar tail, and the
+// dispatch is pure cost. (Bounds have their own, measured, minimum in the
+// header: kBoundsBatchMinimum. Transforms have no caller yet to measure the
+// break-even for; 8 is two kernel steps.)
+constexpr std::size_t kTransformMinimum = 8;
 
-[[nodiscard]] bool useAvx2(std::size_t count)
+[[nodiscard]] bool avx2Active()
 {
-    return count >= kSimdMinimum &&
-           katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
+    return katana::core::activeSimdLevel() == katana::core::SimdLevel::Avx2;
 }
 
 // Where a coordinate's extreme is zero, WHICH zero the sequential loop kept
@@ -66,7 +67,7 @@ void settleZero(double& extreme, const double* coordinates, std::size_t stride, 
 void transformPoints(const Mat4& m, std::span<Vec3> points)
 {
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (useAvx2(points.size())) {
+    if (points.size() >= kTransformMinimum && avx2Active()) {
         katana_avx2_transform_points3(m.data.data(), &points.data()->x, points.size());
         return;
     }
@@ -79,7 +80,7 @@ void transformPoints(const Mat4& m, std::span<Vec3> points)
 void transformPoints(const Mat3& m, std::span<Point2> points)
 {
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (useAvx2(points.size())) {
+    if (points.size() >= kTransformMinimum && avx2Active()) {
         katana_avx2_transform_points2(m.data.data(), &points.data()->x, points.size());
         return;
     }
@@ -89,11 +90,11 @@ void transformPoints(const Mat3& m, std::span<Point2> points)
     }
 }
 
-Box2 boundsOf(std::span<const Point2> points)
+Box2 detail::boundsOfBatch(std::span<const Point2> points)
 {
     Box2 box;
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (useAvx2(points.size())) {
+    if (avx2Active()) {
         const double* xy = &points.data()->x;
         double out[4];
         katana_avx2_bounds2(xy, points.size(), out);
@@ -111,11 +112,11 @@ Box2 boundsOf(std::span<const Point2> points)
     return box;
 }
 
-AABB boundsOf(std::span<const Vec3> points)
+AABB detail::boundsOfBatch(std::span<const Vec3> points)
 {
     AABB box;
 #if defined(KATANA_HAVE_AVX2_KERNELS)
-    if (useAvx2(points.size())) {
+    if (avx2Active()) {
         const double* xyz = &points.data()->x;
         double out[6];
         katana_avx2_bounds3(xyz, points.size(), out);
