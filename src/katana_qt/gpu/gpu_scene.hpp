@@ -12,11 +12,11 @@
 //     (scene_origin.hpp has the precision rule). 16 bytes a vertex instead of
 //     the draw list's 28 (three doubles and a colour).
 //   * Triangles keep sharing vertices through a 32-bit index buffer.
-//   * Lines and points become INSTANCES: each carries its own endpoint
-//     positions and colours, and the vertex shader widens it into a screen-
-//     space quad. The software path widens every line into two triangles on
-//     the CPU (render::Rasterizer, buildScreenPrimitives); here that work - and
-//     the antialiasing - happens per pixel on the GPU.
+//   * Lines and points carry their own positions and colours (a line its two
+//     ends, a point its centre), and a shader widens each into a screen-space
+//     quad. The software path widens every line into two triangles on the CPU
+//     (render::Rasterizer, buildScreenPrimitives); here that work - and the
+//     antialiasing - happens on the GPU.
 //   * A line's or point's depthBias is NOT carried. It is a constant in NDC
 //     depth, sized for the software path's standard-Z buffer, and applied to
 //     a reversed-Z float buffer it would pull a line metres towards the eye
@@ -49,17 +49,23 @@ struct GpuVertex {
 };
 static_assert(sizeof(GpuVertex) == 16);
 
-struct GpuLine {
-    float ax = 0.0f;
-    float ay = 0.0f;
-    float az = 0.0f;
-    std::uint32_t colorA = 0;
-    float bx = 0.0f;
-    float by = 0.0f;
-    float bz = 0.0f;
-    std::uint32_t colorB = 0;
+// One end of a line. The width is carried at both ends, so that the two ends
+// are two self-contained VERTICES of a line list (for the geometry shader,
+// which sees a line as its two vertices) and together one INSTANCE (for the
+// instanced fallback, which sees 40 bytes) - one buffer serves both ways of
+// drawing (gpu_renderer.hpp, LineExpansion).
+struct GpuLineEnd {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    std::uint32_t color = 0;
     float width = 1.0f; // logical pixels, as DrawLine::width
-    float unused = 0.0f;
+};
+static_assert(sizeof(GpuLineEnd) == 20);
+
+struct GpuLine {
+    GpuLineEnd a;
+    GpuLineEnd b;
 };
 static_assert(sizeof(GpuLine) == 40);
 
