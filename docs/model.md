@@ -194,6 +194,30 @@ faster. Properties, metadata and property defaults are JSON text via
 translation unit and keeps those readable for debugging and diffing. (This
 paragraph said geometry was JSON too, from before schema 3.)
 
+### The tables, and the migration that made each
+
+`kMigrations` in `src/katana_storage/project_store.cpp` is the schema's
+history and its reference: each entry's comment says why the change was made
+and why no existing row needed repairing. The file is marked as a Katana
+project by `PRAGMA application_id` ("KTNA") and versioned by
+`PRAGMA user_version`. At schema 9 it holds fourteen tables:
+
+| Migration | Adds |
+|---|---|
+| 1 | `metadata` (key and value), `layers`, `styles`, `property_definitions`, `entities` (indexed by layer and by type) |
+| 2 | `relationships` between entities (indexed both ways) |
+| 3 | `entities.geometry_blob`: geometry as a binary blob, beside the old JSON column, which a load falls back to and a save converts |
+| 4 | `linetypes` and `linetype_elements` (the dashes in order, a row each) |
+| 5 | `dimension_styles`, and the layer column naming one |
+| 6 | `hatch_patterns` and `hatch_families`, and the layer and style columns naming one |
+| 7 | `alignments` and `alignment_pis`: the PI definition only; the elements are solved on load |
+| 8 | `alignment_pvis`: an alignment's design profile |
+| 9 | a style's `description`, `symbol` and `symbol_size` |
+
+A new table or column is a new entry at the end, never an edit of a released
+one, and each default is chosen so that a project written before it draws
+exactly as it did.
+
 ### Metadata a newer build wrote
 
 The `metadata` table is key and value, and it is the one table `save` does not
