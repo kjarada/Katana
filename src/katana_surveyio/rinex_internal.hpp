@@ -147,6 +147,54 @@ enum class Packing {
 // The sentence a person is told for a packed file: what it is and what to do.
 [[nodiscard]] std::string packingRefusal(Packing packing, std::string_view fileName);
 
+// ---- Compact RINEX (Hatanaka), which is expanded as it is read ---------------------
+
+// Which line of the compact file each line of its expansion came from, so a
+// warning about the expansion names a line the person can find in the file
+// they have. Stored as runs, not per line: a run is a first expanded line, the
+// compact line it came from, and how many expanded lines each compact line
+// became from there on (1 for a satellite record, 2 or more for a RINEX 2
+// satellite whose observations wrap, 0 for "every line of the run came from
+// the same compact line" - an epoch line and its continuation lines).
+class LineMap {
+  public:
+    void add(std::size_t expandedFirst, std::size_t compactFirst, std::size_t expandedPerCompact);
+    // The compact line for 1-based expanded line `expanded`; 0 stays 0 (the
+    // file as a whole).
+    [[nodiscard]] std::size_t compactLine(std::size_t expanded) const;
+    [[nodiscard]] bool empty() const { return runs_.empty(); }
+
+  private:
+    struct Run {
+        std::size_t expandedFirst = 0;
+        std::size_t compactFirst = 0;
+        std::size_t expandedPerCompact = 1;
+    };
+    std::vector<Run> runs_;
+};
+
+// A Compact RINEX file expanded to the RINEX observation file it stands for.
+struct CompactExpansion {
+    std::string text;        // the RINEX observation file
+    std::string description; // "Compact RINEX 3.0, written by RNX2CRX ver.4.1.0 on ..."
+    LineMap lines;           // expanded line -> compact line
+    // What could not be expanded, by compact line; the rest of the file is
+    // still expanded from the next epoch that starts afresh.
+    std::vector<ReadWarning> warnings;
+    std::size_t compactLines = 0;  // lines in the compact file
+    std::size_t linesSkipped = 0;  // compact lines that could not be expanded
+    std::size_t optionalLines = 0; // Compact RINEX 3 optional ('&') records, skipped
+};
+
+// Expands `bytes`, which packingOf() found to be Compact RINEX. An error Result
+// (naming the file) when the compact header itself cannot be read or its
+// version is one this expansion does not know; damage in the body is a
+// warning and the epochs it spoils are left out, the rest kept. Refuses to
+// expand beyond `maxExpandedBytes`.
+[[nodiscard]] katana::core::Result<CompactExpansion>
+expandCompactRinex(std::string_view bytes, std::string_view fileName,
+                   std::size_t maxExpandedBytes);
+
 // ---- Navigation files -----------------------------------------------------------
 
 // The navigation files that conventionally sit beside an observation file

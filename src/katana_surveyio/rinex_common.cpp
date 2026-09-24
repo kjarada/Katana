@@ -199,10 +199,8 @@ std::string packingRefusal(Packing packing, std::string_view fileName)
         return name + " is a zip archive. Extract it first and import the RINEX observation "
                       "file inside it.";
     case Packing::Hatanaka:
-        return name + " is Hatanaka-compressed (Compact RINEX, .crx or .YYd). Katana reads plain "
-                      "RINEX: convert it with CRX2RNX (the free tool from the Geospatial "
-                      "Information Authority of Japan) and import the .rnx or .YYo file it "
-                      "writes.";
+        return name + " is Hatanaka-compressed (Compact RINEX, .crx or .YYd), which only ever "
+                      "holds observation data; import it as the observation file.";
     case Packing::Plain:
         break;
     }
@@ -234,11 +232,13 @@ std::vector<std::string> navigationFileCandidates(std::string_view observationFi
     const std::string_view extension = observationFileName.substr(dot + 1);
 
     // Short names (RINEX 2, and RINEX 3 files named the old way): ssssdddf.yyo
-    // beside ssssdddf.yyn (GPS), .yyg (GLONASS), .yyl (Galileo), .yyh (SBAS)
-    // and .yyp (mixed, the RINEX 3 short-name convention).
+    // (or .yyd, Hatanaka-compressed) beside ssssdddf.yyn (GPS), .yyg
+    // (GLONASS), .yyl (Galileo), .yyh (SBAS) and .yyp (mixed, the RINEX 3
+    // short-name convention).
     if (extension.size() == 3 && isDigit(extension[0]) && isDigit(extension[1]) &&
-        (extension[2] == 'o' || extension[2] == 'O')) {
-        const bool upper = extension[2] == 'O';
+        (extension[2] == 'o' || extension[2] == 'O' || extension[2] == 'd' ||
+         extension[2] == 'D')) {
+        const bool upper = extension[2] == 'O' || extension[2] == 'D';
         for (const char kind : std::string_view("nglhp")) {
             std::string name(stem);
             name += '.';
@@ -250,9 +250,11 @@ std::vector<std::string> navigationFileCandidates(std::string_view observationFi
     }
 
     // Long names (RINEX 3 and 4, Table A1): SSSSMRCCC_K_YYYYDDDHHMM_PPU_FRU_xO.rnx
-    // beside SSSSMRCCC_K_YYYYDDDHHMM_PPU_xN.rnx - a navigation file has no
-    // observation frequency part.
-    if (equalsIgnoringCase(extension, "rnx")) {
+    // (or .crx, Hatanaka-compressed) beside SSSSMRCCC_K_YYYYDDDHHMM_PPU_xN.rnx -
+    // a navigation file has no observation frequency part, and is never
+    // Hatanaka-compressed (the compression is defined for observations only).
+    const bool compact = equalsIgnoringCase(extension, "crx");
+    if (compact || equalsIgnoringCase(extension, "rnx")) {
         std::vector<std::string_view> parts;
         std::size_t start = 0;
         while (true) {
@@ -271,7 +273,9 @@ std::vector<std::string> navigationFileCandidates(std::string_view observationFi
                 base += '_';
             }
             for (const char system : std::string_view("MGRECJIS")) {
-                names.push_back(base + system + "N." + std::string(extension));
+                names.push_back(base + system + "N." +
+                                (compact ? std::string(extension[0] == 'C' ? "RNX" : "rnx")
+                                         : std::string(extension)));
             }
             return names;
         }
