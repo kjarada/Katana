@@ -1,4 +1,4 @@
-// What a project records of the 12d customisation it was drawn with, and what
+// What a project records of the customisation it was drawn with, and what
 // opening it says is missing (storage::ProjectMetadata::customisation).
 // Hand-built libraries: the names are what matter, not what the files draw.
 
@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 
 #include "katana/cad/customisation_record.hpp"
 
@@ -207,4 +208,92 @@ TEST(CustomisationRecord, AFileNamedTwiceInOneLoadIsReadOnce)
     // Two names for files that do not exist are not known to be one.
     EXPECT_EQ(katana::cad::distinctCustomisationFiles({dir / "a.4d", dir / "b.4d"}).files.size(), 2U);
     std::filesystem::remove_all(dir);
+}
+
+// ---- a file renamed since the project was saved ----------------------------------------------
+
+// The hash a former name is known by: FNV-1a over the bytes, 64-bit, checked
+// against the published test vectors of the algorithm.
+TEST(CustomisationRecord, AFormerNameIsKnownByItsFnv1a64BitHash)
+{
+    EXPECT_EQ(katana::cad::sourceNameHash(""), 0xcbf29ce484222325ULL);
+    EXPECT_EQ(katana::cad::sourceNameHash("a"), 0xaf63dc4c8601ec8cULL);
+    EXPECT_EQ(katana::cad::sourceNameHash("foobar"), 0x85944171f73967e8ULL);
+}
+
+// A project saved before its files were renamed records the old names; the
+// same files are loaded under the new ones. By hand: "old_codes.4d" and
+// "old_lines.4d" are renamed to the loaded survey_codes.mapfile and
+// linestyles.4d (which still defines "A"), so only "mine.4d" - which nothing
+// renamed and nothing loaded - is missing; and the save records what is
+// loaded, under the new names, and the one file still missing.
+TEST(CustomisationRecord, ARecordedFormerNameIsAnsweredByTheFileThatNowHasItsPlace)
+{
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("A", "linestyles.4d")).ok());
+    std::vector<CustomisationSource> loaded;
+    katana::cad::recordCustomisationLoad(
+        loaded, {library("linestyles.4d"), mapfile("survey_codes.mapfile")}, false, false);
+    const std::vector<katana::cad::RenamedSource> renamed{
+        {katana::cad::sourceNameHash("old_lines.4d"), "linestyles.4d"},
+        {katana::cad::sourceNameHash("old_codes.4d"), "survey_codes.mapfile"},
+    };
+    const std::vector<std::string> recorded{"old_codes.4d", "old_lines.4d", "mine.4d"};
+    const std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, styles, loaded, renamed);
+    EXPECT_EQ(missing, (std::vector<std::string>{"mine.4d"}));
+    EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded),
+              (std::vector<std::string>{"linestyles.4d", "survey_codes.mapfile", "mine.4d"}));
+}
+
+// The rename answers for a file only while the file that has its place is
+// loaded: without it, the drawing lacks what the old name brought, and the
+// warning names the file as the project recorded it.
+TEST(CustomisationRecord, AFormerNameWhoseFileIsNotLoadedNowIsMissingAsRecorded)
+{
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("A", "mine.4d")).ok());
+    std::vector<CustomisationSource> loaded;
+    // linestyles.4d was loaded, and mine.4d then redefined all it brought:
+    // nothing is drawn with it now.
+    katana::cad::recordCustomisationLoad(loaded, {library("linestyles.4d")}, false, false);
+    katana::cad::recordCustomisationLoad(loaded, {library("mine.4d")}, false, false);
+    const std::vector<katana::cad::RenamedSource> renamed{
+        {katana::cad::sourceNameHash("old_lines.4d"), "linestyles.4d"}};
+    EXPECT_EQ(katana::cad::customisationNotLoaded({"old_lines.4d"}, styles, loaded, renamed),
+              (std::vector<std::string>{"old_lines.4d"}));
+    EXPECT_EQ(katana::cad::customisationNotLoaded({"old_lines.4d"}, styles, {}, renamed),
+              (std::vector<std::string>{"old_lines.4d"}));
+}
+
+// The built-in customisation's renames: one for each of its files, in load
+// order, each an earlier name that is not the name it has now. Nothing here
+// can spell the earlier names; that each is answered is the test above.
+TEST(CustomisationRecord, TheBuiltInCustomisationsFourFilesEachAnswerForTheNameTheyHadBefore)
+{
+    const auto renames = katana::cad::builtinRenames();
+    std::vector<std::string> now;
+    std::set<std::uint64_t> former;
+    for (const katana::cad::RenamedSource& rename : renames) {
+        now.emplace_back(rename.now);
+        former.insert(rename.formerName);
+        EXPECT_NE(rename.formerName, katana::cad::sourceNameHash(rename.now)) << rename.now;
+        EXPECT_NE(rename.formerName, katana::cad::sourceNameHash("")) << rename.now;
+    }
+    EXPECT_EQ(now, (std::vector<std::string>{"linestyles.4d", "survey_codes.mapfile",
+                                             "survey_codes_names.mapfile", "symbols.4d"}));
+    EXPECT_EQ(former.size(), renames.size()) << "no two files had one name";
+
+    // And a project that recorded the names the files have now is missing
+    // nothing when they are loaded.
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("A", "linestyles.4d")).ok());
+    ASSERT_TRUE(styles.add(definition("B", "symbols.4d")).ok());
+    std::vector<CustomisationSource> loaded;
+    katana::cad::recordCustomisationLoad(
+        loaded,
+        {library("linestyles.4d"), mapfile("survey_codes.mapfile"),
+         mapfile("survey_codes_names.mapfile"), library("symbols.4d")},
+        false, false);
+    EXPECT_TRUE(katana::cad::customisationNotLoaded(now, styles, loaded).empty());
 }
