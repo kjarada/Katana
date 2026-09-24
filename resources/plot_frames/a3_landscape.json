@@ -1,0 +1,5070 @@
+{
+ "_about": "Katana's A3 landscape plot frame: the sheet border, the title-block strip and its cells, the field slots and the text rules, measured from the owner's cross-section app so that a Katana sheet plots exactly like it. Coordinates are millimetres on the paper with the origin at the bottom-left and Y up (the *_tbf values); anchor_tbf already includes each text's offset and raise. Organisation branding has been removed: the logo cell, the organisation cell and the notes cell are empty slots the user fills (their own logo image, organisation name and notes). See docs/plotting.md.",
+ "coordinates": {
+  "units": "mm",
+  "tbf_origin": "bottom-left of the sheet, Y up",
+  "svg_origin": "top-left, Y down",
+  "convert": "y_svg = 297 - y_tbf, applied per coordinate rather than by a mirror transform, so text is not mirrored (sheet.js:4-7)",
+  "text_anchor": "a text is drawn at (x + offset, y + raise); six texts carry a non-zero offset/raise (#25, #127, #160, #171, #174, #175) and anchor_tbf already includes it (sheet.js:197-198)",
+  "angles": "degrees counter-clockwise in tbf; the SVG uses rotate(-angle) (sheet.js:233)"
+ },
+ "sheet": {
+  "size": "A3 Landscape",
+  "width_mm": 420,
+  "height_mm": 297,
+  "width_height_hardcoded": "tbf.js:228-229 (only the margins are read from the .tbf)",
+  "margins_mm": {
+   "left": 23,
+   "right": 10,
+   "top": 10,
+   "bottom": 35
+  },
+  "plot_frame_viewport": 1,
+  "viewport_svg": {
+   "x": 23,
+   "y": 10,
+   "w": 387,
+   "h": 252,
+   "source": "sheet.js:659-667 Sheet.viewport"
+  },
+  "viewport_tbf": {
+   "x0": 23,
+   "y0": 35,
+   "x1": 410,
+   "y1": 287
+  },
+  "drawing_border_tbf": {
+   "x0": 21.825,
+   "y0": 34.625,
+   "x1": 411.309,
+   "y1": 289.265,
+   "w": 389.484,
+   "h": 254.64,
+   "entity": 0,
+   "weight_mm": 0.53
+  },
+  "title_block_tbf": {
+   "x0": 21.825,
+   "y0": 8.945,
+   "x1": 411.309,
+   "y1": 34.625,
+   "w": 389.484,
+   "h": 25.68,
+   "entity": 1,
+   "weight_mm": 0.53
+  },
+  "sheet_edge_tbf": {
+   "x0": 0,
+   "y0": 0,
+   "x1": 420,
+   "y1": 297,
+   "entity": 39,
+   "note": "construction layer, acad 030 (#ff8000), 0.18 mm. sheet.js draws it (an orange hairline at the paper edge in the render). Treat it as a guide that does not plot. Entity 41 is a second construction rectangle 420.5 wide."
+  },
+  "background": "#FFFFFF rect 0 0 420 297 (sheet.js:617)",
+  "draw_order": [
+   "white background",
+   "panels in array order, which is the z-order (sheet.js:619-626)",
+   "title block polylines",
+   "title block symbols",
+   "title block text",
+   "interactive only: chrome layer with selection handles and a dashed blue plot-frame guide (main.js:228-233)"
+  ]
+ },
+ "palette": {
+  "white": "#000000",
+  "acad 007": "#000000",
+  "acad 030": "#ff8000",
+  "sui water potable": "#0093D0",
+  "off yellow": "#C9A227",
+  "yellow": "#E8B800",
+  "orange": "#F07000",
+  "brown": "#8B5A2B",
+  "green": "#00922B",
+  "cyan": "#00A0B0",
+  "acad 010": "#ff0000",
+  "acad 162": "#0029a6",
+  "pen 018": "#000000"
+ },
+ "palette_rule": "colors.js resolve(): CAD \"white\" and acad 7 plot black; acad N follows the AutoCAD colour index (hue=(N-10)/10*15 degrees, shade table); pens 0/7/18 are black (colors.js:54-122)",
+ "line_styles": {
+  "1": "solid",
+  "DGN Style 1": "dash 2.2 mm, gap 1.1 mm (sheet.js:28)"
+ },
+ "text_rules": {
+  "font": "textstyle \"82Arial\" is pen prefix \"82\" plus face Arial, rendered as \"Arial, Arial, Helvetica, sans-serif\" (sheet.js:185-190). Only the disclaimer uses \"Arial Narrow\".",
+  "size": "worldsize is the CAP height in mm; SVG font-size = worldsize / 0.716, the Arial cap-height ratio (sheet.js:181-196)",
+  "x_factor": "horizontal stretch about the anchor via scale(xf,1) (sheet.js:234-237); nearly every label uses 0.82 (condensed)",
+  "width_estimate": "chars * font_size * 0.52 * x_factor (sheet.js:208-209)",
+  "justify": "\"vertical-horizontal\", e.g. bottom-left or middle-centre; horizontal maps to text-anchor start/middle/end, vertical to baseline alphabetic/central/hanging (sheet.js:160-179)",
+  "multiline": "anchored on the FIRST line and grows downward whatever the justification; line pitch is 1.5 x cap height (sheet.js:205-206, 243-247, 276-281)",
+  "centred_fields": "scale (user_text_17), drawing_number and total sheets (user_text_1) are re-centred in the ruled cell found from the vertical rules (sheet.js:211-223, main.js:472-475)",
+  "squeeze": "a left-anchored single-line field wider than the room to the next vertical rule gets textLength=room and lengthAdjust=spacingAndGlyphs (sheet.js:262-272)",
+  "lift_off_rule": "a baseline closer than 0.24 em above a horizontal rule is lifted clear, capped by the headroom under the rule above (sheet.js:132-156, 228-230)",
+  "leading_space": "several field texts start with a space, e.g. \" $drawing_number\" (a template artefact the app keeps)"
+ },
+ "cells": [
+  {
+   "id": "drawing_area",
+   "tbf": [
+    21.825,
+    34.625,
+    411.309,
+    289.265
+   ],
+   "purpose": "the whole drawing; panels are placed in the viewport inset (23,35)-(410,287)"
+  },
+  {
+   "id": "legend",
+   "tbf": [
+    21.825,
+    8.945,
+    107.265,
+    34.625
+   ],
+   "purpose": "PUBLIC UTILITY LEGEND. Title row 31.256-34.625; note 21.825-50.305 x 21.329-31.256; line-type table 50.305-107.265 x 21.329-31.256 (2 columns split at 78.785, rows at 28.798/26.316/23.811); symbol table 21.825-107.265 x 8.945-21.329 (rows 18.848/16.390/13.908/11.427; columns label|symbol at 45.505|50.305|73.985|78.785|102.465)",
+   "entities": "42-104, 110-120, 162-169"
+  },
+  {
+   "id": "scale",
+   "tbf": [
+    107.265,
+    22.625,
+    167.265,
+    34.625
+   ],
+   "purpose": "label SCALE (#109) and value user_text_17, cap 3, centred in the cell (#127). The value is DERIVED from the plotted scale and read-only (main.js:446-497)"
+  },
+  {
+   "id": "coord_system",
+   "tbf": [
+    107.265,
+    18.288,
+    144.478,
+    22.625
+   ],
+   "purpose": "\"CO-ORD SYSTEM: MGA{user_text_8} ZONE {user_text_9}\" (#108)"
+  },
+  {
+   "id": "height_datum",
+   "tbf": [
+    144.478,
+    18.288,
+    167.265,
+    22.625
+   ],
+   "purpose": "static \"HEIGHT DATUM: A.H.D.\" (#107); should become a field"
+  },
+  {
+   "id": "file_model",
+   "tbf": [
+    107.265,
+    8.945,
+    167.265,
+    18.288
+   ],
+   "purpose": "FILE NAME: with user_text_19 on a dashed underline at y 14.768; MODEL NAME: with user_text_7 on a dashed underline at y 10.022"
+  },
+  {
+   "id": "logo",
+   "tbf": [
+    167.265,
+    22.625,
+    220.229,
+    34.625
+   ],
+   "size_mm": [
+    52.964,
+    12
+   ],
+   "purpose": "LOGO slot: the user's own logo image, fitted with its aspect kept and about 1 mm padding; empty by default",
+   "logo_geometry_bbox_tbf": [
+    168.618,
+    23.249,
+    180.468,
+    34.333
+   ]
+  },
+  {
+   "id": "signoff",
+   "tbf": [
+    167.265,
+    8.945,
+    220.229,
+    22.625
+   ],
+   "purpose": "Four rows, UTILITIES/SURVEYED/COMPILED/REVIEWED. Name fields user_text_3..6 (cap 1.5) sit on dashed lines x 176.488-201.661 at y 19.977/16.477/12.977/9.477; DATE: and $time sit on dashed lines x 208.62-219.273 at the same y"
+  },
+  {
+   "id": "disclaimer",
+   "tbf": [
+    220.229,
+    12,
+    297.117,
+    34.625
+   ],
+   "purpose": "NOTES slot: the user's own multi-line notes or disclaimer (narrow text, cap 0.85, line pitch 1.275, first line anchored at (220.918, 32.961)); empty by default"
+  },
+  {
+   "id": "manager",
+   "tbf": [
+    220.229,
+    8.945,
+    297.117,
+    12
+   ],
+   "purpose": "\"SURVEY UNIT MANAGER:\" with user_text_2 (cap 2) on a dashed line 242.167-277.840 at 10.501; DATE: and $time on a dashed line 284.126-295.973 at 10.513"
+  },
+  {
+   "id": "organisation",
+   "tbf": [
+    297.117,
+    28.865,
+    401.843,
+    34.625
+   ],
+   "size_mm": [
+    104.726,
+    5.76
+   ],
+   "purpose": "ORGANISATION slot: the user's organisation or client name (cap 3.738), blank by default"
+  },
+  {
+   "id": "project",
+   "tbf": [
+    297.117,
+    8.945,
+    401.843,
+    28.865
+   ],
+   "purpose": "five-line middle-centre block (#177): LGA / Address / Address Details / Purpose / Drawing Set Number, cap 2.5, first line anchored at (350.275, 26.447)"
+  },
+  {
+   "id": "sheet_count",
+   "tbf": [
+    401.843,
+    22.385,
+    411.309,
+    34.625
+   ],
+   "purpose": "\"No. of\" / \"SHEETS\" with user_text_1, cap 3, centred. Total sheets; crosssect does NOT derive it from the sheet count"
+  },
+  {
+   "id": "sheet_number",
+   "tbf": [
+    401.843,
+    8.945,
+    411.309,
+    22.385
+   ],
+   "purpose": "\"SHEET No.\" with $drawing_number, cap 3, centred. This sheet's number, set automatically on Add/Duplicate sheet (main.js:2452, 2470)"
+  },
+  {
+   "id": "left_margin",
+   "tbf": [
+    19.9,
+    9.459,
+    21.825,
+    289.265
+   ],
+   "purpose": "rotated 90 degrees: \"Survey Plan Filename:\" (#36) and user_text_19 (#170) up the left margin"
+  },
+  {
+   "id": "stamp",
+   "tbf": [
+    379.813,
+    1.821,
+    420,
+    4
+   ],
+   "purpose": "\"A3 Border version: 2.0    $time\", cap 1 (#40), below the title block"
+  }
+ ],
+ "fields": [
+  {
+   "key": "user_text_1",
+   "token": "$user_text<1,Total Sheet Number>",
+   "label_in_tbf": "Total Sheet Number",
+   "entities": [
+    35
+   ]
+  },
+  {
+   "key": "user_text_2",
+   "token": "$user_text<2,Survey Unit Manager>",
+   "label_in_tbf": "Survey Unit Manager",
+   "entities": [
+    176
+   ]
+  },
+  {
+   "key": "user_text_3",
+   "token": "$user_text<3,Locator Name>",
+   "label_in_tbf": "Locator Name",
+   "entities": [
+    172
+   ]
+  },
+  {
+   "key": "user_text_4",
+   "token": "$user_text<4,Surveyor Name>",
+   "label_in_tbf": "Surveyor Name",
+   "entities": [
+    173
+   ]
+  },
+  {
+   "key": "user_text_5",
+   "token": "$user_text<5,Compiled By>",
+   "label_in_tbf": "Compiled By",
+   "entities": [
+    174
+   ]
+  },
+  {
+   "key": "user_text_6",
+   "token": "$user_text<6,Reviewd By>",
+   "label_in_tbf": "Reviewd By",
+   "entities": [
+    175
+   ]
+  },
+  {
+   "key": "user_text_7",
+   "token": "$user_text<7,Model Name>",
+   "label_in_tbf": "Model Name",
+   "entities": [
+    121
+   ]
+  },
+  {
+   "key": "user_text_8",
+   "token": "$user_text<8,Coordinate System 2020 or 1994>",
+   "label_in_tbf": "Coordinate System 2020 or 1994",
+   "entities": [
+    108
+   ]
+  },
+  {
+   "key": "user_text_9",
+   "token": "$user_text<9,MGA ZONE>",
+   "label_in_tbf": "MGA ZONE",
+   "entities": [
+    108
+   ]
+  },
+  {
+   "key": "user_text_10",
+   "token": "$user_text<10,LGA>",
+   "label_in_tbf": "LGA",
+   "entities": [
+    177
+   ]
+  },
+  {
+   "key": "user_text_11",
+   "token": "$user_text<11,Address>",
+   "label_in_tbf": "Address",
+   "entities": [
+    177
+   ]
+  },
+  {
+   "key": "user_text_12",
+   "token": "$user_text<12,Address Details>",
+   "label_in_tbf": "Address Details",
+   "entities": [
+    177
+   ]
+  },
+  {
+   "key": "user_text_13",
+   "token": "$user_text<13,Purpose>",
+   "label_in_tbf": "Purpose",
+   "entities": [
+    177
+   ]
+  },
+  {
+   "key": "user_text_14",
+   "token": "$user_text<14,Drawing Set Number>",
+   "label_in_tbf": "Drawing Set Number",
+   "entities": [
+    177
+   ]
+  },
+  {
+   "key": "user_text_17",
+   "token": "$user_text<17,SCALE\"1:500, 1:1000.. Etc\">",
+   "label_in_tbf": "SCALE\"1:500, 1:1000.. Etc\"",
+   "entities": [
+    127
+   ]
+  },
+  {
+   "key": "user_text_19",
+   "token": "$user_text<19,pdf_filename>",
+   "label_in_tbf": "pdf_filename",
+   "entities": [
+    170,
+    171
+   ]
+  },
+  {
+   "key": "drawing_number",
+   "token": "$drawing_number",
+   "label_in_tbf": "Drawing Number",
+   "entities": [
+    178
+   ]
+  },
+  {
+   "key": "plot_date",
+   "token": "$time<>",
+   "label_in_tbf": "Plot Date",
+   "entities": [
+    40,
+    122,
+    123,
+    124,
+    125,
+    126
+   ]
+  }
+ ],
+ "field_semantics": {
+  "user_text_1": "Total Sheet Number, shown in the No. of SHEETS cell; default \"1\" (main.js:31); never recomputed from the sheet count",
+  "drawing_number": "SHEET No. cell; default \"1\"; set to index+1 on Add/Duplicate sheet",
+  "plot_date": "every $time (6 DATE cells and the stamp) shows ONE value: the override, or today as dd/mm/yy (tbf.js:361-381)",
+  "user_text_17": "SCALE, derived as \"H 1:{scale}  V 1:{scale/vExag}\" and read-only (main.js:484-497, 1007)",
+  "user_text_19": "pdf_filename: printed twice (rotated in the left margin and in the FILE NAME cell) and used as the export base name (main.js:3503-3507)",
+  "others": "free text, typed in the sidebar field list or by clicking the text on the sheet (main.js:966-1060); \"Fill from JSON\" maps project metadata onto the fields (main.js:1062-1085)"
+ },
+ "regional_conventions": [
+  "\"HEIGHT DATUM: A.H.D.\" (#107, Australian Height Datum), hard-coded",
+  "\"CO-ORD SYSTEM: MGA.. ZONE ..\" (#108, Map Grid of Australia)",
+  "PUBLIC UTILITY LEGEND (AS 5488 / Before You Dig colours; the symbols are redrawn in symbols.js)",
+  "\"SURVEY UNIT MANAGER\" wording"
+ ],
+ "symbols_glyphs": "symbols.js:39-117: 15 procedural glyphs in a -1..1 local box, scaled by size, stroke 0.18/size so every symbol plots at 0.18 mm; an unknown style draws an open 0.8 square",
+ "entities": [
+  {
+   "index": 0,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": true,
+   "points_tbf": [
+    [
+     21.825,
+     289.265
+    ],
+    [
+     411.309,
+     289.265
+    ],
+    [
+     411.309,
+     34.625
+    ],
+    [
+     21.825,
+     34.625
+    ],
+    [
+     21.825,
+     289.265
+    ]
+   ]
+  },
+  {
+   "index": 1,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": true,
+   "points_tbf": [
+    [
+     21.825,
+     8.945
+    ],
+    [
+     411.309,
+     8.945
+    ],
+    [
+     411.309,
+     34.625
+    ],
+    [
+     21.825,
+     34.625
+    ],
+    [
+     21.825,
+     8.945
+    ]
+   ]
+  },
+  {
+   "index": 2,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     297.117,
+     28.865
+    ],
+    [
+     401.843,
+     28.865
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 3,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     107.265,
+     34.625
+    ],
+    [
+     107.265,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 4,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     167.265,
+     34.625
+    ],
+    [
+     167.265,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 5,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     107.277,
+     22.625
+    ],
+    [
+     220.229,
+     22.625
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 6,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     401.843,
+     34.625
+    ],
+    [
+     401.843,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 7,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     401.843,
+     22.385
+    ],
+    [
+     411.309,
+     22.385
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 8,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     242.167,
+     10.501
+    ],
+    [
+     277.84,
+     10.501
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 9,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     220.229,
+     34.625
+    ],
+    [
+     220.229,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 10,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     284.126,
+     10.513
+    ],
+    [
+     295.973,
+     10.513
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 11,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     120.938,
+     10.022
+    ],
+    [
+     165.88,
+     10.022
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 12,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     118.144,
+     14.768
+    ],
+    [
+     165.764,
+     14.768
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 13,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     176.488,
+     19.977
+    ],
+    [
+     201.661,
+     19.977
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 14,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     208.62,
+     19.977
+    ],
+    [
+     219.273,
+     19.977
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 15,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     208.62,
+     16.477
+    ],
+    [
+     219.273,
+     16.477
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 16,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     208.426,
+     12.977
+    ],
+    [
+     219.079,
+     12.977
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 17,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     208.62,
+     9.477
+    ],
+    [
+     219.273,
+     9.477
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 18,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     176.488,
+     16.477
+    ],
+    [
+     201.661,
+     16.477
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 19,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     176.488,
+     12.977
+    ],
+    [
+     201.661,
+     12.977
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 20,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "field-underline",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "DGN Style 1",
+   "dash_mm": [
+    2.2,
+    1.1
+   ],
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     176.488,
+     9.477
+    ],
+    [
+     201.661,
+     9.477
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 21,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 403.902,
+   "y_tbf": 20.518,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    403.902,
+    20.518
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "SHEET No.",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 403.902,
+    "y": 276.482,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(403.902 276.482) scale(0.82 1) translate(-403.902 -276.482)",
+    "textLength": null,
+    "content_filled_example": "SHEET No."
+   }
+  },
+  {
+   "index": 22,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 279.059,
+   "y_tbf": 10.611,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    279.059,
+    10.611
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "DATE:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 279.059,
+    "y": 286.389,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(279.059 286.389) scale(0.82 1) translate(-279.059 -286.389)",
+    "textLength": null,
+    "content_filled_example": "DATE:"
+   }
+  },
+  {
+   "index": 23,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 108.146,
+   "y_tbf": 15.957,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    108.146,
+    15.957
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "FILE NAME:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 108.146,
+    "y": 281.043,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(108.146 281.043) scale(0.82 1) translate(-108.146 -281.043)",
+    "textLength": null,
+    "content_filled_example": "FILE NAME:"
+   }
+  },
+  {
+   "index": 24,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 108.146,
+   "y_tbf": 11.211,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    108.146,
+    11.211
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "MODEL NAME:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 108.146,
+    "y": 285.789,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(108.146 285.789) scale(0.82 1) translate(-108.146 -285.789)",
+    "textLength": null,
+    "content_filled_example": "MODEL NAME:"
+   }
+  },
+  {
+   "index": 25,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 406.169,
+   "y_tbf": 32.97,
+   "offset": -1.349,
+   "raise": 0.063,
+   "anchor_tbf": [
+    404.82,
+    33.033
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "No. of",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 404.82,
+    "y": 263.967,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(404.82 263.967) scale(0.82 1) translate(-404.82 -263.967)",
+    "textLength": null,
+    "content_filled_example": "No. of"
+   }
+  },
+  {
+   "index": 26,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 404.237,
+   "y_tbf": 31.372,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    404.237,
+    31.372
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "SHEETS",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 404.237,
+    "y": 265.628,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(404.237 265.628) scale(0.82 1) translate(-404.237 -265.628)",
+    "textLength": null,
+    "content_filled_example": "SHEETS"
+   }
+  },
+  {
+   "index": 27,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 169.037,
+   "y_tbf": 20.094,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    169.037,
+    20.094
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "UTILITIES:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 169.037,
+    "y": 276.906,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(169.037 276.906) scale(0.82 1) translate(-169.037 -276.906)",
+    "textLength": null,
+    "content_filled_example": "UTILITIES:"
+   }
+  },
+  {
+   "index": 28,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 204.082,
+   "y_tbf": 19.942,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    204.082,
+    19.942
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "DATE:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 204.082,
+    "y": 277.058,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(204.082 277.058) scale(0.82 1) translate(-204.082 -277.058)",
+    "textLength": null,
+    "content_filled_example": "DATE:"
+   }
+  },
+  {
+   "index": 29,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 169.075,
+   "y_tbf": 16.637,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    169.075,
+    16.637
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "SURVEYED:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 169.075,
+    "y": 280.363,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(169.075 280.363) scale(0.82 1) translate(-169.075 -280.363)",
+    "textLength": null,
+    "content_filled_example": "SURVEYED:"
+   }
+  },
+  {
+   "index": 30,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 203.989,
+   "y_tbf": 16.545,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    203.989,
+    16.545
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "DATE:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 203.989,
+    "y": 280.455,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(203.989 280.455) scale(0.82 1) translate(-203.989 -280.455)",
+    "textLength": null,
+    "content_filled_example": "DATE:"
+   }
+  },
+  {
+   "index": 31,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 169.186,
+   "y_tbf": 13.44,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    169.186,
+    13.44
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "COMPILED:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 169.186,
+    "y": 283.56,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(169.186 283.56) scale(0.82 1) translate(-169.186 -283.56)",
+    "textLength": null,
+    "content_filled_example": "COMPILED:"
+   }
+  },
+  {
+   "index": 32,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 203.897,
+   "y_tbf": 12.904,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    203.897,
+    12.904
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "DATE:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 203.897,
+    "y": 284.096,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(203.897 284.096) scale(0.82 1) translate(-203.897 -284.096)",
+    "textLength": null,
+    "content_filled_example": "DATE:"
+   }
+  },
+  {
+   "index": 33,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 169.26,
+   "y_tbf": 9.612,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    169.26,
+    9.612
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "REVIEWED:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 169.26,
+    "y": 287.388,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(169.26 287.388) scale(0.82 1) translate(-169.26 -287.388)",
+    "textLength": null,
+    "content_filled_example": "REVIEWED:"
+   }
+  },
+  {
+   "index": 34,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 203.92,
+   "y_tbf": 9.405,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    203.92,
+    9.405
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "DATE:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 203.92,
+    "y": 287.595,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(203.92 287.595) scale(0.82 1) translate(-203.92 -287.595)",
+    "textLength": null,
+    "content_filled_example": "DATE:"
+   }
+  },
+  {
+   "index": 35,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "field",
+   "x_tbf": 404.018,
+   "y_tbf": 26.009,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    404.018,
+    26.009
+   ],
+   "cap_height_mm": 3,
+   "em_size_mm": 4.19,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<1,Total Sheet Number>",
+   "lines": 1,
+   "fields": [
+    "user_text_1"
+   ],
+   "rendered_svg": {
+    "x": 406.576,
+    "y": 270.991,
+    "anchor": "middle",
+    "baseline": "alphabetic",
+    "font_size": 4.19,
+    "transform": "translate(406.576 270.991) scale(0.82 1) translate(-406.576 -270.991)",
+    "textLength": null,
+    "content_filled_example": "3"
+   }
+  },
+  {
+   "index": 36,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 20.856,
+   "y_tbf": 9.459,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    20.856,
+    9.459
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 90,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "Survey Plan Filename:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 20.856,
+    "y": 287.541,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "rotate(-90 20.856 287.541) translate(20.856 287.541) scale(0.82 1) translate(-20.856 -287.541)",
+    "textLength": null,
+    "content_filled_example": "Survey Plan Filename:"
+   }
+  },
+  {
+   "index": 38,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "label",
+   "x_tbf": 221.023,
+   "y_tbf": 10.313,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    221.023,
+    10.313
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "SURVEY UNIT MANAGER:",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 221.023,
+    "y": 286.687,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(221.023 286.687) scale(0.82 1) translate(-221.023 -286.687)",
+    "textLength": null,
+    "content_filled_example": "SURVEY UNIT MANAGER:"
+   }
+  },
+  {
+   "index": 39,
+   "kind": "poly",
+   "layer": "S - Ax Construction Border",
+   "role": "construction",
+   "colour_token": "acad 030",
+   "colour_hex": "#ff8000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": true,
+   "points_tbf": [
+    [
+     0,
+     297
+    ],
+    [
+     420,
+     297
+    ],
+    [
+     420,
+     0
+    ],
+    [
+     0,
+     0
+    ],
+    [
+     0,
+     297
+    ]
+   ]
+  },
+  {
+   "index": 40,
+   "kind": "text",
+   "layer": "S - Ax Construction Border",
+   "role": "stamp",
+   "x_tbf": 379.813,
+   "y_tbf": 1.821,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    379.813,
+    1.821
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "A3 Border version: 2.0    $time",
+   "lines": 1,
+   "fields": [
+    "plot_date"
+   ],
+   "rendered_svg": {
+    "x": 379.813,
+    "y": 295.179,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(379.813 295.179) scale(0.82 1) translate(-379.813 -295.179)",
+    "textLength": null,
+    "content_filled_example": "A3 Border version: 2.0    24/09/26"
+   }
+  },
+  {
+   "index": 41,
+   "kind": "poly",
+   "layer": "S - Ax Construction Border (Construction)",
+   "role": "construction",
+   "colour_token": "acad 030",
+   "colour_hex": "#ff8000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": true,
+   "points_tbf": [
+    [
+     0,
+     297
+    ],
+    [
+     420.5,
+     297
+    ],
+    [
+     420.5,
+     0
+    ],
+    [
+     0,
+     0
+    ],
+    [
+     0,
+     297
+    ]
+   ]
+  },
+  {
+   "index": 42,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     21.825,
+     21.329
+    ],
+    [
+     107.265,
+     21.329
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 43,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     45.505,
+     21.329
+    ],
+    [
+     45.505,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 44,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     73.985,
+     21.329
+    ],
+    [
+     73.985,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 45,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     78.785,
+     31.256
+    ],
+    [
+     78.785,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 46,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     102.465,
+     21.329
+    ],
+    [
+     102.465,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 47,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     64.167,
+     30.065
+    ],
+    [
+     69.274,
+     30.065
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 48,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     64.167,
+     27.579
+    ],
+    [
+     69.274,
+     27.579
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 49,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "off yellow",
+   "colour_hex": "#C9A227",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     64.167,
+     25.097
+    ],
+    [
+     69.274,
+     25.097
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 50,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     64.167,
+     22.616
+    ],
+    [
+     69.274,
+     22.616
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 51,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     72.351,
+     30.065
+    ],
+    [
+     77.458,
+     30.065
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 52,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     72.351,
+     27.579
+    ],
+    [
+     77.458,
+     27.579
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 53,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "off yellow",
+   "colour_hex": "#C9A227",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     72.351,
+     25.097
+    ],
+    [
+     77.458,
+     25.097
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 54,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     72.351,
+     22.616
+    ],
+    [
+     77.458,
+     22.616
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 55,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "orange",
+   "colour_hex": "#F07000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     92.647,
+     30.065
+    ],
+    [
+     97.759,
+     30.065
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 56,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "orange",
+   "colour_hex": "#F07000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     100.836,
+     30.065
+    ],
+    [
+     105.938,
+     30.065
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 57,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     92.647,
+     27.579
+    ],
+    [
+     98.057,
+     27.579
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 58,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     100.612,
+     27.579
+    ],
+    [
+     105.938,
+     27.579
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 59,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     92.647,
+     25.097
+    ],
+    [
+     97.759,
+     25.097
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 60,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     100.836,
+     25.097
+    ],
+    [
+     105.938,
+     25.097
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 61,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "brown",
+   "colour_hex": "#8B5A2B",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     92.647,
+     22.616
+    ],
+    [
+     97.759,
+     22.616
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 62,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "brown",
+   "colour_hex": "#8B5A2B",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": false,
+   "points_tbf": [
+    [
+     100.836,
+     22.616
+    ],
+    [
+     105.938,
+     22.616
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 63,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     21.825,
+     18.848
+    ],
+    [
+     107.265,
+     18.848
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 64,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     21.825,
+     16.39
+    ],
+    [
+     107.265,
+     16.39
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 65,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     21.825,
+     13.908
+    ],
+    [
+     107.265,
+     13.908
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 66,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     21.825,
+     11.427
+    ],
+    [
+     107.265,
+     11.427
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 67,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     21.825,
+     31.256
+    ],
+    [
+     107.265,
+     31.256
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 68,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     50.305,
+     28.798
+    ],
+    [
+     107.265,
+     28.798
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 69,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     50.305,
+     26.316
+    ],
+    [
+     107.265,
+     26.316
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 70,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     50.305,
+     23.811
+    ],
+    [
+     107.265,
+     23.811
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 71,
+   "kind": "poly",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.13,
+   "closed": false,
+   "points_tbf": [
+    [
+     50.305,
+     31.256
+    ],
+    [
+     50.305,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 72,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.785,
+   "y_tbf": 19.654,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.785,
+    19.654
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "HYDRANT",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.785,
+    "y": 277.346,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.785 277.346) scale(0.82 1) translate(-22.785 -277.346)",
+    "textLength": null,
+    "content_filled_example": "HYDRANT"
+   }
+  },
+  {
+   "index": 73,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.785,
+   "y_tbf": 17.148,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.785,
+    17.148
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "STOP VALVE",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.785,
+    "y": 279.852,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.785 279.852) scale(0.82 1) translate(-22.785 -279.852)",
+    "textLength": null,
+    "content_filled_example": "STOP VALVE"
+   }
+  },
+  {
+   "index": 74,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.785,
+   "y_tbf": 14.667,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.785,
+    14.667
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "WATER METER",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.785,
+    "y": 282.333,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.785 282.333) scale(0.82 1) translate(-22.785 -282.333)",
+    "textLength": null,
+    "content_filled_example": "WATER METER"
+   }
+  },
+  {
+   "index": 75,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.785,
+   "y_tbf": 12.243,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.785,
+    12.243
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "WATER AIR VALVE",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.785,
+    "y": 284.757,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.785 284.757) scale(0.82 1) translate(-22.785 -284.757)",
+    "textLength": null,
+    "content_filled_example": "WATER AIR VALVE"
+   }
+  },
+  {
+   "index": 76,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 24.617,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    24.617
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "HP GAS",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 272.383,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 272.383) scale(0.82 1) translate(-79.745 -272.383)",
+    "textLength": null,
+    "content_filled_example": "HP GAS"
+   }
+  },
+  {
+   "index": 77,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 22.136,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    22.136
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "HP OIL",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 274.864,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 274.864) scale(0.82 1) translate(-79.745 -274.864)",
+    "textLength": null,
+    "content_filled_example": "HP OIL"
+   }
+  },
+  {
+   "index": 78,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 27.099,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    27.099
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "WATER",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 269.901,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 269.901) scale(0.82 1) translate(-51.265 -269.901)",
+    "textLength": null,
+    "content_filled_example": "WATER"
+   }
+  },
+  {
+   "index": 79,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 24.617,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    24.617
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "SEWER",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 272.383,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 272.383) scale(0.82 1) translate(-51.265 -272.383)",
+    "textLength": null,
+    "content_filled_example": "SEWER"
+   }
+  },
+  {
+   "index": 80,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 22.136,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    22.136
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "GAS",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 274.864,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 274.864) scale(0.82 1) translate(-51.265 -274.864)",
+    "textLength": null,
+    "content_filled_example": "GAS"
+   }
+  },
+  {
+   "index": 81,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 14.667,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    14.667
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "GAS TEST POINT",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 282.333,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 282.333) scale(0.82 1) translate(-79.745 -282.333)",
+    "textLength": null,
+    "content_filled_example": "GAS TEST POINT"
+   }
+  },
+  {
+   "index": 82,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 9.761,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    9.761
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "GAS METER",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 287.239,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 287.239) scale(0.82 1) translate(-79.745 -287.239)",
+    "textLength": null,
+    "content_filled_example": "GAS METER"
+   }
+  },
+  {
+   "index": 83,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 70.402,
+   "y_tbf": 26.955,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    70.402,
+    26.955
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "raw_text": "W",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 70.402,
+    "y": 270.045,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(70.402 270.045) scale(0.82 1) translate(-70.402 -270.045)",
+    "textLength": null,
+    "content_filled_example": "W"
+   }
+  },
+  {
+   "index": 84,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 70.402,
+   "y_tbf": 24.473,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    70.402,
+    24.473
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "off yellow",
+   "colour_hex": "#C9A227",
+   "raw_text": "S",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 70.402,
+    "y": 272.527,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(70.402 272.527) scale(0.82 1) translate(-70.402 -272.527)",
+    "textLength": null,
+    "content_filled_example": "S"
+   }
+  },
+  {
+   "index": 85,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 98.479,
+   "y_tbf": 24.473,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    98.479,
+    24.473
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "raw_text": "HG",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 98.479,
+    "y": 272.527,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(98.479 272.527) scale(0.82 1) translate(-98.479 -272.527)",
+    "textLength": null,
+    "content_filled_example": "HG"
+   }
+  },
+  {
+   "index": 86,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 98.479,
+   "y_tbf": 21.992,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    98.479,
+    21.992
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "brown",
+   "colour_hex": "#8B5A2B",
+   "raw_text": "HO",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 98.479,
+    "y": 275.008,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(98.479 275.008) scale(0.82 1) translate(-98.479 -275.008)",
+    "textLength": null,
+    "content_filled_example": "HO"
+   }
+  },
+  {
+   "index": 87,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 29.585,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    29.585
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "COMMUNICATIONS",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 267.415,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 267.415) scale(0.82 1) translate(-51.265 -267.415)",
+    "textLength": null,
+    "content_filled_example": "COMMUNICATIONS"
+   }
+  },
+  {
+   "index": 88,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 29.585,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    29.585
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "ELECTRICITY",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 267.415,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 267.415) scale(0.82 1) translate(-79.745 -267.415)",
+    "textLength": null,
+    "content_filled_example": "ELECTRICITY"
+   }
+  },
+  {
+   "index": 89,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 27.099,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    27.099
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "OPTICAL FIBRE",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 269.901,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 269.901) scale(0.82 1) translate(-79.745 -269.901)",
+    "textLength": null,
+    "content_filled_example": "OPTICAL FIBRE"
+   }
+  },
+  {
+   "index": 90,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 17.196,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    17.196
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "TELEPHONE TWIN PIT",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 279.804,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 279.804) scale(0.82 1) translate(-51.265 -279.804)",
+    "textLength": null,
+    "content_filled_example": "TELEPHONE TWIN PIT"
+   }
+  },
+  {
+   "index": 91,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 14.691,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    14.691
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "TELEPHONE LARGE SUMP",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 282.309,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 282.309) scale(0.82 1) translate(-51.265 -282.309)",
+    "textLength": null,
+    "content_filled_example": "TELEPHONE LARGE SUMP"
+   }
+  },
+  {
+   "index": 92,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 12.209,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    12.209
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "TELEPHONE PILLAR",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 284.791,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 284.791) scale(0.82 1) translate(-51.265 -284.791)",
+    "textLength": null,
+    "content_filled_example": "TELEPHONE PILLAR"
+   }
+  },
+  {
+   "index": 93,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 19.606,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    19.606
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "TELEPHONE PIT",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 277.394,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 277.394) scale(0.82 1) translate(-51.265 -277.394)",
+    "textLength": null,
+    "content_filled_example": "TELEPHONE PIT"
+   }
+  },
+  {
+   "index": 94,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 19.606,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    19.606
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "ELECT. LIGHT POLE",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 277.394,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 277.394) scale(0.82 1) translate(-79.745 -277.394)",
+    "textLength": null,
+    "content_filled_example": "ELECT. LIGHT POLE"
+   }
+  },
+  {
+   "index": 95,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 17.172,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    17.172
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "ELECT. JUNC BOX",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 279.828,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 279.828) scale(0.82 1) translate(-79.745 -279.828)",
+    "textLength": null,
+    "content_filled_example": "ELECT. JUNC BOX"
+   }
+  },
+  {
+   "index": 96,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 79.745,
+   "y_tbf": 12.185,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    79.745,
+    12.185
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "GAS VALVE BOX",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 79.745,
+    "y": 284.815,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(79.745 284.815) scale(0.82 1) translate(-79.745 -284.815)",
+    "textLength": null,
+    "content_filled_example": "GAS VALVE BOX"
+   }
+  },
+  {
+   "index": 97,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.785,
+   "y_tbf": 9.704,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.785,
+    9.704
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "SEWER MANHOLE COVER",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.785,
+    "y": 287.296,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.785 287.296) scale(0.82 1) translate(-22.785 -287.296)",
+    "textLength": null,
+    "content_filled_example": "SEWER MANHOLE COVER"
+   }
+  },
+  {
+   "index": 98,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.78,
+   "y_tbf": 28.655,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.78,
+    28.655
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "Alpha character on line symbols is",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.78,
+    "y": 268.345,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.78 268.345) scale(0.82 1) translate(-22.78 -268.345)",
+    "textLength": null,
+    "content_filled_example": "Alpha character on line symbols is"
+   }
+  },
+  {
+   "index": 99,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.733,
+   "y_tbf": 27.232,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.733,
+    27.232
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "sometimes suppressed. or replaced",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.733,
+    "y": 269.768,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.733 269.768) scale(0.82 1) translate(-22.733 -269.768)",
+    "textLength": null,
+    "content_filled_example": "sometimes suppressed. or replaced"
+   }
+  },
+  {
+   "index": 100,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.68,
+   "y_tbf": 25.808,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.68,
+    25.808
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "by text note. This may occur when a",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.68,
+    "y": 271.192,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.68 271.192) scale(0.82 1) translate(-22.68 -271.192)",
+    "textLength": null,
+    "content_filled_example": "by text note. This may occur when a"
+   }
+  },
+  {
+   "index": 101,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.728,
+   "y_tbf": 24.384,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.728,
+    24.384
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "directional change co-incides with the",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.728,
+    "y": 272.616,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.728 272.616) scale(0.82 1) translate(-22.728 -272.616)",
+    "textLength": null,
+    "content_filled_example": "directional change co-incides with the"
+   }
+  },
+  {
+   "index": 102,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 22.679,
+   "y_tbf": 22.961,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    22.679,
+    22.961
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "preset spacing of alpha characters.",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 22.679,
+    "y": 274.039,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(22.679 274.039) scale(0.82 1) translate(-22.679 -274.039)",
+    "textLength": null,
+    "content_filled_example": "preset spacing of alpha characters."
+   }
+  },
+  {
+   "index": 103,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 25.491,
+   "y_tbf": 31.735,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    25.491,
+    31.735
+   ],
+   "cap_height_mm": 2.36,
+   "em_size_mm": 3.296,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "PUBLIC UTILITY LEGEND",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 25.491,
+    "y": 265.328,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 3.296,
+    "transform": "translate(25.491 265.328) scale(0.82 1) translate(-25.491 -265.328)",
+    "textLength": null,
+    "content_filled_example": "PUBLIC UTILITY LEGEND"
+   }
+  },
+  {
+   "index": 104,
+   "kind": "text",
+   "layer": "S - Ax Public Utilities Legend",
+   "role": "legend",
+   "x_tbf": 51.265,
+   "y_tbf": 9.761,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    51.265,
+    9.761
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "LIGHT POLE",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 51.265,
+    "y": 287.239,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(51.265 287.239) scale(0.82 1) translate(-51.265 -287.239)",
+    "textLength": null,
+    "content_filled_example": "LIGHT POLE"
+   }
+  },
+  {
+   "index": 105,
+   "kind": "poly",
+   "layer": "S - Survey Details",
+   "role": "border",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     107.265,
+     18.288
+    ],
+    [
+     167.265,
+     18.288
+    ]
+   ],
+   "orientation": "horizontal"
+  },
+  {
+   "index": 106,
+   "kind": "poly",
+   "layer": "S - Survey Details",
+   "role": "border",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     144.478,
+     18.288
+    ],
+    [
+     144.478,
+     22.625
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 107,
+   "kind": "text",
+   "layer": "S - Survey Details",
+   "role": "label",
+   "x_tbf": 145.656,
+   "y_tbf": 20.118,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    145.656,
+    20.118
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "HEIGHT DATUM: A.H.D.",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 145.656,
+    "y": 276.882,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(145.656 276.882) scale(0.82 1) translate(-145.656 -276.882)",
+    "textLength": null,
+    "content_filled_example": "HEIGHT DATUM: A.H.D."
+   }
+  },
+  {
+   "index": 108,
+   "kind": "text",
+   "layer": "S - Survey Details",
+   "role": "field",
+   "x_tbf": 107.967,
+   "y_tbf": 19.993,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    107.967,
+    19.993
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "CO-ORD SYSTEM: MGA$user_text<8,Coordinate System 2020 or 1994> ZONE $user_text<9,MGA ZONE>",
+   "lines": 1,
+   "fields": [
+    "user_text_8",
+    "user_text_9"
+   ],
+   "rendered_svg": {
+    "x": 107.967,
+    "y": 277.007,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(107.967 277.007) scale(0.82 1) translate(-107.967 -277.007)",
+    "textLength": null,
+    "content_filled_example": "CO-ORD SYSTEM: MGA2020 ZONE 56"
+   }
+  },
+  {
+   "index": 109,
+   "kind": "text",
+   "layer": "PPLP",
+   "role": "label",
+   "x_tbf": 135.289,
+   "y_tbf": 32.891,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    135.289,
+    32.891
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "raw_text": "SCALE",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 135.289,
+    "y": 264.109,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(135.289 264.109) scale(0.82 1) translate(-135.289 -264.109)",
+    "textLength": null,
+    "content_filled_example": "SCALE"
+   }
+  },
+  {
+   "index": 110,
+   "kind": "symbol",
+   "layer": "PWHY",
+   "role": "legend",
+   "symbol_style": "WATR Hydrant",
+   "at_tbf": [
+    47.701,
+    19.998
+   ],
+   "size_mm": 0.5,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "glyph_known": true
+  },
+  {
+   "index": 111,
+   "kind": "symbol",
+   "layer": "PWMR",
+   "role": "legend",
+   "symbol_style": "WATR Meter",
+   "at_tbf": [
+    47.813,
+    14.767
+   ],
+   "size_mm": 0.8,
+   "rotation_deg": 0,
+   "offset": -0.05,
+   "raise": -0.246,
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "glyph_known": true
+  },
+  {
+   "index": 112,
+   "kind": "symbol",
+   "layer": "PWAV",
+   "role": "legend",
+   "symbol_style": "WATR Air Valve",
+   "at_tbf": [
+    47.692,
+    12.627
+   ],
+   "size_mm": 1,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "glyph_known": true
+  },
+  {
+   "index": 113,
+   "kind": "symbol",
+   "layer": "PTTP",
+   "role": "legend",
+   "symbol_style": "COMM Telephone Twin Concrete Pit",
+   "at_tbf": [
+    76.106,
+    17.201
+   ],
+   "size_mm": 0.5,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "glyph_known": true
+  },
+  {
+   "index": 114,
+   "kind": "symbol",
+   "layer": "PTDP",
+   "role": "legend",
+   "symbol_style": "COMM Telephone Distribution Pillar",
+   "at_tbf": [
+    75.883,
+    12.56
+   ],
+   "size_mm": 0.5,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "glyph_known": true
+  },
+  {
+   "index": 115,
+   "kind": "symbol",
+   "layer": "PEJB",
+   "role": "legend",
+   "symbol_style": "ELEC Cable Junction Box",
+   "at_tbf": [
+    104.768,
+    17.71
+   ],
+   "size_mm": 0.5,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "orange",
+   "colour_hex": "#F07000",
+   "glyph_known": true
+  },
+  {
+   "index": 116,
+   "kind": "symbol",
+   "layer": "PGMR",
+   "role": "legend",
+   "symbol_style": "GAS Meter",
+   "at_tbf": [
+    104.711,
+    10.29
+   ],
+   "size_mm": 0.8,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "glyph_known": true
+  },
+  {
+   "index": 117,
+   "kind": "symbol",
+   "layer": "PGTP",
+   "role": "legend",
+   "symbol_style": "GAS Test Point",
+   "at_tbf": [
+    104.654,
+    15.312
+   ],
+   "size_mm": 0.8,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "glyph_known": true
+  },
+  {
+   "index": 118,
+   "kind": "symbol",
+   "layer": "PGAS",
+   "role": "legend",
+   "symbol_style": "GAS Valve Box",
+   "at_tbf": [
+    104.796,
+    12.83
+   ],
+   "size_mm": 0.8,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "glyph_known": true
+  },
+  {
+   "index": 119,
+   "kind": "poly",
+   "layer": "TS",
+   "role": "legend",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.18,
+   "closed": true,
+   "points_tbf": [
+    [
+     75.264,
+     15.781
+    ],
+    [
+     76.928,
+     15.781
+    ],
+    [
+     76.928,
+     14.59
+    ],
+    [
+     75.264,
+     14.59
+    ]
+   ]
+  },
+  {
+   "index": 120,
+   "kind": "symbol",
+   "layer": "PPLP",
+   "role": "legend",
+   "symbol_style": "ELEC Pole - Power and Light",
+   "at_tbf": [
+    104.84,
+    20.042
+   ],
+   "size_mm": 0.8,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "orange",
+   "colour_hex": "#F07000",
+   "glyph_known": true
+  },
+  {
+   "index": 121,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 122.939,
+   "y_tbf": 10.669,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    122.939,
+    10.669
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<7,Model Name>",
+   "lines": 1,
+   "fields": [
+    "user_text_7"
+   ],
+   "rendered_svg": {
+    "x": 122.939,
+    "y": 286.331,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(122.939 286.331) scale(0.82 1) translate(-122.939 -286.331)",
+    "textLength": null,
+    "content_filled_example": "MODEL_NAME_XS"
+   }
+  },
+  {
+   "index": 122,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 284.657,
+   "y_tbf": 10.6,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    284.657,
+    10.6
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$time<%d/%m/%y>",
+   "lines": 1,
+   "fields": [
+    "plot_date"
+   ],
+   "rendered_svg": {
+    "x": 284.657,
+    "y": 286.151,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(284.657 286.151) scale(0.82 1) translate(-284.657 -286.151)",
+    "textLength": null,
+    "content_filled_example": "24/09/26"
+   }
+  },
+  {
+   "index": 123,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 209.758,
+   "y_tbf": 20.395,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    209.758,
+    20.395
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$time<%d/%m/%y>",
+   "lines": 1,
+   "fields": [
+    "plot_date"
+   ],
+   "rendered_svg": {
+    "x": 209.758,
+    "y": 276.605,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(209.758 276.605) scale(0.82 1) translate(-209.758 -276.605)",
+    "textLength": null,
+    "content_filled_example": "24/09/26"
+   }
+  },
+  {
+   "index": 124,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 209.8,
+   "y_tbf": 16.952,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    209.8,
+    16.952
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$time<%d/%m/%y>",
+   "lines": 1,
+   "fields": [
+    "plot_date"
+   ],
+   "rendered_svg": {
+    "x": 209.8,
+    "y": 280.048,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(209.8 280.048) scale(0.82 1) translate(-209.8 -280.048)",
+    "textLength": null,
+    "content_filled_example": "24/09/26"
+   }
+  },
+  {
+   "index": 125,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 209.741,
+   "y_tbf": 13.439,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    209.741,
+    13.439
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$time<%d/%m/%y>",
+   "lines": 1,
+   "fields": [
+    "plot_date"
+   ],
+   "rendered_svg": {
+    "x": 209.741,
+    "y": 283.561,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(209.741 283.561) scale(0.82 1) translate(-209.741 -283.561)",
+    "textLength": null,
+    "content_filled_example": "24/09/26"
+   }
+  },
+  {
+   "index": 126,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 209.787,
+   "y_tbf": 9.91,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    209.787,
+    9.91
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$time<%d/%m/%y>",
+   "lines": 1,
+   "fields": [
+    "plot_date"
+   ],
+   "rendered_svg": {
+    "x": 209.787,
+    "y": 287.09,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(209.787 287.09) scale(0.82 1) translate(-209.787 -287.09)",
+    "textLength": null,
+    "content_filled_example": "24/09/26"
+   }
+  },
+  {
+   "index": 127,
+   "kind": "text",
+   "layer": "PPLP",
+   "role": "field",
+   "x_tbf": 125.835,
+   "y_tbf": 25.777,
+   "offset": 6.545,
+   "raise": 0.219,
+   "anchor_tbf": [
+    132.38,
+    25.996
+   ],
+   "cap_height_mm": 3,
+   "em_size_mm": 4.19,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<17,SCALE\"1:500, 1:1000.. Etc\">",
+   "lines": 1,
+   "fields": [
+    "user_text_17"
+   ],
+   "rendered_svg": {
+    "x": 137.265,
+    "y": 271.004,
+    "anchor": "middle",
+    "baseline": "alphabetic",
+    "font_size": 4.19,
+    "transform": "translate(137.265 271.004) scale(0.82 1) translate(-137.265 -271.004)",
+    "textLength": null,
+    "content_filled_example": "H 1:100  V 1:20"
+   }
+  },
+  {
+   "index": 161,
+   "kind": "poly",
+   "layer": "S - Ax Borders",
+   "role": "border",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "line_style": "1",
+   "dash_mm": null,
+   "weight_mm": 0.53,
+   "closed": false,
+   "points_tbf": [
+    [
+     297.117,
+     34.625
+    ],
+    [
+     297.117,
+     8.945
+    ]
+   ],
+   "orientation": "vertical"
+  },
+  {
+   "index": 162,
+   "kind": "text",
+   "layer": "",
+   "role": "legend",
+   "x_tbf": 98.884,
+   "y_tbf": 29.581,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    98.884,
+    29.581
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": "100",
+   "angle_deg": 0,
+   "x_factor": 1,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "orange",
+   "colour_hex": "#F07000",
+   "raw_text": "E",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 98.884,
+    "y": 267.419,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": null,
+    "textLength": null,
+    "content_filled_example": "E"
+   }
+  },
+  {
+   "index": 163,
+   "kind": "text",
+   "layer": "",
+   "role": "legend",
+   "x_tbf": 98.927,
+   "y_tbf": 27.137,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    98.927,
+    27.137
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": "100",
+   "angle_deg": 0,
+   "x_factor": 1,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "raw_text": "O",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 98.927,
+    "y": 269.863,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": null,
+    "textLength": null,
+    "content_filled_example": "O"
+   }
+  },
+  {
+   "index": 164,
+   "kind": "text",
+   "layer": "",
+   "role": "legend",
+   "x_tbf": 70.411,
+   "y_tbf": 29.714,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    70.411,
+    29.714
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": "100",
+   "angle_deg": 0,
+   "x_factor": 1,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "raw_text": "T",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 70.411,
+    "y": 267.286,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": null,
+    "textLength": null,
+    "content_filled_example": "T"
+   }
+  },
+  {
+   "index": 165,
+   "kind": "text",
+   "layer": "",
+   "role": "legend",
+   "x_tbf": 70.454,
+   "y_tbf": 22.286,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    70.454,
+    22.286
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": "100",
+   "angle_deg": 0,
+   "x_factor": 1,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "yellow",
+   "colour_hex": "#E8B800",
+   "raw_text": "G",
+   "lines": 1,
+   "fields": [],
+   "rendered_svg": {
+    "x": 70.454,
+    "y": 274.714,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": null,
+    "textLength": null,
+    "content_filled_example": "G"
+   }
+  },
+  {
+   "index": 166,
+   "kind": "symbol",
+   "layer": "PLPL",
+   "role": "legend",
+   "symbol_style": "ELEC Pole - Light",
+   "at_tbf": [
+    75.893,
+    10.192
+   ],
+   "size_mm": 0.3,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "orange",
+   "colour_hex": "#F07000",
+   "glyph_known": true
+  },
+  {
+   "index": 167,
+   "kind": "symbol",
+   "layer": "PTSP",
+   "role": "legend",
+   "symbol_style": "COMM Telephone Single Concrete Pit",
+   "at_tbf": [
+    76.009,
+    20.242
+   ],
+   "size_mm": 0.8,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "white",
+   "colour_hex": "#000000",
+   "glyph_known": true
+  },
+  {
+   "index": 168,
+   "kind": "symbol",
+   "layer": "PWSV",
+   "role": "legend",
+   "symbol_style": "WATR Stop Valve",
+   "at_tbf": [
+    47.635,
+    17.57
+   ],
+   "size_mm": 0.9,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "sui water potable",
+   "colour_hex": "#0093D0",
+   "glyph_known": true
+  },
+  {
+   "index": 169,
+   "kind": "symbol",
+   "layer": "PSMH",
+   "role": "legend",
+   "symbol_style": "SEWR Manhole Cover",
+   "at_tbf": [
+    47.627,
+    10.231
+   ],
+   "size_mm": 0.9,
+   "rotation_deg": 0,
+   "offset": 0,
+   "raise": 0,
+   "colour_token": "off yellow",
+   "colour_hex": "#C9A227",
+   "glyph_known": true
+  },
+  {
+   "index": 170,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "field",
+   "x_tbf": 20.926,
+   "y_tbf": 21.064,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    20.926,
+    21.064
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 90,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$user_text<19,pdf_filename>",
+   "lines": 1,
+   "fields": [
+    "user_text_19"
+   ],
+   "rendered_svg": {
+    "x": 20.926,
+    "y": 275.936,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "rotate(-90 20.926 275.936) translate(20.926 275.936) scale(0.82 1) translate(-20.926 -275.936)",
+    "textLength": null,
+    "content_filled_example": "example_xs.pdf"
+   }
+  },
+  {
+   "index": 171,
+   "kind": "text",
+   "layer": "1",
+   "role": "field",
+   "x_tbf": 118.454,
+   "y_tbf": 14.768,
+   "offset": 2.518,
+   "raise": 0.807,
+   "anchor_tbf": [
+    120.972,
+    15.575
+   ],
+   "cap_height_mm": 1,
+   "em_size_mm": 1.397,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "$user_text<19,pdf_filename>",
+   "lines": 1,
+   "fields": [
+    "user_text_19"
+   ],
+   "rendered_svg": {
+    "x": 120.972,
+    "y": 281.425,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 1.397,
+    "transform": "translate(120.972 281.425) scale(0.82 1) translate(-120.972 -281.425)",
+    "textLength": null,
+    "content_filled_example": "example_xs.pdf"
+   }
+  },
+  {
+   "index": 172,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 177.713,
+   "y_tbf": 20.424,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    177.713,
+    20.424
+   ],
+   "cap_height_mm": 1.5,
+   "em_size_mm": 2.095,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<3,Locator Name>",
+   "lines": 1,
+   "fields": [
+    "user_text_3"
+   ],
+   "rendered_svg": {
+    "x": 177.713,
+    "y": 276.52,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 2.095,
+    "transform": "translate(177.713 276.52) scale(0.82 1) translate(-177.713 -276.52)",
+    "textLength": null,
+    "content_filled_example": "A. LOCATOR"
+   }
+  },
+  {
+   "index": 173,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 177.871,
+   "y_tbf": 16.887,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    177.871,
+    16.887
+   ],
+   "cap_height_mm": 1.5,
+   "em_size_mm": 2.095,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<4,Surveyor Name>",
+   "lines": 1,
+   "fields": [
+    "user_text_4"
+   ],
+   "rendered_svg": {
+    "x": 177.871,
+    "y": 280.02,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 2.095,
+    "transform": "translate(177.871 280.02) scale(0.82 1) translate(-177.871 -280.02)",
+    "textLength": null,
+    "content_filled_example": "B. SURVEYOR"
+   }
+  },
+  {
+   "index": 174,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 177.713,
+   "y_tbf": 13.688,
+   "offset": 0.054,
+   "raise": -0.275,
+   "anchor_tbf": [
+    177.766,
+    13.413
+   ],
+   "cap_height_mm": 1.5,
+   "em_size_mm": 2.095,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<5,Compiled By>",
+   "lines": 1,
+   "fields": [
+    "user_text_5"
+   ],
+   "rendered_svg": {
+    "x": 177.766,
+    "y": 283.52,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 2.095,
+    "transform": "translate(177.766 283.52) scale(0.82 1) translate(-177.766 -283.52)",
+    "textLength": null,
+    "content_filled_example": "C. COMPILER"
+   }
+  },
+  {
+   "index": 175,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 177.713,
+   "y_tbf": 10.206,
+   "offset": 0.136,
+   "raise": -0.279,
+   "anchor_tbf": [
+    177.849,
+    9.927
+   ],
+   "cap_height_mm": 1.5,
+   "em_size_mm": 2.095,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<6,Reviewd By>",
+   "lines": 1,
+   "fields": [
+    "user_text_6"
+   ],
+   "rendered_svg": {
+    "x": 177.849,
+    "y": 287.02,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 2.095,
+    "transform": "translate(177.849 287.02) scale(0.82 1) translate(-177.849 -287.02)",
+    "textLength": null,
+    "content_filled_example": "D. REVIEWER"
+   }
+  },
+  {
+   "index": 176,
+   "kind": "text",
+   "layer": "4",
+   "role": "field",
+   "x_tbf": 250.122,
+   "y_tbf": 10.7,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    250.122,
+    10.7
+   ],
+   "cap_height_mm": 2,
+   "em_size_mm": 2.793,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $user_text<2,Survey Unit Manager>",
+   "lines": 1,
+   "fields": [
+    "user_text_2"
+   ],
+   "rendered_svg": {
+    "x": 250.122,
+    "y": 285.829,
+    "anchor": "start",
+    "baseline": "alphabetic",
+    "font_size": 2.793,
+    "transform": "translate(250.122 285.829) scale(0.82 1) translate(-250.122 -285.829)",
+    "textLength": null,
+    "content_filled_example": "J. SMITH"
+   }
+  },
+  {
+   "index": 177,
+   "kind": "text",
+   "layer": "",
+   "role": "field",
+   "x_tbf": 350.275,
+   "y_tbf": 26.447,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    350.275,
+    26.447
+   ],
+   "cap_height_mm": 2.5,
+   "em_size_mm": 3.492,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "middle-centre",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": "LGA:  $user_text<10,LGA>\n$user_text<11,Address>\n$user_text<12,Address Details>\n$user_text<13,Purpose>\nDrawing Set Number: $user_text<14,Drawing Set Number>",
+   "lines": 5,
+   "fields": [
+    "user_text_10",
+    "user_text_11",
+    "user_text_12",
+    "user_text_13",
+    "user_text_14"
+   ],
+   "rendered_svg": {
+    "x": 350.275,
+    "y": 270.553,
+    "anchor": "middle",
+    "baseline": "central",
+    "font_size": 3.492,
+    "transform": "translate(350.275 270.553) scale(0.82 1) translate(-350.275 -270.553)",
+    "textLength": null,
+    "content_filled_example": "LGA:  CITY OF EXAMPLE\n1 EXAMPLE STREET\nBETWEEN A ST AND B ST\nUTILITY CROSS SECTION\nDrawing Set Number: DS-0001"
+   }
+  },
+  {
+   "index": 178,
+   "kind": "text",
+   "layer": "S - Ax Borders",
+   "role": "field",
+   "x_tbf": 404.018,
+   "y_tbf": 13.105,
+   "offset": 0,
+   "raise": 0,
+   "anchor_tbf": [
+    404.018,
+    13.105
+   ],
+   "cap_height_mm": 3,
+   "em_size_mm": 4.19,
+   "font_style_token": "82Arial",
+   "font_face": "Arial",
+   "bold": false,
+   "ttf_weight": null,
+   "angle_deg": 0,
+   "x_factor": 0.82,
+   "slant": 0,
+   "justify": "bottom-left",
+   "colour_token": "acad 007",
+   "colour_hex": "#000000",
+   "raw_text": " $drawing_number",
+   "lines": 1,
+   "fields": [
+    "drawing_number"
+   ],
+   "rendered_svg": {
+    "x": 406.576,
+    "y": 283.895,
+    "anchor": "middle",
+    "baseline": "alphabetic",
+    "font_size": 4.19,
+    "transform": "translate(406.576 283.895) scale(0.82 1) translate(-406.576 -283.895)",
+    "textLength": null,
+    "content_filled_example": "2"
+   }
+  }
+ ],
+ "removed_entities": {
+  "indices": [
+   37,
+   128,
+   129,
+   130,
+   131,
+   132,
+   133,
+   134,
+   135,
+   136,
+   137,
+   138,
+   139,
+   140,
+   141,
+   142,
+   143,
+   144,
+   145,
+   146,
+   147,
+   148,
+   149,
+   150,
+   151,
+   152,
+   153,
+   154,
+   155,
+   156,
+   157,
+   158,
+   159,
+   160
+  ],
+  "why": "organisation branding (a logo, a header naming the organisation and a disclaimer naming it); their cells are now user slots"
+ }
+}
