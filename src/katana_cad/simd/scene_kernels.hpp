@@ -13,7 +13,7 @@
 //            the elevation ramp reads).
 //   normals  4 doubles per vertex: the x, y, z of the summed face normals, and
 //            a fourth that is never read.
-//   params   doubles, indexed by SceneKernelParam.
+//   params   doubles, at the kParam* indices below.
 //   colours  0xAARRGGBB, as render::Rgba.
 
 #include <cstddef>
@@ -27,22 +27,22 @@ namespace katana::cad::simd {
 // a + (b - a) * f to the bit).
 constexpr std::size_t kRampSegments = 4; // internal linkage: no symbol in a kernel object
 
-enum SceneKernelParam : std::size_t {
-    kParamLiftFactor = 0,
-    kParamLiftDatum,
-    kParamRampLow,
-    kParamRampSpan,
-    kParamLightOn, // 1.0 or 0.0
-    kParamSunX,
-    kParamSunY,
-    kParamSunZ,
-    kParamGround,
-    kParamSkyMinusGround,
-    kParamSun,
-    // Red stops, red steps, green stops, green steps, blue stops, blue steps.
-    kParamRampTable,
-    kParamCount = kParamRampTable + 6 * kRampSegments,
-};
+// Where each parameter sits in `params` (constants rather than an enum: the
+// kernel-header check allows no braces but namespaces and extern "C").
+constexpr std::size_t kParamLiftFactor = 0;
+constexpr std::size_t kParamLiftDatum = 1;
+constexpr std::size_t kParamRampLow = 2;
+constexpr std::size_t kParamRampSpan = 3;
+constexpr std::size_t kParamLightOn = 4; // 1.0 or 0.0
+constexpr std::size_t kParamSunX = 5;
+constexpr std::size_t kParamSunY = 6;
+constexpr std::size_t kParamSunZ = 7;
+constexpr std::size_t kParamGround = 8;
+constexpr std::size_t kParamSkyMinusGround = 9;
+constexpr std::size_t kParamSun = 10;
+// Red stops, red steps, green stops, green steps, blue stops, blue steps.
+constexpr std::size_t kParamRampTable = 11;
+constexpr std::size_t kParamCount = kParamRampTable + 6 * kRampSegments;
 
 } // namespace katana::cad::simd
 
