@@ -13,11 +13,14 @@
 //     interval, the epoch count and the satellites seen per system;
 //   * the marker as a survey::UnpositionedPoint named by MARKER NAME;
 //   * the header's APPROX POSITION XYZ as a survey::GnssGlobalPositionObservation
-//     of that marker, geocentric, with kRinexApproximatePositionSigma on each
-//     axis and GnssSolution::Autonomous. It is an approximate position - most
-//     often the receiver's own navigation solution - and is weighted so that
-//     it can place the marker on a drawing but can never pull on a survey-grade
-//     observation in an adjustment.
+//     of that marker, geocentric, with GnssSolution::Autonomous and
+//     kRinexApproximatePositionSigma on each axis stated in its covariance
+//     (X/Y/Z, as GnssCovariance3 defines it for a geocentric value). It is an
+//     approximate position - most often the receiver's own navigation
+//     solution - so a reduction must weight it by that covariance, never by
+//     its a-priori sigma for a survey-grade GNSS position: at 10 m it can place
+//     the marker on a drawing but cannot pull on a survey-grade observation in
+//     an adjustment.
 // The pseudorange, phase, Doppler and signal-strength values are checked and
 // counted, never stored: processing raw GNSS is outside what Katana does.
 //

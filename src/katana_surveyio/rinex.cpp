@@ -71,14 +71,11 @@ namespace survey = katana::survey;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
+using rinex::kMaxListedWarnings;
 using rinex::LineCursor;
 
 constexpr std::string_view kHumanName = "RINEX observation";
 constexpr std::string_view kParserVersion = "1.0";
-
-// A damaged 200 MB file could otherwise produce a warning per epoch; past this
-// many the rest are counted in one closing warning rather than listed.
-constexpr std::size_t kMaxListedWarnings = 500;
 
 // Satellite numbers are two digits (A1,I2 / A1,I2.2).
 constexpr std::size_t kSatelliteNumbers = 100;
@@ -1525,10 +1522,18 @@ void ObservationReader::noteCompaction()
     result_.project.metadata["compression"] =
         compact.description + "; expanded to RINEX as it was read";
     // The expansion's own warnings come first: they say which epochs never
-    // reached the reader at all.
+    // reached the reader at all. The two lists together keep to the one
+    // limit; what is past it is counted in the closing warning.
     result_.warnings.insert(result_.warnings.begin(),
                             std::make_move_iterator(compact.warnings.begin()),
                             std::make_move_iterator(compact.warnings.end()));
+    suppressedWarnings_ += compact.unlistedWarnings;
+    if (result_.warnings.size() > kMaxListedWarnings) {
+        suppressedWarnings_ += result_.warnings.size() - kMaxListedWarnings;
+        result_.warnings.erase(result_.warnings.begin() +
+                                   static_cast<std::ptrdiff_t>(kMaxListedWarnings),
+                               result_.warnings.end());
+    }
     if (compact.optionalLines > 0) {
         warn(0, std::to_string(compact.optionalLines) +
                     " Compact RINEX optional records ('&' lines, reserved for future use) were "

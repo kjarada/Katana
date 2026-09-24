@@ -131,6 +131,19 @@ std::string compactV3Header()
            header("G    2 C1C L1C", "SYS / # / OBS TYPES") + header("", "END OF HEADER");
 }
 
+// The compact header of a RINEX 2.11 GPS file with two observation types (C1,
+// L1). 9 lines; the first epoch line is line 10.
+std::string compactV2Header()
+{
+    return header("1.0                 COMPACT RINEX FORMAT", "CRINEX VERS   / TYPE") +
+           header("RNX2CRX ver.4.1.0                       24-Sep-26 06:30", "CRINEX PROG / DATE") +
+           header("     2.11           OBSERVATION DATA    G (GPS)", "RINEX VERSION / TYPE") +
+           header("katana test", "PGM / RUN BY / DATE") + header("M2", "MARKER NAME") +
+           header(" -4646000.0000  2553000.0000 -3534000.0000", "APPROX POSITION XYZ") +
+           header("        1.0000        0.0000        0.0000", "ANTENNA: DELTA H/E/N") +
+           header("     2    C1    L1", "# / TYPES OF OBSERV") + header("", "END OF HEADER");
+}
+
 // Section 2.2's text difference, the compressor's side: what the expansion
 // undoes.
 std::string textDifference(const std::string& before, const std::string& after)
@@ -332,6 +345,207 @@ TEST(CompactRinexExpansion, DamageIsWarnedOnceWithTheLinesItSpoilsAndExpansionRe
     EXPECT_EQ(lines[10], "G03         4.000           5.000");
     EXPECT_EQ(expanded.lines.compactLine(10), 20U);
     EXPECT_EQ(expanded.lines.compactLine(11), 22U);
+}
+
+TEST(CompactRinexExpansion, AnEpochListingNoSatellitesExpandsWhetherItOpensTheFileOrFollowsAnEvent)
+{
+    // As the published RNX2CRX ver.4.1.0 writes it (from a plain file holding
+    // the lines expected below): an epoch given in full with no satellites
+    // loses its trailing blanks, so it is 35 characters, not the 41 before a
+    // satellite list; the compressor pads it to 41 before taking the next
+    // epoch's difference. Line 10 is the file's first epoch; line 20 an
+    // external event (flag 5, no records); line 21 the first epoch after it,
+    // given in full again.
+    const std::string bytes = compactV3Header() +
+                              "> 2024 09 12 10 00  0.0000000  0  0\n"             // 10
+                              "\n"                                                // 11 no clock
+                              "                   3              2      G01G02\n" // 12
+                              "\n"                                                // 13
+                              "3&20000000001 3&105000000456 &7&7\n"               // 14 G01
+                              "3&21000000001 3&110000000500 &6&6\n"               // 15 G02
+                              "                 1 &\n"                            // 16
+                              "\n"                                                // 17
+                              "1 1\n"                                             // 18
+                              "2 2\n"                                             // 19
+                              "> 2024 09 12 10 01 15.0000000  5  0\n"             // 20 event
+                              "> 2024 09 12 10 01 30.0000000  0  0\n"             // 21
+                              "\n"                                                // 22
+                              "                 2 &              2      G01G02\n" // 23
+                              "\n"                                                // 24
+                              "3&20000000004 3&105000000460 &7&7\n"               // 25
+                              "3&21000000004 3&110000000504 &6&6\n"               // 26
+                              "                   3\n"                            // 27
+                              "\n"                                                // 28
+                              "2 3\n"                                             // 29
+                              "1 2\n";                                            // 30
+    const rinex::CompactExpansion expanded = expand(bytes, "empty.crx");
+    EXPECT_TRUE(expanded.warnings.empty()) << expanded.warnings.front().message;
+    EXPECT_EQ(expanded.linesSkipped, 0U);
+    const std::vector<std::string> lines = linesOf(expanded.text);
+    // Worked by hand, column numbers 1-based:
+    //   line 12 on line 10 padded to 41: column 20 '3' makes the seconds 30,
+    //     column 35 '2' the count 2, columns 42-47 the list;
+    //   G01 and G02 start their series at the values written (thousandths);
+    //   line 16: column 18 '1' makes the minute 01, column 20 '&' blanks the
+    //     '3' (seconds 0); first differences .001 and .001 (G01), .002 and
+    //     .002 (G02);
+    //   the event as it is; line 21 in full, and line 23 on it padded to 41:
+    //     minute 02, seconds 0, count 2, the list; every series afresh;
+    //   line 27: seconds 30; first differences .002/.003 and .001/.002.
+    const std::vector<std::string> want{
+        "> 2024 09 12 10 00  0.0000000  0  0",
+        "> 2024 09 12 10 00 30.0000000  0  2",
+        "G01  20000000.001 7 105000000.456 7",
+        "G02  21000000.001 6 110000000.500 6",
+        "> 2024 09 12 10 01  0.0000000  0  2",
+        "G01  20000000.002 7 105000000.457 7",
+        "G02  21000000.003 6 110000000.502 6",
+        "> 2024 09 12 10 01 15.0000000  5  0",
+        "> 2024 09 12 10 01 30.0000000  0  0",
+        "> 2024 09 12 10 02  0.0000000  0  2",
+        "G01  20000000.004 7 105000000.460 7",
+        "G02  21000000.004 6 110000000.504 6",
+        "> 2024 09 12 10 02 30.0000000  0  2",
+        "G01  20000000.006 7 105000000.463 7",
+        "G02  21000000.005 6 110000000.506 6",
+    };
+    ASSERT_EQ(lines.size(), 7U + want.size()) << expanded.text;
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        EXPECT_EQ(lines[7 + i], want[i]) << "expanded line " << 8 + i;
+    }
+
+    // Read: six epochs of flag 0 - 10:00:00, 10:00:30, 10:01:00, 10:01:30,
+    // 10:02:00 and 10:02:30 - two of them empty, and every compact line read.
+    const Result<ReadResult> read = readRinex(bytes, "empty.crx");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    ASSERT_EQ(read->project.gnssSessions.size(), 1U);
+    EXPECT_EQ(read->project.gnssSessions[0].epochCount, 6U) << describeWarnings(*read);
+    EXPECT_EQ(read->recordsSkipped, 0U) << describeWarnings(*read);
+    EXPECT_EQ(read->recordsRead, 30U);
+}
+
+TEST(CompactRinexExpansion, InCompactRinexOneAFlagOutlivesItsSeriesRestartingAndIsClearedByABlankOrANewSatellite)
+{
+    // Compact RINEX 1.0 (RINEX 2) as the published RNX2CRX ver.4.1.0 writes it
+    // with "-e 3" (every series starts afresh at every third epoch) from the
+    // plain file whose lines are expected below; its CRX2RNX gives that file
+    // back byte for byte. What the compressor does with the LLI and signal
+    // strength flags, and so what the expansion must undo:
+    //   * a series restarting ("3&...") for a phase jump of more than 10^7
+    //     leaves the flags alone - they are differenced against the old ones;
+    //   * a blank observation blanks its flags on both sides (no '&' for it);
+    //   * a satellite the compressor takes as new - every satellite on an
+    //     epoch line given in full ('&'), and one whose three characters were
+    //     not in the last epoch's list (' 01' is not 'G01') - has its flags
+    //     given whole, blanks as blanks.
+    const std::string bytes = compactV2Header() +
+                              "&24  9 12 10  0  0.0000000  0  2G01G02\n"   // 10 epoch 1
+                              "\n"                                          // 11
+                              "3&20000000123 3&105000000456  7 7\n"         // 12 G01
+                              "3&21000000123 3&110000000500  6 6\n"         // 13 G02
+                              "                3\n"                         // 14 epoch 2
+                              "\n"                                          // 15
+                              "1000 3&1000456\n"                            // 16 L1 jumps
+                              "1000 10000\n"                                // 17
+                              "              1 &\n"                         // 18 epoch 3
+                              "\n"                                          // 19
+                              "0 100000   1\n"                              // 20 L1 LLI 1
+                              "0 0\n"                                       // 21
+                              "&24  9 12 10  1 30.0000000  0  2G01G02\n"   // 22 epoch 4, full
+                              "\n"                                          // 23
+                              "3&20000003123 3&1200456  7 7\n"              // 24
+                              "3&21000003123 3&110000030500  6 6\n"         // 25
+                              "              2 &\n"                         // 26 epoch 5
+                              "\n"                                          // 27
+                              "1000 100000\n"                               // 28
+                              "1000\n"                                      // 29 G02 L1 blank
+                              "                3\n"                         // 30 epoch 6
+                              "\n"                                          // 31
+                              "0 0\n"                                       // 32
+                              "0 3&110000050500\n"                          // 33 G02 L1 back
+                              "&24  9 12 10  3  0.0000000  0  2G01G02\n"   // 34 epoch 7, full
+                              "\n"                                          // 35
+                              "3&20000006123 3&1500456  717\n"              // 36
+                              "3&21000006123 3&110000060500  6\n"           // 37
+                              "                3               &\n"         // 38 epoch 8
+                              "\n"                                          // 39
+                              "3&20000007123 3&1600456  7 7\n"              // 40 ' 01'
+                              "1000 10000\n";                               // 41
+    const rinex::CompactExpansion expanded = expand(bytes, "flags.24d");
+    EXPECT_TRUE(expanded.warnings.empty()) << expanded.warnings.front().message;
+    const std::vector<std::string> lines = linesOf(expanded.text);
+    // Flags are two characters per type, C1 then L1: LLI, signal strength.
+    const std::vector<std::string> want{
+        " 24  9 12 10  0  0.0000000  0  2G01G02",
+        "  20000000.123 7 105000000.456 7",
+        "  21000000.123 6 110000000.500 6",
+        " 24  9 12 10  0 30.0000000  0  2G01G02",
+        // L1 restarts at 1000.456 with no flag text: its " 7" stays.
+        "  20000001.123 7      1000.456 7",
+        "  21000001.123 6 110000010.500 6",
+        " 24  9 12 10  1  0.0000000  0  2G01G02",
+        // Flag text "  1" (after the separator): L1's LLI becomes 1.
+        "  20000002.123 7      1100.45617",
+        "  21000002.123 6 110000020.500 6",
+        " 24  9 12 10  1 30.0000000  0  2G01G02",
+        // A full epoch line: G01 is new, its flags " 7 7" given whole, so
+        // L1's LLI is blank again (a blank in the text is a blank here).
+        "  20000003.123 7      1200.456 7",
+        "  21000003.123 6 110000030.500 6",
+        " 24  9 12 10  2  0.0000000  0  2G01G02",
+        "  20000004.123 7      1300.456 7",
+        // G02's L1 is blank, and with it its flags.
+        "  21000004.123 6",
+        " 24  9 12 10  2 30.0000000  0  2G01G02",
+        "  20000005.123 7      1400.456 7",
+        // L1 back with no flag text: the flags the blank cleared stay clear.
+        "  21000005.123 6 110000050.500",
+        " 24  9 12 10  3  0.0000000  0  2G01G02",
+        "  20000006.123 7      1500.45617",
+        "  21000006.123 6 110000060.500",
+        // '&' in column 33 blanks the 'G': ' 01' is a satellite the
+        // compressor had not seen, its flags " 7 7" given whole - not "717"
+        // carried over from G01.
+        " 24  9 12 10  3 30.0000000  0  2 01G02",
+        "  20000007.123 7      1600.456 7",
+        "  21000007.123 6 110000070.500",
+    };
+    ASSERT_EQ(lines.size(), 7U + want.size()) << expanded.text;
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        EXPECT_EQ(lines[7 + i], want[i]) << "expanded line " << 8 + i;
+    }
+}
+
+TEST(CompactRinexExpansion, DamageWarningsAreListedUpToTheReadersLimitAndTheRestCounted)
+{
+    // 600 good one-satellite epochs, each followed by a bare '>' - an epoch
+    // line with no event flag, which spoils only itself, since the next epoch
+    // is given in full. 600 damaged stretches of one line each: the reader
+    // lists 500 warnings (as it does for a plain file) and counts the other
+    // 100 in one closing warning, rather than holding one per stretch - a
+    // 1 GiB file of 40-byte stretches would otherwise hold millions.
+    std::string bytes = compactV3Header();
+    for (int e = 0; e < 600; ++e) {
+        char line[64];
+        std::snprintf(line, sizeof line, "> 2024 09 12 10 %02d%11.7f  0  1      G01\n", e / 60,
+                      static_cast<double>(e % 60));
+        bytes += std::string(line) + "\n3&1000 3&2000\n>\n";
+    }
+    const rinex::CompactExpansion expanded = expand(bytes, "many.crx");
+    EXPECT_EQ(expanded.warnings.size(), 500U);
+    EXPECT_EQ(expanded.unlistedWarnings, 100U);
+    EXPECT_EQ(expanded.linesSkipped, 600U);
+
+    const Result<ReadResult> read = readRinex(bytes, "many.crx");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(read->project.gnssSessions.at(0).epochCount, 600U);
+    ASSERT_EQ(read->warnings.size(), 501U);
+    EXPECT_EQ(read->warnings.front().record, 13U) << "the first bare '>'";
+    EXPECT_EQ(read->warnings.back().message, "100 more warnings like these are not listed");
+    // 9 header lines and 4 a repetition: 2409, of which the 600 bare lines
+    // are skipped.
+    EXPECT_EQ(read->recordsSkipped, 600U);
+    EXPECT_EQ(read->recordsRead, 2409U - 600U);
 }
 
 TEST(CompactRinexExpansion, CompactHeadersThatCannotBeExpandedAreErrorsThatSayWhy)
