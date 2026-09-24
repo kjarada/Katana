@@ -2509,14 +2509,21 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
     }
     const std::size_t created = imported->entities.size();
     const auto importedBounds = imported->bounds;
-    transaction->add(cmd::createEntities(std::move(imported->entities)));
+    if (created != 0) {
+        transaction->add(cmd::createEntities(std::move(imported->entities)));
+    }
 
-    const auto status = document_.execute(std::move(transaction));
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(status.error().describe()));
-        return;
+    // A file with nothing the drawing can hold - every feature skipped, say -
+    // leaves the transaction empty, and the stack refuses an empty one as a
+    // command that changes nothing. That is not a failed import: the file was
+    // read, and its warnings below say why nothing came of it.
+    if (transaction->size() != 0) {
+        const auto status = document_.execute(std::move(transaction));
+        if (!status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+            warnUser("Import failed", QString::fromStdString(status.error().describe()));
+            return;
+        }
     }
 
     logMessage("Imported " + grouped(created) + " entities from " + fromPath(path.filename()));
@@ -2617,12 +2624,20 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
         transaction->add(cmd::createAlignment(alignment));
         ++alignments;
     }
-    const auto status = document_.execute(std::move(transaction));
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        warnUser( "Import failed",
-                             QString::fromStdString(status.error().describe()));
-        return;
+    // An archive of TINs, meshes or point clouds alone has no layer, style,
+    // entity or alignment for the drawing, so the transaction is empty - and
+    // the stack refuses an empty transaction as a command that changes
+    // nothing. Executed regardless, that refusal returned from here before
+    // the surfaces below were added, and a TIN archive imported as "Import
+    // failed" and an empty 3D view. Only a transaction with something in it
+    // runs; the session data below is added either way.
+    if (transaction->size() != 0) {
+        const auto status = document_.execute(std::move(transaction));
+        if (!status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+            warnUser("Import failed", QString::fromStdString(status.error().describe()));
+            return;
+        }
     }
 
     QString summary = "Imported " + grouped(created) + " entities";
