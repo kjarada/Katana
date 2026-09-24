@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -42,6 +43,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -391,8 +393,14 @@ TEST(TrimbleJobXml, recordKindsAndElementsItDoesNotReadAreCountedInWarnings)
     for (const ReadWarning& warning : result.warnings) {
         EXPECT_EQ(warning.fileName, "tps_gnss_job.jxl");
     }
-    EXPECT_GT(result.recordsSkipped, 0u);
-    EXPECT_GT(result.recordsRead, 20u);
+    // The FieldBook holds 26 records. Skipped: the SurveyEventRecord (a kind
+    // this reader does not import), point 102 (deleted) and the mean turned
+    // angle to 100 (the mean of shots read from their own records) = 3.
+    // Read: the other 23 - 13 setup, equipment, line, note and units records
+    // and 10 point records (CP1, CP2, the backsight shot to CP2, two shots to
+    // 100, the shot to 101, BASE, G100, G200, G300). Each record once.
+    EXPECT_EQ(result.recordsSkipped, 3u);
+    EXPECT_EQ(result.recordsRead, 23u);
 }
 
 TEST(TrimbleJobXml, anRtkVectorBecomesAGeocentricBaselineWithCovarianceAndBothAntennas)
@@ -605,6 +613,9 @@ TEST(TrimbleJobXml, twoCoordinateRecordsForOneNameKeepTheControlOneAndWarnWithTh
     EXPECT_EQ(read->project.controlPoints, (std::vector<survey::ControlPoint>{
                                                survey::ControlPoint::fixedHorizontal("A")}));
     EXPECT_TRUE(anyWarningContains(*read, "kept the control record 2 and not the one at N 1 E 2"));
+    // Both read: record 1 was imported, then replaced by record 2.
+    EXPECT_EQ(read->recordsRead, 2u);
+    EXPECT_EQ(read->recordsSkipped, 0u);
 }
 
 TEST(TrimbleJobXml, aSetupWithNoInstrumentHeightOrAtmosphereSaysSoBeforeImport)
@@ -626,6 +637,75 @@ TEST(TrimbleJobXml, aSetupWithNoInstrumentHeightOrAtmosphereSaysSoBeforeImport)
     const auto& observations = read->project.stations.front().observations;
     ASSERT_EQ(observations.size(), 1u);
     EXPECT_EQ(survey::observationPointing(observations[0])->face, survey::Face::Unknown);
+}
+
+TEST(TrimbleJobXml, eachRecordIsCountedOnceAsReadOnlyWhenSomethingOfItWasImported)
+{
+    // Fifteen records, numbered by their IDs. Read: 1 (a setup), 14 (a shot
+    // whose direction is kept though its distance is refused) and 15 (a shot)
+    // = 3. Skipped, each with its warning: 2 has no station name, 3 orients
+    // a setup that is not in the file, 4 has no point name, 5 is a shot from
+    // a setup that is not in the file, 6 a shot from S to S, 7 a line from S
+    // to S, 8 a GNSS vector with no base, 9 is deleted, 10 is a mean turned
+    // angle, 11 a shot with no reading, 12 a method this reader does not turn
+    // into anything, 13 a shot whose only value (a negative distance) is
+    // refused = 12. 3 + 12 = 15: no record counted twice or not at all.
+    const std::string job =
+        "<JOBFile version=\"5.72\"><FieldBook>\n"
+        "<StationRecord ID=\"1\"><StationName>S</StationName><TheodoliteHeight>1.5"
+        "</TheodoliteHeight></StationRecord>\n"
+        "<StationRecord ID=\"2\"><StationName/><TheodoliteHeight>1.5</TheodoliteHeight>"
+        "</StationRecord>\n"
+        "<BackBearingRecord ID=\"3\"><StationRecordID>99</StationRecordID><BackSight>B</BackSight>"
+        "</BackBearingRecord>\n"
+        "<PointRecord ID=\"4\"><Name/><Deleted>false</Deleted><Grid><North>1</North><East>2</East>"
+        "</Grid></PointRecord>\n"
+        "<PointRecord ID=\"5\"><Name>T</Name><Deleted>false</Deleted><Circle><HorizontalCircle>10"
+        "</HorizontalCircle></Circle><StationID>99</StationID></PointRecord>\n"
+        "<PointRecord ID=\"6\"><Name>S</Name><Deleted>false</Deleted><Circle><HorizontalCircle>10"
+        "</HorizontalCircle></Circle><StationID>1</StationID></PointRecord>\n"
+        "<LineRecord ID=\"7\"><Name>L</Name><Method>TwoPoints</Method><StartPoint>S</StartPoint>"
+        "<EndPoint>S</EndPoint><Deleted>false</Deleted></LineRecord>\n"
+        "<PointRecord ID=\"8\"><Name>G</Name><Deleted>false</Deleted><ECEFDeltas><DeltaX>1</DeltaX>"
+        "<DeltaY>2</DeltaY><DeltaZ>3</DeltaZ></ECEFDeltas></PointRecord>\n"
+        "<PointRecord ID=\"9\"><Name>T</Name><Deleted>true</Deleted><Circle><HorizontalCircle>10"
+        "</HorizontalCircle></Circle><StationID>1</StationID></PointRecord>\n"
+        "<PointRecord ID=\"10\"><Name>T</Name><Method>MeanTurnedAngle</Method><Deleted>false"
+        "</Deleted><MTA><HorizontalAngle>10</HorizontalAngle></MTA></PointRecord>\n"
+        "<PointRecord ID=\"11\"><Name>U</Name><Deleted>false</Deleted><Circle><Face>Face1</Face>"
+        "</Circle><StationID>1</StationID></PointRecord>\n"
+        "<PointRecord ID=\"12\"><Name>V</Name><Method>LaserOffset</Method><Deleted>false</Deleted>"
+        "</PointRecord>\n"
+        "<PointRecord ID=\"13\"><Name>W</Name><Deleted>false</Deleted><Circle><EDMDistance>-5"
+        "</EDMDistance></Circle><StationID>1</StationID></PointRecord>\n"
+        "<PointRecord ID=\"14\"><Name>X</Name><Deleted>false</Deleted><Circle><HorizontalCircle>20"
+        "</HorizontalCircle><EDMDistance>-5</EDMDistance></Circle><StationID>1</StationID>"
+        "</PointRecord>\n"
+        "<PointRecord ID=\"15\"><Name>T</Name><Deleted>false</Deleted><Circle><HorizontalCircle>30"
+        "</HorizontalCircle><VerticalCircle>90</VerticalCircle></Circle><StationID>1</StationID>"
+        "</PointRecord>\n"
+        "</FieldBook></JOBFile>\n";
+    Result<ReadResult> read = readJxl(job, "counts.jxl");
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(read->recordsRead, 3u);
+    EXPECT_EQ(read->recordsSkipped, 12u);
+    // Records 14 and 15: HA to X; HA and ZA to T.
+    ASSERT_EQ(read->project.stations.size(), 1u);
+    EXPECT_EQ(read->project.stations.front().observations.size(), 3u);
+    for (const char* said : {"counts.jxl record 3: a station record with no station name",
+                             "counts.jxl record 4: backsight record 3 names setup record 99",
+                             "counts.jxl record 5: a point record with no name",
+                             "counts.jxl record 6: observation to T names setup record 99",
+                             "counts.jxl record 7: observation from S to itself",
+                             "counts.jxl record 8: line L does not join two different points",
+                             "counts.jxl record 9: the GNSS vector to G has no base point",
+                             "1 record(s) the surveyor deleted", "1 mean turned angle record(s)",
+                             "counts.jxl record 12: observation to U records no circle reading",
+                             "counts.jxl record 13: point V was recorded by the method LaserOffset",
+                             "counts.jxl record 14: slope distance not imported",
+                             "counts.jxl record 15: slope distance not imported"}) {
+        EXPECT_TRUE(anyWarningContains(*read, said)) << said;
+    }
 }
 
 // ---- Robustness ---------------------------------------------------------------------------
@@ -733,6 +813,40 @@ TEST(TrimbleJobXml, randomBytesAndRandomlyDamagedJobsEndInAnErrorOrAProjectNever
     }
 }
 
+TEST(TrimbleJobXml, aRecordThatWouldHoldFarMoreThanItsOwnSizeIsSkippedWithAWarningAndTheRestRead)
+{
+    // A crafted record: an element with a 32 KiB name, holding 16,384 empty
+    // elements. Every one of those is a value whose path repeats the long
+    // name, so holding them all would take 16,384 x 32 KiB = 512 MiB for a
+    // file of about 128 KiB - and twice the file, four times the memory. The
+    // reader stops holding a record past its limit (16 MiB), skips it with a
+    // warning on the line it starts on (2), and reads the point after it.
+    const std::string longName(32 * 1024, 'A');
+    std::string job = "<JOBFile version=\"5.72\"><FieldBook>\n<NoteRecord ID=\"1\"><" + longName + ">";
+    for (int i = 0; i < 16384; ++i) {
+        job += "<b/>";
+    }
+    job += "</" + longName + "></NoteRecord>\n"
+           "<PointRecord ID=\"2\"><Name>P</Name><Method>Coordinates</Method><Deleted>false</Deleted>"
+           "<Grid><North>1</North><East>2</East><Elevation>3</Elevation></Grid></PointRecord>\n"
+           "</FieldBook></JOBFile>\n";
+    const auto start = std::chrono::steady_clock::now();
+    Result<ReadResult> read = readJxl(job, "crafted.jxl");
+    const double seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_TRUE(anyWarningContains(*read, "crafted.jxl record 2: the NoteRecord record holds more"))
+        << (read->warnings.empty() ? std::string("no warning") : describe(read->warnings.front()));
+    EXPECT_EQ(read->recordsSkipped, 1u);
+    EXPECT_EQ(read->recordsRead, 1u);
+    ASSERT_EQ(read->project.points.size(), 1u);
+    EXPECT_EQ(read->project.points.front().id, "P");
+    EXPECT_FALSE(read->project.metadata.contains("jxl.note.1")); // the note was not half read
+    // It reads no more than the 16 MiB before it stops: well under a second
+    // even in a Debug build; the bound is loose for a busy machine.
+    EXPECT_LT(seconds, 10.0);
+}
+
 // ---- Throughput ----------------------------------------------------------------------------
 
 namespace {
@@ -826,4 +940,84 @@ TEST(TrimbleJobXml, aLargeSyntheticJobReadsEveryShotAndReportsItsThroughput)
               << "included) " << seconds << " s = " << mb / seconds << " MB/s\n";
     RecordProperty("reader_megabytes_per_second", std::to_string(mb / readerSeconds));
     RecordProperty("megabytes_per_second", std::to_string(mb / seconds));
+}
+
+namespace {
+
+// `count` keyed-in grid points of one class, one record each: the shape of a
+// list of control marks imported into a job.
+std::string keyedInJob(std::size_t count, std::string_view classification)
+{
+    std::string job = "<JOBFile version=\"5.72\"><FieldBook>\n";
+    job.reserve(count * 240);
+    for (std::size_t i = 1; i <= count; ++i) {
+        const std::string n = std::to_string(i);
+        job += "<PointRecord ID=\"" + n + "\"><Name>CM" + n +
+               "</Name><Method>Coordinates</Method><SurveyMethod>KeyedIn</SurveyMethod>"
+               "<Classification>" + std::string(classification) +
+               "</Classification><Deleted>false</Deleted><Grid><North>" + n + "</North><East>" + n +
+               "</East><Elevation>1</Elevation></Grid></PointRecord>\n";
+    }
+    job += "</FieldBook></JOBFile>\n";
+    return job;
+}
+
+} // namespace
+
+TEST(TrimbleJobXml, aControlListReadsInAboutTheTimeOfTheSameListOfOrdinaryPoints)
+{
+    // 12,000 control marks. Were each checked against every control point
+    // listed before it, the read would make 12,000 x 11,999 / 2 = 72 million
+    // name comparisons - several times the whole of the rest of the read,
+    // and growing with the square of the list. Listed once each, a control
+    // list is the same work as the same list classed Normal plus one entry
+    // per point. Best of three, taken in turn, so a busy machine slows both;
+    // a factor of 3 leaves room for the rest of its noise.
+    constexpr std::size_t kCount = 12000;
+    const std::string control = keyedInJob(kCount, "Control");
+    const std::string normal = keyedInJob(kCount, "Normal");
+    const FormatReader reader = formatRegistry().reader(kId);
+    ASSERT_TRUE(reader);
+    double best[2] = {1e9, 1e9};
+    for (int round = 0; round < 3; ++round) {
+        for (int kind = 0; kind < 2; ++kind) {
+            const auto start = std::chrono::steady_clock::now();
+            Result<ReadResult> read = reader(kind == 0 ? control : normal, "list.jxl", ReadOptions{});
+            const double seconds =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            ASSERT_TRUE(read.ok()) << read.error().describe();
+            ASSERT_EQ(read->project.points.size(), kCount);
+            ASSERT_EQ(read->project.controlPoints.size(), kind == 0 ? kCount : 0u);
+            best[kind] = std::min(best[kind], seconds);
+        }
+    }
+    std::cout << "[ scaling ] JobXML: " << kCount << " control points " << best[0] << " s, as many "
+              << "ordinary points " << best[1] << " s\n";
+    EXPECT_LT(best[0], 3.0 * best[1]);
+}
+
+TEST(TrimbleJobXml, aControlMarkRecordedTwiceIsListedAsControlOnce)
+{
+    // A re-imported control list repeats its marks: A twice (the first kept,
+    // with its height; the second skipped, its values in a warning), then B
+    // with no height.
+    const std::string job =
+        "<JOBFile version=\"5.72\"><FieldBook>"
+        "<PointRecord ID=\"1\"><Name>A</Name><Method>Coordinates</Method>"
+        "<Classification>Control</Classification><Deleted>false</Deleted>"
+        "<Grid><North>1</North><East>2</East><Elevation>3</Elevation></Grid></PointRecord>"
+        "<PointRecord ID=\"2\"><Name>A</Name><Method>Coordinates</Method>"
+        "<Classification>Control</Classification><Deleted>false</Deleted>"
+        "<Grid><North>1</North><East>2</East><Elevation>3</Elevation></Grid></PointRecord>"
+        "<PointRecord ID=\"3\"><Name>B</Name><Method>Coordinates</Method>"
+        "<Classification>Control</Classification><Deleted>false</Deleted>"
+        "<Grid><North>5</North><East>6</East><Elevation/></Grid></PointRecord>"
+        "</FieldBook></JOBFile>";
+    Result<ReadResult> read = readJxl(job);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+    EXPECT_EQ(read->project.controlPoints,
+              (std::vector<survey::ControlPoint>{survey::ControlPoint::fixed3d("A"),
+                                                 survey::ControlPoint::fixedHorizontal("B")}));
+    EXPECT_EQ(read->recordsRead, 2u);
+    EXPECT_EQ(read->recordsSkipped, 1u);
 }
