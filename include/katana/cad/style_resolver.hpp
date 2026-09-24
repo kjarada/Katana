@@ -6,7 +6,7 @@
 //
 // A name reaches here from Style::linetype, Layer::linetype or Style::symbol.
 // Two tables can hold it: the Model's Linetype table (DXF-style dashes, saved
-// in the project) and the session's 12d StyleLibrary (strokes, texts and
+// in the project) and the session's StyleLibrary (strokes, texts and
 // pens; cad::Document::styleLibrary). The rules, as the lead decided them:
 //
 //   LINETYPE (decision D2). A NON-vertex library definition of the name wins
@@ -22,9 +22,9 @@
 //   (entity::builtInSymbolFor), and the caller is told which.
 //
 //   SYMBOLS ON LINES (decision D8). A line whose style names a symbol draws
-//   that symbol at EVERY vertex, as 12d does, and a symbol's name is never
+//   that symbol at EVERY vertex, as a vertex symbol is, and its name is never
 //   used as a pattern along the line: a style whose linetype names its own
-//   symbol - which is what the 12da import writes for a symbol string - is a
+//   symbol - which is what an archive import writes for a symbol string - is a
 //   plain line with symbols on it.
 //
 // Nothing here keeps a pointer into a library beyond the call that returned

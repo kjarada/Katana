@@ -50,7 +50,7 @@ constexpr int kSampleArcChords = 16;
 [[nodiscard]] StyleDrawing builtInDrawing(std::string_view shape, const Point2& at, double size,
                                           double rotation, double fallbackHalfWidth)
 {
-    // The style's size is the symbol's WIDTH, as 12d's is; the unit shape
+    // The style's size is the symbol's WIDTH, as a library's is; the unit shape
     // takes a half-width.
     const double half = size > 0.0 ? 0.5 * size : fallbackHalfWidth;
     StyleDrawing drawing;
@@ -95,7 +95,7 @@ ResolvedLinetype resolveLinePattern(const katana::entity::Model& model,
                                     std::string_view symbol)
 {
     if (!symbol.empty() && linetype == symbol) {
-        // The 12da import names a symbol string's style, linetype AND symbol
+        // An archive import names a symbol string's style, linetype AND symbol
         // after the symbol. Taken as a linetype, the 147 symbols that are not
         // `mode vertex` were laid along their lines as patterns (D8).
         return {};

@@ -145,7 +145,7 @@ katana::core::Result<CommandPtr> importSurveyProject(const Document& document,
                                         PropertyValue(point.description));
         }
         // A 2D drawing has no Z, so the height is a property - the same one the
-        // 12d import writes and the surface builder reads. A point the source
+        // archive import writes and the surface builder reads. A point the source
         // gave no height for gets NO property rather than 0.0: the surface
         // builder leaves a point without one out, where a zero would be a real
         // height at the datum and pull the surface down to it (PLAN.MD 45.3b).

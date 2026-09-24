@@ -11,7 +11,8 @@
 //
 // The unit shape fits the square from -1 to 1 about the origin; `size` is
 // the model-unit half-width it is scaled to (half of Style::symbolSize,
-// which is a width the way 12d's is), `rotation` radians counter-clockwise. A size of 0 means "the viewport's own mark", and the
+// which is a width the way a library symbol's is), `rotation` radians
+// counter-clockwise. A size of 0 means "the viewport's own mark", and the
 // caller decides what that is in pixels - a symbol with no size is not
 // drawn at no size.
 

@@ -175,7 +175,7 @@ TEST_F(TableMerge, MergeDeleteAndPurgeAreDestructiveAndDuplicateIsNot)
 
 TEST_F(TableRename, UndoingALinetypeRenameOntoANameAlreadyHeldPutsBackOnlyWhatTheRenameMoved)
 {
-    // The commands layer does not see the 12d library, so a style or layer
+    // The commands layer does not see the style library, so a style or layer
     // may name a linetype the model lacks - a library linestyle (D2), which
     // STYLE SET now accepts. The rename's validate asks only the model
     // table, so a model linetype can be renamed onto that name. Its undo
@@ -316,7 +316,7 @@ TEST_F(TableNoOpUpdate, SavingAnUneditedStylePushesNoUndoStepAndChangesNothing)
     // it was - which is also what stops it marking the project modified.
     Style imported = style("WATR Main", "WATR Main");
     imported.symbol = "CULT Bollard";
-    imported.description = "12d linestyle";
+    imported.description = "library linestyle";
     must(createStyle(imported));
     const std::size_t steps = stack.undoCount();
 
