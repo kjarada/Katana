@@ -27,6 +27,7 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -183,10 +184,21 @@ std::vector<Seen> textsIn(QWidget& root)
     return seen;
 }
 
+// The property keys an archive import stores its string names, styles and
+// breaklines under, which projects already hold: renaming them is a storage
+// migration (decision D6), not a change of words, so a chooser that offers
+// the properties an entity may carry offers these as they are. Only the key
+// ALONE is let through; any sentence around it is still checked.
+const QStringList kPersistedKeys{QStringLiteral("12d.name"), QStringLiteral("12d.style"),
+                                 QStringLiteral("12d.breakline")};
+
 // Fails once for each text naming the program, saying where it is.
 void expectNoneNames12d(const std::vector<Seen>& seen)
 {
     for (const Seen& each : seen) {
+        if (kPersistedKeys.contains(each.text)) {
+            continue;
+        }
         EXPECT_FALSE(each.text.contains(QStringLiteral("12d"), Qt::CaseInsensitive))
             << each.where.toStdString() << ": " << each.text.toStdString();
     }
