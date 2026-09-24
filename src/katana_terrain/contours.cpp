@@ -1,8 +1,11 @@
 #include "katana/terrain/contours.hpp"
 
+#include "katana/core/task_pool.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <span>
 #include <string>
 
@@ -173,7 +176,7 @@ Result<std::vector<Contour>> contourAt(const TinSurface& surface, double elevati
 }
 
 Result<std::vector<Contour>> contours(const TinSurface& surface, double interval, double base,
-                                      std::size_t majorEvery)
+                                      std::size_t majorEvery, katana::core::TaskPool* pool)
 {
     // Levels closer than kGeometric would be the same geometric feature (and,
     // far below that, no longer distinct doubles at survey elevations).
@@ -229,26 +232,39 @@ Result<std::vector<Contour>> contours(const TinSurface& surface, double interval
                              " limit=" + std::to_string(kMaxContourLevels));
     }
 
-    // Bucket the triangles by the levels that cross them (CSR), so that tracing a
-    // level touches only its own triangles. Total size = number of contour pieces.
-    const auto triangleLevels = [&](std::uint32_t t) {
-        const TinTriangle& tri = surface.triangles()[t];
-        const double z0 = surface.vertices()[tri[0]].z;
-        const double z1 = surface.vertices()[tri[1]].z;
-        const double z2 = surface.vertices()[tri[2]].z;
-        const double lo = std::min({z0, z1, z2});
-        const double hi = std::max({z0, z1, z2});
-        struct Range {
-            std::int64_t first;
-            std::int64_t last;
-        };
-        return lo < hi ? Range{firstLevelAbove(lo), lastLevelAtOrBelow(hi)} : Range{0, -1};
+    katana::core::TaskPool& workers = pool != nullptr ? *pool : katana::core::TaskPool::shared();
+
+    // The levels crossing each triangle, found once and kept: both bucketing
+    // passes below need them, and the floor and the settling loops are most
+    // of the bucketing's cost. Each triangle writes only its own slot, so the
+    // parallel pass fills exactly what a serial one would.
+    struct LevelRange {
+        std::int64_t first = 0;
+        std::int64_t last = -1; // empty when last < first
     };
     const auto triangleCount = static_cast<std::uint32_t>(surface.triangleCount());
+    std::vector<LevelRange> ranges(triangleCount);
+    workers.parallelRanges(0, triangleCount, 4096, [&](std::size_t lo, std::size_t hi) {
+        for (std::size_t t = lo; t < hi; ++t) {
+            const TinTriangle& tri = surface.triangles()[t];
+            const double z0 = surface.vertices()[tri[0]].z;
+            const double z1 = surface.vertices()[tri[1]].z;
+            const double z2 = surface.vertices()[tri[2]].z;
+            const double low = std::min({z0, z1, z2});
+            const double high = std::max({z0, z1, z2});
+            if (low < high) {
+                ranges[t] = LevelRange{firstLevelAbove(low), lastLevelAtOrBelow(high)};
+            }
+        }
+    });
+
+    // Bucket the triangles by the levels that cross them (CSR), so that tracing a
+    // level touches only its own triangles. Total size = number of contour pieces.
+    // Serial, and in triangle order, so every bucket is ascending - the order
+    // LevelTracer::trace documents and the output order depends on.
     std::vector<std::size_t> start(levelCount + 1, 0);
     for (std::uint32_t t = 0; t < triangleCount; ++t) {
-        const auto range = triangleLevels(t);
-        for (std::int64_t k = range.first; k <= range.last; ++k) {
+        for (std::int64_t k = ranges[t].first; k <= ranges[t].last; ++k) {
             ++start[static_cast<std::size_t>(k - firstK) + 1];
         }
     }
@@ -258,21 +274,46 @@ Result<std::vector<Contour>> contours(const TinSurface& surface, double interval
     std::vector<std::uint32_t> bucket(start[levelCount]);
     std::vector<std::size_t> cursor(start.begin(), start.end() - 1);
     for (std::uint32_t t = 0; t < triangleCount; ++t) {
-        const auto range = triangleLevels(t);
-        for (std::int64_t k = range.first; k <= range.last; ++k) {
+        for (std::int64_t k = ranges[t].first; k <= ranges[t].last; ++k) {
             bucket[cursor[static_cast<std::size_t>(k - firstK)]++] = t;
         }
     }
 
-    std::vector<std::uint32_t> visitedStamp(triangleCount, 0);
-    LevelTracer tracer(surface, visitedStamp);
-    for (std::size_t i = 0; i < levelCount; ++i) {
-        const std::int64_t k = firstK + static_cast<std::int64_t>(i);
-        const bool major = majorEvery != 0 && k % static_cast<std::int64_t>(majorEvery) == 0;
-        tracer.trace(level(k), major,
-                     std::span<const std::uint32_t>(bucket.data() + start[i],
-                                                    start[i + 1] - start[i]),
-                     static_cast<std::uint32_t>(i + 1), output);
+    // Levels are independent: tracing one reads the immutable surface and its
+    // own bucket, and writes its own list. They are traced in parallel into
+    // one list per level, and the lists are joined in level order, so the
+    // result is identical to the serial trace whatever the thread count
+    // (Rule 7; test_contours.cpp compares against TaskPool(1)).
+    //
+    // A tracer's visited stamps must be unique per level WITHIN the array it
+    // uses, not globally, so each chunk of levels has an array of its own and
+    // numbers its levels from 1. Chunks are sized to give each thread a few
+    // (the levels differ greatly in length), which bounds the arrays alive at
+    // once by the thread count; the chunking cannot change a result, since no
+    // level sees another level's stamps as its own.
+    std::vector<std::vector<Contour>> perLevel(levelCount);
+    const std::size_t levelsPerChunk =
+        std::max<std::size_t>(1, levelCount / (workers.concurrency() * 4));
+    workers.parallelRanges(0, levelCount, levelsPerChunk, [&](std::size_t lo, std::size_t hi) {
+        std::vector<std::uint32_t> visitedStamp(triangleCount, 0);
+        LevelTracer tracer(surface, visitedStamp);
+        for (std::size_t i = lo; i < hi; ++i) {
+            const std::int64_t k = firstK + static_cast<std::int64_t>(i);
+            const bool major = majorEvery != 0 && k % static_cast<std::int64_t>(majorEvery) == 0;
+            tracer.trace(level(k), major,
+                         std::span<const std::uint32_t>(bucket.data() + start[i],
+                                                        start[i + 1] - start[i]),
+                         static_cast<std::uint32_t>(i - lo + 1), perLevel[i]);
+        }
+    });
+
+    std::size_t total = 0;
+    for (const auto& lines : perLevel) {
+        total += lines.size();
+    }
+    output.reserve(total);
+    for (auto& lines : perLevel) {
+        std::move(lines.begin(), lines.end(), std::back_inserter(output));
     }
     return output;
 }
