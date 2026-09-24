@@ -30,5 +30,20 @@ void addModifyEditTools(ToolCatalog& catalog, const Report& report);
 void addAnnotateTools(ToolCatalog& catalog, const Report& report);
 // Distance, Area, ID Point, Angle, List - tools that measure and report.
 void addInquiryTools(ToolCatalog& catalog, const Report& report);
+// Divide and Measure: points along an object, N parts or every so far.
+void addDrawDivideTools(ToolCatalog& catalog, const Report& report);
+// Lengthen and Reverse.
+void addModifyLengthTools(ToolCatalog& catalog, const Report& report);
+// Match Properties.
+void addPropertyTools(ToolCatalog& catalog, const Report& report);
+// Select Similar and Quick Select: tools whose answer is a selection.
+void addSelectTools(ToolCatalog& catalog, const Report& report);
+
+// Esc for a tool whose Enter only ever commits work it has collected - a
+// LINE or PLINE chain, the cuts of a Trim or Extend, Offset's copies, a run
+// of Fillets or Chamfers: Enter, first stepped back out of any value prompt
+// (whose Enter would take a default), keeping a Done step's command and
+// dropping anything else. Such a tool's cancel() returns this.
+[[nodiscard]] ToolStep keepWorkOnEscape(InteractiveTool& tool);
 
 } // namespace katana::cad::tools

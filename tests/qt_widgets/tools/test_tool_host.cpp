@@ -89,3 +89,122 @@ TEST(ToolHost, AbandonEndsTheToolWithoutCommittingItsPoints)
     ASSERT_EQ(finished.size(), 1u);
     EXPECT_EQ(finished.front(), "draw.line");
 }
+
+// ---- Esc through the tool's own cancel(), transparent commands, selections ----------
+
+TEST(ToolHost, EscInCopyKeepsTheCopiesAlreadyPlacedAsOneUndoStep)
+{
+    // Copy was left out of the host's old keep-on-Esc list, because its
+    // Enter with no copy placed copies by the base point; the tool's own
+    // cancel() now keeps what was placed and applies no default.
+    Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0, 0), Point2(1, 0))).ok());
+    document.selection().add(document.lastCreatedEntities().front());
+    ToolHost host(document);
+    std::vector<std::string> messages;
+    host.onMessage = [&](const std::string& message) { messages.push_back(message); };
+    ASSERT_TRUE(host.start("modify.copy").ok());
+    (void)host.point(Point2(0, 0));
+    (void)host.point(Point2(0, 5));
+    (void)host.point(Point2(0, 10));
+    host.cancel();
+    EXPECT_FALSE(host.active());
+    // The line, then ONE command for both copies: three lines in all.
+    EXPECT_EQ(document.history().undoCount(), 2u);
+    EXPECT_EQ(document.model().entities.size(), 3u);
+    ASSERT_FALSE(messages.empty());
+    EXPECT_EQ(messages.back(), "2 copies of 1 entity");
+}
+
+TEST(ToolHost, ZoomTypedWhileAToolRunsGoesToTheViewAndTheToolKeepsItsStep)
+{
+    Document document;
+    ToolHost host(document);
+    std::vector<std::string> transparent;
+    host.onTransparent = [&](const std::string& command) {
+        transparent.push_back(command);
+        return true;
+    };
+    ASSERT_TRUE(host.start("draw.line").ok());
+    (void)host.point(Point2(0, 0));
+    EXPECT_EQ(host.typed("Z"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(host.typed("'zoom e"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(host.typed("PAN"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(transparent, (std::vector<std::string>{"Z", "'zoom e", "PAN"}));
+    // Still at the second point of the same chain.
+    EXPECT_EQ(host.lastPoint(), Point2(0, 0));
+    EXPECT_EQ(host.typed("10,0"), ToolHost::Outcome::Continue);
+    host.cancel();
+    EXPECT_EQ(document.model().entities.size(), 1u);
+}
+
+TEST(ToolHost, ATransparentCommandWithNoViewToRunItIsRefusedNotSentToTheTool)
+{
+    Document document;
+    ToolHost host(document);
+    std::vector<std::string> refusals;
+    host.onRejected = [&](const std::string& why) { refusals.push_back(why); };
+    ASSERT_TRUE(host.start("draw.line").ok());
+    EXPECT_EQ(host.typed("ZOOM"), ToolHost::Outcome::Rejected);
+    ASSERT_EQ(refusals.size(), 1u);
+    EXPECT_EQ(refusals.front(), "ZOOM cannot run inside Line; press Esc to end the tool first.");
+    EXPECT_TRUE(host.active());
+}
+
+TEST(ToolHost, ABarePIsAnOptionForTheToolAndOnlyTheApostropheFormIsPan)
+{
+    using katana::qt::tools::isTransparentCommand;
+    EXPECT_TRUE(isTransparentCommand("'P"));
+    EXPECT_TRUE(isTransparentCommand(" zoom "));
+    EXPECT_FALSE(isTransparentCommand("P")); // Rotate's and Scale's [Points]
+    EXPECT_FALSE(isTransparentCommand("ZOOMY"));
+    EXPECT_FALSE(isTransparentCommand("10,0"));
+    // At a prompt for a value a bare word is the answer; 'Z is still ZOOM.
+    EXPECT_FALSE(isTransparentCommand("Z", true));
+    EXPECT_TRUE(isTransparentCommand("'Z", true));
+}
+
+TEST(ToolHost, AWordTypedAtAValuePromptIsTheToolsAnswerEvenWhenItReadsZoom)
+{
+    // Quick Select's layer prompt takes any name, "Z" included; only 'Z
+    // goes to the view from there.
+    Document document;
+    ToolHost host(document);
+    std::vector<std::string> transparent;
+    host.onTransparent = [&](const std::string& command) {
+        transparent.push_back(command);
+        return true;
+    };
+    ASSERT_TRUE(host.start("select.quick").ok());
+    EXPECT_EQ(host.typed("Any"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(host.typed("'Z"), ToolHost::Outcome::Continue);
+    EXPECT_EQ(transparent, (std::vector<std::string>{"'Z"}));
+    EXPECT_EQ(host.typed("Z"), ToolHost::Outcome::Continue); // the layer, "Z"
+    EXPECT_EQ(transparent.size(), 1u);
+    EXPECT_NE(host.prompt().find("Condition"), std::string::npos) << host.prompt();
+}
+
+TEST(ToolHost, ASelectingToolsAnswerIsLeftInTheDocumentsSelection)
+{
+    Document document;
+    std::vector<katana::entity::EntityId> lines;
+    for (const double y : {0.0, 1.0, 2.0}) {
+        ASSERT_TRUE(
+            document.execute(katana::commands::createLine(Point2(0, y), Point2(1, y))).ok());
+        lines.push_back(document.lastCreatedEntities().front());
+    }
+    ASSERT_TRUE(document.execute(katana::commands::createCircle(Point2(5, 5), 1.0)).ok());
+    const auto circle = document.lastCreatedEntities().front();
+    document.selection().set({lines.front()});
+    int notified = 0;
+    auto listening = document.addListener([&] { ++notified; });
+    ToolHost host(document);
+    ASSERT_TRUE(host.start("select.similar").ok());
+    EXPECT_EQ(host.enter(), ToolHost::Outcome::Done);
+    // The three lines on layer 0, not the circle.
+    EXPECT_EQ(document.selection().ids(), lines);
+    EXPECT_FALSE(document.selection().contains(circle));
+    EXPECT_GE(notified, 1);
+    EXPECT_EQ(document.history().undoCount(), 4u) << "no command for a selection";
+}
