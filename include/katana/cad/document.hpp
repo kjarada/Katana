@@ -89,12 +89,12 @@ class Document {
 
     // ---- the survey customisation (PLAN.MD 20.3) -----------------------------
     //
-    // The 12d linestyle and symbol definitions this drawing is drawn with, and
-    // the mapfile that says what a survey code becomes. They are NOT part of
-    // the model and are not saved inside the project: a customisation is a
-    // site-wide thing a project NAMES rather than copies, which is 12d's own
-    // arrangement and keeps 35,000 strokes out of every project file. See
-    // docs/survey_coding.md.
+    // The library linestyle and symbol definitions this drawing is drawn
+    // with, and the survey code rules that say what a survey code becomes.
+    // They are NOT part of the model and are not saved inside the project: a
+    // customisation is a site-wide thing a project NAMES rather than copies,
+    // the usual arrangement, and it keeps 35,000 strokes out of every project
+    // file. See docs/survey_coding.md.
     //
     // They are not undoable either, and deliberately: loading a library is not
     // an edit to the drawing, it is a change to what the drawing is looked at
@@ -150,7 +150,7 @@ class Document {
     [[nodiscard]] const std::string& currentLayer() const { return currentLayer_; }
     [[nodiscard]] katana::core::Status setCurrentLayer(const std::string& name);
     // The style new work is drawn in - AutoCAD's CELTYPE, or a current point
-    // style - so a symbol or a 12d linestyle can be drawn with, not only
+    // style - so a symbol or a library linestyle can be drawn with, not only
     // applied afterwards. Empty means ByLayer, and is the default.
     //
     // Refused (NotFound) for a style the model does not have; "" clears it.

@@ -93,8 +93,8 @@ struct EntityAttributes {
 [[nodiscard]] CommandPtr removeEntityProperty(std::vector<EntityId> ids, std::string key);
 // Renames a property on every entity that has it, keeping its value and its
 // type. Refuses a target the entity already has: the two values differ, and
-// silently keeping one of them would lose the other. A 12d import names
-// properties after the attribute tree it flattened ("Asset/Dimensions/Size"),
+// silently keeping one of them would lose the other. An archive import
+// names properties after the attribute tree it flattened ("Asset/Dimensions/Size"),
 // which is the first thing a user wants to tidy.
 [[nodiscard]] CommandPtr renameEntityProperty(std::vector<EntityId> ids, std::string from,
                                               std::string to);
@@ -161,7 +161,7 @@ struct EntityAttributes {
 // ---- styles ----------------------------------------------------------------------
 // A style is how an entity that is not ByLayer is drawn: linetype, weight,
 // colour, hatch and - for a point - its symbol. Delete refuses while any
-// entity still names it. Names are what a 12d linestyle arrives as.
+// entity still names it. Names are what a library linestyle arrives as.
 [[nodiscard]] CommandPtr createStyle(katana::entity::Style style);
 [[nodiscard]] CommandPtr updateStyle(katana::entity::Style style);
 // nullptr when `style` equals the stored one; see updateLinetypeIfChanged.
@@ -169,7 +169,7 @@ struct EntityAttributes {
                                               katana::entity::Style style);
 [[nodiscard]] CommandPtr deleteStyle(std::string name);
 // Renames it and repoints every entity that wore it, as one undo step.
-// A 12d import names a style after a linestyle ("TOPO Natural Surface
+// An archive import names a style after a linestyle ("TOPO Natural Surface
 // Point"), which is the first thing a user wants to shorten.
 [[nodiscard]] CommandPtr renameStyle(std::string from, std::string to);
 // Moves every entity wearing `from` onto `into`, then deletes `from`, as one

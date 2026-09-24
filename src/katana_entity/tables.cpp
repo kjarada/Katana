@@ -759,7 +759,7 @@ Status AlignmentPolicy::validate(const Alignment& alignment)
 }
 
 // The set a viewport can paint. Names as the survey packages use them: a
-// 12d "TOPO Natural Surface Point" style, for instance, is a cross.
+// "TOPO Natural Surface Point" style, for instance, is a cross.
 const std::vector<std::string_view>& symbolNames()
 {
     static const std::vector<std::string_view> names = {
@@ -824,7 +824,7 @@ Status validate(const Style& style)
     }
     // A symbol name is RESOLVED when the style is drawn, exactly as
     // `Style::linetype` already is, and not checked against a closed set
-    // here. It stopped being a closed set when a project could load a 12d
+    // here. It stopped being a closed set when a project could load a
     // symbol library: one production customisation alone names 473 of them,
     // and none is one of the sixteen Katana draws without a library
     // (PLAN.MD 20.3). A name with no definition behind it draws the plain
@@ -835,7 +835,7 @@ Status validate(const Style& style)
                          style.name);
     }
     // The linetype is resolved when drawn, like the symbol, and for the same
-    // reason is not checked against a table: a 12d linestyle lives in the
+    // reason is not checked against a table: a library linestyle lives in the
     // library, not the model. "ByLayer" (display.hpp) is accepted like any
     // other name - it is what a style that inherits its layer's linetype
     // says. Only the encoding is checked, as it is for every string here.

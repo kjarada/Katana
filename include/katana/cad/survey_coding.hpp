@@ -13,8 +13,8 @@
 // what it did and - just as important - which codes the mapfile had no rule
 // for. A code silently left alone looks exactly like a code that was handled.
 //
-// The colour is resolved through a callback because 12d's colour NAMES are
-// known to `archive12d`, which `cad` may not see. The front ends pass
+// The colour is resolved through a callback because the standard colour
+// NAMES are known to `archive12d`, which `cad` may not see. The front ends pass
 // `archive12d::standardColour`. A name the callback does not know leaves the
 // entity's colour alone rather than guessing at one.
 //
@@ -54,13 +54,13 @@ namespace katana::cad {
 struct SurveyCodingOptions {
     // The entity property holding the field code. EMPTY means find it: the
     // first of `codePropertyCandidates()` that any entity actually carries,
-    // which the report names. A drawing imported from a 12da carries the
+    // which the report names. A drawing from an archive import carries the
     // string name in "12d.name" and a survey file's points carry "code", and
     // asking the caller which is asking them to know how the drawing got here.
     std::string property{};
     // Only these entities, or every entity when empty.
     std::vector<katana::entity::EntityId> ids{};
-    // 12d colour name -> RGB. Without one, colours are left alone.
+    // Standard colour name -> RGB. Without one, colours are left alone.
     std::function<std::optional<katana::entity::Color>(std::string_view)> colourOf{};
     // Off, an entity whose rule names a model the drawing has no layer for
     // keeps its layer - its style and attributes are still applied - and is
@@ -82,7 +82,7 @@ struct SurveyCodingOptions {
 // code: a number there is a measurement someone named badly, and treating
 // "1.5" as a field code would put it in whatever model the rule for `1*`
 // names. The entity's properties are asked first and its METADATA after,
-// because a 12da import records a string's name - its code, in a coded
+// because an archive import records a string's name - its code, in a coded
 // survey - as provenance ("12d.name"), not as a property.
 [[nodiscard]] const std::string* surveyCodeOf(const katana::entity::Entity& entity,
                                               const std::string& property);
@@ -93,8 +93,8 @@ struct SurveyCodingOptions {
 [[nodiscard]] std::string findCodeProperty(const katana::entity::Model& model,
                                            const std::vector<katana::entity::EntityId>& subject);
 
-// 12d's plain line: "0", "1", "continuous" in any case, or no name at all. Such
-// a linestyle names no definition and draws as a plain line.
+// The plain continuous line: "0", "1", "continuous" in any case, or no name
+// at all. Such a linestyle names no definition and draws as a plain line.
 [[nodiscard]] bool isPlainLinestyle(std::string_view name);
 
 // What happened to the style of one code's entities.
@@ -156,7 +156,7 @@ struct SurveyCodingReport {
     // Linestyles and symbols the rules of the codes present name that the
     // loaded library does not define - checked for every code, not only for
     // one that creates a style. They are still set on the style - the name is
-    // what 12d records - and they draw as a plain line or mark until a
+    // what the rules record - and they draw as a plain line or mark until a
     // library defines them. Plain lines and Katana's built-in symbol shapes
     // are never listed: they draw correctly without a library.
     std::vector<std::string> missingDefinitions{};
@@ -172,7 +172,7 @@ struct SurveyCodingReport {
 // It exists because "the linestyles are not showing" has several causes that
 // look identical from the outside - no customisation loaded, a customisation
 // that does not define what this drawing names, or a drawing whose styles are
-// 12d's plain lines - and a person cannot tell them apart by looking. This
+// plain continuous lines - and a person cannot tell them apart by looking. This
 // says which.
 struct CustomisationCoverage {
     std::size_t styles = 0;   // styles the drawing has

@@ -42,7 +42,7 @@ void addArc(std::vector<Point2>& into, const Point2& centre, double radius, doub
 {
     const double from = fromDegrees * kPi / 180.0;
     const double to = toDegrees * kPi / 180.0;
-    // 12d writes an arc both ways round (`arc 1.75 0 180` and `arc 1.75 180
+    // Libraries write an arc both ways round (`arc 1.75 0 180` and `arc 1.75 180
     // 0`), so the sweep's sign is taken from the numbers rather than assumed.
     const double sweep = to - from;
     const int steps =
@@ -253,7 +253,7 @@ FlatDefinition flattenDefinition(const LineStyle& style)
     for (const Stroke& stroke : style.strokes) {
         switch (stroke.op) {
         case StrokeOp::Pen:
-            // "view_colour" is 12d for "whatever the entity is", which is the
+            // "view_colour" means "whatever the entity is", which is the
             // empty pen here.
             ink = stroke.pen == "view_colour" ? std::string{} : stroke.pen;
             run = nullptr; // a colour change ends the run it interrupts
@@ -297,10 +297,10 @@ FlatDefinition flattenDefinition(const LineStyle& style)
         case StrokeOp::Arc: {
             FlatDefinition::Run arc;
             arc.pen = ink;
-            // The radius is a LENGTH. 12d writes some arcs with a negative
+            // The radius is a LENGTH. Libraries write some arcs with a negative
             // one (45 of them, in the U-turn and speed-zone road markings),
             // and the sign is not a side: the angles alone say where the arc
-            // runs, and the moves 12d writes either side of each such arc
+            // runs, and the moves written either side of each such arc
             // land on the ends |r| gives. The signed radius drew every one
             // turned half a turn about its centre.
             const double radius = std::abs(stroke.radius) * factor;
@@ -362,7 +362,7 @@ StyleDrawing symbolDrawing(const FlatDefinition& flat, const Point2& at, double 
     StyleDrawing drawing;
     double scale = unitScale(flat.units, paperScale);
     if (size > 0.0) {
-        // `size` is a WIDTH, as 12d's is and as Style::symbolSize is, so the
+        // `size` is a WIDTH, as a library's is and as Style::symbolSize is, so the
         // definition is scaled to span it. A definition with no width - a
         // single vertical stroke - keeps its own scale rather than being
         // divided by zero.

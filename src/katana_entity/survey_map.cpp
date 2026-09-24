@@ -98,7 +98,7 @@ std::optional<SurveySection> parseSurveySection(std::string_view element)
     if (element == "map_data") {
         return SurveySection::Map;
     }
-    // 12d writes the symbol section twice, once in a form marked v9. Both say
+    // A mapfile writes the symbol section twice, once in a form marked v9. Both say
     // the same thing, so both are read as the same section.
     if (element == "vertex_symbol_data" || element == "vertex_symbol_data_v9") {
         return SurveySection::VertexSymbol;

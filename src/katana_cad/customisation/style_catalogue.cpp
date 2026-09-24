@@ -46,8 +46,9 @@ DefinitionKind classify(const LineStyle& definition, const SymbolEvidence& evide
     kind.linestyle = !definition.atVertices;
     kind.namedBySurveyRule = evidence.ruleSymbols.contains(definition.name);
     kind.namedByStyle = evidence.styleSymbols.contains(definition.name);
-    // The file NAME, folded: 12d's own symbol files are user_symbols_*.4d,
-    // and a customisation's author follows the convention in any case.
+    // The file NAME, folded: symbol libraries are conventionally named
+    // *symbols*.4d, and a customisation's author follows the convention in
+    // any case.
     kind.fromSymbolFile =
         katana::core::lowered(definition.source).find("symbol") != std::string::npos;
     kind.symbol =
@@ -103,8 +104,8 @@ void sortForPicker(std::vector<CatalogueEntry>& entries)
 }
 
 // A line with no pattern, whatever defines it or not: ByLayer and "" say
-// nothing, and "continuous", "0" and "1" are the plain line in 12d and DXF
-// alike (D4). None of them is a name that is missing.
+// nothing, and "continuous", "0" and "1" are the plain continuous line in a
+// style library and DXF alike (D4). None of them is a name that is missing.
 bool isPlainLinetype(std::string_view name)
 {
     return name.empty() || katana::entity::isByLayer(name) ||

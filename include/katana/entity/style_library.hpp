@@ -1,10 +1,10 @@
 #pragma once
 
-// A library of 12d linestyle and symbol definitions (PLAN.MD 20.3, slice 1).
+// A library of linestyle and symbol definitions (PLAN.MD 20.3, slice 1).
 //
-// In 12d Model a symbol IS a linestyle - the manual says so where it explains
-// vertex symbols: "There can be the same symbol (defined as a linestyle) for
-// every vertex" (12da documentation, super string, 1.5.10). One grammar
+// In a style library a symbol IS a linestyle - the file format's own
+// documentation says so where it explains vertex symbols: "There can be the
+// same symbol (defined as a linestyle) for every vertex". One grammar
 // describes both, and the only difference is where the strokes go: `mode
 // vertex` puts them at each vertex of a string, anything else runs them along
 // it. So there is one type here for both, and `atVertices` is what separates
@@ -18,7 +18,7 @@
 // are both names resolved against a library.
 //
 // A library is NOT part of a Model and is not saved inside a project, which
-// is how 12d works: the libraries are a site-wide customisation shared by
+// is the usual arrangement: the libraries are a site-wide customisation shared by
 // every project, named by a project rather than copied into it. The
 // alternative - a table in the Model beside Layer and Linetype - was rejected
 // because one production customisation alone is 792 definitions and 35,000
@@ -76,7 +76,7 @@ struct StrokeText {
     std::string text{};
     double angle = 0.0;  // degrees counter-clockwise
     double height = 0.0; // in the definition's own units
-    // 12d's own spelling, "middle-centre" or "top-left". Kept verbatim: the
+    // The file's own spelling, "middle-centre" or "top-left". Kept verbatim: the
     // renderer maps it, and a spelling this does not know must still be
     // written back to the file as it was read.
     std::string justify{};
@@ -101,7 +101,7 @@ struct Stroke {
     double startAngle = 0.0;          // Arc, degrees
     double endAngle = 0.0;            // Arc, degrees
     std::size_t text = kNoText;       // Text: an index into LineStyle::texts
-    std::string pen{}; // Pen: a 12d colour name; "view_colour" is the entity's own
+    std::string pen{}; // Pen: a colour name; "view_colour" is the entity's own
 
     friend bool operator==(const Stroke&, const Stroke&) = default;
 };
@@ -126,7 +126,7 @@ struct LineStyle {
     // is drawn between.
     katana::geometry::Point2 anchor1{};
     katana::geometry::Point2 anchor2{};
-    // TwoPoint only, and 12d's own numbers kept as read: the files use 1 and
+    // TwoPoint only, and the file's own numbers kept as read: the files use 1 and
     // 2, and no documentation available here says what they mean, so they are
     // preserved rather than acted on.
     int stretchMode = 0;
@@ -158,8 +158,8 @@ struct LineStylePolicy : NamedTablePolicy<LineStyle> {
 };
 
 // The same container as every other table of named things. Names compare with
-// regard to CASE, as they do in the rest of the model, although 12d's own
-// comparisons are case-insensitive ("Bypass" and "BYPASS" are one linestyle
+// regard to CASE, as they do in the rest of the model, although the files'
+// own comparisons are case-insensitive ("Bypass" and "BYPASS" are one linestyle
 // there). That difference is deliberate and measured rather than overlooked:
 // of the 372 references the reference mapfile makes into its two libraries,
 // every single one matches exactly and none needs case folding. A
@@ -168,8 +168,8 @@ struct LineStylePolicy : NamedTablePolicy<LineStyle> {
 // so instead of drawing the wrong mark.
 using StyleLibrary = NamedTable<LineStyle, LineStylePolicy>;
 
-// Later wins: a customisation is loaded in layers, and four of the Transport
-// for NSW definitions ("BUIL Doorway" among them) appear in both files, so
+// Later wins: a customisation is loaded in layers, and four of the reference
+// customisation's definitions ("BUIL Doorway" among them) appear in both files, so
 // "already exists" is the normal case rather than an error. Returns whether a
 // definition of that name was replaced.
 [[nodiscard]] katana::core::Result<bool> addOrReplace(StyleLibrary& library, LineStyle style);

@@ -34,7 +34,7 @@ Users& usersOf(UsageMap& map, std::string_view name)
 }
 
 // Where one (layer, style) pair's entities are counted. Entities come in
-// long runs of the same pair - a 12d import puts thousands of points on one
+// long runs of the same pair - an archive import puts thousands of points on one
 // layer in one style - so the five lookups per entity become one.
 struct Slot {
     Users* layer = nullptr;
