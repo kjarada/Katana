@@ -12,4 +12,7 @@ add_library(katana_render STATIC
     rasterizer.cpp
 )
 katana_target_defaults(katana_render)
+# The fill and the vertex transform, eight pixels or four vertices a step on a
+# processor with AVX2; rasterizer.cpp chooses at run time (docs/performance.md).
+katana_add_simd_sources(katana_render AVX2 simd/raster_avx2.cpp)
 target_link_libraries(katana_render PUBLIC katana_geometry katana_core)

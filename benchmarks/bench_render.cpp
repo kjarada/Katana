@@ -25,10 +25,15 @@
 #include <cstdint>
 #include <cstdlib>
 
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
+#include "katana/archive12d/domain.hpp"
+#include "katana/archive12d/reader.hpp"
 #include "katana/cad/scene.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/task_pool.hpp"
@@ -391,5 +396,95 @@ void BM_SceneLayersFrame(benchmark::State& state)
     state.counters["edges"] = static_cast<double>(layers.edges.lines.size());
 }
 BENCHMARK(BM_SceneLayersFrame)->Arg(64)->Arg(256)->Arg(512)->Unit(benchmark::kMillisecond);
+
+// A real archive's frame, drawn as the 3D view draws it (cad::renderLayers) at
+// 1600x1000 from the isometric eye framed on the scene. Synthetic ground is
+// uniform; a real survey is not - dense TIN in the middle, long strings, big
+// triangles at the hull - and the rasteriser's size cutoffs are only honest
+// if they are judged on both. The archive is the owner's and is never
+// committed: KATANA_BENCH_FRAME_12DA names it, and unset the benchmark skips.
+void BM_ArchiveFrame(benchmark::State& state)
+{
+    const char* path = std::getenv("KATANA_BENCH_FRAME_12DA");
+    if (path == nullptr || *path == 0) {
+        state.SkipWithMessage("KATANA_BENCH_FRAME_12DA is not set");
+        return;
+    }
+    std::ifstream in(path, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto archive = katana::archive12d::readArchiveBytes(bytes);
+    if (!archive) {
+        state.SkipWithError("the archive does not read");
+        return;
+    }
+    auto domain = katana::archive12d::toDomain(archive.value());
+    if (!domain) {
+        state.SkipWithError("the archive does not import");
+        return;
+    }
+    katana::cad::Document document;
+    for (auto& layer : domain->layersNeeded) {
+        (void)document.execute(katana::commands::createLayer(std::move(layer)));
+    }
+    for (auto& style : domain->stylesNeeded) {
+        (void)document.execute(katana::commands::createStyle(std::move(style)));
+    }
+    (void)document.execute(katana::commands::createEntities(std::move(domain->entities)));
+    std::vector<katana::cad::SceneSurface> surfaces;
+    for (const auto& imported : domain->surfaces) {
+        katana::cad::SceneSurface item;
+        item.name = imported.name;
+        item.surface = &imported.surface;
+        surfaces.push_back(item);
+    }
+    std::vector<katana::cad::SceneMesh> meshes;
+    for (const auto& imported : domain->meshes) {
+        katana::cad::SceneMesh item;
+        item.name = imported.name;
+        item.mesh = &imported.mesh;
+        meshes.push_back(item);
+    }
+    katana::cad::SceneBuilder builder;
+    katana::cad::SceneOptions options;
+    katana::cad::SceneLayers layers;
+    builder.buildTerrain(surfaces, meshes, options, layers);
+    builder.buildEntities(document, surfaces, options, layers);
+    builder.buildGrid(options, layers);
+
+    constexpr int kFrameWidth = 1600;
+    constexpr int kFrameHeight = 1000;
+    Camera camera;
+    camera.setViewportSize(kFrameWidth, kFrameHeight);
+    camera.setStandardView(katana::render::StandardView::IsoSouthWest);
+    if (!camera.frame(layers.bounds)) {
+        state.SkipWithError("nothing to frame");
+        return;
+    }
+    auto target = Framebuffer::create(kFrameWidth, kFrameHeight);
+    if (!target.ok()) {
+        state.SkipWithError("framebuffer");
+        return;
+    }
+    Rasterizer rasterizer;
+    TaskPool pool;
+    RenderOptions renderOptions;
+    renderOptions.pool = &pool;
+    std::uint64_t triangles = 0;
+    std::uint64_t fragments = 0;
+    for (auto _ : state) {
+        const auto stats =
+            katana::cad::renderLayers(layers, camera, rasterizer, *target, renderOptions);
+        if (!stats.ok()) {
+            state.SkipWithError("render failed");
+            return;
+        }
+        triangles = stats->trianglesRasterised;
+        fragments = stats->fragments;
+        benchmark::DoNotOptimize(target->color().data());
+    }
+    state.counters["rasterised"] = static_cast<double>(triangles);
+    state.counters["fragments"] = static_cast<double>(fragments);
+}
+BENCHMARK(BM_ArchiveFrame)->Unit(benchmark::kMillisecond);
 
 } // namespace
