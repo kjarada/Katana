@@ -64,6 +64,8 @@ TEST(ReductionCorrections, TheAtmosphericCorrectionAtTwentyDegreesIsEightPpmByTh
     // Leica's published formula (286.338 - 0.29535 p / (1 + t/273.15) +
     // 4.126e-4 h / (1 + t/273.15) 10^(7.5t/(237.3+t) + 0.7857)) gives 8.0308
     // for the same air; the 0.001 ppm between them is the Magnus constant.
+    // NeuralSurvey's atmospheric_ppm gives 7.5830 (no humidity term, and
+    // 0.29525 where the refractivity gives 0.29535): 0.45 ppm lower.
     InstrumentSettings instrument;
     instrument.temperatureCelsius = 20.0;
     instrument.pressureHectopascals = 1013.25;
@@ -168,6 +170,10 @@ TEST(ReductionCorrections, SlopeToHorizontalWithCurvatureAndRefractionMatchesThe
     //   HD = 996.194698 - 0.012742 = 996.181956
     //   B = 0.87 / 12742000 = 6.8278135e-8, B Y^2 = 0.0677595 m
     //   dH = 87.155743 + 0.067759 + 1.5 - 1.8 = 86.923502
+    // Cross-check: the owner's NeuralSurvey engine (corrections.rs, run with
+    // cargo on the same inputs) gives height_diff = 86.923502234 - the same
+    // height - and slope_to_horizontal = 996.194698092, which is Y: it
+    // leaves out the A X Y term, 12.7 mm on this sight.
     ReductionSettings settings = bareSettings();
     settings.curvatureAndRefraction = true;
     const auto outcome = reduceAndAdjust(oneShot(deg(85), 1000.0, 1.8), settings, {});
