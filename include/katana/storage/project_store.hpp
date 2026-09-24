@@ -91,11 +91,11 @@ struct ProjectContents {
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
     katana::entity::EntityId nextEntityId = 1;
-    // The survey jobs (survey_job.hpp), in id order. Saved and loaded in the
-    // same transaction as the entities they created, so a job can never name
-    // entities a crash left unsaved. Schema version 10 adds their table; until
-    // that lands, save() REFUSES contents holding a job (Unsupported) rather
-    // than write a project that silently loses it, and load() returns none.
+    // The survey jobs (survey_job.hpp), in the order they were created. Saved
+    // and loaded in the same transaction as the entities they created, so a
+    // job can never name entities a crash left unsaved. Schema version 10.
+    // save() refuses a job without an id and two jobs of one id; a project
+    // from before schema 10 loads with none.
     std::vector<SurveyJob> surveyJobs{};
 };
 
@@ -139,7 +139,10 @@ class ProjectStore {
     // 6: hatch patterns, and Layer/Style::hatchPattern (Phase 09).
     // 7: alignments, stored as their PI definitions (Phase 21).
     // 8: design profiles on alignments, as PVIs (Phase 21).
-    static constexpr int kCurrentSchemaVersion = 9;
+    // 9: a style's description and point symbol.
+    // 10: survey jobs - the raw bytes of each imported field file and its
+    //     siblings, its reduction settings, report and placed points.
+    static constexpr int kCurrentSchemaVersion = 10;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // Creates the directory layout and an empty database. Fails if a project

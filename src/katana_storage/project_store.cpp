@@ -1,8 +1,11 @@
 #include "katana/storage/project_store.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <iterator>
 #include <ctime>
@@ -15,6 +18,7 @@
 #include "katana/entity/geometry_blob.hpp"
 #include "katana/entity/serialization.hpp"
 #include "katana/storage/sqlite_database.hpp"
+#include "katana/survey/reduction_settings.hpp"
 
 namespace katana::storage {
 
@@ -227,6 +231,47 @@ constexpr Migration kMigrations[] = {
         ALTER TABLE styles ADD COLUMN description TEXT NOT NULL DEFAULT '';
         ALTER TABLE styles ADD COLUMN symbol TEXT NOT NULL DEFAULT '';
         ALTER TABLE styles ADD COLUMN symbol_size REAL NOT NULL DEFAULT 0;
+    )sql"},
+    // Survey jobs (survey_job.hpp): each imported field file kept whole, so
+    // its reduction and adjustment can be revisited. Two new tables and
+    // nothing else changed, so a project written before this migration opens
+    // exactly as it was, with no jobs.
+    //
+    // The file and its siblings are BLOBs, never TEXT: a field file is bytes
+    // (a DBX job is binary, a GSI file may be in any code page) and a TEXT
+    // column would invite SQLite or a reader to re-encode it. The settings
+    // are their versioned text form (serialiseReductionSettings), so a later
+    // setting needs no migration. The entity ids and the placed points are
+    // packed binary (see encodeEntityIds / encodePlacedPoints): a job of a
+    // hundred thousand points is one row, not a hundred thousand. Ordinary
+    // rowid tables, because a WITHOUT ROWID table stores a whole row in its
+    // b-tree and suits small rows, not a 50 MB file.
+    {10, R"sql(
+        CREATE TABLE survey_jobs (
+            position           INTEGER PRIMARY KEY,
+            id                 TEXT NOT NULL UNIQUE,
+            name               TEXT NOT NULL,
+            format_id          TEXT NOT NULL,
+            parser_version     TEXT NOT NULL,
+            source_file_name   TEXT NOT NULL,
+            source_bytes       BLOB NOT NULL,
+            settings           TEXT NOT NULL,
+            layer              TEXT NOT NULL,
+            created_entities   BLOB NOT NULL,
+            placed_points      BLOB NOT NULL,
+            report_text        TEXT NOT NULL,
+            report_html        TEXT NOT NULL,
+            report_created_utc TEXT NOT NULL,
+            imported_utc       TEXT NOT NULL
+        );
+
+        CREATE TABLE survey_job_files (
+            job      TEXT NOT NULL REFERENCES survey_jobs(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            name     TEXT NOT NULL,
+            bytes    BLOB NOT NULL,
+            UNIQUE (job, position)
+        );
     )sql"},
 };
 
@@ -971,6 +1016,378 @@ class Binder {
     Status status_;
 };
 
+
+// ---- survey jobs --------------------------------------------------------------------
+//
+// Two lists of a job are stored packed rather than one row per element: the
+// entity ids it created and the points it placed. Little-endian throughout,
+// written byte by byte so the file reads the same on any machine; doubles by
+// their bit pattern, so they come back bit for bit.
+
+void appendU64(std::string& out, std::uint64_t value)
+{
+    for (int shift = 0; shift < 64; shift += 8) {
+        out.push_back(static_cast<char>((value >> shift) & 0xFFU));
+    }
+}
+
+void appendU32(std::string& out, std::uint32_t value)
+{
+    for (int shift = 0; shift < 32; shift += 8) {
+        out.push_back(static_cast<char>((value >> shift) & 0xFFU));
+    }
+}
+
+// Reads what the append functions wrote. Every read is bounds-checked: a
+// damaged row fails the load with a sentence, never reads past the blob.
+class PackedReader {
+  public:
+    explicit PackedReader(std::span<const std::byte> bytes) : bytes_(bytes) {}
+
+    [[nodiscard]] bool u8(std::uint8_t& value)
+    {
+        if (remaining() < 1) {
+            return false;
+        }
+        value = std::to_integer<std::uint8_t>(bytes_[offset_++]);
+        return true;
+    }
+    [[nodiscard]] bool u32(std::uint32_t& value)
+    {
+        std::uint64_t wide = 0;
+        if (!little(4, wide)) {
+            return false;
+        }
+        value = static_cast<std::uint32_t>(wide);
+        return true;
+    }
+    [[nodiscard]] bool u64(std::uint64_t& value) { return little(8, value); }
+    [[nodiscard]] bool f64(double& value)
+    {
+        std::uint64_t bits = 0;
+        if (!little(8, bits)) {
+            return false;
+        }
+        value = std::bit_cast<double>(bits);
+        return true;
+    }
+    [[nodiscard]] bool text(std::size_t size, std::string& value)
+    {
+        if (remaining() < size) {
+            return false;
+        }
+        value.assign(reinterpret_cast<const char*>(bytes_.data() + offset_), size);
+        offset_ += size;
+        return true;
+    }
+    [[nodiscard]] std::size_t remaining() const { return bytes_.size() - offset_; }
+
+  private:
+    [[nodiscard]] bool little(std::size_t size, std::uint64_t& value)
+    {
+        if (remaining() < size) {
+            return false;
+        }
+        value = 0;
+        for (std::size_t i = 0; i < size; ++i) {
+            value |= std::uint64_t{std::to_integer<std::uint8_t>(bytes_[offset_ + i])} << (8 * i);
+        }
+        offset_ += size;
+        return true;
+    }
+
+    std::span<const std::byte> bytes_;
+    std::size_t offset_ = 0;
+};
+
+std::span<const std::byte> asBytes(std::string_view text)
+{
+    return {reinterpret_cast<const std::byte*>(text.data()), text.size()};
+}
+
+// Eight bytes per id, no header: the count is the size over eight.
+std::string encodeEntityIds(const std::vector<EntityId>& ids)
+{
+    std::string out;
+    out.reserve(ids.size() * 8);
+    for (const EntityId id : ids) {
+        appendU64(out, static_cast<std::uint64_t>(id));
+    }
+    return out;
+}
+
+// Version 1: a version byte, a u64 count, then per point the entity (u64),
+// northing and easting (f64), a byte saying whether an elevation follows,
+// the elevation (f64) when it does, the id's length (u32) and the id's bytes.
+// The version byte is there so a later layout can be read beside this one.
+constexpr std::uint8_t kPlacedPointsVersion = 1;
+// The fewest bytes a point can take: entity, northing, easting, the
+// elevation flag and the id's length.
+constexpr std::size_t kSmallestPlacedPoint = 8 + 8 + 8 + 1 + 4;
+
+std::string encodePlacedPoints(const std::vector<SurveyJobPoint>& points)
+{
+    std::string out;
+    out.reserve(9 + points.size() * (kSmallestPlacedPoint + 16));
+    out.push_back(static_cast<char>(kPlacedPointsVersion));
+    appendU64(out, points.size());
+    for (const SurveyJobPoint& point : points) {
+        appendU64(out, static_cast<std::uint64_t>(point.entity));
+        appendU64(out, std::bit_cast<std::uint64_t>(point.northing));
+        appendU64(out, std::bit_cast<std::uint64_t>(point.easting));
+        out.push_back(static_cast<char>(point.elevation ? 1 : 0));
+        if (point.elevation) {
+            appendU64(out, std::bit_cast<std::uint64_t>(*point.elevation));
+        }
+        appendU32(out, static_cast<std::uint32_t>(point.pointId.size()));
+        out += point.pointId;
+    }
+    return out;
+}
+
+Result<std::vector<EntityId>> decodeEntityIds(std::span<const std::byte> bytes,
+                                              const std::string& job)
+{
+    if (bytes.size() % 8 != 0) {
+        return makeError(ErrorCode::DatabaseFailure,
+                         "a survey job's list of the entities it created is damaged",
+                         "job=" + job);
+    }
+    std::vector<EntityId> ids(bytes.size() / 8);
+    PackedReader reader(bytes);
+    for (EntityId& id : ids) {
+        std::uint64_t value = 0;
+        (void)reader.u64(value); // cannot fail: the size was checked above
+        id = static_cast<EntityId>(value);
+    }
+    return ids;
+}
+
+Result<std::vector<SurveyJobPoint>> decodePlacedPoints(std::span<const std::byte> bytes,
+                                                       const std::string& job)
+{
+    const auto damaged = [&job](std::string_view what) {
+        return makeError(ErrorCode::DatabaseFailure,
+                         "a survey job's list of the points it placed is damaged",
+                         "job=" + job + " " + std::string(what));
+    };
+    PackedReader reader(bytes);
+    std::uint8_t version = 0;
+    std::uint64_t count = 0;
+    if (!reader.u8(version) || !reader.u64(count)) {
+        return damaged("header");
+    }
+    if (version != kPlacedPointsVersion) {
+        return makeError(ErrorCode::Unsupported,
+                         "a survey job was saved by a newer version of Katana",
+                         "job=" + job + " placed points version=" + std::to_string(version));
+    }
+    // A count the blob cannot hold is damage - and reserving for it would be
+    // an allocation of a size the file chose.
+    if (count > reader.remaining() / kSmallestPlacedPoint) {
+        return damaged("count");
+    }
+    std::vector<SurveyJobPoint> points(static_cast<std::size_t>(count));
+    for (SurveyJobPoint& point : points) {
+        std::uint64_t entity = 0;
+        std::uint8_t hasElevation = 0;
+        std::uint32_t idSize = 0;
+        if (!reader.u64(entity) || !reader.f64(point.northing) || !reader.f64(point.easting) ||
+            !reader.u8(hasElevation) || hasElevation > 1) {
+            return damaged("point");
+        }
+        point.entity = static_cast<EntityId>(entity);
+        if (hasElevation == 1) {
+            double elevation = 0.0;
+            if (!reader.f64(elevation)) {
+                return damaged("elevation");
+            }
+            point.elevation = elevation;
+        }
+        if (!reader.u32(idSize) || !reader.text(idSize, point.pointId)) {
+            return damaged("point id");
+        }
+    }
+    if (reader.remaining() != 0) {
+        return damaged("trailing bytes");
+    }
+    return points;
+}
+
+// What save() refuses before it writes anything: a job it could not load back
+// as the same job.
+Status validateSurveyJobs(const std::vector<SurveyJob>& jobs)
+{
+    std::set<std::string_view> ids;
+    for (const SurveyJob& job : jobs) {
+        if (job.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a survey job has no id",
+                             "name=" + job.name);
+        }
+        if (!ids.insert(job.id).second) {
+            return makeError(ErrorCode::InvalidArgument, "two survey jobs have the same id",
+                             "job=" + job.id);
+        }
+        for (const SurveyJobFile& file : job.siblingFiles) {
+            if (file.name.empty()) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "a file kept with a survey job has no name", "job=" + job.id);
+            }
+        }
+    }
+    return {};
+}
+
+Status writeSurveyJobs(SqliteDatabase& database, const std::vector<SurveyJob>& jobs)
+{
+    if (jobs.empty()) {
+        return {};
+    }
+    auto insertJob = database.prepare(
+        "INSERT INTO survey_jobs (position, id, name, format_id, parser_version,"
+        " source_file_name, source_bytes, settings, layer, created_entities, placed_points,"
+        " report_text, report_html, report_created_utc, imported_utc)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)");
+    if (!insertJob) {
+        return insertJob.error();
+    }
+    auto insertFile = database.prepare(
+        "INSERT INTO survey_job_files (job, position, name, bytes) VALUES (?1, ?2, ?3, ?4)");
+    if (!insertFile) {
+        return insertFile.error();
+    }
+    for (std::size_t position = 0; position < jobs.size(); ++position) {
+        const SurveyJob& job = jobs[position];
+        const std::string settings = katana::survey::serialiseReductionSettings(job.settings);
+        const std::string created = encodeEntityIds(job.createdEntities);
+        const std::string placed = encodePlacedPoints(job.placedPoints);
+        if (auto status =
+                Binder(*insertJob)(1, static_cast<std::int64_t>(position))(
+                    2, std::string_view(job.id))(3, std::string_view(job.name))(
+                    4, std::string_view(job.formatId))(5, std::string_view(job.parserVersion))(
+                    6, std::string_view(job.sourceFileName))(7, asBytes(job.sourceBytes))(
+                    8, std::string_view(settings))(9, std::string_view(job.layer))(
+                    10, asBytes(created))(11, asBytes(placed))(
+                    12, std::string_view(job.reportText))(13, std::string_view(job.reportHtml))(
+                    14, std::string_view(job.reportCreatedUtc))(
+                    15, std::string_view(job.importedUtc))
+                    .run();
+            !status) {
+            return makeError(status.error().code,
+                             "survey job " + job.id + " could not be saved: " +
+                                 status.error().message,
+                             "bytes=" + std::to_string(job.sourceBytes.size()) + " " +
+                                 status.error().context);
+        }
+        for (std::size_t index = 0; index < job.siblingFiles.size(); ++index) {
+            const SurveyJobFile& file = job.siblingFiles[index];
+            if (auto status = Binder(*insertFile)(1, std::string_view(job.id))(
+                                  2, static_cast<std::int64_t>(index))(
+                                  3, std::string_view(file.name))(4, asBytes(file.bytes))
+                                  .run();
+                !status) {
+                return makeError(status.error().code,
+                                 "file " + file.name + " of survey job " + job.id +
+                                     " could not be saved: " + status.error().message,
+                                 status.error().context);
+            }
+        }
+    }
+    return {};
+}
+
+std::string blobText(const SqliteStatement& row, int column)
+{
+    const std::span<const std::byte> bytes = row.columnBlobSpan(column);
+    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+Result<std::vector<SurveyJob>> readSurveyJobs(SqliteDatabase& database)
+{
+    std::vector<SurveyJob> jobs;
+    auto select = database.prepare(
+        "SELECT id, name, format_id, parser_version, source_file_name, source_bytes, settings,"
+        " layer, created_entities, placed_points, report_text, report_html,"
+        " report_created_utc, imported_utc FROM survey_jobs ORDER BY position");
+    if (!select) {
+        return select.error();
+    }
+    while (true) {
+        const auto row = select->step();
+        if (!row) {
+            return row.error();
+        }
+        if (!*row) {
+            break;
+        }
+        SurveyJob job;
+        job.id = select->columnText(0);
+        job.name = select->columnText(1);
+        job.formatId = select->columnText(2);
+        job.parserVersion = select->columnText(3);
+        job.sourceFileName = select->columnText(4);
+        // Straight from SQLite's buffer into the string: one copy of a file
+        // that may be tens of megabytes, not two.
+        job.sourceBytes = blobText(*select, 5);
+        // A setting a newer build added is skipped by the parser, which is
+        // what its versioning promises; text from a newer VERSION of the
+        // settings is refused, and so is the load - half-read settings would
+        // re-adjust the job with something the person never chose.
+        auto settings = katana::survey::parseReductionSettings(select->columnTextView(6));
+        if (!settings) {
+            return makeError(settings.error().code,
+                             "the reduction settings of survey job " + job.id +
+                                 " cannot be read: " + settings.error().message,
+                             settings.error().context);
+        }
+        job.settings = std::move(*settings);
+        job.layer = select->columnText(7);
+        auto created = decodeEntityIds(select->columnBlobSpan(8), job.id);
+        if (!created) {
+            return created.error();
+        }
+        job.createdEntities = std::move(*created);
+        auto placed = decodePlacedPoints(select->columnBlobSpan(9), job.id);
+        if (!placed) {
+            return placed.error();
+        }
+        job.placedPoints = std::move(*placed);
+        job.reportText = select->columnText(10);
+        job.reportHtml = select->columnText(11);
+        job.reportCreatedUtc = select->columnText(12);
+        job.importedUtc = select->columnText(13);
+        jobs.push_back(std::move(job));
+    }
+
+    auto files =
+        database.prepare("SELECT job, name, bytes FROM survey_job_files ORDER BY job, position");
+    if (!files) {
+        return files.error();
+    }
+    while (true) {
+        const auto row = files->step();
+        if (!row) {
+            return row.error();
+        }
+        if (!*row) {
+            break;
+        }
+        const std::string owner = files->columnText(0);
+        const auto found = std::find_if(jobs.begin(), jobs.end(),
+                                        [&](const SurveyJob& job) { return job.id == owner; });
+        if (found == jobs.end()) {
+            return makeError(ErrorCode::DatabaseFailure,
+                             "a file kept with a survey job names a job that is not there",
+                             "job=" + owner);
+        }
+        SurveyJobFile file;
+        file.name = files->columnText(1);
+        file.bytes = blobText(*files, 2);
+        found->siblingFiles.push_back(std::move(file));
+    }
+    return jobs;
+}
+
 } // namespace
 
 Status ProjectStore::save(const ProjectContents& contents)
@@ -978,13 +1395,8 @@ Status ProjectStore::save(const ProjectContents& contents)
     if (auto status = validateContents(contents); !status) {
         return status;
     }
-    if (!contents.surveyJobs.empty()) {
-        // Placeholder until the survey job table exists (ProjectContents::
-        // surveyJobs): a project saved without its jobs would lose the raw
-        // data behind every imported survey without a word.
-        return makeError(ErrorCode::Unsupported,
-                         "this build cannot save survey jobs yet, so the project was not saved",
-                         std::to_string(contents.surveyJobs.size()) + " survey job(s)");
+    if (auto status = validateSurveyJobs(contents.surveyJobs); !status) {
+        return status;
     }
     SqliteDatabase& database = impl_->database;
     auto transaction = SqliteTransaction::begin(database);
@@ -1003,7 +1415,8 @@ Status ProjectStore::save(const ProjectContents& contents)
     // linetype_elements is deleted explicitly rather than left to the ON DELETE
     // CASCADE: foreign keys are only enforced when the pragma is on, so relying
     // on the cascade would make correctness depend on a connection setting.
-    if (auto status = database.execute("DELETE FROM relationships; DELETE FROM entities;"
+    if (auto status = database.execute("DELETE FROM survey_job_files; DELETE FROM survey_jobs;"
+                                       "DELETE FROM relationships; DELETE FROM entities;"
                                        "DELETE FROM property_definitions; DELETE FROM styles;"
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
                                        "DELETE FROM dimension_styles;"
@@ -1295,6 +1708,9 @@ Status ProjectStore::save(const ProjectContents& contents)
             !status) {
             return status;
         }
+    }
+    if (auto status = writeSurveyJobs(database, contents.surveyJobs); !status) {
+        return status;
     }
     return transaction->commit();
 }
@@ -1714,6 +2130,11 @@ Result<ProjectContents> ProjectStore::load()
                         });
     if (!status) {
         return status.error();
+    }
+    if (auto jobs = readSurveyJobs(database); !jobs) {
+        return jobs.error();
+    } else {
+        contents.surveyJobs = std::move(*jobs);
     }
     return contents;
 }

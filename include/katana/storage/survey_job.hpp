@@ -14,6 +14,7 @@
 // the job names; if that reader has since been fixed, the job says so through
 // `parserVersion`, and the report of the re-run shows the difference.
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,25 @@ struct SurveyJobFile {
     std::string bytes;
 
     friend bool operator==(const SurveyJobFile&, const SurveyJobFile&) = default;
+};
+
+// One point the job put on the drawing: which entity holds it and the
+// coordinates the job gave it, in the survey model's metres (northing, easting;
+// the drawing's y and x).
+//
+// Kept on the job rather than read back from the entity because the entity is
+// the PERSON'S from the moment it is drawn: re-adjusting compares the two to
+// tell a point moved or re-levelled by hand since (whose edit the person may
+// want kept) from one the job may move, and a point deleted by hand from one
+// the new run no longer produces - neither of which the entity alone can say.
+struct SurveyJobPoint {
+    std::string pointId;
+    katana::entity::EntityId entity = katana::entity::kInvalidEntityId;
+    double northing = 0.0;
+    double easting = 0.0;
+    std::optional<double> elevation{}; // absent is not zero
+
+    friend bool operator==(const SurveyJobPoint&, const SurveyJobPoint&) = default;
 };
 
 struct SurveyJob {
@@ -53,6 +73,11 @@ struct SurveyJob {
     std::string reportHtml{};
     std::string reportCreatedUtc{};
     std::string importedUtc{};
+    // The points among createdEntities, one per point id, as the job last
+    // placed them (SurveyJobPoint). A point the person deleted by hand stays
+    // listed - the job still made it - so that re-adjusting can keep the
+    // deletion rather than silently draw the point again.
+    std::vector<SurveyJobPoint> placedPoints{};
 
     friend bool operator==(const SurveyJob&, const SurveyJob&) = default;
 };
