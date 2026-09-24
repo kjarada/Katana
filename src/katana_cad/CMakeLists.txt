@@ -33,6 +33,16 @@ target_sources(katana_cad PRIVATE ${_cad_tool_sources} interactive_tool.cpp)
 # the code table): globbed for the same reason, several authors at once.
 file(GLOB _cad_customisation_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/customisation/*.cpp")
 target_sources(katana_cad PRIVATE ${_cad_customisation_sources})
+# Sheets, the plot frame and the sheet generators (include/katana/cad/plotting/,
+# docs/plotting.md): globbed for the same reason - the sheet model, its painter
+# and its editor are written by different authors at the same time.
+file(GLOB _cad_plotting_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
+target_sources(katana_cad PRIVATE ${_cad_plotting_sources})
+# The built-in plot frame is compiled in with #embed (plotting/frame.cpp) from
+# the committed resources/plot_frames/, so the frame is part of the program and
+# a missing file is a build error, not a blank title block.
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/plotting/frame.cpp" PROPERTIES
+    COMPILE_OPTIONS "--embed-dir=${PROJECT_SOURCE_DIR}/resources/plot_frames")
 katana_target_defaults(katana_cad)
 # katana_geodesy for the survey tools' coordinate converter (survey_tools.cpp):
 # the one survey tool whose answer is PROJ's, reached through the transformer
@@ -40,3 +50,8 @@ katana_target_defaults(katana_cad)
 # cad see geodesy; PROJ itself stays behind katana_geodesy's src/ (Rule 4).
 target_link_libraries(katana_cad PUBLIC katana_commands katana_storage katana_terrain katana_render katana_survey
                       katana_geodesy)
+# The sheet set is stored as JSON (plotting/sheet_json.cpp) and the frame is
+# read from JSON, through the same library the entity serialisation uses. Kept
+# PRIVATE: no public header names it (tools/check_layering.cmake, Rule 4).
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(katana_cad PRIVATE nlohmann_json::nlohmann_json)
