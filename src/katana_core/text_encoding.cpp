@@ -1,5 +1,7 @@
 #include "katana/core/text_encoding.hpp"
 
+#include "simd/text_kernels.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -15,6 +17,11 @@ namespace {
 // first model, a coordinate list its first rows - so 4 KB is already hundreds of
 // ASCII characters; more would only slow a wrong guess down.
 constexpr std::size_t kSniffBytes = 4096;
+
+// The shortest remainder for which isValidUtf8 asks the ASCII kernel: one AVX2
+// block. Anything shorter is a name or a label, done faster byte by byte than
+// through a call.
+constexpr std::size_t kAsciiBlock = 32;
 
 // Windows-1252 differs from Latin-1 only in 0x80-0x9F. Source: the Unicode
 // Consortium's mapping table for CP1252 (MAPPINGS/VENDORS/MICSFT/WINDOWS/
@@ -50,37 +57,59 @@ Result<std::string> fromUtf16(std::string_view bytes, bool littleEndian)
         return makeError(ErrorCode::ParseFailure,
                          "the file is UTF-16 but has an odd number of bytes, so it is truncated");
     }
+    const auto* data = reinterpret_cast<const unsigned char*>(bytes.data());
+    const std::size_t units = bytes.size() / 2;
     const auto unit = [&](std::size_t index) -> std::uint32_t {
-        const auto a = static_cast<unsigned char>(bytes[index]);
-        const auto b = static_cast<unsigned char>(bytes[index + 1]);
-        return littleEndian ? static_cast<std::uint32_t>(a | (b << 8))
-                            : static_cast<std::uint32_t>((a << 8) | b);
+        const std::uint32_t a = data[2 * index];
+        const std::uint32_t b = data[2 * index + 1];
+        return littleEndian ? (a | (b << 8)) : ((a << 8) | b);
     };
 
     std::string out;
     // These formats are almost entirely ASCII, which halves in UTF-8.
-    out.reserve(bytes.size() / 2 + 16);
-    for (std::size_t i = 0; i < bytes.size(); i += 2) {
-        std::uint32_t codePoint = unit(i);
-        if (codePoint >= 0xD800 && codePoint <= 0xDBFF) {
-            if (i + 3 >= bytes.size()) {
-                return makeError(ErrorCode::ParseFailure,
-                                 "the file ends in the middle of a UTF-16 surrogate pair");
+    out.reserve(units + 16);
+    std::size_t i = 0;
+    while (i < units) {
+        // The run of ASCII units, which is nearly all of any file read here, a
+        // whole block at a time where the processor allows (the kernel is the
+        // loop below restricted to ASCII, and equals it byte for byte). Room
+        // for the whole remainder is offered because the run's length is not
+        // known until it ends; resize_and_overwrite keeps only what was
+        // written, and initialises nothing.
+        const std::size_t written = out.size();
+        std::size_t run = 0;
+        out.resize_and_overwrite(written + (units - i), [&](char* buffer, std::size_t) {
+            run = kernels::narrowAsciiUtf16(data + 2 * i, units - i, littleEndian, buffer + written);
+            return written + run;
+        });
+        i += run;
+
+        // Then everything up to the next ASCII unit, one code point at a time.
+        for (; i < units; ++i) {
+            std::uint32_t codePoint = unit(i);
+            if (codePoint < 0x80) {
+                break;
             }
-            const std::uint32_t low = unit(i + 2);
-            if (low < 0xDC00 || low > 0xDFFF) {
+            if (codePoint >= 0xD800 && codePoint <= 0xDBFF) {
+                if (i + 1 >= units) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "the file ends in the middle of a UTF-16 surrogate pair");
+                }
+                const std::uint32_t low = unit(i + 1);
+                if (low < 0xDC00 || low > 0xDFFF) {
+                    return makeError(ErrorCode::ParseFailure,
+                                     "malformed UTF-16: a high surrogate with no low surrogate",
+                                     "byte " + std::to_string(2 * i));
+                }
+                codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (low - 0xDC00);
+                ++i;
+            } else if (codePoint >= 0xDC00 && codePoint <= 0xDFFF) {
                 return makeError(ErrorCode::ParseFailure,
-                                 "malformed UTF-16: a high surrogate with no low surrogate",
-                                 "byte " + std::to_string(i));
+                                 "malformed UTF-16: a low surrogate with no high surrogate",
+                                 "byte " + std::to_string(2 * i));
             }
-            codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (low - 0xDC00);
-            i += 2;
-        } else if (codePoint >= 0xDC00 && codePoint <= 0xDFFF) {
-            return makeError(ErrorCode::ParseFailure,
-                             "malformed UTF-16: a low surrogate with no high surrogate",
-                             "byte " + std::to_string(i));
+            appendUtf8(out, codePoint);
         }
-        appendUtf8(out, codePoint);
     }
     return out;
 }
@@ -116,7 +145,10 @@ bool isValidUtf8(std::string_view text)
         unsigned char highSecond = 0xBF;
 
         if (lead <= 0x7F) {
-            i += 1;
+            // A run of ASCII: a block at a time where the processor allows.
+            // Only for a run that could fill a block, so the short names and
+            // texts the entity model checks one by one pay nothing for it.
+            i += size - i >= kAsciiBlock ? kernels::asciiPrefix(bytes + i, size - i) : 1;
             continue;
         }
         if (lead >= 0xC2 && lead <= 0xDF) {
