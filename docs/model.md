@@ -205,8 +205,8 @@ build reads are listed once, in `kMetadataKeys` (`project_store.cpp`); a key
 added to that list and not to the writer would be read back as unknown, or
 never written.
 
-The first new key is `customisation`: the NAMES of the 12d linestyle, symbol
-and map files a drawing was drawn with, in load order
+The first new key is `customisation`: the NAMES of the style library and
+survey code files a drawing was drawn with, in load order
 (`ProjectMetadata::customisation`), stored one per line - a Windows file name
 may hold `;` but not a line break - and refused by `save` when a name is
 empty or holds a line break or a path separator, since that would read back
@@ -431,7 +431,7 @@ The table managers of 2026-09-23 added three commands to the set:
 - **Merge** (`mergeStyle`, `mergeLinetype`): repoint every holder of `from`
   to `into`, then delete `from` - what a rename onto an existing name has to
   be, and why a rename refuses one. `into` must be in the same table, so a
-  model linetype cannot be merged into a 12d LIBRARY linestyle: the commands
+  model linetype cannot be merged into a LIBRARY linestyle: the commands
   cannot see the library.
 - **Duplicate**: a copy under a new name. Redo reproduces the copy taken at
   execute, even if `from` was edited in between by a command since undone.
@@ -443,7 +443,7 @@ The table managers of 2026-09-23 added three commands to the set:
 Two corrections came with them. **Undo of a rename or merge restores
 before-images** of exactly the holders it moved, not a reverse repoint: the
 new name may already have had holders the table does not know of (a style
-naming a 12d library linestyle), and moving "everything named `to` back"
+naming a library linestyle), and moving "everything named `to` back"
 moved those too. The item goes back under its old name first, so the holders
 put back after it name something that exists at every step. And **the
 update guard is asked, not restated**: `validate` said a dash pattern on
