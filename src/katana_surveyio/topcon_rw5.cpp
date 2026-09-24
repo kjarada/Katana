@@ -1038,6 +1038,11 @@ void Rw5Reader::shot(const Record& r, std::size_t n)
         observation.instrumentHeight = hi;
         observation.targetHeight = th;
         observation.pointing = pointing;
+        // The EDM offset in force for THIS shot: an MO record in the middle
+        // of a setup changes it for the shots after it, which the setup's
+        // InstrumentSettings (taken when the setup began) cannot say.
+        observation.target.prismConstant = settings_.prismConstant;
+        observation.target.prismConstantState = settings_.prismConstantState;
     };
     if (sd) {
         distance(*sd, survey::DistanceKind::Slope, "SD");
