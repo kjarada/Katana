@@ -149,6 +149,44 @@ void BM_RenderGroundFramed(benchmark::State& state)
 // 256 cells = 131k triangles; 724 cells = 1.05M.
 BENCHMARK(BM_RenderGroundFramed)->Arg(256)->Arg(724)->Unit(benchmark::kMillisecond);
 
+// Where the fill's size cutoff belongs (rasterizer.cpp,
+// kBoundedFillMinimumPixels): the whole view tiled, in plan and orthographic, with
+// right triangles of legs `side` pixels, so every frame shades the same pixels
+// and only how many triangles share them changes. Serial, to time the fill
+// and not the scheduling.
+void BM_RenderTriangleSize(benchmark::State& state)
+{
+    const int side = static_cast<int>(state.range(0));
+    DrawList list;
+    for (int y = 0; y + side <= kHeight; y += side) {
+        for (int x = 0; x + side <= kWidth; x += side) {
+            const double x0 = static_cast<double>(x) - kWidth / 2.0;
+            const double y0 = static_cast<double>(y) - kHeight / 2.0;
+            const double s = static_cast<double>(side);
+            const auto color = rgba(static_cast<std::uint8_t>(x), static_cast<std::uint8_t>(y), 90);
+            const auto a = list.addVertex(Vec3(x0, y0, 0.0), color);
+            const auto b = list.addVertex(Vec3(x0 + s, y0, 0.0), rgba(200, 200, 200));
+            const auto c = list.addVertex(Vec3(x0 + s, y0 + s, 0.0), color);
+            const auto d = list.addVertex(Vec3(x0, y0 + s, 0.0), rgba(60, 60, 60));
+            list.addTriangle(a, b, c);
+            list.addTriangle(a, c, d);
+        }
+    }
+    Camera camera;
+    camera.setViewportSize(kWidth, kHeight);
+    camera.setProjection(Projection::Orthographic);
+    camera.setStandardView(katana::render::StandardView::Top);
+    camera.setTarget(Vec3(0.0, 0.0, 0.0));
+    camera.setDistance(1000.0);
+    camera.setOrthographicHeight(static_cast<double>(kHeight));
+    camera.setDepthRange(1.0, 2000.0);
+    TaskPool pool(0);
+    renderLoop(state, list, camera, pool);
+}
+BENCHMARK(BM_RenderTriangleSize)
+    ->Arg(2)->Arg(4)->Arg(6)->Arg(8)->Arg(12)->Arg(16)->Arg(32)->Arg(64)->Arg(256)
+    ->Unit(benchmark::kMillisecond);
+
 // Serial, so the number does not depend on how busy the other cores are.
 void BM_RenderGroundFramedSerial(benchmark::State& state)
 {
