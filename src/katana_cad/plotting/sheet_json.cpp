@@ -1,5 +1,6 @@
 #include "katana/cad/plotting/sheet_json.hpp"
 
+#include <cmath>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -61,15 +62,43 @@ Point2 pointFrom(const Json& json)
     return Point2(json.at(0).get<double>(), json.at(1).get<double>());
 }
 
+// A rectangle as [x0, y0, x1, y1]; the empty rectangle - a viewport not
+// placed on the paper yet - as null. Box2's empty value is made of
+// infinities, which JSON has no numbers for: written as they are they came
+// out as nulls that no reader took back (caught by the round-trip test).
 Json boxJson(const Box2& box)
 {
+    if (box == Box2{}) {
+        return nullptr;
+    }
     return Json::array({box.min.x, box.min.y, box.max.x, box.max.y});
 }
 
 Box2 boxFrom(const Json& json)
 {
+    if (json.is_null()) {
+        return Box2{};
+    }
     return Box2(Point2(json.at(0).get<double>(), json.at(1).get<double>()),
                 Point2(json.at(2).get<double>(), json.at(3).get<double>()));
+}
+
+// Whether every number in `json` is finite. JSON cannot hold an infinity or
+// a NaN, and the writer would put a null in its place that reads back as an
+// error - so such a set is refused when it is written, where the mistake is.
+bool allFinite(const Json& json)
+{
+    if (json.is_number_float()) {
+        return std::isfinite(json.get<double>());
+    }
+    if (json.is_structured()) {
+        for (const Json& item : json) {
+            if (!allFinite(item)) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 Json signOffJson(const SignOff& signOff)
@@ -295,6 +324,10 @@ Result<std::string> sheetSetToJson(const SheetSet& set)
                     {"numbering", set.numbering},
                     {"revisions", std::move(revisions)},
                     {"sheets", std::move(sheets)}};
+    if (!allFinite(root)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the sheet set holds a number that is not finite (an infinity or NaN)");
+    }
     try {
         return root.dump();
     } catch (const Json::exception& error) {

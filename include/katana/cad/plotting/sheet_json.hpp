@@ -24,8 +24,9 @@
 
 namespace katana::cad::plotting {
 
-// Fails (InvalidArgument) only for text that is not valid UTF-8, which the
-// JSON writer cannot write.
+// An unplaced viewport's empty rectangle is written as null. Fails
+// (InvalidArgument) for text that is not valid UTF-8 and for a number that
+// is not finite - neither has a JSON form that reads back.
 [[nodiscard]] core::Result<std::string> sheetSetToJson(const SheetSet& set);
 
 // ParseFailure for text that is not a sheet set; Unsupported for one written
