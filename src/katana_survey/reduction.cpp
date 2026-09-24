@@ -984,15 +984,6 @@ void orientAndRadiate(Engine& engine, std::size_t setupIndex,
         }
     }
     setup.orientationCorrection = state.orientation;
-    if (!state.orientation && reradiate == nullptr) {
-        engine.warn("Setup " + station.setup.id +
-                        (backsight.empty()
-                             ? std::string(" has no backsight")
-                             : " cannot be oriented: its backsight " + std::string(backsight) +
-                                   " has no position and no circle setting was recorded") +
-                        ", so its directions are not oriented and its targets are not radiated.",
-                    station.source);
-    }
 
     // ---- per pointing: factors, azimuth, position ----
     // Per target, the means of what this setup measured to it. Directions
@@ -1548,26 +1539,70 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
     // may start at a point a setup radiated); a setup whose point nothing
     // positions falls back to the file's own coordinates for that point, and
     // the report says so.
+    //
+    // A setup whose backsight has no position yet is tried again whenever
+    // more points have been placed since its last try: a setup on control
+    // that backsights a traverse point is oriented once a later setup has
+    // radiated that point. Only when nothing more can be placed is it given
+    // up on, and then the report says why.
     std::vector<bool> done(raw.stations.size(), false);
+    constexpr std::size_t kNeverTried = static_cast<std::size_t>(-1);
+    std::vector<std::size_t> positionsAtTry(raw.stations.size(), kNeverTried);
     std::size_t remaining = raw.stations.size();
     radiateGnssVectors(engine);
+    const auto warnUnoriented = [&](const SurveyStation& station) {
+        const std::string& backsight = station.backsightPointId;
+        engine.warn("Setup " + station.setup.id +
+                        (backsight.empty()
+                             ? std::string(" has no backsight")
+                             : " cannot be oriented: its backsight " + backsight +
+                                   " has no position and no circle setting was recorded") +
+                        ", so its directions are not oriented and its targets are not radiated.",
+                    station.source);
+    };
+    const auto giveUpUnoriented = [&] {
+        for (std::size_t s = 0; s < raw.stations.size(); ++s) {
+            if (done[s] || positionsAtTry[s] == kNeverTried) {
+                continue;
+            }
+            done[s] = true;
+            --remaining;
+            warnUnoriented(raw.stations[s]);
+        }
+    };
     while (remaining > 0) {
         bool progress = radiateGnssVectors(engine);
         for (std::size_t s = 0; s < raw.stations.size(); ++s) {
-            if (done[s] || !engine.find(raw.stations[s].setup.pointId)) {
+            if (done[s] || !engine.find(raw.stations[s].setup.pointId) ||
+                positionsAtTry[s] == engine.positionOrder.size()) {
                 continue;
             }
+            positionsAtTry[s] = engine.positionOrder.size();
             orientAndRadiate(engine, s);
+            if (!engine.setups[s].orientation) {
+                if (!raw.stations[s].backsightPointId.empty()) {
+                    continue; // try again when more is known
+                }
+                warnUnoriented(raw.stations[s]); // nothing later can orient it
+            }
             done[s] = true;
             --remaining;
             progress = true;
+        }
+        // A try that placed nothing is no progress; one that placed a point
+        // lets the unoriented setups try again.
+        for (std::size_t s = 0; s < raw.stations.size() && !progress; ++s) {
+            progress = !done[s] && positionsAtTry[s] != kNeverTried &&
+                       positionsAtTry[s] != engine.positionOrder.size();
         }
         if (progress) {
             continue;
         }
         bool fellBack = false;
         for (std::size_t s = 0; s < raw.stations.size() && !fellBack; ++s) {
-            if (done[s]) {
+            // A setup already standing on a position (waiting for its
+            // backsight) keeps it: the file's coordinates are the last resort.
+            if (done[s] || engine.find(raw.stations[s].setup.pointId)) {
                 continue;
             }
             const std::string& pointId = raw.stations[s].setup.pointId;
@@ -1588,6 +1623,7 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
             fellBack = true;
         }
         if (!fellBack) {
+            giveUpUnoriented();
             for (std::size_t s = 0; s < raw.stations.size(); ++s) {
                 if (!done[s]) {
                     engine.warn("Setup " + raw.stations[s].setup.id + " stands on " +
@@ -1599,6 +1635,7 @@ Result<ReductionOutcome> reduceAndAdjust(const SurveyProject& raw,
             break;
         }
     }
+    giveUpUnoriented();
     radiateGnssVectors(engine);
 
     engine.flushSetupNotices();
