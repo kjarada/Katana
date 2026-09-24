@@ -126,9 +126,11 @@ class RawProjectBuilder {
 
   private:
     static constexpr std::uint32_t kNoFeature = UINT32_MAX;
+    static constexpr std::uint32_t kNotFound = UINT32_MAX;
 
     struct PointEntry {
         std::string id;
+        std::size_t hash = 0; // of id, kept so the table can grow without rehashing text
         bool positioned = false;
         double northing = 0.0;
         double easting = 0.0;
@@ -136,10 +138,10 @@ class RawProjectBuilder {
         katana::survey::CoordinateSource coordinateSource =
             katana::survey::CoordinateSource::Unknown;
         std::size_t positionRecord = 0;
+        std::size_t sourceRecord = 0; // the SourceRecord is built once, in finish()
         std::string code;
         std::string description;
         std::map<std::string, std::string> metadata;
-        katana::survey::SourceRecord source;
         std::uint32_t feature = kNoFeature;
     };
 
@@ -153,13 +155,20 @@ class RawProjectBuilder {
     using IdIndex = std::unordered_map<std::string, std::uint32_t, TransparentHash, std::equal_to<>>;
 
     PointEntry& entry(std::string_view id, std::size_t record);
+    [[nodiscard]] std::uint32_t findPoint(std::string_view id, std::size_t hash) const;
+    void placePoint(std::uint32_t index);
 
     std::string fileName_;
     katana::survey::SourceRecord sourceTemplate_;
     ReadOptions options_;
     ReadResult result_;
     std::vector<PointEntry> points_;
-    IdIndex pointIndex_;
+    // Point ids -> index in points_, open addressing over points_' own ids:
+    // one table of 32-bit slots instead of a node and a second copy of the id
+    // per point, which on a job of a million shots was a third of the read
+    // (measured: 1.2 us per std::unordered_map insert on this toolchain).
+    // 0 is an empty slot; otherwise index + 1. Kept at most half full.
+    std::vector<std::uint32_t> pointSlots_;
     IdIndex stationIndex_;
     IdIndex featureIndex_;
     std::vector<std::size_t> pointingCounters_;
