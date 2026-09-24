@@ -23,6 +23,7 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     main.cpp
     main_window.cpp
     main_window.hpp
+    main_window_dxf.cpp
     viewport_widget.cpp
     viewport_widget.hpp
     view_workspace.cpp
@@ -93,7 +94,7 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/katana.rc" @ONLY)
     target_sources(katana PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/katana.rc")
 endif()
-target_link_libraries(katana PRIVATE katana_cad katana_interop katana_render Qt6::Widgets)
+target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render Qt6::Widgets)
 
 # The developer tool that renders the icons to files - see make_icons.cpp for
 # why its output is committed rather than generated during the build. Not part
