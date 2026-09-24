@@ -1,7 +1,8 @@
 # Architecture
 
-Cross-cutting decisions that every Katana module obeys. Module-specific
-documents live beside this one.
+Cross-cutting decisions that every Katana module obeys, and the rules they
+come from. Module documents live beside this one; `docs/index.md` says which
+is which.
 
 ## Purpose
 
@@ -9,6 +10,141 @@ Katana is a deterministic C++ engineering platform for CAD and surveying. The
 engine must be able to perform every important engineering operation on its own:
 the user interface, the storage format and (later) the AI layer are all
 consumers of it, never participants in it.
+
+## The architectural rules
+
+Seven rules shape the design. Code comments cite them by number ("Rule 4"),
+so the numbers are fixed: a rule may be reworded here, never renumbered.
+
+**Rule 1 - C++ owns the application.** All core functionality is C++. Python
+is never a run-time dependency of the application: it is used at BUILD time
+to embed the customisation (`tools/embed_customisation.py`; without Python
+the table is empty and Katana draws plain lines) and by developer tools
+(`tools/compare_benchmarks.py`, `tools/audit_register.py`,
+`tools/check_docs.py`).
+
+**Rule 2 - Nothing changes the model except a validated command.** No front
+end - the window, `katana_cli`, a script, and the AI layer when it comes -
+writes the model or the project database directly. Each issues a structured
+command, which is validated, executed as one transaction and recorded for
+undo: request, `commands::Command`, `validate`, `execute`, the change set,
+then storage. `CommandInterpreter` builds the same `Command` objects the
+window's tools do (`docs/cad.md`, "Command interpreter"; `docs/model.md`,
+"Command system"). Direct SQL or memory manipulation from a front end is
+the thing this rule forbids.
+
+**Rule 3 - The renderer is not the source of truth.** The domain model is
+authoritative; the plan view, the 3D view, the section view, the plot and
+every preview are representations of it and hold no state the model does not
+have. Made structural by the layering: `katana_render` sees only core, math
+and geometry and draws a `render::DrawList`, with no idea a Document exists.
+
+**Rule 4 - External libraries are isolated.** Third-party types never
+contaminate the code base: each library is wrapped behind a Katana-owned
+interface in one module (`geodesy::CoordinateTransformer` over PROJ,
+`gis::` over GDAL, `terrain::TinSurface` over CGAL, `storage::ProjectStore`
+over SQLite), and no public header under `include/` names a third-party
+type. The `layering` test checks it ("Layering", below).
+
+**Rule 5 - Test before optimising.** An important subsystem has automated
+tests before it is optimised, and an optimisation that culls work (a spatial
+filter, a tile bin) has a test proving the culled run finds exactly what the
+exhaustive one did.
+
+**Rule 6 - Profile before optimising.** No change is made for speed on an
+assumption. Measure first - CPU, memory, cache behaviour, allocation, GPU,
+I/O, latency, throughput - and claim a speed-up only with a committed
+benchmark and its before and after figures ("Measure, then claim", below;
+`docs/performance.md` holds the figures).
+
+**Rule 7 - Computation is deterministic.** Given identical inputs and
+configuration, results are identical ("Determinism", below). Parallel and
+vectorised code produces the same bits as the serial scalar code unless a
+document says otherwise and why.
+
+## Working rules
+
+How work is done here. Older comments cite some of these by the number of a
+section in the removed contributor instructions; the number is given in
+brackets so such a citation still resolves.
+
+- **One way of doing a thing** (section 1, and section 6's "collapse it").
+  Failure is reported one way (`core::Result` / `Status`), tolerance is one
+  policy (`math::tolerance`), undo is one mechanism (`commands::Command`),
+  layering is one list (`tools/check_layering.cmake`). A second way of doing
+  something that already has a first way is a defect, not a shortcut: collapse
+  it into the first.
+- **Derived expectations** (section 3). Never change an expected value to
+  match what the program produced. When a test fails, establish which is
+  wrong: the implementation (fix it), the expectation (fix it and justify it
+  from a source outside this program - a standard, a published constant, an
+  independent calculation, a hand-worked example in a comment), or the
+  tolerance (widen it only with the error analysis that justifies the new
+  number). Never delete or disable a failing test. `docs/testing.md` has the
+  rest of the testing rules.
+- **Measure, then claim** (section 4). Measure in Release, before and after,
+  with a benchmark committed under `benchmarks/` so the measurement can be
+  repeated; put both numbers in the commit message and the module's document.
+  This machine is shared, so a comparison alternates the builds
+  (`tools/compare_benchmarks.py --alternate`) and runs an A/A control beside
+  the A/B one, and reports ratios rather than single absolute numbers
+  (`docs/testing.md`, "Benchmarks").
+- **Judge a build by its exit code.** `-Werror` is on, so a warning is a
+  failure. A build filtered for "error" lines once printed "built" over a
+  missing binary, because a link failure prints no line that a source-path
+  filter matches.
+- **Comments say why, and every number has a source** (section 6). A constant
+  names where it comes from - a standard, a measurement, a stated policy. A
+  comment that says what the code does is replaced by the reason or deleted.
+  Functions are named, not line numbers. British spelling in prose, American
+  in identifiers where the surrounding code already uses it (`color`).
+- **A change updates its document in the same commit.** The document of the
+  module a change touches is part of the change; `docs/index.md` says which
+  document that is, and `tools/check_docs.py` (the `docs` test) checks that
+  what the documents cite exists.
+- **Absent is not zero.** A missing measurement is `std::optional`, never a
+  placeholder number: a survey point's height is `std::optional<double>`,
+  and a point with no coordinates is a `survey::UnpositionedPoint`, not a
+  point at the origin.
+- **Parallel work** (section 5.3). Work that divides into parts with disjoint
+  file sets runs as parallel agents, each in its own worktree outside the
+  checkout, each building with a capped job count (`-j 3`) and reporting
+  evidence rather than a description; the merged result is built and tested
+  whole before any of it is believed.
+- **Report honestly.** A failure is shown with its output; skipped scope is
+  named with its reason.
+
+Commit messages carry what changed and why, the evidence, and what is still
+open:
+
+```
+<area>: <what changed, imperative>
+
+<why it was needed; the alternative rejected, if the choice was not obvious>
+
+Evidence: <test counts, before/after measurements, external source consulted>
+Outstanding: <what this deliberately does not do>
+```
+
+## Performance targets
+
+The engineering targets every interactive path is judged against. They are
+targets, not assumptions: each claim of meeting one needs a benchmark.
+
+| Operation | Target |
+|---|---|
+| Viewport interaction | 60+ frames per second |
+| Simple selection (pick, snap, box) | under 16 ms |
+| Simple geometry command | under 100 ms |
+| Undo or redo | under 50 ms |
+| Opening a small project | under 2 s |
+| 10 million survey points | interactive navigation |
+| 100 million point cloud | streamed display |
+| 1 billion points | out-of-core, tiled, levels of detail |
+
+Memory layout (structure of arrays, pools, arenas, memory mapping) is changed
+only after profiling shows it matters, and a change reports allocations,
+peak and resident memory. `docs/performance.md` has what has been measured.
 
 ## Layering
 
@@ -24,25 +160,29 @@ core → math → geometry → { terrain, render, entity } → commands → stor
 
 `cad` may see neither `interop` nor `surveyio` nor `archive12d`: the
 application core builds without GDAL and PDAL (`-DKATANA_BUILD_IO=OFF`), and no
-instrument format's or archive reader's own types can reach the drawing. This diagram
-used to show `io` and nothing above `cad` but `qt` and `app`; the exact lists
-are in the layering check and nowhere else.
+instrument format's or archive reader's own types can reach the drawing. The
+exact lists are in the layering check and nowhere else.
 
 A module may include headers from the layers it is listed as depending on in
 [`tools/check_layering.cmake`](../tools/check_layering.cmake), and from nowhere
-else. Two rules are machine-checked there and run as the `layering` test:
+else. Two rules are checked there and run as the `layering` test:
 
 1. **One-way dependencies.** `geometry` cannot include `survey`, `cad` or `qt`.
    The check reads every `#include "katana/<layer>/..."` and compares it against
-   the declared allow-list for the file's own layer.
-2. **No third-party types in public headers.** Eigen, CGAL, PROJ, SQLite, GDAL,
-   PDAL, Qt, Vulkan and nlohmann may appear only in `src/`, never under
-   `include/`. Each is wrapped by a Katana-owned interface — `Result<T>`-based,
-   using Katana's own value types — so that replacing a library is a change to
-   one module rather than to the whole codebase (PLAN.MD Rule 4).
+   the declared allow-list for the file's own layer. Its pattern matches layer
+   names of letters and underscores only, so an include of
+   `katana/archive12d/...` is not checked at all: `cad` including the archive
+   reader would pass today (audit BLD-03, BLD-11). No `cad` file does.
+2. **No third-party types in public headers** (Rule 4). Eigen, CGAL, PROJ,
+   SQLite, GDAL, PDAL, Qt, Vulkan and nlohmann may appear only in `src/`, never
+   under `include/`. Each is wrapped by a Katana-owned interface -
+   `Result<T>`-based, using Katana's own value types - so that replacing a
+   library is a change to one module rather than to the whole code base.
 
-The practical consequence: `katana_math` and `katana_geometry` have no
-dependencies beyond the standard library, and their tests link nothing else.
+A new module is registered in `tools/check_layering.cmake` in the same commit
+that adds it. The practical consequence of the rules: `katana_math` and
+`katana_geometry` have no dependencies beyond the standard library, and their
+tests link nothing else.
 
 ## Error handling
 
@@ -64,9 +204,13 @@ is a bug in the caller, not a runtime condition. Third-party libraries that
 throw (CGAL, nlohmann) or that use return codes (SQLite, PROJ) are converted to
 `Result` at the module boundary; no third-party exception escapes a module.
 
+A value that cannot be computed is refused or reported, never invented: a
+section that cannot reach the ground is counted, not given an elevation; a
+lossy export counts what it dropped. `Status` success is `return {};`.
+
 ## Numerical policy
 
-Every tolerance in the codebase is a named constant in
+Every tolerance in the code base is a named constant in
 [`numerics.hpp`](../include/katana/math/numerics.hpp), documented with its unit
 and rationale. Ad-hoc epsilons are forbidden — they are how CAD kernels acquire
 inconsistent behaviour between subsystems.
@@ -96,17 +240,28 @@ Two further consequences run through the code:
   vertex keeps full precision. Tests assert this by computing a figure locally
   and again shifted by (500000, 5000000).
 
+Text and units have one home each, low in the stack, so that every layer can
+reach them: decoding bytes to UTF-8 is `core/text_encoding.hpp`; trimming and
+number parsing is `core/text.hpp` (locale-independent - never `std::isspace`,
+`std::tolower` or `strtod` on file text); the exact length of a foot or a link
+is `math/unit_ratio.hpp`, which `geodesy/units.hpp` is built from
+(`docs/geodesy.md`).
+
 ## Determinism
 
-Identical inputs and configuration must give identical results (PLAN.MD Rule 7).
+Identical inputs and configuration must give identical results (Rule 7).
 This is a correctness requirement for an engineering tool, not a convenience.
 
 * Containers that feed output are ordered (`std::map`, sorted vectors). No
   result depends on `unordered_map` iteration order or on pointer addresses.
-* Compilation uses `-ffp-contract=off -fno-fast-math`, so the compiler may not
-  fuse or reassociate floating-point operations. Results match across
-  optimisation levels, which is why every suite is run in Release as well as
-  Debug.
+* Compilation uses `-ffp-contract=off -fno-fast-math`
+  (`cmake/KatanaTargetDefaults.cmake`), so the compiler may not fuse or
+  reassociate floating-point operations. Results match across optimisation
+  levels, which is why every suite is run in Release as well as Debug.
+* Parallel work partitions its OUTPUT - one screen tile, one vertex, one
+  triangle bin per index - so the bytes are those of the serial run whatever
+  the thread count, and tests prove it by running with `TaskPool(1)`
+  ("Threading", below).
 * Property tests use a fixed-seed generator
   ([`tests/support/property.hpp`](../tests/support/property.hpp)), so a failure
   reproduces exactly.
@@ -128,171 +283,54 @@ logs do not accumulate project data.
 
 ## Threading
 
-The current engine is single-threaded by construction. The document, its model,
-the command stack and the project store all belong to one thread, and that is
-stated in each header rather than left implicit. The pieces designed to be
-parallelised later — terrain tiles, spatial queries, import and export — are
-written as independent units of work, so that Phase 19 can add a task system
-without restructuring them. `Logger` is the one type that is explicitly
-thread-safe today.
+The document, its model, the command stack, the project store and every
+widget belong to one thread, the GUI thread (or `katana_cli`'s main thread),
+and each header says so. What runs in parallel does so inside one call,
+through one primitive:
+[`katana::core::TaskPool`](../include/katana/core/task_pool.hpp).
 
-## Testing strategy
+* **What it is.** A `std::jthread` pool, created once and kept warm
+  (`TaskPool::shared()`, never destroyed), with `hardware_concurrency() - 1`
+  workers; the calling thread is the last worker. It offers one operation,
+  "run this index range across the cores": `parallelRanges(begin, end, grain,
+  body)` and its grain-1 form `parallelFor`. There are no futures and no task
+  graphs, because nothing needs them.
+* **The contract.** `body` is called exactly once for every index; calls that
+  run at once touch disjoint state; the ORDER in which indices are visited is
+  unspecified and must not matter. A caller meets it by partitioning its
+  output, which is what makes the result bit-identical to the serial run
+  (Rule 7).
+* **Nesting cannot deadlock.** A `parallelRanges` issued while the pool is
+  busy runs serially on the calling thread. Throughput degrades; correctness
+  does not.
+* **Exceptions stop the job.** One escaping `body` is caught, the remaining
+  chunks are skipped, and the first is rethrown to the caller after the
+  workers have stopped.
+* **Grain is measured, not guessed.** A chunk must cost well above what
+  publishing a job to the pool costs; `TinSurface::elevationsAt` records its
+  grain of 256 positions with the measurement it came from, and runs inline
+  below one grain.
 
-`ctest` runs unit, integration, property, regression and end-to-end tests plus
-the layering check. The rules that matter:
+Users today: the software rasteriser (`Rasterizer::render`, which transforms
+vertices, builds screen primitives, bins them and rasterises tiles in
+parallel; a caller may pass its own pool in `RenderOptions::pool`),
+`TiledTerrain::buildAll` (one tile per index) and `TinSurface::elevationsAt`.
+Other types that are safe to use from several threads say so in their
+headers: `Logger`, and the geodesy value types (`docs/geodesy.md`,
+"Threading model"). A PROJ-backed object (`CoordinateTransformer`,
+`GridFactorCalculator`) and a `GdalDataset` are one per thread.
 
-* **Expected values are derived independently of the implementation** — from a
-  closed form, a textbook identity, an exact synthetic construction, or a hand
-  calculation recorded in a comment. A value copied from the code under test
-  proves only that the code is self-consistent. This project has seen the
-  failure mode first-hand: an early least-squares "solver" hardcoded its own
-  test's expected answer and passed.
-* **Edge cases are named, not assumed** — parallel and coincident lines,
-  zero-length segments, tangent circles, nearly parallel geometry, duplicate
-  points, degenerate polygons, empty containers, non-finite input.
-* **Failures are diagnosed before they are fixed.** When a test disagrees with
-  the implementation, the question is which one is wrong on the merits. A
-  tolerance may only be loosened with a floating-point justification.
+## Testing
+
+`docs/testing.md`: the suites, how a test is registered, the headless driver
+of the window, and the rules that make a test evidence.
 
 ## Build
 
-CMake 3.24+, one target per module, warnings as errors. `CMakePresets.json`
-provides Debug, Release, RelWithDebInfo, sanitizer and static-analysis
-configurations. Sanitizers use ASan+UBSan where available; on MinGW, where
-libsanitizer is not shipped, UBSan runs in trap mode so undefined behaviour
-aborts the offending test. GoogleTest and Google Benchmark are fetched once and
-cached under `third_party/_cache`, so additional build directories configure
-offline.
-
-### Where things are built
-
-```
-<build>/bin/katana.exe          the application (target `katana`)
-<build>/bin/katana_cli.exe      the command-line front end
-<build>/bin/tests/              one test executable per module
-<build>/bin/benchmarks/
-<build>/lib/                    static libraries
-```
-
-CMake's default mirrors the source tree inside the build tree, which had put
-the application at `build/release/src/katana_qt/katana_qt_app.exe` - a path
-that reads as though the executable were in the sources. The root
-`CMakeLists.txt` sets the output directories before any `add_subdirectory`,
-because those variables initialise each target's property when the target is
-created. Tests and benchmarks go one level down so that `bin` holds only what
-ships. The directory `src/katana_qt` keeps its name: it names a LAYER, which
-is a statement about dependencies, not about what the user double-clicks.
-
-### Bundling
-
-`cmake --build <build> --target bundle` installs into `<build>/dist/Katana`;
-`--target package` makes `Katana-<version>-win64.zip` (and an NSIS installer
-when `makensis` is on the machine). The result runs with no MSYS2, Qt or GDAL
-installed. Three things make it so, and each was learned by the bundle
-failing:
-
-* **`windeployqt` for Qt, then a dependency scan over everything it deployed.**
-  A scan of `katana.exe` alone never sees `qwindows.dll`, which Qt loads by
-  name at start-up; and a scan that stops at the executables misses what only
-  a PLUGIN needs (`qjpeg.dll` wants libjpeg). So the scan runs after
-  `windeployqt`, over the executables and the plugins.
-* **Conflicts are collected, not fatal.** `katana.exe` finds `Qt6Core.dll`
-  beside itself while `bin/platforms/qwindows.dll` finds the toolchain's copy -
-  one DLL, two paths, which `file(GET_RUNTIME_DEPENDENCIES)` reports as an
-  error unless given `CONFLICTING_DEPENDENCIES_PREFIX`.
-* **`qoffscreen.dll` is copied by hand.** `windeployqt` ships only the desktop
-  platform plugin, but `katana --plot` is a headless feature. Without the
-  offscreen plugin Qt does not exit with an error: it opens a modal "no Qt
-  platform plugin" box and waits for a click, which is how the bundle's own
-  smoke test came to hang for ten minutes.
-
-`bin/` sits beside `share/` because that is where both data-hungry libraries
-look: PROJ finds `proj.db` at `<its DLL>/../share/proj` by itself, and
-`locateGdalData` (in `gdal_adapter.cpp`) does the same for GDAL. See
-`docs/interop.md` for why GDAL needed telling.
-
-The bundle is 388 MB. Almost all of it is the dependency chain of GDAL and PDAL
-as MSYS2 builds them; Katana's own code is a few megabytes.
-
-### The build tree runs on its own too
-
-Until 2026-09-23 only the bundle was self-contained: `<build>/bin/katana.exe`
-found GDAL, PDAL, PROJ, Qt and the C++ runtime through `PATH`, so it ran only
-where MSYS2 was installed and on `PATH` - the libraries were borrowed from the
-toolchain at run time rather than being part of the program. Now the build
-deploys them itself. The `katana_runtime` target (in `ALL`, after `katana` and
-`katana_cli`) runs **the same `KatanaDeploy.cmake`** the bundle runs, with
-`-DKATANA_DEPLOY_PREFIX=<build>`, so `<build>/bin` holds every DLL the programs
-load and `<build>/share` holds `proj` and `gdal`. One script for both, so the
-bundle and the build cannot disagree about what a self-contained Katana needs.
-Switch it off with `-DKATANA_DEPLOY_RUNTIME=OFF`.
-
-A full deploy is too slow for every build - measured on the Release tree, 36 s
-on an idle machine and 62-85 s beside another build, most of it
-`file(GET_RUNTIME_DEPENDENCIES)` running objdump over ~200 DLLs - so the build
-run is incremental. It is skipped (0-1 s, measured) while three things hold:
-
-* **A key is unchanged**: an MD5, taken at configure time, of every module's
-  `LINK_LIBRARIES`, the toolchain and Qt plugin locations, and the deploy
-  script's own text. Which DLLs are needed changes only when a link line does,
-  and a link line changes only through CMake. The programs' import tables
-  would be the direct answer, but `objdump -p` on the 143 MB Debug `katana.exe`
-  takes 2.6 s - on every build.
-* **Every DLL the last deploy recorded is still there.**
-* **Every one is the toolchain's current copy**, by timestamp (`file(COPY)`
-  keeps the source's). MSYS2 is a rolling toolchain; an update replaces
-  `libstdc++-6.dll` under the same name, and a program relinked against the
-  new one that finds the old one beside itself does not start.
-
-Anything else is a full deploy, which first re-copies every DLL already in
-`bin/` from the toolchain - the scan cannot, because it resolves a dependency
-BESIDE the program first and so finds, and keeps, a stale copy - and writes its
-record last, so a deploy that fails part-way is retried rather than trusted.
-Verified on the Release tree: a back-dated `libgdal-39.dll` was noticed and
-replaced with the toolchain's, a deleted `libproj-25.dll` was restored, and the
-next run took 0 s. With `PATH` reduced to `C:\Windows\System32;C:\Windows`,
-`build/release/bin/katana_cli.exe` imported the sample LAS (PDAL), ASCII grid
-and GeoJSON (GDAL) and exported a DXF (GDAL's `header.dxf`, from
-`build/release/share/gdal`), and `katana.exe --screenshot` built the window.
-
-It is `katana_runtime` and not a POST_BUILD step on each program because
-`katana` and `katana_cli` link in parallel under Ninja, and two deploys writing
-one `bin/` at once would race.
-
-**PDAL needs a home directory.** Run with an EMPTY environment (`env -i`),
-PDAL refused every file: "No home directory found" - it reads `USERPROFILE`
-(or `HOME`) for its plugin configuration. Every Windows session has
-`USERPROFILE`, so this does not reach a user, but a service account or a
-container that clears the environment would meet it.
-
-### Why DLLs beside the program, and not static linking
-
-Linking GDAL and PDAL INTO the executables was considered and is not done, for
-reasons that are facts about the toolchain rather than preferences:
-
-* **MSYS2 ships PDAL and PROJ as DLLs only.** `libgdal.a` exists; there is no
-  `libpdalcpp.a` and no `libproj.a` (checked in `C:/msys64/ucrt64/lib`,
-  2026-09-23).
-* **Linking GDAL statically alone would be a defect.** `libpdalcpp-20.dll`
-  imports `libgdal-39.dll` itself, so a Katana with GDAL linked in would load
-  a SECOND GDAL through PDAL: two driver registries, two error states, two
-  `GDAL_DATA` settings in one process, and a dataset opened by one unusable by
-  the other.
-* **A static build is a build of the whole stack from source**: GDAL, PROJ
-  (with `proj.db` embedded - PROJ 9.6 can), PDAL, GEOS, SQLite, libtiff,
-  libgeotiff, curl and their dependencies, as static libraries, with a driver
-  set trimmed to what Katana reads (which would also cut most of the 388 MB).
-  PDAL's CMake is built around shared libraries and plugins, so it is the
-  hard part.
-* **Licences.** GEOS is LGPL-2.1: linking it statically obliges whoever
-  distributes Katana to let a recipient relink it against a modified GEOS
-  (object files, or the source); as a DLL it is replaceable as it stands. Qt
-  is LGPL-3 for the same reason and stays a DLL either way.
-
-So "part of the program" is delivered as: every library in `bin/` beside the
-executable, found first by Windows' DLL search order, and never the
-toolchain's at run time. A single statically linked executable remains
-possible as a packaging project of its own - see PLAN.MD section 6.
+`docs/building.md`: presets, options, targets, where binaries land, running
+`katana` and `katana_cli`, and the packaging decisions - "Where things are
+built", "Bundling", "The build tree runs on its own too" and "Why DLLs beside
+the program, and not static linking" moved there from this document.
 
 ## Failure modes
 
@@ -305,3 +343,41 @@ possible as a packaging project of its own - see PLAN.MD section 6.
 | Project database corrupt | detected on open by integrity check; `recover()` restores the newest sound backup and keeps the damaged file |
 | Project from a newer Katana | refused with `Unsupported` rather than guessed at |
 | Third-party library throws | converted to a `Result` at the module boundary |
+
+## Section and phase numbers in older comments
+
+Comments written before 2026-09-24 cite the original development plan, which
+is no longer in the tree, by section ("§32", "section 36", "20.3") or by phase
+("Phase 18"). A plan section numbered 6 or more is phase (section - 5):
+section 23 is Phase 18. This table resolves each number to its subject and
+the document that covers it now.
+
+| Cited as | Subject | Documented in |
+|---|---|---|
+| Rule 1 to Rule 7 | the architectural rules | this document, "The architectural rules" |
+| §32 | performance targets | this document, "Performance targets"; `docs/performance.md` |
+| §33 | memory architecture | this document, "Performance targets" |
+| §34 | testing strategy | `docs/testing.md` |
+| §35 | numerical correctness | this document, "Numerical policy" |
+| §36 | error handling, no silent failures | this document, "Error handling" |
+| §37 | logging | this document, "Logging" |
+| Phase 01 (§6) | build system | `docs/building.md` |
+| Phases 02-04 (§7-9) | mathematics, geometry and its algorithms | `docs/geometry.md` |
+| Phase 05 (§10); 5.1 to 5.4 | entity system; 5.1 nested layers, 5.2 resolved appearance, 5.3 linetypes, 5.4 dimension styles | `docs/model.md` |
+| Phases 06-07 (§11-12) | commands; project storage | `docs/model.md`, `docs/storage.md` |
+| Phases 08-09 (§13-14) | the CAD application; professional 2D CAD | `docs/cad.md`, `docs/desktop.md`, `docs/tools.md` |
+| Phases 10, 12, 13 (§15, 17, 18) | survey model, survey calculations, least squares | `docs/survey.md` |
+| Phase 11 (§16) | coordinate systems and units | `docs/geodesy.md` |
+| Phase 14 (§19) | terrain | `docs/terrain.md` |
+| Phases 15-16 (§20-21) | 3D rendering, 3D CAD | `docs/render.md` |
+| Phase 17 (§22) | point clouds | `docs/interop.md` |
+| Phase 18 (§23) | spatial indexing | `docs/cad.md`, "Spatial indexing" |
+| Phase 19 (§24) | performance architecture, the task pool, the language standard | `docs/performance.md`; this document, "Threading" |
+| Phase 20 (§25); 20.1, 20.2, 20.3 | file interoperability; where imported data lands, the archive programme, the survey coding programme | `docs/interop.md`, `docs/survey_coding.md` |
+| Phase 21 (§26) | alignments, profiles, corridors, parcels, grading | `docs/geometry.md`, `docs/cad.md` |
+| Phase 22 (§27) | drawing and plotting | `docs/cad.md`, "Plotting to PDF" |
+| Phase 23 (§28) | application API: the command interpreter | `docs/cad.md`, "Command interpreter" |
+| Phases 24-26 (§29-31) | Python AI layer, AI agent, AI safety | not started; Rules 1 and 2 bind them |
+| §45; 45.1 to 45.5 | the survey module and instrument formats | `docs/survey.md` |
+| §46 | the audit register | `docs/audit/2026-09-23-defects.md` |
+| §47 | dockable views, per-view layers | `docs/desktop.md`, "The workspace" |
