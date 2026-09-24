@@ -2,12 +2,13 @@
 
 `katana_io` (the GDAL and PDAL adapters, exposed as `katana::gis` and
 `katana::pointcloud`) and `katana_interop` (conversion to and from the domain
-model). PLAN.MD Phases 17 and 20.
+model): the point-cloud and file-interoperability work.
 
 ## Purpose
 
 Import external survey and GIS data into the drawing, and export the drawing
-back out. Phase 20 states the rule this layer exists to enforce: *"Do not make
+back out. The interoperability plan stated the rule this layer exists to
+enforce: *"Do not make
 the internal data model dependent on any external format. All importers should
 convert external data into the internal domain model."*
 
@@ -28,8 +29,9 @@ PDAL out of the core application layer is what lets it build with
 the application links interop - and that is the configuration a sanitizer build
 wants: neither library is sanitizer-instrumented, so their allocations produce
 false positives that would drown real findings. (This said the sanitizer CI job
-depends on it; the CI workflow had been deleted, and is being restored with such
-a job - audit, BLD.) `tools/check_layering.cmake` enforces the layering.
+depends on it. There is no CI workflow in the repository - it was deleted, and
+audit BLD-01 is open - so the `sanitize` preset is run by hand; see
+`docs/building.md`.) `tools/check_layering.cmake` enforces the layering.
 
 No GDAL or PDAL type appears in any public header: geometry crosses the boundary
 as plain coordinate arrays (`GeoPoint`), rasters as 8-bit RGBA, and failures as
@@ -52,7 +54,7 @@ to GDAL and PDAL, but the MSYS2 toolchain has no ECW SDK and no PDAL E57
 plugin, so such a file fails to open with the library's own error (this table
 listed both until the audit of 2026-09-23 checked the toolchain). LandXML
 SURVEY data - points and observations - is read by the survey data exchange
-(PLAN.MD section 45), not here.
+(`docs/survey.md`), not here.
 
 ## Two kinds of imported data
 
@@ -94,7 +96,8 @@ Every lossy step is stated rather than hidden.
   default 1 mm. The chord count follows `φ = 2·acos(1 − tolerance/r)`, so the
   result is the coarsest polyline meeting the tolerance and no finer.
 * **Text and dimensions** have no counterpart at all. They are skipped, counted,
-  and reported in `warnings` — never silently dropped (PLAN.MD §36).
+  and reported in `warnings` — never silently dropped (`docs/architecture.md`,
+  "Error handling").
 * **Attributes** become string entity properties; entity properties become
   attributes, doubles formatted at `%.17g` so they round trip exactly.
 * **Heights.** A file's Z becomes the `elevation` / `elevations` properties
@@ -172,7 +175,7 @@ Point clouds are drawn by splatting into an image buffer rather than one
 at two million points. Per-point colours are cached against the layer and its
 colour mode, so only the projection is redone per frame.
 
-**What is not implemented**: the out-of-core half of Phase 17. There is no
+**What is not implemented**: the out-of-core half of the point-cloud work. There is no
 spatial hierarchy, no level of detail and no streaming. A billion-point dataset
 is opened as a decimated sample held in memory, not worked on in full.
 
@@ -203,7 +206,7 @@ A `GdalDataset` is not thread-safe; use one per thread.
 
 ## Point-cloud level of detail: COPC, not a bespoke octree
 
-PLAN.MD Phase 17 asked Katana to build a spatial hierarchy for point clouds.
+The original plan asked Katana to build a spatial hierarchy for point clouds.
 It should not build one. A Cloud Optimised Point Cloud is a LAZ file whose
 chunks are already arranged as an octree, and the PDAL linked into
 `katana_io` reads and writes it natively (`pdal --drivers` lists
@@ -222,7 +225,8 @@ What the engine now offers (`include/katana/pointcloud/point_cloud_engine.hpp`):
 **A resolution asked of a non-COPC file is refused, not ignored.**
 `readers.las` has no such option; passing one through would hand the whole
 file to a caller who asked for a coarse sample of a billion points. That is
-the silent failure PLAN.MD section 36 forbids, so it is `InvalidArgument`
+the silent failure `docs/architecture.md` ("Error handling") forbids, so it
+is `InvalidArgument`
 naming `convertToCopc`.
 
 **The destination must be named `.copc.laz`.** The extension is what makes
@@ -735,8 +739,7 @@ grade line; per-segment pipe sizes, vertex attributes, segment text,
 visibility and tinability silently dropped; a LAS colour that is 64 unsigned
 bits parsed as signed. Four of the seven reviewers did not complete, so the
 real-file sweep, the hostile-input fuzzing and a geometry check were done by
-hand afterwards; the test-quality review was not, and is recorded as
-outstanding in `PLAN.MD`.
+hand afterwards; the test-quality review was not, and is still outstanding.
 
 ### Coverage
 
@@ -777,7 +780,7 @@ handling column is asserted by `tests/archive12d/test_coverage.cpp`.
 
 ### Measured
 
-Release, GCC 16.2, this machine (see `CLAUDE.md` for the toolchain): the
+Release, GCC 16.2, this machine (`docs/building.md`, "Toolchain"): the
 58 MB Windsor Road export (2 364 super strings with per-vertex attributes,
 1 453 trimeshes, UTF-16) decodes in 0.06 s, reads in 0.14 s and maps in
 0.08 s; the 55 MB `Test 4 with Tin` (7 820 strings and a 233 946-triangle

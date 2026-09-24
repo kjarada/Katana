@@ -5,7 +5,8 @@ drawing data, the only way to change it, and how it is persisted.
 
 ## Purpose
 
-The domain model is the single source of truth (PLAN.MD Rule 3). The renderer,
+The domain model is the single source of truth (Rule 3,
+`docs/architecture.md`). The renderer,
 the property panel and the command line all read from it and none of them keeps
 a private copy that could drift. Every modification goes through a command, so
 every modification is validated, atomic, undoable and observable — including,
@@ -77,9 +78,10 @@ tables. Layer `"0"` always exists and cannot be removed or renamed.
 `PropertyDatabase` holds an optional schema: a property that has been defined is
 type-checked on assignment, and one that has not is free-form.
 
-`Model` aggregates the entities, the layers and the six named tables - styles,
-linetypes, dimension styles, hatch patterns, alignments - and the property
-schema (`model.hpp`; this said "all four" from before the tables existed).
+`Model` aggregates the entities, the six name-keyed tables - layers, styles,
+linetypes, dimension styles, hatch patterns and alignments - and the property
+schema (`model.hpp`; this said "all four" from before the tables existed, and
+then named five of the six).
 
 ## Command system
 
@@ -132,8 +134,8 @@ Available commands: `CREATE_POINT`/`LINE`/`CIRCLE`/`ARC`/`POLYLINE`/`TEXT`/
 `RenameLayer`, and create / update / delete / rename / merge / duplicate for
 each named table, plus `PurgeTables` (one template set over a `TablePolicy`,
 `table_commands.cpp`; see "Named tables" below). The upper-case names
-are stable identifiers meant to become the vocabulary of the structured API in
-Phase 23; the layer-tree and table commands are named in CamelCase
+are stable identifiers meant to become the vocabulary of the structured application
+API (Rule 2); the layer-tree and table commands are named in CamelCase
 (`CreateLinetype`), which is an inconsistency to settle before that API is
 written, not a second convention to follow.
 
@@ -237,12 +239,11 @@ the store, and rebuilds the stack when the document is replaced.
 
 Entity lookup, insertion and removal are O(log n); `bounds()` and layer queries
 are O(n). `std::map` was chosen for ordering and simplicity, not for speed; the
-plan requires profiling before optimisation, and the structure-of-arrays layout
-contemplated in PLAN.MD §33 is a Phase 19 decision to be taken with measurements
-in hand. Save and load are O(n) in entities with one prepared statement reused
+rules require profiling before optimisation (Rule 6), and a structure-of-arrays
+layout is a decision to be taken with measurements in hand. Save and load are O(n) in entities with one prepared statement reused
 across rows.
 
-Against PLAN.MD §32's targets, the operations in this layer — command execution,
+Against the performance targets (`docs/architecture.md`), the operations in this layer — command execution,
 undo/redo — are far below the 100 ms and 50 ms budgets at drafting scale; they
 have not yet been measured on a 10⁶-entity drawing.
 
@@ -333,12 +334,13 @@ under a name that claims full coverage:
 
 ### Then
 
-Update the `static_assert` count, this document, `PLAN.MD` and `README.md`.
+Update the `static_assert` count and this document, in the same commit as the
+new kind (`docs/index.md` says which other documents a change reaches).
 
 ## Layer visibility and lock: one rule, asked everywhere
 
 A layer is shown when it and every ancestor is visible, and locked when it or
-any ancestor is locked (PLAN.MD 5.1). The rule has one implementation,
+any ancestor is locked (nested layers, plan item 5.1). The rule has one implementation,
 `LayerDatabase::resolve`, and every consumer goes through it - `cad::isDrawn`
 and `cad::isSelectable`, which the viewport, the plot, picking, box selection,
 snapping, the 3D scene, sections and Surface From Drawing ask, and the
