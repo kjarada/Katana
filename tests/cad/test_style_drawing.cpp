@@ -1,4 +1,4 @@
-// A 12d definition turned into geometry (PLAN.MD 20.3, slice 2).
+// A library definition turned into geometry (PLAN.MD 20.3, slice 2).
 
 #include <gtest/gtest.h>
 
@@ -361,7 +361,7 @@ TEST(StyleDrawing, AMarkBesideALineOutsideTheViewIsStillLaidWhenItReachesIntoIt)
 
 TEST(StyleDrawing, AWholeLineInViewLaysExactlyWhatTheUnclippedLayingDoesWhenAnArcOverhangsThePen)
 {
-    // A scallop written the way 12d writes arcs - move to the centre, then
+    // A scallop written the way a library writes arcs - move to the centre, then
     // arc - so the pen only ever stands at x = 0.5 while the half-circle
     // below it runs from x = 0 (180 deg) round to x = 1 (360 deg).
     //   length 1 / move 0.5 0 / arc 0.5 180 360
@@ -455,7 +455,7 @@ TEST(StyleDrawing, TheFactorScalesEveryCoordinateAndTheOriginIsWhereTheDefinitio
 TEST(StyleDrawing, ATrailingMoveIsTheGapAndCountsTowardsThePeriod)
 {
     // "move 0 0 / draw 3 0 / move 5 0" is a three-unit dash and a TWO-UNIT
-    // GAP: the bare move at the end is how a 12d linestyle ends its period.
+    // GAP: the bare move at the end is how a library linestyle ends its period.
     // Measuring only what was drawn made the period 3, so every dash butted
     // against the next one and the whole linestyle came out as a solid line.
     const LineStyle style = definition({move(0, 0), draw(3, 0), move(5, 0)});
@@ -493,8 +493,8 @@ TEST(StyleDrawing, APatternIsClippedToTheLineRatherThanRunningOffTheEndOfIt)
 
 TEST(StyleDrawing, ANegativeArcRadiusIsALengthNotASideSoTheArcIsNotMirroredThroughItsCentre)
 {
-    // Cut from 12d's own U_TURN road marking (user_symbols_TfNSWv15.4d),
-    // which brackets each arc with moves to where it starts and ends:
+    // Cut from a road-marking symbol in a reference library (a U-turn
+    // arrow), which brackets each arc with moves to where it starts and ends:
     //   move 1.127 -0.5348 / move 1.1379 0.0095 /
     //   arc -0.5444 -91.0850 -62.5336 / move 1.3859 -0.4751
     // Worked by hand with |r| = 0.5444 about (1.1379, 0.0095):
