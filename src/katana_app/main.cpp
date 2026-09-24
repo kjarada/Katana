@@ -93,21 +93,22 @@ std::string upperVerb(const std::string& line)
 }
 
 // CUSTOMISE is here rather than in CommandInterpreter for the same reason
-// IMPORT is: the interpreter belongs to katana_cad, which may not see the 12d
-// readers. Unlike IMPORT it needs no third-party library, so it is outside
-// the interoperability guard and is offered even in a build with no GDAL.
+// IMPORT is: the interpreter belongs to katana_cad, which may not see
+// archive12d, where the customisation readers live. Unlike IMPORT it needs
+// no third-party library, so it is outside the interoperability guard and is
+// offered even in a build with no GDAL.
 // What the loaded customisation means for THIS drawing. "The linestyles are
 // not showing" looks identical whether nothing is loaded, the library does
-// not define what the drawing names, or the drawing's styles are 12d's plain
-// lines - so say which.
+// not define what the drawing names, or the drawing's styles are plain
+// continuous lines - so say which.
 void reportCoverage(const katana::cad::Document& document)
 {
     // The words are cad's, so the application's log says the same.
     std::cout << katana::cad::formatCoverage(katana::cad::customisationCoverage(document));
 }
 
-// 12d's colour names reach cad only through a callback: cad may not see
-// archive12d, which owns the table.
+// The standard colour names reach cad only through a callback: cad may not
+// see archive12d, which owns the table.
 std::optional<katana::entity::Color> colourOf(std::string_view name)
 {
     return katana::archive12d::standardColour(name);
@@ -200,11 +201,11 @@ void loadDefaultCustomisation(katana::cad::Document& document, const char* execu
 
 // CUSTOMISE [REPLACE] <file>...: a load MERGES into what is loaded (the lead's
 // decision D1) through archive12d::mergeCustomisation - the merge the window's
-// Format > Load 12d Customisation makes, so the two cannot come to differ. A
+// Format > Load Customisation makes, so the two cannot come to differ. A
 // load's definitions replace those of the same name, and the rules it gives a
 // key in a section replace that key's rules there; everything else loaded is
 // kept. REPLACE swaps out what the load brought - and only that: a load with
-// no mapfile never installs an empty map, nor one with no library an empty
+// no survey code file never installs an empty map, nor one with no library an empty
 // library (audit QT-21).
 //
 // Whether REPLACE was given is decided by the caller, which alone knows
@@ -222,16 +223,16 @@ bool runCustomise(katana::cad::Document& document,
         const auto& library = document.styleLibrary();
         const auto& map = document.surveyMap();
         if (library.empty() && map.empty()) {
-            std::cout << "No 12d customisation is loaded.\n"
-                      << "  CUSTOMISE <file> [<file>...]  loads linestyle and symbol libraries "
-                         "(.4d) and mapfiles\n";
+            std::cout << "No customisation is loaded.\n"
+                      << "  CUSTOMISE <file> [<file>...]  loads style libraries (.4d) and "
+                         "survey code files (.mapfile)\n";
             return true;
         }
         // Counted as the pickers offer them (decision D3, cad::symbolChoices
         // and cad::linetypeChoices), library definitions only. This line once
         // said "157 of them symbols", counting `mode vertex` alone - one of
         // D3's four reasons, and a minority of the symbols the reference
-        // mapfiles use - so here one definition can be counted in both.
+        // survey code files use - so here one definition can be counted in both.
         const auto fromLibrary = [](const std::vector<katana::cad::CatalogueEntry>& entries) {
             return std::ranges::count(entries, katana::cad::DefinitionSource::Library,
                                       &katana::cad::CatalogueEntry::source);
@@ -306,7 +307,7 @@ bool runCustomise(katana::cad::Document& document,
     // A customisation need not be self-contained. Saying what is missing is
     // the difference between a symbol that is plainly absent and one that is
     // silently drawn as a dot. Judged against everything now loaded, since a
-    // mapfile may name what an earlier load defined.
+    // survey code file may name what an earlier load defined.
     std::vector<std::string> missing;
     for (const std::string& name : document.surveyMap().stylesReferenced()) {
         if (!katana::cad::isPlainLinestyle(name) && document.definitionFor(name) == nullptr &&
@@ -316,7 +317,7 @@ bool runCustomise(katana::cad::Document& document,
     }
     if (!missing.empty()) {
         std::cout << "  " << missing.size()
-                  << " names the mapfile asks for that no loaded library defines:";
+                  << " names the survey codes ask for that no loaded library defines:";
         for (std::size_t i = 0; i < missing.size() && i < 8; ++i) {
             std::cout << (i == 0 ? " " : ", ") << "\"" << missing[i] << "\"";
         }
@@ -329,15 +330,16 @@ bool runCustomise(katana::cad::Document& document,
 bool requireMap(const katana::cad::Document& document)
 {
     if (document.surveyMap().empty()) {
-        std::cerr << "error: InvalidState: no mapfile is loaded; use CUSTOMISE <file> first\n";
+        std::cerr << "error: InvalidState: no survey codes are loaded; use CUSTOMISE <file> "
+                     "first\n";
         return false;
     }
     return true;
 }
 
-// CODE [<property>] applies the loaded mapfile to the drawing: every entity
+// CODE [<property>] applies the loaded survey codes to the drawing: every entity
 // carrying a field code gets the model, the style and the attributes the
-// mapfile says it should have, as ONE undoable command. CODE EXPLAIN <code>
+// survey codes say it should have, as ONE undoable command. CODE EXPLAIN <code>
 // says why a code gets what it gets, and CODE CENSUS [<property>] lists the
 // codes the drawing carries - so a property cannot be called EXPLAIN or
 // CENSUS here, which no survey format does.
@@ -818,7 +820,7 @@ std::optional<bool> runInterop(katana::cad::Document& document, InteropState& st
 struct Session {
     katana::cad::Document& document;
     katana::cad::CommandInterpreter& interpreter;
-    // The 12d customisation files loaded, in load order: what a SAVE records
+    // The customisation files loaded, in load order: what a SAVE records
     // in the project, and what an OPEN compares the project's record with.
     std::vector<katana::cad::CustomisationSource> customisation{};
     // What the last OPEN found the project recorded but not loaded, less
@@ -966,14 +968,14 @@ int main(int argc, char* argv[])
         if (argument == "-h" || argument == "--help") {
             std::cout << "usage: katana_cli [script-file] [-c \"command\"]...\n\n"
                       << katana::cad::CommandInterpreter::helpText() << '\n';
-            std::cout << "Survey    CODE [<property>]  apply the loaded mapfile to every entity\n"
-                         "          carrying a field code (found when not named)\n"
+            std::cout << "Survey    CODE [<property>]  apply the loaded survey codes to every\n"
+                         "          entity carrying a field code (found when not named)\n"
                          "          CODE EXPLAIN <code>  why a code gets what it gets\n"
                          "          CODE CENSUS [<property>]  the codes this drawing carries\n"
                          "          MAPFILE LIST [<filter>] | CHECK  the loaded survey codes\n"
-                         "          CUSTOMISE [REPLACE] <file> [<file>...]  load 12d linestyle\n"
-                         "          and symbol libraries (.4d) and mapfiles, merged into what\n"
-                         "          is loaded; CUSTOMISE alone reports what is loaded\n";
+                         "          CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
+                         "          libraries (.4d) and survey code files (.mapfile), merged\n"
+                         "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
 #if defined(KATANA_WITH_INTEROP)
             std::cout << "Interop   IMPORT <file> [LOCAL] | EXPORT <file> | REFS\n"
                       << "          vector -> entities; raster and point cloud -> "

@@ -5,8 +5,8 @@
 // A code is not a label, it is an instruction. `WM01` is a water main: put it
 // in model SURVEY SERVICES, colour it "sui water potable", join it into a
 // line rather than leaving it a point, draw it with the "WATR Main"
-// linestyle. `AC01` is a bollard and gets a symbol instead. A 12d mapfile is
-// the table that says so, and this is that table.
+// linestyle. `AC01` is a bollard and gets a symbol instead. A survey code
+// file (.mapfile) is the table that says so, and this is that table.
 //
 // A rule is keyed by a code pattern which is either EXACT ("PABB") or a
 // PREFIX ("WM*"). The two mapfiles of the reference customisation hold 1,624
@@ -33,8 +33,8 @@
 
 namespace katana::entity {
 
-// Whether a code's points are joined into a string or left as points. 12d
-// writes both cases ("Line" and "line"), so it is parsed without regard to
+// Whether a code's points are joined into a string or left as points. The
+// files write both cases ("Line" and "line"), so it is parsed without regard to
 // case.
 enum class SurveyBreakline { Line, Point };
 
@@ -46,7 +46,7 @@ enum class SurveyBreakline { Line, Point };
 // "$PipeDiameter" and "$CulvBankHeight", and resolving those needs the entity
 // the rule is being applied to.
 struct SurveyAttribute {
-    std::string type{}; // "text" or "integer", 12d's own word
+    std::string type{}; // "text" or "integer", the file's own word
     std::string name{};
     std::string value{};
 
@@ -56,7 +56,7 @@ struct SurveyAttribute {
 // `<symbol_data>`: the symbol a code gets, by name in the symbol library.
 struct SurveySymbol {
     std::string style{};  // a name in the loaded StyleLibrary
-    std::string colour{}; // a 12d colour name; empty means the string's own
+    std::string colour{}; // a standard colour name; empty means the string's own
     double size = 0.0;    // 0 means the library definition's own size
     double rotation = 0.0;
     double offset = 0.0; // across the string
@@ -125,7 +125,7 @@ struct SurveyRule {
     std::string key{}; // as written: "WM*" or "PABB"
     SurveySection section = SurveySection::Map;
 
-    std::string model{}; // 12d's model, which becomes a Katana layer
+    std::string model{}; // the rule's model, which becomes a Katana layer
     std::string colour{};
     std::string linestyle{};
     // "0" and "Normal" both appear and both mean the default pen, so this is

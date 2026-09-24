@@ -34,8 +34,8 @@ namespace katana::cad {
 //   code, description, group, layer, colour, line/point, linestyle, symbol,
 //   size, tinable
 //
-// description is the rule comment, layer is 12d's model (which becomes the
-// layer), line/point is the breakline ("line" or "point"), size is the
+// description is the rule comment, layer is the rule's model (which becomes
+// the layer), line/point is the breakline ("line" or "point"), size is the
 // symbol's size and tinable "yes" or "no". A field the rules do not set is
 // EMPTY, never a default: absent is not zero, and a symbol size of 0 is the
 // map's own way of saying "the definition's size", so it is empty too.
@@ -56,7 +56,7 @@ namespace katana::cad {
 // ---- attribute lists as text ------------------------------------------------------
 
 // One attribute per line, as "<type> <name> = <value>": "text Source = Survey".
-// The type is 12d's own word ("text" or "integer") and the value is kept
+// The type is the file's own word ("text" or "integer") and the value is kept
 // verbatim, "$PipeDiameter" included. Lines end with '\n'.
 [[nodiscard]] std::string formatAttributeLines(
     const std::vector<katana::entity::SurveyAttribute>& attributes);
