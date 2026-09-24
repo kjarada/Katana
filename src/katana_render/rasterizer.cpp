@@ -53,10 +53,11 @@ constexpr std::size_t kMaxChunks = 64;
 // Clipping happens in clip space, before the divide, against five planes. A
 // vertex is inside where every planeDistance() below is >= 0.
 //
-// The NEAR plane is clip z >= 0. With the Vulkan depth range camera.cpp builds
-// (z/w = 0 at the near plane), that is exactly w >= near for a perspective
-// projection and z_eye <= -near for an orthographic one, and setDepthRange()
-// refuses near <= 0, so every kept vertex has w > 0 and the divide is safe.
+// The NEAR plane is clip z <= w. With the REVERSED depth range camera.cpp
+// builds (z/w = 1 at the near plane, 0 at the far), that is exactly w >= near
+// for a perspective projection and z_eye <= -near for an orthographic one, and
+// setDepthRange() refuses near <= 0, so every kept vertex has w > 0 and the
+// divide is safe.
 // This used to clip at w > 1e-6 instead, which kept the reciprocal finite and
 // nothing else: a vertex cut there projects with 1/w = 1e6 to a screen
 // coordinate beyond INT_MAX, and the float-to-int conversion in the binning is
@@ -84,8 +85,14 @@ constexpr std::size_t kMaxChunks = 64;
 // float at the end costs nothing.
 //
 // The far plane is not clipped: nothing numerical goes wrong beyond it, and the
-// per-pixel depth test already rejects depth > 1.
+// per-pixel depth test already rejects depth <= 0 (the cleared value).
 constexpr float kGuardBand = 2.0f;
+
+// How many pixels of its own depth slope a filled triangle is pushed back by
+// (the slope-scaled offset in buildScreenPrimitives). One covers a line a
+// pixel either side of its centre; each more would let linework behind a
+// wall show through one more pixel of the wall's silhouette.
+constexpr float kSlopeOffsetPixels = 1.0f;
 constexpr std::size_t kClipPlanes = 5;
 
 // Signed distance of a clip-space vertex from `plane`, >= 0 inside. Double for
@@ -96,7 +103,7 @@ constexpr std::size_t kClipPlanes = 5;
     const double band = kGuardBand * static_cast<double>(w);
     switch (plane) {
     case 0:
-        return static_cast<double>(z);
+        return static_cast<double>(w) - static_cast<double>(z); // reversed Z: near is z = w
     case 1:
         return band + static_cast<double>(x);
     case 2:
@@ -248,6 +255,16 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
     };
 
     const bool cull = options.backfaceCull;
+    const DepthPull pull = depthPull_;
+    // depth -> depth pulled `pixels` footprints towards the eye, clamped to
+    // the near plane so a biased line touching it still draws.
+    const auto pullTowardsEye = [pull](float depth, float pixels) {
+        if (pixels == 0.0f) {
+            return depth;
+        }
+        const float pulled = depth + pixels * (pull.scale * depth + pull.offset);
+        return std::min(pulled, 1.0f);
+    };
 
     // The bin step needs each chunk's own triangle/point index, so the chunk
     // boundaries are over the combined primitive stream: triangles first, then
@@ -282,6 +299,26 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                     continue;
                 }
                 ScreenTriangle screen;
+                // SLOPE-SCALED OFFSET (what a GPU calls polygon offset): a
+                // filled triangle is pushed AWAY by its own depth change over
+                // kSlopeOffsetPixels. Linework lying on a surface is drawn a
+                // pixel or two wide, so its pixels sample the surface up to
+                // a pixel off the line; seen at a grazing angle the surface
+                // there is nearer than the line by a whole pixel's worth of
+                // depth slope, and no constant bias can cover that without
+                // also showing lines through buildings. Pushing the surface
+                // by its OWN slope covers exactly that and nothing more.
+                // Screen-space constant per triangle, so the fill loop only
+                // adds it.
+                if (depthBias == 0.0f) {
+                    const float dzdx =
+                        ((p1.z - p0.z) * (p2.y - p0.y) - (p2.z - p0.z) * (p1.y - p0.y)) / area;
+                    const float dzdy =
+                        ((p1.x - p0.x) * (p2.z - p0.z) - (p2.x - p0.x) * (p1.z - p0.z)) / area;
+                    screen.depthBias = -kSlopeOffsetPixels * std::max(std::abs(dzdx), std::abs(dzdy));
+                } else {
+                    screen.depthBias = depthBias;
+                }
                 screen.x[0] = p0.x;
                 screen.y[0] = p0.y;
                 screen.z[0] = p0.z;
@@ -297,7 +334,6 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                 screen.z[2] = p2.z;
                 screen.invW[2] = p2.invW;
                 screen.color[2] = p2.color;
-                screen.depthBias = depthBias;
                 chunk.triangles.push_back(screen);
                 ++chunk.stats.trianglesRasterised;
             }
@@ -334,7 +370,7 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                         // never zero and t is in [0, 1].
                         ClipVertex cutVertex = lerpClip(current, next, dc / (dc - dn));
                         if (plane == 0) {
-                            cutVertex.z = 0.0f; // on the near plane exactly: depth 0
+                            cutVertex.z = cutVertex.w; // on the near plane exactly: depth 1
                         }
                         scratch[kept++] = cutVertex;
                     }
@@ -424,16 +460,23 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                     a = lerpClip(a0, b0, t0);
                     b = lerpClip(a0, b0, t1);
                     // As for a triangle: an end cut by the near plane is ON it,
-                    // depth exactly 0, not a rounding error either side.
+                    // depth exactly 1, not a rounding error either side.
                     if (nearCutsA) {
-                        a.z = 0.0f;
+                        a.z = a.w;
                     }
                     if (nearCutsB) {
-                        b.z = 0.0f;
+                        b.z = b.w;
                     }
                 }
-                const ProjectedVertex p0 = project(a);
-                const ProjectedVertex p1 = project(b);
+                ProjectedVertex p0 = project(a);
+                ProjectedVertex p1 = project(b);
+                // The line's depth bias is a VIEW-SPACE distance, depthBias
+                // pixel footprints towards the eye (draw_list.hpp). Under the
+                // reversed projections that is an affine map of the depth
+                // itself (pullTowardsEye), so it is applied to the two ends
+                // and interpolates exactly along the line.
+                p0.z = pullTowardsEye(p0.z, line.depthBias);
+                p1.z = pullTowardsEye(p1.z, line.depthBias);
                 float dx = p1.x - p0.x;
                 float dy = p1.y - p0.y;
                 const float length = std::sqrt(dx * dx + dy * dy);
@@ -491,7 +534,9 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
                         screen.invW[k] = vs[k]->invW;
                         screen.color[k] = vs[k]->color;
                     }
-                    screen.depthBias = line.depthBias;
+                    // Already pulled per vertex; a line has no slope of its
+                    // own across its width to offset.
+                    screen.depthBias = 0.0f;
                     chunk.triangles.push_back(screen);
                     ++chunk.stats.trianglesRasterised;
                 };
@@ -518,7 +563,7 @@ void Rasterizer::buildScreenPrimitives(const DrawList& list, const Framebuffer& 
             ScreenPoint screen;
             screen.x = p.x;
             screen.y = p.y;
-            screen.z = p.z - point.depthBias;
+            screen.z = pullTowardsEye(p.z, point.depthBias);
             screen.half = std::max(point.size, 1.0f) * 0.5f;
             screen.color = p.color;
             chunk.points.push_back(screen);
@@ -610,17 +655,29 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
             for (const std::uint32_t tag : chunk.tileBins[tileIndex]) {
                 if ((tag & kPointTag) != 0u) {
                     const ScreenPoint& p = chunk.points[tag & ~kPointTag];
-                    const int x0 = pixelFloor(p.x - p.half, rect.x0, rect.x1);
-                    const int x1 = pixelFloor(p.x + p.half, rect.x0 - 1, rect.x1 - 1);
-                    const int y0 = pixelFloor(p.y - p.half, rect.y0, rect.y1);
-                    const int y1 = pixelFloor(p.y + p.half, rect.y0 - 1, rect.y1 - 1);
+                    // The pixels whose CENTRES lie in [c - h, c + h): exactly
+                    // size x size for a whole size wherever the point falls.
+                    // Pixel i's centre is i + 0.5, so i runs from
+                    // ceil(c - h - 0.5) to ceil(c + h - 0.5) - 1; ceil(v) is
+                    // -floor(-v), which keeps the conversion clamped. It drew
+                    // floor(c - h)..floor(c + h), one pixel too many on each
+                    // axis (audit REN-10).
+                    const auto ceilIn = [](float v, int lo, int hi) {
+                        return -pixelFloor(-v, -hi, -lo);
+                    };
+                    const int x0 = ceilIn(p.x - p.half - 0.5f, rect.x0, rect.x1);
+                    const int x1 = ceilIn(p.x + p.half - 0.5f, rect.x0, rect.x1) - 1;
+                    const int y0 = ceilIn(p.y - p.half - 0.5f, rect.y0, rect.y1);
+                    const int y1 = ceilIn(p.y + p.half - 0.5f, rect.y0, rect.y1) - 1;
                     for (int y = y0; y <= y1; ++y) {
                         Rgba* row = colorBase + static_cast<std::size_t>(y) *
                                                     static_cast<std::size_t>(stride);
                         float* depthRow = depthBase + static_cast<std::size_t>(y) *
                                                           static_cast<std::size_t>(stride);
                         for (int x = x0; x <= x1; ++x) {
-                            if (p.z < depthRow[x] && p.z >= 0.0f && p.z <= 1.0f) {
+                            // Reversed Z: nearer is larger, and the cleared
+                            // 0 (the far plane) loses to anything in range.
+                            if (p.z > depthRow[x] && p.z <= 1.0f) {
                                 depthRow[x] = p.z;
                                 row[x] = p.color;
                                 ++stats.fragments;
@@ -682,9 +739,14 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
                             continue;
                         }
 
-                        const float depth =
-                            w0 * t.z[0] + w1 * t.z[1] + w2 * t.z[2] - t.depthBias;
-                        if (!(depth >= 0.0f) || depth > 1.0f || !(depth < depthRow[x])) {
+                        // Reversed Z: larger is nearer, the buffer is cleared
+                        // to 0 (the far plane) and the test is strictly
+                        // greater, so the first of two equal depths still
+                        // wins (Rule 7). Clamped at the near plane, which a
+                        // pull towards the eye can overshoot; NaN fails.
+                        const float depth = std::min(
+                            w0 * t.z[0] + w1 * t.z[1] + w2 * t.z[2] + t.depthBias, 1.0f);
+                        if (!(depth > depthRow[x])) {
                             continue;
                         }
 
@@ -723,6 +785,40 @@ void Rasterizer::rasteriseTiles(Framebuffer& target, TaskPool& pool)
     });
 }
 
+// ---- depth bias ---------------------------------------------------------------------
+
+// A line's bias is `pixels` footprints of view distance towards the eye, where
+// a footprint is the world size of one pixel at the line's own depth
+// (Camera::worldPerPixelAt). As a change of reversed depth d:
+//
+//   perspective   d = n (f - z) / ((f - n) z) for eye distance z, so
+//                 dd/dz = -n f / ((f - n) z^2); a footprint is z * 2 tan(fov/2)
+//                 / H, and the pull is pixels * (2 tan(fov/2) / H) * (d + n / (f - n))
+//   orthographic  d = (f - z) / (f - n); a footprint is orthoHeight / H, so the
+//                 pull is pixels * (orthoHeight / H) / (f - n), a constant
+//
+// both of the form pixels * (scale * d + offset). It used to be a constant in
+// NDC depth, which after a depth-range fit was anything from 1 to 25 times the
+// depth span of a whole scene: a biased line drawn on the ground behind a
+// 25 m building showed through all of it.
+Rasterizer::DepthPull Rasterizer::depthPullFor(const Camera& camera)
+{
+    DepthPull pull;
+    const double height = static_cast<double>(camera.viewportHeight());
+    const double range = camera.farPlane() - camera.nearPlane();
+    if (!(height > 0.0) || !(range > 0.0)) {
+        return pull;
+    }
+    if (camera.projection() == Projection::Orthographic) {
+        pull.offset = static_cast<float>(camera.orthographicHeight() / height / range);
+        return pull;
+    }
+    const double angle = 2.0 * std::tan(camera.fieldOfView() * 0.5) / height;
+    pull.scale = static_cast<float>(angle);
+    pull.offset = static_cast<float>(angle * camera.nearPlane() / range);
+    return pull;
+}
+
 // ---- entry point ----------------------------------------------------------------
 
 Result<RenderStats> Rasterizer::render(const DrawList& list, const Camera& camera,
@@ -755,11 +851,12 @@ Result<RenderStats> Rasterizer::render(const DrawList& list, const Camera& camer
                     static_cast<std::size_t>(y) * static_cast<std::size_t>(stride);
                 std::fill(colorBase + row + rect.x0, colorBase + row + rect.x1,
                           options.background);
-                std::fill(depthBase + row + rect.x0, depthBase + row + rect.x1, 1.0f);
+                std::fill(depthBase + row + rect.x0, depthBase + row + rect.x1, 0.0f);
             }
         });
     }
 
+    depthPull_ = depthPullFor(camera);
     transformVertices(list, camera, pool);
     buildScreenPrimitives(list, target, options, pool);
     rasteriseTiles(target, pool);
