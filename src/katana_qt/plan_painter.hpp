@@ -65,6 +65,7 @@
 #include "katana/core/error.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/style_library.hpp"
+#include "katana/geometry/point_splat.hpp"
 #include "katana/geometry/primitives2d.hpp"
 #include "katana/geometry/spatial_index.hpp"
 #include "katana/interop/reference_data.hpp"
@@ -155,6 +156,11 @@ struct PlanPaintOptions {
     // QPainter, so a string crossing the whole site costs what its visible
     // part costs. Off draws every vertex, which tests compare against.
     bool clipLines = true;
+    // Screen only. At most this many cloud points projected a frame; above
+    // it every part of the view draws the same share of its points, coarsest
+    // first (geometry/point_splat.hpp), so a twenty-million-point cloud pans
+    // as a four-million-point one does.
+    std::size_t cloudPointBudget = katana::geometry::kSplatPointBudget;
     // The face plain text (TextGeometry, dimension labels, the overlay) is
     // drawn in. A library text names its own.
     QString fontFamily = QStringLiteral("Segoe UI");
@@ -171,6 +177,10 @@ struct PlanPaintStats {
     std::size_t displaysResolved = 0;
     // Polylines, arcs and circles that ran off the view and were clipped.
     std::size_t linesClipped = 0;
+    // Point-cloud points in the parts of the clouds on the view, and of those
+    // how many were drawn: fewer only when the point budget thinned them.
+    std::size_t cloudPointsInView = 0;
+    std::size_t cloudPointsDrawn = 0;
 };
 
 // Sizes of the marks the painter draws that are not the drawing's own: on
@@ -225,13 +235,20 @@ class PlanPaintCache {
         katana::interop::ReferenceId id = 0;
         QImage image;
     };
-    struct CloudColours {
+    // A point cloud's display copy (geometry/point_splat.hpp): float offsets,
+    // colours, tiles and level-of-detail order, built on the first frame that
+    // shows the layer in this colour mode.
+    struct CloudDisplay {
         katana::interop::ReferenceId id = 0;
         katana::interop::PointColorMode mode = katana::interop::PointColorMode::Elevation;
-        std::vector<QRgb> colours;
+        katana::geometry::SplatCloud splat;
     };
     std::vector<RasterImage> rasters_;
-    std::vector<CloudColours> clouds_;
+    std::vector<CloudDisplay> clouds_;
+    // The image every cloud is splatted into, kept between frames and
+    // reallocated only when the view's size changes: allocating and filling a
+    // window-sized image per cloud per frame cost 2.4 ms a cloud at 1600 x 1000.
+    QImage cloudLayer_;
 
     // A symbol stamp rasterised once and blitted wherever the same symbol is
     // put in the same pen at the same size and sub-pixel position. The view

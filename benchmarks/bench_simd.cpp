@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,6 +35,10 @@
 #define KATANA_BENCH_SIMD_LAYER 1
 #include "katana/core/cpu_features.hpp"
 #include "katana/geometry/point_batch.hpp"
+#endif
+#if __has_include("katana/geometry/point_splat.hpp")
+#define KATANA_BENCH_SPLAT 1
+#include "katana/geometry/point_splat.hpp"
 #endif
 
 namespace {
@@ -439,5 +444,46 @@ BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 20/scalar, 0, 20)->Unit(benchmark:
 BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 20/avx2, 1, 20)->Unit(benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 32/scalar, 0, 32)->Unit(benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(BM_PolylineBoundingBoxesOf, 32/avx2, 1, 32)->Unit(benchmark::kMicrosecond);
+
+#if defined(KATANA_BENCH_SPLAT)
+// The cloud splat's projection, 65,536 points in calls of `block` points:
+// where the AVX2 kernel starts to pay for its call (kProjectMinimum in
+// point_splat.cpp), and what it is worth on the splat's own 512-point blocks.
+void BM_ProjectToPixels(benchmark::State& state, int level, int block)
+{
+    LevelScope scope(state, level);
+    if (!scope.ok()) {
+        return;
+    }
+    std::vector<float> xs(kPoints);
+    std::vector<float> ys(kPoints);
+    for (std::size_t i = 0; i < kPoints; ++i) {
+        xs[i] = static_cast<float>((i * 7919) % 1500) - 750.0F;
+        ys[i] = static_cast<float>((i * 104729) % 1000) - 500.0F;
+    }
+    std::vector<std::int32_t> px(kPoints);
+    std::vector<std::int32_t> py(kPoints);
+    const katana::geometry::PixelProjection projection{800.0, 500.0, 1.5, -2.5, 0.52};
+    const auto n = static_cast<std::size_t>(block);
+    for (auto _ : state) {
+        for (std::size_t first = 0; first + n <= kPoints; first += n) {
+            katana::geometry::projectToPixels(projection, std::span(xs).subspan(first, n),
+                                              std::span(ys).subspan(first, n),
+                                              std::span(px).subspan(first, n),
+                                              std::span(py).subspan(first, n));
+        }
+        benchmark::DoNotOptimize(px.data());
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(kPoints));
+}
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 4/scalar, 0, 4)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 4/avx2, 1, 4)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 8/scalar, 0, 8)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 8/avx2, 1, 8)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 16/scalar, 0, 16)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 16/avx2, 1, 16)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 512/scalar, 0, 512)->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_ProjectToPixels, 512/avx2, 1, 512)->Unit(benchmark::kMicrosecond);
+#endif
 
 } // namespace

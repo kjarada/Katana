@@ -14,6 +14,7 @@ file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
 add_executable(katana_qt_benchmarks
     main.cpp
     bench_plan_paint.cpp
+    bench_plan_cloud.cpp
     survey_drawing.cpp
     survey_drawing.hpp
     ${_qt_src}/viewport_widget.cpp
