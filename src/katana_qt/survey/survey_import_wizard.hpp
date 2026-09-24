@@ -1,17 +1,22 @@
 #pragma once
 
-// Survey > Import Survey Points... (PLAN.MD 45 slice 10): a paged dialog in
-// six steps.
+// Survey > Import Survey Points... (PLAN.MD 45 slice 10): a paged dialog. A
+// delimited coordinate file takes the six steps it always has; a field file
+// with a reader of its own (Leica GSI, Trimble JobXML, Topcon and Carlson
+// RW5, Topcon GTS-7, RINEX ...) takes the instrument path, which reads the
+// file whole, reduces and adjusts it, and keeps it as a SURVEY JOB that can
+// be adjusted again later (Survey > Survey Jobs).
 //
 //   1 File        the file to read.
-//   2 Format      surveyio's detection: every candidate ranked with its
-//                 evidence and its FormatDescriptor record (what the format
-//                 carries, the parser's version). When the detection is not
-//                 Identified - and a delimited text file never is, because its
-//                 probe is weak by design - the person MUST choose: the page
-//                 starts on "(choose the format)" and Next refuses it. An
-//                 unknown file is never handed to a parser silently.
-//   3 Layout      for a delimited file: proposeLayout's reading of the header,
+//   2 Format      surveyio's detection: EVERY registered format, the
+//                 candidates first, each with its evidence and its
+//                 FormatDescriptor record (what the format carries, the
+//                 parser's version). When the detection is not Identified -
+//                 and a delimited text file never is, because its probe is
+//                 weak by design - the person MUST choose: the page starts on
+//                 "(choose the format)" and Next refuses it. An unknown file
+//                 is never handed to a parser silently.
+//   3 Layout      delimited files only: proposeLayout's reading of the header,
 //                 its candidates, presets, a role box per column of the list
 //                 as typed (kept while a change such as swapping northing and
 //                 easting passes through a list that does not validate), the delimiter,
@@ -21,44 +26,76 @@
 //                 proposal is Uncertain the page says so and Next needs the
 //                 person to tick that they have checked the order of northing
 //                 and easting (PLAN.MD 45.5: the order is never guessed).
+//   3 Content     instrument files only, in place of Layout: the file read
+//                 with surveyio::readSurvey - setups, observations by kind,
+//                 points with and without coordinates, coded features, the
+//                 control the file declares, GNSS sessions, the other files
+//                 found beside it (a DBX job's files, a RINEX navigation
+//                 file), what the file does not carry, and every warning with
+//                 its record. A large file is read on a pool thread, with a
+//                 busy bar and Cancel (survey_task.hpp).
 //   4 System      the unit the numbers are in (no default - the reader
 //                 refuses Unknown), the system the file is in (unknown unless
 //                 stated) and, only when BOTH a source and a target EPSG code
 //                 are given, a transformation through katana::geodesy
 //                 (cad::transformSurveyProject). The parser never transforms.
-//   5 Options     the layer, a layer per code, applying the loaded mapfile's
-//                 survey codes after the import (the window's own Apply
+//                 For an instrument file the units are the file's own, stated
+//                 by its reader, and nothing is transformed: raw observations
+//                 are reduced into the drawing's system (the page says which).
+//   5 Reduction   instrument files only: the reduction and adjustment
+//     & Adjustment options (reduction_options_widget.hpp) - basic ones shown,
+//                 advanced ones folded - and Preview, which runs the reduction
+//                 (on a pool thread for a large file) and shows its report
+//                 inline (reduction_report_view.hpp).
+//   6 Options     the layer, a layer per code, applying the loaded survey code
+//                 file's codes after the import (the window's own Apply
 //                 Survey Codes action, on the imported points), and what to do
 //                 with ids the drawing already has (cad::ExistingPointPolicy).
-//   6 Report      records read, every warning as a sentence, the error that
-//                 blocks the import or the points and layers it will create.
-//                 Import makes ONE undoable command (cad::importSurveyPoints),
-//                 frames the views and logs the report.
+//   7 Report      records read, every warning as a sentence, the error that
+//                 blocks the import or the points and layers it will create;
+//                 for an instrument file the reduction report as well.
+//                 Import makes ONE undoable command - cad::importSurveyPoints
+//                 for a delimited file, cad::ImportSurveyJobCommand for an
+//                 instrument file - frames the views and logs a summary.
 //
 // Nothing survey-specific is computed here: the pages gather text and hand it
-// to surveyio (detection, proposal, parsing, templates) and cad (the policy,
-// the transformation, the command, the report).
+// to surveyio (detection, proposal, reading, templates), survey (the
+// reduction) and cad (the policy, the transformation, the commands, the
+// report).
 //
 // The object names below are an interface: the headless --survey-dialog
 // switch in main.cpp fills fields and presses buttons by them.
 //   dialog  surveyImportDialog
 //   fields  file | format | candidate preset template templateName columns
 //           delimiter headerLines comment quoting confirmOrder | unit declared
-//           target | layer layerPerCode existing applyCodes
+//           target | the reduction options (reduction_options_widget.hpp:
+//           method, atmospheric, controlPick, advanced, ...) | layer
+//           layerPerCode existing applyCodes
 //   shown   step candidates formatRecord proposal columnRoles preview
-//           parseError report message
-//   buttons browse | saveTemplate deleteTemplate | back next import close
+//           parseError | content contentSummary | systemSummary |
+//           previewReport (and previewReportSections, previewReportBrowser,
+//           previewReportSummary) | report importReport (and its Sections,
+//           Browser, Summary) | task taskStatus | message
+//   buttons browse | saveTemplate deleteTemplate | addControl removeControl
+//           advanced previewReduction | cancelTask | back next import close
 
 #include <QDialog>
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "katana/core/error.hpp"
 #include "katana/survey/data_model.hpp"
+#include "katana/survey/reduction.hpp"
 #include "katana/surveyio/delimited_points.hpp"
 #include "katana/surveyio/detect.hpp"
+#include "katana/surveyio/format.hpp"
 
 class QAction;
 class QCheckBox;
@@ -79,7 +116,25 @@ class Document;
 
 namespace katana::qt {
 
+class ReductionOptionsWidget;
+class ReductionReportView;
+class SurveyTaskBar;
 class ViewWorkspace;
+
+// What a field file holds, counted for the Content step: worked out on the
+// thread that read the file, so the GUI thread only shows it.
+struct SurveyContent {
+    std::size_t setups = 0;
+    std::size_t observations = 0; // on setups and loose
+    std::map<std::string, std::size_t> observationsByKind{};
+    std::size_t positionedPoints = 0;
+    std::size_t unpositionedPoints = 0;
+    std::size_t features = 0;
+    std::size_t controlPoints = 0;
+    std::size_t gnssSessions = 0;
+    std::size_t traverses = 0;
+};
+[[nodiscard]] SurveyContent surveyContentOf(const katana::survey::SurveyProject& project);
 
 struct SurveyImportContext {
     katana::cad::Document* document = nullptr;
@@ -97,15 +152,33 @@ class SurveyImportWizard final : public QDialog {
     void showEvent(QShowEvent* event) override;
 
   private:
-    enum Page { FilePage, FormatPage, LayoutPage, SystemPage, OptionsPage, ReportPage, Pages };
+    enum Page {
+        FilePage,
+        FormatPage,
+        LayoutPage,
+        ContentPage,
+        SystemPage,
+        ReductionPage,
+        OptionsPage,
+        ReportPage,
+        Pages
+    };
 
     QWidget* buildFilePage();
     QWidget* buildFormatPage();
     QWidget* buildLayoutPage();
+    QWidget* buildContentPage();
     QWidget* buildSystemPage();
+    QWidget* buildReductionPage();
     QWidget* buildOptionsPage();
     QWidget* buildReportPage();
 
+    // The pages this file goes through, in order: the delimited path or the
+    // instrument path (readerPath_).
+    [[nodiscard]] std::vector<int> path() const;
+    [[nodiscard]] int nextPage(int page) const;
+    [[nodiscard]] int previousPage(int page) const;
+    void advance();
     void goTo(int page);
     // What leaving `page` forward needs: the page's input checked and the next
     // page's content prepared. An error keeps the person where they are.
@@ -126,6 +199,21 @@ class SurveyImportWizard final : public QDialog {
     [[nodiscard]] katana::core::Status parseAndTransform();
     void prepareReport();
     void importNow();
+
+    // The instrument path.
+    // Reads the file with its reader - on a pool thread when it is large -
+    // and then shows the Content step.
+    void readWithReader();
+    void showContent();
+    void prepareSystemForReader();
+    void prepareReduction();
+    // Runs the reduction with the options as they stand; `then` follows on
+    // the GUI thread once it has succeeded (the Report step, the import).
+    void runPreview(std::function<void()> then);
+    [[nodiscard]] bool previewIsCurrent() const;
+    void prepareReaderReport();
+    void importJob();
+    [[nodiscard]] katana::core::Result<katana::survey::ReductionContext> contextForReduction() const;
     void showError(const katana::core::Error& error);
     void showMessage(const QString& text);
 
@@ -169,8 +257,19 @@ class SurveyImportWizard final : public QDialog {
     QCheckBox* layerPerCode_ = nullptr;
     QComboBox* existing_ = nullptr;
     QCheckBox* applyCodes_ = nullptr;
-    // 6
+    // content
+    QLabel* contentSummary_ = nullptr;
+    QTreeWidget* content_ = nullptr;
+    // system
+    QLabel* systemSummary_ = nullptr;
+    // reduction
+    ReductionOptionsWidget* options_ = nullptr;
+    ReductionReportView* previewReport_ = nullptr;
+    QPushButton* previewButton_ = nullptr;
+    // report
     QPlainTextEdit* report_ = nullptr;
+    ReductionReportView* importReport_ = nullptr;
+    SurveyTaskBar* task_ = nullptr;
 
     // What the pages have established so far.
     std::string bytes_;
@@ -182,6 +281,24 @@ class SurveyImportWizard final : public QDialog {
     std::string layoutText_;
     std::string systemText_;
     std::string transformText_;
+    // The instrument path's state. The raw project is shared, not copied,
+    // with the threads that reduce it.
+    bool readerPath_ = false;
+    bool bytesComplete_ = false; // bytes_ holds the whole file, not only its head
+    std::string formatId_;
+    std::shared_ptr<const std::string> sourceBytes_;
+    std::shared_ptr<const katana::surveyio::ReadResult> read_;
+    std::shared_ptr<const katana::survey::SurveyProject> raw_;
+    SurveyContent contentCounts_;
+    std::uint64_t readGeneration_ = 0;   // bumped by every read
+    std::uint64_t optionsGeneration_ = 0; // the read the options were set up for
+    // The last successful preview and what it was made from.
+    std::shared_ptr<const katana::survey::ReductionOutcome> outcome_;
+    katana::survey::ReductionSettings outcomeSettings_{};
+    std::vector<katana::survey::SurveyPoint> outcomeDrawingPoints_;
+    std::uint64_t outcomeRead_ = 0;
+    std::uint64_t outcomeRevision_ = 0;
+    std::string outcomeSystem_;
     bool previewPending_ = false;
     bool previewFailed_ = true;
     bool settingRoles_ = false; // preview() is mirroring the text onto the role boxes
