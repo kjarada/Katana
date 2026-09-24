@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -296,4 +297,177 @@ TEST(CustomisationRecord, TheBuiltInCustomisationsFourFilesEachAnswerForTheNameT
          mapfile("survey_codes_names.mapfile"), library("symbols.4d")},
         false, false);
     EXPECT_TRUE(katana::cad::customisationNotLoaded(now, styles, loaded).empty());
+}
+
+// ---- a plain earlier name, and loading what a warning asked for ------------------------------
+
+namespace {
+
+// A rename table shaped like the built-in one: "branded_lines.4d" is an
+// earlier name nobody's own file would have, "common.4d" a plain one
+// anybody's might.
+std::vector<katana::cad::RenamedSource> renamedSet()
+{
+    return {{katana::cad::sourceNameHash("branded_lines.4d"), "linestyles.4d"},
+            {katana::cad::sourceNameHash("common.4d"), "survey_codes_names.mapfile", false}};
+}
+
+// The two files the set is loaded as now, the library defining "A".
+std::vector<CustomisationSource> theSetLoaded(StyleLibrary& styles)
+{
+    EXPECT_TRUE(styles.add(definition("A", "linestyles.4d")).ok());
+    std::vector<CustomisationSource> loaded;
+    katana::cad::recordCustomisationLoad(
+        loaded, {library("linestyles.4d"), mapfile("survey_codes_names.mapfile")}, false, false);
+    return loaded;
+}
+
+} // namespace
+
+// A plain earlier name recorded alone, or beside the names the set has now, is
+// a person's own file that happens to share it: missing while it is not
+// loaded, warned about, and kept by the save rather than dropped for good.
+TEST(CustomisationRecord, APlainFormerNameOutsideTheRenamedSetIsSomeoneElsesFileAndStaysMissing)
+{
+    StyleLibrary styles;
+    const std::vector<CustomisationSource> loaded = theSetLoaded(styles);
+    for (const std::vector<std::string>& recorded :
+         {std::vector<std::string>{"common.4d"},
+          std::vector<std::string>{"linestyles.4d", "survey_codes_names.mapfile", "common.4d"}}) {
+        const std::vector<std::string> missing =
+            katana::cad::customisationNotLoaded(recorded, styles, loaded, renamedSet());
+        EXPECT_EQ(missing, (std::vector<std::string>{"common.4d"}));
+        EXPECT_EQ(katana::cad::customisationRecordToSave(recorded, missing, styles, loaded,
+                                                         renamedSet()),
+                  (std::vector<std::string>{"linestyles.4d", "survey_codes_names.mapfile",
+                                            "common.4d"}));
+    }
+}
+
+// Beside a distinctive earlier name of the same table, the plain one is the
+// record of the renamed set, and the file that has its place answers it.
+TEST(CustomisationRecord, APlainFormerNameBesideADistinctiveOneIsAnsweredByTheRenamedFile)
+{
+    StyleLibrary styles;
+    const std::vector<CustomisationSource> loaded = theSetLoaded(styles);
+    const std::vector<std::string> recorded{"branded_lines.4d", "common.4d"};
+    const std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, styles, loaded, renamedSet());
+    EXPECT_TRUE(missing.empty());
+    EXPECT_EQ(
+        katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, renamedSet()),
+        (std::vector<std::string>{"linestyles.4d", "survey_codes_names.mapfile"}));
+}
+
+// Opened with nothing loaded, a project that recorded the earlier names is
+// told they are missing; loading the files that have their places, as the
+// warning asks, clears them, and the save records the new names alone - so
+// the next open, anywhere, is about those and is cleared the same way.
+TEST(CustomisationRecord, LoadingTheFilesThatReplacedTheFormerNamesClearsWhatTheOpenFoundMissing)
+{
+    const std::vector<std::string> recorded{"branded_lines.4d", "common.4d"};
+    std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, StyleLibrary{}, {}, renamedSet());
+    EXPECT_EQ(missing, recorded);
+
+    StyleLibrary styles;
+    const std::vector<CustomisationSource> loaded = theSetLoaded(styles);
+    katana::cad::noteCustomisationLoaded(missing, loaded, renamedSet());
+    EXPECT_TRUE(missing.empty());
+    const std::vector<std::string> saved =
+        katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, renamedSet());
+    EXPECT_EQ(saved, (std::vector<std::string>{"linestyles.4d", "survey_codes_names.mapfile"}));
+
+    std::vector<std::string> nextOpen =
+        katana::cad::customisationNotLoaded(saved, StyleLibrary{}, {}, renamedSet());
+    EXPECT_EQ(nextOpen, saved);
+    katana::cad::noteCustomisationLoaded(nextOpen, loaded, renamedSet());
+    EXPECT_TRUE(nextOpen.empty());
+
+    // A person's own file of the plain name is not what the set's file is:
+    // loading the set leaves it missing.
+    std::vector<std::string> own{"common.4d"};
+    katana::cad::noteCustomisationLoaded(own, loaded, renamedSet());
+    EXPECT_EQ(own, (std::vector<std::string>{"common.4d"}));
+}
+
+// noteCustomisationLoaded sees only the names still missing. When the open
+// found only the plain earlier name missing - the distinctive one was answered
+// then - the load cannot tell it from someone's own file; the save, which has
+// the whole record, can, and does not keep it once its file is loaded.
+TEST(CustomisationRecord, TheSaveJudgesAPlainFormerNameAgainstTheWholeRecord)
+{
+    const std::vector<std::string> recorded{"branded_lines.4d", "common.4d"};
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("A", "linestyles.4d")).ok());
+    std::vector<CustomisationSource> loaded;
+    katana::cad::recordCustomisationLoad(loaded, {library("linestyles.4d")}, false, false);
+    std::vector<std::string> missing =
+        katana::cad::customisationNotLoaded(recorded, styles, loaded, renamedSet());
+    EXPECT_EQ(missing, (std::vector<std::string>{"common.4d"}));
+
+    const std::vector<CustomisationSource> load{mapfile("survey_codes_names.mapfile")};
+    katana::cad::recordCustomisationLoad(loaded, load, false, false);
+    katana::cad::noteCustomisationLoaded(missing, load, renamedSet());
+    EXPECT_EQ(
+        katana::cad::customisationRecordToSave(recorded, missing, styles, loaded, renamedSet()),
+        (std::vector<std::string>{"linestyles.4d", "survey_codes_names.mapfile"}));
+}
+
+// Only the second survey code file's earlier name was a plain one; the other
+// three carried the publisher's name and are distinctive. Nothing here can
+// spell them: the tests above are of what the flag does.
+TEST(CustomisationRecord, OnlyTheBuiltInSecondSurveyCodeFilesFormerNameIsTooPlainToStandAlone)
+{
+    std::vector<std::string> plain;
+    for (const katana::cad::RenamedSource& rename : katana::cad::builtinRenames()) {
+        if (!rename.distinctive) {
+            plain.emplace_back(rename.now);
+        }
+    }
+    EXPECT_EQ(plain, (std::vector<std::string>{"survey_codes_names.mapfile"}));
+}
+
+// ---- a definition renamed since the drawing was saved ----------------------------------------
+
+// A drawing saved before a definition was renamed names it the earlier way. A
+// lookup that misses asks for the name it has now, and looks that up instead.
+// Names compare exactly, as the library's do.
+TEST(CustomisationRecord, ADefinitionLookupThatMissesIsRetriedUnderTheNameItHasNow)
+{
+    const std::vector<katana::cad::RenamedDefinition> renamed{
+        {katana::cad::sourceNameHash("Brand SURVEY - FU"), "SURVEY - FU"}};
+    EXPECT_EQ(katana::cad::definitionNameNow("Brand SURVEY - FU", renamed), "SURVEY - FU");
+    EXPECT_TRUE(katana::cad::definitionNameNow("brand SURVEY - FU", renamed).empty());
+    EXPECT_TRUE(katana::cad::definitionNameNow("SURVEY - FU", renamed).empty());
+    EXPECT_TRUE(katana::cad::definitionNameNow("", renamed).empty());
+
+    StyleLibrary styles;
+    ASSERT_TRUE(styles.add(definition("SURVEY - FU", "linestyles.4d")).ok());
+    EXPECT_EQ(styles.find("Brand SURVEY - FU"), nullptr);
+    const LineStyle* found =
+        styles.find(katana::cad::definitionNameNow("Brand SURVEY - FU", renamed));
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->name, "SURVEY - FU");
+}
+
+// The built-in table: 29 definitions, each earlier name known once, none the
+// hash of a name given now (a lookup of a name as it is now never needs the
+// table), and no name given now renamed again.
+TEST(CustomisationRecord, TheBuiltInDefinitionRenamesAreTwentyNineDistinctNamesInByteOrder)
+{
+    const auto renames = katana::cad::builtinDefinitionRenames();
+    ASSERT_EQ(renames.size(), 29U);
+    std::set<std::uint64_t> former;
+    std::set<std::string_view> now;
+    for (const katana::cad::RenamedDefinition& rename : renames) {
+        former.insert(rename.formerName);
+        now.insert(rename.now);
+        EXPECT_FALSE(rename.now.empty());
+        EXPECT_TRUE(katana::cad::definitionNameNow(rename.now).empty()) << rename.now;
+    }
+    EXPECT_EQ(former.size(), renames.size());
+    EXPECT_EQ(now.size(), renames.size());
+    EXPECT_TRUE(std::is_sorted(renames.begin(), renames.end(),
+                               [](const auto& a, const auto& b) { return a.now < b.now; }));
 }
