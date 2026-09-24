@@ -28,9 +28,20 @@
 //     Y(m-1)_i = Y(m-1)_(i-1) + Y(m)_i, and so on down to Y(0)_i;
 //   * an epoch with event flag 2 to 6 as it is, its special records after it
 //     unchanged, and every series starting afresh at the next epoch (table 2).
-// Where 1.0 differs (section 2.1): the flags of an observation type restart
-// with that type's series rather than all together, and have no '&' for their
-// blanks when they do.
+// Where 1.0 differs (section 2.1): a blank observation blanks its LLI and
+// signal-strength flags, on both sides and with no '&' written for it; in 3.0
+// the flags stand apart from their observation.
+//
+// Where the paper leaves a detail open, the published RNX2CRX / CRX2RNX
+// ver.4.1.0 (by the same author) decide it, since every compact file in
+// circulation was written by them:
+//   * a series restarting ("M&v", for a new arc or a jump of more than 10^7)
+//     leaves its flags alone - the compressor differences them against the old
+//     ones;
+//   * an epoch line given in full makes every satellite new: its series all
+//     start afresh and its flags are given whole, a blank in them a blank;
+//   * a satellite is known by its three characters as written, so ' 01' and
+//     'G01' in a RINEX 2 file are two satellites.
 //
 // Why expand to text rather than count straight from the compact records: the
 // observation reader's record checks, event handling and warnings then apply
@@ -106,8 +117,22 @@ namespace {
 
 // Table A-2 allows orders up to 9; the published compressor writes 3.
 constexpr int kMaxOrder = 9;
-// Satellite slots: a system letter and a two-digit number.
-constexpr std::size_t kSatelliteSlots = 26 * 100;
+// Satellite slots, one per satellite as written: a system letter or (RINEX 2)
+// a blank, a tens digit or a blank, and a units digit.
+constexpr std::size_t kSatelliteSlots = 27 * 11 * 10;
+
+// The slot of a satellite already checked to be a letter or blank, a digit or
+// blank, and a digit. By the characters as written rather than the satellite
+// they mean: the compressor matches a satellite against the last epoch's list
+// by its three characters, so to it ' 01' after 'G01' is a new satellite, whose
+// series start afresh and whose flags are given whole.
+std::size_t satelliteSlot(std::string_view id)
+{
+    const std::size_t system = id[0] == ' ' ? 26 : static_cast<std::size_t>(id[0] - 'A');
+    const std::size_t tens = id[1] == ' ' ? 10 : static_cast<std::size_t>(id[1] - '0');
+    return (system * 11 + tens) * 10 + static_cast<std::size_t>(id[2] - '0');
+}
+
 // More observation types than any receiver records (RINEX 3.05 has about 150
 // codes across all systems); a bound so a damaged header cannot ask for
 // gigabytes of series.
@@ -549,6 +574,12 @@ bool Expander::expandEpoch(std::string_view line, std::size_t record)
             epochLine_[0] = ' ';
         }
         haveEpochLine_ = true;
+        // Every satellite is new after a line given in full, as CRX2RNX takes
+        // it: the compressor writes one only where it started every series
+        // afresh (the first epoch, after an event, or every n epochs with
+        // "-e n"), and gives each satellite's flags whole there - a blank in
+        // them is a blank, not "unchanged".
+        epoch_ += 2;
     } else if (!haveEpochLine_) {
         return fail("an epoch line given only as its difference from an earlier one, with no "
                     "earlier one to apply it to");
@@ -575,6 +606,14 @@ bool Expander::expandEpoch(std::string_view line, std::size_t record)
         return expandEvent(flag, count, record);
     }
 
+    // An epoch line given in full loses its trailing blanks, so one listing no
+    // satellites stops at the count (35 columns in 3.0) short of where a list
+    // would start. The compressor pads it to that column before differencing
+    // the next epoch against it, so the padding is what the next line's
+    // difference applies to.
+    if (epochLine_.size() < listColumn_) {
+        epochLine_.resize(listColumn_, ' ');
+    }
     if (epochLine_.size() < listColumn_ + static_cast<std::size_t>(count) * 3) {
         return fail("the epoch lists " + std::to_string(count) +
                     " satellites but its satellite list is shorter");
@@ -641,15 +680,13 @@ bool Expander::expandSatellite(std::string_view id, std::string_view text, std::
         return fail("the satellite list holds '" + std::string(id) +
                     "', which is not a satellite (a system letter and a number)");
     }
-    const int number = (id[1] == ' ' ? 0 : (id[1] - '0') * 10) + (id[2] - '0');
     const int types = versionOne_ ? typesV2_ : typesV3_[static_cast<std::size_t>(system - 'A')];
     if (types <= 0 || types > kMostObservationTypes) {
         return fail("satellite " + std::string(id) + ": the header declares " +
                     (types <= 0 ? std::string("no") : std::string("too many")) +
                     " observation types for its system, so its line cannot be expanded");
     }
-    SatelliteState& satellite =
-        satellites_[static_cast<std::size_t>(system - 'A') * 100 + static_cast<std::size_t>(number)];
+    SatelliteState& satellite = satellites_[satelliteSlot(id)];
     if (satellite.lastEpoch == epoch_) {
         return fail("satellite " + std::string(id) + " appears twice in one epoch");
     }
@@ -715,15 +752,8 @@ bool Expander::expandSatellite(std::string_view id, std::string_view text, std::
         }
     }
 
-    // The flags. In 1.0 a type's flags restart with its series (section 2.1).
-    if (versionOne_) {
-        for (std::size_t k = 0; k < typeCount; ++k) {
-            if (fieldKinds_[k] == kStarted) {
-                satellite.flags[2 * k] = ' ';
-                satellite.flags[2 * k + 1] = ' ';
-            }
-        }
-    }
+    // The flags: this epoch's difference applied to the last epoch's, whether
+    // or not a series restarted (a restart does not touch them).
     const std::string_view flags = at < line.size() ? line.substr(at) : std::string_view{};
     if (flags.size() > typeCount * 2) {
         return fail("satellite " + std::string(id) + ": more flag characters than its " +
@@ -733,8 +763,12 @@ bool Expander::expandSatellite(std::string_view id, std::string_view text, std::
 
     for (std::size_t k = 0; k < typeCount; ++k) {
         // 1.0 cannot carry flags without their observation (section 2.1): a
-        // blank observation has blank flags, as CRX2RNX writes it.
+        // blank observation has blank flags, and they stay blank for the next
+        // epoch's difference - the compressor blanks its own copy the same way.
+        // Blanked after the difference is applied, as CRX2RNX does.
         if (versionOne_ && fieldKinds_[k] == kBlank) {
+            satellite.flags[2 * k] = ' ';
+            satellite.flags[2 * k + 1] = ' ';
             continue;
         }
         fields[k * 16 + 14] = satellite.flags[2 * k];
@@ -760,6 +794,13 @@ void Expander::reportDamage(std::size_t lastRecord)
     }
     const std::size_t lines = lastRecord >= damagedFrom_ ? lastRecord - damagedFrom_ + 1 : 1;
     out_.linesSkipped += lines;
+    if (out_.warnings.size() >= kMaxListedWarnings) {
+        ++out_.unlistedWarnings;
+        damagedFrom_ = 0;
+        damageLine_ = 0;
+        damageWhy_.clear();
+        return;
+    }
     std::string message = "the compact data cannot be expanded here: " + damageWhy_ + ". ";
     message += lines == 1 ? "Line " + std::to_string(damagedFrom_) + " is left out"
                           : "Lines " + std::to_string(damagedFrom_) + " to " +
