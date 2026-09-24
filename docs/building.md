@@ -248,8 +248,9 @@ as MSYS2 builds them; Katana's own code is a few megabytes. The install rules
 are `cmake/KatanaPackaging.cmake`; the licensed reference files under `docs/`
 must never be installed.
 
-**Known problem.** `cmake/KatanaPackaging.cmake` still installs the root
-`README.md` unconditionally, and that file was removed on 2026-09-23, so
+**Known problem.** `cmake/KatanaPackaging.cmake` still installs, with no
+condition, a file from the root of the repository that was removed on
+2026-09-23 (the `install(FILES ...)` rule before the LICENSE rule), so
 `cmake --install`, `bundle` and `package` fail at that step until the rule is
 removed or made conditional. Nothing runs the bundle automatically, which is
 why it went unnoticed.
