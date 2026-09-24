@@ -19,6 +19,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "katana/commands/change_set.hpp"
@@ -484,22 +485,44 @@ struct JobRevision {
 // How a point the job placed stands now.
 enum class PlacedState { AsPlaced, EditedByHand, DeletedByHand };
 
-PlacedState stateOf(const katana::entity::Model& model, const SurveyJobPoint& placed)
+struct PlacedNow {
+    PlacedState state = PlacedState::DeletedByHand;
+    const Entity* entity = nullptr;
+    katana::geometry::Point2 position{};
+    std::optional<double> elevation{};
+};
+
+PlacedNow stateOf(const katana::entity::Model& model, const SurveyJobPoint& placed)
 {
-    const Entity* entity = model.entities.find(placed.entity);
-    const auto* point = entity == nullptr
+    PlacedNow now;
+    now.entity = model.entities.find(placed.entity);
+    const auto* point = now.entity == nullptr
                             ? nullptr
-                            : std::get_if<katana::entity::PointGeometry>(&entity->geometry);
+                            : std::get_if<katana::entity::PointGeometry>(&now.entity->geometry);
     if (point == nullptr) {
-        return PlacedState::DeletedByHand;
+        now.entity = nullptr;
+        return now;
     }
+    now.position = point->position;
+    now.elevation = katana::entity::heightsOf(now.entity->properties, 1).front();
     // Exact comparison on purpose: the job wrote these very doubles and the
     // project stores them bit for bit, so ANY difference is an edit - there
     // is no tolerance below which moving a mark by hand does not count.
-    const bool moved = point->position.x != placed.easting || point->position.y != placed.northing;
-    const bool relevelled = katana::entity::heightsOf(entity->properties, 1).front() !=
-                            placed.elevation;
-    return moved || relevelled ? PlacedState::EditedByHand : PlacedState::AsPlaced;
+    const bool moved = now.position.x != placed.easting || now.position.y != placed.northing;
+    const bool relevelled = now.elevation != placed.elevation;
+    now.state = moved || relevelled ? PlacedState::EditedByHand : PlacedState::AsPlaced;
+    return now;
+}
+
+// The sentence's tail saying what the new run made of a point, for the report.
+std::string newRunPuts(const survey::SurveyPoint* point)
+{
+    if (point == nullptr) {
+        return " The new run does not compute it.";
+    }
+    return " The new run puts it at N " + metres(point->northing) + ", E " +
+           metres(point->easting) + (point->elevation ? ", H " + metres(*point->elevation) : "") +
+           ".";
 }
 
 } // namespace
@@ -568,7 +591,6 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
     if (!outcome) {
         return outcome.error();
     }
-
     Plan plan;
     plan.report = std::move(outcome->report);
     const auto leaveOut = drawingControlIds(request.settings);
@@ -582,7 +604,7 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
 
     const bool keepEdits = request.handEdits == HandEditPolicy::Keep;
     const katana::entity::Model& model = context.model;
-    std::set<std::string_view> accountedFor; // ids the job's own points already answer
+    std::unordered_set<std::string_view> accountedFor; // ids the job's own points answer
     ChangeSet change;
     SurveyJobChanges& changes = plan.changes;
     std::vector<SurveyJobPoint> kept;
@@ -590,18 +612,13 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
     for (const SurveyJobPoint& placed : job->placedPoints) {
         const auto found = computed.find(placed.pointId);
         const survey::SurveyPoint* now = found == computed.end() ? nullptr : found->second;
-        const PlacedState state = stateOf(model, placed);
-        const std::string where =
-            now == nullptr ? std::string(" The new run does not compute it.")
-                           : " The new run puts it at N " + metres(now->northing) + ", E " +
-                                 metres(now->easting) +
-                                 (now->elevation ? ", H " + metres(*now->elevation) : "") + ".";
-        if (state == PlacedState::DeletedByHand) {
+        const PlacedNow current = stateOf(model, placed);
+        if (current.state == PlacedState::DeletedByHand) {
             changes.deletedByHand.push_back(placed.pointId);
             warn(plan.report, "Point " + placed.pointId +
                                   " was deleted from the drawing after the job placed it; " +
                                   (keepEdits ? "it stays deleted." : "it is drawn again.") +
-                                  where);
+                                  newRunPuts(now));
             if (keepEdits) {
                 kept.push_back(placed);
                 accountedFor.insert(placed.pointId);
@@ -610,12 +627,12 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
             // drawn again below like any new one.
             continue;
         }
-        if (state == PlacedState::EditedByHand) {
+        if (current.state == PlacedState::EditedByHand) {
             changes.editedByHand.push_back(placed.pointId);
             warn(plan.report, "Point " + placed.pointId +
                                   " was moved or re-levelled by hand after the job placed it; " +
                                   (keepEdits ? "the edit is kept." : "the edit is overwritten.") +
-                                  where);
+                                  newRunPuts(now));
             if (keepEdits) {
                 kept.push_back(placed);
                 accountedFor.insert(placed.pointId);
@@ -631,19 +648,17 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
         }
         SurveyJobPoint moved{placed.pointId, placed.entity, now->northing, now->easting,
                              now->elevation};
-        const Entity* entity = model.entities.find(placed.entity);
-        const auto& position = std::get<katana::entity::PointGeometry>(entity->geometry).position;
-        const bool same = position.x == moved.easting && position.y == moved.northing &&
-                          katana::entity::heightsOf(entity->properties, 1).front() ==
-                              moved.elevation;
+        const bool same = current.position.x == moved.easting &&
+                          current.position.y == moved.northing &&
+                          current.elevation == moved.elevation;
         if (!same) {
-            Entity updated = *entity;
+            Entity updated = *current.entity;
             updated.geometry =
                 katana::entity::PointGeometry{katana::geometry::Point2(now->easting, now->northing)};
             katana::entity::setHeights(updated.properties, {now->elevation});
             if (now->coordinateSource != survey::CoordinateSource::Unknown) {
                 updated.properties.insert_or_assign(
-                    std::string(kCoordinateSourceProperty),
+                    kCoordinateSourceProperty,
                     katana::entity::PropertyValue(std::string(toString(now->coordinateSource))));
             }
             change.modify.push_back(std::move(updated));
@@ -660,11 +675,17 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
     // Points the job has not drawn before: on the job's layer, and never over
     // a survey point the job did not create (Skip) - that point is someone
     // else's, and the report says it was left alone.
-    plan.fresh = drawableProject(outcome->reduced, leaveOut);
-    std::erase_if(plan.fresh.points, [&](const survey::SurveyPoint& point) {
-        return accountedFor.contains(point.id);
-    });
-    plan.fresh.unpositionedPoints.clear(); // reported by the reduction, not re-warned here
+    // Built from the unaccounted points only, not copied whole and pruned:
+    // on a re-adjustment that merely moves points this is nearly empty.
+    plan.fresh.name = outcome->reduced.name;
+    plan.fresh.coordinateSystem = outcome->reduced.coordinateSystem;
+    plan.fresh.units = outcome->reduced.units;
+    plan.fresh.source = outcome->reduced.source;
+    for (const survey::SurveyPoint& point : outcome->reduced.points) {
+        if (!accountedFor.contains(point.id) && !leaveOut.contains(point.id)) {
+            plan.fresh.points.push_back(point);
+        }
+    }
     SurveyImportOptions options;
     options.layer = job->layer.empty() ? SurveyImportOptions{}.layer : job->layer;
     SurveyPointImportReport drawing;
@@ -689,32 +710,42 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
         }
     }
 
-    if (!change.empty() || draw != nullptr) {
+    CommandPtr move;
+    if (!change.empty()) {
+        move = std::make_unique<ChangeSetCommand>(
+            "MOVE_SURVEY_JOB_POINTS",
+            [change = std::move(change)](const CommandContext&) -> Result<ChangeSet> {
+                return change;
+            },
+            !plan.deleted.empty());
+    }
+    // A Transaction only when there are two parts: a ChangeSetCommand keeps
+    // the set its validate() built for its execute(), where a Transaction
+    // validates its first part again on execute - for a re-adjustment that
+    // moves every point of a large job, that is a second copy of all of them.
+    if (move != nullptr && draw != nullptr) {
         auto transaction = std::make_unique<katana::commands::Transaction>("READJUST_SURVEY_JOB");
-        if (!change.empty()) {
-            transaction->add(std::make_unique<ChangeSetCommand>(
-                "MOVE_SURVEY_JOB_POINTS",
-                [change = std::move(change)](const CommandContext&) -> Result<ChangeSet> {
-                    return change;
-                },
-                !plan.deleted.empty()));
-        }
-        if (draw != nullptr) {
-            transaction->add(std::move(draw));
-        }
-        if (auto status = transaction->validate(context); !status) {
+        transaction->add(std::move(move));
+        transaction->add(std::move(draw));
+        plan.entities = std::move(transaction);
+    } else {
+        plan.entities = move != nullptr ? std::move(move) : std::move(draw);
+    }
+    if (plan.entities != nullptr) {
+        if (auto status = plan.entities->validate(context); !status) {
             return status.error();
         }
-        plan.entities = std::move(transaction);
     }
 
     plan.revision.settings = request.settings;
     plan.revision.parserVersion =
         request.parserVersion.empty() ? job->parserVersion : request.parserVersion;
     plan.revision.createdEntities = job->createdEntities;
-    std::erase_if(plan.revision.createdEntities, [&](EntityId id) {
-        return std::find(plan.deleted.begin(), plan.deleted.end(), id) != plan.deleted.end();
-    });
+    if (!plan.deleted.empty()) {
+        const std::unordered_set<EntityId> deleted(plan.deleted.begin(), plan.deleted.end());
+        std::erase_if(plan.revision.createdEntities,
+                      [&](EntityId id) { return deleted.contains(id); });
+    }
     plan.revision.placedPoints = std::move(kept);
     return plan;
 }
