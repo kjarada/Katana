@@ -30,7 +30,9 @@
 #   * no citation of the removed root documents (the plan, the contributor
 #     instructions, the readme);
 # and, over all of docs/*.md, that docs/index.md lists every document and
-# names none that does not exist (EXPECTED ones excepted).
+# names none that does not exist (EXPECTED ones excepted); and that
+# docs/headless.md names every switch src/katana_qt/main.cpp parses and every
+# variable tools/check_screenshot.cmake reads.
 #
 # Deliberately NOT checked: bare file names (`numerics.hpp` - ambiguous by
 # design, and the path beside them usually says which), prose, and whether
@@ -277,6 +279,32 @@ def check_index(root, docs, problems):
             problems.append('docs/index.md: lists %s, which does not exist' % name)
 
 
+def check_switches(root, problems):
+    """Every switch katana parses and every variable check_screenshot.cmake
+    reads is named in docs/headless.md: a switch nobody can find is one
+    nobody uses, and the switches were once spread over four documents with
+    three of them in none."""
+    headless = os.path.join(root, 'docs', 'headless.md')
+    main_cpp = os.path.join(root, 'src', 'katana_qt', 'main.cpp')
+    script = os.path.join(root, 'tools', 'check_screenshot.cmake')
+    if not os.path.exists(headless):
+        return
+    text = read(headless)
+    if os.path.exists(main_cpp):
+        for switch in sorted(set(re.findall(r'argument == "(--[a-z0-9-]+)"', read(main_cpp)))):
+            if not re.search(re.escape(switch) + r'(?![a-z0-9-])', text):
+                problems.append('docs/headless.md: does not name the switch %s '
+                                '(src/katana_qt/main.cpp)' % switch)
+    if os.path.exists(script):
+        source = read(script)
+        variables = set(re.findall(r'DEFINED\s+([A-Z][A-Z0-9_]+)', source))
+        variables |= set(re.findall(r'\bif\(([A-Z][A-Z0-9_]+)\)', source))
+        for variable in sorted(variables):
+            if not re.search(r'-D' + variable + r'\b', text):
+                problems.append('docs/headless.md: does not name -D%s '
+                                '(tools/check_screenshot.cmake)' % variable)
+
+
 def main():
     arguments = sys.argv[1:]
     everything = '--all' in arguments
@@ -299,6 +327,7 @@ def main():
         checked += 1
         check_document(root, doc, ignored, words, tests, suites, problems, counts)
     check_index(root, docs, problems)
+    check_switches(root, problems)
 
     for problem in problems:
         print(problem)
