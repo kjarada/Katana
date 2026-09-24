@@ -32,3 +32,10 @@ target_compile_definitions(katana_archive12d_tests PRIVATE
 # there rather than fail: the suite must stay green without it.
 target_compile_definitions(katana_archive12d_tests PRIVATE
     KATANA_CUSTOMISATION_FILES="${KATANA_CUSTOMISATION_DIR}")
+# The renames the drawing side knows (cad's customisation record) checked
+# against the built-in customisation itself. Only where cad is configured too,
+# which a module filter can leave out.
+if(TARGET katana_cad)
+    target_sources(katana_archive12d_tests PRIVATE test_builtin_renames.cpp)
+    target_link_libraries(katana_archive12d_tests PRIVATE katana_cad)
+endif()
