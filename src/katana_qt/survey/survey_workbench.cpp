@@ -12,6 +12,7 @@
 #include "katana/cad/survey_tools.hpp"
 #include "survey/survey_dialogs.hpp"
 #include "survey/survey_import_wizard.hpp"
+#include "survey/survey_jobs_dialog.hpp"
 #include "survey/survey_points_ui.hpp"
 
 namespace katana::qt {
@@ -51,6 +52,10 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
         make(Icon::SurveyImport, "&Import Survey Points...",
              "Read a file of surveyed points into the drawing, one undoable step",
              "surveyImport");
+    QAction* surveyJobs =
+        make(Icon::SurveyPointReport, "Survey &Jobs...",
+             "The field files imported as survey jobs: their reports, and adjusting them again",
+             "surveyJobs");
     QAction* exportPoints = make(Icon::SurveyExport, "&Export Survey Points...",
                                  "Write the drawing's survey points to a delimited text file",
                                  "surveyExport");
@@ -71,6 +76,9 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
                                         services_.applySurveyCodes};
             return new SurveyImportWizard(std::move(context), &window_);
         });
+    });
+    QObject::connect(surveyJobs, &QAction::triggered, &window_, [this] {
+        open(jobs_, [this] { return new SurveyJobsDialog(dialogContext(), &window_); });
     });
     QObject::connect(exportPoints, &QAction::triggered, &window_, [this] {
         open(export_, [this] { return new SurveyExportDialog(dialogContext(), &window_); });
@@ -104,7 +112,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     // Sections rather than plain separators, as the GIS menu has them: a
     // style that draws their titles says what each group is for.
     menu.addSection("Survey Points");
-    menu.addActions({importPoints, exportPoints, pointManagerAction_, pointReport});
+    menu.addActions({importPoints, surveyJobs, exportPoints, pointManagerAction_, pointReport});
     menu.addSection("Coordinate Geometry");
     menu.addActions({inverse, forward, area, angle});
     menu.addSection("Traverse and Levelling");
@@ -125,7 +133,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
         menu.addAction(services_.applySurveyCodes);
     }
 
-    toolBar.addActions({importPoints, exportPoints, pointManagerAction_});
+    toolBar.addActions({importPoints, surveyJobs, exportPoints, pointManagerAction_});
     toolBar.addSeparator();
     toolBar.addActions({inverse, forward, area, angle});
     toolBar.addSeparator();
@@ -141,7 +149,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
 SurveyWorkbench::~SurveyWorkbench()
 {
     for (QPointer<QDialog>* slot : {&inverse_, &forward_, &angle_, &traverse_, &levelBook_,
-                                    &converter_, &import_, &export_, &pointReport_}) {
+                                    &converter_, &import_, &jobs_, &export_, &pointReport_}) {
         delete slot->data();
     }
     // The dock holds a listener on the document too, and goes for the same
