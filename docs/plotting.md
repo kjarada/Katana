@@ -437,29 +437,38 @@ this one keeps them intact.
 ```json
 {"format": "katana-sheets", "version": 1,
  "defaults": {"organisation": "...", "surveyor": {"name": "...", "date": "..."}, "logo_asset": "logo.png"},
- "numbering": "{n}", "revisions": [{"code": "A", "date": "...", "description": "...", "by": "..."}],
- "sheets": [{"id": "s1", "name": "PLAN", "paper": "A3", "landscape": true, "frame": "a3_landscape",
-             "frame_legend": true, "fields": {},
+ "revisions": [{"code": "A", "date": "...", "description": "...", "by": "..."}],
+ "sheets": [{"id": "s1", "name": "PLAN",
              "viewports": [{"id": "vp1", "kind": "plan", "rect": [24, 36, 409, 286], "scale": 1000,
-                            "centre": [150, 50], "rotation": 0, "hidden_layers": [], "marks": [], ...}]}]}
+                            "centre": [150, 50], "north_arrow": true, "scale_bar": true}]}]}
 ```
 
+- **Defaults are left out.** Only the format, the version, and each sheet's
+  and viewport's id (and a viewport's kind) are always written. Any other
+  member is written only when it differs from the default of its type, and a
+  member left out reads as that default. The example's sheet is A3
+  landscape with the built-in frame, and its plan is not rotated, because
+  those are the defaults. So a default never changes without a version
+  increase, which lets the reader supply an old version's defaults to an old
+  set.
 - **Doubles** are written in the shortest form that reads back to the same
-  bits. A save and a load give back exactly the set that was saved; a test
-  compares it whole.
-- **An unplaced viewport's** empty rectangle is written as `null`. A number
-  that is not finite is refused when the set is written, because JSON has no
-  form for it that reads back.
-- **A member left out** reads as its default. A version newer than this
-  build's (`kSheetSetVersion` = 1) is refused (`Unsupported`), not read
-  wrongly. The document then refuses to overwrite those sheets
-  (`CommandRejected`) and keeps the text as it was. A new member that must
-  survive being saved by an older build needs a version increase.
+  bits, and compared bit for bit against their default, so `-0.0` survives. A
+  save and a load give back exactly the set that was saved; a test compares
+  it whole.
+- **An unplaced viewport's** empty rectangle is the default, so it is left
+  out. Any other number that is not finite is refused when the set is
+  written, because JSON has no form for it that reads back.
+- **A newer version** than this build's (`kSheetSetVersion` = 1) is refused
+  (`Unsupported`), not read wrongly. The document then refuses to overwrite
+  those sheets (`CommandRejected`) and keeps the text as it was. A new member
+  that must survive being saved by an older build also needs a version
+  increase.
 
 **Undo.**
 - `Document::setSheetSet(set, stepName)` is the one way in. It records the
-  JSON before and after as a single command on the document's history, so
-  undo and redo are exact.
+  state before and after (the JSON and the set parsed from it) as a single
+  command on the document's history, so undo and redo are exact and parse
+  nothing.
 - Undoing the first sheet ever added leaves the metadata with no `sheets` key
   at all.
 - An edit that changes nothing records no step. A refused edit changes
@@ -494,10 +503,28 @@ project's `assets/` directory and sets `logoAsset`, as one step.
 - A drawing not yet saved as a project has nowhere to keep a logo
   (`InvalidState`).
 
-**Cost.** Each edit writes the whole set's JSON and keeps the text before and
-after on the history. A set is a few hundred bytes per viewport, so a
-100-sheet set is tens of kilobytes per step. No speed claim is made here, and
-no benchmark was committed for it.
+**Cost.** Each edit writes the whole set's JSON once. The undo step keeps the
+state before and after, each as the text together with the set parsed from
+it, so an undo or redo swaps them back without parsing anything. Only
+members that differ from their type's defaults are written.
+
+`benchmarks/bench_sheets.cpp` measures a large set: a 10 km road drawn
+plan-and-profile at 1:500 with cross sections every 20 m, which is 116
+sheets and 607 viewports. It was run with `tools/compare_benchmarks.py
+--alternate 4` against the first version of this code, with a second copy of
+that version as the A/A control. Medians of 12 samples each, release build:
+
+| Benchmark | First version | A/A control | Now | Ratio |
+|---|---|---|---|---|
+| `BM_SheetEditViewportAndUndo` (edit one viewport, read, undo, read) | 103.1 ms | 97.8 ms | 7.65 ms | 13x faster |
+| `BM_SheetSetToJson` | 24.6 ms | 24.3 ms | 6.3 ms | 3.9x |
+| `BM_SheetSetFromJson` (a project being opened) | 39.3 ms | 36.8 ms | 18.7 ms | 2.1x |
+| `BM_SheetSmartLayoutLongRoad` (generating the 116 sheets) | 2.16 ms | 1.94 ms | 1.87 ms | within noise |
+
+The A/A control moved by 1-11%. The JSON went from 300,942 bytes to 125,652
+(0.42x). What an edit still pays is one write of the whole set. A drag in the
+editor should therefore commit once, on release; it should not commit on
+every mouse move.
 
 ## Not yet
 

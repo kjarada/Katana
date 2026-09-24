@@ -233,8 +233,10 @@ class Document {
     std::shared_ptr<ListenerHandle::Registry> listeners_;
     bool metadataModified_ = false;
     // The parsed sheet set and the JSON it was parsed from (sheet_store.cpp).
+    // Never changed once made: an undo step shares it, so undo and redo swap
+    // a pointer instead of parsing the set again.
     struct SheetCache;
-    mutable std::shared_ptr<SheetCache> sheetCache_;
+    mutable std::shared_ptr<const SheetCache> sheetCache_;
 };
 
 } // namespace katana::cad
