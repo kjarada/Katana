@@ -649,6 +649,19 @@ TEST(FormatCoverage, NamesBuiltInShapesApartFromMissingNames)
               "  1 name is in no loaded library: \"X\"\n");
 }
 
+TEST(FormatCoverage, ADrawingWithNoStylesIsToldTheWaysToGetOneWithoutBeingSentToOneFormat)
+{
+    // A drawing with no styles gives the customisation nothing to show. The
+    // hint once sent everyone to one archive format; a survey import, a
+    // drawing of any kind that carries styles, or a style made by hand all
+    // show it as well.
+    const std::string text = katana::cad::formatCoverage(katana::cad::CustomisationCoverage{});
+    EXPECT_EQ(text,
+              "This drawing has no styles yet; import a drawing or survey that carries styles, or "
+              "make one in Format > Styles and Linetypes or with STYLE NEW, to see the "
+              "customisation take effect.\n");
+}
+
 TEST(FormatCoverage, AVertexSymbolGivenAsALinetypeIsSaidToBeASymbolNotInNoLoadedLibrary)
 {
     // The reviewer's case: an archive's `style "CULT Bollard"` on a line, where the
