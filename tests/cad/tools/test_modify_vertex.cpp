@@ -286,3 +286,60 @@ TEST(VertexTools, EachEditIsOneUndoStep)
     ASSERT_TRUE(driver.document().undo().ok());
     EXPECT_EQ(shapeOf(driver, id).vertices.size(), 3u);
 }
+
+TEST(VertexTools, ExplodingACurvePolylineGivesLinesAndArcs)
+{
+    ToolDriver driver;
+    katana::entity::Entity entity;
+    CurvePolyline2 shape = CurvePolyline2::fromPoints({Point2(0, 0), Point2(2, 0), Point2(2, 5)});
+    shape.vertices[0].bulge = 1.0;
+    shape.vertices[0].height = 10.0;
+    shape.vertices[1].height = 11.0;
+    entity.geometry = shape;
+    const EntityId id = driver.add(katana::commands::createEntities({entity}));
+    selectOnly(driver, {id});
+    driver.start("modify.explode");
+    driver.enter();
+    std::size_t arcs = 0;
+    std::size_t lines = 0;
+    driver.document().model().entities.forEach([&](const katana::entity::Entity& e) {
+        if (const auto* arc = std::get_if<katana::geometry::Arc2>(&e.geometry)) {
+            ++arcs;
+            EXPECT_NEAR(arc->radius, 1.0, 1e-12);
+            const auto heights = katana::entity::heightsOf(e.properties, 2);
+            EXPECT_EQ(heights[0], 10.0);
+            EXPECT_EQ(heights[1], 11.0);
+        } else if (std::holds_alternative<katana::geometry::Segment2>(e.geometry)) {
+            ++lines;
+        }
+    });
+    EXPECT_EQ(arcs, 1u);
+    EXPECT_EQ(lines, 1u);
+}
+
+TEST(VertexTools, OffsettingACurvePolylineMakesConcentricArcs)
+{
+    // A straight 10 m then a quarter circle of radius 5 turning left:
+    // offset 1 to the left (inside the turn) gives radius 4.
+    ToolDriver driver;
+    katana::entity::Entity entity;
+    CurvePolyline2 shape =
+        CurvePolyline2::fromPoints({Point2(0, 0), Point2(10, 0), Point2(15, 5)});
+    shape.vertices[1].bulge = std::tan(std::atan(1.0) / 2.0); // a quarter turn, counter-clockwise
+    entity.geometry = shape;
+    const EntityId id = driver.add(katana::commands::createEntities({entity}));
+    driver.start("modify.offset");
+    driver.type("1");
+    driver.pick(id, 5, 0);
+    driver.click(5, 3);
+    driver.enter();
+    const auto made = driver.document().lastCreatedEntities();
+    ASSERT_EQ(made.size(), 1u);
+    const auto moved =
+        std::get<CurvePolyline2>(driver.document().model().entities.find(made[0])->geometry);
+    ASSERT_EQ(moved.vertices.size(), 3u);
+    EXPECT_NEAR(moved.vertices[0].position.y, 1.0, 1e-9);
+    const auto arc = std::get<katana::geometry::Arc2>(moved.segment(1));
+    EXPECT_NEAR(arc.radius, 4.0, 1e-9);
+    EXPECT_NEAR(arc.center.distanceTo(Point2(10, 5)), 0.0, 1e-9);
+}
