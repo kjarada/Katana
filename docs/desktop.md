@@ -1096,7 +1096,14 @@ now, and the menu items write their lines:
   weight scale (`plotDrawingLineWeightScale`, 0.10 to 5.00) among them;
   `plotDrawingCommand` shows the line and Plot runs it through the one
   executor. The file is a field, so a headless run fills it; Browse opens a
-  file dialog, except headless.
+  file dialog, except headless. The file suggested follows the drawing
+  (`MainWindow::suggestPlotFiles`, on a drawing opened, made new or saved):
+  kept from the first showing, the dialog once plotted a drawing opened
+  afterwards into the first project's folder under its name. A path typed in
+  the field is left as it is. Plot asks before writing over a file that is
+  there, as the save dialog before it did - the drawing's suggested PDF is the
+  sheet set's too (`suggestedPlotFile`) - and a headless run writes it, as the
+  verb does (`qt_the_plot_dialogs_file_follows_the_drawing_opened_headless`).
 - **`SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N]
   [scale=F] [bg=theme|white|none] [view=plan|3d]`**
   (`src/katana_qt/plotting/view_image_export.hpp`): a picture of the plan or
@@ -1108,14 +1115,20 @@ now, and the menu items write their lines:
   the screen's white pens would vanish into the ground; `bg=none` is
   transparent, a PNG's or the clipboard's only (a JPEG has no alpha, and the
   TIFF the plot's writer makes is RGB). A 3D view is grabbed as drawn and
-  scaled. A side is 1 to 10 000 pixels (an A0 sheet at 300 dpi is 9933).
+  scaled, on its own ground, so `bg=white` or `bg=none` with `view=3d` is
+  refused rather than dropped - it once wrote an opaque image for `bg=none`
+  and said nothing - and the dialog greys `viewImageBackground` out for the
+  3D view. A side is 1 to 10 000 pixels (an A0 sheet at 300 dpi is 9933).
   File > Export View as Image (`fileExportViewImage`, `viewImageDialog`)
-  writes the line; Edit > Copy View as Image (`editCopyViewImage`) runs
+  writes the line, its file following the drawing and asking before one is
+  written over, as Plot to PDF's does; Edit > Copy View as Image (`editCopyViewImage`) runs
   `SNAPSHOT CLIPBOARD`. The record is `file="..."` or `clipboard=yes`, then
   `view= width= height=`.
 
 Both are the window's verbs, beside `PLOTSHEETS`: the painter is Qt's, which
-`katana_cli` and `katana_mcp` do not have. A headless run has `--plot` with
+`katana_cli` and `katana_mcp` do not have, and which refuse the lines by name,
+saying where they run (`docs/mcp.md`, "What the server adds to the command
+line"), rather than as unknown commands. A headless run has `--plot` with
 the same settings, and an agent driving the window types the lines (the
 Command Reference's Window section lists them).
 

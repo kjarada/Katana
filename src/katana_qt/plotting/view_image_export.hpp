@@ -18,7 +18,8 @@
 // would vanish - or on nothing (none: a transparent PNG, or the
 // clipboard; a JPEG has no transparency and the TIFF written here is RGB, so
 // bg=none with either is refused). A 3D view is grabbed as it is drawn on
-// screen and scaled to the size; bg= is the plan view's.
+// screen and scaled to the size; bg= is the plan view's, and bg=white or
+// bg=none with view=3d is refused rather than dropped.
 //
 // The verb is the window's - there is a view to picture only there - and a
 // headless run's --screenshot grabs the whole window. What it did is logged as
@@ -95,6 +96,8 @@ struct ViewImageDialogContext {
     CommandRunner run;
     std::function<bool()> headless;
     QString suggestedPath;
+    // As PlotDrawingDialogContext's: asked before Export writes over a file.
+    std::function<bool(const QString& path)> confirmReplace;
 };
 
 class ViewImageDialog final : public QDialog {
@@ -106,6 +109,8 @@ class ViewImageDialog final : public QDialog {
     // What Export does: the SNAPSHOT line handed to the runner and the
     // outcome said in viewImageStatus.
     void exportImage();
+    // As PlotDrawingDialog::suggestPath, in the format chosen.
+    void suggestPath(const QString& path);
 
   private:
     void refresh();
@@ -113,6 +118,7 @@ class ViewImageDialog final : public QDialog {
     void followFormat();
 
     ViewImageDialogContext context_;
+    QString suggested_;
     QLineEdit* path_ = nullptr;
     QComboBox* format_ = nullptr;
     QComboBox* view_ = nullptr;

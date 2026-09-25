@@ -76,6 +76,10 @@ struct PlotDrawingDialogContext {
     std::function<bool()> headless;
     // The file Browse and a new dialog start from.
     QString suggestedPath;
+    // Asked before Plot writes over a file that is there: true to write it.
+    // Unset, it is written - as the PLOT verb writes, asking nothing. The
+    // window asks the person, and never in a headless run.
+    std::function<bool(const QString& path)> confirmReplace;
 };
 
 class PlotDrawingDialog final : public QDialog {
@@ -87,12 +91,20 @@ class PlotDrawingDialog final : public QDialog {
     // What Plot does: the PLOT line handed to the runner and the outcome
     // said in plotDrawingStatus.
     void plot();
+    // The file for the drawing as it is now - another project opened, an
+    // untitled one saved: shown in plotDrawingPath unless something else has
+    // been typed there since the last suggestion. The dialog is kept while
+    // the window lives, and once plotted every drawing into the folder, and
+    // under the name, of the project open when it was first shown.
+    void suggestPath(const QString& path);
 
   private:
     void refresh();
     void browse();
 
     PlotDrawingDialogContext context_;
+    // The last path suggested, to tell it from one typed.
+    QString suggested_;
     QLineEdit* path_ = nullptr;
     QComboBox* paper_ = nullptr;
     QComboBox* orientation_ = nullptr;
