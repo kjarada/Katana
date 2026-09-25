@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/snapping.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/core/error.hpp"
@@ -113,6 +114,14 @@ class InteractiveTool {
     // The defaults reject the input with a sentence saying what is expected
     // instead, so a tool implements only the inputs it takes.
     [[nodiscard]] virtual ToolStep point(const katana::geometry::Point2& at);
+    // A point the view snapped to a named point of an entity - its end, its
+    // middle, its centre or a vertex (snapAnchor) - with the reference that
+    // names it, so annotation made from it can follow the entity, as one
+    // made from a typed #id.end point does (docs/annotation.md,
+    // "Associativity"). The default takes it as the plain point(at): only a
+    // tool whose annotation follows its points keeps the reference.
+    [[nodiscard]] virtual ToolStep anchoredPoint(const katana::geometry::Point2& at,
+                                                 const katana::entity::AnchorRef& anchor);
     [[nodiscard]] virtual ToolStep entity(katana::entity::EntityId id,
                                           const katana::geometry::Point2& at);
     // Typed text that is not a point (routeTypedInput decides): a distance, an
@@ -152,6 +161,14 @@ parsePointInput(std::string_view text, std::optional<katana::geometry::Point2> l
 // text that parses as a point is a point, anything else is a value. The one
 // place that decides, so a click and "10,20" typed are the same input.
 [[nodiscard]] ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text);
+
+// A click the view snapped with `snap` (nullopt when snapping found nothing
+// or is off), as the view hands it to `tool`: anchoredPoint when the snap
+// names a point of an entity (snapAnchor), else point. The one place that
+// decides, so the plan view and the tests hand a tool the same input.
+[[nodiscard]] ToolStep routeSnappedPoint(InteractiveTool& tool, const Document& document,
+                                         const katana::geometry::Point2& at,
+                                         const std::optional<SnapResult>& snap);
 
 // ---- The catalogue -----------------------------------------------------------------
 

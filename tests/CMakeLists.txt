@@ -1298,4 +1298,22 @@ if(TARGET katana)
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # The chain and balloon tools started by their aliases and answered on
+    # the command line (docs/tools.md). By hand: DBA goes on from the newest
+    # dimension (1: 0,0 to 10,0, its line 5 above), and one origin at 20,0
+    # makes a baseline dimension measuring 20; Enter makes it, Enter again
+    # ends the tool. BALLOON from 30,0 to 35,5 is balloon 1, the drawing's
+    # first. LEADER's Callout option boxes the next leader's note.
+    add_test(NAME qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>DIM LINEAR 0,0 10,0 at=5,5|>DBA|?annotate.dimbaseline|>20,0|>|>|>BALLOON|>30,0|>35,5|>|>|>LE|>C|>B|>40,0|>45,5|>|>NOTE|>|>|>LIST"
+            "-DEXPECT=annotate\\.dimbaseline: Baseline Dimension, checked[\r\n]+1 baseline dimension.*balloon 1.*leader with 1 line of text.*4 entities[\r\n]+1  Dimension  layer=0  linear  measures 10[\r\n]+2  Dimension  layer=0  linear  measures 20[\r\n]+3  Leader  layer=0  vertices=2  tip 30,0  \"1\"  callout=circle[\r\n]+4  Leader  layer=0  vertices=2  tip 40,0  \"NOTE\"  callout=box"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/chain_balloon_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
 endif()

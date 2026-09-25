@@ -15,6 +15,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/interactive_tool.hpp"
+#include "katana/cad/snapping.hpp"
 
 namespace katana::cad::testing {
 
@@ -36,6 +37,19 @@ class ToolDriver {
     }
 
     ToolStep click(double x, double y) { return apply(tool_->point({x, y})); }
+    // A click the plan view would snap: to the nearest end, middle, centre
+    // or intersection (the default modes) within 0.5 of (x, y), handed on
+    // as the view hands it (routeSnappedPoint) - a point of an entity
+    // reaches the tool as that point. Nothing within 0.5 is a plain click.
+    ToolStep clickSnapped(double x, double y)
+    {
+        SnapRequest request;
+        request.cursor = {x, y};
+        request.aperture = 0.5;
+        const auto found = snap(document_.model(), request);
+        const katana::geometry::Point2 at = found ? found->point : katana::geometry::Point2(x, y);
+        return apply(routeSnappedPoint(*tool_, document_, at, found));
+    }
     ToolStep pick(katana::entity::EntityId id, double x, double y)
     {
         return apply(tool_->entity(id, {x, y}));

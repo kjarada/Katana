@@ -793,8 +793,12 @@ TEST(AnnotateLinearDimension, UndoTakesBackAChosenOrientation)
     EXPECT_EQ(dimensions[0].measurement(), 6.0);
 }
 
-TEST(AnnotateLinearDimension, PlacementsThisModelCannotDrawAreRefusedWithAReason)
+TEST(AnnotateLinearDimension, PlacementsThatSayNoOrientationAreRefusedWithAReason)
 {
+    // A line between the two origins' levels was refused here too until the
+    // tool could make the Linear kind, which draws it as AutoCAD's DIMLINEAR
+    // does (test_annotate_leader_options.cpp,
+    // ALineBetweenTheOriginsLevelsIsTheLinearKindDimHorizontalMakes).
     ToolDriver driver;
     driver.start("annotate.dimlinear");
     (void)driver.click(0.0, 0.0);
@@ -805,13 +809,9 @@ TEST(AnnotateLinearDimension, PlacementsThisModelCannotDrawAreRefusedWithAReason
     EXPECT_EQ(inside.outcome, Outcome::Rejected);
     EXPECT_TRUE(contains(inside.message, "H or V")) << inside.message;
     EXPECT_EQ(driver.tool().prompt(), location);
-    // Horizontal, but at y = 3, between the levels 0 and 6.
     (void)driver.type("H");
     const std::string horizontal = driver.tool().prompt();
     EXPECT_TRUE(contains(horizontal, "horizontal")) << horizontal;
-    const ToolStep between = driver.click(12.0, 3.0);
-    EXPECT_EQ(between.outcome, Outcome::Rejected);
-    EXPECT_TRUE(contains(between.message, "between")) << between.message;
     EXPECT_EQ(driver.type("2.5").outcome, Outcome::Rejected) << "no typed offset for linear";
     EXPECT_EQ(driver.tool().prompt(), horizontal);
     EXPECT_EQ(driver.executed(), 0);
