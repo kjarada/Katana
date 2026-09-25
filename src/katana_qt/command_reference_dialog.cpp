@@ -142,9 +142,10 @@ QString windowHelpText()
 Script    SCRIPT <file.kcs> [CONTINUE]   run a katana_cli script a line at a time, stopping
           at the first line refused unless CONTINUE (File > Run Script); a line starting
           with # is a note and runs nothing; several lines pasted run as a script
-Import    IMPORT <file> [LOCAL]   a drawing, vector data, a raster or a point cloud, by its
-          extension; LOCAL moves vector data, a .12da archive or a DXF so its lower-left
-          corner sits at 0,0
+Import    IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]   a drawing, vector data, a
+          raster or a point cloud, by its extension; vector data, a .12da archive or a DXF
+          moves as one piece: LOCAL puts its lower-left corner at 0,0, ALONGSIDE on the
+          drawing's, OFFSET by dE east and dN north (GIS > Import Vector Data, Placement)
 Export    EXPORT <file>   the drawing, by extension (DXF, GeoPackage, GeoJSON, SHP, .12da)
 Info      INFO <file>   describe a data file through GDAL or PDAL (INFO id: an entity)
 Refs      REFS   the reference layers: rasters and point clouds
