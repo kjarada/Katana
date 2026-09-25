@@ -211,6 +211,9 @@ Result<std::string> importImageAsset(const Document& document, const std::filesy
                                      "project's assets folder",
                                      what));
     }
+    // "a logo", "an image".
+    const std::string_view article =
+        !what.empty() && std::string_view("aeiou").contains(what.front()) ? "an" : "a";
     std::error_code error;
     const auto size = std::filesystem::file_size(image, error);
     if (error) {
@@ -218,8 +221,8 @@ Result<std::string> importImageAsset(const Document& document, const std::filesy
     }
     if (size > maximumBytes) {
         return makeError(ErrorCode::InvalidArgument,
-                         std::format("the image is too large for a {} (at most {} MB)", what,
-                                     maximumBytes / (1024u * 1024u)),
+                         std::format("the image is too large for {} {} (at most {} MB)", article,
+                                     what, maximumBytes / (1024u * 1024u)),
                          image.string() + ": " + std::to_string(size) + " bytes");
     }
     auto bytes = readAll(image);
@@ -228,10 +231,8 @@ Result<std::string> importImageAsset(const Document& document, const std::filesy
     }
     const auto extension = imageExtension(*bytes);
     if (!extension) {
-        const bool vowel = !what.empty() && std::string_view("aeiou").contains(what.front());
         return makeError(ErrorCode::Unsupported,
-                         std::format("{} {} must be a PNG, JPEG, GIF or BMP image",
-                                     vowel ? "an" : "a", what),
+                         std::format("{} {} must be a PNG, JPEG, GIF or BMP image", article, what),
                          image.string());
     }
     const std::filesystem::path assets = *project / "assets";

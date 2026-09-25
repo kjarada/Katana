@@ -6,12 +6,14 @@
 #   -DAPP=<katana executable>  -DPROJECT=<sample project dir>  -DOUTPUT=<json path>
 # under QT_QPA_PLATFORM=offscreen.
 #
-# Three runs:
+# Four runs:
 #   1. the verbs, the JSON and the PDFs: the JSON holds what the verbs made,
 #      the PDFs start with %PDF and PLOTSHEETS sheets=2 is one page;
 #   2. --sheets-json - alone on the saved copy: the same JSON on stdout, so
 #      SAVE kept the sheets in the project;
-#   3. a line that is refused: the run fails, naming it, and writes nothing.
+#   3. a line that is refused: the run fails, naming it, and writes nothing;
+#   4. a PLOTSHEETS whose sheet the painter reports a problem in: the PDF is
+#      written and the run goes on.
 #
 # The sample project is COPIED before it is opened, as in check_plot.cmake: a
 # test must never change the data checked into the repository.
@@ -132,5 +134,21 @@ if(rc EQUAL 0 OR EXISTS "${refused}")
 endif()
 if(NOT err MATCHES "no sheet 99" OR NOT err MATCHES "--command SHEET REMOVE 99 was refused")
     message(FATAL_ERROR "the refusal does not say what was refused:\n${err}")
+endif()
+# 4. A plot the painter reports a problem in (an image view whose file is not
+#    in the project) is still written: PLOTSHEETS is not refused, and the run
+#    goes on to --sheets-json.
+set(warned "${work}/sheets_headless_warned.pdf")
+set(after "${work}/sheets_headless_after.json")
+file(REMOVE "${warned}" "${after}")
+execute_process(
+    COMMAND "${APP}" "${copy}" --command "VIEW ADD 1 image text=nowhere.png"
+        --command "PLOTSHEETS \"${warned}\" sheets=1" --sheets-json "${after}"
+    RESULT_VARIABLE rc
+    OUTPUT_VARIABLE out
+    ERROR_VARIABLE err
+    TIMEOUT 120)
+if(NOT rc EQUAL 0 OR NOT EXISTS "${warned}" OR NOT EXISTS "${after}")
+    message(FATAL_ERROR "a plot with a problem in it stopped the run (exit ${rc})\n${err}")
 endif()
 message(STATUS "sheets_headless: the verbs, SAVE, --sheets-json and both plots agree")

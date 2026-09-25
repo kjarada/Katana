@@ -865,6 +865,23 @@ TEST(SheetVerbs, SheetsThatAreNotValidJsonAreNeitherListedNorOverwritten)
     EXPECT_EQ(s.steps(), steps);
 }
 
+TEST(SheetVerbs, ATextTypedBackIsTheTextStored)
+{
+    Session s;
+    // "\n" is a line break and "\\" a backslash; the reply writes them so.
+    EXPECT_EQ(s.ok(R"(TITLEBLOCK notes "SEE C:\\NEW\nLEVELS IN METRES")"),
+              R"(notes="SEE C:\\NEW\nLEVELS IN METRES")");
+    EXPECT_EQ(s.set().defaults.notes, "SEE C:\\NEW\nLEVELS IN METRES");
+    // What the reply says, typed back, stores the same text.
+    const std::string reply = s.ok("TITLEBLOCK notes");
+    (void)s.ok("TITLEBLOCK " + reply.substr(0, reply.find('=')) + " " + reply.substr(reply.find('=') + 1));
+    EXPECT_EQ(s.set().defaults.notes, "SEE C:\\NEW\nLEVELS IN METRES");
+    // A backslash before anything else is itself.
+    (void)s.ok(R"(SHEET NEW "A\B")");
+    EXPECT_EQ(s.set().sheets.back().name, "A\\B");
+    EXPECT_TRUE(contains(s.ok("SHEETS"), R"(name="A\\B")"));
+}
+
 // ---- every edit is one step, and the same lines make the same set --------------------
 
 TEST(SheetVerbs, EveryEditIsOneUndoStepThatUndoesExactly)

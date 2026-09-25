@@ -76,13 +76,19 @@ std::string joined(const Words& words, std::size_t from, std::string_view separa
 }
 
 // A typed "\n" is a line break: a command line has no other way to put one
-// in a note.
+// in a note. "\\" is a backslash, so a text that holds "\n" itself (a path,
+// C:\\new) can be typed, as a reply writes it (inQuotes). Any other
+// backslash is itself.
 std::string unescaped(std::string_view text)
 {
     std::string out;
     for (std::size_t i = 0; i < text.size(); ++i) {
-        if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == 'n') {
+        const char next = i + 1 < text.size() ? text[i + 1] : '\0';
+        if (text[i] == '\\' && next == 'n') {
             out += '\n';
+            ++i;
+        } else if (text[i] == '\\' && next == '\\') {
+            out += '\\';
             ++i;
         } else {
             out += text[i];
@@ -91,14 +97,21 @@ std::string unescaped(std::string_view text)
     return out;
 }
 
-// A value in a reply: in double quotes, a line break written back as "\n",
-// so the reply stays one fact per line and can be typed back.
+// A value in a reply: in double quotes, a line break written back as "\n"
+// and a backslash as "\\", so the reply stays one fact per line and a text
+// typed back (unescaped) is the text stored. A double quote, which only a
+// loaded set can hold (the command line cannot type one inside quotes), is
+// written "\"" so the reply still reads unambiguously.
 std::string inQuotes(std::string_view text)
 {
     std::string out = "\"";
     for (const char c : text) {
         if (c == '\n') {
             out += "\\n";
+        } else if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '"') {
+            out += "\\\"";
         } else {
             out += c;
         }
@@ -802,7 +815,7 @@ Result<std::string> sheetsVerb(Document& document, const Words& args)
             return status.error();
         }
         return std::format("wrote {} to {}", countOf((*set)->sheets.size(), "sheet", "sheets"),
-                           inQuotes(args[1]));
+                           "\"" + args[1] + "\"");
     }
     if (action == "LOAD") {
         if (args.size() != 2) {
@@ -816,7 +829,8 @@ Result<std::string> sheetsVerb(Document& document, const Words& args)
         if (const Status status = document.setSheetSet(*loaded, "LOAD_SHEETS"); !status) {
             return status.error();
         }
-        return std::format("loaded {} from {}", countOf(count, "sheet", "sheets"), inQuotes(args[1]));
+        return std::format("loaded {} from {}", countOf(count, "sheet", "sheets"),
+                           "\"" + args[1] + "\"");
     }
     return usage(kUsage);
 }
