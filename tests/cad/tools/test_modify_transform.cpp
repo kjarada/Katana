@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "tool_driver.hpp"
 
 namespace {
@@ -684,6 +685,61 @@ TEST(ScaleTool, TheCopyOptionScalesACopyAndLeavesTheOriginal)
     EXPECT_EQ(driver.type("0.5").outcome, Outcome::Done);
     const std::vector<Segment2> expected = {{{1.0, 1.0}, {2.0, 1.0}}, {{0.5, 0.5}, {1.0, 0.5}}};
     EXPECT_EQ(allLines(driver), expected);
+}
+
+// Every tool that copies copies a callout with its pit as a callout of the
+// pit's copy - the tip on the copy, the note read off it - not a second
+// callout of the original (docs/annotation.md, "Associativity"). The tools
+// once built their copies apart from COPY and missed this.
+TEST(CopyingTools, ACalloutCopiedWithItsPitReadsThePitsCopy)
+{
+    struct Case {
+        const char* tool;
+        std::vector<std::string> steps; // typed; "" is Enter
+        std::vector<Point2> pits;       // where each copy of the pit lands
+    };
+    // The pit at (10,0). Copy by (100,0); rotate a copy half a turn and scale
+    // one by 2 about the origin; four polar items a quarter-turn apart, the
+    // original counted.
+    const std::vector<Case> cases = {
+        {"modify.copy", {"0,0", "@100,0", ""}, {{110.0, 0.0}}},
+        {"modify.rotate", {"0,0", "C", "180"}, {{-10.0, 0.0}}},
+        {"modify.scale", {"0,0", "copy", "2"}, {{20.0, 0.0}}},
+        {"modify.array_polar", {"0,0", "4", "", ""}, {{0.0, 10.0}, {-10.0, 0.0}, {0.0, -10.0}}},
+    };
+    for (const Case& test : cases) {
+        SCOPED_TRACE(test.tool);
+        ToolDriver driver;
+        const EntityId pit = driver.add(cmd::createPoint({10.0, 0.0}));
+        katana::entity::Entity callout;
+        callout.geometry =
+            katana::entity::LeaderGeometry{.vertices = {Point2(10.0, 0.0), Point2(15.0, 5.0)},
+                                           .text = "PIT {id}",
+                                           .tipRef = katana::entity::AnchorRef{pit},
+                                           .fields = true};
+        const EntityId leader = driver.add(cmd::createEntities({callout}));
+        select(driver, {pit, leader});
+        driver.start(test.tool);
+        for (const std::string& step : test.steps) {
+            (void)(step.empty() ? driver.enter() : driver.type(step));
+        }
+        const auto& model = driver.document().model();
+        const auto made = driver.document().lastCreatedEntities();
+        ASSERT_EQ(made.size(), 2 * test.pits.size());
+        for (std::size_t k = 0; k < test.pits.size(); ++k) {
+            // Copied in selection order, a set per placement: pit, callout.
+            const EntityId pitCopy = made[2 * k];
+            const auto& copy = std::get<katana::entity::LeaderGeometry>(
+                entityOf(driver, made[2 * k + 1])->geometry);
+            EXPECT_EQ(copy.tipRef.entity, pitCopy);
+            expectNear(copy.vertices.front(), test.pits[k]);
+            EXPECT_EQ(katana::entity::leaderNote(model, copy), "PIT " + std::to_string(pitCopy));
+        }
+        const auto& original =
+            std::get<katana::entity::LeaderGeometry>(entityOf(driver, leader)->geometry);
+        EXPECT_EQ(original.tipRef.entity, pit);
+        EXPECT_EQ(original.vertices.front(), Point2(10.0, 0.0));
+    }
 }
 
 TEST(ScaleTool, RefusesAZeroNegativeOrUnitFactorAndAZeroReference)
