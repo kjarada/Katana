@@ -25,6 +25,7 @@ done. There is no user guide yet.
 | [survey_coding.md](survey_coding.md) | style libraries, survey code files, coding a survey, the built-in customisation | `katana_archive12d` (customisation), `src/katana_cad/customisation/`, the Survey Code Manager |
 | [cad.md](cad.md) | the engine both front ends drive: document, selection, snapping, the command interpreter, the spatial index, alignments, corridors, parcels, grading, plotting arithmetic, style and symbol resolution | `katana_cad` (outside `tools/`) |
 | [desktop.md](desktop.md) | the window: theme, icons, toolbars, the workspace and docks, panels, the managers, the rules a dialog follows | `src/katana_qt` (outside `tools/` and `survey/`) |
+| [drawing.md](drawing.md) | the drawing system: curve polylines, ellipses and splines, which kind a polyline is stored as, grips, the vertex tools and panel, precision input, the snaps, the drawing verbs | `curves2d.hpp`, `polyline_vertices.hpp`, `entity/curve_pieces.hpp` |
 | [tools.md](tools.md) | the interactive drawing tools, their catalogue and the tool host | `src/katana_cad/tools/`, `src/katana_qt/tools/`, `interactive_tool.hpp` |
 | [headless.md](headless.md) | `katana_cli`, the window's headless switches and steps, `check_screenshot.cmake`'s variables | `src/katana_qt/main.cpp`, `tools/check_screenshot.cmake`, `tools/check_plot.cmake` |
 | [audit/2026-09-23-defects.md](audit/2026-09-23-defects.md) | the audit's defect register, one ID per defect | mark a defect FIXED in the commit that fixes it (`tools/audit_register.py`) |

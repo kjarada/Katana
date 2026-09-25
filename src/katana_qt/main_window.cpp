@@ -221,6 +221,36 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
                     {"Text", QString::fromStdString(g.text)},
                     {"Callout", QString::fromUtf8(katana::entity::toString(g.callout))}};
         }
+        // The drawing system's kinds; the vertices themselves are in the
+        // Vertices panel (qt/drawing/vertex_panel.hpp).
+        Rows operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            Rows rows = {{"Vertices", QString::number(g.vertices.size())},
+                         {"Closed", g.closed ? "yes" : "no"},
+                         {"Arcs", g.hasArcs() ? "yes" : "no"},
+                         {"Heights", g.hasHeights() ? "yes" : "no"},
+                         {"Length", number(g.length())}};
+            if (g.closed) {
+                rows.push_back({"Area", number(g.area())});
+            }
+            return rows;
+        }
+        Rows operator()(const katana::geometry::Ellipse2& g) const
+        {
+            return {{"Centre", point(g.center)},
+                    {"Major radius", number(g.majorRadius())},
+                    {"Minor radius", number(g.minorRadius())},
+                    {"Rotation", number(g.majorAxis.angle() * katana::math::kRadToDeg) + " deg"},
+                    {"Sweep", number(g.sweep * katana::math::kRadToDeg) + " deg"},
+                    {"Length", number(g.length())}};
+        }
+        Rows operator()(const katana::geometry::Spline2& g) const
+        {
+            return {{"Degree", QString::number(g.degree)},
+                    {"Control points", QString::number(g.controlPoints.size())},
+                    {"Fit points", QString::number(g.fitPoints.size())},
+                    {"Length", number(g.length())}};
+        }
     };
     return std::visit(Visitor{}, geometry);
 }
@@ -3932,6 +3962,37 @@ void MainWindow::buildSurfaceFromDrawing()
             // Closing only makes sense for a ring that lost none of its vertices.
             breakline.closed = polyline->closed && whole;
             flush();
+        } else if (const auto* curved =
+                       std::get_if<katana::geometry::CurvePolyline2>(&entity.geometry)) {
+            // A 3D string with arcs holds its heights itself; its arcs go in
+            // as chords at the drawing tolerance, each chord point at the
+            // height interpolated along its segment (docs/drawing.md).
+            withElevation += curved->hasHeights() ? 1 : 0;
+            katana::terrain::Breakline breakline;
+            bool whole = true;
+            auto walk = curved->tessellateWithHeights(katana::geometry::kCurveChordTolerance);
+            if (curved->closed && walk.size() > 1) {
+                walk.pop_back();
+            }
+            for (const auto& step : walk) {
+                const auto z = curved->hasHeights() ? step.height : std::optional<double>(0.0);
+                if (!z) {
+                    ++withoutHeight;
+                    whole = false;
+                    if (breakline.vertices.size() >= 2) {
+                        input.breaklines.push_back(breakline);
+                    }
+                    breakline.vertices.clear();
+                    continue;
+                }
+                const katana::geometry::Point3 p(step.position.x, step.position.y, *z);
+                breakline.vertices.push_back(p);
+                input.points.push_back(p);
+            }
+            breakline.closed = curved->closed && whole;
+            if (breakline.vertices.size() >= 2) {
+                input.breaklines.push_back(breakline);
+            }
         }
     });
     if (withoutHeight != 0) {

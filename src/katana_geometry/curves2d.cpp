@@ -427,6 +427,32 @@ std::vector<Point2> CurvePolyline2::tessellate(double tolerance) const
     return out;
 }
 
+std::vector<CurvePolyline2::HeightedPoint> CurvePolyline2::tessellateWithHeights(double tolerance) const
+{
+    std::vector<HeightedPoint> out;
+    if (vertices.empty()) {
+        return out;
+    }
+    out.push_back(HeightedPoint{vertices.front().position, vertices.front().height});
+    for (std::size_t i = 0; i < segmentCount(); ++i) {
+        const CurveVertex& from = vertices[i];
+        const CurveVertex& to = vertices[segmentEnd(i)];
+        if (const auto arc = arcFromBulge(from.position, to.position, from.bulge)) {
+            const std::vector<Point2> chords = chordArc(*arc, tolerance);
+            for (std::size_t k = 1; k + 1 < chords.size(); ++k) {
+                const double t = static_cast<double>(k) / static_cast<double>(chords.size() - 1);
+                std::optional<double> height;
+                if (from.height && to.height) {
+                    height = *from.height + (*to.height - *from.height) * t;
+                }
+                out.push_back(HeightedPoint{chords[k], height});
+            }
+        }
+        out.push_back(HeightedPoint{to.position, to.height});
+    }
+    return out;
+}
+
 Polyline2 CurvePolyline2::toPolyline(double tolerance) const
 {
     if (!hasArcs()) {
@@ -891,16 +917,27 @@ double Spline2::length() const { return chainLength(tessellate(kCurveChordTolera
 
 Box2 Spline2::boundingBox() const
 {
+    // The curve's own extent, from chords within a tenth of the drawing
+    // tolerance and widened by it: the control polygon's box contains the
+    // curve too, but can be far larger, and a window selection asks whether
+    // the box is INSIDE the window.
+    constexpr double tolerance = kCurveChordTolerance * 0.1;
     Box2 box;
-    for (const Point2& p : controlPoints) {
+    for (const Point2& p : tessellate(tolerance)) {
         box.expand(p);
     }
-    return box;
+    if (box.empty()) {
+        for (const Point2& p : controlPoints) {
+            box.expand(p);
+        }
+        return box;
+    }
+    return box.inflated(tolerance);
 }
 
 Point2 Spline2::closestPoint(const Point2& p) const
 {
-    const std::vector<Point2> chain = tessellate(kCurveChordTolerance * 1.0e-2);
+    const std::vector<Point2> chain = tessellate(kCurveChordTolerance * 0.1);
     if (chain.empty()) {
         return controlPoints.empty() ? Point2{} : controlPoints.front();
     }

@@ -1,5 +1,7 @@
 #include "katana/interop/export.hpp"
 
+#include "katana/geometry/chording.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <variant>
@@ -221,6 +223,62 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
                     // feature; the formats here have nowhere to put it.
                     supported = false;
                     ++dimensionSkipped;
+                } else if constexpr (std::is_same_v<Held, katana::geometry::CurvePolyline2>) {
+                    // Chorded to the export tolerance; each chord point's
+                    // height is the geometry's own rule (linear by length
+                    // along its segment, CurvePolyline2::heightAtStation), so
+                    // nothing is invented - and a missing end height leaves the
+                    // points of that segment without one.
+                    std::vector<katana::gis::GeoPoint> points;
+                    for (std::size_t i = 0; i < held.segmentCount(); ++i) {
+                        const auto& from = held.vertices[i];
+                        const auto& to = held.vertices[held.segmentEnd(i)];
+                        std::vector<Point2> piece{from.position, to.position};
+                        if (const auto arc = katana::geometry::arcFromBulge(
+                                from.position, to.position, from.bulge)) {
+                            piece = katana::geometry::chordArc(*arc, options.curveTolerance);
+                        }
+                        for (std::size_t k = points.empty() ? 0 : 1; k < piece.size(); ++k) {
+                            points.push_back(toGeo(piece[k], options.originShift));
+                            const double t =
+                                static_cast<double>(k) / static_cast<double>(piece.size() - 1);
+                            heights.push_back(from.height && to.height
+                                                  ? std::optional<double>(
+                                                        *from.height + (*to.height - *from.height) * t)
+                                                  : std::nullopt);
+                        }
+                    }
+                    if (held.closed && points.size() > 1) {
+                        points.pop_back();
+                        heights.pop_back();
+                    }
+                    geometry.kind = held.closed && points.size() >= 3
+                                        ? katana::gis::GeometryKind::Polygon
+                                        : katana::gis::GeometryKind::LineString;
+                    geometry.parts.push_back(std::move(points));
+                } else if constexpr (std::is_same_v<Held, katana::geometry::Ellipse2> ||
+                                     std::is_same_v<Held, katana::geometry::Spline2>) {
+                    // No curve of either kind in these formats: chords.
+                    std::vector<katana::gis::GeoPoint> points;
+                    std::vector<Point2> chain = held.tessellate(options.curveTolerance);
+                    bool shut = false;
+                    if constexpr (std::is_same_v<Held, katana::geometry::Ellipse2>) {
+                        shut = held.isFull();
+                    } else {
+                        shut = held.isClosedShape();
+                    }
+                    if (shut && chain.size() > 3) {
+                        chain.pop_back();
+                    } else {
+                        shut = false;
+                    }
+                    for (const Point2& p : chain) {
+                        points.push_back(toGeo(p, options.originShift));
+                    }
+                    geometry.kind = shut ? katana::gis::GeometryKind::Polygon
+                                         : katana::gis::GeometryKind::LineString;
+                    uniformHeight(points.size(), std::nullopt);
+                    geometry.parts.push_back(std::move(points));
                 } else if constexpr (std::is_same_v<Held, katana::entity::LabelGeometry> ||
                                      std::is_same_v<Held, katana::entity::LeaderGeometry>) {
                     // Labels and leaders are annotation too, drawn for a view.
