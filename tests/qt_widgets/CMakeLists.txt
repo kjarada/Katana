@@ -35,6 +35,10 @@ set(_qt_survey_sources
     ${_qt_src}/survey/survey_task.cpp
     ${_qt_src}/survey/survey_job_support.cpp
     ${_qt_src}/survey/survey_jobs_dialog.cpp)
+# The sheets' dialogs, panels and output (src/katana_qt/plotting/) and their
+# tests: globbed, as they are in the application.
+file(GLOB _qt_plotting_sources CONFIGURE_DEPENDS "${_qt_src}/plotting/*.cpp")
+file(GLOB _qt_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
 add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
@@ -71,6 +75,8 @@ add_executable(katana_qt_widget_tests
     ${_qt_tool_tests}
     ${_qt_survey_sources}
     ${_qt_survey_tests}
+    ${_qt_plotting_sources}
+    ${_qt_plotting_tests}
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")
