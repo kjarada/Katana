@@ -740,6 +740,13 @@ step (`docs/headless.md`) runs a line the same way and prints the outcome;
 `qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless` runs one while
 Line waits for its first point.
 
+The Sheets editor is handed the runner when File > Sheets first opens it
+(`SheetEditor::setCommandRunner`): Generate Sheets, Choose Paper and the view
+fields run their `GENERATE`, `SHEET SUGGESTPAPER` and `VIEW SET` lines
+through it (`docs/plotting.md`, "The sheet editor"). The window's command line
+and the editor's lines get the same sheet-verb context,
+`sheetVerbContextFor`, which replaced the window's own copy of it.
+
 ### The session's verbs on the window's command line
 
 Until 2026-09-26 the window refused or misread several verbs `katana_cli` had.

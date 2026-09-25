@@ -3,15 +3,27 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <functional>
+#include <map>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 #include <QAction>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLabel>
 #include <QMenu>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QToolButton>
+#include <QVBoxLayout>
 
 #include "icons.hpp"
+#include "katana/cad/command_interpreter.hpp"
+#include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/cad/plotting/arrange_commands.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/geometry/polygon.hpp"
@@ -135,6 +147,50 @@ Result<const Viewport*> planToFit(const katana::cad::Document& document, const S
                          viewport->id);
     }
     return viewport;
+}
+
+// Choose Paper's first scale: the one the plan is drawn at now.
+const QString kAsDrawn = QStringLiteral("As drawn");
+
+// A Choose Paper scale as SHEET SUGGESTPAPER takes it: "auto" for As drawn,
+// else the denominator of "1:500" or "500". Nothing for any other text.
+std::optional<std::string> scaleOption(const QString& text)
+{
+    QString typed = text.trimmed();
+    if (typed.isEmpty() || typed.compare(kAsDrawn, Qt::CaseInsensitive) == 0) {
+        return std::string("auto");
+    }
+    if (typed.startsWith(QStringLiteral("1:"))) {
+        typed = typed.mid(2).trimmed();
+    }
+    bool ok = false;
+    const double denominator = typed.toDouble(&ok);
+    if (!ok || !(denominator > 0.0) || !std::isfinite(denominator)) {
+        return std::nullopt;
+    }
+    return typed.toStdString();
+}
+
+// SHEET SUGGESTPAPER's reply, "sheet 1 view=vp1 scale=500 paper=A1
+// orientation=landscape frame=a3_landscape fill=0.834", as a person reads
+// it: "A1 landscape, 83% full at 1:500".
+std::string adviceWords(const std::string& reply)
+{
+    std::map<std::string, std::string, std::less<>> values;
+    std::size_t start = 0;
+    while (start < reply.size()) {
+        std::size_t end = reply.find(' ', start);
+        end = end == std::string::npos ? reply.size() : end;
+        const std::string_view word = std::string_view(reply).substr(start, end - start);
+        if (const std::size_t equals = word.find('='); equals != std::string_view::npos) {
+            values[std::string(word.substr(0, equals))] = std::string(word.substr(equals + 1));
+        }
+        start = end + 1;
+    }
+    const double fill = QString::fromStdString(values["fill"]).toDouble();
+    const double scale = QString::fromStdString(values["scale"]).toDouble();
+    return std::format("{} {}, {}% full at {}", values["paper"], values["orientation"],
+                       std::lround(fill * 100.0), scaleWords(scale));
 }
 
 // What a command did, on the status bar and in the log.
@@ -414,30 +470,6 @@ Result<std::string> rotateSelectionToBestFit(katana::cad::Document& document, Sh
                        fit->rotation * katana::math::kRadToDeg, scaleWords(fit->standardScale));
 }
 
-Result<std::string> choosePaperForSheet(katana::cad::Document& document, SheetEditor& editor)
-{
-    if (auto sheet = sheetToArrange(document, editor); !sheet) {
-        return sheet.error();
-    }
-    const std::string id = plotting::mainPlanOf(document.sheetSet(), editor.currentSheet());
-    const Viewport* plan = findViewport(document, id);
-    if (plan == nullptr) {
-        return makeError(ErrorCode::InvalidArgument, "the sheet has no plan to choose paper for");
-    }
-    const SheetSource source = editor.source();
-    const std::vector<Point2> content = viewportContent(*plan, source, document.sheetSet());
-    if (content.empty()) {
-        return makeError(ErrorCode::InvalidArgument, "the plan shows nothing to choose paper for", id);
-    }
-    const double scale = drawnScaleOf(*plan, source, document.sheetSet());
-    const auto change = plotting::choosePaperForScale(document, id, content, scale);
-    if (!change) {
-        return change.error();
-    }
-    return std::format("A{} {} holds {} at {}.", static_cast<int>(change->advice.paper),
-                       change->advice.landscape ? "landscape" : "portrait", id, scaleWords(scale));
-}
-
 // ---- The menus --------------------------------------------------------------------------
 
 void fillArrangeMenu(QMenu& menu, katana::cad::Document& document, SheetEditor& editor)
@@ -567,8 +599,82 @@ QPushButton* choosePaperButton(QWidget* parent, katana::cad::Document& document,
                              "kept in proportion")
                          .arg(QString::fromStdString(id)));
     QObject::connect(button, &QPushButton::clicked, &editor,
-                     [&document, &editor] { announce(editor, choosePaperForSheet(document, editor)); });
+                     [&document, &editor] { (void)openSuggestPaperDialog(document, editor); });
     return button;
+}
+
+QDialog* openSuggestPaperDialog(katana::cad::Document& document, SheetEditor& editor)
+{
+    auto* dialog = new QDialog(&editor);
+    dialog->setObjectName(QStringLiteral("sheetSuggestPaperDialog"));
+    dialog->setWindowTitle(QStringLiteral("Choose Paper for a Scale"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* layout = new QVBoxLayout(dialog);
+    const std::string sheet = std::to_string(editor.currentSheet() + 1);
+    const std::string id = plotting::mainPlanOf(document.sheetSet(), editor.currentSheet());
+    auto* note = new QLabel(QString("The smallest paper that holds %1 at the scale, the other views "
+                                    "kept in proportion.")
+                                .arg(QString::fromStdString(id.empty() ? std::string("the plan") : id)),
+                            dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto* form = new QFormLayout();
+    layout->addLayout(form);
+    auto* scale = new QComboBox(dialog);
+    scale->setObjectName(QStringLiteral("sheetSuggestPaperScale"));
+    scale->setEditable(true);
+    scale->addItem(kAsDrawn);
+    for (const double denominator : katana::cad::kSheetScales) {
+        scale->addItem(QString::fromStdString(scaleWords(denominator)));
+    }
+    form->addRow(QStringLiteral("Scale"), scale);
+    auto* advice = new QLabel(dialog);
+    advice->setObjectName(QStringLiteral("sheetSuggestPaperAdvice"));
+    advice->setWordWrap(true);
+    form->addRow(QStringLiteral("Paper"), advice);
+    auto* buttons = new QDialogButtonBox(dialog);
+    QPushButton* apply = buttons->addButton(QStringLiteral("Apply"), QDialogButtonBox::AcceptRole);
+    apply->setObjectName(QStringLiteral("sheetSuggestPaperApply"));
+    QPushButton* cancel = buttons->addButton(QDialogButtonBox::Cancel);
+    cancel->setObjectName(QStringLiteral("sheetSuggestPaperCancel"));
+    QObject::connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    // "SHEET SUGGESTPAPER n scale=..." for the choice; nothing for a scale
+    // that cannot be read.
+    const auto lineFor = [sheet, scale]() -> std::optional<std::string> {
+        const auto words = scaleOption(scale->currentText());
+        if (!words) {
+            return std::nullopt;
+        }
+        return "SHEET SUGGESTPAPER " + sheet + " scale=" + *words;
+    };
+    // What the verb advises without apply=on - the answer Apply gives,
+    // worked out by the same code on the same content - and nothing changed.
+    const auto refresh = [&document, &editor, lineFor, advice, apply] {
+        const auto line = lineFor();
+        if (!line) {
+            advice->setText(QStringLiteral("A scale is 1:500, 500 or As drawn."));
+            apply->setEnabled(false);
+            return;
+        }
+        const auto tokens = katana::cad::CommandInterpreter::tokenize(*line);
+        const auto reply = plotting::runSheetVerb(document, tokens.value(), [&document, &editor] {
+            return sheetVerbContextFor(document, [&editor] { return editor.source(); });
+        });
+        advice->setText(QString::fromStdString(reply ? adviceWords(*reply) : reply.error().message));
+        apply->setEnabled(reply.ok());
+    };
+    QObject::connect(scale, &QComboBox::currentTextChanged, dialog, refresh);
+    refresh();
+    QObject::connect(dialog, &QDialog::accepted, &editor, [&editor, lineFor] {
+        if (const auto line = lineFor()) {
+            (void)editor.runLine(QString::fromStdString(*line + " apply=on"));
+        }
+    });
+    dialog->open();
+    return dialog;
 }
 
 } // namespace katana::qt

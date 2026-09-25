@@ -1822,6 +1822,7 @@ struct GenerateOptions {
     std::optional<bool> keyPlan;
     std::optional<bool> model3d;
     std::optional<bool> legend;
+    std::optional<bool> rotate;
     bool replace = false;
 };
 
@@ -1829,7 +1830,8 @@ struct GenerateOptions {
 std::string_view generateKeys(std::string_view kind)
 {
     if (kind == "fit") {
-        return "paper orientation frame area alignment scale model3d legend interval halfwidth";
+        return "paper orientation frame area alignment scale model3d legend interval halfwidth "
+               "rotate";
     }
     if (kind == "grid") {
         return "paper orientation frame area scale overlap keyplan";
@@ -1954,6 +1956,8 @@ Result<GenerateOptions> generateOptions(std::string_view kind, const Words& args
             status = store(o.model3d, onOff(value, key));
         } else if (key == "legend") {
             status = store(o.legend, onOff(value, key));
+        } else if (key == "rotate") {
+            status = store(o.rotate, onOff(value, key));
         }
         if (!status) {
             return status.error();
@@ -1997,11 +2001,29 @@ Result<Box2> generateArea(const GenerateOptions& o, const entity::Model& model,
     return extent;
 }
 
+// What GENERATE FIT rotate=on turns to fill the sheet: the corners of area=,
+// which a turn of a quarter can still fit better on the paper's other way,
+// else what a plan of the drawing shows - the front end's, with its imagery
+// (SheetVerbContext::content), else the drawing's outline - as the editor's
+// Rotate to Best Fit measures a plan.
+std::vector<Point2> rotateContent(const GenerateOptions& o, const Document& document,
+                                  const SheetVerbContextProvider& context)
+{
+    if (o.area) {
+        return {o.area->min, Point2(o.area->max.x, o.area->min.y), o.area->max,
+                Point2(o.area->min.x, o.area->max.y)};
+    }
+    Viewport plan;
+    plan.kind = ViewportKind::Plan;
+    return contentOf(document, context ? context() : SheetVerbContext{}, plan);
+}
+
 Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateOptions& o,
-                                          const entity::Model& model,
+                                          const Document& document,
                                           const SheetVerbContextProvider& context,
                                           std::vector<std::string>& skipped)
 {
+    const entity::Model& model = document.model();
     const double automatic = 0.0;
     if (kind == "fit") {
         LayoutRequest request;
@@ -2035,6 +2057,11 @@ Result<std::vector<Sheet>> generateSheets(std::string_view kind, const GenerateO
             request.alignment = *name;
             request.crossSectionInterval = *o.interval;
             request.crossSectionHalfWidth = o.halfWidth.value_or(request.crossSectionHalfWidth);
+        }
+        if (o.rotate.value_or(false)) {
+            // smartLayoutRotated refuses a plan along an alignment and
+            // sections after the plan itself, saying why.
+            return smartLayoutRotated(model, request, rotateContent(o, document, context));
         }
         return smartLayout(model, request);
     }
@@ -2181,7 +2208,7 @@ Result<std::string> generateVerb(Document& document, const Words& args,
                            at.value_or(0) + 1, describeSheet(now, at.value_or(0)));
     }
     std::vector<std::string> skipped;
-    auto sheets = generateSheets(kind, *options, document.model(), context, skipped);
+    auto sheets = generateSheets(kind, *options, document, context, skipped);
     if (!sheets) {
         return sheets.error();
     }
@@ -2460,7 +2487,8 @@ ARRANGE DISTRIBUTE across|up id id id ...   equal gaps, the first and last stayi
 ARRANGE MATCHSCALE from id id ...   the views take the scale view `from` is drawn at
 GENERATE kind [option=value ...] [replace=on]   adds the sheets, or replaces every sheet
   fit       the drawing, area=x0,y0,x1,y1 or alignment=name on as few sheets as it takes:
-            scale=auto|n model3d=on legend=on interval=m halfwidth=m
+            scale=auto|n model3d=on legend=on interval=m halfwidth=m; rotate=on turns the plan
+            of the drawing or area= to fill the sheet
   grid      tiles over the drawing or area=: scale=500 overlap=m keyplan=on|off
   strips    plans along alignment=: scale=auto|n; at a fixed scale overlap=m from=ch to=ch
             keyplan=on|off

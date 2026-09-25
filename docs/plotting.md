@@ -690,18 +690,98 @@ beside the drawing:
   A drag is ONE command, committed on release.
 - **Properties** on the right: a viewport's title, scale (or Auto),
   rotation, centre, exaggeration, alignment and chainages, north arrow,
-  scale bar, hidden layers, text, lock; or, with nothing selected, the
-  sheet's paper, orientation, frame and legend block, and a table of every
+  scale bar, hidden layers (plans and sections), text, picture, lock, and
+  its place on the paper; or, with nothing selected, the sheet's paper,
+  orientation, frame and legend block, Choose Paper, and a table of every
   field the frame prints with this sheet's overrides.
-- **Toolbar**: Generate Sheets (the drawing fitted, tiles with a key plan,
-  strips along an alignment, plan and profile, cross sections, one sheet per
-  imported plot frame; appended or replacing), New Sheet, Add View, Tile
-  (the eight presets), Title Block (organisation, project lines, client, set
-  number and numbering, coordinate system, datum, the five sign-offs, notes,
-  revisions and the logo), Fit Page, Plot Sheet, Plot All.
+- **Toolbar**: Generate Sheets (every layout and option of `GENERATE`; see
+  below), New Sheet, Add View, Tile (the eight presets), Title Block
+  (organisation, project lines, client, set number and numbering,
+  coordinate system, datum, the five sign-offs, notes, revisions and the
+  logo), Fit Page, Plot Sheet, Plot All.
 
-The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
-`test_sheet_editor.cpp`.
+**The editor's lines.** Generate Sheets, Choose Paper and the view fields
+below do not edit the set themselves. Each builds the line a person would
+type and hands it to `SheetEditor::runLine`, which in the window is the
+window's one executor (`MainWindow::runVerbLine`, `desktop.md`, "One
+executor: the command runner"): the line is echoed in the command log, kept
+in the history, and undone as one step, exactly as if it had been typed. An
+editor made without a window (the tests make one) runs the line through the
+interpreter's own sheet verbs (`runSheetVerb`) and posts the line and its
+reply through `onMessage`. Either way the verb gets the same context
+(`sheetVerbContextFor`: what the plan view draws, the visible surfaces, what
+a view shows), which the window's command line is given too, so a line
+means the same typed or built. A refused line changes nothing, and the
+panel is redrawn to show what is stored. The fields that edit the set
+directly (title, scale, rotation, centre, north arrow, the grid) are older
+and still make their one `editViewport` step themselves.
+
+| In the editor | Object names | The line it runs |
+|---|---|---|
+| On the paper: Left, Bottom, Width, Height in mm | `sheetViewportX`, `sheetViewportY`, `sheetViewportW`, `sheetViewportH` | `VIEW SET id rect=x0,y0,x1,y1`, refused when it misses the paper; a field left as it was keeps its exact value and writes nothing |
+| Chainage from, to (long sections, plans on an alignment, and now cross sections) | `sheetChainageFrom`, `sheetChainageTo` | `VIEW SET id from=` / `to=` |
+| Cross sections: At chainages with the list, or Every with the interval | `sheetSectionsAtChainages`, `sheetSectionStations`, `sheetSectionsEvery`, `sheetSectionInterval` | `interval=0 stations=a,b,c`, or `stations="" interval=m`, and with no range yet `from=` and `to=` the alignment's whole length: the painter cuts a list when there is one and an interval only over a range (`viewportStations`) |
+| Hidden layers... on plans, key plans, long sections and cross sections | `sheetViewportHiddenLayers`; its dialog `sheetHiddenLayersDialog`, `sheetHiddenLayersList`, `sheetHiddenLayersOk` | `VIEW SET id hide="a" show="b"`, only what the ticks changed, so an entry that is no layer of its own (a parent path) is kept |
+| An image view's Browse... | `sheetImageName`, `sheetImageBrowse` | `VIEW SET id file="path"`: copied into the project's assets (`importImageAsset`, up to 32 MB) and named in one step; a headless session opens no file dialog and names the verb |
+| Choose paper for this scale | `sheetChoosePaper`; its dialog below | `SHEET SUGGESTPAPER n scale=... apply=on` |
+| Generate Sheets... | `sheetGenerate`; its dialog below | `GENERATE kind ...` |
+
+**Choose Paper** (`sheetSuggestPaperDialog`) takes the scale the sheet's
+main plan is to be drawn at (`sheetSuggestPaperScale`: As drawn, a
+standard scale, or one typed) and shows at once the paper that holds it
+(`sheetSuggestPaperAdvice`, "A1 landscape, 83% full at 1:500"). The advice
+is `SHEET SUGGESTPAPER n scale=...` itself, run without `apply=on`, which
+changes nothing: the answer Apply (`sheetSuggestPaperApply`) then gives,
+worked out by the same code on the same content. Before, the button applied
+at once, at the scale the plan was drawn at, with nothing to read first.
+
+**Generate Sheets** (`sheetGenerateDialog`) offers every layout and every
+option `GENERATE` takes, and shows the line OK will run
+(`sheetGenerateLine`) as the choices change; a line that cannot be typed (a
+list of chainages that are not numbers, a window with no breadth) disables
+Generate (`sheetGenerateOk`) and says why there. The fields:
+- `sheetGenerateLayout` (fit, grid, strips, profile, sections, frames,
+  register), `sheetGeneratePaper`, `sheetGenerateOrientation` and
+  `sheetGenerateFrame` for every layout that takes them, the register and
+  the plot frames included (the frames take only `frame=`).
+- `sheetGenerateArea` for a fit and for tiles: the whole drawing, the
+  current plan view (offered only when the window has one: what it shows,
+  `SheetEditor::planViewArea`), or a window typed in
+  `sheetGenerateAreaX0`, `Y0`, `X1`, `Y1`.
+- `sheetGenerateScale`; `sheetGenerateAlignment`, whose "(none)" is a fit
+  of the area or, for a layout along an alignment, the drawing's only one
+  (a layout along an alignment starts on the first); `sheetGenerateFrom`
+  and `sheetGenerateTo` for strips at a fixed scale; `sheetGenerateOverlap`
+  and `sheetGenerateKeyPlan` for tiles and fixed-scale strips.
+- Cross sections: `sheetGenerateNoSections`, or `sheetGenerateEvery` with
+  `sheetGenerateInterval` (after a fit's or a profile's plan, or a sections
+  layout), or `sheetGenerateAtStations` with `sheetGenerateStations` (a
+  sections layout); `sheetGenerateHalfWidth`, and for a sections layout
+  `sheetGenerateRows`, `sheetGenerateColumns` and `sheetGenerateVe` (Auto,
+  1, 2, 5, 10, 20).
+- `sheetGenerateModel3d` and `sheetGenerateLegend` for a fit and a profile;
+  `sheetGenerateRotate` for a fit of an area with no sections;
+  `sheetGenerateReplace` for all but the register.
+
+The line writes out every option the layout takes, so it says the whole
+choice: "The drawing, fitted" with a window, a snapshot and no legend is
+`GENERATE fit paper=A3 landscape frame=on area=0,0,200,100 scale=auto
+model3d=on legend=off`. The dialog used to lay the sheets out with the
+generators itself, always over the whole drawn extent, landscape, with the
+built-in frame, with no range for strips, no chainage list and no
+exaggeration for sections; through the verb it has all of them, and cannot
+come to lay out other sheets than the typed line. The toolbar opens it
+without waiting (`openGenerateDialog`), which is how a headless session
+fills it; `generateSheets` still runs it and waits.
+
+The tests are `tests/qt_widgets/test_sheet_painter.cpp`,
+`test_sheet_editor.cpp`, `plotting/test_sheet_view_options.cpp` (each field
+above, its line, its one step and its refusal) and
+`plotting/test_generate_dialog.cpp` (each layout's choices, the line they
+make, and the same sheets as that line typed into a second document with
+the window's context). `qt_generate_sheets_runs_the_line_it_shows_headless`
+fills the dialog in the window by its object names, presses Generate, and
+undoes it as one step.
 
 ## Sheets on the command line
 
@@ -812,13 +892,26 @@ is fixed: remove it and add another.
 
 | Kind | Generator | Options |
 |---|---|---|
-| `fit` | `smartLayout` of the drawing, `area=` or `alignment=` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=` |
+| `fit` | `smartLayout` of the drawing, `area=` or `alignment=`; with `rotate=on`, `smartLayoutRotated` | `scale=auto\|n`, `model3d=on`, `legend=on`, `interval=`, `halfwidth=`, `rotate=on\|off` |
 | `grid` | `gridSheets` over the drawing or `area=` | `scale=500`, `overlap=m`, `keyplan=on\|off` |
 | `strips` | `stripSheets` at a fixed scale; on `auto`, the whole alignment fitted on one sheet (`smartLayout`) | `alignment=`, `scale=`, `overlap=`, `from=`, `to=`, `keyplan=` |
 | `profile` | `smartLayout`, plan and profile | `alignment=`, `scale=`, `interval=`, `halfwidth=`, `model3d=`, `legend=` |
 | `sections` | `crossSectionSheets` | `alignment=`, `interval=` or `stations=`, `halfwidth=`, `rows=`, `columns=`, `scale=`, `ve=auto\|n` |
 | `frames` | `sheetsFromPlotFrames`, and the frames skipped, with the reason | `frame=on\|off` |
 | `register` | `addRegisterSheet`: a cover first in the set, the drawing register beside the revision table | `paper=`, `portrait`, `frame=` |
+
+`GENERATE fit rotate=on` turns the plan to fill the sheet, as the Generate
+dialog's "Rotate the drawing to fill the sheet" always did (see "In the
+editor" under "Arranging a sheet"). What is turned is what the plan shows:
+the front end's content for a plan of the drawing (with the window's
+imagery), else the drawing's outline, or with `area=` the area's four
+corners, so a tall area on a wide sheet is turned when that holds it at a
+larger scale, and no further than it takes: 100 x 300 m on A3 is 1 : 1250
+square and 1 : 1000 turned 56.2 degrees. A plan
+along `alignment=` or with sections after it (`interval=`) is refused, as
+`smartLayoutRotated` refuses it: a strip already follows its alignment.
+The option was added so the dialog's choice has a verb; before, it was the
+one Generate choice an agent could not make.
 
 All kinds but `frames` also take `paper=`, `portrait` or `landscape`, and
 `frame=`. `alignment=` may be left out when the drawing has only one. An
@@ -1330,9 +1423,12 @@ chosen on the canvas (`selectedIds`), whichever of it is the primary. Every comm
 reports what it did, or why it did nothing, in the status bar and the log.
 
 With nothing selected, the sheet's properties have a **Choose paper for this
-scale** button (`sheetChoosePaper`). It is disabled on a sheet with no plan.
+scale** button (`sheetChoosePaper`). It is disabled on a sheet with no plan,
+and opens Choose Paper ("The sheet editor"): the scale, the advice at it,
+and Apply, which runs `SHEET SUGGESTPAPER n scale=... apply=on`.
 The Generate dialog's "The drawing, fitted" has **Rotate the drawing to fill
-the sheet** (`sheetGenerateRotate`), which calls `smartLayoutRotated`:
+the sheet** (`sheetGenerateRotate`), which writes `rotate=on` on its
+`GENERATE fit` line, and so calls `smartLayoutRotated`:
 - On an automatic scale, the plan is turned when that buys a larger standard
   scale, and left square otherwise.
 - At a fixed scale that would need tiles, or a sheet of its own for the 3D
@@ -1904,6 +2000,11 @@ worked out through the canvas's own cache (`SheetCanvas::paintCache`), so a
 selection cuts nothing again. New long
 sections and cross sections are added with Auto on. Setting it is the usual
 one-step `editViewport` (`viewport.autoScale = true`).
+
+Cross sections are cut at the chainages listed or every so many metres over
+the chainage range, and both sections have their hidden layers, which the
+painter leaves out as it does a plan's; the fields and the lines they run
+are in "The sheet editor".
 
 ## Plot styles and output
 
