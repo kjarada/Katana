@@ -413,7 +413,8 @@ TEST(IfcImport, LocalMovesEverythingAlignmentsIncluded)
     ASSERT_EQ(shifted.alignments.size(), 1u);
     EXPECT_NEAR(shifted.alignments[0].horizontal.pis[0].point.x, 0.0, 1e-6);
     EXPECT_NEAR(shifted.alignments[0].horizontal.pis[0].point.y, 50.0, 1e-6);
-    EXPECT_NEAR(shifted.bounds.min.x, 90.0, 1e-6);
+    // The extent is everything's: MC01's first PI is the furthest west.
+    EXPECT_NEAR(shifted.bounds.min.x, 0.0, 1e-6);
 }
 
 // ---- what is not an IFC file, or is a hostile one -----------------------------------

@@ -103,7 +103,9 @@ struct IfcImport {
     std::vector<entity::Layer> layers;         // every layer the entities are on
     std::vector<entity::Alignment> alignments; // named uniquely within the file
     std::vector<ImportedSurface> surfaces;
-    katana::geometry::Box2 bounds; // of the entities
+    // Of everything imported: the entities, the alignments' PIs and the
+    // surfaces - what LOCAL moves to the origin.
+    katana::geometry::Box2 bounds;
     // Products read, by class in the schema's spelling ("IfcPipeSegment").
     std::map<std::string, std::size_t> classes;
     std::size_t products = 0;         // elements and annotations read

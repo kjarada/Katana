@@ -433,6 +433,9 @@ class UtilityWriter {
                                           " segment of " + line.id,
                                       b_.productShape(representations), line.id);
         ++b_.report().serviceSegments;
+        b_.tally("service " + line.id, run.element,
+                 run.system == "USERDEFINED" ? run.systemObjectType : run.system,
+                 "a graded segment: " + run.reason);
 
         // ---- AS 5488: the grade -----------------------------------------------------
         PropertyList grade;
@@ -539,6 +542,9 @@ class UtilityWriter {
                  representation);
         const Id element = b_.product(feature.element, key + "/feature", line.id, feature.reason,
                                       b_.productShape({representation}), line.id);
+        b_.tally("service " + line.id, feature.element,
+                 feature.system == "USERDEFINED" ? feature.systemObjectType : feature.system,
+                 "a service at one point: " + feature.reason);
         if (const std::string_view common = commonPropertySet(feature.element.entity);
             !common.empty()) {
             PropertyList list;
@@ -572,6 +578,8 @@ class UtilityWriter {
                        std::string("Located by ") + sub::toString(vertex.evidence.method),
                        b_.productShape({representation}));
         ++b_.report().locatedPoints;
+        b_.tally("service " + line.id, IfcClass{"IfcAnnotation", "SURVEY", {}}, {},
+                 "a located point");
 
         PropertyList located;
         located.label("LocateMethod", sub::toString(vertex.evidence.method));

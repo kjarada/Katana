@@ -10,6 +10,7 @@ katana_add_test_suite(ifc
         test_classification.cpp
         test_export.cpp
         test_import.cpp
+        test_front_end.cpp
 )
 target_compile_definitions(katana_ifc_tests PRIVATE
     KATANA_IFC_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data"

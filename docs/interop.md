@@ -50,7 +50,7 @@ adapter boundary and converted, so nothing throws across the interface.
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
 
 IFC is not here: `katana_ifc` reads and writes it natively, with no GDAL
-(`docs/ifc.md`), and the command line routes a `.ifc` to it before any of
+(`docs/ifc.md`), and both front ends route a `.ifc` to it before any of
 these. Not supported: **DWG**, and **ECW and E57**: the extensions are routed
 to GDAL and PDAL, but the MSYS2 toolchain has no ECW SDK and no PDAL E57
 plugin, so such a file fails to open with the library's own error (this table

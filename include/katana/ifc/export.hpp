@@ -165,6 +165,28 @@ struct ExportOptions {
     bool exportAlignments = true;
 };
 
+// One line of the account of what an export wrote: so many objects of one
+// source that became one class, and why. The export's report, and what the
+// window's export dialog previews, so that what a person is shown is what
+// the writer did rather than a second guess at it.
+struct ClassTally {
+    // Where they came from: "layer Survey/Kerb", "service W1",
+    // "alignment MC01", "surface Ground".
+    std::string source;
+    // The class written, as the schema spells it; EMPTY for objects that were
+    // not written (labels, entities with nothing to draw), `why` saying so.
+    std::string entity;
+    std::string predefinedType;
+    std::string objectType; // what a USERDEFINED one is
+    std::string system;     // the IfcDistributionSystemEnum value, for a service element
+    // What decided it: "rule kerb", "no rule: a surveyed point",
+    // "AssetFeature \"Conduit (with Cable)\"", "12d drainage pipe".
+    std::string why;
+    std::size_t count = 0;
+
+    friend bool operator==(const ClassTally&, const ClassTally&) = default;
+};
+
 struct IfcExport {
     std::string text; // the file (writeIfc); empty from writeIfcFile
     std::size_t bytesWritten = 0;
@@ -181,6 +203,8 @@ struct IfcExport {
     std::size_t entitiesWritten = 0; // drawing entities written
     std::size_t entitiesSkipped = 0;
     std::size_t surfaces = 0;
+    // What each source became, ordered by source, then class, then why.
+    std::vector<ClassTally> tally;
     std::vector<std::string> warnings;
 };
 

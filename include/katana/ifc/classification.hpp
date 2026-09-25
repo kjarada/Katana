@@ -35,6 +35,7 @@
 #include <string_view>
 #include <vector>
 
+#include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/survey/subsurface/utility_network.hpp"
 
@@ -138,6 +139,32 @@ struct ClassificationRule {
 // name - STORMWATER for "STORM", "DRAINAGE" or "SW"; SEWAGE, WATERSUPPLY, GAS,
 // FUEL, ELECTRICAL, COMMUNICATION - or empty for none.
 [[nodiscard]] std::string serviceSystemFor(std::string_view text);
+
+// A project's rules as a file, so that layers named otherwise than the
+// defaults expect are classified as the project means them - the way a
+// wrong class shown in the window's preview is put right. CSV, one rule a
+// row, the columns found by name in a header row, in any order and letter
+// case; '#' starts a comment line:
+//
+//   rule        the rule's name, shown in reports                   required
+//   words       its words, separated by ';' ("POLE*;LP")             required
+//   kinds       Point;Line;Arc;Polyline;Circle;Text;Dimension;
+//               Label;Leader - empty for any kind
+//   class       the IFC class, as the schema spells it ("IfcColumn")  required
+//   predefined_type   "COLUMN"; empty when the class has none
+//   object_type what a USERDEFINED one is; required with USERDEFINED
+//   system      the distribution system its elements serve ("SEWAGE")
+//
+// ParseFailure naming the line for a class this export does not write, a
+// predefined type on a class without one, a kind that is not one, a rule
+// with no words, and USERDEFINED without an object type - the same things
+// writeIfc refuses, found when the file is read rather than when it is used.
+[[nodiscard]] core::Result<std::vector<ClassificationRule>>
+parseClassificationRules(std::string_view text);
+
+// `rules` as parseClassificationRules reads them: what the window writes as
+// a starting point for a project's own file (the defaults, commented).
+[[nodiscard]] std::string formatClassificationRules(const std::vector<ClassificationRule>& rules);
 
 struct EntityClass {
     IfcClass ifcClass;

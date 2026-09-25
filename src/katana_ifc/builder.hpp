@@ -10,6 +10,7 @@
 // (containment in the site, presentation layers, classification) are written
 // once, last, by finish().
 
+#include <array>
 #include <map>
 #include <optional>
 #include <set>
@@ -91,6 +92,12 @@ class Builder {
     [[nodiscard]] const ExportOptions& options() const { return options_; }
     [[nodiscard]] IfcExport& report() { return report_; }
     void warn(std::string message) { report_.warnings.push_back(std::move(message)); }
+    // Accounts for `count` more objects of `source` written as `ifcClass` (in
+    // `system`), for the reason `why` (IfcExport::tally); an empty class
+    // entity counts objects that were not written. finish() files the
+    // account in the report, in order.
+    void tally(std::string_view source, const IfcClass& ifcClass, std::string_view system,
+               std::string_view why, std::size_t count = 1);
 
     // A GlobalId for `key`, unique in the file even if two keys hash alike
     // (they never have; the check costs nothing).
@@ -198,6 +205,8 @@ class Builder {
     std::map<Id, std::string> referenceKeys_; // a reference -> "<classification>/<identification>"
     std::map<Id, std::vector<Id>> associations_;
     std::map<Id, std::string> classificationKeys_;
+    // source, entity, predefined type, object type, system, why -> count
+    std::map<std::array<std::string, 6>, std::size_t> tally_;
     std::map<std::string, Id> enumerations_;
     std::map<std::string, Id> curveStyles_;
     std::map<std::string, Id> surfaceStyles_;
