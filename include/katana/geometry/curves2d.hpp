@@ -127,6 +127,14 @@ struct CurvePolyline2 {
     // point to last (the closing point repeated when closed, so the result is
     // an open walk of the whole path).
     [[nodiscard]] std::vector<Point2> tessellate(double tolerance) const;
+    // The same walk with a height at every point: a vertex's own, and on an
+    // arc's chords the height interpolated by length along it (none where an
+    // end has none) - the rule heightAtStation states.
+    struct HeightedPoint {
+        Point2 position;
+        std::optional<double> height;
+    };
+    [[nodiscard]] std::vector<HeightedPoint> tessellateWithHeights(double tolerance) const;
     // As a straight polyline: exact when there are no arcs (the closing
     // segment implied, as Polyline2 does), chorded within `tolerance`
     // otherwise.
@@ -136,6 +144,17 @@ struct CurvePolyline2 {
 
     friend bool operator==(const CurvePolyline2&, const CurvePolyline2&) = default;
 };
+
+// The polyline offset by `distance` to the left of its direction of travel
+// (negative: right). Straight segments move parallel, arcs become concentric
+// arcs; consecutive pieces are joined where their offsets meet, and with a
+// round join about the original vertex where they do not (the outside of a
+// turn between an arc and a line that part). Heights stay with their
+// vertices. Fails with InvalidGeometry when an arc would shrink to nothing,
+// and - as geometry::offset for Polyline2 - is only faithful while |distance|
+// is below the local feature size.
+[[nodiscard]] katana::core::Result<CurvePolyline2> offset(const CurvePolyline2& polyline,
+                                                          double distance);
 
 // ---- the ellipse --------------------------------------------------------------------
 
@@ -236,9 +255,10 @@ struct Spline2 {
     [[nodiscard]] std::vector<Point2> tessellate(double tolerance) const;
     [[nodiscard]] Polyline2 toPolyline(double tolerance) const;
     [[nodiscard]] double length() const;
-    // The control polygon's box: the curve lies inside the convex hull of
-    // its control points (positive weights), so this contains it.
+    // The curve's extent, to a tenth of kCurveChordTolerance (not the
+    // control polygon's, which can be far larger).
     [[nodiscard]] Box2 boundingBox() const;
+    // To a tenth of kCurveChordTolerance, on the curve's chords.
     [[nodiscard]] Point2 closestPoint(const Point2& p) const;
     [[nodiscard]] double distanceTo(const Point2& p) const;
 

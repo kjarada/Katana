@@ -306,7 +306,7 @@ TEST(Spline, AFitSplinePassesThroughItsPoints)
     expectNear(spline->endPoint(), fit.back());
     // Every fit point lies on the curve.
     for (const Point2& p : fit) {
-        EXPECT_LT(spline->distanceTo(p), 1e-4);
+        EXPECT_LT(spline->distanceTo(p), 2e-4);
     }
 }
 

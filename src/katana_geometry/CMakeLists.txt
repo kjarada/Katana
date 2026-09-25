@@ -9,6 +9,7 @@ add_library(katana_geometry STATIC
     polygon.cpp
     editing.cpp
     curves2d.cpp
+    curve_offset.cpp
     polyline_vertices.cpp
     mesh.cpp
     point_batch.cpp

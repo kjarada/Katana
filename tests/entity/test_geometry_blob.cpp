@@ -72,6 +72,14 @@ TEST(GeometryBlob, EveryGeometryKindSurvivesARoundTripExactly)
         Circle2{Point2(-10.0, 10.0), 7.5},
         TextGeometry{Point2(2.0, 3.0), "Lot 42", 2.5, 0.7853981633974483},
         DimensionGeometry{Point2(0.0, 0.0), Point2(10.0, 0.0), 1.5, "10.00 m"},
+        katana::geometry::CurvePolyline2{
+            {{Point2(0.0, 0.0), 0.5, 12.25}, {Point2(5.0, 1.0), -0.0, std::nullopt},
+             {Point2(7.0, 4.0), -1.5, -0.0}},
+            true},
+        katana::geometry::Ellipse2{Point2(3.0, 4.0), katana::geometry::Vec2(6.0, -2.0), 0.35,
+                                   -0.75, 1.25},
+        *katana::geometry::Spline2::throughPoints(
+            {Point2(0.0, 0.0), Point2(2.0, 3.0), Point2(5.0, 1.0), Point2(8.0, 4.0)}, 3),
     };
 
     for (const Geometry& original : samples) {
@@ -306,6 +314,14 @@ TEST(GeometryBlob, AgreesWithTheJsonEncodingItReplaces)
         Circle2{Point2(-10.0, 10.0), 7.5},
         TextGeometry{Point2(2.0, 3.0), "Lot 42", 2.5, 0.5},
         DimensionGeometry{Point2(0.0, 0.0), Point2(10.0, 0.0), 1.5, ""},
+        katana::geometry::CurvePolyline2{
+            {{Point2(0.0, 0.0), 0.5, 12.25}, {Point2(5.0, 1.0), -0.0, std::nullopt},
+             {Point2(7.0, 4.0), -1.5, -0.0}},
+            true},
+        katana::geometry::Ellipse2{Point2(3.0, 4.0), katana::geometry::Vec2(6.0, -2.0), 0.35,
+                                   -0.75, 1.25},
+        *katana::geometry::Spline2::throughPoints(
+            {Point2(0.0, 0.0), Point2(2.0, 3.0), Point2(5.0, 1.0), Point2(8.0, 4.0)}, 3),
     };
 
     for (const Geometry& original : samples) {
@@ -362,6 +378,12 @@ TEST(GeometryBlobWireFormat, TheKindByteIsPinnedToTheVariantOrder)
         {6, "Dimension", DimensionGeometry{Point2(0.0, 0.0), Point2(1.0, 0.0), 0.0, ""}},
         {7, "Label", LabelGeometry{.target = 1, .style = "S"}},
         {8, "Leader", LeaderGeometry{.vertices = {Point2(0.0, 0.0), Point2(1.0, 1.0)}}},
+        // The drawing system's, appended after the annotation system's.
+        {9, "CurvePolyline",
+         katana::geometry::CurvePolyline2::fromPoints({Point2(0.0, 0.0), Point2(1.0, 1.0)})},
+        {10, "Ellipse", katana::geometry::Ellipse2{}},
+        {11, "Spline",
+         *katana::geometry::Spline2::fromControlPoints({Point2(0.0, 0.0), Point2(1.0, 1.0)}, 1)},
     };
 
     ASSERT_EQ(pinned.size(), std::variant_size_v<Geometry>)
@@ -386,6 +408,53 @@ TEST(GeometryBlobWireFormat, TheKindByteIsPinnedToTheVariantOrder)
             << item.name << ": the on-disk kind byte changed, which reinterprets every "
                             "project already saved";
     }
+}
+
+TEST(GeometryBlobWireFormat, ACurvePolylinesLayoutIsPinned)
+{
+    // Written by hand from geometry_blob.hpp's description, so the layout of
+    // the drawing system's polyline cannot drift with writer and reader
+    // agreeing: version 2, kind 9, u32 count, u8 closed, then x, y, bulge and
+    // height a vertex, a NaN height for none.
+    const auto d = [](double value) {
+        const auto bits = std::bit_cast<std::uint64_t>(value);
+        std::vector<std::byte> bytes;
+        for (int shift = 0; shift < 64; shift += 8) {
+            bytes.push_back(static_cast<std::byte>((bits >> shift) & 0xFFu));
+        }
+        return bytes;
+    };
+    std::vector<std::byte> stored = {std::byte{0x02}, std::byte{0x09}, std::byte{0x02},
+                                     std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+                                     std::byte{0x00}};
+    for (const double value : {1.0, 2.0, 0.5, std::numeric_limits<double>::quiet_NaN(), 3.0,
+                               4.0, 0.0, 7.25}) {
+        const auto bytes = d(value);
+        stored.insert(stored.end(), bytes.begin(), bytes.end());
+    }
+    // The NaN is the canonical quiet one, 0x7FF8000000000000.
+    EXPECT_EQ(stored[7 + 3 * 8 + 7], std::byte{0x7F});
+    EXPECT_EQ(stored[7 + 3 * 8 + 6], std::byte{0xF8});
+
+    const auto decoded = geometryFromBlob(stored);
+    ASSERT_TRUE(decoded.ok()) << decoded.error().describe();
+    const auto* polyline = std::get_if<katana::geometry::CurvePolyline2>(&*decoded);
+    ASSERT_NE(polyline, nullptr) << "kind 9 no longer means CurvePolyline";
+    ASSERT_EQ(polyline->vertices.size(), 2u);
+    EXPECT_FALSE(polyline->closed);
+    EXPECT_EQ(polyline->vertices[0].position, Point2(1.0, 2.0));
+    EXPECT_EQ(polyline->vertices[0].bulge, 0.5);
+    EXPECT_FALSE(polyline->vertices[0].height.has_value());
+    EXPECT_EQ(polyline->vertices[1].height, 7.25);
+
+    const auto written = geometryToBlob(Geometry{*polyline});
+    ASSERT_TRUE(written.ok());
+    EXPECT_EQ(*written, stored) << "the on-disk layout changed";
+
+    // A drawing kind in a version-1 blob is refused, not guessed at.
+    std::vector<std::byte> old = stored;
+    old[0] = std::byte{0x01};
+    EXPECT_FALSE(geometryFromBlob(old).ok());
 }
 
 TEST(GeometryBlobWireFormat, StoredBytesFromAPreviousBuildStillDecode)

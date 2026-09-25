@@ -190,6 +190,61 @@ Json toJsonValue(const Geometry& geometry)
             }
             return j;
         }
+        // Bulges and heights as lists beside the vertices, a null height for
+        // "not surveyed"; the lists are omitted when every entry is 0 / null.
+        Json operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            Json vertices = Json::array();
+            Json bulges = Json::array();
+            Json heights = Json::array();
+            bool anyBulge = false;
+            bool anyHeight = false;
+            for (const auto& vertex : g.vertices) {
+                vertices.push_back(pointToJson(vertex.position));
+                bulges.push_back(vertex.bulge);
+                anyBulge = anyBulge || vertex.bulge != 0.0;
+                heights.push_back(vertex.height ? Json(*vertex.height) : Json(nullptr));
+                anyHeight = anyHeight || vertex.height.has_value();
+            }
+            Json j = {{"type", "CurvePolyline"}, {"closed", g.closed}, {"vertices", std::move(vertices)}};
+            if (anyBulge) {
+                j["bulges"] = std::move(bulges);
+            }
+            if (anyHeight) {
+                j["heights"] = std::move(heights);
+            }
+            return j;
+        }
+        Json operator()(const katana::geometry::Ellipse2& g) const
+        {
+            return {{"type", "Ellipse"},
+                    {"center", pointToJson(g.center)},
+                    {"majorAxis", pointToJson(g.majorAxis)},
+                    {"ratio", g.ratio},
+                    {"startParameter", g.startParameter},
+                    {"sweep", g.sweep}};
+        }
+        Json operator()(const katana::geometry::Spline2& g) const
+        {
+            const auto points = [](const std::vector<Point2>& list) {
+                Json out = Json::array();
+                for (const Point2& p : list) {
+                    out.push_back(pointToJson(p));
+                }
+                return out;
+            };
+            Json j = {{"type", "Spline"},
+                      {"degree", g.degree},
+                      {"controlPoints", points(g.controlPoints)},
+                      {"knots", g.knots}};
+            if (!g.weights.empty()) {
+                j["weights"] = g.weights;
+            }
+            if (!g.fitPoints.empty()) {
+                j["fitPoints"] = points(g.fitPoints);
+            }
+            return j;
+        }
     };
     return std::visit(Visitor{}, geometry);
 }
@@ -292,6 +347,66 @@ Result<Geometry> geometryFromJsonValue(const Json& j)
             leader.tipRef = anchorFromJson(j.at("tipRef"));
         }
         geometry = std::move(leader);
+        break;
+    }
+    case EntityType::CurvePolyline: {
+        katana::geometry::CurvePolyline2 polyline;
+        polyline.closed = j.at("closed").get<bool>();
+        for (const Json& vertex : j.at("vertices")) {
+            polyline.vertices.push_back(katana::geometry::CurveVertex{pointFromJson(vertex), 0.0, {}});
+        }
+        const auto listOf = [&](const char* key) -> const Json* {
+            if (!j.contains(key)) {
+                return nullptr;
+            }
+            const Json& list = j.at(key);
+            if (!list.is_array() || list.size() != polyline.vertices.size()) {
+                throw Json::other_error::create(
+                    501, std::string("a polyline's ") + key + " must list one per vertex", &list);
+            }
+            return &list;
+        };
+        if (const Json* bulges = listOf("bulges")) {
+            for (std::size_t i = 0; i < bulges->size(); ++i) {
+                polyline.vertices[i].bulge = bulges->at(i).get<double>();
+            }
+        }
+        if (const Json* heights = listOf("heights")) {
+            for (std::size_t i = 0; i < heights->size(); ++i) {
+                if (!heights->at(i).is_null()) {
+                    polyline.vertices[i].height = heights->at(i).get<double>();
+                }
+            }
+        }
+        geometry = std::move(polyline);
+        break;
+    }
+    case EntityType::Ellipse: {
+        katana::geometry::Ellipse2 ellipse;
+        ellipse.center = pointFromJson(j.at("center"));
+        ellipse.majorAxis = pointFromJson(j.at("majorAxis"));
+        ellipse.ratio = j.at("ratio").get<double>();
+        ellipse.startParameter = j.at("startParameter").get<double>();
+        ellipse.sweep = j.at("sweep").get<double>();
+        geometry = ellipse;
+        break;
+    }
+    case EntityType::Spline: {
+        katana::geometry::Spline2 spline;
+        spline.degree = j.at("degree").get<int>();
+        for (const Json& p : j.at("controlPoints")) {
+            spline.controlPoints.push_back(pointFromJson(p));
+        }
+        spline.knots = j.at("knots").get<std::vector<double>>();
+        if (j.contains("weights")) {
+            spline.weights = j.at("weights").get<std::vector<double>>();
+        }
+        if (j.contains("fitPoints")) {
+            for (const Json& p : j.at("fitPoints")) {
+                spline.fitPoints.push_back(pointFromJson(p));
+            }
+        }
+        geometry = std::move(spline);
         break;
     }
     }
