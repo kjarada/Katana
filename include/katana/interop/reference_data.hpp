@@ -49,6 +49,14 @@ struct RasterOverlay {
     bool visible = true;
     double opacity = 1.0;
 
+    // Where a raster fetched from a web service came from, and the terms it
+    // came under (docs/gis_online.md, "Licences and attribution"): the
+    // service's address with any key removed, its licence, and the
+    // attribution the publisher asks for. Empty for a file.
+    std::string sourceUrl;
+    std::string licence;
+    std::string attribution;
+
     // World-space corners of the image. Computed through the full affine, so a
     // rotated or north-up-negative geotransform is handled rather than assumed
     // away: all four corners are transformed and the bounding box taken.
