@@ -88,11 +88,16 @@ struct DocumentChange {
         // customisation bits: the customisation is kept across a new or an
         // open.
         Replaced = 1u << 15,
+        // The annotation tables: text styles, label styles and auto-label
+        // rules (entity/annotation.hpp). One bit for the three, since
+        // everything drawn from one is drawn from the others.
+        AnnotationStyles = 1u << 16,
     };
 
     // Every table bit.
     static constexpr std::uint32_t kTables = Layers | Styles | Linetypes | DimensionStyles |
-                                             HatchPatterns | Alignments | PropertyDefinitions;
+                                             HatchPatterns | Alignments | PropertyDefinitions |
+                                             AnnotationStyles;
     // What a drawing is DRAWN from - its entities, the tables that say how
     // they look, the customisation - as against what is only highlighted
     // (the selection) or only bookkeeping (history, saved, metadata).
@@ -286,6 +291,19 @@ class Document {
     // isModified() honest the way any other command does.
     [[nodiscard]] katana::core::Status setSheetSet(const plotting::SheetSet& sheets,
                                                    std::string stepName = "SET_SHEETS");
+    // ---- annotation (docs/annotation.md) ---------------------------------------
+    //
+    // The scale the plan view draws paper-sized annotation at: text, labels,
+    // leaders and paper-sized dimensions are drawn paperMm x scale / 1000
+    // model units tall there (a sheet viewport uses its own scale instead).
+    // 1 : entity::kDefaultAnnotationScale until one is chosen. Kept, like the
+    // sheets, under a project metadata key ("annotation_scale") the storage
+    // layer carries without a schema change, so it travels with the project.
+    [[nodiscard]] double annotationScale() const;
+    // Sets it as ONE undoable step; refuses a scale that is not finite and
+    // positive. Choosing the scale it already has records nothing.
+    [[nodiscard]] katana::core::Status setAnnotationScale(double scale);
+
     // ---- survey jobs (cad/survey_job.hpp) --------------------------------------
     //
     // The field files imported as jobs, in id order, kept so their reduction
@@ -359,6 +377,9 @@ class Document {
         std::uint64_t hatchPatterns = 0;
         std::uint64_t alignments = 0;
         std::uint64_t properties = 0;
+        std::uint64_t textStyles = 0;
+        std::uint64_t labelStyles = 0;
+        std::uint64_t labelRules = 0;
     };
     TableRevisions tablesSeen_{};
     std::unique_ptr<katana::commands::CommandStack> stack_;

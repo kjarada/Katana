@@ -66,6 +66,25 @@ Status validateResultingEntity(const Model& model, const Entity& entity)
     if (!entity.style.empty() && model.styles.find(entity.style) == nullptr) {
         return makeError(ErrorCode::NotFound, "style does not exist", "style=" + entity.style);
     }
+    // The annotation tables an annotation names (entity/annotation.hpp): a
+    // text or leader in a text style that is not there would draw in the
+    // default face with nothing to say why, and a label in a missing label
+    // style would draw nothing at all.
+    const std::string* textStyle = nullptr;
+    if (const auto* text = std::get_if<katana::entity::TextGeometry>(&entity.geometry)) {
+        textStyle = &text->style;
+    } else if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
+        textStyle = &leader->style;
+    }
+    if (textStyle != nullptr && !textStyle->empty() && !model.textStyles.contains(*textStyle)) {
+        return makeError(ErrorCode::NotFound, "text style does not exist",
+                         "text style=" + *textStyle + " " + idContext(entity.id));
+    }
+    if (const auto* label = std::get_if<katana::entity::LabelGeometry>(&entity.geometry);
+        label != nullptr && !model.labelStyles.contains(label->style)) {
+        return makeError(ErrorCode::NotFound, "label style does not exist",
+                         "label style=" + label->style + " " + idContext(entity.id));
+    }
     for (const auto& [key, value] : entity.properties) {
         if (auto status = model.properties.validate(key, value); !status) {
             return status;

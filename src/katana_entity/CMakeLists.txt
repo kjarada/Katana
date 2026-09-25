@@ -13,6 +13,11 @@ add_library(katana_entity STATIC
     style_library.cpp
     survey_map.cpp
     validation.cpp
+    text_block.cpp
+    annotation.cpp
+    anchor.cpp
+    label_text.cpp
+    label_values.cpp
 )
 katana_target_defaults(katana_entity)
 target_link_libraries(katana_entity
