@@ -22,9 +22,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::cad {
@@ -45,6 +47,22 @@ class CommandInterpreter {
     [[nodiscard]] const std::vector<std::string>& history() const { return history_; }
 
     [[nodiscard]] static std::string helpText();
+
+    // A line split into words as run() splits it: on whitespace, double
+    // quotes grouping words and removed ("" is an empty word). ParseFailure
+    // for a quote never closed. For a front end's own verbs (PLOTSHEETS), so
+    // they read a line exactly as the interpreter would.
+    [[nodiscard]] static katana::core::Result<std::vector<std::string>>
+    tokenize(std::string_view line);
+
+    // What the sheet verbs (plotting/sheet_verbs.hpp) cannot see in the
+    // Document - the surfaces a cross section samples, the extent the plan
+    // view draws - from the front end that has them. Headless there is none,
+    // and the verbs do without.
+    void setSheetContext(katana::cad::plotting::SheetVerbContextProvider provider)
+    {
+        sheetContext_ = std::move(provider);
+    }
 
     // Forgets the "last point" that relative (@dx,dy) and polar (@d<a) points
     // resolve against. The interpreter cannot see a document being replaced
@@ -70,11 +88,18 @@ class CommandInterpreter {
     [[nodiscard]] Reply hatchPattern(const Tokens& args);
     [[nodiscard]] Reply style(const Tokens& args);
     [[nodiscard]] Reply alignment(const Tokens& args);
+    // CRS: the project's coordinate system - shown, set, cleared, found in the
+    // common list, suggested for a place (project_crs.hpp).
+    [[nodiscard]] Reply coordinateSystem(const Tokens& args);
     [[nodiscard]] Reply parcel(const Tokens& args);
     // INVERSE, FORWARD (RADIATE) and AREA: the survey tools of survey_tools.hpp,
     // printing the same report the Survey menu's dialogs print.
     [[nodiscard]] Reply survey(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply attributes(const std::string& verb, const Tokens& args);
+    // MODIFY: Global Modify (global_modify.hpp) on the selection, the drawing
+    // or named layers. The interpreter knows no view, so the View scope is
+    // the window's alone.
+    [[nodiscard]] Reply modify(const Tokens& args);
     [[nodiscard]] Reply undoRedo(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply file(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply inspect(const std::string& verb, const Tokens& args) const;
@@ -123,6 +148,7 @@ class CommandInterpreter {
     Document& document_;
     std::vector<std::string> history_;
     std::optional<katana::geometry::Point2> lastPoint_;
+    katana::cad::plotting::SheetVerbContextProvider sheetContext_;
 };
 
 } // namespace katana::cad

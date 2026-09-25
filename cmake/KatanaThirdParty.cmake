@@ -7,6 +7,14 @@ include(FetchContent)
 
 set(KATANA_THIRD_PARTY_CACHE "${PROJECT_SOURCE_DIR}/third_party/_cache")
 
+# ON takes both harnesses from an installed package (find_package) instead of
+# building them from a download. The Linux toolchain file turns it on, since
+# its prefix carries both and a cloud session cannot reach github.com; the
+# Windows build keeps the pinned sources, so its versions do not move with
+# whatever MSYS2 happens to have installed.
+option(KATANA_FIND_TEST_FRAMEWORKS
+       "Find GoogleTest and Google Benchmark with find_package instead of downloading them" OFF)
+
 function(_katana_fetch name url)
     string(TOUPPER ${name} _upper)
     set(_cached "${KATANA_THIRD_PARTY_CACHE}/${name}")
@@ -23,6 +31,10 @@ function(_katana_fetch name url)
 endfunction()
 
 function(katana_provide_googletest)
+    if(KATANA_FIND_TEST_FRAMEWORKS)
+        find_package(GTest CONFIG REQUIRED GLOBAL)
+        return()
+    endif()
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     _katana_fetch(googletest
@@ -30,6 +42,10 @@ function(katana_provide_googletest)
 endfunction()
 
 function(katana_provide_benchmark)
+    if(KATANA_FIND_TEST_FRAMEWORKS)
+        find_package(benchmark CONFIG REQUIRED GLOBAL)
+        return()
+    endif()
     set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)

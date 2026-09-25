@@ -44,7 +44,8 @@ inline constexpr double kTilingInsetMm = 1.0;
 [[nodiscard]] std::string_view presetName(TilingPreset preset);
 
 // Which cell a viewport of this kind takes: lower first. Plan 0, LongSection
-// 1, CrossSections 2, Model3D 3, KeyPlan 4, Image 5, Legend 6, Notes 7.
+// 1, CrossSections 2, Model3D 3, KeyPlan 4, Image 5, Legend 6, Notes 7,
+// SheetIndex 8, Revisions 9.
 [[nodiscard]] int tilingRank(ViewportKind kind);
 // Notes are placed by hand and tiling leaves them where they are, as the
 // owner's app does; every other kind tiles.

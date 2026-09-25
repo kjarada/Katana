@@ -177,9 +177,11 @@ TEST(CustomisationWorkbench, TheFormatMenuOffersLayersTheManagersTheLoadsAndPurg
     EXPECT_EQ(names(bench.menu->actions()),
               (std::vector<std::string>{"formatLayers", "formatStyles", "formatSymbols",
                                         "formatSurveyCodes", "---", "loadCustomisation",
-                                        "replaceCustomisation", "---", "formatPurge"}));
+                                        "replaceCustomisation", "---", "formatGlobalModify",
+                                        "formatPurge"}));
     EXPECT_EQ(names(bench.bar->actions()),
-              (std::vector<std::string>{"formatStyles", "formatSymbols", "formatSurveyCodes"}));
+              (std::vector<std::string>{"formatStyles", "formatSymbols", "formatSurveyCodes",
+                                        "formatGlobalModify"}));
     EXPECT_EQ(bench.bench->codeManagerAction(), &bench.action("formatSurveyCodes"))
         << "the action the Survey menu shows too";
 }

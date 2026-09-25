@@ -14,6 +14,15 @@ namespace katana::qt::gpu {
 
 namespace {
 
+[[nodiscard]] GpuBackend expectedBackend()
+{
+#if defined(KATANA_GPU_VULKAN)
+    return GpuBackend::Vulkan;
+#else
+    return GpuBackend::Direct3D11;
+#endif
+}
+
 // The same numbers as RenderViewWidget's (render_view_widget.cpp): the two
 // widgets must feel identical under the mouse, so a change to one belongs in
 // both. Radians per logical pixel of drag, and the dolly factor per notch.
@@ -25,14 +34,22 @@ constexpr double kZoomPerNotch = 1.15;
 GpuSceneView::GpuSceneView(katana::render::Camera& camera, QWidget* parent)
     : QRhiWidget(parent), camera_(camera)
 {
+#if defined(KATANA_GPU_VULKAN)
+    setApi(QRhiWidget::Api::Vulkan);
+#else
     setApi(QRhiWidget::Api::Direct3D11);
+#endif
     setSampleCount(4);
     // Our own target: the automatic one's depth buffer is not a float one.
     setAutoRenderTarget(false);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(40, 40);
     QObject::connect(this, &QRhiWidget::renderFailed, this, [this] {
-        fail(QStringLiteral("the GPU view could not render (no Direct3D 11 on this platform)"));
+        // Qt says only that it has no QRhi for the widget: no device of the
+        // API here, or a window that is never shown (a headless run).
+        fail(QStringLiteral("the GPU view could not render: Qt made it no %1 device - none "
+                            "here, or its window is never shown")
+                 .arg(QString::fromLatin1(toString(expectedBackend()))));
     });
 }
 
@@ -63,11 +80,35 @@ void GpuSceneView::setDrawList(const katana::render::DrawList& list)
     // The last framing was of nothing (the host's hook framed an empty
     // scene): this list is the first with something in it, so it is framed
     // at the next frame, as RenderViewWidget frames its first non-empty scene.
-    if (framedEmpty_ && !renderer_.scene().bounds.empty()) {
+    if (framedEmpty_ && !renderer_.sceneBounds().empty()) {
         framed_ = false;
         framedEmpty_ = false;
     }
     update();
+}
+
+void GpuSceneView::setLayers(std::span<const LayerSource> layers)
+{
+    renderer_.setLayers(layers);
+    // As setDrawList: the first scene with something in it after an empty
+    // framing is framed at the next frame.
+    if (framedEmpty_ && !renderer_.sceneBounds().empty()) {
+        framed_ = false;
+        framedEmpty_ = false;
+    }
+    // From onPrepareFrame the frame being drawn uploads it: asking for
+    // another would draw every change twice.
+    if (!inFrame_) {
+        update();
+    }
+}
+
+void GpuSceneView::updateLayer(std::size_t index, const katana::render::DrawList& list)
+{
+    renderer_.updateLayer(index, list);
+    if (!inFrame_) {
+        update();
+    }
 }
 
 void GpuSceneView::setCameraFramed(bool framed)
@@ -91,16 +132,17 @@ void GpuSceneView::zoomExtents()
 void GpuSceneView::frameScene()
 {
     keepCameraLogical(); // frame() fits the camera's aspect
-    katana::math::AABB box = renderer_.scene().bounds;
     if (onZoomExtents) {
         // The host frames whatever it frames for an empty scene, and asks
         // for a repaint: framed_ is set even then, or every frame would call
         // it again. framedEmpty_ has the next non-empty list framed anyway.
+        // Read after the hook: the host may hand over its scene as it frames.
         onZoomExtents();
         framed_ = true;
-        framedEmpty_ = box.empty();
+        framedEmpty_ = renderer_.sceneBounds().empty();
         return;
     }
+    katana::math::AABB box = renderer_.sceneBounds();
     if (box.empty()) {
         // Nothing to frame yet: framed_ stays as it was, so a first frame
         // that came before the draw list leaves the framing to the frame
@@ -137,8 +179,21 @@ void GpuSceneView::initialize(QRhiCommandBuffer* /*commands*/)
         return;
     }
     QRhi* gpu = rhi();
-    if (gpu == nullptr || gpu->backend() != QRhi::D3D11) {
-        fail(QStringLiteral("the GPU view needs Direct3D 11 (its shaders are HLSL)"));
+#if defined(KATANA_GPU_VULKAN)
+    constexpr QRhi::Implementation kBackend = QRhi::Vulkan;
+#else
+    constexpr QRhi::Implementation kBackend = QRhi::D3D11;
+#endif
+    if (gpu == nullptr || gpu->backend() != kBackend) {
+        fail(QStringLiteral("the GPU view needs %1, which its shaders are built for")
+                 .arg(QString::fromLatin1(toString(expectedBackend()))));
+        return;
+    }
+    if (!softwareDeviceAllowed_ && gpu->driverInfo().deviceType == QRhiDriverInfo::CpuDevice) {
+        fail(QStringLiteral("the only %1 device is a software one (%2); the software "
+                            "rasteriser draws faster on the CPU")
+                 .arg(QString::fromLatin1(toString(expectedBackend())),
+                      QString::fromUtf8(gpu->driverInfo().deviceName)));
         return;
     }
     // Multisampled, the widget draws into msaaColorBuffer() and resolves into
@@ -201,6 +256,11 @@ void GpuSceneView::render(QRhiCommandBuffer* commands)
     const QSize size = target_->pixelSize();
     katana::render::Camera frameCamera = camera_;
     frameCamera.setViewportSize(size.width(), size.height());
+    if (onPrepareFrame) {
+        inFrame_ = true;
+        onPrepareFrame(frameCamera);
+        inFrame_ = false;
+    }
     FrameSettings settings = settings_;
     settings.pixelRatio = pixelRatio();
 
@@ -331,7 +391,9 @@ std::unique_ptr<GpuSceneView> makeGpuSceneViewIfChosen(katana::render::Camera& c
     if (chosen.kind != RendererKind::Gpu) {
         return nullptr;
     }
-    return std::make_unique<GpuSceneView>(camera, parent);
+    auto view = std::make_unique<GpuSceneView>(camera, parent);
+    view->setSoftwareDeviceAllowed(chosen.softwareDeviceAllowed);
+    return view;
 }
 
 } // namespace katana::qt::gpu

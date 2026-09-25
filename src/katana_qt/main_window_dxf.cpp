@@ -10,6 +10,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 
+#include "katana/cad/annotation/export_annotation.hpp"
 #include "katana/dxf/import_command.hpp"
 #include "katana/dxf/reader.hpp"
 #include "katana/dxf/writer.hpp"
@@ -126,7 +127,15 @@ bool MainWindow::exportDxfFile(const std::filesystem::path& path,
     dxfOptions.entities = options.entities;
     dxfOptions.layers = options.layers;
     dxfOptions.originShift = options.originShift;
+    // Annotation at the drawing's annotation scale, labels and every
+    // dimension kind drawn out as the plan view draws them
+    // (cad/annotation/export_annotation.hpp); katana_cli's EXPORT does the
+    // same, so both write the same file.
+    dxfOptions.annotationScale = document_.annotationScale();
     QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto drawn = katana::cad::annotation::drawAnnotationForExport(document_.model(),
+                                                                        dxfOptions.annotationScale);
+    dxfOptions.drawn = &drawn;
     const auto written = katana::dxf::writeDxfFile(document_.model(), path, dxfOptions);
     QApplication::restoreOverrideCursor();
     if (!written.ok()) {

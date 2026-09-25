@@ -602,3 +602,112 @@ TEST(DxfWriter, ASplineComesBackWithItsControlPointsKnotsAndFitPoints)
     EXPECT_EQ(read.fitPoints.size(), 4u);
     EXPECT_NEAR(read.length(), spline->length(), 1e-9);
 }
+
+// ---- annotation (docs/annotation.md, "Exchange") ---------------------------------------
+
+namespace {
+
+// A model with a point and a label of it in a point-number style.
+katana::entity::Model labelledPoint(katana::entity::EntityId& label)
+{
+    katana::entity::Model model;
+    katana::entity::LabelStyle style;
+    style.name = "pt";
+    style.kind = katana::entity::LabelKind::Point;
+    style.text = "{point}";
+    EXPECT_TRUE(model.labelStyles.add(style).ok());
+    const auto point = add(model, PointGeometry{Point2(1.0, 1.0)});
+    label = add(model, katana::entity::LabelGeometry{.target = point, .style = "pt",
+                                                     .anchor = Point2(1.0, 1.0)});
+    return model;
+}
+
+} // namespace
+
+TEST(DxfWriter, PaperSizedTextIsWrittenAtTheAnnotationScale)
+{
+    katana::entity::Model model;
+    TextGeometry note{Point2(0.0, 0.0), "NOTE", 2.5, 0.0};
+    note.paperHeight = 3.5;
+    add(model, note);
+    dxf::ExportOptions options;
+    options.annotationScale = 500.0;
+    const auto back = dxf::readDxf(written(model, options));
+    ASSERT_TRUE(back.ok());
+    ASSERT_EQ(back->entities.size(), 1u);
+    // 3.5 mm at 1:500 is 1.75 m; the model height is not what the sheet shows.
+    EXPECT_DOUBLE_EQ(std::get<TextGeometry>(back->entities[0].geometry).height, 1.75);
+}
+
+TEST(DxfWriter, WithNothingDrawnALabelIsSkippedAndSaidSo)
+{
+    katana::entity::EntityId label = 0;
+    const auto model = labelledPoint(label);
+    const auto out = dxf::writeDxf(model);
+    ASSERT_TRUE(out.ok());
+    EXPECT_EQ(out->entitiesWritten, 1u) << "the point; the label is not counted written";
+    EXPECT_EQ(out->entitiesSkipped, 1u);
+    ASSERT_FALSE(out->warnings.empty());
+    EXPECT_NE(out->warnings.front().find("1 labels were not written"), std::string::npos);
+    EXPECT_EQ(records(out->text, "TEXT"), 0u);
+}
+
+TEST(DxfWriter, DrawnAnnotationIsWrittenAsItsShapesOnItsLayer)
+{
+    katana::entity::EntityId label = 0;
+    auto model = labelledPoint(label);
+    ASSERT_TRUE(model.layers.add(katana::entity::Layer{.name = "Labels"}).ok());
+    Entity moved = *model.entities.find(label);
+    moved.layer = "Labels";
+    ASSERT_TRUE(model.entities.replace(moved).ok());
+    // What cad::annotation::drawAnnotationForExport would hand over: the
+    // label's text and a leader stroke.
+    const std::map<katana::entity::EntityId, std::vector<katana::entity::Geometry>> drawn = {
+        {label,
+         {TextGeometry{Point2(2.0, 2.0), "P1", 1.25, 0.0}, Segment2{Point2(1.0, 1.0), Point2(2.0, 2.0)}}},
+    };
+    dxf::ExportOptions options;
+    options.drawn = &drawn;
+    const auto out = dxf::writeDxf(model, options);
+    ASSERT_TRUE(out.ok());
+    EXPECT_EQ(out->entitiesWritten, 2u);
+    EXPECT_EQ(out->entitiesSkipped, 0u);
+    EXPECT_TRUE(out->warnings.empty());
+    const auto back = dxf::readDxf(out->text);
+    ASSERT_TRUE(back.ok());
+    const auto texts = ofKind<TextGeometry>(*back);
+    ASSERT_EQ(texts.size(), 1u);
+    EXPECT_EQ(std::get<TextGeometry>(texts[0]->geometry).text, "P1");
+    EXPECT_EQ(texts[0]->layer, "Labels");
+    EXPECT_EQ(ofKind<Segment2>(*back).size(), 1u);
+}
+
+TEST(DxfWriter, ALabelDrawnAsNothingIsLeftOutAndSaidSo)
+{
+    katana::entity::EntityId label = 0;
+    const auto model = labelledPoint(label);
+    const std::map<katana::entity::EntityId, std::vector<katana::entity::Geometry>> drawn = {
+        {label, {}}};
+    dxf::ExportOptions options;
+    options.drawn = &drawn;
+    options.annotationScale = 2000.0;
+    const auto out = dxf::writeDxf(model, options);
+    ASSERT_TRUE(out.ok());
+    ASSERT_EQ(out->warnings.size(), 1u);
+    EXPECT_NE(out->warnings.front().find("1 labels had no room at 1:2000"), std::string::npos);
+    EXPECT_EQ(records(out->text, "TEXT"), 0u);
+}
+
+TEST(DxfWriter, WithNothingDrawnALeaderIsItsLineLandingAndNote)
+{
+    katana::entity::Model model;
+    katana::entity::LeaderGeometry leader;
+    leader.vertices = {Point2(0.0, 0.0), Point2(10.0, 10.0)};
+    leader.text = "PIT 12";
+    add(model, leader);
+    const auto out = dxf::writeDxf(model);
+    ASSERT_TRUE(out.ok());
+    // The segment and the landing, and the note.
+    EXPECT_EQ(records(out->text, "LINE"), 2u);
+    EXPECT_EQ(records(out->text, "TEXT"), 1u);
+}

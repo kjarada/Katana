@@ -355,6 +355,10 @@ guesses were wrong in both places):
   byte loop at every level, with no extra call.
 - `transformPoints` takes the kernel from 8 points (two kernel steps). It has
   no caller in the program yet, so its break-even has not been measured.
+- `packDrawList` takes the vertex kernel for any list with a vertex in it.
+  A probe build with a minimum of 1 packed four vertices, one tail and no
+  whole step, as fast as the loop, and 16 or more faster (`docs/gpu.md`,
+  "Packing"), so there is no minimum to keep.
 
 Not used, and why:
 
@@ -497,6 +501,7 @@ any `#pragma omp` other than `omp simd`.
 | `geometry::transformPoints` (Mat4 with Vec3, Mat3 with Point2, in place) | the batch API | 4 points: 3 loads, 6 permutes or blends, 9 multiplies and 9 adds, 6 permutes back (2D: no transpose) | `math::transformPoint` on each point |
 | `geometry::boundsOf` (Point2, Vec3) | `Polyline2::boundingBox`, `TriangleMesh::bounds`, for 16 points or more | 4 points: one MINPD and one MAXPD per register, lanes folded at the end | the `expand()` loop |
 | `geometry::projectToPixels` (float offsets to pixels) | the plan view's cloud splat, 512 points a call, from 4 points | 4 points: two float-to-double widenings, 2 subtractions, 2 multiplies, an add and a subtraction, 4 range compares, 2 truncating conversions blended with "no pixel" | the loop in `point_splat.cpp`; see "Point clouds in the plan view" below |
+| `gpu::packDrawList`'s vertices (double positions to float offsets) | every layer the 3D view hands the GPU, any length | 4 vertices: 3 loads, 3 subtractions and 3 double-to-float conversions, 3 byte rotations, 4 colour blends, 4 stores | the loop in `gpu_scene.cpp`; see `docs/gpu.md`, "Packing" |
 
 Both text kernels are on the real import path. The interop archive import
 decodes the file and then calls `readArchive`, which validates the whole
@@ -799,7 +804,10 @@ What changed:
   rebuild of the drawing alone does not walk the terrain again. The walk
   visits each vertex once rather than once per primitive using it, and falls
   back to `DrawList::bounds()` when an extreme is a zero, the one case where
-  the visiting order decides the result (which zero's sign).
+  the visiting order decides the result (which zero's sign). Since
+  2026-09-25 that walk is `DrawList::bounds()` itself, with the fallback to
+  primitive order inside it, because packing for the GPU needed it too
+  (`docs/gpu.md`, "Packing").
 
 Dispatch thresholds, from a probe build with every minimum at 1
 (`BM_SceneKernelBreakEven*`, `BM_SceneFadeEdges/1-4`): a surface of 4 to 25
