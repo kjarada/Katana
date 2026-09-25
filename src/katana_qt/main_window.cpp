@@ -987,10 +987,13 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
         return reply;
     };
     utilities.runCommand = [this](const QString& line) {
-        // What was being typed on the command line survives the dialog's run.
-        const QString typed = commandInput_->text();
-        runCommand(line);
-        commandInput_->setText(typed);
+        // Echoed as a typed line is, and run as runCommandLine runs a typed
+        // UTILITY line - but never handed to a running tool first: a tool
+        // waiting for a text's string would take any typed line for it, and
+        // the dialog's line is never a text. What was being typed on the
+        // command line is left as it was.
+        commandLog_->appendPlainText("> " + line);
+        (void)utilities_->runLine(line);
     };
     utilities_ = std::make_unique<UtilityWorkbench>(*this, std::move(utilities), surveyMenu);
 }
@@ -1951,16 +1954,22 @@ void MainWindow::runCommandLine()
     }
     // What is typed is echoed - but an ONLINE KEY's value never is.
     commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // A tool waiting for typed text - a Text's string, a count - takes the
+    // whole line before any verb below, as a transparent ZOOM gives way to it
+    // (tools::isTransparentCommand): "Utility pit" is a label on a services
+    // plan, not a UTILITY line to refuse.
+    const bool toolTakesText = views_->toolTakesText();
     // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
     // workbench's, as the interoperability verbs below are the window's - and
-    // before a running tool, which would take the line for an answer.
-    if (online_ != nullptr && online_->runLine(line)) {
+    // before a running tool at a point or a pick, which would take the line
+    // for an answer.
+    if (online_ != nullptr && !toolTakesText && online_->runLine(line)) {
         return;
     }
     // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
     // through the utilities workbench, which frames what a DRAW added - and
     // before a running tool, for ONLINE's reason.
-    if (utilities_ != nullptr && utilities_->runLine(line)) {
+    if (utilities_ != nullptr && !toolTakesText && utilities_->runLine(line)) {
         return;
     }
     // While a tool runs, what is typed is its answer - a point, a distance,
