@@ -7,6 +7,7 @@
 
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "katana/cad/annotation/leader_edit.hpp"
 #include "katana/cad/document.hpp"
@@ -212,4 +213,51 @@ TEST(LeaderEdit, AttachingNeedsAnEntityAndTheValuesAreRowsInOrder)
     EXPECT_EQ(std::get<double>(document.model().entities.find(line)->properties.at("size")), 200.0);
     EXPECT_FALSE(
         ann::setLeaderTargetProperty(document.model(), leader, "", PropertyValue{1.0}).ok());
+}
+
+TEST(LeaderEdit, ANumberedBalloonIsACircleSoItsNumberIsCounted)
+{
+    Document document;
+    const EntityId a = add(document, PointGeometry{Point2(0, 0)});
+    const EntityId b = add(document, PointGeometry{Point2(10, 0)});
+    const std::vector<ann::AnchoredPoint> points{ann::AnchoredPoint{Point2(0, 0), AnchorRef{a}},
+                                                 ann::AnchoredPoint{Point2(5, 5), {}}};
+    ann::LeaderChange box;
+    box.callout = CalloutShape::Box;
+    const auto refused = ann::newLeader(document.model(), points, box, true);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().code, katana::core::ErrorCode::InvalidArgument);
+    EXPECT_NE(refused.error().message.find("circle"), std::string::npos);
+    ann::LeadersForOptions options;
+    options.balloon = true;
+    options.change = box;
+    EXPECT_FALSE(ann::leadersFor(document.model(), {a, b}, options, 1000.0, {}).ok());
+
+    // Given a note, a balloon is not numbered, and may be any shape.
+    box.note = ann::LeaderNote{ann::LeaderNote::Kind::Text, "A"};
+    const auto noted = ann::newLeader(document.model(), points, box, true);
+    ASSERT_TRUE(noted.ok()) << noted.error().describe();
+    EXPECT_EQ(noted->callout, CalloutShape::Box);
+    // A circle numbered, and the next one numbered on from it.
+    const auto first = ann::newLeader(document.model(), points, {}, true);
+    ASSERT_TRUE(first.ok());
+    EXPECT_EQ(first->text, "1");
+    add(document, *first);
+    EXPECT_EQ(ann::nextBalloonNumber(document.model()), 2);
+}
+
+TEST(LeaderEdit, AttachingATipWhereItIsIsNoCommand)
+{
+    Document document;
+    const EntityId line = add(document, Segment2{Point2(0, 0), Point2(40, 0)});
+    const EntityId leader =
+        add(document, LeaderGeometry{.vertices = {Point2(9, 9), Point2(20, 20)}, .text = "X"});
+    const ann::AnchoredPoint place{Point2(10, 0), AnchorRef{line, AnchorPoint::Along, 0, 0.25}};
+    auto attach = ann::attachLeader(document.model(), leader, place);
+    ASSERT_TRUE(attach.ok());
+    ASSERT_NE(*attach, nullptr);
+    ASSERT_TRUE(document.execute(std::move(*attach)).ok());
+    auto again = ann::attachLeader(document.model(), leader, place);
+    ASSERT_TRUE(again.ok());
+    EXPECT_EQ(*again, nullptr) << "on that place already";
 }

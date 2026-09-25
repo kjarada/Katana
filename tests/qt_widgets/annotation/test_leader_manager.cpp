@@ -293,6 +293,220 @@ TEST(LeaderManager, ANoteMadeAStylesAndBackKeepsTheUsersWordsAndLook)
     EXPECT_EQ(d.leader(leader).paperHeight, 2.0);
 }
 
+// The drawing the look-lending cases share: a point with an invert, a text
+// style, and label styles lending all of a look (Invert), none of it
+// (Plain) and a height finer than the form's 3 decimals (Fine).
+struct StyledDrawing : Drawing {
+    EntityId pit = 0;
+    StyledDrawing()
+    {
+        pit = run("POINT 0,0");
+        run("SELECT " + std::to_string(pit));
+        run("PROP SET invert 10.5");
+        run("TEXTSTYLE NEW Notes paper=3.5");
+        run("LABELSTYLE NEW Invert kind=point text=\"INV {prop.invert:.2f}\" textstyle=Notes "
+            "paper=3");
+        run("LABELSTYLE NEW Plain kind=point text=\"P {prop.invert:.1f}\"");
+        run("LABELSTYLE NEW Fine kind=point text=\"F {id}\" paper=2.3456");
+    }
+    // A plain leader on the point, 2 mm high in the default text style.
+    EntityId plainLeader(const char* hang)
+    {
+        return run("LEADER #" + std::to_string(pit) + " " + hang + " text=X paper=2");
+    }
+};
+
+void chooseStyle(QWidget& dialog, const char* name)
+{
+    chooseData(child<QComboBox>(dialog, "leaderNoteKind"), kLabelStyle);
+    auto* style = child<QComboBox>(dialog, "leaderLabelStyle");
+    style->setCurrentIndex(style->findText(QString::fromLatin1(name)));
+}
+
+void chooseTextStyle(QComboBox* box, const char* name)
+{
+    box->setCurrentIndex(box->findData(QString::fromLatin1(name)));
+}
+
+TEST(LeaderManager, ALookSetBackOverAStylesIsKeptAndAnotherStyleLendsOverTheOneBefore)
+{
+    StyledDrawing d;
+    const EntityId kept = d.plainLeader("5,5");
+    LeaderManagerDialog dialog(d.document);
+    auto* textStyle = child<QComboBox>(dialog, "leaderTextStyle");
+    auto* paper = child<QDoubleSpinBox>(dialog, "leaderPaperHeight");
+
+    // The style's words, the leader's own look: set back over the lent one,
+    // it is what Apply gives, though the style would lend its own.
+    ASSERT_TRUE(dialog.showLeader(kept));
+    chooseStyle(dialog, "Invert");
+    EXPECT_EQ(textStyle->currentData().toString(), QStringLiteral("Notes"));
+    EXPECT_EQ(paper->value(), 3.0);
+    chooseTextStyle(textStyle, "");
+    paper->setValue(2.0);
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(kept).labelStyle, "Invert");
+    EXPECT_EQ(d.leader(kept).style, "");
+    EXPECT_EQ(d.leader(kept).paperHeight, 2.0);
+
+    // A style lending nothing, chosen after one lending all: the look from
+    // before either, as LEADER SET labelstyle=Plain gives.
+    const EntityId other = d.plainLeader("5,-5");
+    const EntityId typed = d.plainLeader("-5,-5");
+    ASSERT_TRUE(dialog.showLeader(other));
+    chooseStyle(dialog, "Invert");
+    chooseStyle(dialog, "Plain");
+    EXPECT_EQ(textStyle->currentData().toString(), QString());
+    EXPECT_EQ(paper->value(), 2.0);
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    d.run("LEADER SET " + std::to_string(typed) + " labelstyle=Plain");
+    EXPECT_EQ(d.leader(other).labelStyle, "Plain");
+    EXPECT_EQ(d.leader(other).style, d.leader(typed).style);
+    EXPECT_EQ(d.leader(other).paperHeight, d.leader(typed).paperHeight);
+    EXPECT_EQ(d.leader(other).paperHeight, 2.0);
+}
+
+TEST(LeaderManager, ALookTypedAfterALendIsKeptAndAStylesHeightIsLentExactly)
+{
+    StyledDrawing d;
+    const EntityId typed = d.plainLeader("5,5");
+    const EntityId fine = d.plainLeader("5,-5");
+    LeaderManagerDialog dialog(d.document);
+    auto* textStyle = child<QComboBox>(dialog, "leaderTextStyle");
+    auto* paper = child<QDoubleSpinBox>(dialog, "leaderPaperHeight");
+
+    // Back from the style, only what still shows the style's is put back.
+    ASSERT_TRUE(dialog.showLeader(typed));
+    chooseStyle(dialog, "Invert");
+    paper->setValue(5.0);
+    chooseData(child<QComboBox>(dialog, "leaderNoteKind"), kText);
+    EXPECT_EQ(textStyle->currentData().toString(), QString()) << "lent, so put back";
+    EXPECT_EQ(paper->value(), 5.0) << "the user's own since the lend";
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(typed).text, "X");
+    EXPECT_EQ(d.leader(typed).style, "");
+    EXPECT_EQ(d.leader(typed).paperHeight, 5.0);
+
+    // A height the box shows to 3 decimals is lent whole, as labelstyle= does.
+    ASSERT_TRUE(dialog.showLeader(fine));
+    chooseStyle(dialog, "Fine");
+    EXPECT_EQ(paper->value(), 2.346);
+    EXPECT_FALSE(dialog.formChange().paperHeight) << "the style's own: left to the style";
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(fine).paperHeight, 2.3456);
+}
+
+TEST(LeaderManager, AStyleThatComesOrGoesUnderTheFormLendsItsLook)
+{
+    Drawing d;
+    const EntityId pit = d.run("POINT 0,0");
+    d.run("SELECT " + std::to_string(pit));
+    d.run("PROP SET invert 10.5");
+    d.run("TEXTSTYLE NEW Notes paper=3.5");
+    const EntityId leader = d.run("LEADER #" + std::to_string(pit) + " 5,5 text=X paper=2");
+    LeaderManagerDialog dialog(d.document);
+    ASSERT_TRUE(dialog.showLeader(leader));
+    auto* style = child<QComboBox>(dialog, "leaderLabelStyle");
+    auto* textStyle = child<QComboBox>(dialog, "leaderTextStyle");
+    auto* paper = child<QDoubleSpinBox>(dialog, "leaderPaperHeight");
+    chooseData(child<QComboBox>(dialog, "leaderNoteKind"), kLabelStyle);
+    EXPECT_EQ(style->count(), 0);
+    EXPECT_FALSE(dialog.apply()) << "there is no style to be";
+
+    // The first style made while the form waits for one: named, and lending.
+    d.run("LABELSTYLE NEW Zed kind=point text=\"Z {prop.invert:.1f}\" textstyle=Notes paper=3");
+    processEvents();
+    EXPECT_EQ(style->currentText(), QStringLiteral("Zed"));
+    EXPECT_EQ(textStyle->currentData().toString(), QStringLiteral("Notes"));
+    EXPECT_EQ(paper->value(), 3.0);
+    EXPECT_EQ(dialog.preview(), QStringLiteral("Z 10.5"));
+
+    // Another made leaves the choice; the chosen one deleted moves it, and
+    // what that one lent goes with it.
+    d.run("LABELSTYLE NEW Alpha kind=point text=\"A {prop.invert:.1f}\"");
+    processEvents();
+    EXPECT_EQ(style->currentText(), QStringLiteral("Zed"));
+    d.run("LABELSTYLE DELETE Zed");
+    processEvents();
+    EXPECT_EQ(style->currentText(), QStringLiteral("Alpha"));
+    EXPECT_EQ(textStyle->currentData().toString(), QString());
+    EXPECT_EQ(paper->value(), 2.0);
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(leader).labelStyle, "Alpha");
+    EXPECT_EQ(d.leader(leader).style, "");
+    EXPECT_EQ(d.leader(leader).paperHeight, 2.0);
+}
+
+TEST(LeaderManager, ForSelectionShowsTheLookAStyleLendsAndMakesWhatItShows)
+{
+    StyledDrawing d;
+    const EntityId other = d.run("POINT 20,0");
+    d.run("SELECT " + std::to_string(other));
+    d.run("PROP SET invert 9.25");
+    d.run("SELECT " + std::to_string(d.pit));
+    LeaderManagerDialog dialog(d.document);
+    dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
+    auto* kind = child<QComboBox>(dialog, "leaderForNoteKind");
+    auto* style = child<QComboBox>(dialog, "leaderForLabelStyle");
+    auto* textStyle = child<QComboBox>(dialog, "leaderForTextStyle");
+    auto* paper = child<QDoubleSpinBox>(dialog, "leaderForPaperHeight");
+    chooseData(kind, kLabelStyle);
+    style->setCurrentIndex(style->findText(QStringLiteral("Fine")));
+    EXPECT_EQ(paper->value(), 2.346) << "Fine's height, to the box's decimals";
+    style->setCurrentIndex(style->findText(QStringLiteral("Invert")));
+    EXPECT_EQ(textStyle->currentData().toString(), QStringLiteral("Notes"));
+    EXPECT_EQ(paper->value(), 3.0);
+    EXPECT_EQ(dialog.forPreview(), QStringLiteral("INV 10.50"));
+    ASSERT_TRUE(dialog.makeForSelection()) << dialog.problem().toStdString();
+    const EntityId lent = d.document.lastCreatedEntities().front();
+    EXPECT_EQ(d.leader(lent).style, "Notes");
+    EXPECT_EQ(d.leader(lent).paperHeight, 3.0);
+
+    // Set to the default face and the text style's height, that is what the
+    // leader gets - not the style's, lent over what the boxes show.
+    chooseTextStyle(textStyle, "");
+    paper->setValue(0.0);
+    d.run("SELECT " + std::to_string(other));
+    processEvents();
+    ASSERT_TRUE(dialog.makeForSelection()) << dialog.problem().toStdString();
+    const EntityId own = d.document.lastCreatedEntities().front();
+    EXPECT_EQ(d.leader(own).labelStyle, "Invert");
+    EXPECT_EQ(d.leader(own).style, "");
+    EXPECT_EQ(d.leader(own).paperHeight, 0.0);
+
+    // Lent again, then the note a template: the look before comes back.
+    style->setCurrentIndex(style->findText(QStringLiteral("Plain")));
+    style->setCurrentIndex(style->findText(QStringLiteral("Invert")));
+    EXPECT_EQ(textStyle->currentData().toString(), QStringLiteral("Notes"));
+    chooseData(kind, kTemplate);
+    EXPECT_EQ(textStyle->currentData().toString(), QString());
+    EXPECT_EQ(paper->value(), 0.0);
+}
+
+TEST(LeaderManager, ANumberedBalloonMustStayACircle)
+{
+    Drawing d;
+    const EntityId a = d.run("POINT 0,0");
+    d.run("SELECT " + std::to_string(a));
+    LeaderManagerDialog dialog(d.document);
+    dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
+    child<QCheckBox>(dialog, "leaderForBalloon")->setChecked(true);
+    chooseData(child<QComboBox>(dialog, "leaderForCallout"), kBox);
+    // A box's number would not be counted, and so be given again.
+    EXPECT_TRUE(dialog.forPreview().startsWith(QStringLiteral("a numbered balloon is a circle")))
+        << dialog.forPreview().toStdString();
+    const std::size_t before = d.steps();
+    EXPECT_FALSE(dialog.makeForSelection());
+    EXPECT_TRUE(dialog.problem().startsWith(QStringLiteral("a numbered balloon is a circle")))
+        << dialog.problem().toStdString();
+    EXPECT_EQ(d.steps(), before);
+    // With a note it is not numbered, and may be a box.
+    child<QPlainTextEdit>(dialog, "leaderForNote")->setPlainText(QStringLiteral("A"));
+    ASSERT_TRUE(dialog.makeForSelection()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(d.document.lastCreatedEntities().front()).callout,
+              katana::entity::CalloutShape::Box);
+}
+
 TEST(LeaderManager, AStylesNoteIsReadAfreshWhenTheStyleChanges)
 {
     Drawing d;
@@ -386,6 +600,11 @@ TEST(LeaderManager, SeveralSelectedLeadersAreChangedTogetherInOneStep)
     EXPECT_EQ(d.steps(), before + 2);
     EXPECT_EQ(d.leader(a).text, "A " + std::to_string(pit));
     EXPECT_EQ(d.leader(b).text, "B " + std::to_string(pit));
+    processEvents();
+    ASSERT_TRUE(dialog.detach()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.steps(), before + 3);
+    EXPECT_FALSE(d.leader(a).tipRef.associated());
+    EXPECT_FALSE(d.leader(b).tipRef.associated());
 
     // One selected: the form's leader alone.
     d.run("SELECT " + std::to_string(b));
@@ -397,6 +616,9 @@ TEST(LeaderManager, SeveralSelectedLeadersAreChangedTogetherInOneStep)
 TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
 {
     Drawing d;
+    // Made first, so selected it comes before the line: it offers no place
+    // for a tip and is passed over.
+    const EntityId dim = d.run("DIM 0,20 10,20 2");
     const EntityId line = d.run("LINE 0,0 40,0");
     const EntityId leader = d.run("LEADER 10,1 20,10 text=X");
     LeaderManagerDialog dialog(d.document);
@@ -404,11 +626,27 @@ TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
     auto* along = child<QDoubleSpinBox>(dialog, "leaderAlong");
     EXPECT_FALSE(attach->isEnabled()) << "nothing else is selected";
     EXPECT_FALSE(along->isEnabled()) << "a plain leader is along nothing";
-    d.run("SELECT " + std::to_string(leader) + " " + std::to_string(line));
+    d.run("SELECT " + std::to_string(dim) + " " + std::to_string(leader) + " " +
+          std::to_string(line));
     processEvents();
     ASSERT_EQ(dialog.currentLeader(), leader);
     EXPECT_TRUE(attach->isEnabled());
+
+    // Attaching acts on the leader as drawn: with the form changed, it waits.
+    auto* note = child<QPlainTextEdit>(dialog, "leaderNote");
+    note->insertPlainText(QStringLiteral("!"));
+    EXPECT_FALSE(attach->isEnabled());
+    EXPECT_TRUE(attach->toolTip().contains(QStringLiteral("not applied")));
     const std::size_t before = d.steps();
+    EXPECT_FALSE(dialog.attachToSelected());
+    EXPECT_TRUE(dialog.problem().contains(QStringLiteral("not applied")))
+        << dialog.problem().toStdString();
+    EXPECT_EQ(d.steps(), before);
+    EXPECT_FALSE(d.leader(leader).tipRef.associated());
+    note->setPlainText(QStringLiteral("X"));
+    EXPECT_TRUE(dialog.formChange().empty()) << "back to what it showed";
+    EXPECT_TRUE(attach->isEnabled());
+
     ASSERT_TRUE(dialog.attachToSelected()) << dialog.problem().toStdString();
     EXPECT_EQ(d.steps(), before + 1);
     // The tip (10,1) is over a quarter of the 40-long line: its foot (10,0).
@@ -419,6 +657,8 @@ TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
     EXPECT_EQ(attached.vertices.front(), Point2(10, 0));
 
     processEvents();
+    ASSERT_TRUE(dialog.attachToSelected()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.steps(), before + 1) << "on that place already: no step";
     EXPECT_TRUE(along->isEnabled());
     EXPECT_EQ(along->value(), 25.0);
     EXPECT_TRUE(
@@ -570,10 +810,12 @@ TEST(LeaderManager, ALabelStyleNoteLendsItsLookAndIsReadLive)
 TEST(LeaderManager, ForSelectionMakesALeaderToEachSelectedEntityInOneStep)
 {
     Drawing d;
+    // The dimension first: the first selected offers no place for a leader,
+    // so the preview passes over it to a, and not on to b.
+    const EntityId dim = d.run("DIM 0,20 10,20 2");
     const EntityId a = d.run("POINT 0,0");
     const EntityId b = d.run("POINT 10,0");
-    const EntityId dim = d.run("DIM 0,20 10,20 2");
-    d.run("SELECT " + std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(dim));
+    d.run("SELECT " + std::to_string(dim) + " " + std::to_string(a) + " " + std::to_string(b));
     LeaderManagerDialog dialog(d.document);
     dialog.showTab(LeaderManagerDialog::Tab::ForSelection);
     processEvents();
@@ -581,6 +823,13 @@ TEST(LeaderManager, ForSelectionMakesALeaderToEachSelectedEntityInOneStep)
               QStringLiteral("3 entities selected"));
     chooseData(child<QComboBox>(dialog, "leaderForNoteKind"), kTemplate);
     child<QPlainTextEdit>(dialog, "leaderForNote")->setPlainText(QStringLiteral("{type} {id}"));
+    EXPECT_EQ(dialog.forPreview(), QStringLiteral("Point ") + QString::number(a));
+    EXPECT_EQ(child<QLabel>(dialog, "leaderForCheck")->text(),
+              QStringLiteral("For Point ") + QString::number(a) +
+                  QStringLiteral(", the first selected:"));
+    EXPECT_TRUE(
+        valueRows(dialog, "leaderForValues").contains(QStringLiteral("id=") + QString::number(a)))
+        << valueRows(dialog, "leaderForValues").join(", ").toStdString();
     const std::size_t before = d.steps();
     ASSERT_TRUE(dialog.makeForSelection()) << dialog.problem().toStdString();
     EXPECT_EQ(d.steps(), before + 1);
@@ -624,6 +873,7 @@ TEST(LeaderManager, ForSelectionIsPreviewedForTheFirstAndPlacedAsTold)
 {
     Drawing d;
     d.run("ANNOSCALE 500");
+    d.run("TEXTSTYLE NEW Notes paper=3.5");
     const EntityId pit = d.run("POINT 0,0");
     d.run("SELECT " + std::to_string(pit));
     d.run("PROP SET invert 10.5");
@@ -654,6 +904,12 @@ TEST(LeaderManager, ForSelectionIsPreviewedForTheFirstAndPlacedAsTold)
     child<QDoubleSpinBox>(dialog, "leaderForAngle")->setValue(90.0);
     child<QDoubleSpinBox>(dialog, "leaderForLength")->setValue(10.0);
     chooseData(child<QComboBox>(dialog, "leaderForCallout"), kBox);
+    chooseData(child<QComboBox>(dialog, "leaderForArrow"),
+               static_cast<int>(katana::entity::ArrowHead::Open));
+    auto* textStyle = child<QComboBox>(dialog, "leaderForTextStyle");
+    textStyle->setCurrentIndex(textStyle->findData(QStringLiteral("Notes")));
+    // Not the text style's 3.5: the box's own is what is sent.
+    child<QDoubleSpinBox>(dialog, "leaderForPaperHeight")->setValue(2.0);
     auto* arrowSize = child<QDoubleSpinBox>(dialog, "leaderForArrowSize");
     auto* landing = child<QDoubleSpinBox>(dialog, "leaderForLanding");
     EXPECT_EQ(arrowSize->value(), LeaderGeometry{}.arrowSize) << "a new leader's own, to start";
@@ -672,6 +928,9 @@ TEST(LeaderManager, ForSelectionIsPreviewedForTheFirstAndPlacedAsTold)
     EXPECT_NEAR(shape.vertices.back().x, 0.0, 1e-12);
     EXPECT_NEAR(shape.vertices.back().y, 5.0, 1e-12);
     EXPECT_EQ(shape.callout, katana::entity::CalloutShape::Box);
+    EXPECT_EQ(shape.arrow, katana::entity::ArrowHead::Open);
+    EXPECT_EQ(shape.style, "Notes");
+    EXPECT_EQ(shape.paperHeight, 2.0);
     EXPECT_EQ(shape.arrowSize, 4.0);
     EXPECT_EQ(shape.landing, 0.0) << "none";
     EXPECT_EQ(d.says(made[0]), "IL 10.50 " + std::to_string(pit));
