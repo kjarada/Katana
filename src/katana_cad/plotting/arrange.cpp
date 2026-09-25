@@ -1180,7 +1180,9 @@ Result<std::vector<std::string>> alignViewports(Sheet& sheet, std::span<const st
     // The box the edges are taken from: the views' own, or the tiling area
     // for one alone.
     Box2 reference;
-    if (placed.size() == 1) {
+    // One asked for alone aligns to the tiling area; two asked for of which
+    // one is not placed is not "one alone", and the placed one keeps its place.
+    if (found->size() == 1) {
         reference = tilingArea(sheet);
     } else {
         for (const Viewport* viewport : placed) {
