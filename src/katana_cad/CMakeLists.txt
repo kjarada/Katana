@@ -22,6 +22,7 @@ add_library(katana_cad STATIC
     viewport_layout.cpp
     layer_overrides.cpp
     view_set.cpp
+    scope_verbs.cpp
 )
 # The interactive tools (include/katana/cad/interactive_tool.hpp) are globbed:
 # each family is written by its own author, often at the same time as the
@@ -57,7 +58,8 @@ target_sources(katana_cad PRIVATE ${_cad_annotation_sources})
 # The AS 5488 subsurface utility verbs and the drawing they make
 # (include/katana/cad/utilities/, docs/subsurface_utilities.md): here, over
 # katana_survey's grading, so the window, katana_cli and katana_mcp share them.
-target_sources(katana_cad PRIVATE utilities/utility_drawing.cpp utilities/utility_verbs.cpp)
+target_sources(katana_cad PRIVATE utilities/utility_drawing.cpp utilities/utility_data.cpp
+                                  utilities/utility_verbs.cpp)
 katana_target_defaults(katana_cad)
 # The scene build's kernels (docs/performance.md, "SIMD: kernels chosen at run
 # time"): lighting, colour and edge fades of dense TINs and meshes.

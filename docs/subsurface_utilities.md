@@ -41,6 +41,12 @@ project specification, and set them where they differ.
 | Does the deliverable meet the client's schema? | `subsurface::checkDelivery` | `CHECK ... SCHEMA` |
 | What should the schema's Clash attribute say? | `subsurface::clashOf` | `CLEARANCE` |
 | Where is each stretch, at what level, on the plan? | `utilities::drawUtilities` | `DRAW` |
+| What does it grade as now that it has been edited in CAD? | `utilities::planUtilityRegrade` | `REGRADE` |
+| What does the drawing deliver, as a schedule? | `subsurface::writeUtilityCsv` | `SCHEDULE` |
+
+Every question but the drawing's is asked of a schedule file or of what is
+drawn, chosen by the scope and filter words every verb shares ("Drawing
+data", below).
 
 ## Decisions, and where this is stricter than the standard
 
@@ -147,24 +153,61 @@ the same at the window's command line, in a `katana_cli` script and in a
 quoted. `HELP UTILITY` lists every option.
 
 ```
-UTILITY REPORT <schedule.csv> [MINCOVER <m>] [SPACING <m>]
-UTILITY VERIFY <schedule.csv>
-UTILITY CLEARANCE <schedule.csv> <design.csv> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
-UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>
-UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+UTILITY REPORT    <schedule.csv> | <scope> [MINCOVER <m>] [SPACING <m>]
+UTILITY VERIFY    <schedule.csv> | <scope>
+UTILITY CLEARANCE <schedule.csv> | <scope> [DESIGN] <design.csv> | #<id> [LEVEL <z>] | ALIGNMENT <name>
+                  [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
+UTILITY CHECK     <schedule.csv> | <scope> SCHEMA <schema.csv>
+UTILITY DRAW      <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+UTILITY REGRADE   <scope> [SPACING <m>] [MINCOVER <m>]
+UTILITY SCHEDULE  <out.csv> <scope> [SCHEMA <schema.csv>]
 ```
 
-`REPORT`, `VERIFY`, `CLEARANCE` and `CHECK` read the files, grade and reply
-with the report; they never touch the drawing, so they are safe against any
-open project. `SPACING` is `GradingSettings::maximumDetectedSpacing` (default
-10 m) for both `REPORT` and `DRAW`, so a drawing and a report of one schedule
+`<scope>` is what every verb on drawing data takes, read by the one shared
+parser (`docs/cad.md`, "Scope and filter"): `SELECTION`, `DRAWING`, `VIEW
+[id]`, `AREA x0,y0,x1,y1` or `LAYERS a,b [ONLY]`, then `[WHERE key=value
+...]`. A first word that is one of those, or `WHERE`, takes the services
+drawn in the document ("Drawing data", below); anything else is the path of
+a schedule, as before - a file named like a scope word is given with its
+directory (`./drawing`).
+
+`REPORT`, `VERIFY`, `CLEARANCE`, `CHECK` and `SCHEDULE` read and reply; they
+never touch the drawing, so they are safe against any open project.
+`SPACING` is `GradingSettings::maximumDetectedSpacing` (default 10 m) for
+`REPORT`, `DRAW` and `REGRADE`, so a drawing and a report of one schedule
 agree. `CHECK` with errors against the schema is refused, and the refusal
 carries the whole check - a script that stops must still say why. `katana_cli`
 prints the refusal's first line on stderr, as every refusal, and the check
 after it on stdout, where a report goes, so `katana_cli -c "UTILITY CHECK
 ..." > check.txt` keeps the check exactly when it failed; and exits 1. An option
 that is not the verb's, one given twice, or a negative or missing number is
-refused by name; so is a file that cannot be read or parsed, with its path.
+refused by name (`LEVEL` alone may be negative: a level below the datum); so
+is a file that cannot be read or parsed, with its path.
+
+The proposed works `CLEARANCE` measures against are a design centre line
+from one of three places. `DESIGN` may be left out, since the design file's
+second place is what the verb always took:
+
+- **A design file** (`parseDesignCsv`), as before.
+- **An entity drawn as the centre line**, `#<id>`: a line or a polyline (a
+  closed one returns to its start; anything else is refused by its kind).
+  Its levels are `LEVEL`'s at every vertex when given, else the entity's own
+  heights (`entity::heightsOf`, the `elevation`/`elevations` a 3D string
+  carries), else none - and a design with no levels is cleared in plan only,
+  as a design file without a level column is. `LEVEL` with a file or an
+  alignment is refused: they carry their own.
+- **A document alignment**, `ALIGNMENT <name>` (`ALIGN`, `docs/cad.md`): its
+  horizontal geometry chorded to 1 mm and its design profile's levels, where
+  it has one (`utilities::designFromAlignment`). The stations are each
+  element's ends, as many along a curve as the one sagitta rule
+  (`geometry::sagittaChordCount`) asks for 1 mm, every key station of the
+  profile, and enough inside each vertical curve that the straight line
+  between two samples is within 1 mm of the parabola: a chord of length l on
+  a curve whose grade changes by A over L departs from it by at most
+  A l^2 / (8 L), so l = sqrt(8 L x 0.001 / A). A millimetre because the
+  clearance report prints millimetres. Stations the profile does not reach
+  have no level. `UtilityData.AnAlignmentsDesignIsWithinAMillimetreOfItsCurvesInPlanAndInLevel`
+  holds every chord to it, on an alignment with a curve and a crest.
 
 ## Drawing the services
 
@@ -244,15 +287,24 @@ not recorded, or cannot be computed, is absent - absent is not zero - and
 that includes `utility.status`, which a schedule without one leaves off, as
 the report lists it missing. Two are always there: `utility.type`, which
 names the layer (`unknown` when not recorded), and `utility.level_ref` beside
-a service level, the part of the service the level is on - `top` for a level
+a level or a depth, the part of the service it is on - `top` for a level
 given with no reference, as the grading and the cover read it, so it does
-not say whether the reference was recorded.
+not say whether the reference was recorded. A reference recorded as
+`unknown` is kept even with no level, since it is what the schedule said.
+
+**Each point carries its whole row of the schedule** - its place along the
+line, its recorded level and depth as well as the service level made of
+them, its uncertainties, its method, claim, what it verifies, the path to
+the next point and its schema fields - and its line's attributes too. So the
+points alone are the schedule: "Drawing data", below, reads them back, and
+the runs are derived output that `UTILITY REGRADE` draws again.
 
 | On | Properties |
 |---|---|
 | each polyline | `utility.line`, `utility.type`, `utility.quality_level` (the run's), `utility.limited_by` (why the run is below its ends, each reason once), `utility.length` (the run's plan length), `utility.from` and `utility.to` (its end vertices), `utility.owner`, `utility.material`, `utility.diameter` (metres) and `utility.diameter_inside`, `utility.configuration`, `utility.description`, `utility.status` |
-| each point | `utility.line`, `utility.type`, `utility.vertex`, `utility.method`, `utility.quality_level` (the vertex's graded level), `utility.claimed` and `utility.over_claim`, `utility.service_level` with `utility.level_ref`, `utility.level_qualified`, `utility.surface_level`, `utility.cover` with `utility.cover_note`, `utility.cover_below_minimum` (only with `MINCOVER`), `utility.verifies` |
-| both | a delivery schema's own attributes, uninterpreted, as `utility.field.<name>` |
+| each point: the row | `utility.line`, `utility.vertex`, `utility.order` (its place along the line, from 1), `utility.method`, `utility.level` and `utility.depth` (as recorded), `utility.level_ref`, `utility.surface_level`, `utility.h_unc` and `utility.v_unc`, `utility.claimed`, `utility.verifies`, `utility.path` (to the next point: on every point but the last when the schedule gave a path for any stretch of the line, else on none), and the line's `utility.type`, `utility.owner`, `utility.material`, `utility.diameter`, `utility.diameter_inside`, `utility.configuration`, `utility.description`, `utility.status` |
+| each point: the grading | `utility.quality_level` (the vertex's graded level), `utility.over_claim`, `utility.service_level`, `utility.level_qualified`, `utility.cover` with `utility.cover_note`, `utility.cover_below_minimum` (only with `MINCOVER`) |
+| both | a delivery schema's own attributes, uninterpreted, as `utility.field.<name>`: a polyline its line's, a point its line's and its own. Which is which is the schedule format's to say (`subsurface::utilityCsvColumns`, `CarriedOn`), as it said when the schedule was read |
 
 The reply is one record a line: the drawing, then each service.
 
@@ -270,6 +322,99 @@ end to frame - survey data in a real coordinate system usually lands far
 from what is on the screen. `utilities::drawReplyBounds` reads it back from
 the reply, so every front end reads it the same way. `cli.utility_draw_adds_the_graded_sample_to_the_drawing`
 and `tests/cad/utilities/test_utility_verbs.cpp` run it on the sample.
+
+## Drawing data: the verbs on what is drawn
+
+The owner asked on 2026-09-26 for "the utility tools to act on data on view,
+layer/s, elements, filtered elements, like global change". Every verb but
+`DRAW` takes the services drawn in the document, by the scope and filter
+words Global Modify takes (`docs/cad.md`, "Scope and filter"), as well as a
+schedule file. The file stays a source beside the drawing: a delivered
+schedule is still checked before anyone draws it.
+
+`utilities::readUtilityData` (`include/katana/cad/utilities/utility_data.hpp`)
+reads the scope's services from the drawn points:
+
+- **A scope that takes part of a line takes the whole line**, because the
+  grading is per line: a run of it, one of its points, or anything else
+  carrying its `utility.line` brings in every point of it in the drawing.
+  The reply's first record says so, after the scope's own keys:
+  `scope=layers layers=utilities/water/QL-B sublayers=yes matched=1 lines=1
+  completed=1 ignored=0` - `completed` counts the lines read whole from
+  beyond the scope, `ignored` what the scope took that carries no utility
+  data. A scope that takes nothing is reported, not refused ("no utility
+  lines in the scope: nothing to report").
+- **The services are in the order drawn**, by their first point's id -
+  schedule order for services one `DRAW` made; the points of each by
+  `utility.order`. That is what makes the first proof below hold.
+- **A line whose points do not agree is refused by name**, and nothing is
+  guessed: two points at one `utility.order` (a copy of a point, or a
+  schedule drawn twice), a point missing its order, vertex id or method, a
+  method, level reference, claim or path that does not read, a number that
+  is not one, a depth above the surface, two points of one line that give its
+  owner (or any line attribute) differently, or a line with its runs left and
+  no points. A guess at which point is right would be a schedule nobody
+  wrote. Values a person types in the property panel read as the schedule
+  reads them: `EML` is a method, `19` is a level, `2.5` a place between the
+  second and third points.
+
+Three proofs hold the drawing to the schedule, each a test in
+`tests/cad/utilities/test_utility_data.cpp`:
+
+1. **A schedule drawn and reported from the drawing is the schedule's
+   report**, word for word after the scope record, for both samples and with
+   `MINCOVER` and `SPACING` (`UtilityData.TheReportOfTheDrawingIsTheReportOfTheScheduleItWasDrawnFrom`);
+   `VERIFY` and `CLEARANCE` likewise.
+2. **The schedule written from the drawing reads back as the lines drawn**,
+   field for field and doubles to the bit - `UtilityLine`'s `==`
+   (`UtilityData.AScheduleWrittenFromTheDrawingReadsBackAsTheLinesDrawn`).
+3. **A point moved or a method edited, then `REGRADE`, draws exactly what a
+   `DRAW` of the schedule so edited draws**, entity for entity, and one undo
+   puts every entity back, ids and all
+   (`UtilityData.RegradeAfterAMovedPointDrawsWhatADrawOfTheScheduleSoEditedDraws`).
+
+**`UTILITY REGRADE <scope> [SPACING <m>] [MINCOVER <m>]`** grades the lines in
+scope again from their points as they are now and replaces their runs and
+their points' graded properties, as ONE undo step named `UTILITY REGRADE`
+(`utilities::planUtilityRegrade`). A point keeps its id and everything that
+is a person's - their own properties (another `utility.` one too), style,
+colour; its `utility.` properties are those a `DRAW` of its row writes. A
+line whose runs come out the same is left alone, and a regrade that changes
+nothing pushes no undo step. Each line is drawn under the prefix it was
+drawn under, read from its points' layer `<prefix>/<type>/points`, else its
+runs'; a point on its type's points layer follows an edited type to the new
+type's layer, one a person put elsewhere stays there. It is all or nothing:
+a line that cannot be graded, or a run on a locked layer, refuses the whole
+regrade and nothing changes. The reply is `DRAW`'s records, the first
+`utilities regraded changed=<lines changed> ... bounds=`, which
+`utilities::drawReplyBounds` reads as it reads a draw's, then the scope
+record.
+
+**`UTILITY SCHEDULE <out.csv> <scope> [SCHEMA <schema.csv>]`** writes the lines
+in scope as a schedule (`subsurface::writeUtilityCsv`), so a drawing edited
+in CAD becomes a deliverable again: one row per point, the line's attributes
+on every row, each number in the shortest text that reads back exactly
+(`core::formatExactReal`), a diameter in the millimetres that divide back to
+it, and a column only when some row has a value for it. It overwrites the
+file, as every export does headless. With `SCHEMA`, it writes in the
+client's words (`subsurface::utilityCsvDialect`): each column under the
+schema attribute that is one of its names (`line` as `AssetIdentifier`,
+`method` as `LocateMethod`), each word value in the first spelling the
+schema's domain lists for it (`in service` as `In Service`, QL-B as
+`Quality Level B`). A value that cannot be written - a line break in a text,
+a kept field no column carries - is refused by name, so a written schedule
+always reads back.
+
+**`UTILITY CHECK <scope> SCHEMA <schema.csv>`** checks the drawing as the
+schedule `SCHEDULE ... SCHEMA` would write from it: what the drawing would
+deliver. So a spelling the file got wrong and the drawing holds as a value -
+`In service` for `In Service` - is not found in the drawing, and a value the
+schema has no spelling for is written in Katana's own, for the check to
+find. The line numbers in its findings are those of that written schedule;
+`SCHEDULE` with the same schema writes it for reading beside the check.
+(Rejected: keeping each cell's original text on the points. It would go
+stale at the first edit in CAD, and the check would then pass a value the
+drawing no longer holds.)
 
 ## The TfNSW Utility Schema and Specification
 
@@ -369,6 +514,22 @@ framed on what was drawn. `docs/desktop.md` ("Survey > Subsurface Utilities")
 describes how it is built.
 
 ## Not done
+
+- The utilities dialog takes files only: its Drawing source, the scope and
+  filter controls, the design from an entity or an alignment, and the
+  Regrade and Schedule tabs are the window's half, not yet built. Until
+  then the window's command line runs every verb above, except that `VIEW`
+  is refused there as it is headless, because the window does not yet
+  supply the interpreter's scope context (`CommandInterpreter::setScopeContext`).
+- `REGRADE` leaves a quality-level layer it has emptied (a line no longer
+  QL-C anywhere) in the layer table, and draws new runs ByLayer, not in a
+  style or colour a person gave the old ones: the runs are derived output,
+  and removing a layer is `PURGE`'s decision, not a regrade's.
+- A drawing made by a `UTILITY DRAW` before 2026-09-26 has points without
+  `utility.order` and the rest of the row, and is refused by name; draw its
+  schedule again.
+- A design centre line drawn as an arc, a circle or a spline is refused;
+  draw it as a polyline or make it an alignment.
 
 - The drawing is plan only: levels, depths and cover are properties of the
   points, not a 3D string, and pits, valves and poles are points, not

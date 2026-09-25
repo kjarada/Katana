@@ -90,6 +90,8 @@ struct UtilityAttributes {
     // by the schema's own attribute name. Kept so that they can be checked
     // (delivery_schema.hpp) and reported, never dropped.
     std::map<std::string, std::string> fields;
+
+    friend bool operator==(const UtilityAttributes&, const UtilityAttributes&) = default;
 };
 
 // Which part of the service a recorded level is ON. A level without this is
@@ -134,6 +136,8 @@ struct UtilityVertex {
     // (a depth description, the date obtained, a pothole report), by the
     // schema's attribute name.
     std::map<std::string, std::string> fields;
+
+    friend bool operator==(const UtilityVertex&, const UtilityVertex&) = default;
 };
 
 // The level of the recorded point on the service: `level`, or else surface
@@ -160,6 +164,10 @@ struct UtilityLine {
     // One per segment, i.e. vertices.size() - 1 entries; empty means every
     // segment is Detected. Any other size is an InvalidArgument.
     std::vector<PathEvidence> pathEvidence;
+
+    // Field by field, doubles exactly: what a schedule written from the
+    // drawing and read back is held to (writeUtilityCsv, utility_csv.hpp).
+    friend bool operator==(const UtilityLine&, const UtilityLine&) = default;
 };
 
 struct GradingSettings {

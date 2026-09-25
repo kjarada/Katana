@@ -27,6 +27,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
+#include "katana/cad/scope_verbs.hpp"
 #include "katana/core/error.hpp"
 
 namespace katana::cad {
@@ -64,6 +65,12 @@ class CommandInterpreter {
         sheetContext_ = std::move(provider);
     }
 
+    // What the scope word VIEW means (scope_verbs.hpp): the window's active
+    // plan view, or the view with the id given, with its own hidden layers
+    // and its visible area. Headless there is none, and VIEW is refused in
+    // favour of AREA.
+    void setScopeContext(ScopeViewProvider provider) { scopeViews_ = std::move(provider); }
+
     // Forgets the "last point" that relative (@dx,dy) and polar (@d<a) points
     // resolve against. The interpreter cannot see a document being replaced
     // behind it, so a front end that swaps documents must say so - otherwise
@@ -96,9 +103,8 @@ class CommandInterpreter {
     // printing the same report the Survey menu's dialogs print.
     [[nodiscard]] Reply survey(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply attributes(const std::string& verb, const Tokens& args);
-    // MODIFY: Global Modify (global_modify.hpp) on the selection, the drawing
-    // or named layers. The interpreter knows no view, so the View scope is
-    // the window's alone.
+    // MODIFY: Global Modify (global_modify.hpp) on the shared scope and filter
+    // words (scope_verbs.hpp); VIEW through the window's scope context.
     [[nodiscard]] Reply modify(const Tokens& args);
     [[nodiscard]] Reply undoRedo(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply file(const std::string& verb, const Tokens& args);
@@ -131,6 +137,7 @@ class CommandInterpreter {
     std::vector<std::string> history_;
     std::optional<katana::geometry::Point2> lastPoint_;
     katana::cad::plotting::SheetVerbContextProvider sheetContext_;
+    ScopeViewProvider scopeViews_;
 };
 
 } // namespace katana::cad
