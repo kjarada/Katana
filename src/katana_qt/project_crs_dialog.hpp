@@ -3,7 +3,10 @@
 // File > Project Coordinate System: the project's coordinate system chosen
 // from the common list, from what suits a place, or typed (an EPSG code, WKT
 // or a PROJ string), each checked as it is typed (docs/cad.md, "The project's
-// coordinate system").
+// coordinate system"). The place is given by whoever opens it, or typed as a
+// longitude and latitude (projectCrsPlace, then projectCrsSuggest) - filled
+// in with the drawing's centre when the project has a system to say where
+// that is.
 //
 // A thin front end over Document::setCoordinateSystem: OK is ONE undo step,
 // and everything here can be done without it with the CRS verb (CRS SET,
@@ -19,6 +22,7 @@
 
 class QLabel;
 class QLineEdit;
+class QPushButton;
 class QTreeWidget;
 
 namespace katana::qt {
@@ -36,6 +40,10 @@ class ProjectCrsDialog final : public QDialog {
     // Sets the project's coordinate system from the text box, as one step.
     // False, with the reason in the check line, when it names no system.
     bool apply();
+    // Suggest: the systems for the place typed in projectCrsPlace listed
+    // first, as CRS SUGGEST lists them. False, with the reason in the check
+    // line, when it is not a longitude and a latitude.
+    bool suggest();
 
   private:
     void fill(const QString& filter);
@@ -45,6 +53,7 @@ class ProjectCrsDialog final : public QDialog {
     std::optional<std::pair<double, double>> place_;
     QLabel* current_ = nullptr;
     QLineEdit* search_ = nullptr;
+    QLineEdit* placeText_ = nullptr;
     QTreeWidget* list_ = nullptr;
     QLineEdit* text_ = nullptr;
     QLabel* check_ = nullptr;

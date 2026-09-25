@@ -17,8 +17,14 @@
 //   onlineDataDialog      the dialog (the action onlineData + "Dialog")
 //   onlineSearch          filter the tree as you type
 //   onlineProviders       the tree: Australia > state > provider > layer, Global, Custom
-//   onlineDetails         the chosen layer: kind, service, licence, attribution,
-//                         coverage, key needed, verified
+//   onlineDetails         the chosen layer: kind, service, service CRS, version,
+//                         limits, time, licence, attribution, coverage, key
+//                         needed, verified
+//   onlineCatalogue       a catalogue layer's search (shown only for one):
+//   onlineCatalogueSearch   the words, as ONLINE LAYERS <provider> <words> takes them
+//   onlineCatalogueRun      search
+//   onlineCatalogueResults  what it found: title, dataset, format, address
+//   onlineCatalogueAdd      add the chosen result's service, as ONLINE CUSTOM <url>
 //   onlineArea            Current view / Drawing extents / Selection / Typed box
 //   onlineBox             x0,y0,x1,y1 for a typed box
 //   onlineBoxCrs          the typed box's CRS: the project's, or WGS 84 lon/lat
@@ -28,6 +34,11 @@
 //   onlineTag             an OpenStreetMap tag test (building, highway=primary)
 //   onlineFrom, onlineTo  acquisition dates for Sentinel-2
 //   onlineCloud           the cloud ceiling, percent
+//   onlineTimeDefault     the layer's own date (the latest), for a time-enabled layer
+//   onlineTime            the date to ask for otherwise: time=YYYY-MM-DD
+//   onlineAdvanced        the Advanced group:
+//   onlineTimeoutOn         give up after onlineTimeout seconds: timeout=<s>
+//   onlineTimeout
 //   onlineProjectCrs      what the project's CRS is, or that it has none
 //   onlineCrs             a CRS to use when the project has none
 //   onlineKey             this provider's key (never shown back)
@@ -47,6 +58,7 @@
 
 #include "katana/core/error.hpp"
 #include "katana/interop/online_catalogue.hpp"
+#include "katana/interop/online_requests.hpp"
 #include "katana/interop/online_verbs.hpp"
 
 class QCheckBox;
@@ -55,7 +67,9 @@ class QDateEdit;
 class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
+class QGroupBox;
 class QPushButton;
+class QSpinBox;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -69,8 +83,10 @@ struct OnlineDialogContext {
     std::function<std::string()> projectCrs;
     std::function<bool(const std::string& keyName)> hasKey;
     std::function<void(const std::string& keyName, const std::string& value)> saveKey;
-    // Runs the command (an Import) in the background. An error is shown in
-    // the status line; success means the job started.
+    // Runs the command (an Import, a catalogue search - ONLINE LAYERS - or
+    // ONLINE CUSTOM) in the background. An error is shown in the status
+    // line; success means the job started. A search's results come back
+    // through showCatalogueResults.
     std::function<katana::core::Status(const katana::interop::OnlineCommand&)> run;
     // Discovers the service at a URL and adds it to the user catalogue, in
     // the background; the dialog is refreshed by the workbench when it lands.
@@ -95,12 +111,28 @@ class OnlineDataDialog final : public QDialog {
     void setStatus(const QString& text, bool isError = false);
     // Shows the project's coordinate system as it is now.
     void refreshProjectCrs();
+    // What a catalogue search found - the workbench's answer to the ONLINE
+    // LAYERS line it ran, the dialog's or a typed one - listed in
+    // onlineCatalogueResults for Add to take a service from.
+    void showCatalogueResults(const std::vector<katana::interop::CkanResource>& found);
+
+    // A layer's limits in a person's words, by its kind of service: the
+    // facts ONLINE INFO gives as max_zoom, page_size and the rest. Empty for
+    // a service with none.
+    [[nodiscard]] static QString limitsText(const katana::interop::OnlineLayer& layer);
+    // Whether the layer has a date to choose: a time dimension, or {time} in
+    // its address.
+    [[nodiscard]] static bool hasTime(const katana::interop::OnlineLayer& layer);
 
   private:
     void showDetails();
     void applyFilter(const QString& text);
     void importChosen();
     void addCustomService();
+    // Runs ONLINE LAYERS <provider> <words> for the chosen catalogue layer.
+    void searchCatalogue();
+    // Runs ONLINE CUSTOM <url> for the chosen result.
+    void addCatalogueResult();
     void saveKey();
     [[nodiscard]] const katana::interop::OnlineLayer* chosenLayer() const;
 
@@ -119,6 +151,15 @@ class OnlineDataDialog final : public QDialog {
     QDateEdit* to_ = nullptr;
     QCheckBox* useDates_ = nullptr;
     QDoubleSpinBox* cloud_ = nullptr;
+    QCheckBox* timeDefault_ = nullptr;
+    QDateEdit* time_ = nullptr;
+    QCheckBox* timeoutOn_ = nullptr;
+    QSpinBox* timeout_ = nullptr;
+    QGroupBox* catalogue_ = nullptr;
+    QLineEdit* catalogueSearch_ = nullptr;
+    QPushButton* catalogueRun_ = nullptr;
+    QTreeWidget* catalogueResults_ = nullptr;
+    QPushButton* catalogueAdd_ = nullptr;
     QLabel* projectCrs_ = nullptr;
     QLineEdit* crs_ = nullptr;
     QLineEdit* key_ = nullptr;

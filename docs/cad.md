@@ -284,6 +284,15 @@ it, and the sheets print it in the title block, so it is set in one place:
   searches them, checks a typed one as it is typed, and sets it; the status
   bar shows the system and opens the dialog when clicked; and GIS > Online
   Data's Set Project CRS opens it with the systems for the typed box first.
+  Its Suggest for a place row (`projectCrsPlace`, `projectCrsSuggest`) lists
+  what `CRS SUGGEST lon,lat` lists, first, for a longitude and latitude
+  typed there; when the project has a system and the drawing has extents,
+  the drawing's centre is filled in (taken to WGS 84 by
+  `gis::transformPoint`). The drawing's centre rather than the view's: the
+  dialog is given the document, not a view, and where the drawing is is the
+  better answer to "which zone is this project in". Until 2026-09-26 the
+  suggestions came only from Online Data, and File > Project Coordinate
+  System could not suggest anything.
 
 The tests are `tests/cad/test_project_crs.cpp` and
 `tests/qt_widgets/test_project_crs_dialog.cpp`.
