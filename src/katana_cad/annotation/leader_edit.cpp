@@ -250,9 +250,25 @@ Status requireLeaders(const Model& model, const std::vector<EntityId>& ids)
     return {};
 }
 
+// Counted only while a circle: isNumberedBalloon.
+Status checkNumberedBalloon(const LeaderChange& change, bool balloon)
+{
+    if (balloon && !change.note && change.callout &&
+        *change.callout != katana::entity::CalloutShape::Circle) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a numbered balloon is a circle: leave callout= a circle, or give the "
+                         "balloon a note",
+                         "callout=" + std::string(katana::entity::toString(*change.callout)));
+    }
+    return {};
+}
+
 Result<LeaderGeometry> newLeader(const Model& model, const std::vector<AnchoredPoint>& points,
                                  const LeaderChange& change, bool balloon)
 {
+    if (auto status = checkNumberedBalloon(change, balloon); !status) {
+        return status.error();
+    }
     LeaderGeometry leader;
     for (const AnchoredPoint& point : points) {
         leader.vertices.push_back(point.point);
@@ -326,6 +342,9 @@ Result<CommandPtr> attachLeader(const Model& model, EntityId id, const AnchoredP
     auto& leader = std::get<LeaderGeometry>(changed.geometry);
     if (auto status = applyLeaderChange(model, change, leader, id); !status) {
         return status.error();
+    }
+    if (changed == *model.entities.find(id)) {
+        return CommandPtr{}; // on that place already: no step, as changeLeaders
     }
     ChangeSet changes;
     changes.modify.push_back(std::move(changed));
@@ -408,6 +427,9 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
     const Vec2 toNote = Vec2(std::cos(options.angle), std::sin(options.angle)) *
                         katana::entity::annotationModelSize(options.length, scale);
     // What does not depend on the entity is refused once, for all of them.
+    if (auto status = checkNumberedBalloon(options.change, options.balloon); !status) {
+        return status.error();
+    }
     if (auto status = checkLeaderChange(model, options.change); !status) {
         return status.error();
     }

@@ -24,9 +24,12 @@
 //
 // Apply sends only what the user CHANGED: the form remembers what it showed,
 // and a field still showing that is left out of the edit, so a value the
-// widgets cannot hold exactly (a height of 2.345 mm, a landing of 60 mm, a
-// non-breaking space) is never rewritten, and an untouched form applied is
-// no step.
+// widgets cannot hold exactly (a height finer than their 3 decimals, such as
+// 2.3456 mm, a landing past their 1000 mm, a non-breaking space) is never
+// rewritten, and an untouched form applied is no step. A note made a label
+// style's is the exception the core forces: the style lends its look to
+// whatever the edit leaves out, so the look the form shows is sent unless
+// it is the style's own.
 //
 // It follows docs/desktop.md, "The rules a dialog or panel follows": no moc,
 // non-modal and kept by AnnotationWorkbench, a command never run from the
@@ -135,11 +138,24 @@ class LeaderManagerDialog final : public QDialog {
         double landing = 0.0;
         double along = 0.0;
     };
-    // The look before a label style lent its own, to put back when the note
-    // stops being the style's.
-    struct Look {
-        QString textStyle;
-        double paperHeight = 0.0;
+    // A label style's look lent to a text style box and a height box, as
+    // labelstyle= lends a leader it: what each showed before, and what the
+    // style put there, so that putting it back leaves alone a field the
+    // user has changed since.
+    struct Lender {
+        QComboBox* textStyle = nullptr;
+        QDoubleSpinBox* paperHeight = nullptr;
+        std::optional<QString> textStyleBefore{};
+        std::optional<QString> textStyleLent{};
+        std::optional<double> paperHeightBefore{};
+        std::optional<double> paperHeightLent{};
+
+        // `style`'s look into the boxes, after putting back another's.
+        void lend(const katana::entity::LabelStyle* style);
+        // The look before, in each field still showing what was lent.
+        void unlend();
+        // Nothing lent to put back: the boxes' look is the form's own now.
+        void forget();
     };
 
     void refresh(const DocumentChanges& changes);
@@ -153,6 +169,7 @@ class LeaderManagerDialog final : public QDialog {
     void noteKindChosen();
     void lendStyleLook();
     void updateForNoteKind();
+    void lendForStyleLook();
     void updateForPreview();
     void report(const katana::core::Status& status);
     [[nodiscard]] FormValues readForm() const;
@@ -169,11 +186,11 @@ class LeaderManagerDialog final : public QDialog {
     // The widgets as showForm left them.
     std::optional<FormValues> loaded_;
     // The note kind the form shows now, the user's own note while a label
-    // style's template stands in for it, and the look before a style lent
-    // its own.
+    // style's template stands in for it, and the look a style lent each tab.
     int shownKind_ = 0;
     std::optional<QString> stash_;
-    std::optional<Look> lentFrom_;
+    Lender lender_;
+    Lender forLender_;
     // Set by the document when the drawing is replaced (File > New, Open):
     // the next refresh starts the form afresh rather than applying edits
     // meant for the old drawing to a leader of the new one.

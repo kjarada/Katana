@@ -71,6 +71,11 @@ struct LeaderChange {
 [[nodiscard]] katana::core::Status checkLeaderChange(const katana::entity::Model& model,
                                                      const LeaderChange& change);
 
+// A balloon (`balloon`) numbered for want of a note in `change` is refused
+// with a callout other than a circle: only a circle's number is counted, by
+// nextBalloonNumber and BALLOON RENUMBER, so another would be given again.
+[[nodiscard]] katana::core::Status checkNumberedBalloon(const LeaderChange& change, bool balloon);
+
 // `change` applied to `leader` (the leader with id `id`, or 0 for one not
 // made yet). A label-style note with no text style or paper height in the
 // change lends the leader the style's, so the leader looks as the style's
@@ -91,7 +96,8 @@ struct LeaderChange {
 // A new leader through `points` (the tip first): `change` applied to a plain
 // one, a tip Inside an outline ending in a dot unless the change gives an
 // arrow (ISO 128-22, leader lines), and a balloon a circle callout numbered
-// on from the highest when the change gives it no note.
+// on from the highest when the change gives it no note - refused with any
+// other callout, since only a circle's number is counted.
 [[nodiscard]] katana::core::Result<katana::entity::LeaderGeometry>
 newLeader(const katana::entity::Model& model, const std::vector<AnchoredPoint>& points,
           const LeaderChange& change, bool balloon);
@@ -104,7 +110,7 @@ changeLeaders(const katana::entity::Model& model, std::vector<katana::entity::En
               const LeaderChange& change);
 
 // The tip of leader `id` put on `place`, which must name an entity
-// ("ATTACH_LEADER").
+// ("ATTACH_LEADER"); nullptr when the tip is on that place already.
 [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
 attachLeader(const katana::entity::Model& model, katana::entity::EntityId id,
              const AnchoredPoint& place);
@@ -136,7 +142,8 @@ setLeaderTargetProperty(const katana::entity::Model& model, katana::entity::Enti
 // on a circle on the side the note goes; the note `length` paper
 // millimetres from the tip at `angle` (radians). An entity that offers no
 // place, or that the note would say nothing about, is skipped and counted;
-// refused when none is made, with the first reason.
+// refused when none is made, with the first reason, and - as newLeader - a
+// balloon numbered for want of a note with a callout that is not a circle.
 struct LeadersForOptions {
     LeaderChange change{};
     double angle = 0.25 * katana::math::kPi; // 45 degrees: up and to the right

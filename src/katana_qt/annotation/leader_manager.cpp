@@ -230,6 +230,14 @@ QString placeText(const katana::entity::AnchorRef& ref, bool polyline)
     return {};
 }
 
+// What `box` would show, and so hold, for `value`: rounded to its
+// decimals, then kept to its range, as QDoubleSpinBox::setValue does.
+double shownBy(const QDoubleSpinBox* box, double value)
+{
+    const double rounded = QString::number(value, 'f', box->decimals()).toDouble();
+    return std::clamp(rounded, box->minimum(), box->maximum());
+}
+
 Status runCommand(katana::cad::Document& document, katana::commands::CommandPtr command)
 {
     return command ? document.execute(std::move(command)) : Status{};
@@ -491,6 +499,11 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     layout->addWidget(problem_);
     resize(960, 680);
 
+    lender_.textStyle = textStyle_;
+    lender_.paperHeight = paperHeight_;
+    forLender_.textStyle = forTextStyle_;
+    forLender_.paperHeight = forPaperHeight_;
+
     // ---- behaviour ------------------------------------------------------------------------
     // The list and the tables show; they never run a command (docs/desktop.md).
     connect(list_, &QListWidget::currentItemChanged, this,
@@ -525,9 +538,14 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     }
     connect(forNoteKind_, &QComboBox::currentIndexChanged, this, [this] {
         updateForNoteKind();
+        lendForStyleLook();
         updateForPreview();
     });
-    for (QComboBox* box : {forLabelStyle_, forArrow_, forCallout_, forTextStyle_}) {
+    connect(forLabelStyle_, &QComboBox::currentIndexChanged, this, [this] {
+        lendForStyleLook();
+        updateForPreview();
+    });
+    for (QComboBox* box : {forArrow_, forCallout_, forTextStyle_}) {
         connect(box, &QComboBox::currentIndexChanged, this, [this] { updateForPreview(); });
     }
     connect(forNote_, &QPlainTextEdit::textChanged, this, [this] { updateForPreview(); });
@@ -618,8 +636,19 @@ void LeaderManagerDialog::refresh(const DocumentChanges& delivered)
         changes.selection = true;
     }
     if (changes.model) {
+        const QString chosen = labelStyle_->currentText();
+        const QString forChosen = forLabelStyle_->currentText();
         fillStyles();
         fillList();
+        // The style chosen is gone, or the first one came: the box names
+        // another now, which lends its look as choosing it does (showForm,
+        // below, puts the leader's own back where the leader changed).
+        if (labelStyle_->currentText() != chosen) {
+            lendStyleLook();
+        }
+        if (forLabelStyle_->currentText() != forChosen) {
+            lendForStyleLook();
+        }
     }
     if (changes.selection) {
         // The form follows the drawing's selection: the shown leader while it
@@ -715,7 +744,7 @@ void LeaderManagerDialog::showForm(const LeaderGeometry& shape)
     const bool any = shown_ != 0;
     shownGeometry_ = any ? std::optional(shape) : std::nullopt;
     stash_.reset();
-    lentFrom_.reset();
+    lender_.forget();
     for (QWidget* field : std::initializer_list<QWidget*>{
              noteKind_, note_, values_, arrow_, callout_, textStyle_, paperHeight_, arrowSize_,
              landing_, attributeName_, attributeValue_, attributeType_}) {
@@ -820,18 +849,15 @@ void LeaderManagerDialog::noteKindChosen()
         lendStyleLook();
     } else if (shownKind_ == styled && now != styled) {
         // Back to the user's words and the look before the style lent its
-        // own; a leader shown in a style starts from the style's template.
+        // own, where the user has not changed it since; a leader shown in a
+        // style starts from the style's template.
         shownKind_ = now;
         updateNoteKind();
         if (stash_) {
             setNoteText(note_, *stash_);
         }
-        if (lentFrom_) {
-            textStyle_->setCurrentIndex(std::max(0, textStyle_->findData(lentFrom_->textStyle)));
-            paperHeight_->setValue(lentFrom_->paperHeight);
-        }
         stash_.reset();
-        lentFrom_.reset();
+        lender_.unlend();
     } else {
         shownKind_ = now;
         updateNoteKind();
@@ -839,26 +865,62 @@ void LeaderManagerDialog::noteKindChosen()
     updatePreview();
 }
 
-void LeaderManagerDialog::lendStyleLook()
+void LeaderManagerDialog::Lender::lend(const katana::entity::LabelStyle* style)
 {
-    if (static_cast<Kind>(noteKind_->currentData().toInt()) != Kind::LabelStyle) {
-        return;
-    }
-    const auto* style =
-        document_.model().labelStyles.find(labelStyle_->currentText().toStdString());
+    // Another style's look first put back, so one lending less (no text
+    // style, no height) leaves the look from before, not the last one's.
+    unlend();
     if (style == nullptr) {
         return;
     }
-    if (!lentFrom_) {
-        lentFrom_ = Look{textStyle_->currentData().toString(), paperHeight_->value()};
-    }
     if (!style->textStyle.empty()) {
-        textStyle_->setCurrentIndex(
-            std::max(0, textStyle_->findData(QString::fromStdString(style->textStyle))));
+        textStyleBefore = textStyle->currentData().toString();
+        textStyle->setCurrentIndex(
+            std::max(0, textStyle->findData(QString::fromStdString(style->textStyle))));
+        textStyleLent = textStyle->currentData().toString();
     }
     if (style->paperHeight > 0.0) {
-        paperHeight_->setValue(style->paperHeight);
+        paperHeightBefore = paperHeight->value();
+        paperHeight->setValue(style->paperHeight);
+        paperHeightLent = paperHeight->value();
     }
+}
+
+void LeaderManagerDialog::Lender::unlend()
+{
+    if (textStyleLent && textStyle->currentData().toString() == *textStyleLent) {
+        textStyle->setCurrentIndex(std::max(0, textStyle->findData(*textStyleBefore)));
+    }
+    if (paperHeightLent && paperHeight->value() == *paperHeightLent) {
+        paperHeight->setValue(*paperHeightBefore);
+    }
+    forget();
+}
+
+void LeaderManagerDialog::Lender::forget()
+{
+    textStyleBefore.reset();
+    textStyleLent.reset();
+    paperHeightBefore.reset();
+    paperHeightLent.reset();
+}
+
+void LeaderManagerDialog::lendStyleLook()
+{
+    if (shown_ == 0 || static_cast<Kind>(noteKind_->currentData().toInt()) != Kind::LabelStyle) {
+        return;
+    }
+    lender_.lend(document_.model().labelStyles.find(labelStyle_->currentText().toStdString()));
+}
+
+void LeaderManagerDialog::lendForStyleLook()
+{
+    if (static_cast<Kind>(forNoteKind_->currentData().toInt()) != Kind::LabelStyle) {
+        forLender_.unlend();
+        return;
+    }
+    forLender_.lend(
+        document_.model().labelStyles.find(forLabelStyle_->currentText().toStdString()));
 }
 
 void LeaderManagerDialog::updateForNoteKind()
@@ -891,10 +953,30 @@ ann::LeaderChange LeaderManagerDialog::formChange() const
     if (now.callout != was.callout) {
         change.callout = static_cast<katana::entity::CalloutShape>(now.callout);
     }
-    if (now.textStyle != was.textStyle) {
+    // A note made a label style's is lent the style's look in each part the
+    // edit leaves out (applyLeaderChange). So, for each part the style
+    // lends: left out while the form shows the style's own - the core then
+    // lends it exactly, finer than the spin box holds, as labelstyle= does -
+    // else sent, as the leader's own exact value where the form still shows
+    // that, or as the form's.
+    const katana::entity::LabelStyle* lender =
+        change.note && kind == Kind::LabelStyle
+            ? document_.model().labelStyles.find(now.labelStyle.toStdString())
+            : nullptr;
+    if (lender != nullptr && !lender->textStyle.empty()) {
+        if (now.textStyle != QString::fromStdString(lender->textStyle)) {
+            change.textStyle =
+                now.textStyle == was.textStyle ? current->style : now.textStyle.toStdString();
+        }
+    } else if (now.textStyle != was.textStyle) {
         change.textStyle = now.textStyle.toStdString();
     }
-    if (now.paperHeight != was.paperHeight) {
+    if (lender != nullptr && lender->paperHeight > 0.0) {
+        if (now.paperHeight != shownBy(paperHeight_, lender->paperHeight)) {
+            change.paperHeight =
+                now.paperHeight == was.paperHeight ? current->paperHeight : now.paperHeight;
+        }
+    } else if (now.paperHeight != was.paperHeight) {
         change.paperHeight = now.paperHeight;
     }
     if (now.arrowSize != was.arrowSize) {
@@ -1015,7 +1097,7 @@ void LeaderManagerDialog::insertValue(const QString& name)
         noteKind_->setCurrentIndex(noteKind_->findData(static_cast<int>(Kind::Template)));
         shownKind_ = static_cast<int>(Kind::Template);
         stash_.reset();
-        lentFrom_.reset();
+        lender_.forget();
         updateNoteKind();
     }
     insertField(noteKind_, note_, name);
@@ -1108,30 +1190,37 @@ bool LeaderManagerDialog::attachToSelected()
                          "again"));
         return false;
     }
-    // The first selected entity that is not a leader, else any other one.
-    const katana::entity::Entity* target = nullptr;
+    // The first other selected entity that offers a place for the tip (a
+    // dimension or a label does not), those that are not leaders first.
+    const katana::entity::Entity* first = nullptr;
+    std::optional<ann::AnchoredPoint> place;
     for (const bool leadersToo : {false, true}) {
         for (const EntityId id : document_.selection().ids()) {
             const katana::entity::Entity* entity = document_.model().entities.find(id);
-            if (target == nullptr && entity != nullptr && id != shown_ &&
-                (leadersToo || !std::holds_alternative<LeaderGeometry>(entity->geometry))) {
-                target = entity;
+            if (place || entity == nullptr || id == shown_ ||
+                leadersToo != std::holds_alternative<LeaderGeometry>(entity->geometry)) {
+                continue;
+            }
+            first = first != nullptr ? first : entity;
+            const auto ref = katana::entity::nearestAnchor(*entity, current->vertices.front());
+            if (const auto point =
+                    ref ? katana::entity::resolveAnchor(*entity, *ref) : std::nullopt) {
+                place = ann::AnchoredPoint{*point, *ref};
             }
         }
     }
-    if (target == nullptr) {
+    if (first == nullptr) {
         report(makeError(ErrorCode::InvalidState,
                          "select the entity to put the tip on, with the leader"));
         return false;
     }
-    const auto ref = katana::entity::nearestAnchor(*target, current->vertices.front());
-    const auto point = ref ? katana::entity::resolveAnchor(*target, *ref) : std::nullopt;
-    if (!point) {
-        report(makeError(ErrorCode::InvalidArgument, "that entity has no place on it to attach to",
-                         "id=" + std::to_string(target->id)));
+    if (!place) {
+        report(makeError(ErrorCode::InvalidArgument,
+                         "nothing selected with the leader has a place on it to attach to",
+                         "id=" + std::to_string(first->id)));
         return false;
     }
-    auto command = ann::attachLeader(document_.model(), shown_, ann::AnchoredPoint{*point, *ref});
+    auto command = ann::attachLeader(document_.model(), shown_, *place);
     if (!command) {
         report(command.error());
         return false;
@@ -1203,11 +1292,27 @@ ann::LeadersForOptions LeaderManagerDialog::forOptions() const
     if (const int callout = forCallout_->currentData().toInt(); callout != kAutomatic) {
         options.change.callout = static_cast<katana::entity::CalloutShape>(callout);
     }
-    if (const QString style = forTextStyle_->currentData().toString(); !style.isEmpty()) {
-        options.change.textStyle = style.toStdString();
+    // What the boxes show is what the leaders get. A new leader's own look
+    // is the default text style and its height, so those are left out -
+    // but not where a label style lends its look to what is left out: then
+    // only the style's own, as the boxes show it, is (and is lent exactly).
+    const katana::entity::LabelStyle* lender =
+        note.kind == Kind::LabelStyle ? document_.model().labelStyles.find(note.text) : nullptr;
+    const QString textStyle = forTextStyle_->currentData().toString();
+    if (lender != nullptr && !lender->textStyle.empty()) {
+        if (textStyle != QString::fromStdString(lender->textStyle)) {
+            options.change.textStyle = textStyle.toStdString();
+        }
+    } else if (!textStyle.isEmpty()) {
+        options.change.textStyle = textStyle.toStdString();
     }
-    if (forPaperHeight_->value() > 0.0) {
-        options.change.paperHeight = forPaperHeight_->value();
+    const double height = forPaperHeight_->value();
+    if (lender != nullptr && lender->paperHeight > 0.0) {
+        if (height != shownBy(forPaperHeight_, lender->paperHeight)) {
+            options.change.paperHeight = height;
+        }
+    } else if (height > 0.0) {
+        options.change.paperHeight = height;
     }
     if (forArrowSize_->value() != LeaderGeometry{}.arrowSize) {
         options.change.arrowSize = forArrowSize_->value();
@@ -1257,6 +1362,12 @@ void LeaderManagerDialog::updateForPreview()
         would.callout = katana::entity::CalloutShape::Circle;
     }
     ann::LeaderChange change = options.change;
+    if (const Status status = ann::checkNumberedBalloon(change, options.balloon); !status) {
+        forCheck_->setStyleSheet(QStringLiteral("color: #d9534f"));
+        forCheck_->setText(describe(status));
+        forPreview_->clear();
+        return;
+    }
     if (options.balloon && !change.note) {
         change.note =
             ann::LeaderNote{Kind::Text, std::to_string(ann::nextBalloonNumber(document_.model()))};
