@@ -1190,13 +1190,15 @@ button is one step, as before, and the arrow drops down the history
 `CommandStack::redoNames`, the next step first. The k-th entry (`undoStepK`,
 `redoStepK`, so `--trigger undoStep3` reaches it) runs `UNDO k` or `REDO k`
 through the one executor: one line in the log, and what it did said as the
-typed line says it. The lists show 25 steps each way, with a last line saying
+typed line says it. Its status tip is that line and what it covers: "UNDO 3:
+the last 3 steps, down to ..." and "REDO 3: the next 3 steps, down to ..." -
+the Redo list's once said "the last" too, which REDO does not do. The lists show 25 steps each way, with a last line saying
 how many more there are and that `UNDO n` reaches them; they are refilled with
 the panels. The names are the commands' own (`CREATE_POINT`), the words the
 Undo item and the Drawing Summary use. Tested in
 `tests/commands/test_command_stack_names.cpp` and by
-`qt_the_undo_and_redo_lists_step_through_the_history_headless`. The optional
-Undo History dock of the plan, with the save point marked, is not built.
+`qt_the_undo_and_redo_lists_step_through_the_history_headless`. Not done: an
+Undo History dock with the save point marked is not built.
 
 ## GIS > Online Data: a workbench of its own
 

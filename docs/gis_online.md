@@ -308,7 +308,7 @@ Since 2026-09-26 it also has what the verbs had and it did not:
   nothing.
 
 `qt_widgets.GisOnlineDialog.*` drive each by its object name, and
-`qt_online_dialog_details_and_deadline_headless` reads the details and
+`qt_the_online_dialog_shows_the_services_system_and_imports_within_a_deadline_headless` reads the details and
 imports through the dialog with a deadline set. A live catalogue search runs
 only with `KATANA_ONLINE_TESTS=1`: a CKAN search is a query, which the local
 catalogue's `file://` layer cannot answer.

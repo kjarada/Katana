@@ -3,7 +3,7 @@
 // person drives it, and judged by the lines it hands the executor and by the
 // Document. The executor is the real interpreter on the same drawing, where
 // the window's command line sends a HATCH line, so each line is also known to
-// do what it says; qt_hatch_patterns_tab_headless runs it through the window.
+// do what it says; qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless runs it through the window.
 
 #include <gtest/gtest.h>
 

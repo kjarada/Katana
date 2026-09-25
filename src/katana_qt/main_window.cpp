@@ -1822,8 +1822,11 @@ void MainWindow::refreshHistoryMenus()
     // The steps each way, the next first, as far as a list can be read: a
     // longer history is said in a last line and reached by typing UNDO n.
     constexpr std::size_t kListed = 25;
+    // `which` says where the k steps are: the last ones for Undo, the next
+    // for Redo - whose list once said "the last k steps" as Undo's does.
     const auto fill = [this](QMenu& menu, const std::vector<std::string_view>& names,
-                             const QString& verb, const QString& itemName) {
+                             const QString& verb, const QString& itemName,
+                             const QString& which) {
         menu.clear();
         for (std::size_t k = 0; k < names.size() && k < kListed; ++k) {
             const QString name =
@@ -1834,8 +1837,8 @@ void MainWindow::refreshHistoryMenus()
             item->setObjectName(itemName + QString::number(k + 1));
             const QString line = QString("%1 %2").arg(verb).arg(k + 1);
             item->setStatusTip(k == 0 ? QString("%1: %2").arg(line, name)
-                                      : QString("%1: the last %2 steps, down to %3")
-                                            .arg(line)
+                                      : QString("%1: the %2 %3 steps, down to %4")
+                                            .arg(line, which)
                                             .arg(k + 1)
                                             .arg(name));
             connect(item, &QAction::triggered, this, [this, line] { (void)runVerbLine(line); });
@@ -1845,8 +1848,8 @@ void MainWindow::refreshHistoryMenus()
                 ->setEnabled(false);
         }
     };
-    fill(*undoHistory_, document_.history().undoNames(), "UNDO", "undoStep");
-    fill(*redoHistory_, document_.history().redoNames(), "REDO", "redoStep");
+    fill(*undoHistory_, document_.history().undoNames(), "UNDO", "undoStep", "last");
+    fill(*redoHistory_, document_.history().redoNames(), "REDO", "redoStep", "next");
 }
 
 void MainWindow::refreshTitle()
