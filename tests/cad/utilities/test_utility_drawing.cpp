@@ -20,6 +20,7 @@
 
 #include "katana/cad/plot.hpp"
 #include "katana/cad/utilities/utility_drawing.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/survey/subsurface/utility_csv.hpp"
 
 using namespace katana::cad::utilities;
@@ -165,6 +166,16 @@ constexpr std::string_view kSharedPlace =
     "S1,S1-1,100.0,200.0,EML,,,,0.10,,,sewer\n"
     "S1,S1-2,105.0,200.0,pothole,19.0,top,20.0,0.02,0.02,exposed,\n"
     "S1,S1-3,105.0,200.0,pothole,19.0,top,20.0,0.02,0.02,,\n"
+    "S1,S1-4,110.0,200.0,EML,,,,0.10,,,\n";
+
+// The same pothole with its two records a rounding error apart, as a
+// reprojected export leaves them: 10 nm, a length, but under the model's
+// tolerance for one.
+constexpr std::string_view kNearlyOnePlace =
+    "line,point,easting,northing,method,level,level_ref,surface,h_unc,v_unc,path,type\n"
+    "S1,S1-1,100.0,200.0,EML,,,,0.10,,,sewer\n"
+    "S1,S1-2,105.0,200.0,pothole,19.0,top,20.0,0.02,0.02,exposed,\n"
+    "S1,S1-3,105.00000001,200.0,pothole,19.0,top,20.0,0.02,0.02,,\n"
     "S1,S1-4,110.0,200.0,EML,,,,0.10,,,\n";
 
 } // namespace
@@ -357,6 +368,15 @@ TEST(UtilityDrawing, TheRunsCarryTheServiceAndWhyTheyAreLimited)
     EXPECT_FALSE(has(telco[0], keys::kMaterial));
     EXPECT_FALSE(has(telco[0], keys::kDiameter));
     EXPECT_EQ(text(telco[0], keys::kConfiguration), "pit to pit");
+    // Nor a status: a schedule with none gives no utility.status, where
+    // "unknown" would read as if someone had recorded it.
+    const std::vector<Entity> unrecorded = of(drawn(parsed(kSharedPlace)), "S1",
+                                              EntityType::Polyline);
+    ASSERT_FALSE(unrecorded.empty());
+    for (const Entity& run : unrecorded) {
+        EXPECT_FALSE(has(run, keys::kStatus)) << text(run, keys::kStatus);
+        EXPECT_EQ(text(run, keys::kType), "sewer");
+    }
 }
 
 TEST(UtilityDrawing, ThePointsCarryWhatTheGradingFoundAtEachVertex)
@@ -405,6 +425,15 @@ TEST(UtilityDrawing, ThePointsCarryWhatTheGradingFoundAtEachVertex)
     const UtilityDrawing unasked = drawn(sample());
     EXPECT_FALSE(has(point(unasked, "E1-1"), keys::kCoverBelowMinimum));
     EXPECT_TRUE(has(point(unasked, "E1-1"), keys::kCover));
+
+    // A level given with no reference is on the top, as the grading and the
+    // cover take it - the one reading the parsed schedule keeps.
+    const UtilityDrawing unreferenced =
+        drawn(parsed("line,point,easting,northing,method,level,surface,h_unc,type\n"
+                     "S2,S2-1,0,0,pothole,19.0,20.0,0.02,sewer\n"
+                     "S2,S2-2,5,0,pothole,19.1,20.1,0.02,\n"));
+    EXPECT_EQ(text(point(unreferenced, "S2-1"), keys::kLevelReference), "top");
+    EXPECT_NEAR(real(point(unreferenced, "S2-1"), keys::kCover), 1.0, 1e-9);
 }
 
 TEST(UtilityDrawing, SpacingChangesTheGrading)
@@ -466,6 +495,27 @@ TEST(UtilityDrawing, ALayerPrefixPlacesEveryLayerUnderIt)
     const auto refused = drawUtilities(sample(), options);
     ASSERT_FALSE(refused.ok());
     EXPECT_NE(refused.error().message.find("not a layer path"), std::string::npos);
+
+    // A prefix that is a layer path but leaves no room for the two levels
+    // drawn under it is refused here, by the prefix - not by the model once
+    // the drawing's layers are being made. Fifteen levels are seventeen with
+    // the type and the quality level; the model takes sixteen.
+    options.layerPrefix = "a/b/c/d/e/f/g/h/i/j/k/l/m/n/o";
+    const auto deep = drawUtilities(sample(), options);
+    ASSERT_FALSE(deep.ok());
+    EXPECT_EQ(deep.error().code, katana::core::ErrorCode::InvalidArgument);
+    EXPECT_NE(deep.error().message.find("the layer prefix leaves no room"), std::string::npos)
+        << deep.error().describe();
+    EXPECT_NE(deep.error().message.find("nested too deeply (17 > 16)"), std::string::npos);
+    EXPECT_EQ(deep.error().context, options.layerPrefix);
+    // 490 characters take "/water/QL-B", but not "/telecommunications/QL-C",
+    // which makes 514 of the model's 512.
+    options.layerPrefix = std::string(490, 'p');
+    const auto wide = drawUtilities(sample(), options);
+    ASSERT_FALSE(wide.ok());
+    EXPECT_NE(wide.error().message.find("/telecommunications/QL-C - layer name is too long"),
+              std::string::npos)
+        << wide.error().describe();
 }
 
 TEST(UtilityDrawing, ARunOfNoLengthIsNotDrawnButItsPointsAre)
@@ -480,4 +530,20 @@ TEST(UtilityDrawing, ARunOfNoLengthIsNotDrawnButItsPointsAre)
     EXPECT_EQ(drawing.lines[0].polylines, 2u);
     // No QL-A layer: nothing is on it.
     EXPECT_EQ(std::ranges::count(layerNames(drawing), std::string("utilities/sewer/QL-A")), 0);
+}
+
+TEST(UtilityDrawing, ARunARoundingErrorLongIsNotDrawnEither)
+{
+    // Longer than nothing, shorter than the model's tolerance: were it drawn,
+    // the model would refuse it, and with it the whole draw.
+    const UtilityDrawing drawing = drawn(parsed(kNearlyOnePlace));
+    EXPECT_EQ(drawing.segments, 3u);
+    EXPECT_EQ(of(drawing, "S1", EntityType::Polyline).size(), 2u);
+    EXPECT_EQ(of(drawing, "S1", EntityType::Point).size(), 4u);
+    EXPECT_EQ(std::ranges::count(layerNames(drawing), std::string("utilities/sewer/QL-A")), 0);
+    for (const Entity& entity : drawing.entities) {
+        const auto valid = katana::entity::validate(entity.geometry);
+        EXPECT_TRUE(valid.ok()) << text(entity, keys::kVertex) << ": "
+                                << (valid.ok() ? std::string() : valid.error().describe());
+    }
 }
