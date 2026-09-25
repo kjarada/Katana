@@ -1522,6 +1522,11 @@ void MainWindow::refreshAll()
     if (crsButton_ != nullptr) {
         crsButton_->setText("CRS: " + projectCrsLabel(document_));
     }
+    // File > Export IFC, open beside the drawing: its counts and selection
+    // follow the drawing, as the panels do.
+    if (!ifcExport_.isNull() && ifcExport_->isVisible()) {
+        ifcExport_->refresh();
+    }
 }
 
 void MainWindow::refreshTitle()
@@ -3494,8 +3499,17 @@ std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& pa
 std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
 {
     if (katana::ifc::isIfcPath(toPath(path))) {
+        // Described first, as the GIS files are: a file that cannot be read
+        // has no dialog, and says why.
+        auto described = describeIfcFile(toPath(path));
+        if (!described) {
+            logMessage(QString::fromStdString(described.error().describe()), true);
+            warnUser("Import", QString::fromStdString(described.error().describe()));
+            return nullptr;
+        }
         auto dialog = std::make_unique<IfcImportDialog>(ifcImportContext(), this);
         dialog->setFile(path);
+        dialog->setSummary(*described);
         return dialog;
     }
     auto description = interop::describeSource(toPath(path));

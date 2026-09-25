@@ -667,8 +667,43 @@ class DrawingWriter {
                 parts[{entity->layer, text(entity->metadata, "12d.name")}].push_back(entity);
             }
         }
+        // Each pit and connection goes to ONE string. 12d names a string's
+        // parts by its header, and two strings may share a name - or have
+        // none - so a part goes to the string of its name it stands on (a
+        // vertex of it), and to the first of its name only when it stands on
+        // none; otherwise every pit of the name would be written once per
+        // string.
+        std::map<const Entity*, std::vector<const Entity*>> partsOf;
+        for (const auto& [key, members] : parts) {
+            std::vector<const Entity*> named;
+            for (const Entity* line : lines) {
+                if (line->layer == key.first && text(line->metadata, "12d.name") == key.second) {
+                    named.push_back(line);
+                }
+            }
+            if (named.empty()) {
+                continue; // no string of its name: written as the entity it is
+            }
+            for (const Entity* part : members) {
+                const Entity* owner = named.front();
+                if (const auto* point = std::get_if<entity::PointGeometry>(&part->geometry)) {
+                    const auto standsOn = [&](const Entity* line) {
+                        const auto& vertices =
+                            std::get<geometry::Polyline2>(line->geometry).vertices;
+                        return std::any_of(vertices.begin(), vertices.end(), [&](const Point2& v) {
+                            return (v - point->position).length() < 0.01;
+                        });
+                    };
+                    if (const auto found = std::find_if(named.begin(), named.end(), standsOn);
+                        found != named.end()) {
+                        owner = *found;
+                    }
+                }
+                partsOf[owner].push_back(part);
+            }
+        }
         for (const Entity* line : lines) {
-            writeDrainageString(*line, parts[{line->layer, text(line->metadata, "12d.name")}]);
+            writeDrainageString(*line, partsOf[line]);
         }
     }
 
@@ -694,11 +729,18 @@ class DrawingWriter {
         // The lowest invert at each vertex, for the pits' depths.
         std::vector<std::optional<double>> invertAt(shape.vertices.size());
         if (pipes == 0 || pipes + 1 != shape.vertices.size()) {
-            b_.warn("drainage string \"" + name + "\" has " + std::to_string(pipes) +
-                    " pipes for " + std::to_string(shape.vertices.size()) +
-                    " vertices; it is written as one pipe along its line");
             const Drawn drawn = draw(line);
-            if (!drawn.items.empty()) {
+            if (drawn.items.empty()) {
+                // Nothing to draw: not written, and accounted for as not.
+                b_.warn("drainage string \"" + name + "\" has " + std::to_string(pipes) +
+                        " pipes for " + std::to_string(shape.vertices.size()) +
+                        " vertices and no extent to write; it is not written");
+                ++b_.report().entitiesSkipped;
+                b_.tally("layer " + line.layer, {}, {}, "nothing to draw");
+            } else {
+                b_.warn("drainage string \"" + name + "\" has " + std::to_string(pipes) +
+                        " pipes for " + std::to_string(shape.vertices.size()) +
+                        " vertices; it is written as one pipe along its line");
                 const Id representation =
                     drawn.in3d
                         ? b_.shape(b_.axisContext(), "Axis", "Curve3D", drawn.items)
@@ -727,6 +769,9 @@ class DrawingWriter {
             members.push_back(writePit(*part, shape, invertAt, system));
             handled_.insert(part->id);
             ++b_.report().entitiesWritten;
+        }
+        if (members.empty()) {
+            return; // nothing of the string was written: no system of nothing
         }
         const bool listed = isSystemEnumeration(system);
         const Id id = b_.file().add("IfcDistributionSystem",

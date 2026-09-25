@@ -105,11 +105,16 @@ struct IfcExportContext {
     std::function<bool()> headless;
 };
 
+// What became of an import: done, or declined by the person at a question
+// (the far-apart one), or failed - the last two said apart, since a cancel
+// is not a failure.
+enum class IfcImportOutcome { Imported, Cancelled, Failed };
+
 struct IfcImportContext {
     // What the file holds, read but not imported, as a person reads it.
     std::function<katana::core::Result<QString>(const QString& path)> describe;
-    // Imports, reporting in the log; false when it failed (logged).
-    std::function<bool(const IfcImportRequest&)> run;
+    // Imports, reporting in the log.
+    std::function<IfcImportOutcome(const IfcImportRequest&)> run;
     std::function<bool()> headless;
 };
 
@@ -121,8 +126,12 @@ class IfcExportDialog final : public QDialog {
     [[nodiscard]] IfcExportRequest request() const;
     // What stops an export, as a sentence; empty when nothing does.
     [[nodiscard]] QString check() const;
+    // The same, but for the file: what stops a preview, which writes none.
+    [[nodiscard]] QString checkWithoutFile() const;
     void setFile(const QString& path);
     // Reads the window's state again - counts, selection, coordinate system.
+    // The window calls it as its drawing changes, and the dialog before each
+    // preview and export, so a choice is never judged by counts that were.
     void refresh();
     // The preview, or the account of the export just written, as the table
     // shows it: one row per ClassTally.
@@ -167,6 +176,9 @@ class IfcImportDialog final : public QDialog {
     [[nodiscard]] IfcImportRequest request() const;
     [[nodiscard]] QString check() const;
     void setFile(const QString& path);
+    // Shows what the file holds, as Describe does, from a description made
+    // elsewhere (--import-options makes it before the dialog).
+    void setSummary(const QString& text);
 
   private:
     void recheck();

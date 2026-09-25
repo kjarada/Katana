@@ -578,7 +578,10 @@ class UtilityWriter {
                        std::string("Located by ") + sub::toString(vertex.evidence.method),
                        b_.productShape({representation}));
         ++b_.report().locatedPoints;
-        b_.tally("service " + line.id, IfcClass{"IfcAnnotation", "SURVEY", {}}, {},
+        // In the service's system, as the file groups it.
+        const UtilityClass run = classifyUtilityRun(line.attributes);
+        b_.tally("service " + line.id, IfcClass{"IfcAnnotation", "SURVEY", {}},
+                 run.system == "USERDEFINED" ? run.systemObjectType : run.system,
                  "a located point");
 
         PropertyList located;

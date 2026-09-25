@@ -41,7 +41,10 @@ The grammar is one function both front ends call
 (`ifc::parseExportArguments`, `ifc::parseImportArguments` in
 `include/katana/ifc/front_end.hpp`), as are reading the files an export names
 (`ifc::readExportFiles`) and the GlobalId namespace, so the same line writes
-the same file in either.
+the same file in either. A path is quoted, or read up to the first ".ifc"
+that ends a word, so that one with blanks may be typed as it is; a path that
+holds ".ifc " before its end is quoted, and a quote opened before the .ifc
+and never closed is refused rather than read as part of the path.
 
 EXPORT writes the drawing's entities and alignments, georeferenced by the
 project's coordinate system (`CRS SET`). UTILITIES adds an investigation in
@@ -83,15 +86,26 @@ the scenario with the sample schedule
 | service E1 | 3 | IfcCableCarrierSegment CONDUITSEGMENT | ELECTRICAL | a graded segment: configuration "4 x 100 mm conduits" |
 
 What is not written is accounted for too: a label is "not written", "a
-label: labels are not exported".
+label: labels are not exported". Every product the report counts is in the
+table once (`IfcExportTally.EveryProductTheReportCountsIsAccountedForOnce`).
+
+The table is the file the choices made when Preview was pressed: changing any
+of them but the file's name clears it, and a problem found since replaces the
+last result. The window's counts - entities, the selection, alignments,
+surfaces, the coordinate system - are read again as the drawing changes and
+before each preview and export, so "Selected entities only" with nothing
+selected is refused ("select what to export, or untick it") rather than
+writing the whole drawing or none of it.
 
 File > Import IFC reads a file's description first (Describe: schema,
 coordinate system, classes, alignments, surfaces) and imports what is ticked -
 alignments, elements, surfaces - moved to the origin or not, with the curve
-tolerance. A file far from the drawing is shifted alongside or kept, as every
-import asks; a file naming an EPSG code gives the project its coordinate
-system when the project has none (asked, or answered in the dialog), as a step
-of its own. Terrain comes in as surfaces of the session, which Export IFC
+tolerance. A file far from the drawing - its entities, alignments and
+surfaces - is shifted alongside or kept, as every import asks. A file naming
+an EPSG code gives the project its coordinate system when the project has
+none, as a step of its own: File > Import and a path given to the window ask,
+the dialog's "Take the file's coordinate system" answers in advance, and a
+typed IMPORT or a headless session asks no one and says how (`CRS SET`). Terrain comes in as surfaces of the session, which Export IFC
 writes out again.
 
 
@@ -163,7 +177,7 @@ deflection 0.9021827588 rad, the first arc 80 × (0.9021827588 − 40/160) =
 Each **service** of the schedule is an `IfcDistributionSystem`, and each of
 its **graded segments** - the standard grades segments, not services - one
 element, grouped by the system. Every **located point** is an `IfcAnnotation`
-SURVEY carrying its evidence. The class comes from the service's type and the
+SURVEY carrying its evidence, a member of its service's system. The class comes from the service's type and the
 words of its feature, subtype, configuration, material and description
 (`ifc::classifyUtilityRun`, `include/katana/ifc/classification.hpp`):
 
@@ -251,10 +265,13 @@ Services come first - linework on a service's layer is the service - and a
 pit on a "STORMWATER PITS" layer is in STORMWATER without a rule per service
 (`ifc::serviceSystemFor`). What no rule names is an `IfcAnnotation` of its
 kind: SURVEY for a point, or a line with heights or a survey code; TEXT,
-DIMENSION, LEADER; NOTDEFINED for other linework. The rules are data
-(`ExportOptions::rules`, and a RULES file: "Classification rules" below): a project whose layers are named otherwise passes
-its own, which replace the defaults, and a rule naming a class the export does
-not write, or USERDEFINED without saying what, is refused.
+DIMENSION, LEADER; NOTDEFINED for other linework. The rules are data: a
+caller that sets `ExportOptions::rules` replaces the defaults with them, and
+a project whose layers are named otherwise gives a RULES file ("Classification
+rules" below), whose rules both front ends try before the defaults, which
+still classify everything the file does not name
+(`ifc::readExportFiles`). A rule naming a class the export does not write, or
+USERDEFINED without saying what, is refused.
 `IfcBuildingElementProxy` is written only when such a rule asks for it.
 
 The geometry is what the class expects: a run's `Axis` in 3D where every
@@ -289,6 +306,10 @@ light pole,POLE*;LP;LIGHTING,Point,IfcColumn,COLUMN,,
 headwall,HEADWALL*;HW,Point;Circle,IfcDistributionChamberElement,USERDEFINED,HEADWALL,STORMWATER
 ```
 
+Blank lines and lines that begin with '#' are skipped; a field holding ',',
+'"' or '#', or blanks at either end, is double-quoted, with '"' doubled inside
+it, and a quoted field ends at its closing quote - anything but blanks before
+the next ',' is refused, naming the line.
 `words` are separated by ';' and matched as the defaults' are; `kinds` limit
 a rule to Point, Line, Arc, Polyline, Circle, Text, Dimension, Label or
 Leader, and are empty for any; `system` names the distribution system an

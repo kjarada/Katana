@@ -1,13 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 
 #include "katana/entity/model.hpp"
 #include "katana/ifc/front_end.hpp"
 #include "katana/ifc/import.hpp"
+#include "katana/terrain/tin_surface.hpp"
 
 namespace ifc = katana::ifc;
 using katana::core::ErrorCode;
@@ -308,4 +311,135 @@ TEST(IfcImportBounds, TheExtentIncludesTheAlignmentsAndSurfaces)
     ASSERT_FALSE(back->bounds.empty());
     EXPECT_NEAR(back->bounds.min.x, 1000.0, 1e-6);
     EXPECT_NEAR(back->bounds.max.y, 2050.0, 1e-6);
+}
+
+// ---- what the review found ----------------------------------------------------------
+
+// A quote opened before a .ifc and never closed is refused, not handed to
+// the other formats' grammar to be written under a name starting '"'.
+TEST(IfcFrontEnd, AnUnclosedQuoteBeforeAnIfcIsRefused)
+{
+    EXPECT_EQ(refusal(ifc::parseExportArguments("\"site plan.ifc")),
+              "InvalidArgument: a quoted path is never closed");
+    const auto import = ifc::parseImportArguments("\"site.ifc LOCAL");
+    ASSERT_TRUE(import && !*import);
+    EXPECT_EQ(import->error().describe(), "InvalidArgument: a quoted path is never closed");
+    // Not an .ifc: still the other formats' line.
+    EXPECT_FALSE(ifc::parseExportArguments("\"site.dxf"));
+}
+
+TEST(IfcRulesFile, ACommentIsSkippedWholeAndAQuotedHashIsData)
+{
+    // A quote in a comment must not open a field that swallows the rules
+    // after it; a quoted field that starts '#' is a rule, not a comment.
+    const std::string text = "rule,words,kinds,class,predefined_type,object_type,system\n"
+                             "# light poles, \"LP or POLE on the lighting layer\n"
+                             "light pole,LIGHTING,Point,IfcColumn,COLUMN,,\n"
+                             "  # kerbs surveyed as 12\" strings\n"
+                             "\"#1 kerb\",KB,,\"IfcKerb\" ,,,\n";
+    const auto rules = ifc::parseClassificationRules(text);
+    ASSERT_TRUE(rules.ok()) << rules.error().describe();
+    ASSERT_EQ(rules->size(), 2u);
+    EXPECT_EQ((*rules)[0].name, "light pole");
+    EXPECT_EQ((*rules)[1].name, "#1 kerb");
+    EXPECT_EQ((*rules)[1].target.entity, "IfcKerb"); // the blank after the quote is not its
+    // Anything but blanks between a closing quote and the comma is refused.
+    const auto after =
+        ifc::parseClassificationRules("rule,words,class\npole,POLE,\"IfcColumn\"x\n");
+    ASSERT_FALSE(after.ok());
+    EXPECT_NE(after.error().describe().find("text after a quoted field's closing quote"),
+              std::string::npos);
+    EXPECT_NE(after.error().describe().find("[line 2]"), std::string::npos);
+}
+
+// Whatever a rule is called and whatever its words, what the writer writes
+// the reader reads back as it was.
+TEST(IfcRulesFile, AnyRuleWrittenOutReadsBackAsItWas)
+{
+    std::vector<ifc::ClassificationRule> rules{
+        {"#1 pole",
+         {"POLE*", "LP"},
+         {katana::entity::EntityType::Point},
+         {"IfcColumn", "COLUMN", {}},
+         {}},
+        {"a, \"quoted\" name", {"WALL"}, {}, {"IfcWall", "USERDEFINED", "SOUND, WALL"}, "NOISE"},
+        {" padded ", {"FENCE"}, {}, {"IfcRailing", "FENCE", {}}, {}},
+    };
+    const auto back = ifc::parseClassificationRules(ifc::formatClassificationRules(rules));
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    ASSERT_EQ(back->size(), rules.size());
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+        EXPECT_EQ((*back)[i].name, rules[i].name);
+        EXPECT_EQ((*back)[i].words, rules[i].words);
+        EXPECT_EQ((*back)[i].kinds, rules[i].kinds);
+        EXPECT_EQ((*back)[i].target, rules[i].target);
+        EXPECT_EQ((*back)[i].system, rules[i].system);
+    }
+}
+
+// A terrain alone has an extent too.
+TEST(IfcImportBounds, ASurfaceAloneHasAnExtent)
+{
+    auto surface = katana::terrain::TinSurface::create(
+        {{500.0, 700.0, 10.0}, {510.0, 700.0, 11.0}, {500.0, 720.0, 12.0}}, {{0, 1, 2}});
+    ASSERT_TRUE(surface.ok());
+    const auto out = ifc::writeIfc({nullptr, {{"Ground", &*surface}}, {}});
+    ASSERT_TRUE(out.ok());
+    const auto back = ifc::readIfc(out->text);
+    ASSERT_TRUE(back.ok());
+    ASSERT_EQ(back->surfaces.size(), 1u);
+    ASSERT_FALSE(back->bounds.empty());
+    EXPECT_NEAR(back->bounds.min.x, 500.0, 1e-9);
+    EXPECT_NEAR(back->bounds.min.y, 700.0, 1e-9);
+    EXPECT_NEAR(back->bounds.max.x, 510.0, 1e-9);
+    EXPECT_NEAR(back->bounds.max.y, 720.0, 1e-9);
+}
+
+// Every product the report counts is in the account, once, as the class
+// written - the preview is only as true as this. (IfcDistributionSystem is
+// a group, not a product: it is in the classes map and not in the tally.)
+TEST(IfcExportTally, EveryProductTheReportCountsIsAccountedForOnce)
+{
+    katana::entity::Model model;
+    Entity kerb;
+    kerb.geometry = Polyline2{{Point2{334000.0, 6250000.0}, Point2{334010.0, 6250000.0}}, false};
+    kerb.layer = "Survey/Kerb";
+    ASSERT_TRUE(model.entities.add(kerb).ok());
+    Entity pit;
+    pit.geometry = katana::entity::PointGeometry{Point2{334005.0, 6250002.0}};
+    pit.layer = "Stormwater/Pits";
+    ASSERT_TRUE(model.entities.add(pit).ok());
+    katana::entity::Alignment alignment;
+    alignment.name = "A";
+    alignment.horizontal.pis = {{Point2{334000.0, 6250000.0}, 0.0, 0.0, 0.0},
+                                {Point2{334100.0, 6250050.0}, 0.0, 0.0, 0.0}};
+    ASSERT_TRUE(model.alignments.add(alignment).ok());
+    auto surface = katana::terrain::TinSurface::create(
+        {{334000.0, 6250000.0, 10.0}, {334010.0, 6250000.0, 11.0}, {334000.0, 6250010.0, 12.0}},
+        {{0, 1, 2}});
+    ASSERT_TRUE(surface.ok());
+    ifc::ExportArguments arguments;
+    arguments.path = "x.ifc";
+    arguments.schedule = std::string(KATANA_SAMPLES) + "/utilities/schedule.csv";
+    auto files = ifc::readExportFiles(arguments);
+    ASSERT_TRUE(files.ok());
+
+    const auto out = ifc::writeIfc({&model, {{"Ground", &*surface}}, std::move(files->utilities)});
+    ASSERT_TRUE(out.ok()) << out.error().describe();
+    std::map<std::string, std::size_t> tallied;
+    for (const auto& row : out->tally) {
+        if (!row.entity.empty()) {
+            tallied[row.entity] += row.count;
+        }
+    }
+    auto counted = out->classes;
+    counted.erase("IfcDistributionSystem");
+    EXPECT_EQ(tallied, counted);
+    // A located point is in its service's system, as the file groups it.
+    const auto point = std::find_if(out->tally.begin(), out->tally.end(), [](const auto& row) {
+        return row.source == "service W1" && row.entity == "IfcAnnotation";
+    });
+    ASSERT_NE(point, out->tally.end());
+    EXPECT_EQ(point->system, "WATERSUPPLY");
+    EXPECT_EQ(point->count, 6u);
 }

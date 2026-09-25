@@ -312,9 +312,10 @@ class MainWindow final : public QMainWindow {
                        const katana::interop::VectorExportOptions& options);
     // A .ifc, read and written natively (main_window_ifc.cpp, docs/ifc.md).
     // File > Import, a path given to the window and a typed IMPORT take the
-    // request's defaults; File > Import IFC's dialog chooses. False when it
-    // failed, which has been reported.
-    bool importIfcFile(const IfcImportRequest& request);
+    // request's defaults (a typed IMPORT says how to take the file's
+    // coordinate system rather than asking); File > Import IFC's dialog
+    // chooses. Failed or cancelled has been reported.
+    IfcImportOutcome importIfcFile(const IfcImportRequest& request);
     // Writes the file `request` asks for and reports it, or with `write`
     // false only accounts for what it would hold (the export dialog's
     // preview), writing and logging nothing. The report, or the error.

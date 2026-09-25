@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -651,4 +652,71 @@ TEST(IfcExportSurfaces, ASurfaceIsTerrainAsATriangulatedFaceSet)
     EXPECT_EQ(back->surfaces[0].name, "Ground");
     EXPECT_EQ(back->surfaces[0].surface.vertexCount(), 4u);
     EXPECT_EQ(back->surfaces[0].surface.triangleCount(), 2u);
+}
+
+namespace {
+
+Entity drainageString(std::string name, std::vector<Point2> vertices, std::size_t pipes)
+{
+    Entity line;
+    line.geometry = Polyline2{std::move(vertices), false};
+    line.layer = "Drainage";
+    line.metadata["12d.element"] = std::string("string drainage");
+    line.metadata["12d.name"] = std::move(name);
+    for (std::size_t i = 1; i <= pipes; ++i) {
+        line.properties["pipe." + std::to_string(i) + ".diameter"] = 0.375;
+    }
+    return line;
+}
+
+Entity drainagePit(std::string name, Point2 at)
+{
+    Entity pit;
+    pit.geometry = katana::entity::PointGeometry{at};
+    pit.layer = "Drainage";
+    pit.metadata["12d.element"] = std::string("drainage pit");
+    pit.metadata["12d.name"] = std::move(name);
+    pit.properties["pit.type"] = std::string("Junction pit");
+    return pit;
+}
+
+} // namespace
+
+// 12d names a string's pits by its header, and two strings may share a name:
+// each pit is written once, with the string it stands on.
+TEST(IfcExportDrawing, TwoDrainageStringsOfOneNameWriteEachPitOnce)
+{
+    Model model;
+    ASSERT_TRUE(model.entities.add(drainageString("SW", {{0.0, 0.0}, {30.0, 0.0}}, 1)).ok());
+    ASSERT_TRUE(model.entities.add(drainageString("SW", {{0.0, 50.0}, {30.0, 50.0}}, 1)).ok());
+    for (const Point2 at :
+         {Point2{0.0, 0.0}, Point2{30.0, 0.0}, Point2{0.0, 50.0}, Point2{30.0, 50.0}}) {
+        ASSERT_TRUE(model.entities.add(drainagePit("SW", at)).ok());
+    }
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_EQ(out.classes.at("IfcDistributionChamberElement"), 4u);
+    EXPECT_EQ(out.classes.at("IfcPipeSegment"), 2u);
+    EXPECT_EQ(out.classes.at("IfcDistributionSystem"), 2u);
+    EXPECT_EQ(out.entitiesWritten, 6u);
+}
+
+// A drainage string with nothing to draw is not written, and is accounted
+// for as not written - not claimed as "one pipe along its line".
+TEST(IfcExportDrawing, ADrainageStringWithNothingToDrawIsSkippedAndSaysSo)
+{
+    Model model;
+    ASSERT_TRUE(
+        model.entities.add(drainageString("SW", {{0.0, 0.0}, {0.000001, 0.0}, {0.000002, 0.0}}, 0))
+            .ok());
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_FALSE(out.classes.contains("IfcPipeSegment"));
+    EXPECT_FALSE(out.classes.contains("IfcDistributionSystem")); // no system of nothing
+    EXPECT_EQ(out.entitiesWritten, 0u);
+    EXPECT_EQ(out.entitiesSkipped, 1u);
+    ASSERT_EQ(out.tally.size(), 1u);
+    EXPECT_EQ(out.tally[0].entity, "");
+    EXPECT_EQ(out.tally[0].why, "nothing to draw");
+    EXPECT_TRUE(std::any_of(out.warnings.begin(), out.warnings.end(), [](const std::string& w) {
+        return w.find("no extent to write; it is not written") != std::string::npos;
+    }));
 }

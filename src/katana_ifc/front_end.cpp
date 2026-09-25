@@ -45,27 +45,40 @@ std::optional<std::vector<std::string>> words(std::string_view text)
 }
 
 // The path, and what follows it: a quoted path, or everything up to the
-// first ".ifc" that ends a word. nullopt when there is no .ifc.
-std::optional<std::pair<std::string, std::string_view>> splitPath(std::string_view argument)
+// first ".ifc" that ends a word. nullopt when there is no .ifc; an error for
+// a quote opened before a .ifc and never closed, which would otherwise pass
+// to the other formats' grammar and be written under a name starting with
+// the quote.
+std::optional<Result<std::pair<std::string, std::string_view>>> splitPath(std::string_view argument)
 {
+    using Split = Result<std::pair<std::string, std::string_view>>;
     argument = core::trimmed(argument);
     if (argument.starts_with('"')) {
         const std::size_t end = argument.find('"', 1);
         if (end == std::string_view::npos) {
+            const std::string lower = core::lowered(argument);
+            for (std::size_t at = lower.find(".ifc"); at != std::string::npos;
+                 at = lower.find(".ifc", at + 1)) {
+                const std::size_t after = at + 4;
+                if (after == lower.size() || lower[after] == ' ' || lower[after] == '\t') {
+                    return Split(
+                        makeError(ErrorCode::InvalidArgument, "a quoted path is never closed"));
+                }
+            }
             return std::nullopt;
         }
         std::string path(argument.substr(1, end - 1));
         if (!isIfcPath(pathFromUtf8(path))) {
             return std::nullopt;
         }
-        return std::pair(std::move(path), argument.substr(end + 1));
+        return Split(std::pair(std::move(path), argument.substr(end + 1)));
     }
     const std::string lower = core::lowered(argument);
     for (std::size_t at = lower.find(".ifc"); at != std::string::npos;
          at = lower.find(".ifc", at + 1)) {
         const std::size_t end = at + 4;
         if (end == lower.size() || lower[end] == ' ' || lower[end] == '\t') {
-            return std::pair(std::string(argument.substr(0, end)), argument.substr(end));
+            return Split(std::pair(std::string(argument.substr(0, end)), argument.substr(end)));
         }
     }
     return std::nullopt;
@@ -115,9 +128,12 @@ std::optional<Result<ExportArguments>> parseExportArguments(std::string_view arg
     if (!split) {
         return std::nullopt;
     }
+    if (!*split) {
+        return Result<ExportArguments>(split->error());
+    }
     ExportArguments out;
-    out.path = split->first;
-    const auto keywords = words(split->second);
+    out.path = (*split)->first;
+    const auto keywords = words((*split)->second);
     if (!keywords) {
         return Result<ExportArguments>(invalid("a quoted path is never closed"));
     }
@@ -158,9 +174,12 @@ std::optional<Result<ImportArguments>> parseImportArguments(std::string_view arg
     if (!split) {
         return std::nullopt;
     }
+    if (!*split) {
+        return Result<ImportArguments>(split->error());
+    }
     ImportArguments out;
-    out.path = split->first;
-    const auto keywords = words(split->second);
+    out.path = (*split)->first;
+    const auto keywords = words((*split)->second);
     if (!keywords) {
         return Result<ImportArguments>(invalid("a quoted path is never closed"));
     }

@@ -743,6 +743,11 @@ class, in which system, and why ("rule kerb", "a graded segment: type water",
 (`ifc::IfcExport::tally`), made by writing the file in memory, never a second
 guess at the mapping; and a class that is wrong for a project's layers is put
 right with a rules file, which Save Default Rules starts from the defaults.
+The table is the preview of the choices when Preview was pressed: changing any
+of them but the file's name clears it, and the dialog reads the window's
+counts again (`IfcExportDialog::refresh`) as the drawing changes and before
+each preview and export, so "Selected entities only" with nothing selected is
+refused rather than writing the whole drawing.
 
 A .ifc reaches the same two functions from everywhere else a path enters:
 File > Import and its IFC filter, a path given to the window, the typed
@@ -755,16 +760,23 @@ Vector's file dialog opens the export dialog with the file filled. The Command
 Reference lists the window's own verbs after the interpreter's.
 
 An import asks what the DXF import asks - a file far from the drawing is
-shifted alongside or kept - weighing everything it brings, alignments and
-surfaces too. When the file names an EPSG code and the project has none, File
-> Import asks whether the project takes it, the dialog's "Take the file's
-coordinate system" answers in advance, and a headless or typed import says
-how (`CRS SET`); the change is its own undoable step, after the import's.
+shifted alongside or kept - weighing everything it brings against everything
+the drawing holds, alignments and the session's surfaces too. When the file
+names an EPSG code and the project has none, File > Import and a path given to
+the window ask whether the project takes it, the dialog's "Take the file's
+coordinate system" answers in advance, and a typed `IMPORT` or a headless
+session asks no one and says how (`CRS SET`); the change is its own undoable
+step, after the import's. Declining the far-apart question cancels the import,
+which the dialog says as a cancel, not a failure.
 Data shifted or moved to the origin is in no system, and takes none. Terrain
 comes in as surfaces of the session (`MainWindow::addSurface`), which the
 export also writes out - the one exchange that carries the 3D view's surfaces
 both ways besides the 12d archive. `qt_widgets.IfcExportDialog.PreviewShowsTheWritersAccountClassByClass`
-and the `qt_ifc_*_headless` checks (`tests/CMakeLists.txt`) drive all of it.
+and the rest of `qt_widgets.IfcExportDialog.*` and `qt_widgets.IfcImportDialog.*`
+drive the dialogs' own logic; the `qt_ifc_*_headless` checks
+(`tests/CMakeLists.txt`) drive each way in - the two dialogs, the typed verbs,
+a path given to the window, `--import-options`, Dataset Information, a file far
+from the drawing's alignment, a missing file, and surfaces out and back.
 
 ## Global Modify
 
