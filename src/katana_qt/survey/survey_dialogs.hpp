@@ -108,10 +108,11 @@ class SurveyToolDialog : public QDialog {
     void frameViews() const;
     // Shows `text` on the message line in the muted colour (not an error).
     void setNote(const QString& text);
-
-  private:
+    // Shows `error` on the message line in the error colour, and logs it as
+    // an error: for a button that is neither a verb nor a filler.
     void showError(const katana::core::Error& error);
 
+  private:
     SurveyDialogContext context_;
     QFormLayout* form_ = nullptr;
     QLabel* message_ = nullptr;
