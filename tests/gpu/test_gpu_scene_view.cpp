@@ -1,8 +1,11 @@
 // The GPU widget (gpu/gpu_scene_view.hpp) under the offscreen platform, where
 // it cannot render: what it tells its host, and that its mouse moves the
 // host's camera exactly as RenderViewWidget's does. The cases named
-// "OnTheDesktop..." need a real QRhiWidget frame and run only on the windows
-// platform (KATANA_GPU_TEST_PLATFORM=windows); ctest skips them.
+// "OnTheDesktop..." need a real QRhiWidget frame and run only on a platform
+// the build's view can show: windows for the Direct3D 11 build
+// (KATANA_GPU_TEST_PLATFORM=windows, by hand - ctest skips them there), xcb
+// for the Vulkan one (ctest runs the Linux suite on xcb under Xvfb, so they
+// run there, on lavapipe when there is no GPU).
 
 #include <gtest/gtest.h>
 
@@ -48,7 +51,23 @@ katana::render::DrawList triangleAt(const katana::math::Vec3& offset)
     return list;
 }
 
-bool onDesktop() { return QGuiApplication::platformName() == QStringLiteral("windows"); }
+// The platform the build's view can show, as renderer_choice.cpp's rule 5.
+bool onDesktop()
+{
+    const QString platform = QGuiApplication::platformName();
+#if defined(KATANA_GPU_VULKAN)
+    return platform == QStringLiteral("xcb") || platform == QStringLiteral("wayland");
+#else
+    return platform == QStringLiteral("windows");
+#endif
+}
+
+#if defined(KATANA_GPU_VULKAN)
+constexpr const char* kNeedsDesktop = "needs the xcb or wayland platform (ctest runs it under Xvfb)";
+#else
+constexpr const char* kNeedsDesktop =
+    "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
+#endif
 
 std::size_t drawnPixels(const QImage& grabbed)
 {
@@ -216,7 +235,7 @@ TEST(GpuSceneView, ResizingKeepsTheHostsCameraInTheWidgetsLogicalPixels)
 TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
 {
     if (!onDesktop()) {
-        GTEST_SKIP() << "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
+        GTEST_SKIP() << kNeedsDesktop;
     }
     katana::render::DrawList list;
     const auto a = list.addVertex(katana::math::Vec3(-20.0, -20.0, 0.0), katana::render::rgba(220, 60, 60));
@@ -229,6 +248,7 @@ TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
     Camera camera;
     camera.setStandardView(katana::render::StandardView::IsoSouthWest);
     GpuSceneView view(camera);
+    view.setSoftwareDeviceAllowed(true); // the widget is under test, not the device policy
     view.resize(320, 200);
     QString failure;
     view.onRenderFailed = [&failure](const QString& why) { failure = why; };
@@ -247,7 +267,7 @@ TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
     // Framed on its first frame, so the triangle is on screen.
     EXPECT_GT(drawnPixels(grabbed),
               static_cast<std::size_t>(grabbed.width() * grabbed.height() / 20));
-    saveGrab("scene_view_windows", grabbed);
+    saveGrab("scene_view_desktop", grabbed);
 }
 
 // A GPU view made over a ViewState whose camera the user has already orbited
@@ -257,7 +277,7 @@ TEST(GpuSceneView, OnTheDesktopDrawsTheSceneThroughTheHostsCamera)
 TEST(GpuSceneView, OnTheDesktopAHostCameraAlreadyFramedKeepsItsViewThroughTheFirstFrame)
 {
     if (!onDesktop()) {
-        GTEST_SKIP() << "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
+        GTEST_SKIP() << kNeedsDesktop;
     }
     Camera camera;
     camera.setTarget(katana::math::Vec3(-15.0, -15.0, 0.0));
@@ -272,6 +292,8 @@ TEST(GpuSceneView, OnTheDesktopAHostCameraAlreadyFramedKeepsItsViewThroughTheFir
     };
 
     GpuSceneView view(camera);
+
+    view.setSoftwareDeviceAllowed(true); // the widget is under test, not the device policy
     view.resize(320, 200);
     int hookCalls = 0;
     view.onZoomExtents = [&] {
@@ -293,6 +315,7 @@ TEST(GpuSceneView, OnTheDesktopAHostCameraAlreadyFramedKeepsItsViewThroughTheFir
     // host's hook - its target moves from (-15, -15, 0) to (0, 0, 4).
     Camera fresh = kept;
     GpuSceneView other(fresh);
+    other.setSoftwareDeviceAllowed(true); // the widget is under test, not the device policy
     other.resize(320, 200);
     other.onZoomExtents = [&] { hostFrames(fresh); };
     other.setDrawList(triangleAt(katana::math::Vec3()));
@@ -312,10 +335,11 @@ TEST(GpuSceneView, OnTheDesktopAHostCameraAlreadyFramedKeepsItsViewThroughTheFir
 TEST(GpuSceneView, OnTheDesktopADrawListArrivingAfterTheFirstFrameIsFramed)
 {
     if (!onDesktop()) {
-        GTEST_SKIP() << "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
+        GTEST_SKIP() << kNeedsDesktop;
     }
     Camera camera;
     GpuSceneView view(camera);
+    view.setSoftwareDeviceAllowed(true); // the widget is under test, not the device policy
     view.resize(320, 200);
     view.show();
     QApplication::processEvents();
@@ -352,11 +376,12 @@ TEST(GpuSceneView, OnTheDesktopADrawListArrivingAfterTheFirstFrameIsFramed)
 TEST(GpuSceneView, OnTheDesktopAFrameLeavesTheHostsCameraReadyForTheSoftwareView)
 {
     if (!onDesktop()) {
-        GTEST_SKIP() << "needs the windows platform (KATANA_GPU_TEST_PLATFORM=windows)";
+        GTEST_SKIP() << kNeedsDesktop;
     }
     const katana::render::DrawList list = triangleAt(katana::math::Vec3());
     Camera camera;
     GpuSceneView view(camera);
+    view.setSoftwareDeviceAllowed(true); // the widget is under test, not the device policy
     view.resize(320, 200);
     view.setDrawList(list);
     const QImage grabbed = view.grabFramebuffer();
@@ -370,4 +395,45 @@ TEST(GpuSceneView, OnTheDesktopAFrameLeavesTheHostsCameraReadyForTheSoftwareView
     EXPECT_TRUE(painted.ok()) << (painted.ok() ? "" : painted.error().describe())
                               << " (the GPU frame was " << grabbed.width() << "x"
                               << grabbed.height() << ")";
+}
+
+// A software device - lavapipe, WARP - runs the GPU's work on the CPU, which
+// the rasteriser was written to do better; so the view refuses one as a
+// failure, the host falls back, and only KATANA_RENDERER=gpu
+// (setSoftwareDeviceAllowed) lets it draw. Testable only where the software
+// device is what the view would get - a desktop with no GPU, or Xvfb.
+TEST(GpuSceneView, OnTheDesktopASoftwareDeviceIsRefusedUnlessAllowed)
+{
+    if (!onDesktop()) {
+        GTEST_SKIP() << kNeedsDesktop;
+    }
+    // The view and a hardware OffscreenGpu ask QRhi for the same default
+    // device, so this says which kind the view will get.
+    katana::qt::gpu::OffscreenOptions hardware;
+    hardware.device = katana::qt::gpu::GpuDevice::Hardware;
+    if (auto gpu = katana::qt::gpu::OffscreenGpu::create(8, 8, hardware)) {
+        GTEST_SKIP() << "this machine has a hardware device (" << (*gpu)->deviceName()
+                     << "); a software one is refused only when it is what the view gets";
+    }
+
+    Camera camera;
+    GpuSceneView refusing(camera);
+    refusing.resize(64, 48);
+    QString reason;
+    refusing.onRenderFailed = [&reason](const QString& why) { reason = why; };
+    refusing.setDrawList(triangleAt(katana::math::Vec3()));
+    (void)refusing.grabFramebuffer();
+    EXPECT_TRUE(refusing.failed());
+    EXPECT_NE(reason.indexOf(QStringLiteral("software")), -1) << reason.toStdString();
+
+    Camera other;
+    GpuSceneView allowed(other);
+    allowed.setSoftwareDeviceAllowed(true);
+    allowed.resize(64, 48);
+    QString failure;
+    allowed.onRenderFailed = [&failure](const QString& why) { failure = why; };
+    allowed.setDrawList(triangleAt(katana::math::Vec3()));
+    const QImage grabbed = allowed.grabFramebuffer();
+    EXPECT_FALSE(allowed.failed()) << failure.toStdString();
+    EXPECT_GT(drawnPixels(grabbed), 0u);
 }

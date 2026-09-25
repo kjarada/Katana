@@ -1,5 +1,10 @@
 #include "main_window.hpp"
 
+#include "katana/core/cpu_features.hpp"
+#if defined(KATANA_HAS_GPU)
+#include "gpu/renderer_choice.hpp"
+#endif
+
 #include "theme.hpp"
 
 #include "icons.hpp"
@@ -85,6 +90,37 @@
 #include "katana/storage/project_store.hpp"
 
 namespace katana::qt {
+
+namespace {
+
+// The vector kernels in force, and why when it is not what the processor
+// could run (core::simdSelection).
+QString simdDescription()
+{
+    const katana::core::SimdSelection& simd = katana::core::simdSelection();
+    QString text = QString::fromLatin1(katana::core::toString(simd.active));
+    if (!simd.note.empty()) {
+        text += QString(" (%1)").arg(QString::fromStdString(simd.note));
+    }
+    return text;
+}
+
+// What the renderer rules choose for a 3D view made now, and why
+// (gpu::chooseRenderer).
+QString rendererDescription()
+{
+#if defined(KATANA_HAS_GPU)
+    const auto decision =
+        gpu::chooseRenderer(gpu::currentRendererEnvironment(false, false));
+    return QString("%1 - %2")
+        .arg(QString::fromLatin1(gpu::toString(decision.kind)),
+             QString::fromStdString(decision.reason));
+#else
+    return QStringLiteral("software - the GPU renderer is not built into this copy");
+#endif
+}
+
+} // namespace
 
 namespace cad = katana::cad;
 namespace cmd = katana::commands;
@@ -810,7 +846,13 @@ void MainWindow::buildActions()
                     QString("<p style='color:%1'>GDAL %2, PDAL %3.</p>")
                         .arg(theme::textMuted().name(),
                              QString::fromStdString(katana::gis::gdalVersion()),
-                             QString::fromStdString(katana::pointcloud::pdalVersion())));
+                             QString::fromStdString(katana::pointcloud::pdalVersion())) +
+                    // What this copy runs on this machine: the vector kernels
+                    // in force (docs/performance.md, "Dispatch") and what
+                    // draws a 3D view (docs/gpu.md, "Fallback") - the first
+                    // two things to know about a report that something is slow.
+                    QString("<p style='color:%1'>Vector kernels: %2. 3D views: %3.</p>")
+                        .arg(theme::textMuted().name(), simdDescription(), rendererDescription()));
         box.exec();
     });
     reference->setObjectName("helpCommandReference");

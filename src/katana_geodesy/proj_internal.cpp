@@ -1,7 +1,10 @@
 #include "proj_internal.hpp"
 
 #include <cstddef>
+#include <string>
 #include <utility>
+
+#include "katana/core/library_data.hpp"
 
 namespace katana::geodesy::detail {
 
@@ -23,6 +26,13 @@ core::Result<std::unique_ptr<ProjContext>> ProjContext::create()
     proj_log_func(context->context_, context.get(), &ProjContext::logCallback);
     proj_log_level(context->context_, PJ_LOG_ERROR);
     proj_context_set_enable_network(context->context_, 0);
+    // Before proj.db is first opened below: in a relocated Linux prefix
+    // PROJ's own search path is wrong (core/library_data.hpp).
+    if (const auto& data = core::projDataDirectory()) {
+        const std::string path = data->string();
+        const char* const paths[] = {path.c_str()};
+        proj_context_set_search_paths(context->context_, 1, paths);
+    }
 
     // Forces PROJ to locate and open proj.db now, so that a broken installation
     // is reported as such instead of as a confusing "crs not found" later.
