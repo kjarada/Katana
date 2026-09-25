@@ -130,6 +130,12 @@ committed and never needed by a test. A test that reads the git-ignored
 customisation must pass without it (`docs/building.md`, "The customisation
 folder").
 
+**No test needs the network.** The online import's tests answer every request
+from fixtures (`tests/interop/data/online/`) through
+`OnlineEnvironment::transport`, or read local files as `file://` URLs; the
+few that reach real services are named `OnlineLive.*` and skip unless
+`KATANA_ONLINE_TESTS=1` is set (`docs/gis_online.md`, "Tests").
+
 ## What makes a test evidence
 
 **Derived expectations** (`docs/architecture.md`, "Working rules"). The
