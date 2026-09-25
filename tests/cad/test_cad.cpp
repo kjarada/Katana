@@ -782,6 +782,22 @@ TEST(CadInterpreter, InfoTakesAnIdWrittenPlainOrAsAnAnchoredPointNamesIt)
     EXPECT_EQ(s.fails("INFO 1 2"), ErrorCode::InvalidArgument);
 }
 
+TEST(CadInterpreter, SelectTakesIdsWrittenPlainOrAsInfoTakesThem)
+{
+    Session s;
+    s.ok("POINT 1,1");
+    s.ok("POINT 2,2");
+    s.ok("POINT 3,3");
+    // The ids Select by ID and a DIM line give, #n among them.
+    EXPECT_EQ(s.ok("SELECT #1 3"), "2 selected");
+    EXPECT_EQ(s.document.selection().ids(), (std::vector<katana::entity::EntityId>{1, 3}));
+    EXPECT_EQ(s.fails("SELECT #4"), ErrorCode::NotFound);
+    EXPECT_EQ(s.fails("SELECT #"), ErrorCode::ParseFailure);
+    EXPECT_EQ(s.fails("SELECT ##2"), ErrorCode::ParseFailure);
+    // A refused line leaves the selection as it was.
+    EXPECT_EQ(s.document.selection().ids(), (std::vector<katana::entity::EntityId>{1, 3}));
+}
+
 TEST(CadInterpreter, AnEntityIdIsAPositiveWholeNumberPlainOrAfterAHash)
 {
     for (const char* word : {"1", "12", "#12", "18446744073709551615"}) {
@@ -796,10 +812,12 @@ TEST(CadInterpreter, AnEntityIdIsAPositiveWholeNumberPlainOrAfterAHash)
 
 TEST(CadInterpreter, AnImportArgumentLosesOnePairOfQuotesAndAFinalUnquotedLocal)
 {
-    using Argument = CommandInterpreter::ImportArgument;
     const auto read = [](std::string_view rest) {
-        const Argument argument = CommandInterpreter::importArgument(rest);
-        return std::pair(argument.path, argument.local);
+        const auto argument = CommandInterpreter::importArgument(rest);
+        EXPECT_TRUE(argument.ok()) << rest;
+        return argument ? std::pair(argument->path, argument->placement.mode ==
+                                                        katana::cad::ImportPlacementMode::Local)
+                        : std::pair(std::string(), false);
     };
     EXPECT_EQ(read(" site.dxf"), std::pair(std::string("site.dxf"), false));
     EXPECT_EQ(read(" site.dxf LOCAL"), std::pair(std::string("site.dxf"), true));
@@ -822,6 +840,118 @@ TEST(CadInterpreter, AnImportArgumentLosesOnePairOfQuotesAndAFinalUnquotedLocal)
     EXPECT_EQ(read(""), std::pair(std::string(), false));
     EXPECT_EQ(read("   "), std::pair(std::string(), false));
     EXPECT_EQ(read(" \"\" LOCAL"), std::pair(std::string(), true));
+}
+
+TEST(CadInterpreter, AnImportArgumentTakesAlongsideOrAnOffsetAsItsLastWordAndRefusesABadOffset)
+{
+    using katana::cad::ImportPlacement;
+    using katana::cad::ImportPlacementMode;
+    const auto along = CommandInterpreter::importArgument(" \"C:/Survey Data/site.dxf\" alongside");
+    ASSERT_TRUE(along.ok()) << along.error().describe();
+    EXPECT_EQ(along->path, "C:/Survey Data/site.dxf");
+    EXPECT_EQ(along->placement, (ImportPlacement{ImportPlacementMode::Alongside, {}}));
+
+    const auto moved = CommandInterpreter::importArgument(" site.dxf OFFSET=-12.5,300");
+    ASSERT_TRUE(moved.ok()) << moved.error().describe();
+    EXPECT_EQ(moved->path, "site.dxf");
+    EXPECT_EQ(moved->placement,
+              (ImportPlacement{ImportPlacementMode::Offset, katana::geometry::Vec2(-12.5, 300.0)}));
+
+    // The word alone is a file of that name, and inside the quotes it is the
+    // file's too.
+    for (const char* rest : {" ALONGSIDE", " OFFSET=1,2", " \"yard OFFSET=1,2\""}) {
+        const auto file = CommandInterpreter::importArgument(rest);
+        ASSERT_TRUE(file.ok()) << rest;
+        EXPECT_EQ(file->placement.mode, ImportPlacementMode::Keep) << rest;
+    }
+    // A mistyped offset is refused, never read as part of the file's name.
+    for (const char* rest : {" site.dxf OFFSET=", " site.dxf OFFSET=1", " site.dxf offset=1,x",
+                             " site.dxf OFFSET=1,2,3", " site.dxf OFFSET=inf,0",
+                             " site.dxf OFFSET=1;2"}) {
+        const auto refused = CommandInterpreter::importArgument(rest);
+        ASSERT_FALSE(refused.ok()) << rest;
+        EXPECT_EQ(refused.error().code, ErrorCode::InvalidArgument) << rest;
+    }
+}
+
+TEST(ImportPlacement, AWordAndThePlacementItNamesReadBackAsEachOther)
+{
+    using katana::cad::ImportPlacement;
+    using katana::cad::ImportPlacementMode;
+    using katana::geometry::Vec2;
+    EXPECT_EQ(katana::cad::placementWord(ImportPlacement{}), "");
+    EXPECT_EQ(katana::cad::placementWord({ImportPlacementMode::Local, {}}), "LOCAL");
+    EXPECT_EQ(katana::cad::placementWord({ImportPlacementMode::Alongside, {}}), "ALONGSIDE");
+    EXPECT_EQ(katana::cad::placementWord({ImportPlacementMode::Offset, Vec2(10.0, -20.5)}),
+              "OFFSET=10,-20.5");
+    // Each offset written so it reads back exactly: survey coordinates keep
+    // their millimetres, and a tenth is not 0.1000000000000000055.
+    for (const ImportPlacement& placement :
+         {ImportPlacement{ImportPlacementMode::Local, {}},
+          ImportPlacement{ImportPlacementMode::Alongside, {}},
+          ImportPlacement{ImportPlacementMode::Offset, Vec2(0.1, -7410850.125)},
+          ImportPlacement{ImportPlacementMode::Offset, Vec2(1e-7, 0.0)}}) {
+        const auto read = katana::cad::parsePlacementWord(katana::cad::placementWord(placement));
+        ASSERT_TRUE(read.ok());
+        ASSERT_TRUE(read->has_value());
+        EXPECT_EQ(**read, placement) << katana::cad::placementWord(placement);
+    }
+    const auto notOne = katana::cad::parsePlacementWord("site.dxf");
+    ASSERT_TRUE(notOne.ok());
+    EXPECT_FALSE(notOne->has_value());
+}
+
+TEST(ImportPlacement, LocalPutsTheLowerLeftCornerAtTheOrigin)
+{
+    // samples/gis/parcels.geojson spans (180, 0) to (365, 165).
+    const katana::geometry::Box2 parcels({180.0, 0.0}, {365.0, 165.0});
+    const auto local = katana::cad::resolveImportShift(
+        {katana::cad::ImportPlacementMode::Local, {}}, katana::geometry::Box2{}, parcels);
+    ASSERT_TRUE(local.shift.has_value());
+    EXPECT_EQ(*local.shift, katana::geometry::Vec2(180.0, 0.0)); // subtracted: (0,0) to (185,165)
+    EXPECT_EQ(local.said,
+              "LOCAL: moved as one piece by -180.000,0.000, so its lower-left corner sits at 0,0.");
+}
+
+TEST(ImportPlacement, AlongsidePutsTheCornerOnTheDrawingsAndIntoAnEmptyDrawingMovesNothing)
+{
+    const katana::geometry::Box2 parcels({180.0, 0.0}, {365.0, 165.0});
+    const katana::geometry::Box2 drawing({1000.0, 2000.0}, {1010.0, 2005.0});
+    const auto along = katana::cad::resolveImportShift(
+        {katana::cad::ImportPlacementMode::Alongside, {}}, drawing, parcels);
+    ASSERT_TRUE(along.shift.has_value());
+    // Subtracted from (180, 0) it leaves the drawing's corner, (1000, 2000).
+    EXPECT_EQ(*along.shift, katana::geometry::Vec2(-820.0, -2000.0));
+    EXPECT_EQ(along.said, "ALONGSIDE: moved as one piece by 820.000,2000.000, so its lower-left "
+                          "corner sits on the drawing's, at 1000.000,2000.000.");
+
+    const auto empty = katana::cad::resolveImportShift(
+        {katana::cad::ImportPlacementMode::Alongside, {}}, katana::geometry::Box2{}, parcels);
+    EXPECT_FALSE(empty.shift.has_value());
+    EXPECT_NE(empty.said.find("the drawing is empty"), std::string::npos) << empty.said;
+}
+
+TEST(ImportPlacement, AnOffsetMovesByWhatItSaysAndKeepOrNoDataMovesNothing)
+{
+    const katana::geometry::Box2 parcels({180.0, 0.0}, {365.0, 165.0});
+    const auto moved = katana::cad::resolveImportShift(
+        {katana::cad::ImportPlacementMode::Offset, katana::geometry::Vec2(10.0, -20.5)},
+        katana::geometry::Box2{}, parcels);
+    ASSERT_TRUE(moved.shift.has_value());
+    EXPECT_EQ(*moved.shift, katana::geometry::Vec2(-10.0, 20.5));
+    EXPECT_EQ(moved.said, "OFFSET: moved as one piece by 10.000,-20.500.");
+
+    const auto kept =
+        katana::cad::resolveImportShift({}, katana::geometry::Box2{}, parcels);
+    EXPECT_FALSE(kept.shift.has_value());
+    EXPECT_TRUE(kept.said.empty());
+    // A file holding nothing with a position has nothing to move, whatever
+    // was asked; said, so an empty import is not taken for a moved one.
+    const auto nothing = katana::cad::resolveImportShift(
+        {katana::cad::ImportPlacementMode::Local, {}}, katana::geometry::Box2{},
+        katana::geometry::Box2{});
+    EXPECT_FALSE(nothing.shift.has_value());
+    EXPECT_NE(nothing.said.find("nothing to move"), std::string::npos) << nothing.said;
 }
 
 TEST(CadInterpreter, KeepsAHistoryAndHasHelp)

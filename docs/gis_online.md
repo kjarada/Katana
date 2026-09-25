@@ -257,7 +257,11 @@ import - or the raster to the reference data (which is not undoable, by
 design: `docs/interop.md`, "Two kinds of imported data"). Cancel in the status
 bar stops the transfer between packets (GDAL's progress callback) and the warp
 between chunks; nothing is applied. A headless run waits for the job with a
-deadline, `timeout=` (600 s by default), after which it is cancelled.
+deadline, `timeout=` (600 s by default), after which it is cancelled. In a
+person's session `timeout=` is a deadline too when it is given - the dialog's
+Give up after - and the job is cancelled then as Cancel would; without it a
+person cancels when they choose. Until 2026-09-26 `timeout=` was read only by
+a headless run, and typed in the window it did nothing.
 
 A request is retried three times, the delay doubling from a second, for a 429,
 a 5xx, a timeout or a dropped connection - never for another 4xx, which would
@@ -277,6 +281,37 @@ Sentinel-2 dates and cloud (`onlineUseDates`, `onlineFrom`, `onlineTo`,
 that has none (`onlineCrs`), a key (`onlineKey`, `onlineSaveKey`), Add Custom
 Service (`onlineCustomUrl`, `onlineAddCustom`), Import (`onlineImport`) and a
 status line (`onlineStatus`).
+
+Since 2026-09-26 it also has what the verbs had and it did not:
+
+- **The details say what `ONLINE INFO` says**: the service's CRS (or "the
+  service's own"), its version, and its limits worded for its kind of
+  service (`OnlineDataDialog::limitsText`, from the same fields
+  `formatInfo` reports): tiles to a zoom and so many an import, features a
+  page, pixels a request, square kilometres an import, or a STAC search's
+  days and cloud.
+- **A catalogue is searched in the dialog** (`onlineCatalogue`, shown only
+  for a catalogue layer): `onlineCatalogueSearch` and `onlineCatalogueRun`
+  run `ONLINE LAYERS <provider> <words>` through the workbench, as a typed
+  line does; what the search found comes back from the workbench's job
+  (`OnlineDataDialog::showCatalogueResults`) into `onlineCatalogueResults`
+  (title, dataset, format, the address with any key taken out), as well as
+  to the log; `onlineCatalogueAdd`, or a double click, runs `ONLINE CUSTOM
+  <address>` for the chosen one. The details had said to type the verb.
+- **A date for a time-enabled layer**: `onlineTimeDefault` (Default,
+  latest) or `onlineTime`, which writes `time=YYYY-MM-DD`. Offered only for a
+  layer with a time dimension or `{time}` in its address
+  (`OnlineDataDialog::hasTime`); NASA GIBS's daily imagery is one.
+- **Advanced** (`onlineAdvanced`): `onlineTimeoutOn` and `onlineTimeout`,
+  Give up after [600] s, which writes `timeout=`; 600 is where it starts
+  because it is a headless run's own deadline, so ticking it alone changes
+  nothing.
+
+`qt_widgets.GisOnlineDialog.*` drive each by its object name, and
+`qt_online_dialog_details_and_deadline_headless` reads the details and
+imports through the dialog with a deadline set. A live catalogue search runs
+only with `KATANA_ONLINE_TESTS=1`: a CKAN search is a query, which the local
+catalogue's `file://` layer cannot answer.
 
 **The dialog does not import.** It writes the line `ONLINE IMPORT ...` would
 be, reads it with the verb's own parser (`OnlineDataDialog::command`) and
@@ -434,5 +469,9 @@ published shapes.
   layer, which is clipped; an ArcGIS lot crossing the area's edge arrives
   entire, which is what a cadastre wants.
 - `katana_cli` has no `ONLINE` verbs.
+- The dialog's own lines are not echoed in the command log the way the
+  window's one executor echoes a dialog's line: the dialog hands the
+  workbench a parsed command, which predates the executor. The replies are
+  logged.
 - Reference rasters are session data (`docs/interop.md`), so an online raster
   is not reopened with the project; its record is in the reply and the log.

@@ -17,27 +17,31 @@ namespace katana::app {
 
 namespace {
 
-bool importDxf(katana::cad::Document& document, const std::filesystem::path& file, bool local)
+bool importDxf(katana::cad::Document& document, const std::filesystem::path& file,
+               const katana::cad::ImportPlacement& placement)
 {
     katana::dxf::ImportOptions options;
     options.sourceName = file.filename().string();
     auto imported = katana::dxf::readDxfFile(file, options);
-    if (imported && local && !imported->bounds.empty()) {
-        // LOCAL: moved as one piece to sit at the origin, as the other
-        // importers do. Read again rather than moved afterwards, so the one
-        // reader applies the one shift to every kind of geometry.
-        options.originShift =
-            katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
-        imported = katana::dxf::readDxfFile(file, options);
-    }
     if (!imported) {
         std::cerr << "error: " << imported.error().describe() << '\n';
         return false;
     }
-    const std::size_t count = imported->entities.size();
-#if defined(KATANA_WITH_INTEROP)
+    // Where it lands (cad/import_placement.hpp), as the other importers do.
+    // Read again rather than moved afterwards, so the one reader applies the
+    // one shift to every kind of geometry.
     const auto existingBounds = document.model().entities.bounds();
-#endif
+    const katana::cad::ImportShift placed =
+        katana::cad::resolveImportShift(placement, existingBounds, imported->bounds);
+    if (placed.shift) {
+        options.originShift = *placed.shift;
+        imported = katana::dxf::readDxfFile(file, options);
+        if (!imported) {
+            std::cerr << "error: " << imported.error().describe() << '\n';
+            return false;
+        }
+    }
+    const std::size_t count = imported->entities.size();
     // Linetypes, layers and entities: ONE undo step.
     if (auto command = katana::dxf::importCommand(*imported, document.model())) {
         if (const auto status = document.execute(std::move(command)); !status) {
@@ -47,6 +51,9 @@ bool importDxf(katana::cad::Document& document, const std::filesystem::path& fil
     }
     std::cout << "imported " << count << " entities from " << file.filename().string()
               << " (DXF" << (imported->release.empty() ? "" : " ") << imported->release << ")\n";
+    if (!placed.said.empty()) {
+        std::cout << "  " << placed.said << '\n';
+    }
     for (const auto& tally : imported->tally) {
         std::cout << "  " << tally.kind << ": " << tally.read << " read, " << tally.imported
                   << " imported\n";
@@ -66,7 +73,8 @@ bool importDxf(katana::cad::Document& document, const std::filesystem::path& fil
     if (advice.farApart) {
         std::cout << "  WARNING: " << advice.message << '\n'
                   << "  undo, then re-import with  IMPORT <file> LOCAL  to move it as one "
-                     "piece so its lower-left corner sits at 0,0\n";
+                     "piece so its lower-left corner sits at 0,0, or  IMPORT <file> ALONGSIDE  "
+                     "to put that corner on the drawing's\n";
     }
 #endif
     return true;
@@ -99,13 +107,14 @@ bool exportDxf(const katana::cad::Document& document, const std::filesystem::pat
 } // namespace
 
 std::optional<bool> runDxfVerb(katana::cad::Document& document, std::string_view verb,
-                               const std::string& path, bool local)
+                               const std::string& path,
+                               const katana::cad::ImportPlacement& placement)
 {
     const std::filesystem::path file(path);
     if (path.empty() || !katana::dxf::isDxfPath(file)) {
         return std::nullopt;
     }
-    return verb == "IMPORT" ? importDxf(document, file, local) : exportDxf(document, file);
+    return verb == "IMPORT" ? importDxf(document, file, placement) : exportDxf(document, file);
 }
 
 } // namespace katana::app

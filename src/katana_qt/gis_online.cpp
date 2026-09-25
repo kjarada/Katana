@@ -320,10 +320,17 @@ Status OnlineDataWorkbench::run(const interop::OnlineCommand& command)
             [this, found](const JobReport& report) {
                 if (report.outcome == JobOutcome::Finished) {
                     reply(interop::formatCatalogueSearch(*found));
+                    // The dialog lists them to add from, whoever asked.
+                    if (dialog_ != nullptr) {
+                        dialog_->showCatalogueResults(*found);
+                    }
                 } else {
-                    reply(errorLine(interop::OnlineVerb::Layers,
-                                    report.outcome == JobOutcome::Cancelled ? "cancelled" : report.error),
-                          true);
+                    const std::string why =
+                        report.outcome == JobOutcome::Cancelled ? "cancelled" : report.error;
+                    reply(errorLine(interop::OnlineVerb::Layers, why), true);
+                    if (dialog_ != nullptr) {
+                        dialog_->setStatus(qs(why), true);
+                    }
                 }
             });
         if (services_.headless()) {
@@ -611,6 +618,19 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
                                    report.outcome != JobOutcome::Finished);
             }
         });
+    if (!services_.headless() && command.timeoutSeconds) {
+        // A deadline asked for (timeout=, the dialog's Give up after): the job
+        // is cancelled if it is still running then, as the status bar's Cancel
+        // would. Without one, a person cancels when they choose.
+        const int seconds = *command.timeoutSeconds;
+        QTimer::singleShot(seconds * 1000, &window_, [&runner, id, this, seconds] {
+            if (runner.cancel(id)) {
+                reply(errorLine(interop::OnlineVerb::Import,
+                                "no answer within " + std::to_string(seconds) + " s; cancelled"),
+                      true);
+            }
+        });
+    }
     if (services_.headless()) {
         // Nobody can press Cancel: a deadline does it instead.
         const int seconds = command.timeoutSeconds.value_or(kHeadlessDeadlineSeconds);

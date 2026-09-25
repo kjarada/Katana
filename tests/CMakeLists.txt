@@ -1256,6 +1256,19 @@ if(TARGET katana)
             "-DFORBID=No importer|Far from|no one to ask"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_local_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ALONGSIDE and OFFSET typed as an agent types them, each moving the
+    # parcels (180,0 to 365,165) as one piece and saying so; a DXF placed
+    # the same way; a raster refusing a placement by name, and a mistyped
+    # offset refused before anything is read.
+    add_test(NAME qt_import_placement_typed_on_the_windows_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 1000,2000 1010,2005|>IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE|>UNDO|>IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5|>IMPORT \"${PROJECT_SOURCE_DIR}/tests/dxf/data/r2000_site.dxf\" local|>IMPORT ${_gis}/terrain.asc ALONGSIDE|>IMPORT ${_gis}/parcels.geojson OFFSET=ten,0"
+            "-DEXPECT=ALONGSIDE: moved as one piece by 820\\.000,2000\\.000, so its lower-left corner sits on the drawing's, at 1000\\.000,2000\\.000\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 1000\\.00,2000\\.00 to 1185\\.00,2165\\.00.*OFFSET: moved as one piece by 10\\.000,-20\\.500\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 190\\.00,-20\\.50 to 375\\.00,144\\.50.*LOCAL: moved as one piece by [^\r\n]*, so its lower-left corner sits at 0,0\\.[\r\n]+Imported 9 entities from r2000_site\\.dxf.*ALONGSIDE is not supported for rasters and point clouds.*OFFSET= takes the east and north"
+            "-DFORBID=No importer|Far from"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_placement_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A dialog's line while a tool waits for a point: the CIRCLE is drawn,
     # not taken for the Line's first point, its reply comes back, and the
     # typed points then draw the line as ever - entity 2, from 0,0 to 10,0;
@@ -1272,6 +1285,7 @@ if(TARGET katana)
     set_tests_properties(qt_the_session_verbs_run_on_the_windows_command_line_headless
         qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
         qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
+        qt_import_placement_typed_on_the_windows_command_line_headless
         qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
@@ -1486,7 +1500,9 @@ endif()
 # The File items that ask for a file, reached by the object names they now
 # carry: in a headless session each opens no file dialog - nobody could close
 # it - and names the line that does the same without one, as GIS > Convert
-# Point Cloud to COPC does. Save of a drawing with no project is Save As. The
+# Point Cloud to COPC does; Import names every placement IMPORT takes
+# (docs/interop.md, "Placing an import"). Save of a drawing with no project is
+# Save As. The
 # empty drawing's Export says so in the log, not in a box.
 if(TARGET katana)
     add_test(NAME qt_the_file_items_name_their_verbs_in_a_headless_run_headless
@@ -1494,10 +1510,26 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=*fileOpen|*fileSaveAs|*fileImport|*fileExportVector|>RECT 0,0 1,1|*fileExportVector|*loadCustomisation|*replaceCustomisation|*fileSave"
-            "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type CUSTOMISE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type CUSTOMISE REPLACE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
+            "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL \\| ALONGSIDE \\| OFFSET=dE,dN\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type CUSTOMISE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type CUSTOMISE REPLACE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_items_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+# Edit > Select by ID and the Edit and View actions' object names
+# (docs/desktop.md, "The plan view's shortcut menu"). Three points; Select All
+# by its action; the dialog, non-modal, selects #2 and 3 through the executor
+# and says what SELECT answered; Grid is reached by its name and turned off;
+# Erase by its name erases the two, and Undo by its name brings them back.
+if(TARGET katana)
+    add_test(NAME qt_select_by_id_selects_and_frames_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>POINT 1,1|>POINT 20,20|>POINT 40,40|*editSelectAll|@editSelectById|selectByIdIds=#2, 3|!selectByIdSelect|?selectByIdStatus|*viewGrid|?viewGrid|*editErase|>LIST|*editUndo|>LIST"
+            "-DEXPECT=3 selected.*--dialog editSelectById opened selectByIdDialog \"Select by ID\"[\r\n]+2 selected[\r\n]+selectByIdStatus: 2 selected.*viewGrid: Grid, unchecked[\r\n]+2 erased[\r\n]+1 entities[\r\n]+1 +Point +layer=0 +at 1,1.*3 entities"
+            "-DFORBID=\\(modal\\)|no such menu item|not an entity id"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/select_by_id_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_select_by_id_selects_and_frames_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

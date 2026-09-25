@@ -70,4 +70,20 @@ if(TARGET katana)
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_online_dialog_headless PROPERTIES
         ENVIRONMENT_MODIFICATION "${_online_dialog_env}" TIMEOUT 180)
+    # The details say the service's system and that the Advanced group's
+    # deadline is there; an import given one (timeout=90, well past what a
+    # local file takes) still arrives whole.
+    add_test(NAME qt_online_dialog_details_and_deadline_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/online_dialog_deadline_headless.png"
+            "-DDRIVE=@onlineData|onlineSearch=headless lots|?onlineDetails|onlineArea=Typed box|onlineBox=151.2,-33.875,151.215,-33.865|onlineBoxCrs=WGS 84 longitude, latitude|onlineCrs=EPSG:7856|onlineTimeoutOn=on|onlineTimeout=90|!onlineImport|?onlineStatus"
+            "-DEXPECT=onlineDetails: [^\r\n]*Service CRS.*imported provider=headless-local layer=lots kind=vector entities=4.*onlineStatus: Imported"
+            "-DFORBID=no answer within"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_online_dialog_details_and_deadline_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "${_online_env};KATANA_ONLINE_CACHE=set:${CMAKE_CURRENT_BINARY_DIR}/online_dialog_deadline_headless_cache"
+        TIMEOUT 180)
 endif()
