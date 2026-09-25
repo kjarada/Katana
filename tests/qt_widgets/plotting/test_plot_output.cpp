@@ -242,6 +242,54 @@ TEST(PlotOutput, ARequestComesFromThePageSetupAndGoesBackToIt)
     EXPECT_FALSE(katana::qt::pageSetupFor(raster, plotting::PageSetup{}).filePerSheet);
 }
 
+// The PLOTSHEETS verb's words make the request the Plot dialog would make:
+// the page setup's, each word given in its place, one PDF unless a format
+// is named.
+TEST(PlotOutput, ThePlotSheetsVerbsWordsMakeARequestOverThePageSetup)
+{
+    plotting::SheetSet set;
+    for (const char* id : {"s1", "s2", "s3"}) {
+        plotting::Sheet sheet;
+        sheet.id = id;
+        set.sheets.push_back(sheet);
+    }
+    plotting::PageSetup setup;
+    setup.colourMode = PlotColourMode::Greyscale;
+    setup.dpi = 200.0;
+    setup.lineWeightScale = 0.8;
+    setup.filePerSheet = true;
+    setup.fileNamePattern = "{n} {name}";
+
+    const auto bare = plotting::parsePlotSheets(set, {"out.pdf"});
+    ASSERT_TRUE(bare.ok());
+    const PlotRequest kept = katana::qt::plotRequestFor(setup, *bare);
+    EXPECT_EQ(kept.format, PlotFormat::Pdf) << "one PDF unless a format is named";
+    EXPECT_EQ(kept.colourMode, PlotColourMode::Greyscale);
+    EXPECT_DOUBLE_EQ(kept.dpi, 200.0);
+    EXPECT_DOUBLE_EQ(kept.lineWeightScale, 0.8);
+    EXPECT_EQ(kept.fileNamePattern, "{n} {name}");
+    EXPECT_EQ(kept.destination, QString("out.pdf"));
+    EXPECT_TRUE(kept.sheets.empty());
+
+    const auto words = plotting::parsePlotSheets(
+        set, {"format=tiff", "folder=plots", "style=mono", "dpi=90", "lineweight=1.5",
+              "pattern={id}", "sheets=3,1"});
+    ASSERT_TRUE(words.ok()) << words.error().describe();
+    const PlotRequest given = katana::qt::plotRequestFor(setup, *words);
+    EXPECT_EQ(given.format, PlotFormat::Tiff);
+    EXPECT_EQ(given.destination, QString("plots"));
+    EXPECT_EQ(given.colourMode, PlotColourMode::Monochrome);
+    EXPECT_DOUBLE_EQ(given.dpi, 90.0);
+    EXPECT_DOUBLE_EQ(given.lineWeightScale, 1.5);
+    EXPECT_EQ(given.fileNamePattern, "{id}");
+    EXPECT_EQ(given.sheets, "3,1");
+    EXPECT_TRUE(katana::qt::validatePlotRequest(set, given).ok());
+    const auto files = katana::qt::plannedFiles(set, given);
+    ASSERT_TRUE(files.ok());
+    ASSERT_EQ(files->size(), 2u);
+    EXPECT_TRUE(files->front().endsWith("s3.tif")) << files->front().toStdString();
+}
+
 TEST(PlotOutput, OnePdfHoldsTheChosenSheetsInTheOrderChosen)
 {
     Fixture fixture;

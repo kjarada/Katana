@@ -306,17 +306,17 @@ TEST(SheetVerbs, AViewIsAddedAsTheEditorAddsOneThenGivenItsOptions)
     EXPECT_EQ(s.ok("VIEW ADD 1 plan"),
               "added view vp1 to sheet 1\n"
               "view id=vp1 kind=plan rect=24,36,409,286 scale=auto centre=auto rotation=0 "
-              "north=on scalebar=on locked=off");
+              "north=on scalebar=on grid=none gridinterval=auto locked=off");
     EXPECT_EQ(s.document.history().undoName(), "ADD_VIEWPORT");
     // Beside it, a legend of its own size in the middle, and a key plan at
     // a place and scale given.
     EXPECT_EQ(s.ok("VIEW ADD s1 legend"),
               "added view vp2 to sheet 1\n"
-              "view id=vp2 kind=legend rect=176.5,111,256.5,211 locked=off");
+              "view id=vp2 kind=legend rect=176.5,111,256.5,211 legend=this_sheet locked=off");
     EXPECT_EQ(s.ok(R"(VIEW ADD 1 keyplan rect=300,200,400,280 scale=1:5000 centre=150,50 title="KEY PLAN")"),
               "added view vp3 to sheet 1\n"
               "view id=vp3 kind=key_plan rect=300,200,400,280 scale=5000 centre=150,50 rotation=0 "
-              "north=on scalebar=off locked=off title=\"KEY PLAN\"");
+              "north=on scalebar=off grid=none gridinterval=auto locked=off title=\"KEY PLAN\"");
     EXPECT_EQ(s.ok(R"(VIEW ADD 1 notes text="1. LEVELS ARE IN METRES.\n2. DO NOT SCALE.")"),
               "added view vp4 to sheet 1\n"
               "view id=vp4 kind=notes rect=171.5,121,261.5,201 locked=off "
@@ -373,7 +373,7 @@ TEST(SheetVerbs, ViewSetChangesAViewInOneStepAndARefusalChangesNothing)
     std::size_t steps = s.steps();
     EXPECT_EQ(s.ok("VIEW SET vp1 scale=1:250 centre=1000.5,2000.25 rotation=30 north=off"),
               "view id=vp1 kind=plan rect=24,36,409,286 scale=250 centre=1000.5,2000.25 "
-              "rotation=30 north=off scalebar=on locked=off");
+              "rotation=30 north=off scalebar=on grid=none gridinterval=auto locked=off");
     EXPECT_EQ(s.steps(), ++steps);
     EXPECT_EQ(s.document.history().undoName(), "EDIT_VIEWPORT");
     const Viewport& plan = s.set().sheets[0].viewports[0];
@@ -383,7 +383,7 @@ TEST(SheetVerbs, ViewSetChangesAViewInOneStepAndARefusalChangesNothing)
     EXPECT_DOUBLE_EQ(plan.rotation, 30.0 * katana::math::kDegToRad);
 
     EXPECT_TRUE(contains(s.ok("view set VP1 SCALE=auto Centre=AUTO locked=yes hide=TREES hide=FENCES"),
-                         "scale=auto centre=auto rotation=30 north=off scalebar=on locked=on "
+                         "scale=auto centre=auto rotation=30 north=off scalebar=on grid=none gridinterval=auto locked=on "
                          "hidden=\"FENCES,TREES\""));
     EXPECT_TRUE(contains(s.ok("VIEW SET vp1 show=TREES title=\"SITE PLAN\""),
                          "hidden=\"FENCES\" title=\"SITE PLAN\""));
@@ -428,7 +428,7 @@ TEST(SheetVerbs, ViewListAndRemove)
               "sheet 2 id=s2 views=2\n"
               "view id=vp2 kind=notes rect=24,36,409,286 locked=off "
               "text=\"1. ALL DIMENSIONS ARE IN METRES UNLESS NOTED OTHERWISE.\"\n"
-              "view id=vp3 kind=legend rect=30,40,100,120 locked=off");
+              "view id=vp3 kind=legend rect=30,40,100,120 legend=this_sheet locked=off");
     EXPECT_EQ(lines(s.ok("VIEW LIST")).size(), 5u);
     const std::size_t steps = s.steps();
     EXPECT_EQ(s.ok("VIEW REMOVE vp2"), "removed view vp2 from sheet 2");
@@ -617,7 +617,7 @@ TEST(SheetVerbs, GenerateSaysWhatItCannotDo)
     EXPECT_EQ(s.refused("GENERATE strips alignment=RIVER").message,
               "the drawing has no alignment of that name");
     EXPECT_EQ(s.refused("GENERATE mosaic").message,
-              "GENERATE makes fit, grid, strips, profile, sections or frames");
+              "GENERATE makes fit, grid, strips, profile, sections, frames or register");
     EXPECT_EQ(s.refused("GENERATE grid interval=20").message,
               "GENERATE GRID takes no option interval=; it takes paper orientation frame area "
               "scale overlap keyplan replace");
@@ -951,7 +951,10 @@ TEST(SheetVerbs, TheSameLinesMakeTheSameSet)
 
 // ---- the pieces ----------------------------------------------------------------------
 
-TEST(SheetVerbs, APlotSelectionIsNumbersIdsAndRangesInTheOrderGiven)
+// PLOTSHEETS reads its words as the Plot dialog and --plot-sheets read
+// theirs: the sheets as every plot's selection (page_setup.hpp), and what is
+// not given left to the page setup.
+TEST(SheetVerbs, PlotSheetsReadsTheWordsEveryPlotTakes)
 {
     SheetSet set;
     for (const char* id : {"s1", "s2", "s3", "s4", "s5", "s6"}) {
@@ -959,29 +962,39 @@ TEST(SheetVerbs, APlotSelectionIsNumbersIdsAndRangesInTheOrderGiven)
         sheet.id = id;
         set.sheets.push_back(sheet);
     }
-    EXPECT_EQ(parseSheetSelection(set, "1,3-5").value(), (std::vector<std::size_t>{0, 2, 3, 4}));
-    EXPECT_EQ(parseSheetSelection(set, "6,s2,1-2").value(), (std::vector<std::size_t>{5, 1, 0}));
-    EXPECT_EQ(parseSheetSelection(set, "s2-s4").value(), (std::vector<std::size_t>{1, 2, 3}));
-    EXPECT_EQ(parseSheetSelection(set, "ALL").value().size(), 6u);
-    EXPECT_EQ(parseSheetSelection(set, "5-3").error().message,
-              "a range runs from the lower sheet to the higher");
-    EXPECT_EQ(parseSheetSelection(set, "1,,2").error().code, ErrorCode::ParseFailure);
-    EXPECT_EQ(parseSheetSelection(set, "7").error().message, "no sheet 7: the set has 6 sheets");
-    EXPECT_EQ(parseSheetSelection(SheetSet{}, "all").error().message, "the set has no sheets");
-
     const auto request = parsePlotSheets(set, {"C:/plots/set.pdf", "sheets=2,4-6", "dpi=150"});
     ASSERT_TRUE(request.ok());
     EXPECT_EQ(request->path, fs::path("C:/plots/set.pdf"));
-    EXPECT_EQ(request->sheets, (std::vector<std::size_t>{1, 3, 4, 5}));
-    EXPECT_DOUBLE_EQ(request->dpi, 150.0);
+    EXPECT_EQ(request->sheets, "2,4-6");
+    EXPECT_EQ(request->dpi, std::optional<double>(150.0));
+    EXPECT_FALSE(request->format.has_value());
     const auto every = parsePlotSheets(set, {"out.pdf"});
     ASSERT_TRUE(every.ok());
     EXPECT_TRUE(every->sheets.empty());
-    EXPECT_DOUBLE_EQ(every->dpi, 300.0);
+    EXPECT_FALSE(every->dpi || every->colourMode || every->lineWeightScale || every->fileNamePattern)
+        << "the page setup's";
+
+    const auto pngs = parsePlotSheets(
+        set, {"format=png", "style=mono", "folder=out", "pattern={n:02}", "lineweight=1.4", "sheets=s2"});
+    ASSERT_TRUE(pngs.ok()) << pngs.error().describe();
+    EXPECT_EQ(pngs->path, fs::path("out"));
+    EXPECT_EQ(pngs->format, std::optional<std::string>("png"));
+    EXPECT_EQ(pngs->colourMode, std::optional(katana::cad::PlotColourMode::Monochrome));
+    EXPECT_EQ(pngs->fileNamePattern, std::optional<std::string>("{n:02}"));
+    EXPECT_EQ(pngs->lineWeightScale, std::optional<double>(1.4));
+    EXPECT_EQ(pngs->sheets, "s2");
+    // folder= alone is a PDF a sheet.
+    EXPECT_EQ(parsePlotSheets(set, {"folder=out"})->format, std::optional<std::string>("pdfs"));
+
     EXPECT_TRUE(contains(parsePlotSheets(set, {}).error().message, "usage: PLOTSHEETS"));
-    EXPECT_EQ(parsePlotSheets(set, {"out.pdf", "dpi=20"}).error().message, "dpi= is 72 to 1200");
-    EXPECT_TRUE(contains(parsePlotSheets(set, {"out.pdf", "colour=on"}).error().message,
-                         "takes no option colour="));
+    EXPECT_EQ(parsePlotSheets(set, {"out.pdf", "dpi=20"}).error().message, "dpi= is 50 to 1200");
+    EXPECT_TRUE(contains(parsePlotSheets(set, {"out.pdf", "sheets=7"}).error().message, "7"));
+    EXPECT_TRUE(contains(parsePlotSheets(set, {"out.pdf", "format=bmp"}).error().message,
+                         "pdf, pdfs, png or tiff"));
+    EXPECT_TRUE(contains(parsePlotSheets(set, {"out.pdf", "folder=x"}).error().message, "not both"));
+    EXPECT_FALSE(parsePlotSheets(set, {"out.pdf", "pattern={nope}"}).ok());
+    EXPECT_TRUE(contains(parsePlotSheets(set, {"out.pdf", "paper=A1"}).error().message,
+                         "takes no option paper="));
 }
 
 TEST(SheetVerbs, TheTitleBlockFunctionsReadAndWriteEveryField)
