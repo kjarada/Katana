@@ -188,6 +188,9 @@ class SheetEditor final : public QMainWindow {
     QLabel* status_ = nullptr;
     bool rebuilding_ = false;
     katana::cad::Document::ListenerHandle listener_;
+    // The sections the properties cut to show an automatic section's scale:
+    // kept, so a selection does not cut them again (cut per revision).
+    SheetPaintCache sectionCuts_;
 };
 
 } // namespace katana::qt

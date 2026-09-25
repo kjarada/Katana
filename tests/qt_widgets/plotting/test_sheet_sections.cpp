@@ -548,3 +548,16 @@ TEST(SheetSections, AutomaticCrossSectionsShareOneScaleThatFitsTheirWidth)
     EXPECT_EQ(own.scale, 100.0);
     EXPECT_EQ(own.exaggeration, 1.0);
 }
+
+TEST(SheetSections, AStoredScaleThatIsNotPositiveIsReportedNotDrawn)
+{
+    // A scale read from a file unchecked: 0 would put every label at infinity.
+    const Road road;
+    auto viewport = longSection(kLongRect, 0.0, 10.0, Point2(90.0, 25.0));
+    SheetPaintStats stats;
+    const QImage paper = painted(sheetWith({viewport}), road.source(), &stats);
+    ASSERT_EQ(stats.problems.size(), 1u);
+    EXPECT_NE(stats.problems.front().find("not a positive number"), std::string::npos);
+    EXPECT_EQ(stats.viewportsDrawn, 0u);
+    EXPECT_EQ(colourIn(paper, kLongRect, kCut), 0);
+}
