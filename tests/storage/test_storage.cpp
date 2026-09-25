@@ -373,6 +373,15 @@ TEST_F(ProjectStoreRoundTrip, InvalidContentsAreNeverWrittenOrApplied)
 [[nodiscard]] katana::core::Status rewindSchemaTo(SqliteDatabase& database, int version)
 {
     // Newest first: a migration is undone before the one it was built on.
+    if (version < 11) {
+        if (auto status = database.execute("DROP TABLE IF EXISTS label_rules;"
+                                           "DROP TABLE IF EXISTS label_styles;"
+                                           "DROP TABLE IF EXISTS text_styles;"
+                                           "ALTER TABLE dimension_styles DROP COLUMN paper_sized;");
+            !status) {
+            return status;
+        }
+    }
     if (version < 10) {
         if (auto status = database.execute("DROP TABLE IF EXISTS survey_job_files;"
                                            "DROP TABLE IF EXISTS survey_jobs;");

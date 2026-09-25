@@ -304,6 +304,112 @@ template <> struct TablePolicy<katana::entity::Style> {
     }
 };
 
+// The annotation tables (entity/annotation.hpp). Each guard names the first
+// holder, the shape refuseIfUsed gives: the entity id for an entity, the
+// style or rule name for a table.
+template <> struct TablePolicy<katana::entity::TextStyle> {
+    static constexpr std::string_view kNoun = "text style";
+    static constexpr std::string_view kStem = "TextStyle";
+    static auto& table(katana::entity::Model& model) { return model.textStyles; }
+    static const auto& table(const katana::entity::Model& model) { return model.textStyles; }
+    static Status deletable(std::string_view name)
+    {
+        if (name == katana::entity::kDefaultTextStyleName) {
+            return makeError(ErrorCode::CommandRejected, "the default text style cannot be deleted");
+        }
+        return {};
+    }
+    static Status updatable(const katana::entity::TextStyle&) { return {}; }
+    // A text or a leader left naming a deleted style would fall back to the
+    // default face and height with nothing to say why, and a label style to
+    // Standard.
+    static Status inUse(const katana::entity::Model& model, std::string_view name)
+    {
+        std::size_t count = 0;
+        katana::entity::EntityId first = 0;
+        model.entities.forEach([&](const katana::entity::Entity& entity) {
+            const std::string* style = nullptr;
+            if (const auto* text = std::get_if<katana::entity::TextGeometry>(&entity.geometry)) {
+                style = &text->style;
+            } else if (const auto* leader =
+                           std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
+                style = &leader->style;
+            }
+            if (style != nullptr && *style == name) {
+                first = count == 0 ? entity.id : first;
+                ++count;
+            }
+        });
+        if (count > 0) {
+            return makeError(ErrorCode::CommandRejected, "that text style is still used",
+                             "used by " + std::to_string(count) + " entities, e.g. id=" +
+                                 std::to_string(first));
+        }
+        std::string holder;
+        model.labelStyles.forEach([&](const katana::entity::LabelStyle& style) {
+            if (holder.empty() && style.textStyle == name) {
+                holder = style.name;
+            }
+        });
+        if (!holder.empty()) {
+            return makeError(ErrorCode::CommandRejected, "that text style is still used",
+                             "label style=" + holder);
+        }
+        return {};
+    }
+};
+
+template <> struct TablePolicy<katana::entity::LabelStyle> {
+    static constexpr std::string_view kNoun = "label style";
+    static constexpr std::string_view kStem = "LabelStyle";
+    static auto& table(katana::entity::Model& model) { return model.labelStyles; }
+    static const auto& table(const katana::entity::Model& model) { return model.labelStyles; }
+    static Status deletable(std::string_view) { return {}; }
+    static Status updatable(const katana::entity::LabelStyle&) { return {}; }
+    // A label left naming a deleted style would draw nothing at all.
+    static Status inUse(const katana::entity::Model& model, std::string_view name)
+    {
+        std::size_t count = 0;
+        katana::entity::EntityId first = 0;
+        model.entities.forEach([&](const katana::entity::Entity& entity) {
+            if (const auto* label = std::get_if<katana::entity::LabelGeometry>(&entity.geometry);
+                label != nullptr && label->style == name) {
+                first = count == 0 ? entity.id : first;
+                ++count;
+            }
+        });
+        if (count > 0) {
+            return makeError(ErrorCode::CommandRejected, "that label style is still used",
+                             "used by " + std::to_string(count) + " labels, e.g. id=" +
+                                 std::to_string(first));
+        }
+        std::string holder;
+        model.labelRules.forEach([&](const katana::entity::LabelRule& rule) {
+            if (holder.empty() && rule.labelStyle == name) {
+                holder = rule.name;
+            }
+        });
+        if (!holder.empty()) {
+            return makeError(ErrorCode::CommandRejected, "that label style is still used",
+                             "label rule=" + holder);
+        }
+        return {};
+    }
+};
+
+template <> struct TablePolicy<katana::entity::LabelRule> {
+    static constexpr std::string_view kNoun = "label rule";
+    static constexpr std::string_view kStem = "LabelRule";
+    static auto& table(katana::entity::Model& model) { return model.labelRules; }
+    static const auto& table(const katana::entity::Model& model) { return model.labelRules; }
+    static Status deletable(std::string_view) { return {}; }
+    static Status updatable(const katana::entity::LabelRule&) { return {}; }
+    // The labels a rule made name it only so that the rule can find them
+    // again; they stay, as hand-placed labels would, and AUTOLABEL CLEAR
+    // still removes them by the name.
+    static Status inUse(const katana::entity::Model&, std::string_view) { return {}; }
+};
+
 template <typename T> std::string commandName(std::string_view verb)
 {
     return std::string(verb) + std::string(TablePolicy<T>::kStem);
@@ -904,6 +1010,45 @@ CommandPtr duplicateStyle(std::string from, std::string to)
 CommandPtr updateStyleIfChanged(const katana::entity::Model& model, katana::entity::Style style)
 {
     return updateIfChanged(model, std::move(style));
+}
+
+CommandPtr createTextStyle(katana::entity::TextStyle style)
+{
+    return std::make_unique<CreateItemCommand<katana::entity::TextStyle>>(std::move(style));
+}
+CommandPtr updateTextStyle(katana::entity::TextStyle style)
+{
+    return std::make_unique<UpdateItemCommand<katana::entity::TextStyle>>(std::move(style));
+}
+CommandPtr deleteTextStyle(std::string name)
+{
+    return std::make_unique<DeleteItemCommand<katana::entity::TextStyle>>(std::move(name));
+}
+
+CommandPtr createLabelStyle(katana::entity::LabelStyle style)
+{
+    return std::make_unique<CreateItemCommand<katana::entity::LabelStyle>>(std::move(style));
+}
+CommandPtr updateLabelStyle(katana::entity::LabelStyle style)
+{
+    return std::make_unique<UpdateItemCommand<katana::entity::LabelStyle>>(std::move(style));
+}
+CommandPtr deleteLabelStyle(std::string name)
+{
+    return std::make_unique<DeleteItemCommand<katana::entity::LabelStyle>>(std::move(name));
+}
+
+CommandPtr createLabelRule(katana::entity::LabelRule rule)
+{
+    return std::make_unique<CreateItemCommand<katana::entity::LabelRule>>(std::move(rule));
+}
+CommandPtr updateLabelRule(katana::entity::LabelRule rule)
+{
+    return std::make_unique<UpdateItemCommand<katana::entity::LabelRule>>(std::move(rule));
+}
+CommandPtr deleteLabelRule(std::string name)
+{
+    return std::make_unique<DeleteItemCommand<katana::entity::LabelRule>>(std::move(name));
 }
 
 CommandPtr purgeTableItems(TableItems items)

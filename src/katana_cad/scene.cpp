@@ -1099,7 +1099,14 @@ void SceneBuilder::emitEntities(const Document& document,
                     for (const auto& segment : drawn.extensionLines) {
                         stroke(segment.start, segment.end);
                     }
-                    stroke(drawn.dimensionLine.start, drawn.dimensionLine.end);
+                    if (drawn.hasDimensionLine) {
+                        stroke(drawn.dimensionLine.start, drawn.dimensionLine.end);
+                    }
+                    for (const auto& curve : drawn.curves) {
+                        for (std::size_t i = 0; i + 1 < curve.size(); ++i) {
+                            stroke(curve[i], curve[i + 1]);
+                        }
+                    }
                     for (const auto& segment : drawn.arrowStrokes) {
                         stroke(segment.start, segment.end);
                     }
@@ -1111,6 +1118,17 @@ void SceneBuilder::emitEntities(const Document& document,
                             stroke(fill[i], fill[(i + 1) % fill.size()]);
                         }
                     }
+                } else if constexpr (std::is_same_v<Shape, katana::entity::LabelGeometry>) {
+                    // As a text is: a marker where the label attaches. Its
+                    // words are worked out at a scale the 3D view does not
+                    // have, and set in a font it does not either.
+                    own.clear();
+                    chord_ = {shape.anchor};
+                    emitPath(chord_, false, color, width, nullptr);
+                } else if constexpr (std::is_same_v<Shape, katana::entity::LeaderGeometry>) {
+                    // The line; the arrow and the note are paper-sized.
+                    own.clear();
+                    emitPath(shape.vertices, false, color, width, nullptr);
                 } else {
                     static_assert(false, "emitEntities has no case for this geometry kind");
                 }

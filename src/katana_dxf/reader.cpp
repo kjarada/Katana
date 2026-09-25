@@ -1966,6 +1966,21 @@ std::optional<Geometry> placeGeometry(const Geometry& geometry, const Affine& tr
             out.end = t.apply(dimension.end);
             const double scale = std::sqrt(std::abs(t.determinant()));
             out.offset = dimension.offset * scale * (t.determinant() < 0.0 ? -1.0 : 1.0);
+            out.vertex = t.apply(dimension.vertex);
+            return Geometry{std::move(out)};
+        }
+        // This reader makes neither a label nor a leader, so none is ever in
+        // a block; the cases are here for the visitor to be complete.
+        std::optional<Geometry> operator()(const katana::entity::LabelGeometry&) const
+        {
+            return std::nullopt;
+        }
+        std::optional<Geometry> operator()(const katana::entity::LeaderGeometry& leader) const
+        {
+            katana::entity::LeaderGeometry out = leader;
+            for (Point2& vertex : out.vertices) {
+                vertex = t.apply(vertex);
+            }
             return Geometry{std::move(out)};
         }
     };
@@ -2254,12 +2269,20 @@ void translate(Geometry& geometry, const Vec2& shift)
             using T = std::decay_t<decltype(shape)>;
             if constexpr (std::is_same_v<T, PointGeometry> || std::is_same_v<T, TextGeometry>) {
                 shape.position = shape.position - shift;
-            } else if constexpr (std::is_same_v<T, Segment2> ||
-                                 std::is_same_v<T, katana::entity::DimensionGeometry>) {
+            } else if constexpr (std::is_same_v<T, Segment2>) {
                 shape.start = shape.start - shift;
                 shape.end = shape.end - shift;
+            } else if constexpr (std::is_same_v<T, katana::entity::DimensionGeometry>) {
+                shape.start = shape.start - shift;
+                shape.end = shape.end - shift;
+                shape.vertex = shape.vertex - shift;
             } else if constexpr (std::is_same_v<T, Arc2> || std::is_same_v<T, Circle2>) {
                 shape.center = shape.center - shift;
+            } else if constexpr (std::is_same_v<T, katana::entity::LabelGeometry>) {
+                shape.anchor = shape.anchor - shift;
+                if (shape.position) {
+                    *shape.position = *shape.position - shift;
+                }
             } else {
                 for (Point2& vertex : shape.vertices) {
                     vertex = vertex - shift;

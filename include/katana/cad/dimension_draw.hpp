@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/tables.hpp"
@@ -35,6 +36,13 @@ struct DimensionDrawing {
     // the dimension line.
     std::vector<Segment2> extensionLines;
     Segment2 dimensionLine;
+    // False for the kinds that have no straight dimension line - an
+    // angular dimension's is its arc, in `curves` - so a consumer does not
+    // draw a zero-length one.
+    bool hasDimensionLine = true;
+    // Polylines: an angular dimension's arc, chorded to the drawing's own
+    // accuracy, and a radial or ordinate dimension's leader.
+    std::vector<std::vector<Point2>> curves;
     // Arrow strokes, for the tick and open heads.
     std::vector<Segment2> arrowStrokes;
     // Closed arrow outlines, one polygon per end, for the filled and dot heads.
@@ -54,14 +62,36 @@ struct DimensionDrawing {
     [[nodiscard]] bool empty() const { return text.empty() && extensionLines.empty(); }
 };
 
-// Builds the drawing for `dimension` under `style`.
+// Builds the drawing for `dimension` under `style`, for every kind
+// (entity.hpp, DimensionKind, says what each measures and where its line
+// goes).
+//
+// `scale` is the annotation scale the drawing is for, 1 : scale. It matters
+// only to a paper-sized style (DimensionStyle::paperSized), whose sizes are
+// millimetres on paper and are drawn at size x scale / 1000 model units; a
+// model-unit style draws the same at every scale. The default is the
+// default annotation scale, which is what the spatial index and a caller
+// with no view use.
 //
 // A degenerate dimension - the two measured points coincident, so there is no
 // direction to offset along - produces an empty drawing rather than a division
 // by zero or an arbitrary orientation. The model rejects such a dimension on
 // the way in; this is the renderer refusing to guess if one ever arrives.
 [[nodiscard]] DimensionDrawing buildDimension(const katana::entity::DimensionGeometry& dimension,
-                                              const katana::entity::DimensionStyle& style);
+                                              const katana::entity::DimensionStyle& style,
+                                              double scale = katana::entity::kDefaultAnnotationScale);
+
+// `style` with its sizes in model units at 1 : `scale`: itself for a
+// model-unit style, its paper millimetres x scale / 1000 for a paper-sized one.
+[[nodiscard]] katana::entity::DimensionStyle
+dimensionStyleAtScale(const katana::entity::DimensionStyle& style, double scale);
+
+// The text a dimension shows: an override verbatim, else the measured value
+// formatted by the style - lengths by formatMeasurement, an angle in degrees,
+// minutes and seconds, a radius with "R" and a diameter with the diameter
+// sign before it when the style has no prefix of its own.
+[[nodiscard]] std::string dimensionText(const katana::entity::DimensionGeometry& dimension,
+                                        const katana::entity::DimensionStyle& style);
 
 // The style a dimension resolves to: its layer's named style, else the
 // document default. Follows the same ByLayer shape as

@@ -159,7 +159,8 @@ const std::map<std::string, std::string, std::less<>>& aliases()
         {"O", "OFFSET"},   {"TR", "TRIM"},       {"EX", "EXTEND"},      {"F", "FILLET"},
         {"CHA", "CHAMFER"}, {"U", "UNDO"},       {"LA", "LAYER"},       {"SEL", "SELECT"},
         {"LT", "LINETYPE"}, {"LTYPE", "LINETYPE"}, {"DS", "DIMSTYLE"}, {"HA", "HATCH"}, {"AL", "ALIGN"}, {"PARC", "PARCEL"}, {"ST", "STYLE"},
-        {"RADIATE", "FORWARD"}, {"?", "HELP"},
+        {"RADIATE", "FORWARD"}, {"?", "HELP"}, {"LE", "LEADER"}, {"MT", "MTEXT"},
+        {"TS", "TEXTSTYLE"}, {"LS", "LABELSTYLE"},
     };
     return table;
 }
@@ -198,13 +199,71 @@ std::string describe(const Entity& entity)
             out << "  centre " << g.center.x << "," << g.center.y << "  radius=" << g.radius
                 << "  area=" << g.area();
         }
+        // A line break in a text is written \n, so one entity stays one line
+        // of the reply a script or an agent reads.
+        static std::string oneLine(const std::string& text)
+        {
+            std::string line;
+            for (const char c : text) {
+                if (c == '\n') {
+                    line += "\\n";
+                } else {
+                    line += c;
+                }
+            }
+            return line;
+        }
         void operator()(const katana::entity::TextGeometry& g) const
         {
-            out << "  \"" << g.text << "\"  height=" << g.height;
+            out << "  \"" << oneLine(g.text) << "\"  height=" << g.height;
+            if (!g.style.empty()) {
+                out << "  style=" << g.style;
+            }
+            if (g.paperHeight > 0.0) {
+                out << "  paper=" << g.paperHeight;
+            }
+            if (g.justify != katana::entity::TextJustify::BottomLeft) {
+                out << "  justify=" << katana::entity::toString(g.justify);
+            }
         }
         void operator()(const katana::entity::DimensionGeometry& g) const
         {
+            if (g.kind != katana::entity::DimensionKind::Aligned) {
+                out << "  " << katana::entity::toString(g.kind);
+            }
             out << "  measures " << g.measurement();
+            if (g.startRef.associated() || g.endRef.associated() || g.vertexRef.associated()) {
+                out << "  associative";
+            }
+        }
+        void operator()(const katana::entity::LabelGeometry& g) const
+        {
+            out << "  style=" << g.style;
+            if (g.target != 0) {
+                out << "  target=" << g.target;
+            } else {
+                out << "  alignment=" << g.alignment;
+            }
+            if (g.part >= 0) {
+                out << "  part=" << g.part;
+            }
+            if (!g.rule.empty()) {
+                out << "  rule=" << g.rule;
+            }
+            if (g.position) {
+                out << "  at " << g.position->x << "," << g.position->y;
+            }
+        }
+        void operator()(const katana::entity::LeaderGeometry& g) const
+        {
+            out << "  vertices=" << g.vertices.size() << "  tip " << g.vertices.front().x << ","
+                << g.vertices.front().y;
+            if (!g.text.empty()) {
+                out << "  \"" << oneLine(g.text) << "\"";
+            }
+            if (g.callout != katana::entity::CalloutShape::None) {
+                out << "  callout=" << katana::entity::toString(g.callout);
+            }
         }
     };
     std::visit(Detail{out}, entity.geometry);
@@ -321,6 +380,7 @@ Survey    INVERSE p p | INVERSE line-id   distance, azimuth, bearing; height dif
           total (the selection when no ids); hectares when the project unit is the metre
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
+          PAPER on|off (sizes in paper mm, drawn at the annotation scale)
           LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
 Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
@@ -328,7 +388,8 @@ Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id | HELP
-Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE ?)";
+Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE ?  LE MT TS LS
+)" + annotationHelpText();
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -506,6 +567,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
 
     if (verb == "HELP") {
         return helpText();
+    }
+    if (isAnnotationVerb(verb, args)) {
+        return annotation(verb, args);
     }
     for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {
@@ -1273,6 +1337,9 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
             if (!style.suffix.empty()) {
                 out << "  suffix='" << style.suffix << "'";
             }
+            if (style.paperSized) {
+                out << "  paper-sized";
+            }
             // What a dimension of exactly ten units would read as. This is the
             // question anyone setting a style is actually asking, and working
             // it out from the fields is guesswork.
@@ -1305,7 +1372,7 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
         if (args.size() < 4) {
             return usage("DIMSTYLE SET name field value\n"
                          "  fields: TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND"
-                         " PREFIX SUFFIX TRIM");
+                         " PREFIX SUFFIX TRIM PAPER");
         }
         const katana::entity::DimensionStyle* current = model.dimensionStyles.find(name);
         if (current == nullptr) {
@@ -1377,6 +1444,9 @@ CommandInterpreter::Reply CommandInterpreter::dimensionStyle(const Tokens& args)
         } else if (field == "TRIM") {
             const std::string on = upper(value);
             changed.suppressTrailingZeros = on == "ON" || on == "1" || on == "YES";
+        } else if (field == "PAPER") {
+            const std::string on = upper(value);
+            changed.paperSized = on == "ON" || on == "1" || on == "YES";
         } else {
             return makeError(ErrorCode::InvalidArgument, "unknown dimension style field", field);
         }

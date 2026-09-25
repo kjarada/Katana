@@ -11,11 +11,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "katana/core/text.hpp"
 #include "katana/dxf/codes.hpp"
 #include "katana/dxf/reader.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/dimension_text.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/tables.hpp"
+#include "katana/entity/text_block.hpp"
 
 namespace katana::dxf {
 
@@ -231,9 +234,17 @@ class Writer {
     std::uint64_t begin(std::string_view type, const Entity& entity, std::string_view subclass,
                         std::uint64_t owner = kModelSpaceRecord);
     void writeEntity(const Entity& entity);
+    // The entity as its own geometry, with no drawn shapes looked up: what
+    // writeEntity writes each drawn shape with, since a shape keeps its
+    // entity's id.
+    void writeGeometry(const Entity& entity);
     void writePolyline(const Entity& entity, const Polyline2& polyline);
     void writeText(const Entity& entity, const katana::entity::TextGeometry& text);
     void writeDimension(const Entity& entity, const katana::entity::DimensionGeometry& dimension);
+    void writeLeader(const Entity& entity, const katana::entity::LeaderGeometry& leader);
+    // A text's height in the file: its paper height, or its style's, at the
+    // export's annotation scale; else its model height.
+    [[nodiscard]] double textHeightOf(const katana::entity::TextGeometry& text) const;
     // Ends the entity begun last with this module's extended data where it
     // has something the entity's groups could not hold: `heights` they
     // cannot carry, a colour no index is.
@@ -258,6 +269,13 @@ class Writer {
     std::vector<std::pair<const katana::entity::Linetype*, std::string>> linetypes_;
     std::vector<std::pair<const katana::entity::Layer*, std::string>> layers_;
     std::size_t partialHeights_ = 0;
+    // Labels drawn out by the front end that drew nothing (no room at the
+    // scale), counted for the warning.
+    std::size_t drawnNothing_ = 0;
+    // Labels, and dimensions of a kind other than aligned, not written
+    // (writeEntity says why), for the export's warning.
+    std::size_t labelsSkipped_ = 0;
+    std::size_t dimensionsSkipped_ = 0;
     // The entity begun last has a colour no index is exactly.
     std::optional<katana::entity::Color> exactColour_;
     std::size_t lastColourKey_ = 0;
@@ -852,10 +870,21 @@ void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry&
     const double z = heights.front().value_or(0.0);
     const auto* besides = isZeroLevel(heights) ? &heights : nullptr;
     // One TEXT a line: TEXT holds one, and a Text holding a break is lines.
+    const double height = textHeightOf(geometry);
     const Vec2 down = Vec2(std::sin(geometry.rotation), -std::cos(geometry.rotation)) *
-                      (kLinePitch * geometry.height);
+                      (kLinePitch * height);
     std::string_view rest = geometry.text;
     Point2 position = geometry.position;
+    if (geometry.justify != katana::entity::TextJustify::BottomLeft) {
+        // The block's first baseline-left, by the estimate the model's box
+        // uses (entity/text_block.hpp): TEXT's own alignment points would
+        // need the reader's font to agree with ours.
+        katana::entity::TextGeometry sized = geometry;
+        sized.height = height;
+        const auto corners = katana::entity::estimatedTextCorners(sized);
+        position = corners[3] + Vec2(std::sin(geometry.rotation), -std::cos(geometry.rotation)) *
+                                    height;
+    }
     for (;;) {
         const std::size_t end = rest.find('\n');
         std::string_view lineText = rest.substr(0, end);
@@ -863,8 +892,7 @@ void Writer::writeText(const Entity& entity, const katana::entity::TextGeometry&
             lineText.remove_suffix(1);
         }
         if (!lineText.empty()) {
-            textLine(entity, position, lineText, geometry.height, geometry.rotation, z, nullptr,
-                     besides);
+            textLine(entity, position, lineText, height, geometry.rotation, z, nullptr, besides);
         }
         if (end == std::string_view::npos) {
             break;
@@ -1001,15 +1029,74 @@ void Writer::writePolyline(const Entity& entity, const Polyline2& polyline)
 // picture block beside it that every reader draws instead of the entity, so
 // writing the picture is writing what the reader will see, without the half
 // that some readers get wrong.
+double Writer::textHeightOf(const katana::entity::TextGeometry& text) const
+{
+    double paper = text.paperHeight;
+    if (!(paper > 0.0) && !text.style.empty()) {
+        if (const auto* style = model_.textStyles.find(text.style); style != nullptr) {
+            paper = style->paperHeight;
+        }
+    }
+    return paper > 0.0 ? katana::entity::annotationModelSize(paper, options_.annotationScale)
+                       : text.height;
+}
+
+// A leader as the lines and text it draws at the export's annotation scale:
+// the line through its vertices, a landing, and its note's lines beside the
+// landing. No arrowhead - a filled one would be a SOLID with nothing to say
+// it belongs to the line - and no callout frame.
+void Writer::writeLeader(const Entity& entity, const katana::entity::LeaderGeometry& leader)
+{
+    const auto& v = leader.vertices;
+    for (std::size_t i = 0; i + 1 < v.size(); ++i) {
+        line(entity, v[i], v[i + 1]);
+    }
+    const double scale = options_.annotationScale;
+    const Vec2 last = v.back() - v[v.size() - 2];
+    const double sign = last.x < 0.0 ? -1.0 : 1.0;
+    Point2 end = v.back();
+    if (leader.landing > 0.0) {
+        end = end + Vec2(sign * katana::entity::annotationModelSize(leader.landing, scale), 0.0);
+        line(entity, v.back(), end);
+    }
+    if (leader.text.empty()) {
+        return;
+    }
+    double paper = leader.paperHeight;
+    if (!(paper > 0.0)) {
+        const auto* style = model_.textStyles.find(
+            leader.style.empty() ? katana::entity::kDefaultTextStyleName : leader.style);
+        paper = style != nullptr && style->paperHeight > 0.0 ? style->paperHeight : 2.5;
+    }
+    katana::entity::TextGeometry note;
+    note.text = leader.text;
+    note.height = katana::entity::annotationModelSize(paper, scale);
+    note.position = end + Vec2(sign * 0.5 * note.height, 0.0);
+    note.justify = sign > 0.0 ? katana::entity::TextJustify::MiddleLeft
+                              : katana::entity::TextJustify::MiddleRight;
+    writeText(entity, note);
+}
+
 void Writer::writeDimension(const Entity& entity, const katana::entity::DimensionGeometry& dimension)
 {
+    if (dimension.kind != katana::entity::DimensionKind::Aligned) {
+        ++dimensionsSkipped_;
+        ++result_.entitiesSkipped;
+        return;
+    }
     const katana::entity::Layer* layer = model_.layers.find(entity.layer);
     const std::string styleName = layer != nullptr && !layer->dimensionStyle.empty()
                                       ? layer->dimensionStyle
                                       : std::string(katana::entity::kDefaultDimensionStyleName);
     const katana::entity::DimensionStyle* found = model_.dimensionStyles.find(styleName);
-    const katana::entity::DimensionStyle style = found != nullptr ? *found
-                                                                  : katana::entity::DimensionStyle{};
+    katana::entity::DimensionStyle style = found != nullptr ? *found
+                                                            : katana::entity::DimensionStyle{};
+    if (style.paperSized) {
+        for (double* size : {&style.textHeight, &style.textGap, &style.extensionOffset,
+                             &style.extensionBeyond, &style.arrowSize}) {
+            *size = katana::entity::annotationModelSize(*size, options_.annotationScale);
+        }
+    }
     const double length = dimension.measurement();
     const Vec2 along = (dimension.end - dimension.start) / length;
     const Vec2 left(-along.y, along.x);
@@ -1047,6 +1134,27 @@ void Writer::writeDimension(const Entity& entity, const katana::entity::Dimensio
 }
 
 void Writer::writeEntity(const Entity& entity)
+{
+    // Annotation the front end drew out for this file (ExportOptions::drawn):
+    // written as its shapes, on its layer and in its colour.
+    if (options_.drawn != nullptr) {
+        if (const auto found = options_.drawn->find(entity.id); found != options_.drawn->end()) {
+            if (found->second.empty()) {
+                ++drawnNothing_;
+            }
+            Entity shape = entity;
+            shape.properties.clear(); // an annotation's shapes have no surveyed heights
+            for (const katana::entity::Geometry& geometry : found->second) {
+                shape.geometry = geometry;
+                writeGeometry(shape);
+            }
+            return;
+        }
+    }
+    writeGeometry(entity);
+}
+
+void Writer::writeGeometry(const Entity& entity)
 {
     std::visit(
         [&](const auto& shape) {
@@ -1113,8 +1221,18 @@ void Writer::writeEntity(const Entity& entity)
                 writePolyline(entity, shape);
             } else if constexpr (std::is_same_v<T, katana::entity::TextGeometry>) {
                 writeText(entity, shape);
-            } else {
+            } else if constexpr (std::is_same_v<T, katana::entity::DimensionGeometry>) {
                 writeDimension(entity, shape);
+            } else if constexpr (std::is_same_v<T, katana::entity::LeaderGeometry>) {
+                writeLeader(entity, shape);
+            } else if constexpr (std::is_same_v<T, katana::entity::LabelGeometry>) {
+                // A label's words and place are worked out for a view by the
+                // placer, which this module cannot see; counted and said, never
+                // written as something it is not.
+                ++labelsSkipped_;
+                ++result_.entitiesSkipped;
+            } else {
+                static_assert(false, "the DXF writer has no case for this geometry kind");
             }
         },
         entity.geometry);
@@ -1134,8 +1252,13 @@ void Writer::writeEntities()
         if (!only.empty() && !only.contains(entity.layer)) {
             return;
         }
+        // A label or a dimension the file cannot hold is counted skipped,
+        // not written as well.
+        const std::size_t skipped = result_.entitiesSkipped;
         writeEntity(entity);
-        ++result_.entitiesWritten;
+        if (result_.entitiesSkipped == skipped) {
+            ++result_.entitiesWritten;
+        }
     });
     text(0, "ENDSEC");
 }
@@ -1167,6 +1290,24 @@ Result<DxfExport> Writer::run()
     writeObjects();
     std::string objects = std::move(body_);
 
+    if (labelsSkipped_ != 0) {
+        result_.warnings.push_back(
+            std::to_string(labelsSkipped_) +
+            " labels were not written: their text and place are worked out for a view, which "
+            "the file has no form for");
+    }
+    if (drawnNothing_ != 0) {
+        result_.warnings.push_back(
+            std::to_string(drawnNothing_) + " labels had no room at 1:" +
+            katana::core::formatExactReal(options_.annotationScale) +
+            " and were not written, as the plan view leaves them out at that scale");
+    }
+    if (dimensionsSkipped_ != 0) {
+        result_.warnings.push_back(
+            std::to_string(dimensionsSkipped_) +
+            " linear, angular, radial and ordinate dimensions were not written: only aligned "
+            "dimensions are written, as the lines and text they draw");
+    }
     if (partialHeights_ != 0) {
         result_.warnings.push_back(
             std::to_string(partialHeights_) +

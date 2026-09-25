@@ -29,6 +29,10 @@
 
 namespace katana::cad {
 
+namespace annotation {
+struct AnchoredPoint;
+}
+
 class CommandInterpreter {
   public:
     explicit CommandInterpreter(Document& document) : document_(document) {}
@@ -74,6 +78,29 @@ class CommandInterpreter {
     [[nodiscard]] Reply undoRedo(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply file(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply inspect(const std::string& verb, const Tokens& args) const;
+
+    // The annotation verbs (annotation/annotation_verbs.cpp, docs/annotation.md):
+    // ANNOSCALE, TEXTSTYLE, TEXT and MTEXT with options, TEXTEDIT, LABELSTYLE,
+    // LABEL, AUTOLABEL, the DIM kinds, LEADER and BALLOON. Options are
+    // key=value; replies are key=value records, one per line.
+    [[nodiscard]] static bool isAnnotationVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] static std::string annotationHelpText();
+    [[nodiscard]] Reply annotation(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply annotationScale(const Tokens& args);
+    [[nodiscard]] Reply textStyle(const Tokens& args);
+    [[nodiscard]] Reply styledText(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply textEdit(const Tokens& args);
+    [[nodiscard]] Reply labelStyle(const Tokens& args);
+    [[nodiscard]] Reply label(const Tokens& args);
+    [[nodiscard]] Reply autoLabel(const Tokens& args);
+    [[nodiscard]] Reply dimension(const Tokens& args);
+    [[nodiscard]] Reply leader(const std::string& verb, const Tokens& args);
+    // A point that may name another entity's point - "#12", "#12.end",
+    // "#12.v3", "#12.s2", "#12.mid", "#12.centre" - or any point parsePoint
+    // takes. A named point carries its reference, so what is made from it
+    // follows the entity (annotation/associative.hpp).
+    [[nodiscard]] katana::core::Result<annotation::AnchoredPoint>
+    parseAnchoredPoint(const std::string& text);
 
     Document& document_;
     std::vector<std::string> history_;

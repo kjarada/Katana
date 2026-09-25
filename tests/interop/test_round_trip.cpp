@@ -104,6 +104,11 @@ std::size_t vertexCount(const katana::entity::Geometry& geometry)
         std::size_t operator()(const katana::geometry::Circle2&) const { return 0; }
         std::size_t operator()(const katana::entity::TextGeometry&) const { return 1; }
         std::size_t operator()(const katana::entity::DimensionGeometry&) const { return 2; }
+        std::size_t operator()(const katana::entity::LabelGeometry&) const { return 0; }
+        std::size_t operator()(const katana::entity::LeaderGeometry& l) const
+        {
+            return l.vertices.size();
+        }
     };
     return std::visit(Visitor{}, geometry);
 }

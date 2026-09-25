@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 
+#include "katana/cad/annotation/export_annotation.hpp"
 #include "katana/dxf/import_command.hpp"
 #include "katana/dxf/reader.hpp"
 #include "katana/dxf/writer.hpp"
@@ -73,7 +74,15 @@ bool importDxf(katana::cad::Document& document, const std::filesystem::path& fil
 
 bool exportDxf(const katana::cad::Document& document, const std::filesystem::path& file)
 {
-    const auto written = katana::dxf::writeDxfFile(document.model(), file);
+    // Annotation at the drawing's annotation scale, labels and every
+    // dimension kind drawn out as the plan view draws them (the window does
+    // the same, MainWindow::exportDxfFile), so both write the same file.
+    katana::dxf::ExportOptions options;
+    options.annotationScale = document.annotationScale();
+    const auto drawn =
+        katana::cad::annotation::drawAnnotationForExport(document.model(), options.annotationScale);
+    options.drawn = &drawn;
+    const auto written = katana::dxf::writeDxfFile(document.model(), file, options);
     if (!written) {
         std::cerr << "error: " << written.error().describe() << '\n';
         return false;
