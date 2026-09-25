@@ -733,7 +733,10 @@ void paintMessage(TextSetter& text, const Box2& rect, const QString& message)
 void paintTable(QPainter& painter, const Paper& paper, TextSetter& text,
                 const plotting::TableLayout& table)
 {
-    const QColor shade(232, 232, 232);
+    // The highlight is a fill like any other, so the plot style prints it
+    // (a light grey drops out of a monochrome plot, as a one-ink plotter's
+    // would; the row's rules and text still say which it is).
+    const QBrush shade = paperFill(paper, QColor(232, 232, 232));
     for (const Box2& box : table.shaded) {
         painter.fillRect(paper.at(box), shade);
     }
@@ -775,7 +778,7 @@ class SheetSectionCanvas final : public SectionCanvas {
     {
         return katana::qt::dashedPen(paper_, colour, widthMm, patternMm);
     }
-    QBrush fill(const QColor& colour) const override { return QBrush(colour); }
+    QBrush fill(const QColor& colour) const override { return paperFill(paper_, colour); }
     double textWidthMm(const QString& line, const SectionTextStyle& style) override
     {
         return text_.widthMm(line, styleOf(style));
@@ -1113,7 +1116,7 @@ void SheetPainter::paintKeyPlan(const Viewport& viewport, const ResolvedViewport
                 ring << paper.at(point);
             }
             painter_.setPen(paperPen(paper, current ? kHereInk : kOutlineInk, current ? 0.5 : 0.35));
-            painter_.setBrush(current ? kHereFill : kOutlineFill);
+            painter_.setBrush(paperFill(paper, current ? kHereFill : kOutlineFill));
             painter_.drawPolygon(ring);
         }
     }

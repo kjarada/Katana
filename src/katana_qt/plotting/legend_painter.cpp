@@ -50,6 +50,12 @@ class Sample {
             context.plot != nullptr ? katana::cad::paperColour(entry.colour, *context.plot)
                                     : entry.colour;
         ink_ = QColor(colour.r, colour.g, colour.b, colour.a);
+        // A solid area prints as the plan prints a fill (cad::paperFillColour):
+        // in monochrome black or white by its lightness, not the pen's black.
+        const katana::entity::Color area =
+            context.plot != nullptr ? katana::cad::paperFillColour(entry.colour, *context.plot)
+                                    : entry.colour;
+        fillInk_ = QColor(area.r, area.g, area.b, area.a);
         // The plan painter's pen: the weight in paper millimetres.
         penWidth_ = std::max(entry.lineWeight, 0.0) * context.pixelsPerMillimetre;
         pen_ = QPen(ink_, penWidth_);
@@ -219,7 +225,7 @@ class Sample {
                 QPainterPath path;
                 path.addPolygon(polygon);
                 path.closeSubpath();
-                painter_.fillPath(path, ink_);
+                painter_.fillPath(path, fillInk_);
                 break;
             }
             case katana::cad::HatchDrawing::Lines:
@@ -261,6 +267,7 @@ class Sample {
     double metresPerMillimetre_ = 0.5;
     katana::cad::ViewTransform view_{};
     QColor ink_;
+    QColor fillInk_; // a solid area's colour on paper
     double penWidth_ = 0.0;
     QPen pen_;
     StylePaintTarget target_{};

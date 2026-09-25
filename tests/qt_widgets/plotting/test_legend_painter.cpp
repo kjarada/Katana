@@ -401,6 +401,33 @@ TEST(SheetLegendSample, AnAreaIsASwatchFilledWithItsPattern)
     EXPECT_TRUE(kCell.adjusted(-1, -1, 1, 1).contains(QRectF(ink.left, ink.top, ink.width(), ink.height())));
 }
 
+// In monochrome a solid area prints as the plan prints its fill: black or
+// paper white by its lightness (cad::paperFillColour), not in the pen's
+// black whatever its colour - a light swatch beside a dark one would
+// otherwise print the same.
+TEST(SheetLegendSample, AnAreasFillFollowsTheMonochromeRuleForFills)
+{
+    Model model;
+    ASSERT_TRUE(model.hatchPatterns.add(katana::entity::HatchPattern{"SOLIDFILL", "", true, {}}).ok());
+    katana::cad::PlotSettings mono;
+    mono.colourMode = katana::cad::PlotColourMode::Monochrome;
+    LegendSampleContext c = context(&model);
+    c.plot = &mono;
+    const int cell = static_cast<int>(kCell.width() * kCell.height());
+    plotting::LegendEntry light = entryOf(plotting::LegendKind::Area, Color{200, 236, 200, 255});
+    light.hatchPattern = "SOLIDFILL";
+    QImage pale = blank();
+    ASSERT_TRUE(paintSample(pale, light, c));
+    plotting::LegendEntry dark = entryOf(plotting::LegendKind::Area, Color{0, 60, 0, 255});
+    dark.hatchPattern = "SOLIDFILL";
+    QImage solid = blank();
+    ASSERT_TRUE(paintSample(solid, dark, c));
+    EXPECT_GT(pixelsNear(solid, QColor(0, 0, 0)), cell * 6 / 10) << "a dark fill prints solid";
+    // The light one keeps its black outline and nothing more.
+    EXPECT_LT(pixelsNear(pale, QColor(0, 0, 0)), pixelsNear(solid, QColor(0, 0, 0)) / 2)
+        << "a light fill drops out";
+}
+
 TEST(SheetLegendSample, APointATextAndAnEmptyCell)
 {
     QImage point = blank();
