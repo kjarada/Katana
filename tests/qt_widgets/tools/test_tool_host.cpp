@@ -6,9 +6,11 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/snapping.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "tools/tool_host.hpp"
 
@@ -207,4 +209,37 @@ TEST(ToolHost, ASelectingToolsAnswerIsLeftInTheDocumentsSelection)
     EXPECT_FALSE(document.selection().contains(circle));
     EXPECT_GE(notified, 1);
     EXPECT_EQ(document.history().undoCount(), 4u) << "no command for a selection";
+}
+
+
+TEST(ToolHost, ASnapOnAnEntitysPointReachesTheToolAsThatPoint)
+{
+    // A leader's tip snapped to a line's end follows the line; one snapped
+    // to somewhere along it (Nearest) names no point of it and is a plain
+    // point, as a click with no snap is.
+    Document document;
+    ASSERT_TRUE(
+        document.execute(katana::commands::createLine(Point2(0, 0), Point2(10, 0))).ok());
+    const auto line = document.lastCreatedEntities().front();
+    ToolHost host(document);
+    const auto leader = [&](const katana::cad::SnapResult& snap) {
+        EXPECT_TRUE(host.start("annotate.leader").ok());
+        (void)host.point(snap.point, snap);
+        (void)host.point(Point2(15, 5));
+        (void)host.enter();
+        (void)host.enter();
+        host.cancel();
+        const auto made = document.lastCreatedEntities();
+        EXPECT_EQ(made.size(), 1u);
+        return std::get<katana::entity::LeaderGeometry>(
+            document.model().entities.find(made.front())->geometry);
+    };
+    const auto snapped =
+        leader(katana::cad::SnapResult{Point2(10, 0), katana::cad::SnapMode::Endpoint, line});
+    EXPECT_EQ(snapped.tipRef,
+              (katana::entity::AnchorRef{line, katana::entity::AnchorPoint::End, 0}));
+    const auto along =
+        leader(katana::cad::SnapResult{Point2(4, 0), katana::cad::SnapMode::Nearest, line});
+    EXPECT_FALSE(along.tipRef.associated());
+    EXPECT_EQ(along.vertices.front(), Point2(4, 0));
 }

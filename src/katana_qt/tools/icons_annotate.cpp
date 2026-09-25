@@ -180,6 +180,62 @@ void paintOrdinateDimension(const ToolInk& ink)
     ink.line(16, 6, 21, 6, true);
 }
 
+void paintBaselineDimension(const ToolInk& ink)
+{
+    // Three origins along the bottom and two dimension lines stacked above
+    // them, both from the first origin's extension line: the shorter one
+    // below, the longer one a step further out, as a baseline chain lies.
+    ink.node(4, 20.5);
+    ink.node(12, 20.5);
+    ink.node(20, 20.5);
+    ink.line(4, 18.5, 4, 3.5, false, kExtensionWidth);
+    ink.line(12, 18.5, 12, 11, false, kExtensionWidth);
+    ink.line(20, 18.5, 20, 3.5, false, kExtensionWidth);
+    // Eight pixels between origins: the two heads meet and are the line.
+    arrowhead(ink, 4, 13, -1, 0);
+    arrowhead(ink, 12, 13, 1, 0);
+    ink.line(8, 6, 16, 6, true);
+    arrowhead(ink, 4, 6, -1, 0);
+    arrowhead(ink, 20, 6, 1, 0);
+}
+
+void paintContinueDimension(const ToolInk& ink)
+{
+    // Three origins and two dimension lines end to end on one level, the
+    // second going on from the first's end: a continued chain.
+    ink.node(3, 20.5);
+    ink.node(12, 20.5);
+    ink.node(21, 20.5);
+    for (const double x : {3.0, 12.0, 21.0}) {
+        ink.line(x, 18.5, x, 5.5, false, kExtensionWidth);
+    }
+    arrowhead(ink, 3, 9, -1, 0);
+    arrowhead(ink, 12, 9, 1, 0);
+    arrowhead(ink, 12, 9, -1, 0);
+    arrowhead(ink, 21, 9, 1, 0);
+}
+
+void paintBalloon(const ToolInk& ink)
+{
+    // A leader from a feature at the bottom left up to a circle with a
+    // number in it: a leader whose note is framed, as the item balloons of
+    // a detail or a schedule are.
+    constexpr double kTipX = 4.0;
+    constexpr double kTipY = 20.5;
+    constexpr double kCentreX = 15.5;
+    constexpr double kCentreY = 8.5;
+    constexpr double kRadius = 6.0;
+    const double dx = kTipX - kCentreX;
+    const double dy = kTipY - kCentreY;
+    const double length = std::hypot(dx, dy);
+    // From the circle's edge to inside the arrowhead, so no gap shows.
+    ink.line(kCentreX + dx / length * kRadius, kCentreY + dy / length * kRadius,
+             kTipX - dx / length * 3.5, kTipY - dy / length * 3.5, true);
+    arrowhead(ink, kTipX, kTipY, dx, dy);
+    ink.stroke(circle(kCentreX, kCentreY, kRadius), true);
+    ink.label(kCentreX, kCentreY, 8, QStringLiteral("1"));
+}
+
 void paintLabel(const ToolInk& ink)
 {
     // A labelled point: the point at the bottom left, and a tag beside it
@@ -214,6 +270,12 @@ bool paintAnnotateIcon(std::string_view toolId, const ToolInk& ink)
         paintLeader(ink);
     } else if (toolId == "annotate.label") {
         paintLabel(ink);
+    } else if (toolId == "annotate.dimbaseline") {
+        paintBaselineDimension(ink);
+    } else if (toolId == "annotate.dimcontinue") {
+        paintContinueDimension(ink);
+    } else if (toolId == "annotate.balloon") {
+        paintBalloon(ink);
     } else {
         return false;
     }
