@@ -43,7 +43,9 @@ std::string formatTimestamp(std::chrono::system_clock::time_point time)
     gmtime_r(&seconds, &utc);
 #endif
 
-    char buffer[40];
+    // 64, not the 25 the text needs: GCC 15 sizes each %d for any int and
+    // warns (format-truncation) that a 40-byte buffer could be too small.
+    char buffer[64];
     std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
                   utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
                   utc.tm_sec, static_cast<int>(millis));
