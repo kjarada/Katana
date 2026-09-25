@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <filesystem>
 #include <memory>
+#include <random>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -617,20 +620,38 @@ Status clipVectorFile(const std::filesystem::path& input, const CrsBox& box,
     add("-skipfailures");
     GDALVectorTranslateOptions* options = GDALVectorTranslateOptionsNew(arguments.List(), nullptr);
     std::error_code ignored;
-    std::filesystem::remove(output, ignored);
     std::filesystem::create_directories(output.parent_path(), ignored);
+    // Written under a name of its own and renamed into place, as the cache's
+    // other files are (online_fetch.cpp, writeAtomically): the output's name
+    // is a hash of the file and the area, so two imports of the same area -
+    // two windows, or two tests run side by side - name the same file, and on
+    // Windows the second writer found it held open by the first and failed.
+    const std::filesystem::path partial =
+        output.string() + ".part-" + std::to_string(std::random_device{}()) + ".gpkg";
     GDALDatasetH sources[] = {source.get()};
     int usageError = FALSE;
     CPLErrorReset();
     CPLPushErrorHandler(CPLQuietErrorHandler);
-    DatasetHandle clipped(GDALVectorTranslate(output.string().c_str(), nullptr, 1, sources, options,
-                                              &usageError));
+    DatasetHandle clipped(GDALVectorTranslate(partial.string().c_str(), nullptr, 1, sources,
+                                              options, &usageError));
     CPLPopErrorHandler();
     GDALVectorTranslateOptionsFree(options);
     if (!clipped) {
-        std::filesystem::remove(output, ignored);
+        std::filesystem::remove(partial, ignored);
         return makeError(ErrorCode::FileImportFailure, "GDAL could not clip the downloaded file",
                          std::string(CPLGetLastErrorMsg()));
+    }
+    clipped.reset(); // closed, so the rename can move it
+    std::error_code renamed;
+    std::filesystem::rename(partial, output, renamed);
+    if (renamed) {
+        std::filesystem::remove(partial, ignored);
+        // Another import of the same area got there first: its file is the
+        // same clip, and it is the one to read.
+        if (!std::filesystem::is_regular_file(output, ignored)) {
+            return makeError(ErrorCode::FileImportFailure, "could not keep the clipped file",
+                             renamed.message());
+        }
     }
     return {};
 }
