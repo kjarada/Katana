@@ -1042,7 +1042,7 @@ std::size_t paintSection(QPainter& painter, const Paper& paper, TextSetter& text
         key.capMm = 1.5;
         double widest = 0.0;
         for (const auto& surface : section.surfaces) {
-            widest = std::max(widest, text.widthMm(qText(surface.name), key));
+            widest = std::max(widest, text.widthMm(qText(surface.name).toUpper(), key));
         }
         const double pitch = 3.2;
         const double count = static_cast<double>(section.surfaces.size());
@@ -1058,7 +1058,8 @@ std::size_t paintSection(QPainter& painter, const Paper& paper, TextSetter& text
                 painter.setPen(pens[s]);
                 painter.drawLine(paper.at(Point2(plot.min.x + 1.5, y)),
                                  paper.at(Point2(plot.min.x + 7.0, y)));
-                text.draw(Point2(plot.min.x + 8.0, y), qText(section.surfaces[s].name), line);
+                text.draw(Point2(plot.min.x + 8.0, y), qText(section.surfaces[s].name).toUpper(),
+                          line);
                 y -= pitch;
             }
         });
@@ -1636,6 +1637,13 @@ bool SheetPainter::paintSections(const Viewport& viewport, TextSetter& text, con
     const plotting::ViewportSource& from = viewport.source;
     if (from.alignment.empty()) {
         problem(viewport, "no alignment chosen");
+        return false;
+    }
+    // A stored scale comes from JSON unchecked: one that is not a positive
+    // number would put every label at infinity.
+    if (!(viewport.scale > 0.0) || !std::isfinite(viewport.scale) ||
+        !std::isfinite(viewport.verticalExaggeration)) {
+        problem(viewport, std::format("the scale 1:{} is not a positive number", viewport.scale));
         return false;
     }
     SectionAxes axes;
