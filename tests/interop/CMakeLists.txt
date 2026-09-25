@@ -49,8 +49,12 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/online_verbs_headless.png"
-            "-DDRIVE=>ONLINE PROVIDERS local|>ONLINE INFO copernicus dem|>ONLINE IMPORT headless-local lots area=lonlat:151.2,-33.875,151.215,-33.865 crs=EPSG:7856|>UNDO|>ONLINE IMPORT headless-local lots area=view crs=EPSG:28356"
-            "-DEXPECT=provider id=headless-local .*field name=service value=cog.*imported provider=headless-local layer=lots kind=vector entities=4 target=online/headless-local/lots.*attribution=\"test attribution\".*1 undone.*error verb=IMPORT code=InvalidCRS"
+            "-DDRIVE=>ONLINE PROVIDERS local|>ONLINE INFO copernicus dem|>ONLINE IMPORT headless-local lots area=lonlat:151.2,-33.875,151.215,-33.865 crs=EPSG:7856|?FrameStatsLabel|>UNDO|>ONLINE IMPORT headless-local lots area=view crs=EPSG:28356"
+            # The plan view is moved to what arrived: the four lots in MGA 56
+            # and nothing of the sample, which is in local coordinates
+            # thousands of kilometres away - left where it was, the view
+            # showed the sample and the import looked like it had done nothing.
+            "-DEXPECT=provider id=headless-local .*field name=service value=cog.*imported provider=headless-local layer=lots kind=vector entities=4 target=online/headless-local/lots.*attribution=\"test attribution\".*FrameStatsLabel: Plan +4 drawn.*1 undone.*error verb=IMPORT code=InvalidCRS"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_online_verbs_headless PROPERTIES
         ENVIRONMENT_MODIFICATION "${_online_verbs_env}" TIMEOUT 180)

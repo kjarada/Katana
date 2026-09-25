@@ -64,15 +64,33 @@
             }
         },
         {
-            "name": "linux-debug",
-            "displayName": "Debug (Linux/macOS, system packages)",
+            "name": "linux",
+            "hidden": true,
             "inherits": "base",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+            "toolchainFile": "${sourceDir}/cmake/toolchains/katana-linux.cmake"
+        },
+        {
+            "name": "linux-debug",
+            "displayName": "Debug (Linux, tools/setup_linux_toolchain.py)",
+            "inherits": "linux",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
         },
         {
+            "name": "linux-release",
+            "displayName": "Release (Linux, tools/setup_linux_toolchain.py)",
+            "inherits": "linux",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+        },
+        {
+            "name": "linux-relwithdebinfo",
+            "displayName": "RelWithDebInfo (Linux, tools/setup_linux_toolchain.py)",
+            "inherits": "linux",
+            "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+        },
+        {
             "name": "linux-sanitize",
-            "displayName": "Debug + ASan + UBSan (Linux/macOS)",
+            "displayName": "Debug + ASan + UBSan (Linux)",
             "inherits": "linux-debug",
             "cacheVariables": { "KATANA_ENABLE_SANITIZERS": "ON" }
         }
@@ -84,6 +102,8 @@
         { "name": "sanitize", "configurePreset": "sanitize" },
         { "name": "tidy", "configurePreset": "tidy" },
         { "name": "linux-debug", "configurePreset": "linux-debug" },
+        { "name": "linux-release", "configurePreset": "linux-release" },
+        { "name": "linux-relwithdebinfo", "configurePreset": "linux-relwithdebinfo" },
         { "name": "linux-sanitize", "configurePreset": "linux-sanitize" }
     ],
     "testPresets": [
@@ -110,6 +130,16 @@
         {
             "name": "linux-debug",
             "configurePreset": "linux-debug",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "linux-release",
+            "configurePreset": "linux-release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "linux-relwithdebinfo",
+            "configurePreset": "linux-relwithdebinfo",
             "output": { "outputOnFailure": true }
         },
         {

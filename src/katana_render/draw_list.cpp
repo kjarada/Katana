@@ -46,25 +46,71 @@ void DrawList::addSegment(const Point3& from, const Point3& to, Rgba color, floa
     addLine(a, b, width, depthBias);
 }
 
-katana::math::AABB DrawList::bounds() const
+namespace {
+
+// The reference order: every use of every vertex, primitive by primitive.
+// What bounds() falls back to when the order decides the result.
+katana::math::AABB boundsInPrimitiveOrder(const DrawList& list)
 {
     katana::math::AABB box;
     const auto include = [&](VertexIndex index) {
-        if (index < positions.size() && positions[index].isFinite()) {
-            box.expand(positions[index]);
+        if (index < list.positions.size() && list.positions[index].isFinite()) {
+            box.expand(list.positions[index]);
         }
     };
-    for (const DrawTriangle& triangle : triangles) {
+    for (const DrawTriangle& triangle : list.triangles) {
         include(triangle.a);
         include(triangle.b);
         include(triangle.c);
     }
-    for (const DrawLine& line : lines) {
+    for (const DrawLine& line : list.lines) {
         include(line.a);
         include(line.b);
     }
-    for (const DrawPoint& point : points) {
+    for (const DrawPoint& point : list.points) {
         include(point.a);
+    }
+    return box;
+}
+
+} // namespace
+
+katana::math::AABB DrawList::bounds() const
+{
+    std::vector<std::uint8_t> used;
+    return bounds(used);
+}
+
+katana::math::AABB DrawList::bounds(std::vector<std::uint8_t>& used) const
+{
+    const std::size_t count = positions.size();
+    used.assign(count, 0);
+    const auto use = [&used, count](VertexIndex index) {
+        if (index < count) {
+            used[index] = 1;
+        }
+    };
+    for (const DrawTriangle& triangle : triangles) {
+        use(triangle.a);
+        use(triangle.b);
+        use(triangle.c);
+    }
+    for (const DrawLine& line : lines) {
+        use(line.a);
+        use(line.b);
+    }
+    for (const DrawPoint& point : points) {
+        use(point.a);
+    }
+    katana::math::AABB box;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (used[i] != 0 && positions[i].isFinite()) {
+            box.expand(positions[i]);
+        }
+    }
+    if (box.min.x == 0.0 || box.min.y == 0.0 || box.min.z == 0.0 || box.max.x == 0.0 ||
+        box.max.y == 0.0 || box.max.z == 0.0) {
+        return boundsInPrimitiveOrder(*this);
     }
     return box;
 }
