@@ -16,10 +16,12 @@
 //     utilities::drawReplyBounds. Survey data in a real coordinate system
 //     usually lands far from what the view was showing, and left unframed a
 //     successful draw looked like one that did nothing.
-// The dialog's Run goes back through the window's own command line
-// (UtilityServices::runCommand), so a line from the dialog is echoed, kept in
-// the history and undone exactly as a typed one; it reaches runLine like any
-// other, which is where its reply is kept for the dialog to show.
+// The dialog's Run goes back through the window (UtilityServices::runCommand),
+// so a line from the dialog is echoed, kept in the history and undone exactly
+// as a typed one; it reaches runLine like any other, which is where its reply
+// is kept for the dialog to show. A TYPED line reaches runLine only when no
+// tool is waiting for typed text: then it is the tool's - a label may read
+// "Utility pit" - where the dialog's line never is.
 
 #include <QPointer>
 #include <QString>
@@ -53,9 +55,9 @@ struct UtilityServices {
     std::function<bool()> headless;
     // The window's CommandInterpreter: runs one line, returns its reply.
     std::function<katana::core::Result<std::string>(const std::string& line)> interpret;
-    // The window's command line: `line` run as if typed and Enter pressed -
-    // echoed in the log and kept in the history - which hands a UTILITY line
-    // back to runLine.
+    // The window's command line: `line` echoed in the log and handed back to
+    // runLine, as a typed UTILITY line is - kept in the history by `interpret`
+    // - but never to a running tool, which a typed line may be.
     std::function<void(const QString& line)> runCommand;
 };
 
