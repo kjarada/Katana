@@ -49,7 +49,7 @@ VerificationReport verifyDetections(const std::vector<UtilityLine>& lines,
             }
             const std::string where = line.id + " / " + exposure.id;
             PositionEvidence evidence = exposure.evidence;
-            evidence.hasLevel = exposure.level.has_value();
+            evidence.hasLevel = hasVerticalMeasurement(exposure);
             const Classification grade = classify(evidence, settings.tolerances);
             if (grade.level != QualityLevel::A) {
                 report.problems.push_back(where + " checks " + exposure.verifies + " but is " +
