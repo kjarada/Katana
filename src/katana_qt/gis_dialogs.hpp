@@ -33,16 +33,25 @@ class QSpinBox;
 
 namespace katana::qt {
 
+class ImportPlacementBox;
+
+// GIS > Import Vector Data. Object names: importSourceLayer, importTargetLayer,
+// importAttributes, and the Placement group's (import_placement.hpp).
 class VectorImportDialog final : public QDialog {
   public:
-    explicit VectorImportDialog(const katana::interop::SourceDescription& source,
-                                QWidget* parent = nullptr);
+    // `drawing` is the drawing's extent now, for what the Placement group
+    // says a move onto it will do.
+    VectorImportDialog(const katana::interop::SourceDescription& source,
+                       const katana::geometry::Box2& drawing, QWidget* parent = nullptr);
     [[nodiscard]] katana::interop::VectorImportOptions options() const;
+    // Where the data lands; the window reads it with options().
+    [[nodiscard]] ImportPlacementBox& placementBox() const { return *placement_; }
 
   private:
     QComboBox* sourceLayer_ = nullptr;
     QLineEdit* targetLayer_ = nullptr;
     QCheckBox* attributes_ = nullptr;
+    ImportPlacementBox* placement_ = nullptr;
 };
 
 class RasterImportDialog final : public QDialog {

@@ -10,10 +10,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <exception>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -23,6 +25,8 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/document_status.hpp"
+#include "katana/cad/import_placement.hpp"
+#include "katana/entity/model.hpp"
 
 namespace katana::app::mcp {
 
@@ -281,6 +285,45 @@ std::string singleLine(const std::string& text, const char* what)
     return text;
 }
 
+// katana_import's placement, local and offsets as the word its IMPORT line
+// ends in ("" to keep the data where it is), by cad::placementWord, so the
+// line is the one a person would type.
+std::string importPlacementWord(const Json& arguments)
+{
+    using katana::cad::ImportPlacementMode;
+    const bool local = optionalBool(arguments, "local", false);
+    const Json& chosen = argument(arguments, "placement");
+    if (chosen.is_null()) {
+        return local ? "LOCAL" : "";
+    }
+    static const std::map<std::string, ImportPlacementMode> kModes{
+        {"keep", ImportPlacementMode::Keep},
+        {"local", ImportPlacementMode::Local},
+        {"alongside", ImportPlacementMode::Alongside},
+        {"offset", ImportPlacementMode::Offset}};
+    const auto mode = chosen.is_string() ? kModes.find(chosen.get<std::string>()) : kModes.end();
+    if (mode == kModes.end()) {
+        throw ToolRefusal{"\"placement\" must be keep, local, alongside or offset"};
+    }
+    if (local && mode->second != ImportPlacementMode::Local) {
+        throw ToolRefusal{"\"local\": true and \"placement\": \"" + mode->first +
+                          "\" say different things; give one"};
+    }
+    katana::cad::ImportPlacement placement{mode->second, {}};
+    if (mode->second == ImportPlacementMode::Offset) {
+        const auto number = [&](const char* name) {
+            const Json& value = argument(arguments, name);
+            if (!value.is_number() || !std::isfinite(value.get<double>())) {
+                throw ToolRefusal{std::string("placement offset needs \"") + name +
+                                  "\", a number"};
+            }
+            return value.get<double>();
+        };
+        placement.offset = katana::geometry::Vec2(number("offset_east"), number("offset_north"));
+    }
+    return katana::cad::placementWord(placement);
+}
+
 // ---- the session's state ------------------------------------------------------------
 
 // The drawing's state, as STATUS JSON gives it (cad/document_status.hpp): one
@@ -530,24 +573,41 @@ const std::vector<Tool>& tools()
             "katana_import", "Import a file",
             "Import a file into the drawing: DXF always; with the GIS module also shapefiles, "
             "GeoJSON, GeoPackage, .12da archives and other vector formats (as entities), and "
-            "rasters and point clouds (as reference layers). local: true moves what a DXF, "
-            "vector file or .12da archive holds as one piece, so that its lower-left corner sits "
-            "at 0,0 instead of at its survey coordinates.",
+            "rasters and point clouds (as reference layers). placement says where what a DXF, "
+            "vector file or .12da archive holds lands: at its own coordinates (keep, the "
+            "default), moved as one piece so its lower-left corner sits at 0,0 (local), onto "
+            "the drawing's lower-left corner (alongside), or by offset_east and offset_north "
+            "(offset). The reply says the move made.",
             objectSchema(
                 Json{{"path", {{"type", "string"}, {"description", "The file to import."}}},
+                     {"placement",
+                      {{"type", "string"},
+                       {"enum", {"keep", "local", "alongside", "offset"}},
+                       {"description",
+                        "Where the data lands, moved as one piece with its shape and dimensions "
+                        "unchanged: keep - its own coordinates; local - its lower-left corner at "
+                        "0,0 (IMPORT ... LOCAL); alongside - its lower-left corner on the "
+                        "drawing's (ALONGSIDE; into an empty drawing it keeps its own); offset - "
+                        "moved by offset_east and offset_north (OFFSET=dE,dN). Anything but keep "
+                        "is refused for rasters and point clouds, which are drawn at their own "
+                        "coordinates."}}},
+                     {"offset_east",
+                      {{"type", "number"},
+                       {"description", "With placement offset: added to every easting."}}},
+                     {"offset_north",
+                      {{"type", "number"},
+                       {"description", "With placement offset: added to every northing."}}},
                      {"local",
                       {{"type", "boolean"},
                        {"description",
-                        "Move the imported data as one piece so its lower-left corner sits at "
-                        "0,0, its shape and dimensions unchanged (IMPORT ... LOCAL). Refused for "
+                        "The same as placement local: move the imported data as one piece so "
+                        "its lower-left corner sits at 0,0 (IMPORT ... LOCAL). Refused for "
                         "rasters and point clouds, which are drawn at their own coordinates."}}}},
                 {"path"}),
             hints(false, false, false), [](Session& session, const Json& arguments) {
-                std::string line = "IMPORT " + quoted(requiredString(arguments, "path"));
-                if (optionalBool(arguments, "local", false)) {
-                    line += " LOCAL";
-                }
-                return oneLine(session, line);
+                const std::string word = importPlacementWord(arguments);
+                return oneLine(session, "IMPORT " + quoted(requiredString(arguments, "path")) +
+                                            (word.empty() ? "" : " " + word));
             }});
 
         list.push_back(Tool{

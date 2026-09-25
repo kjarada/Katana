@@ -261,7 +261,7 @@ may not see GDAL, PDAL or the archive readers:
 | Verb | `katana_cli` | the window's command line |
 |---|---|---|
 | the interpreter's verbs (`HELP`) | yes | yes |
-| `IMPORT <file> [LOCAL]`, `EXPORT`, `REFS`, `INFO <file>` | yes (with `KATANA_BUILD_IO`; a `.dxf` without it) | yes |
+| `IMPORT <file> [LOCAL \| ALONGSIDE \| OFFSET=dE,dN]`, `EXPORT`, `REFS`, `INFO <file>` | yes (with `KATANA_BUILD_IO`; a `.dxf` without it) | yes |
 | `INFO <id>` or `INFO #<id>`: an entity, the interpreter's - taken for a file only when a file of that name exists (both took every `INFO` for a file until 2026-09-26) | yes | yes |
 | `COPC <source> <destination.copc.laz>` | yes | yes (since 2026-09-26) |
 | `CUSTOMISE [REPLACE] <file>...`; `CUSTOMISE` alone reports what is loaded and from which files | yes | yes (the report since 2026-09-26) |

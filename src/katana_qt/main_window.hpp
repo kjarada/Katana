@@ -37,12 +37,15 @@
 #include "gis_online.hpp"
 #include "keyboard_shortcuts_dialog.hpp"
 #include "script_runner.hpp"
+#include "import_placement.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "plotting/plot_drawing_dialog.hpp"
 #include "plotting/plot_output.hpp"
 #include "plotting/view_image_export.hpp"
+// Whole, not declared: selectById_ is destroyed wherever the window is.
+#include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -78,12 +81,12 @@ class MainWindow final : public QMainWindow {
     // Opens a project given on the command line.
     void openProject(const QString& directory);
     // Imports a data file given on the command line, routed by its extension
-    // exactly as File > Import does. With `local` - a typed IMPORT <file>
-    // LOCAL - vector data, a .12da archive or a DXF is moved as one piece so the
-    // lower-left corner of what it holds sits at 0,0, and nobody is asked
-    // where to put it; a raster or a point cloud refuses it by name, being
-    // reference data drawn at its own coordinates.
-    void importPath(const QString& path, bool local = false);
+    // exactly as File > Import does. With a `placement` - a typed IMPORT
+    // <file> LOCAL, ALONGSIDE or OFFSET=dE,dN - vector data, a .12da archive
+    // or a DXF is moved as one piece (cad/import_placement.hpp), and nobody
+    // is asked where to put it; a raster or a point cloud refuses it by name,
+    // being reference data drawn at its own coordinates.
+    void importPath(const QString& path, const katana::cad::ImportPlacement& placement = {});
     // Plots the drawing to `path` on the active plan viewport. With
     // `fitToDrawing` the scale is the first standard one the drawing fits at
     // and the sheet is centred on it; otherwise `settings.scaleDenominator`
@@ -165,8 +168,10 @@ class MainWindow final : public QMainWindow {
     // been logged. For the headless --dataset-info switch.
     [[nodiscard]] std::unique_ptr<DatasetInfoDialog> makeDatasetInfo(const QString& path);
     // The GIS menu's import dialog for `path`'s kind of data - vector, raster
-    // or point cloud - built but not shown. nullptr, logged, for a file that
-    // cannot be described or has no such dialog. For --import-options.
+    // or point cloud, or for a DXF or a .12da the placement step File >
+    // Import asks (ImportPlacementDialog) - built but not shown. nullptr,
+    // logged, for a file that cannot be described or has no such dialog. For
+    // --import-options.
     [[nodiscard]] std::unique_ptr<QDialog> makeImportOptions(const QString& path);
     // Triggers the menu item whose object name is `name`, exactly as a click
     // does. For the headless --action switch, so that a menu command is run
@@ -178,6 +183,9 @@ class MainWindow final : public QMainWindow {
     // whose dialog acts on a selection.
     void selectAll();
     void selectOnly(katana::entity::EntityId id);
+    // Edit > Select by ID (select_by_id_dialog.hpp), made the first time and
+    // kept, as Format > Layers is.
+    void showSelectById();
     // Runs `line` as if it were typed on the command line and Enter pressed.
     // For the headless --command switch, so a test can set up a drawing -
     // styles, entities, a selection - through the verbs a person types. An
@@ -237,6 +245,16 @@ class MainWindow final : public QMainWindow {
     // back to its own when nothing runs.
     void showRunningTool(const std::string& id);
     void buildViewMenu(QMenu* viewMenu);
+    // A right-click in a plan view with no tool running: the shortcut menu
+    // (plan_context_menu.hpp) for the selection, at `globalPos`.
+    void showPlanContextMenu(const QPoint& globalPos);
+    // After Select by ID: the selection framed in the active plan view when
+    // `zoom`, and the Properties panel brought forward to show it.
+    void showSelection(bool zoom);
+    // A double click on entity `id` with no tool running: it alone selected,
+    // and its editor opened - a text's or a label's where the window has
+    // one, the Properties panel otherwise.
+    void editDoubleClicked(katana::entity::EntityId id);
     // `name`, when given, becomes the action's object name: what --action and
     // QMainWindow::saveState know it by.
     [[nodiscard]] QAction* makeAction(Icon icon, const QString& text, const QString& tip,
@@ -324,11 +342,18 @@ class MainWindow final : public QMainWindow {
     void reportMissingCustomisation();
     void reportCustomisationCoverage();
     // The options are the GIS menu's dialogs' choices; File > Import and a
-    // path on the command line take the defaults.
-    // `local`: moved to sit at 0,0, as importPath says.
+    // path on the command line take the defaults. `placement` is where the
+    // data lands, as importPath says; Keep asks when it is far from the
+    // drawing (decideImportPlacement, import_placement.hpp).
     void importVectorFile(const std::filesystem::path& path,
-                          katana::interop::VectorImportOptions options = {}, bool local = false);
-    void importArchive12dFile(const std::filesystem::path& path, bool local = false);
+                          katana::interop::VectorImportOptions options = {},
+                          const katana::cad::ImportPlacement& placement = {});
+    void importArchive12dFile(const std::filesystem::path& path,
+                              const katana::cad::ImportPlacement& placement = {});
+    // File > Import's step for a DXF or a .12da archive, whose only choice
+    // is where it lands (ImportPlacementDialog), and then the IMPORT line
+    // it makes, through runVerbLine.
+    void importWithPlacement(const QString& path);
     void importRasterFile(const std::filesystem::path& path,
                           katana::interop::RasterImportOptions options = {});
     void importPointCloudFile(const std::filesystem::path& path,
@@ -342,9 +367,12 @@ class MainWindow final : public QMainWindow {
     // A .dxf, read and written natively rather than through GDAL
     // (main_window_dxf.cpp). The export honours the options' entities,
     // layers and origin shift; the rest are GDAL's.
-    void importDxfFile(const std::filesystem::path& path, bool local = false);
-    // What an IMPORT ... LOCAL says it did: the shift, as the move it made.
-    void logLocalShift(const katana::geometry::Vec2& shift);
+    void importDxfFile(const std::filesystem::path& path,
+                       const katana::cad::ImportPlacement& placement = {});
+    // decideImportPlacement for this window: where data read at `incoming`
+    // lands in the drawing as it is now, asked or logged.
+    [[nodiscard]] PlacementDecision placeImport(const katana::cad::ImportPlacement& placement,
+                                                const katana::geometry::Box2& incoming);
     bool exportDxfFile(const std::filesystem::path& path,
                        const katana::interop::VectorExportOptions& options);
 
@@ -481,6 +509,8 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<LayerManagerDialog> layers_;
     // File > Sheets, kept between uses and owned here for the reason layers_ is.
     std::unique_ptr<SheetEditor> sheets_;
+    // Edit > Select by ID, kept between uses for the reason layers_ is.
+    std::unique_ptr<SelectByIdDialog> selectById_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
