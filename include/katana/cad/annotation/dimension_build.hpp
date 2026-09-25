@@ -12,6 +12,7 @@
 #include <optional>
 #include <vector>
 
+#include "katana/commands/command.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/model.hpp"
@@ -88,5 +89,29 @@ baselineDimensions(const katana::entity::DimensionGeometry& base,
 [[nodiscard]] katana::core::Result<std::vector<katana::entity::DimensionGeometry>>
 continuedDimensions(const katana::entity::DimensionGeometry& base,
                     const std::vector<AnchoredPoint>& points);
+
+// Which chain dimensionChain makes.
+enum class DimensionChain { Baseline, Continued };
+
+// The spacing a baseline chain from dimension entity `base` takes when none
+// is given: a text height and a half of the dimension style `base` is drawn
+// in, at 1 : `scale` - AutoCAD's metric DIMDLI of 3.75 against a DIMTXT of
+// 2.5.
+[[nodiscard]] double baselineSpacing(const katana::entity::Model& model,
+                                     const katana::entity::Entity& base, double scale);
+
+// DIM BASELINE's and DIM CONTINUE's command, which the Baseline and Continue
+// Dimension tools make too, so the two cannot differ: the chain from the
+// aligned or linear dimension `base` through `points` (baselineDimensions,
+// continuedDimensions) as ONE command, DIM_BASELINE or DIM_CONTINUE, each
+// dimension on the base's layer and in its style and colour. A baseline
+// chain's lines are `spacing` apart, or baselineSpacing's at 1 : `scale`
+// when none is given; a continued chain has no spacing. InvalidArgument when
+// `base` is not a dimension or there are no points, and as the chain's
+// builder refuses.
+[[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+dimensionChain(const katana::entity::Model& model, katana::entity::EntityId base,
+               const std::vector<AnchoredPoint>& points, DimensionChain kind,
+               std::optional<double> spacing, double scale);
 
 } // namespace katana::cad::annotation

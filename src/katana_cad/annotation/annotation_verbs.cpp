@@ -30,6 +30,7 @@
 #include "katana/cad/annotation/auto_label.hpp"
 #include "katana/cad/annotation/dimension_build.hpp"
 #include "katana/cad/annotation/label_layout.hpp"
+#include "katana/cad/annotation/leader_build.hpp"
 #include "katana/cad/annotation/text_layout.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/dimension_draw.hpp"
@@ -1523,56 +1524,30 @@ CommandInterpreter::Reply CommandInterpreter::dimension(const Tokens& args)
         if (!id) {
             return id.error();
         }
-        const Entity* base = model.entities.find(*id);
-        const auto* dimension = base != nullptr
-                                    ? std::get_if<katana::entity::DimensionGeometry>(&base->geometry)
-                                    : nullptr;
-        if (dimension == nullptr) {
-            return makeError(ErrorCode::InvalidArgument, "that entity is not a dimension",
-                             "id=" + std::to_string(*id));
-        }
         auto list = points(1);
         if (!list) {
             return list.error();
         }
-        Result<std::vector<katana::entity::DimensionGeometry>> chain =
-            std::vector<katana::entity::DimensionGeometry>{};
-        if (kind == "BASELINE") {
-            // A text height and a half apart unless told: AutoCAD's metric
-            // DIMDLI of 3.75 against a DIMTXT of 2.5.
-            const auto style = dimensionStyleAtScale(resolveDimensionStyle(model, *base),
-                                                     document_.annotationScale());
-            double spacing = 1.5 * style.textHeight;
-            if (const std::string* text = parsed->find("spacing")) {
-                auto value = numberOf(*text, "spacing");
-                if (!value) {
-                    return value.error();
-                }
-                spacing = *value;
+        // A text height and a half apart unless told (ann::baselineSpacing).
+        std::optional<double> spacing;
+        if (const std::string* text = parsed->find("spacing");
+            text != nullptr && kind == "BASELINE") {
+            auto value = numberOf(*text, "spacing");
+            if (!value) {
+                return value.error();
             }
-            chain = ann::baselineDimensions(*dimension, *list, spacing);
-        } else {
-            chain = ann::continuedDimensions(*dimension, *list);
+            spacing = *value;
         }
-        if (!chain) {
-            return chain.error();
+        // The whole chain as one step, on the base's layer and style - the
+        // Baseline and Continue Dimension tools' door too.
+        auto built = ann::dimensionChain(
+            model, *id, *list,
+            kind == "BASELINE" ? ann::DimensionChain::Baseline : ann::DimensionChain::Continued,
+            spacing, document_.annotationScale());
+        if (!built) {
+            return built.error();
         }
-        // The whole chain as one step, on the base's layer and style.
-        cmd::ChangeSet changes;
-        for (auto& geometry : *chain) {
-            Entity entity;
-            entity.geometry = std::move(geometry);
-            entity.layer = base->layer;
-            entity.style = base->style;
-            entity.color = base->color;
-            changes.add.push_back(std::move(entity));
-        }
-        if (auto status = document_.execute(std::make_unique<cmd::ChangeSetCommand>(
-                kind == "BASELINE" ? "DIM_BASELINE" : "DIM_CONTINUE",
-                [changes](const cmd::CommandContext&) -> Result<cmd::ChangeSet> {
-                    return changes;
-                }));
-            !status) {
+        if (auto status = document_.execute(std::move(*built)); !status) {
             return status.error();
         }
         const auto ids = document_.lastCreatedEntities();
@@ -1611,21 +1586,8 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     }
     if (balloon) {
         leader.callout = katana::entity::CalloutShape::Circle;
-        // The next number: one more than the highest balloon already numbered.
-        long long highest = 0;
-        document_.model().entities.forEach([&](const Entity& entity) {
-            const auto* other = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
-            if (other == nullptr || other->callout != katana::entity::CalloutShape::Circle) {
-                return;
-            }
-            long long value = 0;
-            const auto [end, error] = std::from_chars(
-                other->text.data(), other->text.data() + other->text.size(), value);
-            if (error == std::errc{} && end == other->text.data() + other->text.size()) {
-                highest = std::max(highest, value);
-            }
-        });
-        leader.text = std::to_string(highest + 1);
+        // The next number, as the Balloon tool numbers one.
+        leader.text = ann::nextBalloonNumber(document_.model());
     }
     for (const auto& [key, value] : parsed->options) {
         if (key == "text" || key == "n") {

@@ -3,9 +3,12 @@
 #include "katana/cad/spatial_query.hpp"
 
 #include <cmath>
+#include <cstdint>
+#include <variant>
 #include <vector>
 
 #include "katana/cad/selection.hpp"
+#include "katana/entity/anchor.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/geometry/editing.hpp"
 
@@ -336,6 +339,59 @@ std::optional<SnapResult> snap(const katana::entity::Model& model, const SnapReq
         return SnapResult{Point2(std::round(request.cursor.x / spacing) * spacing,
                                  std::round(request.cursor.y / spacing) * spacing),
                           SnapMode::Grid, katana::entity::kInvalidEntityId};
+    }
+    return std::nullopt;
+}
+
+std::optional<katana::entity::AnchorRef> snapAnchor(const katana::entity::Model& model,
+                                                    const SnapResult& snap)
+{
+    using katana::entity::AnchorPoint;
+    using katana::entity::AnchorRef;
+    if (snap.mode != SnapMode::Endpoint && snap.mode != SnapMode::Midpoint &&
+        snap.mode != SnapMode::Center) {
+        return std::nullopt;
+    }
+    const Entity* entity = model.entities.find(snap.entity);
+    if (entity == nullptr) {
+        return std::nullopt;
+    }
+    // The points each kind names, in the order a tie is settled: a
+    // polyline's corners by their vertex, not as its start or end.
+    std::vector<AnchorRef> names;
+    const auto name = [&](AnchorPoint point, std::uint32_t index = 0) {
+        names.push_back(AnchorRef{entity->id, point, index});
+    };
+    const auto& geometry = entity->geometry;
+    if (std::holds_alternative<Segment2>(geometry)) {
+        name(AnchorPoint::Start);
+        name(AnchorPoint::End);
+        name(AnchorPoint::Mid);
+    } else if (std::holds_alternative<Arc2>(geometry)) {
+        name(AnchorPoint::Start);
+        name(AnchorPoint::End);
+        name(AnchorPoint::Mid);
+        name(AnchorPoint::Centre);
+    } else if (std::holds_alternative<Circle2>(geometry)) {
+        name(AnchorPoint::Centre);
+    } else if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
+        for (std::uint32_t i = 0; i < polyline->vertices.size(); ++i) {
+            name(AnchorPoint::Vertex, i);
+        }
+        for (std::uint32_t i = 0; i < polyline->segmentCount(); ++i) {
+            name(AnchorPoint::SegmentMid, i);
+        }
+    } else if (std::holds_alternative<katana::entity::LeaderGeometry>(geometry)) {
+        name(AnchorPoint::Start);
+        name(AnchorPoint::End);
+    } else {
+        name(AnchorPoint::Position);
+    }
+    for (const AnchorRef& ref : names) {
+        const auto at = katana::entity::resolveAnchor(*entity, ref);
+        if (at && at->distanceTo(snap.point) <= katana::math::tolerance::kGeometric) {
+            return ref;
+        }
     }
     return std::nullopt;
 }

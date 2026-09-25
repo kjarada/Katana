@@ -239,7 +239,17 @@ entity they belong to (`AnchorRef`: an entity and which of its points -
 position, start, end, mid, centre, vertex N, the middle of segment N). On the
 command line a point written `#id`, `#id.end`, `#id.v3` or `#id.s2` names one;
 the interactive dimension tools name the lines, arcs and circles they are
-given by picking.
+given by picking, and - since 2026-09-26 - any point the plan view SNAPPED to
+an entity's end, middle, centre or vertex. The view hands the tool what its
+snap found (`cad::snapAnchor` turns an Endpoint, Midpoint or Center snap into
+the reference; `cad::routeSnappedPoint` gives it to
+`InteractiveTool::anchoredPoint`, whose default is a plain point), and the
+Linear, Aligned, Ordinate (feature and datum), Angular-by-points, Baseline
+and Continue Dimension tools and the Leader's and Balloon's tip keep it, so
+what they make follows the entity exactly as the verb's `#id` points do
+(`test_annotate_leader_options.cpp`, `AssociativePoints`). An Intersection,
+Perpendicular, Tangent or Nearest snap is not a point one entity keeps, and
+stays a plain point.
 
 Rather than teach every command about annotation, `Document::execute` wraps
 EVERY command in `withAssociativeUpdate`
@@ -262,14 +272,17 @@ stored byte for byte as it was.
 | Kind | Measures | Made by |
 |---|---|---|
 | Aligned | the true distance, its line parallel to the points | `DIM ALIGNED`, `DIM p p offset`, the Aligned Dimension tool |
-| Linear | along a direction: horizontal, vertical or rotated | `DIM LINEAR` / `HORIZONTAL` / `VERTICAL` (the Linear Dimension tool stores the aligned projection, `docs/tools.md`) |
+| Linear | along a direction: horizontal, vertical or rotated | `DIM LINEAR` / `HORIZONTAL` / `VERTICAL`; the Linear Dimension tool for Rotated, for a line between the origins' levels and for snapped origins (otherwise it stores the aligned projection, `docs/tools.md`) |
 | Angular | the angle at a vertex, the side the arc is dragged to | `DIM ANGULAR`, the Angular Dimension tool |
 | Radius, Diameter | an arc's or a circle's, from its centre | `DIM RADIUS` / `DIAMETER`, the Radius and Diameter Dimension tools |
 | OrdinateX, OrdinateY | a feature's X or Y from a datum | `DIM ORDINATE`, the Ordinate Dimension tool |
 
 `DIM BASELINE dim p...` adds dimensions measured from the same first point,
 each a spacing further out; `DIM CONTINUE dim p...` chains them end to end
-(`BaselineAndContinuedChains`). A dimension style's sizes are model units,
+(`BaselineAndContinuedChains`). The Baseline and Continue Dimension tools
+make the same chains through the same door, `annotation::dimensionChain`
+(one command, on the base's layer and in its style), going on from the
+drawing's newest linear or aligned dimension until Select picks another. A dimension style's sizes are model units,
 or with `paperSized` (`DIMSTYLE SET name PAPER on`) paper millimetres drawn
 at the annotation scale (`APaperSizedStyleIsTheSameOnPaperAtEveryScale`). The
 arrowheads are closed filled, open, tick, dot or none (`ArrowHead`, which
@@ -289,10 +302,12 @@ segment, level on the sheet, and the note sits half a text height beyond it,
 left-justified to the right and right-justified to the left
 (`TheLandingRunsAwayFromTheLineAndTheNoteSitsBeyondIt`); a circle callout is
 the smallest circle clearing its note. `BALLOON` is a circled leader whose
-number counts on from the highest balloon in the drawing (or `n=`). The
-Leader tool makes the same entity (`docs/tools.md`); it used to draw a
-polyline, an arrowhead and a text per line, which drifted apart when one was
-moved.
+number counts on from the highest balloon in the drawing (or `n=`;
+`annotation::nextBalloonNumber`, which the Balloon tool numbers by too). The
+Leader tool makes the same entity (`docs/tools.md`), with `LEADER`'s arrow,
+callout, text style and paper height as options for the leader being drawn;
+it used to draw a polyline, an arrowhead and a text per line, which drifted
+apart when one was moved.
 
 ## The verbs
 
@@ -452,6 +467,9 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/cad/annotation/test_export_annotation.cpp` | what a file is handed |
 | `tests/cad/tools/test_annotate.cpp` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
 | `tests/cad/tools/test_annotate_label_tool.cpp` | the Label Objects tool against the `LABEL` line, its style offered, options, undo and refusals |
+| `tests/cad/tools/test_annotate_dimension_chain.cpp` | the Baseline and Continue Dimension tools against `DIM BASELINE` and `DIM CONTINUE`: the newest base, Select, Spacing, Enter and Esc, a snapped origin followed |
+| `tests/cad/tools/test_annotate_leader_options.cpp` | `snapAnchor`; the Leader's options and the Balloon tool against `LEADER` and `BALLOON`; Linear's Rotated and a line between the levels against `DIM LINEAR`; the Ordinate's Datum against `DIM ORDINATE datum=`; snapped points followed |
+| `qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless` | the window: `DBA`, `BALLOON` and `LE`'s Callout answered on the command line |
 | `tests/qt_widgets/annotation/test_label_edit_dialog.cpp` | the `LABEL SET` line Edit Label writes, the dialog and the Label Layout Report driven by object name, each line run as the window runs it |
 | `qt_labels_are_made_edited_and_reported_in_the_window_headless` | the window end to end: `LBL` answered on the command line, the Properties rows, Edit Label's line through the one executor, the layout report, the Annotate menu |
 | `cli.label_layout_names_the_label_that_found_no_room` | `katana_cli`: the suppressed record, and a pinned label placed |
@@ -472,8 +490,12 @@ it skipped dimensions, and so does the archive exporter.
   drawing can be cut off at the edge.
 * **The Text tool** asks for a model height as before; a style, a paper
   height and a justification are the verb's (`TEXT ... style= paper=
-  justify=`, `TEXTEDIT`). The Linear Dimension tool stores the aligned
-  projection (`docs/tools.md`).
+  justify=`, `TEXTEDIT`). The Linear Dimension tool still stores the aligned
+  projection for an unsnapped horizontal or vertical dimension outside the
+  origins' levels (`docs/tools.md`).
+* **Leader options** are for the leader being drawn, and the tool always
+  takes the arrow size and the landing from the dimension style; `LEADER`'s
+  `arrowsize=` and `landing=` set them on the command line.
 * **Labels are not picked by their text**: a label is selected at its
   anchor, and moved off its placed position with Annotate > Edit Label
   (`LABEL SET id at=x,y`) rather than by dragging its text.

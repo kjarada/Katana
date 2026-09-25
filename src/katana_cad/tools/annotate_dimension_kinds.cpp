@@ -10,7 +10,7 @@
 //   Radius    Select an arc or circle
 //             Specify dimension line location          its direction and reach
 //   Diameter  the same
-//   Ordinate  Specify feature location
+//   Ordinate  Specify feature location or [Datum]
 //             Specify leader endpoint or [Xdatum/Ydatum]
 //
 // Each makes the dimension the DIM verb makes (DIM ANGULAR, RADIUS, DIAMETER,
@@ -19,11 +19,17 @@
 // DimensionGeometry of its kind, drawn by dimension_draw.cpp in the layer's
 // dimension style, added by ONE command. A dimension made from picked
 // entities - two lines, an arc or a circle - follows them when they are
-// edited (the associative update); one made from typed or clicked points
-// measures those points.
+// edited (the associative update), and so does one whose points were snapped
+// to an entity's end, middle, centre or vertex (anchoredPoint), as DIM's #id
+// points do; one made from typed or plainly clicked points measures those
+// points.
 //
 // The ordinate's datum is the drawing's origin, as AutoCAD's is the UCS
-// origin; DIM ORDINATE ... datum=x,y measures from another.
+// origin, until Datum gives another - DIM ORDINATE ... datum=x,y. The tool
+// starts again after each dimension, and measures from the datum of the
+// drawing's newest ordinate dimension: the datum given is kept for the rest
+// of the run, and the drawing, not the program, keeps it, as it keeps the
+// height the Text tool offers.
 
 #include <cmath>
 #include <optional>
@@ -43,6 +49,7 @@ namespace {
 
 using katana::cad::annotation::AnchoredPoint;
 using katana::core::Result;
+using katana::entity::AnchorRef;
 using katana::entity::DimensionGeometry;
 using katana::entity::DimensionKind;
 using katana::entity::EntityId;
@@ -147,21 +154,21 @@ class AngularDimensionTool final : public InteractiveTool {
     {
         switch (step_) {
         case Step::Vertex:
-            vertex_ = at;
+            vertex_ = {at, pending_};
             step_ = Step::FirstPoint;
             return ToolStep::next();
         case Step::FirstPoint:
-            if (coincident(vertex_, at)) {
+            if (coincident(vertex_.point, at)) {
                 return ToolStep::rejected("that point is the vertex; an angle's arm needs a length");
             }
-            first_ = at;
+            first_ = {at, pending_};
             step_ = Step::SecondPoint;
             return ToolStep::next();
         case Step::SecondPoint:
-            if (coincident(vertex_, at)) {
+            if (coincident(vertex_.point, at)) {
                 return ToolStep::rejected("that point is the vertex; an angle's arm needs a length");
             }
-            second_ = at;
+            second_ = {at, pending_};
             byLines_ = false;
             step_ = Step::Location;
             return ToolStep::next();
@@ -172,6 +179,14 @@ class AngularDimensionTool final : public InteractiveTool {
             break;
         }
         return InteractiveTool::point(at);
+    }
+
+    ToolStep anchoredPoint(const Point2& at, const AnchorRef& anchor) override
+    {
+        pending_ = anchor;
+        ToolStep step = point(at);
+        pending_ = {};
+        return step;
     }
 
     ToolStep value(std::string_view text) override
@@ -225,16 +240,16 @@ class AngularDimensionTool final : public InteractiveTool {
         ToolFeedback feedback;
         switch (step_) {
         case Step::FirstPoint:
-            feedback.markers.push_back(vertex_);
-            if (!coincident(vertex_, cursor)) {
-                feedback.shapes.emplace_back(Segment2{vertex_, cursor});
+            feedback.markers.push_back(vertex_.point);
+            if (!coincident(vertex_.point, cursor)) {
+                feedback.shapes.emplace_back(Segment2{vertex_.point, cursor});
             }
             break;
         case Step::SecondPoint:
-            feedback.markers.push_back(vertex_);
-            feedback.shapes.emplace_back(Segment2{vertex_, first_});
-            if (!coincident(vertex_, cursor)) {
-                feedback.shapes.emplace_back(Segment2{vertex_, cursor});
+            feedback.markers.push_back(vertex_.point);
+            feedback.shapes.emplace_back(Segment2{vertex_.point, first_.point});
+            if (!coincident(vertex_.point, cursor)) {
+                feedback.shapes.emplace_back(Segment2{vertex_.point, cursor});
             }
             break;
         case Step::Location:
@@ -254,11 +269,11 @@ class AngularDimensionTool final : public InteractiveTool {
     {
         switch (step_) {
         case Step::FirstPoint:
-            return vertex_;
+            return vertex_.point;
         case Step::SecondPoint:
-            return first_;
+            return first_.point;
         case Step::Location:
-            return byLines_ ? std::nullopt : std::optional<Point2>(second_);
+            return byLines_ ? std::nullopt : std::optional<Point2>(second_.point);
         case Step::FirstLine:
         case Step::SecondLine:
         case Step::Vertex:
@@ -276,8 +291,7 @@ class AngularDimensionTool final : public InteractiveTool {
             return katana::cad::annotation::angularBetweenLines(document_->model(), firstLine_,
                                                                 secondLine_, at);
         }
-        return katana::cad::annotation::angularDimension(
-            AnchoredPoint{vertex_, {}}, AnchoredPoint{first_, {}}, AnchoredPoint{second_, {}}, at);
+        return katana::cad::annotation::angularDimension(vertex_, first_, second_, at);
     }
 
     const Document* document_ = nullptr;
@@ -286,9 +300,12 @@ class AngularDimensionTool final : public InteractiveTool {
     EntityId firstLine_ = 0;
     EntityId secondLine_ = 0;
     bool byLines_ = false;
-    Point2 vertex_;
-    Point2 first_;
-    Point2 second_;
+    // Each with the entity point it was snapped to, if any.
+    AnchoredPoint vertex_;
+    AnchoredPoint first_;
+    AnchoredPoint second_;
+    // Set only while anchoredPoint hands a snapped point to point().
+    AnchorRef pending_{};
 };
 
 // ---- Radius and diameter ---------------------------------------------------------------
@@ -378,14 +395,47 @@ class RadialDimensionTool final : public InteractiveTool {
 
 // ---- Ordinate --------------------------------------------------------------------------
 
+// The datum of the drawing's newest ordinate dimension, with the entity
+// point it follows; the drawing's origin when there is none.
+AnchoredPoint newestOrdinateDatum(const katana::entity::Model& model)
+{
+    AnchoredPoint datum{Point2(0.0, 0.0), {}};
+    model.entities.forEach([&](const katana::entity::Entity& entity) {
+        const auto* dimension = std::get_if<DimensionGeometry>(&entity.geometry);
+        if (dimension != nullptr && (dimension->kind == DimensionKind::OrdinateX ||
+                                     dimension->kind == DimensionKind::OrdinateY)) {
+            datum = {dimension->vertex, dimension->vertexRef};
+        }
+    });
+    return datum;
+}
+
+std::string pointText(const Point2& point)
+{
+    return formatNumber(point.x) + "," + formatNumber(point.y);
+}
+
 class OrdinateDimensionTool final : public InteractiveTool {
   public:
-    explicit OrdinateDimensionTool(const ToolContext& context) : attributes_(context.attributes) {}
+    explicit OrdinateDimensionTool(const ToolContext& context)
+        : attributes_(context.attributes),
+          datum_(context.document != nullptr ? newestOrdinateDatum(context.document->model())
+                                             : AnchoredPoint{Point2(0.0, 0.0), {}})
+    {
+    }
 
     [[nodiscard]] std::string prompt() const override
     {
+        if (askingDatum_) {
+            return "Specify the datum point <" + pointText(datum_.point) + ">";
+        }
         if (!feature_) {
-            return "Specify feature location";
+            // The datum is said while it is not the origin, since nothing on
+            // screen shows what the ordinates are measured from.
+            const bool origin = datum_.point == Point2(0.0, 0.0) && !datum_.ref.associated();
+            return origin ? "Specify feature location or [Datum]"
+                          : "Specify feature location or [Datum] (datum " +
+                                pointText(datum_.point) + ")";
         }
         if (axis_) {
             return std::string("Specify leader endpoint of the ") + (*axis_ ? "X" : "Y") +
@@ -398,17 +448,40 @@ class OrdinateDimensionTool final : public InteractiveTool {
 
     ToolStep point(const Point2& at) override
     {
+        if (askingDatum_) {
+            datum_ = {at, pending_};
+            askingDatum_ = false;
+            return ToolStep::next();
+        }
         if (!feature_) {
-            feature_ = at;
+            feature_ = AnchoredPoint{at, pending_};
             return ToolStep::next();
         }
         return finished(place(at), attributes_);
+    }
+
+    // A feature or a datum snapped to an entity's point follows it, as DIM
+    // ORDINATE #id.end ... datum=#id.centre does; the leader's end does not.
+    ToolStep anchoredPoint(const Point2& at, const AnchorRef& anchor) override
+    {
+        pending_ = anchor;
+        ToolStep step = point(at);
+        pending_ = {};
+        return step;
     }
 
     ToolStep value(std::string_view text) override
     {
         if (isOption(text, "Undo")) {
             return undo();
+        }
+        if (askingDatum_) {
+            return ToolStep::rejected("click the datum or type it as x,y, or press Enter to keep "
+                                      "it");
+        }
+        if (!feature_ && isOption(text, "Datum")) {
+            askingDatum_ = true;
+            return ToolStep::next();
         }
         if (feature_ && isOption(text, "Xdatum")) {
             axis_ = true;
@@ -418,13 +491,27 @@ class OrdinateDimensionTool final : public InteractiveTool {
             axis_ = false;
             return ToolStep::next();
         }
-        return ToolStep::rejected(!feature_ ? "click the feature or type it as x,y"
+        return ToolStep::rejected(!feature_ ? "click the feature or type it as x,y, or type D for "
+                                              "the datum"
                                             : "click the leader's end, or type X or Y to choose "
                                               "the ordinate");
     }
 
+    ToolStep enter() override
+    {
+        if (askingDatum_) {
+            askingDatum_ = false; // the datum shown is kept
+            return ToolStep::next();
+        }
+        return InteractiveTool::enter();
+    }
+
     ToolStep undo() override
     {
+        if (askingDatum_) {
+            askingDatum_ = false;
+            return ToolStep::next();
+        }
         if (axis_) {
             axis_.reset();
             return ToolStep::next();
@@ -439,8 +526,8 @@ class OrdinateDimensionTool final : public InteractiveTool {
     [[nodiscard]] ToolFeedback preview(const Point2& cursor) const override
     {
         ToolFeedback feedback;
-        if (feature_) {
-            feedback.markers.push_back(*feature_);
+        if (feature_ && !askingDatum_) {
+            feedback.markers.push_back(feature_->point);
             if (auto dimension = place(cursor)) {
                 feedback.shapes.emplace_back(*dimension);
             }
@@ -448,18 +535,24 @@ class OrdinateDimensionTool final : public InteractiveTool {
         return feedback;
     }
 
-    [[nodiscard]] std::optional<Point2> lastPoint() const override { return feature_; }
+    [[nodiscard]] std::optional<Point2> lastPoint() const override
+    {
+        return feature_ ? std::optional<Point2>(feature_->point) : std::nullopt;
+    }
 
   private:
     [[nodiscard]] Result<DimensionGeometry> place(const Point2& at) const
     {
-        return katana::cad::annotation::ordinateDimension(AnchoredPoint{Point2(0.0, 0.0), {}},
-                                                          AnchoredPoint{*feature_, {}}, at, axis_);
+        return katana::cad::annotation::ordinateDimension(datum_, *feature_, at, axis_);
     }
 
     katana::commands::EntityAttributes attributes_;
-    std::optional<Point2> feature_;
+    AnchoredPoint datum_;
+    bool askingDatum_ = false;
+    std::optional<AnchoredPoint> feature_;
     std::optional<bool> axis_; // true: X; empty: from the leader's direction
+    // Set only while anchoredPoint hands a snapped point to point().
+    AnchorRef pending_{};
 };
 
 } // namespace

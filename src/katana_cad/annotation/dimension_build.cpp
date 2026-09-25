@@ -2,7 +2,10 @@
 
 #include <cmath>
 #include <string>
+#include <variant>
 
+#include "katana/cad/dimension_draw.hpp"
+#include "katana/commands/change_set.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/math/numerics.hpp"
@@ -305,6 +308,51 @@ Result<std::vector<DimensionGeometry>> continuedDimensions(const DimensionGeomet
         previous = std::move(*made);
     }
     return chain;
+}
+
+double baselineSpacing(const katana::entity::Model& model, const katana::entity::Entity& base,
+                       double scale)
+{
+    const auto style = dimensionStyleAtScale(resolveDimensionStyle(model, base), scale);
+    return 1.5 * style.textHeight;
+}
+
+Result<katana::commands::CommandPtr> dimensionChain(const katana::entity::Model& model,
+                                                    katana::entity::EntityId base,
+                                                    const std::vector<AnchoredPoint>& points,
+                                                    DimensionChain kind,
+                                                    std::optional<double> spacing, double scale)
+{
+    const katana::entity::Entity* entity = model.entities.find(base);
+    const auto* dimension =
+        entity != nullptr ? std::get_if<DimensionGeometry>(&entity->geometry) : nullptr;
+    if (dimension == nullptr) {
+        return makeError(ErrorCode::InvalidArgument, "that entity is not a dimension",
+                         "id=" + std::to_string(base));
+    }
+    if (points.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "a chain needs at least one more point");
+    }
+    auto chain = kind == DimensionChain::Baseline
+                     ? baselineDimensions(*dimension, points,
+                                          spacing.value_or(baselineSpacing(model, *entity, scale)))
+                     : continuedDimensions(*dimension, points);
+    if (!chain) {
+        return chain.error();
+    }
+    katana::commands::ChangeSet changes;
+    for (auto& geometry : *chain) {
+        katana::entity::Entity made;
+        made.geometry = std::move(geometry);
+        made.layer = entity->layer;
+        made.style = entity->style;
+        made.color = entity->color;
+        changes.add.push_back(std::move(made));
+    }
+    return katana::commands::CommandPtr(std::make_unique<katana::commands::ChangeSetCommand>(
+        kind == DimensionChain::Baseline ? "DIM_BASELINE" : "DIM_CONTINUE",
+        [changes](const katana::commands::CommandContext&)
+            -> Result<katana::commands::ChangeSet> { return changes; }));
 }
 
 } // namespace katana::cad::annotation

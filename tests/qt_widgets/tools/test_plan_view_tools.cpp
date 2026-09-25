@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <QKeyEvent>
@@ -742,4 +743,33 @@ TEST(PlanViewTools, MatchPropertiesTakesTheSourceByAClickAndTheTargetsBySelectio
     EXPECT_FALSE(plan.view.toolActive());
     EXPECT_EQ(plan.document.model().entities.find(target)->layer, "ROAD");
     EXPECT_TRUE(plan.errors.empty()) << plan.errors.front().toStdString();
+}
+
+
+TEST(PlanViewTools, ADimensionSnappedToALinesEndsKeepsTheEndsItWasSnappedTo)
+{
+    // The view hands the tool the entity point its snap found, not only the
+    // point: pixel (202, 152) is model (0.2, -0.2), 0.28 from the line's
+    // start and inside the aperture, and (298, 148) is (9.8, 0.2), as near
+    // its end. The dimension line goes through (250, 100), model (5, 5).
+    PlanFixture plan;
+    const EntityId line = addLine(plan.document, Point2(0, 0), Point2(10, 0));
+    plan.view.setSnapEnabled(true);
+    plan.view.setSnapModes(static_cast<katana::cad::SnapModes>(katana::cad::SnapMode::Endpoint));
+    ASSERT_TRUE(plan.view.startTool("annotate.dimaligned").ok());
+    plan.press(202, 152);
+    plan.press(298, 148);
+    plan.view.setSnapEnabled(false);
+    plan.press(250, 100);
+
+    const auto made = plan.entities();
+    ASSERT_EQ(made.size(), 2u);
+    const auto* dimension = std::get_if<katana::entity::DimensionGeometry>(&made.back()->geometry);
+    ASSERT_NE(dimension, nullptr);
+    EXPECT_EQ(dimension->start, Point2(0, 0));
+    EXPECT_EQ(dimension->end, Point2(10, 0));
+    EXPECT_EQ(dimension->startRef,
+              (katana::entity::AnchorRef{line, katana::entity::AnchorPoint::Start, 0}));
+    EXPECT_EQ(dimension->endRef,
+              (katana::entity::AnchorRef{line, katana::entity::AnchorPoint::End, 0}));
 }

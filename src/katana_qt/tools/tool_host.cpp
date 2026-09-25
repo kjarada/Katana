@@ -73,9 +73,9 @@ std::optional<ToolHost::Point2> ToolHost::lastPoint() const
     return tool_ != nullptr ? tool_->lastPoint() : std::nullopt;
 }
 
-ToolHost::Outcome ToolHost::point(const Point2& at)
+ToolHost::Outcome ToolHost::point(const Point2& at, const std::optional<cad::SnapResult>& snap)
 {
-    return tool_ != nullptr ? apply(tool_->point(at)) : idle();
+    return tool_ != nullptr ? apply(cad::routeSnappedPoint(*tool_, document_, at, snap)) : idle();
 }
 
 ToolHost::Outcome ToolHost::entity(katana::entity::EntityId id, const Point2& at)
