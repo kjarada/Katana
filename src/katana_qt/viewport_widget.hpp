@@ -37,6 +37,7 @@
 #include "katana/interop/reference_data.hpp"
 
 #include "customisation/style_painter.hpp"
+#include "drawing/grip_controller.hpp"
 #include "plan_painter.hpp"
 #include "tools/tool_host.hpp"
 
@@ -133,6 +134,8 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] bool toolActive() const { return tools_.active(); }
     // The host itself, for a caller that wants its hooks or to drive it.
     [[nodiscard]] tools::ToolHost& toolHost() { return tools_; }
+    // The grips shown on the selection while no tool runs (docs/drawing.md).
+    [[nodiscard]] drawing::GripController& gripController() { return grips_; }
     // A whole line of typed input handed to the running tool, as the command
     // line hands it over when Enter is pressed there. False, and nothing
     // done, when no tool is running: the line is then the command line's.
@@ -332,6 +335,10 @@ class ViewportWidget final : public QWidget {
     // along the bottom of the view.
     void drawPrompt(QPainter& painter) const;
     void drawSnapMarker(QPainter& painter) const;
+    // The grips of the selection, and a grip being dragged, over the drawing.
+    void drawGrips(QPainter& painter) const;
+    // Whether grips take the input now: no tool running.
+    [[nodiscard]] bool gripsLive() const { return !tools_.active(); }
 
     katana::cad::Document& document_;
     katana::cad::ViewState& state_;
@@ -349,6 +356,9 @@ class ViewportWidget final : public QWidget {
     // The tool running in this view, if any. Declared after document_, which
     // it holds a reference to.
     tools::ToolHost tools_;
+    // The selection's grips; declared after document_, which it refers to.
+    drawing::GripController grips_;
+    QPointF gripPress_; // where a grip press began, to tell a drag from a click
     QString typed_;
     // What each change at the running tool's selection step replaced, for
     // Ctrl+Z there. A click or box there changes the DOCUMENT's selection,
@@ -364,6 +374,8 @@ class ViewportWidget final : public QWidget {
     mutable std::size_t lastPreviewCount_ = 0;
     Point2 cursorWorld_; // after snapping
     std::optional<katana::cad::SnapResult> activeSnap_;
+    // What constrained the cursor (Ortho, Polar 45°, a lock): its tooltip.
+    QString trackingLabel_;
 
     bool gridVisible_ = true;
     bool snapEnabled_ = true;
