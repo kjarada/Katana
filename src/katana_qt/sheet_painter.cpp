@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <functional>
+#include <limits>
 #include <set>
 #include <string_view>
 #include <utility>
@@ -19,6 +21,8 @@
 #include <QPolygonF>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plotting/section_annotation.hpp"
+#include "katana/cad/plotting/section_fit.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/render/camera.hpp"
@@ -508,28 +512,16 @@ double niceAtMost(double maximum)
     return magnitude;
 }
 
-// A round number at least `minimum`.
+// A round number at least `minimum`: 1, 2 or 5 times a power of ten.
 double niceAtLeast(double minimum)
 {
-    if (!(minimum > 0.0)) {
-        return 1.0;
-    }
-    const double magnitude = std::pow(10.0, std::floor(std::log10(minimum)));
-    for (const double multiple : {1.0, 2.0, 5.0, 10.0}) {
-        if (magnitude * multiple >= minimum * (1.0 - 1e-9)) {
-            return magnitude * multiple;
-        }
-    }
-    return magnitude * 10.0;
+    return plotting::roundStepAtLeast(minimum);
 }
 
+// `value` as a label on a grid of `step` (plotting::stepText).
 QString number(double value, double step)
 {
-    int decimals = 0;
-    if (step < 1.0) {
-        decimals = std::clamp(static_cast<int>(std::ceil(-std::log10(step) - 1e-9)), 1, 3);
-    }
-    return QString::number(value, 'f', decimals);
+    return QString::fromStdString(plotting::stepText(value, step));
 }
 
 QString metres(double length)
@@ -650,38 +642,126 @@ void paintMessage(TextSetter& text, const Box2& rect, const QString& message)
 }
 
 // ---- sections ----------------------------------------------------------------------
-
-// The level of `surface` at `station`, interpolated; nothing in a gap.
-std::optional<double> levelAt(const katana::cad::SectionSurface& surface, double station)
-{
-    const auto& samples = surface.samples;
-    const auto after = std::lower_bound(samples.begin(), samples.end(), station,
-                                        [](const katana::cad::SectionSample& s, double at) {
-                                            return s.station < at;
-                                        });
-    if (after == samples.end()) {
-        return std::nullopt;
-    }
-    if (after->station == station || after == samples.begin()) {
-        return after->station == station ? after->elevation : std::nullopt;
-    }
-    const auto before = std::prev(after);
-    if (!before->elevation || !after->elevation) {
-        return std::nullopt;
-    }
-    const double t = (station - before->station) / (after->station - before->station);
-    return *before->elevation + t * (*after->elevation - *before->elevation);
-}
-
-bool isDesign(const katana::cad::SectionSurface& surface)
-{
-    return std::string_view(surface.name).starts_with("design");
-}
+//
+// What a section decides with numbers - its automatic scale, its label steps,
+// its layout, cut and fill, crossing notes and where each label goes - is
+// decided in cad/plotting/section_fit.hpp and section_annotation.hpp; this
+// measures the text and draws.
 
 const std::array<QColor, 5> kGroundInks{QColor(125, 80, 40), QColor(0, 125, 50),
                                         QColor(0, 90, 200), QColor(150, 0, 150),
                                         QColor(210, 120, 0)};
 const QColor kDesignInk(210, 0, 0);
+// Cut and fill, shaded between the design and the ground: light red where the
+// ground stands above the design and is dug away, light green where the
+// design stands above the ground and is built up.
+const QColor kCutShade(250, 200, 200);
+const QColor kFillShade(200, 236, 200);
+
+// A long section with nothing to fit its levels to is drawn as long sections
+// usually are: H 1:500 V 1:50.
+constexpr double kLongSectionExaggeration = 10.0;
+// The room a section's viewport keeps at its foot for its title.
+constexpr double kSectionTitleMm = 7.0;
+
+QString qText(const std::string& text) { return QString::fromStdString(text); }
+
+// The pen of each series, in the order they were cut: the design red and
+// heavier, each ground a colour of its own.
+std::vector<QPen> seriesPens(const Paper& paper, const katana::cad::Section& section)
+{
+    std::vector<QPen> pens;
+    std::size_t ground = 0;
+    for (const katana::cad::SectionSurface& surface : section.surfaces) {
+        const bool design = plotting::isDesignSeries(surface.name);
+        pens.push_back(paperPen(paper, design ? kDesignInk : kGroundInks[ground % kGroundInks.size()],
+                                design ? 0.5 : 0.35));
+        ground += design ? 0 : 1;
+    }
+    return pens;
+}
+
+// A row of a long section's data band: a series' levels, the cut or fill
+// between the design and the ground, or - neither - the chainage.
+struct BandRow {
+    const katana::cad::SectionSurface* series = nullptr;
+    bool cutFill = false;
+};
+
+// The band's rows, top down: the design first - the level a long section is
+// read for - then the ground, two series at most; the cut or fill when there
+// are both; the chainage last.
+std::vector<BandRow> bandRows(const katana::cad::Section& section)
+{
+    std::vector<BandRow> rows;
+    for (const bool design : {true, false}) {
+        for (const katana::cad::SectionSurface& surface : section.surfaces) {
+            if (plotting::isDesignSeries(surface.name) == design) {
+                rows.push_back({&surface, false});
+            }
+        }
+    }
+    rows.resize(std::min<std::size_t>(rows.size(), 2));
+    if (plotting::designSeries(section) != nullptr && plotting::groundSeries(section) != nullptr) {
+        rows.push_back({nullptr, true});
+    }
+    rows.push_back({});
+    return rows;
+}
+
+// The level labels up a section's left side.
+TextStyle levelLabelStyle()
+{
+    TextStyle style;
+    style.capMm = 1.5;
+    style.xFactor = 0.9;
+    style.horizontal = HorizontalJustify::Right;
+    style.vertical = VerticalJustify::Middle;
+    return style;
+}
+
+// Where a section is drawn in its viewport: all of it but the title's corner.
+Box2 sectionArea(const Box2& rect)
+{
+    Box2 area = rect;
+    area.min.y += kSectionTitleMm;
+    return area;
+}
+
+// The chainages a cross-section viewport cuts at: its list, else every
+// interval over its range (64 at most).
+std::vector<double> crossSectionStations(const plotting::ViewportSource& from)
+{
+    std::vector<double> stations = from.stations;
+    if (stations.empty() && from.sectionInterval > 0.0 && from.chainageTo > from.chainageFrom) {
+        for (double at = from.chainageFrom; at <= from.chainageTo + 1e-9 && stations.size() < 64;
+             at += from.sectionInterval) {
+            stations.push_back(at);
+        }
+    }
+    return stations;
+}
+
+double crossSectionHalfWidth(const plotting::ViewportSource& from)
+{
+    return from.sectionHalfWidth > 0.0 ? from.sectionHalfWidth : 20.0;
+}
+
+// A line of text drawn in the box placeLabels gave it: `turned` stands it up
+// from the box's foot, reading upwards; otherwise it sits on the box's base.
+void drawInBox(TextSetter& text, const Box2& box, const QString& line, TextStyle style, bool turned)
+{
+    style.horizontal = HorizontalJustify::Left;
+    if (turned) {
+        style.angleDegrees = 90.0;
+        style.vertical = VerticalJustify::Middle;
+        text.draw(Point2(box.center().x, box.min.y), line, style);
+    } else {
+        style.angleDegrees = 0.0;
+        style.vertical = VerticalJustify::Bottom;
+        text.draw(box.min, line, style);
+    }
+}
 
 struct SectionAxes {
     double scale = 500.0;        // 1 : scale horizontally
@@ -689,117 +769,202 @@ struct SectionAxes {
     Point2 centre{};             // (axis value, elevation) at the plot's middle
     bool autoCentre = false;
     double shift = 0.0;          // axis value = station + shift
-    std::optional<std::pair<double, double>> range; // a long section's chainages
+    // A long section's chainages: exactly these are shown, ends labelled.
+    std::optional<std::pair<double, double>> range;
     bool cross = false;          // a cross section: the centreline at 0
     bool dataBand = false;       // a long section's levels under it
     const katana::cad::LayerOverrides* hidden = nullptr;
     QString caption;             // under a cross section: its chainage
+    // Gives the crossings their own levels (their entities' heights).
+    const katana::entity::Model* model = nullptr;
+    // A cross section's design level at its centreline from the alignment's
+    // profile: read there when no design series gives one.
+    std::optional<double> profileLevel;
 };
 
-void paintSection(QPainter& painter, const Paper& paper, TextSetter& text, const Box2& area,
-                  const katana::cad::Section& section, const SectionAxes& axes)
+// `levels` widened to take in `level` too.
+std::optional<std::pair<double, double>> widened(std::optional<std::pair<double, double>> levels,
+                                                 std::optional<double> level)
 {
-    // Room for the levels on the left, the axis values (and a long
-    // section's data band) below, and a caption under a cross section.
-    const std::size_t bandRows =
-        axes.dataBand ? std::min<std::size_t>(section.surfaces.size(), 2) + 1 : 0;
-    const double rowH = 8.0;
-    double bottom = axes.dataBand ? static_cast<double>(bandRows) * rowH : 4.0;
-    if (!axes.caption.isEmpty()) {
-        bottom += 4.5;
+    if (!level) {
+        return levels;
     }
-    const double left = axes.dataBand ? 22.0 : 11.0;
-    Box2 plot(Point2(area.min.x + left, area.min.y + bottom + 1.0),
-              Point2(area.max.x - 2.0, area.max.y - 2.0));
-    const bool banded = axes.dataBand && plot.height() >= 30.0;
-    if (axes.dataBand && !banded) {
-        plot.min.y = area.min.y + 5.0 + (axes.caption.isEmpty() ? 0.0 : 4.5);
+    if (!levels) {
+        return std::pair{*level, *level};
     }
-    if (!(plot.width() > 10.0) || !(plot.height() > 8.0)) {
-        return;
-    }
+    return std::pair{std::min(levels->first, *level), std::max(levels->second, *level)};
+}
+
+// Draws `section` in `area`; returns how many of its notes it had no room
+// for (SheetPaintStats::sectionNotesDropped).
+std::size_t paintSection(QPainter& painter, const Paper& paper, TextSetter& text, const Box2& area,
+                         const katana::cad::Section& section, const SectionAxes& axes)
+{
+    constexpr double kInfinity = std::numeric_limits<double>::infinity();
+    const katana::cad::SectionSurface* design = plotting::designSeries(section);
+    const katana::cad::SectionSurface* ground = plotting::groundSeries(section);
+    const std::vector<BandRow> rows = axes.dataBand ? bandRows(section) : std::vector<BandRow>{};
+    // The stations shown: a long section's range and nothing past it, else
+    // all of it.
+    const double fromStation = axes.range ? axes.range->first - axes.shift : -kInfinity;
+    const double toStation = axes.range ? axes.range->second - axes.shift : kInfinity;
+    const auto levels = widened(
+        plotting::levelRange(section, fromStation, toStation, axes.model, axes.hidden),
+        axes.profileLevel);
 
     const double hMm = 1000.0 / axes.scale;
     const double vMm = hMm * axes.exaggeration;
     Point2 centre = axes.centre;
     if (axes.autoCentre) {
-        const Box2 extent = section.extent();
-        if (!extent.empty()) {
-            centre.y = extent.center().y;
-            centre.x = axes.cross ? 0.0 : extent.center().x + axes.shift;
+        if (levels) {
+            centre.y = 0.5 * (levels->first + levels->second);
         }
-        if (axes.range && axes.range->second > axes.range->first) {
+        if (axes.range) {
             centre.x = 0.5 * (axes.range->first + axes.range->second);
+        } else if (axes.cross) {
+            centre.x = 0.0;
+        } else if (const Box2 extent = section.extent(); !extent.empty()) {
+            centre.x = extent.center().x + axes.shift;
         }
     }
-    const auto X = [&](double value) { return plot.center().x + (value - centre.x) * hMm; };
-    const auto Y = [&](double level) { return plot.center().y + (level - centre.y) * vMm; };
-    const double firstValue = centre.x - 0.5 * plot.width() / hMm;
-    const double lastValue = centre.x + 0.5 * plot.width() / hMm;
-    const double lowLevel = centre.y - 0.5 * plot.height() / vMm;
-    const double highLevel = centre.y + 0.5 * plot.height() / vMm;
-    const double hStep = niceAtLeast(12.0 / hMm);
-    const double vStep = niceAtLeast(7.0 / vMm);
 
-    // Grid.
+    // The plot, laid out around the widest level label: the levels' step
+    // depends only on the plot's height, so it is known before the width is.
+    const TextStyle levelStyle = levelLabelStyle();
+    plotting::SectionLayoutRequest request;
+    request.area = area;
+    request.bandRows = rows.size();
+    request.caption = !axes.caption.isEmpty();
+    plotting::SectionLayout layout = plotting::sectionPlotLayout(request);
+    if (layout.plot.empty()) {
+        return 0;
+    }
+    const double midY = layout.plot.center().y;
+    const double lowLevel = centre.y - 0.5 * layout.plot.height() / vMm;
+    const double highLevel = centre.y + 0.5 * layout.plot.height() / vMm;
+    // Level labels are stacked up the side, so their height sets their step.
+    const double vStep = niceAtLeast(std::max(7.0, levelStyle.capMm + 1.0) / vMm);
+    const std::vector<double> levelValues = plotting::gridValues(lowLevel, highLevel, vStep, 200);
+    request.levelLabelMm = 0.0;
+    for (const double level : levelValues) {
+        request.levelLabelMm = std::max(
+            request.levelLabelMm, text.widthMm(number(level, vStep), levelStyle));
+    }
+    layout = plotting::sectionPlotLayout(request);
+    if (layout.plot.empty()) {
+        return 0;
+    }
+    Box2 plot = layout.plot;
+    const bool banded = layout.banded;
+    const double midX = plot.center().x;
+    const auto X = [&](double value) { return midX + (value - centre.x) * hMm; };
+    const auto Y = [&](double level) { return midY + (level - centre.y) * vMm; };
+    // A chainage range is shown exactly: the plot ends where it does.
+    if (axes.range) {
+        plot.min.x = std::max(plot.min.x, X(axes.range->first));
+        plot.max.x = std::min(plot.max.x, X(axes.range->second));
+        if (!(plot.width() > 1.0)) {
+            return 0; // the range is off the plot
+        }
+    }
+    const double firstValue = centre.x + (plot.min.x - midX) / hMm;
+    const double lastValue = centre.x + (plot.max.x - midX) / hMm;
+
+    TextStyle small;
+    small.capMm = 1.4;
+    small.xFactor = 0.9;
+    TextStyle values = small;
+    values.capMm = 1.5;
+    TextStyle cell = small; // a band value, turned across its row
+
+    // The step along: a band's values are turned across it, so they need
+    // only their height; the axis values need their width.
+    const double hStep =
+        banded ? plotting::labelStep(hMm, 10.0, 1.0, [&](double) { return cell.capMm; })
+               : plotting::labelStep(hMm, 10.0, 2.0, [&](double step) {
+                     double widest = 0.0;
+                     for (const double v : plotting::gridValues(firstValue, lastValue, step, 200)) {
+                         widest = std::max(widest,
+                                           text.widthMm(number(v, step), values));
+                     }
+                     return widest;
+                 });
+    const std::vector<double> alongValues = plotting::gridValues(firstValue, lastValue, hStep, 400);
+    const std::vector<QPen> pens = seriesPens(paper, section);
+
+    // ---- under the plot's clip: shading, grid, lines ----
     const QRectF plotDevice = paper.at(plot);
     painter.save();
     painter.setClipRect(plotDevice, Qt::IntersectClip);
+
+    // Cut and fill, under everything else.
+    if (design != nullptr && ground != nullptr) {
+        painter.setPen(Qt::NoPen);
+        for (const plotting::EarthworkRegion& region :
+             plotting::earthworkRegions(*design, *ground, fromStation, toStation)) {
+            QPolygonF polygon;
+            for (const Point2& p : region.outline) {
+                polygon << paper.at(Point2(X(p.x + axes.shift), Y(p.y)));
+            }
+            painter.setBrush(region.kind == plotting::Earthwork::Cut ? kCutShade : kFillShade);
+            painter.drawPolygon(polygon);
+        }
+        painter.setBrush(Qt::NoBrush);
+    }
+
     painter.setPen(paperPen(paper, kGridInk, 0.13));
-    int drawn = 0;
-    for (double v = std::ceil(firstValue / hStep) * hStep; v <= lastValue && drawn < 400;
-         v += hStep, ++drawn) {
+    for (const double v : alongValues) {
         painter.drawLine(paper.at(Point2(X(v), plot.min.y)), paper.at(Point2(X(v), plot.max.y)));
     }
-    drawn = 0;
-    for (double e = std::ceil(lowLevel / vStep) * vStep; e <= highLevel && drawn < 400;
-         e += vStep, ++drawn) {
+    for (const double e : levelValues) {
         painter.drawLine(paper.at(Point2(plot.min.x, Y(e))), paper.at(Point2(plot.max.x, Y(e))));
     }
 
     // The centreline of a cross section.
-    if (axes.cross && X(0.0) > plot.min.x && X(0.0) < plot.max.x) {
+    const bool centreline = axes.cross && X(0.0) > plot.min.x && X(0.0) < plot.max.x;
+    if (centreline) {
         painter.setPen(dashedPen(paper, kInk, 0.25, {6.0, 1.2, 0.6, 1.2}));
         painter.drawLine(paper.at(Point2(X(0.0), plot.min.y)), paper.at(Point2(X(0.0), plot.max.y)));
     }
 
-    // Crossings: where the drawing's lines cut the section, at their level
-    // when they carry one.
-    TextStyle small;
-    small.capMm = 1.4;
-    small.xFactor = 0.9;
+    // Crossings: where the drawing's lines cut the section, marked at their
+    // level when they have one; their notes are placed below with the rest.
+    struct Crossing {
+        double x = 0.0;
+        std::optional<double> y; // the marker, when it is inside the plot
+        double along = 0.0;      // chainage or offset
+        plotting::CrossingNote note;
+    };
+    std::vector<Crossing> crossings;
     for (const katana::cad::SectionCrossing& crossing : section.crossings) {
         if (axes.hidden != nullptr && axes.hidden->hides(crossing.layer)) {
             continue;
         }
-        const double x = X(crossing.station + axes.shift);
-        if (x <= plot.min.x || x >= plot.max.x) {
+        Crossing at;
+        at.along = crossing.station + axes.shift;
+        at.x = X(at.along);
+        if (at.x <= plot.min.x || at.x >= plot.max.x) {
             continue;
         }
+        at.note = plotting::crossingNote(section, crossing, axes.model);
         painter.setPen(dashedPen(paper, kFaint, 0.18, {1.5, 1.0}));
-        painter.drawLine(paper.at(Point2(x, plot.min.y)), paper.at(Point2(x, plot.max.y)));
-        if (crossing.elevation) {
+        painter.drawLine(paper.at(Point2(at.x, plot.min.y)), paper.at(Point2(at.x, plot.max.y)));
+        if (at.note.level) {
+            const double y = Y(*at.note.level);
             painter.setPen(paperPen(paper, kInk, 0.25));
             painter.setBrush(Qt::white);
-            painter.drawEllipse(paper.at(Point2(x, Y(*crossing.elevation))), paper.mm(0.8),
-                                paper.mm(0.8));
+            painter.drawEllipse(paper.at(Point2(at.x, y)), paper.mm(0.8), paper.mm(0.8));
             painter.setBrush(Qt::NoBrush);
+            if (y > plot.min.y && y < plot.max.y) {
+                at.y = y;
+            }
         }
-        TextStyle label = small;
-        label.angleDegrees = 90.0;
-        label.horizontal = HorizontalJustify::Right;
-        text.draw(Point2(x - 0.4, plot.max.y - 1.0), QString::fromStdString(crossing.layer), label);
+        crossings.push_back(std::move(at));
     }
 
     // Surfaces, broken at every gap.
-    std::size_t ground = 0;
-    for (const katana::cad::SectionSurface& surface : section.surfaces) {
-        const bool design = isDesign(surface);
-        painter.setPen(paperPen(paper, design ? kDesignInk : kGroundInks[ground % kGroundInks.size()],
-                                design ? 0.5 : 0.35));
-        if (!design) {
-            ++ground;
-        }
+    for (std::size_t s = 0; s < section.surfaces.size(); ++s) {
+        painter.setPen(pens[s]);
         QPolygonF run;
         const auto flush = [&] {
             if (run.size() > 1) {
@@ -807,7 +972,7 @@ void paintSection(QPainter& painter, const Paper& paper, TextSetter& text, const
             }
             run.clear();
         };
-        for (const katana::cad::SectionSample& sample : surface.samples) {
+        for (const katana::cad::SectionSample& sample : section.surfaces[s].samples) {
             if (!sample.elevation) {
                 flush();
                 continue;
@@ -818,132 +983,374 @@ void paintSection(QPainter& painter, const Paper& paper, TextSetter& text, const
     }
     painter.restore();
 
-    // Frame and labels.
+    // The plot's frame; a range's ends heavier, as where the section stops.
     painter.setPen(paperPen(paper, kInk, 0.25));
     painter.drawRect(plotDevice);
-    TextStyle levels = small;
-    levels.capMm = 1.5;
-    levels.horizontal = HorizontalJustify::Right;
-    levels.vertical = VerticalJustify::Middle;
-    drawn = 0;
-    for (double e = std::ceil(lowLevel / vStep) * vStep; e <= highLevel && drawn < 200;
-         e += vStep, ++drawn) {
-        text.draw(Point2(plot.min.x - 0.8, Y(e)), number(e, vStep), levels);
+    std::vector<std::pair<double, double>> ends; // (axis value, paper x) of the range ends in view
+    if (axes.range) {
+        painter.setPen(paperPen(paper, kInk, 0.35));
+        for (const double end : {axes.range->first, axes.range->second}) {
+            const double x = X(end);
+            if (x >= plot.min.x - 1e-6 && x <= plot.max.x + 1e-6) {
+                painter.drawLine(paper.at(Point2(x, plot.min.y)), paper.at(Point2(x, plot.max.y)));
+                ends.emplace_back(end, x);
+            }
+        }
     }
-    // The datum inside the plot's foot: the left band is only as wide as a level.
+
+    // ---- labels inside the plot -------------------------------------------------------
+    // The datum and the surface key, the centreline's levels, and each
+    // crossing's note and offset: placed so that none covers another, the
+    // nearest the middle kept first.
+    std::vector<plotting::LabelCandidate> inside;
+    std::vector<std::function<void(std::size_t)>> drawInside;
+    std::vector<std::size_t> notes; // which of them are notes, counted when dropped
+    // A note is never written over another crossing's line or the
+    // centreline, where it would seem to name that one: such places are not
+    // offered. Its own line is the one at `own`.
+    std::vector<double> linesAt;
+    for (const Crossing& at : crossings) {
+        linesAt.push_back(at.x);
+    }
+    if (centreline) {
+        linesAt.push_back(X(0.0));
+    }
+    const auto onAnotherLine = [&linesAt](const Box2& place, double own) {
+        constexpr double clear = 0.25;
+        return std::any_of(linesAt.begin(), linesAt.end(), [&](double x) {
+            return x != own && place.min.x < x + clear && place.max.x > x - clear;
+        });
+    };
+
     TextStyle datum = small;
     datum.capMm = 1.5;
     const QString datumText = QString("DATUM RL %1").arg(lowLevel, 0, 'f', 2);
-    const Point2 datumAt(plot.min.x + 1.0, plot.min.y + 1.0);
-    knockOut(painter, paper, Box2(Point2(datumAt.x - 0.4, datumAt.y - 0.5),
-                                  Point2(datumAt.x + text.widthMm(datumText, datum) + 0.4,
-                                         datumAt.y + 2.0)));
-    text.draw(datumAt, datumText, datum);
-
-    // Surface key, top left inside the plot.
     {
+        const double w = text.widthMm(datumText, datum);
+        const Box2 box(Point2(plot.min.x + 1.0, plot.min.y + 1.0),
+                       Point2(plot.min.x + 1.0 + w, plot.min.y + 1.0 + datum.capMm));
+        inside.push_back({{box}, -3.0});
+        drawInside.emplace_back([&, box, datumText](std::size_t) {
+            knockOut(painter, paper, box.inflated(0.4));
+            drawInBox(text, box, datumText, datum, false);
+        });
+    }
+
+    // The surface key, top left.
+    if (!section.surfaces.empty()) {
         TextStyle key = small;
         key.capMm = 1.5;
-        key.vertical = VerticalJustify::Middle;
-        double y = plot.max.y - 2.5;
         double widest = 0.0;
         for (const auto& surface : section.surfaces) {
-            widest = std::max(widest, text.widthMm(QString::fromStdString(surface.name), key));
+            widest = std::max(widest, text.widthMm(qText(surface.name), key));
         }
-        if (!section.surfaces.empty()) {
-            knockOut(painter, paper,
-                     Box2(Point2(plot.min.x + 0.6, y - 3.2 * (section.surfaces.size() - 1) - 1.8),
-                          Point2(plot.min.x + 9.5 + widest, plot.max.y - 0.6)));
-        }
-        ground = 0;
-        for (const auto& surface : section.surfaces) {
-            const bool design = isDesign(surface);
-            painter.setPen(paperPen(paper, design ? kDesignInk
-                                                  : kGroundInks[ground % kGroundInks.size()],
-                                    design ? 0.5 : 0.35));
-            if (!design) {
-                ++ground;
+        const double pitch = 3.2;
+        const double count = static_cast<double>(section.surfaces.size());
+        const Box2 box(Point2(plot.min.x + 0.6, plot.max.y - 2.5 - pitch * (count - 1.0) - 1.8),
+                       Point2(plot.min.x + 9.5 + widest, plot.max.y - 0.6));
+        inside.push_back({{box}, -2.0});
+        drawInside.emplace_back([&, box, key, pitch](std::size_t) {
+            knockOut(painter, paper, box);
+            TextStyle line = key;
+            line.vertical = VerticalJustify::Middle;
+            double y = plot.max.y - 2.5;
+            for (std::size_t s = 0; s < section.surfaces.size(); ++s) {
+                painter.setPen(pens[s]);
+                painter.drawLine(paper.at(Point2(plot.min.x + 1.5, y)),
+                                 paper.at(Point2(plot.min.x + 7.0, y)));
+                text.draw(Point2(plot.min.x + 8.0, y), qText(section.surfaces[s].name), line);
+                y -= pitch;
             }
-            painter.drawLine(paper.at(Point2(plot.min.x + 1.5, y)),
-                             paper.at(Point2(plot.min.x + 7.0, y)));
-            text.draw(Point2(plot.min.x + 8.0, y), QString::fromStdString(surface.name), key);
-            y -= 3.2;
-        }
+        });
     }
 
-    // Axis values, or the data band: each series' level at every grid line,
-    // and the chainage.
-    TextStyle values = small;
-    values.capMm = 1.5;
-    values.horizontal = HorizontalJustify::Centre;
-    values.vertical = VerticalJustify::Top;
-    if (!banded) {
-        drawn = 0;
-        for (double v = std::ceil(firstValue / hStep) * hStep; v <= lastValue && drawn < 200;
-             v += hStep, ++drawn) {
-            text.draw(Point2(X(v), plot.min.y - 0.8), number(v, hStep), values);
+    // A cross section's design and ground levels at the centreline, and the
+    // cut or fill between them. The design is the design series', else the
+    // alignment's profile's.
+    if (centreline) {
+        const double station = -axes.shift;
+        std::optional<double> designLevel =
+            design != nullptr ? plotting::levelAt(*design, station) : std::nullopt;
+        const bool designSeriesLevel = designLevel.has_value();
+        if (!designLevel) {
+            designLevel = axes.profileLevel;
         }
-    } else {
-        // Design first: the level a long section is read for.
-        std::vector<const katana::cad::SectionSurface*> rows;
-        for (const auto& surface : section.surfaces) {
-            if (isDesign(surface)) {
-                rows.push_back(&surface);
-            }
+        const auto groundLevel = ground != nullptr ? plotting::levelAt(*ground, station) : std::nullopt;
+        const auto seriesPen = [&](const katana::cad::SectionSurface* series) {
+            return pens[static_cast<std::size_t>(series - section.surfaces.data())];
+        };
+        QStringList lines;
+        if (designLevel) {
+            const QString name =
+                designSeriesLevel ? qText(design->name).toUpper() : QStringLiteral("DESIGN");
+            lines << QString("%1 RL %2").arg(name).arg(*designLevel, 0, 'f', 3);
         }
-        for (const auto& surface : section.surfaces) {
-            if (!isDesign(surface)) {
-                rows.push_back(&surface);
-            }
+        if (groundLevel) {
+            lines << QString("%1 RL %2").arg(qText(ground->name).toUpper()).arg(*groundLevel, 0, 'f', 3);
         }
-        rows.resize(std::min<std::size_t>(rows.size(), 2));
-        const double bandTop = plot.min.y - 1.0;
-        const double bandLeft = area.min.x + 0.5;
-        painter.setPen(paperPen(paper, kInk, 0.18));
-        TextStyle head = small;
-        head.capMm = 1.5;
-        head.vertical = VerticalJustify::Middle;
-        TextStyle cell = small;
-        cell.capMm = 1.4;
-        cell.angleDegrees = 90.0;
-        cell.vertical = VerticalJustify::Middle;
-        cell.horizontal = HorizontalJustify::Centre;
-        for (std::size_t r = 0; r <= rows.size(); ++r) {
-            const double top = bandTop - static_cast<double>(r) * rowH;
-            const Box2 row(Point2(bandLeft, top - rowH), Point2(plot.max.x, top));
-            painter.setPen(paperPen(paper, kInk, 0.18));
-            painter.drawRect(paper.at(row));
-            painter.drawLine(paper.at(Point2(plot.min.x, top)), paper.at(Point2(plot.min.x, top - rowH)));
-            const bool chainage = r == rows.size();
-            QString name = chainage ? QStringLiteral("CHAINAGE")
-                                    : QString::fromStdString(rows[r]->name).toUpper();
-            const double room = plot.min.x - bandLeft - 1.0;
-            double squeeze = 1.0;
-            if (const double w = text.widthMm(name, head); w > room) {
-                squeeze = room / w;
-            }
-            text.draw(Point2(bandLeft + 0.6, top - rowH / 2.0), name, head, squeeze);
-            drawn = 0;
-            for (double v = std::ceil(firstValue / hStep) * hStep; v <= lastValue && drawn < 200;
-                 v += hStep, ++drawn) {
-                QString value;
-                if (chainage) {
-                    value = number(v, hStep);
-                } else if (auto level = levelAt(*rows[r], v - axes.shift)) {
-                    value = QString::number(*level, 'f', 3);
+        if (designLevel && groundLevel && std::abs(*designLevel - *groundLevel) >= 0.0005) {
+            const double fill = *designLevel - *groundLevel;
+            lines << QString("%1 %2").arg(fill > 0.0 ? "FILL" : "CUT").arg(std::abs(fill), 0, 'f', 3);
+        }
+        if (!lines.isEmpty()) {
+            // A tick across the centreline at each level read, in its series' pen.
+            const double x0 = X(0.0);
+            const auto tick = [&](const QPen& pen, std::optional<double> level) {
+                if (!level || !(Y(*level) > plot.min.y) || !(Y(*level) < plot.max.y)) {
+                    return;
                 }
-                text.draw(Point2(X(v), top - rowH / 2.0), value, cell);
+                painter.setPen(pen);
+                painter.drawLine(paper.at(Point2(x0 - 1.0, Y(*level))),
+                                 paper.at(Point2(x0 + 1.0, Y(*level))));
+            };
+            if (designLevel) {
+                tick(designSeriesLevel ? seriesPen(design) : paperPen(paper, kDesignInk, 0.5),
+                     designLevel);
             }
+            if (ground != nullptr) {
+                tick(seriesPen(ground), groundLevel);
+            }
+            TextStyle note = small;
+            note.lineSpacingMm = 2.3;
+            double w = 0.0;
+            for (const QString& line : lines) {
+                w = std::max(w, text.widthMm(line, note));
+            }
+            const double h = note.lineSpacingMm * static_cast<double>(lines.size() - 1) + note.capMm;
+            // Beside the centreline just above the higher level, else at the
+            // plot's top, else at its foot; right of it first.
+            double above = plot.min.y + 1.0;
+            for (const auto& level : {designLevel, groundLevel}) {
+                if (level) {
+                    above = std::max(above, Y(*level) + 1.2);
+                }
+            }
+            std::vector<Box2> boxes;
+            for (const double base : {above, plot.max.y - 1.0 - h, plot.min.y + 1.0}) {
+                boxes.emplace_back(Point2(x0 + 0.8, base), Point2(x0 + 0.8 + w, base + h));
+                boxes.emplace_back(Point2(x0 - 0.8 - w, base), Point2(x0 - 0.8, base + h));
+            }
+            std::erase_if(boxes, [&](const Box2& place) { return onAnotherLine(place, x0); });
+            notes.push_back(inside.size());
+            inside.push_back({boxes, -1.0});
+            drawInside.emplace_back([&, boxes, lines, note](std::size_t k) {
+                const Box2& box = boxes[k];
+                knockOut(painter, paper, box.inflated(0.3));
+                TextStyle first = note;
+                first.vertical = VerticalJustify::Top;
+                text.draw(Point2(box.min.x, box.max.y), lines.join(QLatin1Char('\n')), first);
+            });
         }
     }
 
+    // Each crossing: its note stood up beside its line, above or below its
+    // marker (or from the plot's top or foot without one), in full or as its
+    // layer alone; its chainage or offset under the marker.
+    const double middle = axes.cross ? X(0.0) : plot.center().x;
+    TextStyle offsetStyle = small;
+    offsetStyle.capMm = 1.3;
+    for (const Crossing& at : crossings) {
+        const double priority = std::abs(at.x - middle);
+        const double cap = small.capMm;
+        std::vector<Box2> boxes;
+        std::vector<QString> texts;
+        QStringList forms{qText(at.note.text)};
+        if (at.note.shortText != at.note.text) {
+            forms << qText(at.note.shortText);
+        }
+        for (const QString& form : forms) {
+            const double w = text.widthMm(form, small);
+            for (const bool high : {true, false}) {
+                for (const double side : {-1.0, 1.0}) {
+                    const double x0 = side < 0.0 ? at.x - 0.4 - cap : at.x + 0.4;
+                    double foot = 0.0;
+                    if (at.y) {
+                        foot = high ? *at.y + 1.2 : *at.y - 1.2 - w;
+                    } else {
+                        foot = high ? plot.max.y - 1.0 - w : plot.min.y + 1.0;
+                    }
+                    const Box2 place(Point2(x0, foot), Point2(x0 + cap, foot + w));
+                    if (!onAnotherLine(place, at.x)) {
+                        boxes.push_back(place);
+                        texts.push_back(form);
+                    }
+                }
+            }
+        }
+        notes.push_back(inside.size());
+        inside.push_back({boxes, priority});
+        drawInside.emplace_back([&, boxes, texts](std::size_t k) {
+            // Masked, so the note reads where it crosses a series or a shade.
+            knockOut(painter, paper, boxes[k].inflated(0.15));
+            drawInBox(text, boxes[k], texts[k], small, true);
+        });
+        if (at.y) {
+            const double along = std::abs(at.along) < 0.005 ? 0.0 : at.along;
+            const QString offset = axes.cross ? QString::number(along, 'f', 2)
+                                              : QString("CH %1").arg(along, 0, 'f', 3);
+            const double w = text.widthMm(offset, offsetStyle);
+            const std::vector<Box2> places{
+                Box2(Point2(at.x - w / 2.0, *at.y - 1.2 - offsetStyle.capMm),
+                     Point2(at.x + w / 2.0, *at.y - 1.2)),
+                Box2(Point2(at.x - w / 2.0, *at.y + 1.2),
+                     Point2(at.x + w / 2.0, *at.y + 1.2 + offsetStyle.capMm))};
+            inside.push_back({places, priority + 1e-6});
+            drawInside.emplace_back([&, places, offset](std::size_t k) {
+                knockOut(painter, paper, places[k].inflated(0.2));
+                drawInBox(text, places[k], offset, offsetStyle, false);
+            });
+        }
+    }
+    const auto placedInside = plotting::placeLabels(inside, plot.inflated(-0.3));
+    for (std::size_t i = 0; i < inside.size(); ++i) {
+        if (placedInside[i]) {
+            drawInside[i](*placedInside[i]);
+        }
+    }
+    const auto dropped = static_cast<std::size_t>(
+        std::count_if(notes.begin(), notes.end(), [&](std::size_t i) { return !placedInside[i]; }));
+
+    // ---- labels outside the plot --------------------------------------------------------
+    // Levels up the left, and under the plot the axis values - or the data
+    // band - and a cross section's caption; none outside the viewport.
+    std::vector<plotting::LabelCandidate> outside;
+    std::vector<std::function<void(std::size_t)>> drawOutside;
+    std::vector<Box2> fixed;
+    for (const double e : levelValues) {
+        const QString label = number(e, vStep);
+        const double w = text.widthMm(label, levelStyle);
+        const Box2 box(Point2(plot.min.x - 0.8 - w, Y(e) - levelStyle.capMm / 2.0),
+                       Point2(plot.min.x - 0.8, Y(e) + levelStyle.capMm / 2.0));
+        outside.push_back({{box}, -1.0});
+        drawOutside.emplace_back([&, box, label](std::size_t) {
+            drawInBox(text, box, label, levelStyle, false);
+        });
+    }
     if (!axes.caption.isEmpty()) {
         TextStyle caption;
         caption.capMm = 2.0;
         caption.bold = true;
         caption.horizontal = HorizontalJustify::Centre;
-        text.draw(Point2(plot.center().x, area.min.y + 1.2), axes.caption, caption);
+        const double room = area.width() - 2.0;
+        double squeeze = 1.0;
+        if (const double w = text.widthMm(axes.caption, caption); w > room && room > 0.0) {
+            squeeze = room / w;
+        }
+        const double w = text.widthMm(axes.caption, caption) * squeeze;
+        const double x = std::clamp(plot.center().x, area.min.x + 1.0 + w / 2.0, area.max.x - 1.0 - w / 2.0);
+        text.draw(Point2(x, area.min.y + 1.2), axes.caption, caption, squeeze);
+        fixed.emplace_back(Point2(x - w / 2.0, area.min.y + 1.2), Point2(x + w / 2.0, area.min.y + 3.2));
     }
+
+    if (!banded) {
+        // Axis values; a range's ends in full, reading inwards from them.
+        const auto axisLabel = [&](const QString& label, double x, int align, double priority) {
+            const double w = text.widthMm(label, values);
+            const double left = align < 0 ? x : (align > 0 ? x - w : x - w / 2.0);
+            const Box2 box(Point2(left, plot.min.y - 0.8 - values.capMm), Point2(left + w, plot.min.y - 0.8));
+            outside.push_back({{box}, priority});
+            drawOutside.emplace_back([&, box, label](std::size_t) {
+                drawInBox(text, box, label, values, false);
+            });
+        };
+        for (const auto& [value, x] : ends) {
+            axisLabel(QString::number(value, 'f', 3), x, value == axes.range->first ? -1 : 1, -2.0);
+        }
+        for (const double v : alongValues) {
+            axisLabel(number(v, hStep), X(v), 0, 0.0);
+        }
+    }
+    const auto placedOutside = plotting::placeLabels(outside, area, fixed, 0.3);
+    for (std::size_t i = 0; i < outside.size(); ++i) {
+        if (placedOutside[i]) {
+            drawOutside[i](*placedOutside[i]);
+        }
+    }
+
+    if (!banded) {
+        return dropped;
+    }
+
+    // ---- the data band: each row's value at every column that has room -----------------
+    const double rowH = plotting::kSectionBandRowMm;
+    const double bandTop = plot.min.y - 1.0;
+    const double bandBottom = bandTop - rowH * static_cast<double>(rows.size());
+    const double bandLeft = plot.min.x - layout.leftMm + 0.5;
+    TextStyle head = small;
+    head.capMm = 1.5;
+    head.vertical = VerticalJustify::Middle;
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        const double top = bandTop - static_cast<double>(r) * rowH;
+        painter.setPen(paperPen(paper, kInk, 0.18));
+        painter.drawRect(paper.at(Box2(Point2(bandLeft, top - rowH), Point2(plot.max.x, top))));
+        painter.drawLine(paper.at(Point2(plot.min.x, top)), paper.at(Point2(plot.min.x, top - rowH)));
+        const QString name = rows[r].cutFill        ? QStringLiteral("CUT/FILL")
+                             : rows[r].series == nullptr ? QStringLiteral("CHAINAGE")
+                                                         : qText(rows[r].series->name).toUpper();
+        const double room = plot.min.x - bandLeft - 1.0;
+        double squeeze = 1.0;
+        if (const double w = text.widthMm(name, head); w > room && room > 0.0) {
+            squeeze = room / w;
+        }
+        text.draw(Point2(bandLeft + 0.6, top - rowH / 2.0), name, head, squeeze);
+    }
+    // The columns: a range's ends first, written in full just inside them,
+    // then the grid's; a column too near one already placed is left out.
+    struct Column {
+        double value = 0.0;
+        QString chainage;
+    };
+    std::vector<Column> columns;
+    std::vector<plotting::LabelCandidate> places;
+    const double half = cell.capMm / 2.0 + 0.1;
+    for (std::size_t i = 0; i < ends.size(); ++i) {
+        const bool start = axes.range && ends[i].first == axes.range->first;
+        const double x = ends[i].second;
+        const double left = start ? x + 0.4 : x - 0.4 - 2.0 * half;
+        columns.push_back({ends[i].first, QString::number(ends[i].first, 'f', 3)});
+        places.push_back({{Box2(Point2(left, bandBottom), Point2(left + 2.0 * half, bandTop))}, -1.0});
+    }
+    for (const double v : alongValues) {
+        columns.push_back({v, number(v, hStep)});
+        places.push_back({{Box2(Point2(X(v) - half, bandBottom), Point2(X(v) + half, bandTop))}, 0.0});
+    }
+    const auto placedColumns = plotting::placeLabels(
+        places, Box2(Point2(plot.min.x, bandBottom), Point2(plot.max.x, bandTop)), {}, 0.6);
+    TextStyle turned = cell;
+    turned.angleDegrees = 90.0;
+    turned.vertical = VerticalJustify::Middle;
+    turned.horizontal = HorizontalJustify::Centre;
+    for (std::size_t c = 0; c < columns.size(); ++c) {
+        if (!placedColumns[c]) {
+            continue;
+        }
+        const double x = places[c].boxes.front().center().x;
+        const double station = columns[c].value - axes.shift;
+        for (std::size_t r = 0; r < rows.size(); ++r) {
+            QString value;
+            if (rows[r].cutFill) {
+                if (const auto difference = plotting::cutFillAt(*design, *ground, station)) {
+                    value = qText(plotting::cutFillText(*difference));
+                }
+            } else if (rows[r].series == nullptr) {
+                value = columns[c].chainage;
+            } else if (const auto level = plotting::levelAt(*rows[r].series, station)) {
+                value = QString::number(*level, 'f', 3);
+            }
+            if (value.isEmpty()) {
+                continue;
+            }
+            // Turned across its row, and never taller than the row.
+            const double room = rowH - 1.2;
+            double squeeze = 1.0;
+            if (const double w = text.widthMm(value, turned); w > room) {
+                squeeze = room / w;
+            }
+            const double top = bandTop - static_cast<double>(r) * rowH;
+            text.draw(Point2(x, top - rowH / 2.0), value, turned, squeeze);
+        }
+    }
+    return dropped;
 }
 
 } // namespace
@@ -960,6 +1367,10 @@ class SheetPainter {
     }
 
     SheetPaintStats run();
+
+    // A section viewport's scale and exaggeration: its own, or with
+    // autoScale those fitSection chooses for what it shows in its plot.
+    plotting::SectionFit sectionFit(const Viewport& viewport, TextSetter& text);
 
   private:
     void paintViewport(const Viewport& viewport, TextSetter& text, const Paper& paper);
@@ -981,6 +1392,10 @@ class SheetPainter {
                                             double& start);
     const katana::cad::Section* crossSection(const std::string& alignment, double chainage,
                                              double halfWidth, std::string& failure);
+    // The design profile's level at `chainage` along `alignment`: nothing
+    // without a profile or past its ends.
+    [[nodiscard]] std::optional<double> profileLevel(const std::string& alignment,
+                                                     double chainage) const;
     [[nodiscard]] std::vector<katana::cad::SectionSurfaceInput> surfaceInputs() const;
 
     QPainter& painter_;
@@ -1030,7 +1445,15 @@ const katana::cad::Section* SheetPainter::longSection(const std::string& name,
                 options.spatialIndex = source_.plan.index;
                 auto section = katana::cad::extractSection(line, inputs, model, options);
                 if (section && alignment->vertical) {
-                    if (auto profile = katana::geometry::solveProfile(*alignment->vertical)) {
+                    // The profile runs by chainage, the section by distance
+                    // from the alignment's start: shifted by the start, the
+                    // design lies over the ground however the chainage is
+                    // numbered.
+                    katana::geometry::VerticalAlignment vertical = *alignment->vertical;
+                    for (katana::geometry::ProfilePVI& pvi : vertical.pvis) {
+                        pvi.station -= entry.startChainage;
+                    }
+                    if (auto profile = katana::geometry::solveProfile(vertical)) {
                         if (auto status =
                                 katana::cad::appendDesignProfile(*section, *profile, "design " + name);
                             !status) {
@@ -1091,6 +1514,18 @@ const katana::cad::Section* SheetPainter::crossSection(const std::string& name, 
     }
     failure = entry.failure;
     return entry.section ? &*entry.section : nullptr;
+}
+
+std::optional<double> SheetPainter::profileLevel(const std::string& name, double chainage) const
+{
+    const katana::entity::Model* model = source_.plan.model;
+    const katana::entity::Alignment* alignment =
+        model != nullptr ? model->alignments.find(name) : nullptr;
+    if (alignment == nullptr || !alignment->vertical) {
+        return std::nullopt;
+    }
+    const auto profile = katana::geometry::solveProfile(*alignment->vertical);
+    return profile ? profile->elevationAt(chainage) : std::nullopt;
 }
 
 bool SheetPainter::paintPlanViewport(const Viewport& viewport, TextSetter& text, const Paper& paper,
@@ -1209,9 +1644,8 @@ bool SheetPainter::paintSections(const Viewport& viewport, TextSetter& text, con
     axes.centre = viewport.centre;
     axes.autoCentre = viewport.autoCentre;
     axes.hidden = &viewport.hiddenLayers;
-    // Leave the title's corner to the title.
-    Box2 area = viewport.rect;
-    area.min.y += 7.0;
+    axes.model = source_.plan.model;
+    const Box2 area = sectionArea(viewport.rect);
 
     if (viewport.kind == ViewportKind::LongSection) {
         std::string failure;
@@ -1222,27 +1656,23 @@ bool SheetPainter::paintSections(const Viewport& viewport, TextSetter& text, con
             return false;
         }
         axes.shift = start;
-        if (from.chainageTo > from.chainageFrom) {
-            axes.range = std::pair{from.chainageFrom, from.chainageTo};
-        }
+        // The chainages asked for, else the whole alignment: exactly those
+        // are shown, and their ends labelled.
+        axes.range = from.chainageTo > from.chainageFrom
+                         ? std::pair{from.chainageFrom, from.chainageTo}
+                         : std::pair{start, start + section->length};
         axes.dataBand = true;
-        paintSection(painter_, paper, text, area, *section, axes);
+        stats_.sectionNotesDropped += paintSection(painter_, paper, text, area, *section, axes);
         return true;
     }
 
     // Cross sections: the chainages asked for, one row each.
-    std::vector<double> stations = from.stations;
-    if (stations.empty() && from.sectionInterval > 0.0 && from.chainageTo > from.chainageFrom) {
-        for (double at = from.chainageFrom; at <= from.chainageTo + 1e-9 && stations.size() < 64;
-             at += from.sectionInterval) {
-            stations.push_back(at);
-        }
-    }
+    const std::vector<double> stations = crossSectionStations(from);
     if (stations.empty()) {
         problem(viewport, "no chainage to cut a cross section at");
         return false;
     }
-    const double halfWidth = from.sectionHalfWidth > 0.0 ? from.sectionHalfWidth : 20.0;
+    const double halfWidth = crossSectionHalfWidth(from);
     axes.cross = true;
     const double rowHeight = area.height() / static_cast<double>(stations.size());
     bool any = false;
@@ -1259,10 +1689,92 @@ bool SheetPainter::paintSections(const Viewport& viewport, TextSetter& text, con
         SectionAxes rowAxes = axes;
         rowAxes.shift = -halfWidth;
         rowAxes.caption = QString("CH %1").arg(stations[i], 0, 'f', 3);
-        paintSection(painter_, paper, text, row, *section, rowAxes);
+        rowAxes.profileLevel = profileLevel(from.alignment, stations[i]);
+        stats_.sectionNotesDropped += paintSection(painter_, paper, text, row, *section, rowAxes);
         any = true;
     }
     return any;
+}
+
+plotting::SectionFit SheetPainter::sectionFit(const Viewport& viewport, TextSetter& text)
+{
+    plotting::SectionFit fit{viewport.scale,
+                             viewport.verticalExaggeration > 0.0 ? viewport.verticalExaggeration : 1.0};
+    const plotting::ViewportSource& from = viewport.source;
+    if (!viewport.autoScale || viewport.rect.empty() || from.alignment.empty()) {
+        return fit;
+    }
+    const Box2 area = sectionArea(viewport.rect);
+    const std::optional<double> centreAlong =
+        viewport.autoCentre ? std::nullopt : std::optional<double>(viewport.centre.x);
+    const std::optional<double> centreLevel =
+        viewport.autoCentre ? std::nullopt : std::optional<double>(viewport.centre.y);
+    // The level column, as wide as the widest level written to a tenth: near
+    // enough the painter's own for a fit that leaves a tenth of the plot spare.
+    const TextStyle levelStyle = levelLabelStyle();
+    const auto levelColumn = [&](const std::pair<double, double>& levels) {
+        return std::max(text.widthMm(number(levels.first, 0.1), levelStyle),
+                        text.widthMm(number(levels.second, 0.1), levelStyle));
+    };
+
+    plotting::SectionFitRequest request;
+    plotting::SectionLayoutRequest layout;
+    if (viewport.kind == ViewportKind::LongSection) {
+        std::string failure;
+        double start = 0.0;
+        const katana::cad::Section* section = longSection(from.alignment, failure, start);
+        if (section == nullptr) {
+            return fit;
+        }
+        // The range asked for, else the whole alignment.
+        const bool ranged = from.chainageTo > from.chainageFrom;
+        const double first = ranged ? from.chainageFrom : start;
+        const double last = ranged ? from.chainageTo : start + section->length;
+        const auto levels = plotting::levelRange(*section, first - start, last - start,
+                                                 source_.plan.model, &viewport.hiddenLayers);
+        layout = {area, bandRows(*section).size(), false, levels ? levelColumn(*levels) : 0.0};
+        request.spanM = plotting::sectionSpan(first, last, centreAlong);
+        request.depthM =
+            levels ? plotting::sectionSpan(levels->first, levels->second, centreLevel) : 0.0;
+        request.flatExaggeration = kLongSectionExaggeration;
+    } else {
+        // Every row at one scale: each as wide as the viewport, the deepest
+        // setting the exaggeration.
+        const std::vector<double> stations = crossSectionStations(from);
+        if (stations.empty()) {
+            return fit;
+        }
+        const double halfWidth = crossSectionHalfWidth(from);
+        double column = 0.0;
+        for (const double chainage : stations) {
+            std::string failure;
+            const katana::cad::Section* section =
+                crossSection(from.alignment, chainage, halfWidth, failure);
+            if (section == nullptr) {
+                continue;
+            }
+            const auto levels = widened(
+                plotting::levelRange(*section, -std::numeric_limits<double>::infinity(),
+                                     std::numeric_limits<double>::infinity(), source_.plan.model,
+                                     &viewport.hiddenLayers),
+                profileLevel(from.alignment, chainage));
+            if (levels) {
+                request.depthM = std::max(
+                    request.depthM, plotting::sectionSpan(levels->first, levels->second, centreLevel));
+                column = std::max(column, levelColumn(*levels));
+            }
+        }
+        const double rowHeight = area.height() / static_cast<double>(stations.size());
+        layout = {Box2(area.min, Point2(area.max.x, area.min.y + rowHeight)), 0, true, column};
+        request.spanM = plotting::sectionSpan(-halfWidth, halfWidth, centreAlong);
+    }
+    const plotting::SectionLayout plot = plotting::sectionPlotLayout(layout);
+    request.plotWidthMm = plot.plot.width();
+    request.plotHeightMm = plot.plot.height();
+    if (auto fitted = plotting::fitSection(request)) {
+        return *fitted;
+    }
+    return fit;
 }
 
 bool SheetPainter::paintSnapshot(const Viewport& viewport, const Paper& paper)
@@ -1537,8 +2049,8 @@ SheetPaintStats SheetPainter::run()
                       Qt::white);
     TextSetter text(painter_, paper);
 
-    // An automatic scale is decided here, and the title block reports the
-    // scale that was drawn.
+    // An automatic scale is decided here - a plan's, and a section's scale
+    // and exaggeration - and the title block reports the scale that was drawn.
     plotting::SheetSet drawnSet = set_;
     plotting::Sheet& drawnSheet = drawnSet.sheets[index_];
     for (Viewport& viewport : drawnSheet.viewports) {
@@ -1549,6 +2061,13 @@ SheetPaintStats SheetPainter::run()
             viewport.centre = at.centre;
             viewport.autoScale = false;
             viewport.autoCentre = false;
+        } else if ((viewport.kind == ViewportKind::LongSection ||
+                    viewport.kind == ViewportKind::CrossSections) &&
+                   viewport.autoScale) {
+            const plotting::SectionFit fit = sectionFit(viewport, text);
+            viewport.scale = fit.scale;
+            viewport.verticalExaggeration = fit.exaggeration;
+            viewport.autoScale = false;
         }
     }
 
@@ -1681,6 +2200,20 @@ ResolvedViewport resolvePlanViewport(const Viewport& viewport, const SheetSource
         }
     }
     return at;
+}
+
+plotting::SectionFit resolveSectionViewport(const Viewport& viewport, const SheetSource& source,
+                                            SheetPaintCache& cache)
+{
+    // Measured as a paint measures, on a scratch device: the fit leaves room
+    // for the level labels, and their width is the font's.
+    QImage scratch(8, 8, QImage::Format_ARGB32_Premultiplied);
+    QPainter painter(&scratch);
+    const plotting::SheetSet none;
+    const SheetPaintOptions options;
+    const Paper paper(0.0, options);
+    TextSetter text(painter, paper);
+    return SheetPainter(painter, none, 0, source, options, cache).sectionFit(viewport, text);
 }
 
 SheetPaintStats paintSheet(QPainter& painter, const plotting::SheetSet& set, std::size_t index,
