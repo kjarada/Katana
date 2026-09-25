@@ -297,6 +297,31 @@ TEST(PlanGrid, LabelsKeepOffTheFurnitureAndOffEachOther)
     }
 }
 
+TEST(PlanGrid, TwoLabelsCloserThanTheSpacingAreNotBothKept)
+{
+    // Along the bottom E 305 150, 305 200 ... sit 50 mm apart. Labels 48 mm
+    // wide leave 2 mm between their centres' neighbours less 0.8 mm of
+    // knock-out: 1.2 mm of paper, which reads as one label run on into the
+    // next. The default 1.5 mm keeps every other one; asked for no spacing,
+    // each fits.
+    const Viewport viewport = gridded(GridStyle::Lines, 50.0);
+    PlanGridOptions close;
+    close.labelWidthMm = [](std::string_view) { return 48.0; };
+    const PlanGrid spaced = gridOf(viewport, close);
+    EXPECT_EQ(labelTexts(spaced, ViewportEdge::Bottom),
+              (std::vector<std::string>{"E 305 200", "E 305 300"}));
+    for (std::size_t i = 0; i < spaced.labels.size(); ++i) {
+        for (std::size_t j = i + 1; j < spaced.labels.size(); ++j) {
+            EXPECT_FALSE(overlap(spaced.labels[i].box.inflated(close.labelSpacingMm),
+                                 spaced.labels[j].box))
+                << spaced.labels[i].text << " / " << spaced.labels[j].text;
+        }
+    }
+    close.labelSpacingMm = 0.0;
+    EXPECT_EQ(labelTexts(gridOf(viewport, close), ViewportEdge::Bottom),
+              (std::vector<std::string>{"E 305 200", "E 305 250", "E 305 300"}));
+}
+
 TEST(PlanGrid, TicksComeInFromTheBorderAndTheirLabelsStandPastThem)
 {
     const Viewport viewport = gridded(GridStyle::Ticks, 50.0);

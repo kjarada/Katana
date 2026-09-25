@@ -739,8 +739,9 @@ edges it meets.
   from it, or past the tick for ticks.
 - Each is knocked out on white, 0.4 mm all round.
 - A label is kept only when it lies wholly inside the viewport, clear of the
-  view's title, scale bar and north arrow, and clear of the labels already
-  kept. The painter passes the exact boxes those three knock out
+  view's title, scale bar and north arrow, and at least 1.5 mm clear of the
+  labels already kept (`PlanGridOptions::labelSpacingMm`): two closer than
+  that read as one label run on into the next. The painter passes the exact boxes those three knock out
   (`PlanGridOptions::keepOut`), so a label never sits over the title or the
   scale-bar corner, and never half-under either. Labels are taken bottom,
   left, top, right, and along each edge in order, so the same grid always
