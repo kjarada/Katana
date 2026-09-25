@@ -40,6 +40,7 @@
 #include "customisation/definition_thumbnails.hpp"
 #include "customisation/document_watcher.hpp"
 #include "customisation/filter_bar.hpp"
+#include "customisation/hatch_patterns_tab.hpp"
 #include "customisation/name_picker.hpp"
 #include "customisation/row_table_model.hpp"
 #include "customisation/style_preview.hpp"
@@ -2841,6 +2842,9 @@ StyleManagerDialog::StyleManagerDialog(const CustomisationContext& context, QWid
     impl.statusLine->setWordWrap(true);
     impl.tabs->addTab(impl.buildStylesPage(), "Styles");
     impl.tabs->addTab(impl.buildLinetypesPage(), "Linetypes");
+    // The model's hatch patterns, a tab of their own (hatch_patterns_tab.hpp):
+    // what a style's or a layer's hatch names, next to what its linetype does.
+    impl.tabs->addTab(new HatchPatternsTab(impl.context, impl.tabs), "Hatch Patterns");
     impl.tabs->addTab(impl.buildDiagnosticsPage(), "Diagnostics");
     layout->addWidget(impl.tabs, 1);
     impl.buildPrompt(this);

@@ -72,8 +72,9 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
     };
     stylesAction_ =
         make(Icon::FormatStyles, "St&yles and Linetypes...",
-             "The drawing's styles, its dash linetypes and the loaded library linestyles: "
-             "edit, merge, rename, find what uses each, and what nothing defines",
+             "The drawing's styles, its dash linetypes, its hatch patterns and the loaded "
+             "library linestyles: edit, merge, rename, find what uses each, and what nothing "
+             "defines",
              "formatStyles", kStyleManagerName);
     symbolsAction_ =
         make(Icon::FormatSymbols, "Sym&bol Library...",

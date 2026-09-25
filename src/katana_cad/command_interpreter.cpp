@@ -397,8 +397,10 @@ Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DE
           LINETYPE MERGE from into   (repoints every layer and style, then deletes from)
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
+          HATCH SET name angle spacing [angle spacing ...] | SET name SOLID   edits one
           angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
-Style     STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new
+Style     STYLE LIST | SYMBOLS [filter] | NEW name [field value] | SET name field value
+          STYLE RENAME old new
           STYLE DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]
           fields: linetype weight colour hatch symbol symbolsize description; APPLY - = ByLayer
           linetype takes a model linetype, a loaded library linestyle or ByLayer (the layer's)
@@ -825,7 +827,8 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
     }
 
     static constexpr const char* kUsage =
-        "STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new |"
+        "STYLE LIST | SYMBOLS [filter] | NEW name [field value] | SET name field value |"
+        " RENAME old new |"
         " DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]\n"
         "  fields: linetype (a model linetype, a library linestyle or ByLayer), weight (mm),\n"
         "  colour (#RRGGBB or bylayer), hatch, symbol,\n"
@@ -848,12 +851,109 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
                                args[count]));
     };
 
-    if (action == "NEW") {
-        if (const auto wrong = wants(2)) {
-            return *wrong;
+    // SET's fields, applied to `changed`: a refusal, or nothing when the
+    // field and its value were taken. Shared by SET and by NEW with a field,
+    // so a new style and an edited one read a field the same way.
+    const auto setField = [&](katana::entity::Style& changed) -> std::optional<Reply> {
+        const std::string field = upper(args[2]);
+        const std::string& value = args[3];
+        if (field == "LINETYPE") {
+            // The rest of the line, as SYMBOL takes it: "WATR Main" unquoted
+            // used to become "WATR" with "Main" dropped.
+            const std::string linetypeName = restOfLine(args, 3);
+            if (katana::entity::isByLayer(linetypeName)) {
+                changed.linetype = std::string(katana::entity::kByLayerLinetype);
+            } else {
+                if (auto status = checkLinetypeName(document_, linetypeName); !status) {
+                    return Reply(status.error());
+                }
+                changed.linetype = linetypeName;
+            }
+        } else if (field == "WEIGHT") {
+            const auto weight = parseNumber(value);
+            if (!weight) {
+                return Reply(weight.error());
+            }
+            changed.lineWeight = *weight;
+        } else if (field == "COLOUR" || field == "COLOR") {
+            if (upper(value) == "BYLAYER") {
+                changed.color.reset();
+            } else {
+                const auto colour = katana::entity::Color::fromHex(value);
+                if (!colour) {
+                    return Reply(colour.error());
+                }
+                changed.color = *colour;
+            }
+        } else if (field == "HATCH") {
+            if (value != "-" && !model.hatchPatterns.contains(value)) {
+                return Reply(makeError(ErrorCode::NotFound, "hatch pattern does not exist", value));
+            }
+            changed.hatchPattern = value == "-" ? std::string() : value;
+        } else if (field == "SYMBOL") {
+            // A library symbol's name has spaces in it - "CULT Bollard" -
+            // so the rest of the line is the name, as DESCRIPTION does.
+            std::string symbolName;
+            for (std::size_t i = 3; i < args.size(); ++i) {
+                symbolName += (i > 3 ? " " : "") + args[i];
+            }
+            if (symbolName == "-") {
+                changed.symbol.clear();
+            } else {
+                // The model itself accepts any name, because a project can be
+                // opened before its library is loaded (see entity::validate).
+                // A person TYPING one should still be told about a typo, which
+                // is the same courtesy HATCH above pays.
+                if (!katana::entity::isBuiltInSymbolName(symbolName) &&
+                    document_.definitionFor(symbolName) == nullptr) {
+                    return Reply(makeError(
+                        ErrorCode::NotFound,
+                        "no symbol of that name is built in or in the loaded library",
+                        symbolName));
+                }
+                changed.symbol = symbolName;
+            }
+        } else if (field == "SYMBOLSIZE") {
+            const auto size = parseNumber(value);
+            if (!size) {
+                return Reply(size.error());
+            }
+            changed.symbolSize = *size;
+        } else if (field == "DESCRIPTION") {
+            std::string text;
+            for (std::size_t i = 3; i < args.size(); ++i) {
+                text += (i > 3 ? " " : "") + args[i];
+            }
+            changed.description = text;
+        } else {
+            return Reply(usage(kUsage));
         }
+        return std::nullopt;
+    };
+
+    if (action == "NEW") {
         katana::entity::Style item;
         item.name = name;
+        // NEW name field value: a style made with one field set, as SET would
+        // set it, in one step - the Hatch Patterns tab's "New Style Using
+        // This". A second word that is no field is a name that needed quotes.
+        if (args.size() > 2) {
+            static constexpr std::string_view kFields[] = {
+                "LINETYPE", "WEIGHT", "COLOUR", "COLOR", "HATCH", "SYMBOL", "SYMBOLSIZE",
+                "DESCRIPTION"};
+            const std::string field = upper(args[2]);
+            if (std::find(std::begin(kFields), std::end(kFields), field) == std::end(kFields)) {
+                if (const auto wrong = wants(2)) {
+                    return *wrong;
+                }
+            }
+            if (args.size() < 4) {
+                return usage(kUsage);
+            }
+            if (auto refused = setField(item)) {
+                return *refused;
+            }
+        }
         return finish(document_.execute(cmd::createStyle(std::move(item))),
                       "style " + name + " created");
     }
@@ -912,77 +1012,8 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
             return makeError(ErrorCode::NotFound, "style does not exist", name);
         }
         katana::entity::Style changed = *existing;
-        const std::string field = upper(args[2]);
-        const std::string& value = args[3];
-        if (field == "LINETYPE") {
-            // The rest of the line, as SYMBOL takes it: "WATR Main" unquoted
-            // used to become "WATR" with "Main" dropped.
-            const std::string linetypeName = restOfLine(args, 3);
-            if (katana::entity::isByLayer(linetypeName)) {
-                changed.linetype = std::string(katana::entity::kByLayerLinetype);
-            } else {
-                if (auto status = checkLinetypeName(document_, linetypeName); !status) {
-                    return status.error();
-                }
-                changed.linetype = linetypeName;
-            }
-        } else if (field == "WEIGHT") {
-            const auto weight = parseNumber(value);
-            if (!weight) {
-                return weight.error();
-            }
-            changed.lineWeight = *weight;
-        } else if (field == "COLOUR" || field == "COLOR") {
-            if (upper(value) == "BYLAYER") {
-                changed.color.reset();
-            } else {
-                const auto colour = katana::entity::Color::fromHex(value);
-                if (!colour) {
-                    return colour.error();
-                }
-                changed.color = *colour;
-            }
-        } else if (field == "HATCH") {
-            if (value != "-" && !model.hatchPatterns.contains(value)) {
-                return makeError(ErrorCode::NotFound, "hatch pattern does not exist", value);
-            }
-            changed.hatchPattern = value == "-" ? std::string() : value;
-        } else if (field == "SYMBOL") {
-            // A library symbol's name has spaces in it - "CULT Bollard" -
-            // so the rest of the line is the name, as DESCRIPTION does.
-            std::string symbolName;
-            for (std::size_t i = 3; i < args.size(); ++i) {
-                symbolName += (i > 3 ? " " : "") + args[i];
-            }
-            if (symbolName == "-") {
-                changed.symbol.clear();
-            } else {
-                // The model itself accepts any name, because a project can be
-                // opened before its library is loaded (see entity::validate).
-                // A person TYPING one should still be told about a typo, which
-                // is the same courtesy HATCH above pays.
-                if (!katana::entity::isBuiltInSymbolName(symbolName) &&
-                    document_.definitionFor(symbolName) == nullptr) {
-                    return makeError(ErrorCode::NotFound,
-                                     "no symbol of that name is built in or in the loaded library",
-                                     symbolName);
-                }
-                changed.symbol = symbolName;
-            }
-        } else if (field == "SYMBOLSIZE") {
-            const auto size = parseNumber(value);
-            if (!size) {
-                return size.error();
-            }
-            changed.symbolSize = *size;
-        } else if (field == "DESCRIPTION") {
-            std::string text;
-            for (std::size_t i = 3; i < args.size(); ++i) {
-                text += (i > 3 ? " " : "") + args[i];
-            }
-            changed.description = text;
-        } else {
-            return usage(kUsage);
+        if (auto refused = setField(changed)) {
+            return *refused;
         }
         // Setting what is already there is not an edit: no undo step.
         auto command = cmd::updateStyleIfChanged(model, std::move(changed));
@@ -1586,11 +1617,36 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
         return text;
     }
 
+    const char* const kUsage = "HATCH LIST | SOLID name | NEW name angle spacing [angle spacing"
+                               " ...] | SET name angle spacing [angle spacing ...] | SET name"
+                               " SOLID | DELETE name";
     if (args.size() < 2) {
-        return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
-                     " | DELETE name");
+        return usage(kUsage);
     }
     const std::string& name = args[1];
+
+    // "angle spacing [angle spacing ...]" from args[2] on. Angles are DEGREES
+    // here and radians in the model. Every other angle the interpreter takes
+    // is in degrees, because that is what a drafter types; converting at the
+    // edge keeps the model in one unit.
+    const auto families = [&args]() -> Result<std::vector<katana::entity::HatchLineFamily>> {
+        std::vector<katana::entity::HatchLineFamily> parsed;
+        for (std::size_t i = 2; i + 1 < args.size(); i += 2) {
+            const auto angle = parseNumber(args[i]);
+            if (!angle) {
+                return angle.error();
+            }
+            const auto spacing = parseNumber(args[i + 1]);
+            if (!spacing) {
+                return spacing.error();
+            }
+            katana::entity::HatchLineFamily family;
+            family.angle = *angle * katana::math::kDegToRad;
+            family.spacing = *spacing;
+            parsed.push_back(family);
+        }
+        return parsed;
+    };
 
     if (action == "DELETE") {
         return finish(document_.execute(cmd::deleteHatchPattern(name)),
@@ -1605,9 +1661,6 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
                       "hatch pattern " + name + " created (solid)");
     }
     if (action == "NEW") {
-        // Angles are DEGREES here and radians in the model. Every other angle
-        // the interpreter takes is in degrees, because that is what a drafter
-        // types; converting at the edge keeps the model in one unit.
         if (args.size() < 4 || (args.size() - 2) % 2 != 0) {
             return usage("HATCH NEW name angle spacing [angle spacing ...]\n"
                          "  angle in DEGREES, spacing in MODEL units."
@@ -1615,26 +1668,66 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
         }
         katana::entity::HatchPattern pattern;
         pattern.name = name;
-        for (std::size_t i = 2; i + 1 < args.size(); i += 2) {
-            const auto angle = parseNumber(args[i]);
-            if (!angle) {
-                return angle.error();
-            }
-            const auto spacing = parseNumber(args[i + 1]);
-            if (!spacing) {
-                return spacing.error();
-            }
-            katana::entity::HatchLineFamily family;
-            family.angle = *angle * katana::math::kDegToRad;
-            family.spacing = *spacing;
-            pattern.families.push_back(family);
+        auto parsed = families();
+        if (!parsed) {
+            return parsed.error();
         }
+        pattern.families = std::move(*parsed);
+        const std::size_t count = pattern.families.size();
         return finish(document_.execute(cmd::createHatchPattern(std::move(pattern))),
-                      "hatch pattern " + name + " created (" +
-                          std::to_string(pattern.families.size()) + " families)");
+                      "hatch pattern " + name + " created (" + std::to_string(count) +
+                          " families)");
     }
-    return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
-                 " | DELETE name");
+    if (action == "SET") {
+        // An existing pattern's families, or its fill, replaced as one undo
+        // step - what the Hatch Patterns tab's Save runs. The name and the
+        // description are the pattern's and are kept; so is each family's
+        // offset where a family of that position remains, since none can be
+        // typed and an imported pattern's would otherwise be lost to an edit
+        // of its spacing.
+        const bool toSolid = args.size() == 3 && upper(args[2]) == "SOLID";
+        if (!toSolid && (args.size() < 4 || (args.size() - 2) % 2 != 0)) {
+            return usage("HATCH SET name angle spacing [angle spacing ...] | HATCH SET name SOLID"
+                         "\n  angle in DEGREES, spacing in MODEL units");
+        }
+        const katana::entity::HatchPattern* existing = model.hatchPatterns.find(name);
+        if (existing == nullptr) {
+            return makeError(ErrorCode::NotFound, "hatch pattern does not exist", name);
+        }
+        katana::entity::HatchPattern changed = *existing;
+        if (toSolid) {
+            changed.solid = true;
+            changed.families.clear();
+            // What HATCH SOLID calls one, when it has no words of its own.
+            if (changed.description.empty()) {
+                changed.description = "Solid fill";
+            }
+        } else {
+            auto parsed = families();
+            if (!parsed) {
+                return parsed.error();
+            }
+            for (std::size_t i = 0; i < parsed->size() && i < existing->families.size(); ++i) {
+                (*parsed)[i].offset = existing->families[i].offset;
+            }
+            changed.solid = false;
+            changed.families = std::move(*parsed);
+            // HATCH SOLID's own words, which would now be untrue.
+            if (existing->solid && changed.description == "Solid fill") {
+                changed.description.clear();
+            }
+        }
+        // Setting what is already there is not an edit: no undo step.
+        if (changed == *existing) {
+            return "hatch pattern " + name + " unchanged";
+        }
+        const std::string kind = changed.solid ? std::string("solid")
+                                               : std::to_string(changed.families.size()) +
+                                                     " families";
+        return finish(document_.execute(cmd::updateHatchPattern(std::move(changed))),
+                      "hatch pattern " + name + " updated (" + kind + ")");
+    }
+    return usage(kUsage);
 }
 
 CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)

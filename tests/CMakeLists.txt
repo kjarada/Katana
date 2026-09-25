@@ -270,9 +270,23 @@ if(TARGET katana)
             "-DEXPECT=--dialog surveyParcelReport opened surveyParcelReportDialog \"Parcel Report\".*parcelSummary: area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m, centroid 50[.]000,25[.]000, drawn counter-clockwise.*parcelCourses: 1 [|] 0[.]000 [|] 0[.]000 [|] N 90[^|]+ E [|] 100[.]000 ; 2 [|] 100[.]000 [|] 0[.]000 [|] N 0[^|]+ E [|] 50[.]000.*message: 5 labels created on layer 0, the current layer.*parcelLegalText: Lot 7: Beginning at E 0[.]000 N 0[.]000; thence N 90[^;]+, 100[.]000 m;.*Containing 5000[.]000 m[^ ]+ [(]0[.]5000 ha[)][.].*message: a headless session opens no file dialog.*commandLog: .*> PARCEL 1 LABEL 2 5 labels created on layer 0"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/parcel_report_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Format > Styles and Linetypes > Hatch Patterns through the real window:
+    # a style made from the tab (STYLE NEW ... HATCH, one line), a delete the
+    # layer's use refuses, a purge that takes only the pattern nothing uses,
+    # and the table following a HATCH SET typed on the command line. Layer 0
+    # names "none" outright, so even "none" is used by a layer.
+    add_test(NAME qt_hatch_patterns_tab_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>HATCH NEW brick 45 0.25|>LAYER NEW site|>LAYER HATCH site brick|@formatStyles|managerTabs=Hatch Patterns|hatchPatternTable=brick|?hatchPatternTable|?hatchPatternFamilies|hatchPatternName=brick paving|!hatchPatternNewStyle|?hatchPatternStatus|!hatchPatternDelete|?hatchPatternStatus|hatchPatternName=fill|!hatchPatternNewSolid|!hatchPatternPurge|?hatchPatternStatus|>HATCH SET brick 45 0.5 135 0.5|?hatchPatternTable|?commandLog"
+            "-DEXPECT=hatchPatternTable: brick [|] 1 family [|] used by 1 layer[^;]* ; none [|] draws nothing [|] used by 1 layer, e[.]g[.] +layer=0.*hatchPatternFamilies: 45 [|] 0[.]25.*hatchPatternStatus: style brick paving created.*hatchPatternStatus: [^\r\n]*used by 1 layer and 1 style.*hatchPatternStatus: purged 0 styles, 0 linetypes and 1 hatch pattern.*hatchPatternTable: brick [|] 2 families [|] used by 1 layer and 1 style.*commandLog: .*> STYLE NEW \"brick paving\" HATCH brick style brick paving created"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hatch_patterns_tab_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_alignment_manager_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
         qt_parcel_report_headless
+        qt_hatch_patterns_tab_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
