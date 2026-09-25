@@ -20,6 +20,7 @@
 
 #include <QString>
 
+#include "command_runner.hpp"
 #include "katana/entity/entity.hpp"
 
 namespace katana::cad {
@@ -66,6 +67,14 @@ struct CustomisationContext {
     // session. May be null: a dialog then shows the defaults and cannot
     // change them.
     katana::cad::LineworkCodes* lineworkCodes = nullptr;
+
+    // The window's one executor (command_runner.hpp): a dialog that changes
+    // the drawing builds the verb line a person would type and runs it here,
+    // so it is echoed, kept in the history and undone as a typed line. May be
+    // empty (a test, a dialog built before the window's command line): the
+    // dialog then says it cannot run the line rather than doing the work
+    // itself.
+    CommandRunner run{};
 };
 
 } // namespace katana::qt

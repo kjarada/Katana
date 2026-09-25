@@ -28,27 +28,37 @@ QString nameOf(const std::filesystem::path& path)
 
 } // namespace
 
-void MainWindow::importDxfFile(const std::filesystem::path& path)
+void MainWindow::importDxfFile(const std::filesystem::path& path, bool local)
 {
     katana::dxf::ImportOptions options;
     options.sourceName = path.filename().string();
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = katana::dxf::readDxfFile(path, options);
+    // LOCAL: read again with the shift, so the one reader moves every kind of
+    // geometry alike, as katana_cli's does.
+    if (imported.ok() && local && !imported->bounds.empty()) {
+        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
+        imported = katana::dxf::readDxfFile(path, options);
+    }
     QApplication::restoreOverrideCursor();
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
         warnUser("Import failed", QString::fromStdString(imported.error().describe()));
         return;
     }
+    if (local && options.originShift) {
+        logLocalShift(*options.originShift);
+    }
 
     // The question every import asks: a DXF of survey data sits at survey
     // coordinates, and merged into a drawing near the origin one of the two
-    // becomes a dot.
+    // becomes a dot. With LOCAL the place is chosen already.
     const auto advice =
         interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    if (advice.farApart && headless_) {
+    const bool ask = advice.farApart && !local;
+    if (ask && headless_) {
         logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (advice.farApart) {
+    } else if (ask) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle("Far from the current drawing");

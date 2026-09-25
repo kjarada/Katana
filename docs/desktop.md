@@ -15,8 +15,8 @@ File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
 `helpMenu`). File keeps to files: the customisation is loaded from Format
 and from Survey > Survey Coding, beside the managers of what it brings. The
-status bar shows a view's running readout, the current layer, the active snap
-and the cursor coordinates.
+status bar shows a view's running readout, how many entities are selected of
+how many, the current layer, the active snap and the cursor coordinates.
 
 The readout (`FrameStatsLabel`) is a 3D view's frame time or a section's
 station and elevation under the cursor, forwarded from whichever view raised
@@ -169,7 +169,8 @@ any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
 Library, Loa&d Customisation, In&verse, Toggle Pe&rspective and others).
 The tool actions built from the catalogue have no underlined letters; their
-aliases are in their tooltips.
+aliases are in their tooltips. Help > Keyboard Shortcuts lists the keys for a
+person ("The Command Reference and the keyboard shortcuts", below).
 
 `katana --screenshot` grabs the window headlessly so that the look can be
 reviewed, and the same run can drive the menus and dialogs step by step:
@@ -700,6 +701,297 @@ modal box** - every question the window would ask becomes a line in the log
 or a refusal. `docs/headless.md` ("A headless session never opens a modal
 box") lists what each one does.
 
+## One executor: the command runner
+
+A dialog that changes the drawing does not do the work itself: it builds the
+verb line a person would type and hands it to the window's one executor,
+`MainWindow::runVerbLine`, as a `CommandRunner` (`src/katana_qt/command_runner.hpp`).
+The workbenches carry it to their dialogs - `SurveyServices::run`,
+`CustomisationServices::run` into every manager's `CustomisationContext::run`,
+`AnnotationWorkbench::setCommandRunner`, `UtilityServices::run` - so a dialog
+never reaches into the window for it.
+
+- **The same dispatcher as a typed line.** `runCommandLine` is Enter on the
+  command line: it reads and clears the field, echoes the line, offers it to
+  the workbenches' verbs (`runWorkbenchLine`: `ONLINE`, `UTILITY`), then to a
+  running tool (`ViewWorkspace::typeIntoTool`), and hands whatever is left to
+  `dispatchLine` - the view verbs, the window's own (`SCRIPT`, `CUSTOMISE`,
+  `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`, `PLOT`,
+  `SNAPSHOT`), a tool's alias, and the interpreter. `runVerbLine` echoes the line and runs the same
+  `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
+  line is kept in the interpreter's history and undone exactly as a typed one.
+- **Never a running tool's answer.** That step is the only one `runVerbLine`
+  leaves out. A tool waiting for a point or a text takes any typed line for
+  one; a dialog's `CIRCLE 5,5 2` while Line waits for its first point is drawn,
+  and the tool still waits. What is being typed on the command line is left
+  alone.
+- **The reply comes back.** While the line runs, `logMessage` also collects
+  what it logs, and `warnUser` what it shows in a box, into a
+  `VerbOutcome`: `ok`, the `reply` lines and the `error` lines. `ok` is judged
+  by the errors counted, as `runCommand` judges a `--command` line, so a
+  `PLOTSHEETS` that plotted with a missing image is still ok. An empty line is
+  not ok: a dialog has no Enter to press.
+
+The Subsurface Utilities dialog was the first to run its line this way; before
+the runner it had an echo-and-run callback of its own in the window, a second
+executor, which is gone. GIS > Convert Point Cloud to COPC is the second: its two file
+dialogs choose the files, and the conversion is the `COPC "<source>"
+"<destination>"` line through `runVerbLine`. The headless driver's `--run-line`
+step (`docs/headless.md`) runs a line the same way and prints the outcome;
+`qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless` runs one while
+Line waits for its first point.
+
+### The session's verbs on the window's command line
+
+Until 2026-09-26 the window refused or misread several verbs `katana_cli` had.
+Each now reaches the same code on every front end
+(`qt_the_session_verbs_run_on_the_windows_command_line_headless`,
+`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`,
+`qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless`):
+
+- `INFO 12` (or `INFO #12`) describes entity 12, unless a file of that name
+  exists: `CommandInterpreter::isEntityId`. The window, and the session under
+  `katana_cli` and `katana_mcp`, once took every `INFO` for `INFO <file>`, so
+  `katana_describe_entity` answered that the file did not exist.
+- `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
+  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`), given the
+  standard colour table by `CommandInterpreter::setColourLookup`.
+- `COPC <source> <destination.copc.laz>`, each path one word or quoted; it
+  logs the `IMPORT` line that reads the result. In a headless session the GIS
+  menu's item opens no file dialog and names this verb instead.
+- `CUSTOMISE` alone reports what is loaded, from which files, what the project
+  was drawn with that is not loaded, and what it covers in this drawing
+  (`cad::customisationReport`, the words `katana_cli` prints); it once
+  answered with its usage.
+- `IMPORT <file> LOCAL` moves a DXF, vector file or .12da archive as one piece
+  so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
+  cloud refuses it by name. The path and the `LOCAL` are read by
+  `CommandInterpreter::importArgument`, as the session reads them; `LOCAL` was
+  once taken for part of the path. The import dialogs do not offer it yet.
+
+## Run Script: a katana_cli script in the window
+
+A script is what `katana_cli` runs: a `.kcs` file of commands, one a line,
+UTF-8, a Windows line end taken off, blank lines and lines whose first
+non-blank is `#` skipped. The window runs the same files three ways, all
+through one function, `MainWindow::runScript`
+(`src/katana_qt/script_runner.hpp`):
+
+- **File > Run Script...** (`fileRunScript`) opens a non-modal dialog
+  (`fileRunScriptDialog`) that shows the file's commands with their line
+  numbers and the exact line it will run, and runs nothing itself: Run hands
+  `SCRIPT "<file>" [CONTINUE]` to the one executor. File > Recent Scripts
+  (`fileRecentScripts`, items `recentScript1` to `recentScript8`) runs one
+  again. The list is the person's, kept in the settings; a headless session
+  neither adds to it nor changes it.
+- **`SCRIPT <file> [CONTINUE]`** typed or sent by a dialog. The window's own
+  verb, beside `PLOTSHEETS`: `katana_cli` runs a script given on its command
+  line and `katana_mcp` has `katana_run_script`, so an interpreter verb would
+  add nothing on those two.
+- **`--script FILE`** in a headless run (`docs/headless.md`).
+
+Each line is run by `runVerbLine`, as a dialog's line is: echoed, kept in the
+history, its own undo step as in `katana_cli`, and never a running tool's
+answer - a script names its points (`LINE 0,0 10,0`, not `LINE` and then its
+points). The run stops at the first line refused unless `CONTINUE` (the
+dialog's `scriptContinueOnError`) is given, and ends with a record:
+`script="<file>" lines=N ran=N failed=N`, with `stopped_at=K` (the file's line
+number), `quit_at=K` or `cancelled_at=K` when it ended early, and an error
+naming the line that stopped it. `QUIT` or `EXIT` in a script ends the script,
+as it ends `katana_cli`'s, and never closes the window under the person who
+ran it. A script that runs itself, directly or through another, is refused at
+that line (`qt_a_script_may_not_run_itself_headless`). A long run shows
+`scriptProgress` with Cancel, which stops between two lines; a headless run
+shows nothing.
+
+The line a dialog runs gets back everything its script's lines logged: a
+line run inside another's `runVerbLine` adds what it logged to the outer
+line's capture as well as its own.
+
+**Comments and pasted lines.** A typed line starting with `#` is a note: it
+is echoed and runs nothing, as in a script - unless a tool is waiting for
+typed text, whose answer ("#3 pit") it may be. Several lines pasted on the
+command line (Ctrl+V with line breaks in the clipboard, or a context-menu
+paste and then Enter) run at once as a script that stops at the first
+refused, `script=pasted` in its record; whatever was typed before the paste
+starts the first line. The single-line field used to show the breaks as
+blanks and run the whole as one line of nonsense.
+
+Tested in `tests/qt_widgets/test_script_runner.cpp` (reading, the stopping
+rules, the record, the dialog) and through the real window by
+`qt_script_switch_runs_every_line_of_a_script_headless`,
+`qt_script_switch_stops_at_the_first_refused_line_headless`,
+`qt_typed_script_continue_runs_every_line_headless`,
+`qt_run_script_dialog_runs_the_line_it_shows_headless`,
+`qt_several_lines_on_the_command_line_run_as_a_script_headless` and the two
+batch runs, `qt_script_batch_run_exits_when_the_script_is_done_headless` and
+`qt_script_batch_run_fails_at_a_refused_line_headless`.
+
+## The Command Reference and the keyboard shortcuts
+
+Help > Command Reference (`helpCommandReference`, F1) used to print the
+interpreter's help into the log, which left out every verb the window's front
+end runs itself, and the sheet verbs' options could be read only by typing
+HELP SHEETS. It is now a non-modal, searchable dialog (`commandReferenceDialog`,
+`src/katana_qt/command_reference_dialog.hpp`), built from the texts the verbs'
+own code keeps, so nothing is written twice:
+
+- **Commands**: `CommandInterpreter::helpText`, the annotation verbs included;
+- **Sheets**: `plotting::sheetVerbHelp`, every option (Help > Sheets and
+  Plotting Commands, `helpSheetCommands`, opens the reference here);
+- **Subsurface utilities**: `utilities::utilityVerbHelp`;
+- **Online data**: `interop::onlineUsage`;
+- **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
+  `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
+  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `CUSTOMISE`, `PLOTSHEETS`, `ZOOM`,
+  `GRID`, `SNAP`, `ONLINE`, `UTILITY`, `QUIT`), and the rule for a bare tool
+  word - with the one word that means different things on the two command
+  lines: a bare `LS` starts the List tool in the window and is `LABELSTYLE`
+  in `katana_cli`;
+- **the tools**, a section a menu: each tool's name, aliases, key, tip and id,
+  from the tool catalogue.
+
+`referenceEntries` reads a help text into entries by the layout every help
+here keeps: an entry starts at a line that does not start with a blank, a
+label in the first column (`DimStyle  DIMSTYLE LIST ...`) titles a group, and a
+first paragraph ended by a blank line is the section's introduction. The
+search wants every word it is given, in any case; a double-click puts the
+entry's verb on the command line, to be finished there, and the reference
+itself runs nothing. `windowHelpText` lives beside the reference rather than
+in `main_window.cpp` so that the widget tests search the real text; a comment
+on `dispatchLine` says a verb added there is added to it, and
+`CommandReference.TheWindowSectionNamesEveryVerbTheWindowRunsItself` checks
+the list. A typed `HELP` (or `?`) alone prints the interpreter's help and then
+`windowHelpText`; `HELP SHEETS` and `HELP UTILITY` are unchanged.
+
+The reverse fault is fixed too: the interpreter's help listed `PLOTSHEETS`,
+which `katana_cli` refuses (it paints, and only the window can), so
+`katana_cli -h` and `katana_mcp`'s `katana_help` advertised a verb their
+reader could not run. The line now says it is the window's, and names
+`--plot-sheets` for a headless run.
+
+Help > Keyboard Shortcuts (`helpKeyboardShortcuts`, `keyboardShortcutsDialog`,
+`src/katana_qt/keyboard_shortcuts_dialog.hpp`) is a searchable table of every
+key the window answers to - the key, the command, the menu it is under and its
+status tip (`MainWindow::shortcutRows`) - with any key that
+`MainWindow::shortcutClashes` finds reaching two commands marked "(clash)" and
+listed under the table. The keys are the ones `--check-shortcuts` counts, so
+the two cannot disagree.
+
+Tested in `tests/qt_widgets/test_command_reference.cpp` and, through the Help
+menu, by `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`.
+
+## File > Drawing Summary
+
+The window showed only pieces of the drawing's state - the title, the current
+layer, the current style - and nowhere the alignment count, the undo depth,
+the full project path or the customisation it was drawn with; the
+customisation's coverage was logged once, at a load, and scrolled away. File >
+Drawing Summary (`fileDrawingSummary`, `drawingSummaryDialog`,
+`src/katana_qt/customisation/drawing_summary_dialog.hpp`) keeps it all in view,
+non-modal and kept, following the Document through a `DocumentWatcher`
+(refreshed once a turn of the event loop however many commands ran):
+
+- the project's full path and whether it has unsaved changes;
+- entities, layers, alignments and sheets;
+- the current layer, style, annotation scale and coordinate system;
+- the selection;
+- the undo and redo depth with the next step each way;
+- the customisation, in the words a bare `CUSTOMISE` prints
+  (`cad::customisationSummary`): the loaded files in load order, the files the
+  project was drawn with that are not loaded, the counts and this drawing's
+  coverage; and the names the drawing's styles give that no loaded library
+  defines (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
+  and Linetypes, opens Format > Styles and Linetypes on its Styles tab with the
+  Missing chip and the name in the search, reached by the object names the
+  manager's header lists (`MainWindow::showMissingInStyles`), so its styles
+  are what the manager shows.
+
+It changes nothing. Copy as JSON runs `STATUS JSON` through the one executor
+and copies the reply - exactly what `katana_status` and `katana://status` give
+(`docs/cad.md`, "STATUS") - and Load Customisation is the Format menu's item.
+The status bar has a permanent `statusSelectionCount` label, "3 selected / 120
+entities", refreshed with the panels.
+
+Tested in `tests/qt_widgets/customisation/test_drawing_summary_dialog.cpp`
+and, typed and through the menu, by
+`qt_drawing_summary_and_status_json_describe_the_drawing_headless`, which
+leaves a style's linestyle undefined by replacing the library that defined it
+and follows the name into the style manager.
+
+## Plot to PDF and view images
+
+File > Plot to PDF was a modal box that never set the plot's colour mode or
+line weight scale - `--plot` took both - and nothing an agent driving the
+window could run plotted the drawing; nothing saved or copied a picture of a
+view at all but `--screenshot`, which grabs the whole window. Both are verbs
+now, and the menu items write their lines:
+
+- **`PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N]
+  [dpi=N] [style=colour|grey|mono] [lineweight=F] [margin=MM]`**
+  (`src/katana_qt/plotting/plot_drawing_dialog.hpp`): the drawing on one
+  sheet as the active plan view shows it, through the `plotDrawingToPdf`
+  that `--plot` uses; what is not given is `PlotSettings`' default. It logs
+  the sentence it always did and a record, `file="..." paper= orientation=
+  scale= dpi= style= lineweight=`, with the scale a fitted plot chose. File >
+  Plot to PDF (`filePlot`) opens `plotDrawingDialog`, non-modal and kept:
+  every field has an object name, the colour mode
+  (`plotDrawingColourMode`, Colour / Greyscale / Monochrome) and the line
+  weight scale (`plotDrawingLineWeightScale`, 0.10 to 5.00) among them;
+  `plotDrawingCommand` shows the line and Plot runs it through the one
+  executor. The file is a field, so a headless run fills it; Browse opens a
+  file dialog, except headless.
+- **`SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N]
+  [scale=F] [bg=theme|white|none] [view=plan|3d]`**
+  (`src/katana_qt/plotting/view_image_export.hpp`): a picture of the plan or
+  3D view. The plan view is painted afresh at the size asked by the plan
+  painter (`ViewportWidget::renderToImage`, read-only: the view's own kept
+  drawing is untouched), at the scale that fits what the view shows, without
+  the grid, the snap marker or a tool's preview. On `bg=white` it is drawn
+  as a plot draws it - white pens black, line weights in millimetres - since
+  the screen's white pens would vanish into the ground; `bg=none` is
+  transparent, a PNG's or the clipboard's only (a JPEG has no alpha, and the
+  TIFF the plot's writer makes is RGB). A 3D view is grabbed as drawn and
+  scaled. A side is 1 to 10 000 pixels (an A0 sheet at 300 dpi is 9933).
+  File > Export View as Image (`fileExportViewImage`, `viewImageDialog`)
+  writes the line; Edit > Copy View as Image (`editCopyViewImage`) runs
+  `SNAPSHOT CLIPBOARD`. The record is `file="..."` or `clipboard=yes`, then
+  `view= width= height=`.
+
+Both are the window's verbs, beside `PLOTSHEETS`: the painter is Qt's, which
+`katana_cli` and `katana_mcp` do not have. A headless run has `--plot` with
+the same settings, and an agent driving the window types the lines (the
+Command Reference's Window section lists them).
+
+Tested in `tests/qt_widgets/plotting/test_plot_drawing_dialog.cpp` and
+`tests/qt_widgets/plotting/test_view_image_export.cpp` (the grammars, the
+dialogs' lines, the sizes, each file format, and the plan painted into an
+image), by `qt_plot_and_view_image_dialogs_run_their_verbs_headless` (both
+dialogs driven by object name, Copy View as Image, a typed transparent PNG,
+the 3D view grabbed; the dialog's image size read from the PNG's header), and
+by `qt_plot_headless`, whose `PLOT` script prints the same sheet in each
+style: the colour plot has coloured pixels and the greyscale and monochrome
+ones none, the monochrome one fewer mid greys than the greyscale one, and
+line weights times 4 and times 0.25 more and less ink than times 1.
+
+## Undo and Redo lists
+
+Edit > Undo and Redo move one step a click; `UNDO n` and `REDO n` have always
+moved several, but only for someone who typed them. The Edit toolbar's Undo
+and Redo are now split buttons (`editUndoButton`, `editRedoButton`): the
+button is one step, as before, and the arrow drops down the history
+(`editUndoMenu`, `editRedoMenu`) from `CommandStack::undoNames` and
+`CommandStack::redoNames`, the next step first. The k-th entry (`undoStepK`,
+`redoStepK`, so `--trigger undoStep3` reaches it) runs `UNDO k` or `REDO k`
+through the one executor: one line in the log, and what it did said as the
+typed line says it. The lists show 25 steps each way, with a last line saying
+how many more there are and that `UNDO n` reaches them; they are refilled with
+the panels. The names are the commands' own (`CREATE_POINT`), the words the
+Undo item and the Drawing Summary use. Tested in
+`tests/commands/test_command_stack_names.cpp` and by
+`qt_the_undo_and_redo_lists_step_through_the_history_headless`. The optional
+Undo History dock of the plan, with the save point marked, is not built.
+
 ## GIS > Online Data: a workbench of its own
 
 The online import (`docs/gis_online.md`) is `OnlineDataWorkbench`
@@ -755,8 +1047,8 @@ the fields, tested without a window - writes the `UTILITY` line (a path with
 blanks quoted, a blank option left out, a file field left empty or a number
 that does not read refused with the field named, and nothing run; a file that
 cannot be read is the verb's refusal, by its path, once the line has run); `utilityCommand`
-shows that line as it is edited; Run hands it back to the window
-(`UtilityServices::runCommand`), so it is echoed, kept in the history and
+shows that line as it is edited; Run hands it to the window's one executor
+(`UtilityServices::run`, "One executor: the command runner"), so it is echoed, kept in the history and
 undone exactly as a typed line - but never offered to a running tool first,
 since the dialog's line is never a text - and the reply the workbench got for it comes
 back into `utilityOutput`, with Copy and Save As beside it. The reply stays

@@ -22,7 +22,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/cad/document.hpp"
-#include "katana/entity/model.hpp"
+#include "katana/cad/document_status.hpp"
 
 namespace katana::app::mcp {
 
@@ -283,53 +283,12 @@ std::string singleLine(const std::string& text, const char* what)
 
 // ---- the session's state ------------------------------------------------------------
 
+// The drawing's state, as STATUS JSON gives it (cad/document_status.hpp): one
+// definition for this server, katana_cli and the window.
 Json statusOf(const Session& session)
 {
-    const katana::cad::Document& document = session.document();
-    const katana::entity::Model& model = document.model();
-    Json project = nullptr;
-    if (const auto directory = document.projectDirectory()) {
-        const std::u8string text = directory->u8string();
-        project = std::string(reinterpret_cast<const char*>(text.data()), text.size());
-    }
-    return Json{
-        {"project", project},
-        {"modified", document.isModified()},
-        {"entities", model.entities.size()},
-        {"layers", model.layers.size()},
-        {"currentLayer", document.currentLayer()},
-        {"currentStyle", document.currentStyle()},
-        {"selected", document.selection().size()},
-        {"alignments", model.alignments.size()},
-        {"undoSteps", document.history().undoCount()},
-        {"redoSteps", document.history().redoCount()},
-        {"styleLibraryDefinitions", document.styleLibrary().size()},
-        {"surveyCodeRules", document.surveyMap().size()},
-    };
-}
-
-std::string describeStatus(const Json& status)
-{
-    std::ostringstream text;
-    text << "Project: "
-         << (status["project"].is_null() ? std::string("(none - not saved to a project yet)")
-                                         : status["project"].get<std::string>())
-         << (status["modified"].get<bool>() ? "  [unsaved changes]" : "") << '\n'
-         << "Entities: " << status["entities"].get<std::size_t>()
-         << "  Layers: " << status["layers"].get<std::size_t>()
-         << "  Alignments: " << status["alignments"].get<std::size_t>() << '\n'
-         << "Current layer: " << status["currentLayer"].get<std::string>();
-    if (const std::string style = status["currentStyle"].get<std::string>(); !style.empty()) {
-        text << "  Current style: " << style;
-    }
-    text << '\n'
-         << "Selected: " << status["selected"].get<std::size_t>()
-         << "  Undo steps: " << status["undoSteps"].get<std::size_t>()
-         << "  Redo steps: " << status["redoSteps"].get<std::size_t>() << '\n'
-         << "Customisation: " << status["styleLibraryDefinitions"].get<std::size_t>()
-         << " linestyles and symbols, " << status["surveyCodeRules"].get<std::size_t>()
-         << " survey code rules";
-    return text.str();
+    return Json::parse(
+        katana::cad::statusJson(katana::cad::documentStatus(session.document())));
 }
 
 // ---- tools --------------------------------------------------------------------------
@@ -494,8 +453,10 @@ const std::vector<Tool>& tools()
             "layer and style, the selection and the undo history.",
             objectSchema(Json::object()), hints(true, false, true),
             [](Session& session, const Json&) {
-                const Json status = statusOf(session);
-                return ToolReply{describeStatus(status), status};
+                const katana::cad::DocumentStatus status =
+                    katana::cad::documentStatus(session.document());
+                return ToolReply{katana::cad::formatStatus(status),
+                                 Json::parse(katana::cad::statusJson(status))};
             }});
 
         list.push_back(Tool{
@@ -568,14 +529,18 @@ const std::vector<Tool>& tools()
         list.push_back(Tool{
             "katana_import", "Import a file",
             "Import a file into the drawing: DXF always; with the GIS module also shapefiles, "
-            "GeoJSON, GeoPackage and other vector formats (as entities), and rasters and point "
-            "clouds (as reference layers). local: true imports vector data in the drawing's own "
-            "coordinates rather than reprojecting it.",
+            "GeoJSON, GeoPackage, .12da archives and other vector formats (as entities), and "
+            "rasters and point clouds (as reference layers). local: true moves what a DXF, "
+            "vector file or .12da archive holds as one piece, so that its lower-left corner sits "
+            "at 0,0 instead of at its survey coordinates.",
             objectSchema(
                 Json{{"path", {{"type", "string"}, {"description", "The file to import."}}},
                      {"local",
                       {{"type", "boolean"},
-                       {"description", "Import vector data untransformed (LOCAL)."}}}},
+                       {"description",
+                        "Move the imported data as one piece so its lower-left corner sits at "
+                        "0,0, its shape and dimensions unchanged (IMPORT ... LOCAL). Refused for "
+                        "rasters and point clouds, which are drawn at their own coordinates."}}}},
                 {"path"}),
             hints(false, false, false), [](Session& session, const Json& arguments) {
                 std::string line = "IMPORT " + quoted(requiredString(arguments, "path"));

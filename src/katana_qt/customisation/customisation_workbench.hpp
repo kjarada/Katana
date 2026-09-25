@@ -40,6 +40,7 @@
 #include <QPointer>
 #include <QString>
 
+#include "command_runner.hpp"
 #include "icons.hpp"
 #include "katana/cad/linework.hpp"
 #include "katana/entity/entity.hpp"
@@ -84,6 +85,9 @@ struct CustomisationServices {
     QAction* layers = nullptr;
     QAction* loadCustomisation = nullptr;
     QAction* replaceCustomisation = nullptr;
+    // The window's one executor, handed on to every manager
+    // (CustomisationContext::run). May be empty (a test).
+    CommandRunner run;
 };
 
 class CustomisationWorkbench {

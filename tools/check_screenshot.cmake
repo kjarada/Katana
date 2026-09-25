@@ -128,13 +128,21 @@ if(DEFINED SURVEY_DIALOG)
     endif()
 endif()
 
+# -DSCRIPT=<file.kcs> runs that script (--script), a step before the DRIVE
+# steps, so they can list what it made; a script that stops at a refused line
+# fails the run, which -DREFUSED checks.
+if(DEFINED SCRIPT)
+    list(APPEND extra --script "${SCRIPT}")
+endif()
+
 # -DDRIVE=<step>[|<step>...] drives dialogs and docks step by step, in
 # order, for a paged dialog that has to be filled between presses (the import
 # wizard) or a run that uses several: "@NAME" opens the dialog of action NAME
 # (--dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
 # "%NAME" makes the window's own dock or toolbar NAME the target (--panel),
 # ">TEXT" runs TEXT on the command line (--command) and ">" alone is Enter on
-# an empty command line (--enter), "?WIDGET" prints what the target's WIDGET
+# an empty command line (--enter), "<TEXT" runs TEXT through the window's one
+# executor as a dialog does (--run-line), "?WIDGET" prints what the target's WIDGET
 # shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
 # (--trigger), "!BUTTON" presses a button, and anything else is a FIELD=TEXT
 # fill. '|' between steps, for FILL's reason.
@@ -155,6 +163,8 @@ if(DEFINED DRIVE)
             list(APPEND extra --enter)
         elseif(_sigil STREQUAL ">")
             list(APPEND extra --command "${_rest}")
+        elseif(_sigil STREQUAL "<")
+            list(APPEND extra --run-line "${_rest}")
         elseif(_sigil STREQUAL "?")
             list(APPEND extra --report "${_rest}")
         elseif(_sigil STREQUAL "*")
@@ -182,6 +192,12 @@ if(DEFINED COMPARE)
     foreach(_file IN LISTS _written)
         file(REMOVE "${_file}")
     endforeach()
+endif()
+
+if(DEFINED IMAGE_SIZE)
+    string(REPLACE "|" ";" _image "${IMAGE_SIZE}")
+    list(GET _image 0 _image_file)
+    file(REMOVE "${_image_file}")
 endif()
 
 execute_process(
@@ -251,6 +267,33 @@ if(DEFINED FORBID)
     endforeach()
     if(_said MATCHES "${FORBID}")
         message(FATAL_ERROR "the run reported /${FORBID}/ (\"${CMAKE_MATCH_0}\"), its own paths aside:\n${_said}")
+    endif()
+endif()
+
+# -DIMAGE_SIZE=<file>|<width>|<height>: the run must have written a PNG of
+# exactly that many pixels (a SNAPSHOT's). It is removed first, so one left by
+# an earlier run cannot pass for this one - see the removal above the run. The
+# size is read from the PNG's own header: the width and height, big-endian,
+# at bytes 16 to 23.
+if(DEFINED IMAGE_SIZE)
+    string(REPLACE "|" ";" _image "${IMAGE_SIZE}")
+    list(GET _image 0 _image_file)
+    list(GET _image 1 _image_width)
+    list(GET _image 2 _image_height)
+    if(NOT EXISTS "${_image_file}")
+        message(FATAL_ERROR "the run wrote no ${_image_file}\n${out}\n${err}")
+    endif()
+    file(READ "${_image_file}" _image_head LIMIT 4 HEX)
+    if(NOT _image_head STREQUAL "89504e47")
+        message(FATAL_ERROR "${_image_file} is not a PNG (first bytes ${_image_head})")
+    endif()
+    file(READ "${_image_file}" _image_ihdr OFFSET 16 LIMIT 8 HEX)
+    string(SUBSTRING "${_image_ihdr}" 0 8 _image_w)
+    string(SUBSTRING "${_image_ihdr}" 8 8 _image_h)
+    math(EXPR _image_w "0x${_image_w}")
+    math(EXPR _image_h "0x${_image_h}")
+    if(NOT _image_w EQUAL _image_width OR NOT _image_h EQUAL _image_height)
+        message(FATAL_ERROR "${_image_file} is ${_image_w} x ${_image_h}, not ${_image_width} x ${_image_height}")
     endif()
 endif()
 

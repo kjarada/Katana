@@ -108,3 +108,63 @@ TEST(Session, ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes)
     EXPECT_TRUE(refused.err.starts_with("error: ")) << refused.err;
     EXPECT_EQ(refused.err.find('\n'), refused.err.size() - 1) << refused.err;
 }
+
+TEST(Session, InfoWithAnEntityIdDescribesTheEntityInEveryBuild)
+{
+    // With the GIS module every INFO was once read as INFO <file>, before the
+    // interpreter could see it, so INFO 1 - and katana_describe_entity, which
+    // sends it - answered that the file did not exist. A 10 x 5 rectangle:
+    // perimeter 30, area 50.
+    Session session(nullptr);
+    ASSERT_TRUE(run(session, "RECT 0,0 10,5").ok);
+    const Printed info = run(session, "INFO 1");
+    EXPECT_TRUE(info.ok) << info.err;
+    EXPECT_EQ(info.out, "1  Polyline  layer=0  vertices=4  closed  length=30  area=50\n");
+    EXPECT_EQ(info.err, "");
+    EXPECT_EQ(run(session, "info #1").out, info.out);
+
+    const Printed missing = run(session, "INFO 2");
+    EXPECT_FALSE(missing.ok);
+    EXPECT_EQ(missing.err, "error: NotFound: entity does not exist [2]\n");
+}
+
+#if defined(KATANA_TEST_WITH_INTEROP)
+TEST(Session, InfoOfAFileNamedLikeAnIdStillReadsTheFile)
+{
+    // The id is the interpreter's only when no file of that name exists: a
+    // file called 12 beside the session is described (and, being no GIS
+    // file, refused as one), never looked up as entity 12.
+    const ScratchDirectory scratch("info-file");
+    (void)scratch.file("12", "not a GIS file\n");
+    const std::filesystem::path before = std::filesystem::current_path();
+    std::filesystem::current_path(scratch.path);
+    Session session(nullptr);
+    const Printed info = run(session, "INFO 12");
+    std::filesystem::current_path(before);
+    EXPECT_FALSE(info.ok);
+    EXPECT_FALSE(contains(info.err, "entity does not exist")) << info.err;
+    EXPECT_TRUE(info.err.starts_with("error: ")) << info.err;
+}
+
+TEST(Session, AQuotedImportEndingInLocalMovesTheDataToTheOrigin)
+{
+    // katana_import sends IMPORT "path" LOCAL. LOCAL was taken off and the
+    // quotes left on, so every such import looked for a file named with its
+    // quotes. The folder has a blank in its name, so the quotes are needed.
+    // samples/gis/parcels.geojson spans (180, 0) to (365, 165), so moved as
+    // one piece to put its lower-left corner at 0,0 it spans (0, 0) to
+    // (185, 165).
+    const ScratchDirectory scratch("import local");
+    const std::filesystem::path copy = scratch.path / "site parcels.geojson";
+    std::filesystem::copy_file(std::filesystem::path(KATANA_GIS_SAMPLES) / "parcels.geojson", copy);
+    Session session(nullptr);
+    const Printed imported = run(session, "IMPORT \"" + copy.generic_string() + "\" LOCAL");
+    EXPECT_TRUE(imported.ok) << imported.err;
+    EXPECT_TRUE(contains(imported.out, "extent 0,0 to 185,165")) << imported.out;
+    const auto bounds = session.document().model().entities.bounds();
+    EXPECT_DOUBLE_EQ(bounds.min.x, 0.0);
+    EXPECT_DOUBLE_EQ(bounds.min.y, 0.0);
+    EXPECT_DOUBLE_EQ(bounds.max.x, 185.0);
+    EXPECT_DOUBLE_EQ(bounds.max.y, 165.0);
+}
+#endif

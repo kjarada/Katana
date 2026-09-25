@@ -206,6 +206,38 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.code_applies_and_reports PROPERTIES PASS_REGULAR_EXPRESSION
         "1 entity carries a code in \"code\": 1 matched, 0 fallback-only.*Layers created: KATANA TEST${_eol}Styles created: cross${_eol}.*  KT01: 1 entity, prefix, matched; layer 0 -> KATANA TEST; style cross \\(created\\); 1 changed${_eol}Applied as one command.*1 entity carries a code in \"code\", 1 distinct code${_eol}  KT01: 1, prefix, matched, model KATANA TEST")
 
+    # CUSTOMISE alone names the files loaded, in load order - "is my code
+    # file loaded?" is what a count could not answer - after the counts. The
+    # built-in libraries may come first where this checkout has them, so the
+    # line after the heading is not pinned.
+    add_test(NAME cli.customise_alone_names_the_files_loaded
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "${_replace}" -c "CUSTOMISE")
+    set_tests_properties(cli.customise_alone_names_the_files_loaded PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "3 survey code rules over 2 distinct codes${_eol}Loaded files, in load order:${_eol}.*  \"cli-codes\\.mapfile\", a survey code file")
+    # INFO with an entity's id describes the entity, as the interpreter's
+    # INFO does, in a build with the GIS module too: there every INFO was
+    # once read as INFO <file>. A 10 x 5 rectangle: perimeter 30, area 50.
+    add_test(NAME cli.info_with_an_id_describes_the_entity
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "RECT 0,0 10,5" -c "INFO 1")
+    set_tests_properties(cli.info_with_an_id_describes_the_entity PROPERTIES
+        PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
+        FAIL_REGULAR_EXPRESSION "error")
+
+    # STATUS and STATUS JSON: the record katana_mcp's katana_status gives,
+    # here as a verb (cad/document_status.hpp). One rectangle, selected, one
+    # undo step.
+    add_test(NAME cli.status_reports_the_drawing_in_text_and_json
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "RECT 0,0 10,5" -c "SELECT ALL" -c STATUS
+                -c "STATUS JSON")
+    set_tests_properties(cli.status_reports_the_drawing_in_text_and_json PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "Entities: 1  Layers: 1  Alignments: 0${_eol}Current layer: 0${_eol}Selected: 1  Undo steps: 1  Redo steps: 0${_eol}.*  \"entities\": 1,${_eol}.*  \"selected\": 1,${_eol}.*  \"undoSteps\": 1${_eol}}"
+        FAIL_REGULAR_EXPRESSION "error")
+
     # The help names the customisation's files by what they are, in the words
     # the window uses, and no product: what STYLE's linetype takes and what
     # CUSTOMISE loads.
@@ -417,4 +449,15 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
         PASS_REGULAR_EXPRESSION "converted survey_scan\\.las.*Point cloud: 40,000 points.*COPC: yes")
     set_tests_properties(cli.local_is_refused_for_reference_data PROPERTIES
         PASS_REGULAR_EXPRESSION "LOCAL is not supported for rasters and point clouds")
+    # A QUOTED path and LOCAL, as katana_import sends them: LOCAL was taken off
+    # and the quotes left on, so the file was looked for by its quoted name.
+    # parcels.geojson spans (180, 0) to (365, 165) (its coordinates, by hand),
+    # so moved to put that lower-left corner at 0,0 it spans (0, 0) to
+    # (185, 165).
+    add_test(NAME cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "IMPORT \"${_gis}/parcels.geojson\" LOCAL")
+    set_tests_properties(cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin PROPERTIES
+        PASS_REGULAR_EXPRESSION "imported [0-9]+ entities from parcels\\.geojson.*extent 0,0 to 185,165"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()

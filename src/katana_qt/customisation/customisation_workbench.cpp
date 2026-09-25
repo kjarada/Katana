@@ -164,6 +164,7 @@ CustomisationContext CustomisationWorkbench::context()
         selectAndShow(ids);
     };
     context.lineworkCodes = &lineworkCodes_;
+    context.run = services_.run;
     return context;
 }
 

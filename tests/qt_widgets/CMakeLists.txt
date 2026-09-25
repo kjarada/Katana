@@ -83,6 +83,13 @@ add_executable(katana_qt_widget_tests
     # File > Project Coordinate System (test_project_crs_dialog).
     ${_qt_src}/project_crs_dialog.cpp
     test_project_crs_dialog.cpp
+    # File > Run Script and the SCRIPT verb's reading and running (test_script_runner).
+    ${_qt_src}/script_runner.cpp
+    test_script_runner.cpp
+    # Help > Command Reference and Keyboard Shortcuts (test_command_reference).
+    ${_qt_src}/command_reference_dialog.cpp
+    ${_qt_src}/keyboard_shortcuts_dialog.cpp
+    test_command_reference.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}
@@ -103,7 +110,8 @@ target_link_libraries(katana_qt_widget_tests PRIVATE
     Qt6::Widgets Qt6::PrintSupport GTest::gtest)
 target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
-    KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data")
+    KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data"
+    KATANA_QT_WIDGET_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
 katana_target_defaults(katana_qt_widget_tests)
 # The 3D view hosts the GPU renderer where it is built, so the widget tests
 # compile what the application does; offscreen, the rules choose software.

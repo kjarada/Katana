@@ -9,19 +9,24 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "customisation/drawing_summary_dialog.hpp"
 #include "format.hpp"
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
 #include "plotting/plot_dialog.hpp"
+#include "plotting/plot_drawing_dialog.hpp"
+#include "plotting/view_image_export.hpp"
 #include "plotting/sheet_arrange.hpp"
 #include "plotting/sheet_checks.hpp"
 #include "plotting/sheet_tables.hpp"
 #include "project_crs_dialog.hpp"
+#include "render_view_widget.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
 #include <QAction>
+#include <QAbstractButton>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
@@ -38,22 +43,28 @@
 
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileInfo>
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QInputDialog>
 #include <QPixmap>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProgressDialog>
 #include <QPushButton>
+#include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QTabWidget>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTimer>
@@ -67,6 +78,7 @@
 #include <cstdio>
 #include <map>
 #include <set>
+#include <utility>
 
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/generators.hpp"
@@ -77,6 +89,7 @@
 #include "katana/dxf/reader.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
+#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/archive12d/domain.hpp"
@@ -344,6 +357,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
+    // CODE and MAPFILE CHECK name colours by the standard table, which is
+    // archive12d's and so out of the interpreter's reach (survey_code_verbs.hpp).
+    interpreter_.setColourLookup(
+        [](std::string_view name) { return katana::archive12d::standardColour(name); });
     // GENERATE on the command line lays out what Generate Sheets would: what
     // the plan view draws, and the visible surfaces for the sections.
     interpreter_.setSheetContext([this] {
@@ -471,22 +488,44 @@ void MainWindow::buildActions()
     // ---- File ------------------------------------------------------------------------
     QAction* newAction = makeAction(Icon::New, "&New", "Start a new, empty drawing",
                                     QKeySequence::New, "fileNew");
+    // Every one named, as --action and --trigger find a menu item by its
+    // object name: these six had none, so an agent driving the window could
+    // not reach them.
     QAction* openAction = makeAction(Icon::Open, "&Open Project...", "Open a Katana project directory",
-                                     QKeySequence::Open);
+                                     QKeySequence::Open, "fileOpen");
     QAction* saveAction =
-        makeAction(Icon::Save, "&Save", "Save the project", QKeySequence::Save);
-    QAction* saveAsAction = makeAction(Icon::SaveAs, "Save &As...",
-                                       "Save the project under another name", QKeySequence::SaveAs);
+        makeAction(Icon::Save, "&Save", "Save the project", QKeySequence::Save, "fileSave");
+    QAction* saveAsAction =
+        makeAction(Icon::SaveAs, "Save &As...", "Save the project under another name",
+                   QKeySequence::SaveAs, "fileSaveAs");
     QAction* importAction =
         makeAction(Icon::Import, "&Import...",
                    "Import a drawing, an image or a point cloud (DXF, SHP, GeoTIFF, LAS ...)",
-                   QKeySequence(Qt::CTRL | Qt::Key_I));
+                   QKeySequence(Qt::CTRL | Qt::Key_I), "fileImport");
     QAction* exportAction = makeAction(Icon::Export, "Export &Vector...",
                                        "Export the drawing (DXF, GeoPackage, GeoJSON, SHP ...)",
-                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+                                       QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E),
+                                       "fileExportVector");
     QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
                                      "Plot the drawing to a sheet at a standard scale",
-                                     QKeySequence::Print);
+                                     QKeySequence::Print, "filePlot");
+    plotAction->setData("plotDrawingDialog");
+    // A picture of a view, and the same on the clipboard from Edit
+    // (plotting/view_image_export.hpp): both are the SNAPSHOT verb.
+    QAction* exportImageAction =
+        makeAction(Icon::Export, "Export View as I&mage...",
+                   "Save the plan or 3D view as a PNG, JPEG or TIFF, at the view's size or larger",
+                   QKeySequence(), "fileExportViewImage");
+    exportImageAction->setData("viewImageDialog");
+    connect(exportImageAction, &QAction::triggered, this, [this] { showViewImageExport(); });
+    // A katana_cli script run in the window, a line at a time through the
+    // one executor (script_runner.hpp); the dialog shows what the file holds
+    // and runs the SCRIPT line.
+    QAction* runScriptAction =
+        makeAction(Icon::CommandLine, "&Run Script...",
+                   "Run a script of commands (.kcs), a line at a time, as katana_cli runs it",
+                   QKeySequence(), "fileRunScript");
+    connect(runScriptAction, &QAction::triggered, this, [this] { showRunScript(); });
     connect(newAction, &QAction::triggered, this, [this] { newDocument(); });
     connect(openAction, &QAction::triggered, this, [this] { openDocument(); });
     connect(saveAction, &QAction::triggered, this, [this] { saveDocument(); });
@@ -571,7 +610,12 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
-    fileMenu->addActions({importAction, exportAction});
+    fileMenu->addActions({importAction, exportAction, exportImageAction});
+    fileMenu->addSeparator();
+    fileMenu->addAction(runScriptAction);
+    recentScriptsMenu_ = fileMenu->addMenu("Rec&ent Scripts");
+    recentScriptsMenu_->setObjectName("fileRecentScripts");
+    refreshRecentScripts();
     fileMenu->addSeparator();
     fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
     fileMenu->addSeparator();
@@ -584,6 +628,16 @@ void MainWindow::buildActions()
     connect(crsAction, &QAction::triggered, this,
             [this] { (void)chooseProjectCrs(this, document_); });
     fileMenu->addAction(crsAction);
+    // The drawing at a glance, kept live beside it: what STATUS reports and
+    // the customisation report (customisation/drawing_summary_dialog.hpp).
+    QAction* summaryAction =
+        makeAction(Icon::Properties, "Drawing S&ummary...",
+                   "The drawing at a glance: project, contents, what is current, the history and "
+                   "the customisation loaded, and what it leaves undefined",
+                   QKeySequence(), "fileDrawingSummary");
+    summaryAction->setData("drawingSummaryDialog");
+    connect(summaryAction, &QAction::triggered, this, [this] { showDrawingSummary(); });
+    fileMenu->addAction(summaryAction);
     fileMenu->addSeparator();
     QAction* quitAction =
         fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
@@ -628,6 +682,11 @@ void MainWindow::buildActions()
                                                   [this] { views_->cancel(); });
     deselectAction->setObjectName("editDeselect");
     editMenu->addAction(eraseAction);
+    QAction* copyImageAction = editMenu->addAction(
+        "Copy &View as Image", this, [this] { (void)runVerbLine("SNAPSHOT CLIPBOARD"); });
+    copyImageAction->setObjectName("editCopyViewImage");
+    copyImageAction->setStatusTip(
+        "Copy the plan view, as it is on screen, to the clipboard as an image (SNAPSHOT CLIPBOARD)");
     editMenu->addSeparator();
     QAction* attributesAction =
         editMenu->addAction("A&ttributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
@@ -669,7 +728,26 @@ void MainWindow::buildActions()
     });
 
     QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
-    editBar->addActions({undoAction_, redoAction_});
+    // Undo and Redo, each with its history dropped down beside it (the
+    // button is one step; the k-th entry of the list is UNDO k or REDO k,
+    // run through the one executor as one line). The menus are refilled
+    // with the panels (refreshHistoryMenus).
+    const auto historyButton = [this, editBar](QAction* action, const char* name,
+                                               const char* menuName) {
+        auto* button = new QToolButton(editBar);
+        button->setObjectName(name);
+        button->setDefaultAction(action);
+        button->setPopupMode(QToolButton::MenuButtonPopup);
+        button->setAutoRaise(true);
+        button->setIconSize(editBar->iconSize());
+        auto* menu = new QMenu(button);
+        menu->setObjectName(menuName);
+        button->setMenu(menu);
+        editBar->addWidget(button);
+        return menu;
+    };
+    undoHistory_ = historyButton(undoAction_, "editUndoButton", "editUndoMenu");
+    redoHistory_ = historyButton(redoAction_, "editRedoButton", "editRedoMenu");
     editBar->addSeparator();
     editBar->addActions({selectAllAction, eraseAction});
 
@@ -824,13 +902,27 @@ void MainWindow::buildActions()
     buildGisActions(*gisMenu, exportAction);
 
     // ---- Help ------------------------------------------------------------------------
+    // The reference and the shortcuts are dialogs of their own, non-modal and
+    // kept (command_reference_dialog.hpp, keyboard_shortcuts_dialog.hpp);
+    // each action's data names its dialog, as --dialog finds it.
     QAction* reference = makeAction(Icon::Help, "&Command Reference",
-                                    "List every command the command line accepts",
+                                    "Every command the command line accepts, searchable",
                                     QKeySequence::HelpContents);
+    reference->setData("commandReferenceDialog");
+    connect(reference, &QAction::triggered, this, [this] { showCommandReference({}); });
+    QAction* sheetCommands =
+        makeAction(Icon::Help, "&Sheets and Plotting Commands",
+                   "The sheet verbs and every option they take (HELP SHEETS)", QKeySequence(),
+                   "helpSheetCommands");
+    sheetCommands->setData("commandReferenceDialog");
+    connect(sheetCommands, &QAction::triggered, this, [this] { showCommandReference("Sheets"); });
+    QAction* shortcuts =
+        makeAction(Icon::Help, "&Keyboard Shortcuts...",
+                   "Every key the window answers to, where its command is and what it does",
+                   QKeySequence(), "helpKeyboardShortcuts");
+    shortcuts->setData("keyboardShortcutsDialog");
+    connect(shortcuts, &QAction::triggered, this, [this] { showKeyboardShortcuts(); });
     QAction* about = makeAction(Icon::About, "&About Katana", "Version and build information");
-    connect(reference, &QAction::triggered, this, [this] {
-        logMessage(QString::fromStdString(cad::CommandInterpreter::helpText()));
-    });
     connect(about, &QAction::triggered, this, [this] {
         QMessageBox box(this);
         box.setWindowTitle("About Katana");
@@ -857,7 +949,9 @@ void MainWindow::buildActions()
     });
     reference->setObjectName("helpCommandReference");
     about->setObjectName("helpAbout");
-    helpMenu->addActions({reference, about});
+    helpMenu->addActions({reference, sheetCommands, shortcuts});
+    helpMenu->addSeparator();
+    helpMenu->addAction(about);
 }
 
 // Every GDAL and PDAL capability the program has, in one menu, grouped by the
@@ -963,6 +1057,7 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     services.replaceCustomisation = replaceCustomisationAction;
     services.applySurveyCodes = codeAction;
     services.codeManager = format_->codeManagerAction();
+    services.run = commandRunner();
     // A second row: the drawing's own toolbars (File to Format) fill the
     // first, and in one row the Survey, Terrain and GIS bars were squeezed
     // to a button each behind their overflow arrows.
@@ -986,15 +1081,11 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
         historyCursor_ = static_cast<int>(interpreter_.history().size());
         return reply;
     };
-    utilities.runCommand = [this](const QString& line) {
-        // Echoed as a typed line is, and run as runCommandLine runs a typed
-        // UTILITY line - but never handed to a running tool first: a tool
-        // waiting for a text's string would take any typed line for it, and
-        // the dialog's line is never a text. What was being typed on the
-        // command line is left as it was.
-        commandLog_->appendPlainText("> " + line);
-        (void)utilities_->runLine(line);
-    };
+    // The window's one executor: echoed as a typed line is and run as a
+    // typed UTILITY line is - but never handed to a running tool first: a
+    // tool waiting for a text's string would take any typed line for it, and
+    // the dialog's line is never a text.
+    utilities.run = commandRunner();
     utilities_ = std::make_unique<UtilityWorkbench>(*this, std::move(utilities), surveyMenu);
 }
 
@@ -1013,11 +1104,13 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
     services.layers = layersAction;
     services.loadCustomisation = customiseAction;
     services.replaceCustomisation = replaceCustomisationAction;
+    services.run = commandRunner();
     QToolBar* formatBar = makeToolBar("Format", Qt::TopToolBarArea);
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
                                                        *formatBar);
     annotation_ = std::make_unique<AnnotationWorkbench>(*this, document_, formatMenu, *formatBar);
+    annotation_->setCommandRunner(commandRunner());
 }
 
 void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu)
@@ -1168,6 +1261,128 @@ QStringList MainWindow::shortcutClashes(int* sequences) const
         }
     }
     return clashes;
+}
+
+std::vector<ShortcutRow> MainWindow::shortcutRows() const
+{
+    // The menus first, in their order, each key with the menu path it is
+    // found under; then any action no menu shows, and the QShortcuts - the
+    // keys shortcutClashes counts, so the table and the check agree.
+    std::vector<ShortcutRow> rows;
+    std::set<const QAction*> inMenus;
+    const auto add = [&rows](const QAction& action, const QString& menu) {
+        for (const QKeySequence& key : action.shortcuts()) {
+            if (!key.isEmpty()) {
+                rows.push_back({key.toString(QKeySequence::PortableText),
+                                QString(action.text()).remove('&').remove("..."), menu,
+                                action.statusTip()});
+            }
+        }
+    };
+    const std::function<void(const QMenu&, const QString&)> walk = [&](const QMenu& menu,
+                                                                       const QString& path) {
+        for (const QAction* item : menu.actions()) {
+            if (item->isSeparator()) {
+                continue;
+            }
+            if (const QMenu* sub = item->menu()) {
+                walk(*sub, path + " > " + QString(item->text()).remove('&'));
+                continue;
+            }
+            inMenus.insert(item);
+            add(*item, path);
+        }
+    };
+    for (const QAction* top : menuBar()->actions()) {
+        if (const QMenu* menu = top->menu()) {
+            walk(*menu, QString(top->text()).remove('&'));
+        }
+    }
+    for (const QAction* action : findChildren<QAction*>()) {
+        if (!inMenus.contains(action)) {
+            add(*action, "(no menu)");
+        }
+    }
+    for (const QShortcut* shortcut : findChildren<QShortcut*>()) {
+        if (!shortcut->key().isEmpty()) {
+            rows.push_back({shortcut->key().toString(QKeySequence::PortableText),
+                            shortcut->objectName(), "(no menu)", shortcut->whatsThis()});
+        }
+    }
+    return rows;
+}
+
+void MainWindow::showCommandReference(const QString& section)
+{
+    if (referenceDialog_ == nullptr) {
+        // A double-click puts the verb on the command line, to be finished
+        // there: the reference runs nothing.
+        referenceDialog_ = new CommandReferenceDialog(
+            commandReferenceSections(),
+            [this](const QString& verb) {
+                commandInput_->setText(verb);
+                commandInput_->setFocus(Qt::OtherFocusReason);
+            },
+            this);
+    }
+    if (!section.isEmpty()) {
+        referenceDialog_->showSection(section);
+    }
+    referenceDialog_->show();
+    referenceDialog_->raise();
+    referenceDialog_->activateWindow();
+}
+
+void MainWindow::showDrawingSummary()
+{
+    if (summaryDialog_ == nullptr) {
+        DrawingSummaryContext context;
+        context.document = &document_;
+        context.customisation = [this] {
+            return cad::customisationSummary(document_, customisation_,
+                                             customisationMissingAtOpen_);
+        };
+        context.run = commandRunner();
+        context.load = [this] { (void)triggerAction("loadCustomisation"); };
+        context.showMissing = [this](const QString& name) { showMissingInStyles(name); };
+        context.crs = [this] { return projectCrsLabel(document_); };
+        summaryDialog_ = new DrawingSummaryDialog(std::move(context), this);
+    }
+    summaryDialog_->refresh();
+    summaryDialog_->show();
+    summaryDialog_->raise();
+    summaryDialog_->activateWindow();
+}
+
+void MainWindow::showMissingInStyles(const QString& name)
+{
+    // The manager has no call for this, so it is reached as a person reaches
+    // it - its Styles tab, its Missing chip, its search - by the object names
+    // style_manager.hpp gives them.
+    StyleManagerDialog& manager = format_->showStyleManager();
+    auto* page = manager.findChild<QWidget*>("stylesPage");
+    if (page == nullptr) {
+        return;
+    }
+    if (auto* tabs = manager.findChild<QTabWidget*>("managerTabs")) {
+        tabs->setCurrentWidget(page);
+    }
+    if (auto* missing = page->findChild<QAbstractButton*>("filterMissing")) {
+        missing->click();
+    }
+    if (auto* search = page->findChild<QLineEdit*>("filterText")) {
+        search->setText(name);
+    }
+}
+
+void MainWindow::showKeyboardShortcuts()
+{
+    if (shortcutsDialog_ == nullptr) {
+        shortcutsDialog_ = new KeyboardShortcutsDialog(shortcutRows(), shortcutClashes(), this);
+    }
+    shortcutsDialog_->show();
+    shortcutsDialog_->raise();
+    shortcutsDialog_->activateWindow();
 }
 
 void MainWindow::buildDocks()
@@ -1401,6 +1616,11 @@ void MainWindow::buildStatusBar()
     layerLabel_ = new QLabel(this);
     frameStatsLabel_ = new QLabel(this);
     frameStatsLabel_->setObjectName("FrameStatsLabel");
+    // How many of how many are selected, always in view: the one count a
+    // person acting on a selection needs before every command.
+    selectionCountLabel_ = new QLabel(this);
+    selectionCountLabel_->setObjectName("statusSelectionCount");
+    selectionCountLabel_->setToolTip("Entities selected, of all the drawing holds");
     // The project's coordinate system, one click from changing it.
     crsButton_ = new QToolButton(this);
     crsButton_->setObjectName("statusProjectCrs");
@@ -1410,6 +1630,7 @@ void MainWindow::buildStatusBar()
             [this] { (void)chooseProjectCrs(this, document_); });
     statusBar()->addPermanentWidget(crsButton_);
     statusBar()->addPermanentWidget(frameStatsLabel_);
+    statusBar()->addPermanentWidget(selectionCountLabel_);
     statusBar()->addPermanentWidget(layerLabel_);
     statusBar()->addPermanentWidget(snapLabel_);
     statusBar()->addPermanentWidget(coordinateLabel_);
@@ -1438,6 +1659,12 @@ void MainWindow::warnUser(const QString& title, const QString& text)
     if (headless_) {
         logMessage(title + ": " + text.simplified(), true);
         return;
+    }
+    // A box is not a logged error, but a dialog that ran the line must still
+    // be told it failed, and why.
+    if (capture_ != nullptr) {
+        capture_->errors << title + ": " + text.simplified();
+        capture_->failed = true;
     }
     QMessageBox::warning(this, title, text);
 }
@@ -1516,10 +1743,46 @@ void MainWindow::refreshAll()
                              ? "&Undo " + QString::fromUtf8(document_.history().undoName().data(),
                                                             static_cast<int>(document_.history().undoName().size()))
                              : "&Undo");
+    refreshHistoryMenus();
     layerLabel_->setText("Layer: " + QString::fromStdString(document_.currentLayer()));
+    selectionCountLabel_->setText(QString("%1 selected / %2 entities")
+                                      .arg(document_.selection().size())
+                                      .arg(document_.model().entities.size()));
     if (crsButton_ != nullptr) {
         crsButton_->setText("CRS: " + projectCrsLabel(document_));
     }
+}
+
+void MainWindow::refreshHistoryMenus()
+{
+    // The steps each way, the next first, as far as a list can be read: a
+    // longer history is said in a last line and reached by typing UNDO n.
+    constexpr std::size_t kListed = 25;
+    const auto fill = [this](QMenu& menu, const std::vector<std::string_view>& names,
+                             const QString& verb, const QString& itemName) {
+        menu.clear();
+        for (std::size_t k = 0; k < names.size() && k < kListed; ++k) {
+            const QString name =
+                QString::fromUtf8(names[k].data(), static_cast<qsizetype>(names[k].size()));
+            // '&&' so a name's own '&' is shown, not taken for a mnemonic.
+            QAction* item = menu.addAction(QString("%1  %2").arg(k + 1).arg(
+                QString(name).replace("&", "&&")));
+            item->setObjectName(itemName + QString::number(k + 1));
+            const QString line = QString("%1 %2").arg(verb).arg(k + 1);
+            item->setStatusTip(k == 0 ? QString("%1: %2").arg(line, name)
+                                      : QString("%1: the last %2 steps, down to %3")
+                                            .arg(line)
+                                            .arg(k + 1)
+                                            .arg(name));
+            connect(item, &QAction::triggered, this, [this, line] { (void)runVerbLine(line); });
+        }
+        if (names.size() > kListed) {
+            menu.addAction(QString("%1 more: type %2 n").arg(names.size() - kListed).arg(verb))
+                ->setEnabled(false);
+        }
+    };
+    fill(*undoHistory_, document_.history().undoNames(), "UNDO", "undoStep");
+    fill(*redoHistory_, document_.history().redoNames(), "REDO", "redoStep");
 }
 
 void MainWindow::refreshTitle()
@@ -1784,9 +2047,21 @@ void MainWindow::newDocument()
     }
 }
 
+bool MainWindow::refuseFileDialog(const QString& verb)
+{
+    // A file dialog nobody can close is a hang, and --trigger reaches these
+    // items by their names: pointed at the verb that asks nothing instead,
+    // as the COPC item is.
+    if (!headless_) {
+        return false;
+    }
+    logMessage("A headless session opens no file dialog: type " + verb + " instead.", true);
+    return true;
+}
+
 void MainWindow::openDocument()
 {
-    if (!confirmDiscard()) {
+    if (!confirmDiscard() || refuseFileDialog("OPEN <directory>")) {
         return;
     }
     const QString directory =
@@ -1880,6 +2155,9 @@ bool MainWindow::saveDocument()
 
 bool MainWindow::saveDocumentAs()
 {
+    if (refuseFileDialog("SAVE <directory>")) {
+        return false;
+    }
     QString target = QFileDialog::getSaveFileName(this, "Save Project As", "untitled.katana",
                                                   "Katana project (*.katana)");
     if (target.isEmpty()) {
@@ -1922,6 +2200,9 @@ void MainWindow::logMessage(const QString& text, bool isError)
     }
     const QString line = isError ? "! " + text : text;
     commandLog_->appendPlainText(line);
+    if (capture_ != nullptr) {
+        (isError ? capture_->errors : capture_->reply) << text;
+    }
     if (isError) {
         ++errorsLogged_;
         statusBar()->showMessage(text, 6000);
@@ -1952,30 +2233,95 @@ void MainWindow::runCommandLine()
         views_->pressEnter();
         return;
     }
+    // Several lines at once - pasted, or a --command holding line breaks -
+    // are a script, run a line at a time and stopping at the first refused
+    // (runPastedLines). A single-line field shows the breaks as blanks, and
+    // the whole was once run as one line of nonsense.
+    if (line.contains('\n') || line.contains('\r')) {
+        runPastedLines(line);
+        return;
+    }
     // What is typed is echoed - but an ONLINE KEY's value never is.
     commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
     // A tool waiting for typed text - a Text's string, a count - takes the
     // whole line before any verb below, as a transparent ZOOM gives way to it
     // (tools::isTransparentCommand): "Utility pit" is a label on a services
-    // plan, not a UTILITY line to refuse.
-    const bool toolTakesText = views_->toolTakesText();
-    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
-    // workbench's, as the interoperability verbs below are the window's - and
-    // before a running tool at a point or a pick, which would take the line
-    // for an answer.
-    if (online_ != nullptr && !toolTakesText && online_->runLine(line)) {
-        return;
-    }
-    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
-    // through the utilities workbench, which frames what a DRAW added - and
-    // before a running tool, for ONLINE's reason.
-    if (utilities_ != nullptr && !toolTakesText && utilities_->runLine(line)) {
+    // plan, not a UTILITY line to refuse. Otherwise the workbenches' verbs
+    // come before a running tool at a point or a pick, which would take the
+    // line for an answer - and so does a '#' comment, as in a katana_cli
+    // script, which a Text's string ("#3 pit") may well start with.
+    if (!views_->toolTakesText() && (isScriptComment(line) || runWorkbenchLine(line))) {
         return;
     }
     // While a tool runs, what is typed is its answer - a point, a distance,
     // an option - before it is anything else: Polyline's C closes it, where
     // on its own C would start a Circle.
     if (views_->typeIntoTool(line)) {
+        return;
+    }
+    dispatchLine(line);
+}
+
+bool MainWindow::runWorkbenchLine(const QString& line)
+{
+    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
+    // workbench's, as the interoperability verbs are the window's.
+    if (online_ != nullptr && online_->runLine(line)) {
+        return true;
+    }
+    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
+    // through the utilities workbench, which frames what a DRAW added.
+    return utilities_ != nullptr && utilities_->runLine(line);
+}
+
+VerbOutcome MainWindow::runVerbLine(const QString& line)
+{
+    const QString trimmed = line.trimmed();
+    if (trimmed.isEmpty()) {
+        // An empty TYPED line is Enter in the drawing; a dialog has no Enter
+        // to press, so for it an empty line is a line it failed to build.
+        return {false, {}, "there is no command to run"};
+    }
+    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(trimmed));
+    VerbCapture capture;
+    VerbCapture* const outer = std::exchange(capture_, &capture);
+    const int errorsBefore = errorsLogged_;
+    // Never typeIntoTool: that is the whole difference from a typed line.
+    if (!runWorkbenchLine(trimmed)) {
+        dispatchLine(trimmed);
+    }
+    capture_ = outer;
+    // A line run inside another's run - a script's, under the SCRIPT line a
+    // dialog ran - logged into the outer line's reply too: the dialog that
+    // ran the SCRIPT line gets back everything its lines said.
+    if (outer != nullptr) {
+        outer->reply << capture.reply;
+        outer->errors << capture.errors;
+        outer->failed = outer->failed || capture.failed;
+    }
+    VerbOutcome outcome;
+    // By the errors COUNTED, not the lines captured: PLOTSHEETS logs the
+    // problems of a plot it carried out and takes them off the count, and a
+    // --command run judges the same line the same way (runCommand).
+    outcome.ok = errorsLogged_ == errorsBefore && !capture.failed;
+    outcome.reply = capture.reply.join('\n');
+    outcome.error = capture.errors.join('\n');
+    return outcome;
+}
+
+CommandRunner MainWindow::commandRunner()
+{
+    return [this](const QString& line) { return runVerbLine(line); };
+}
+
+// The verbs taken here before the interpreter are listed for people by
+// windowHelpText (command_reference_dialog.cpp): what the typed HELP adds and
+// the Command Reference's Window section. A verb added here is added there.
+void MainWindow::dispatchLine(const QString& line)
+{
+    // A note, as a katana_cli script has them: a dialog's or a script's line
+    // comes here without passing runCommandLine's check.
+    if (isScriptComment(line)) {
         return;
     }
     const QStringList words = line.split(' ', Qt::SkipEmptyParts);
@@ -1999,6 +2345,19 @@ void MainWindow::runCommandLine()
     }
     if (verb == "QUIT" || verb == "EXIT") {
         close();
+        return;
+    }
+    // SCRIPT <file> [CONTINUE]: a katana_cli script, each line run through
+    // the one executor (script_runner.hpp). The window's, as PLOTSHEETS is:
+    // katana_cli runs a script given on its command line, and katana_mcp has
+    // katana_run_script.
+    if (verb == "SCRIPT") {
+        const auto command = parseScriptCommand(line);
+        if (!command) {
+            logMessage(QString::fromStdString(command.error().describe()), true);
+            return;
+        }
+        runScript(command->path, command->continueOnError);
         return;
     }
     // CUSTOMISE [REPLACE] <file>..., as katana_cli has it and for the same
@@ -2037,19 +2396,49 @@ void MainWindow::runCommandLine()
             }
             paths.push_back(toPath(word));
         }
-        if (paths.empty()) {
+        if (paths.empty() && replace) {
             logMessage("usage: CUSTOMISE [REPLACE] <file> [<file>...]", true);
+            return;
+        }
+        // Alone, it reports what is loaded and what it covers here, in the
+        // words katana_cli's CUSTOMISE says them (cad/customisation_report.hpp).
+        if (paths.empty()) {
+            logMessage(QString::fromStdString(katana::cad::customisationReport(
+                                                  document_, customisation_,
+                                                  customisationMissingAtOpen_))
+                           .trimmed());
             return;
         }
         applyCustomisation(paths, replace ? katana::archive12d::LoadMode::Replace
                                           : katana::archive12d::LoadMode::Merge);
         return;
     }
+    // INFO 12 describes entity 12, as the interpreter's INFO does - unless a
+    // file is really called that. Every INFO was once taken for a file here,
+    // so INFO 12 answered that the file did not exist.
+    if (verb == "INFO" && words.size() == 2 &&
+        cad::CommandInterpreter::isEntityId(words[1].toStdString()) && !QFileInfo::exists(words[1])) {
+        runInterpreterLine(line, verb);
+        return;
+    }
+    // IMPORT <file> [LOCAL], the path and the LOCAL read as the session reads
+    // them (CommandInterpreter::importArgument): LOCAL was once taken for part
+    // of the path, and "site.dxf LOCAL" had no importer.
+    if (verb == "IMPORT") {
+        const auto typed =
+            cad::CommandInterpreter::importArgument(line.mid(words.front().size()).toStdString());
+        if (typed.path.empty()) {
+            logMessage("usage: IMPORT <file> [LOCAL]", true);
+            return;
+        }
+        importPath(QString::fromStdString(typed.path), typed.local);
+        return;
+    }
     // The interoperability verbs, as katana_cli has them. They live in the
     // front ends, not the CommandInterpreter, because katana_cad may not see
     // GDAL or PDAL (tools/check_layering.cmake). The argument is the rest of
     // the line, one layer of quotes removed, so a path may hold spaces.
-    if (verb == "IMPORT" || verb == "EXPORT" || verb == "INFO") {
+    if (verb == "EXPORT" || verb == "INFO") {
         QString path = line.mid(words.front().size()).trimmed();
         if (path.size() >= 2 && path.startsWith('"') && path.endsWith('"')) {
             path = path.mid(1, path.size() - 2);
@@ -2058,9 +2447,7 @@ void MainWindow::runCommandLine()
             logMessage("usage: " + verb + " <file>", true);
             return;
         }
-        if (verb == "IMPORT") {
-            importPath(path);
-        } else if (verb == "EXPORT") {
+        if (verb == "EXPORT") {
             (void)exportDrawingTo(toPath(path), {});
         } else if (auto description = interop::describeSource(toPath(path))) {
             logMessage(QString::fromStdString(interop::formatDescription(*description)).trimmed());
@@ -2087,6 +2474,23 @@ void MainWindow::runCommandLine()
                            .arg(grouped(cloud.points.size()))
                            .arg(grouped(cloud.sourcePointCount)));
         }
+        return;
+    }
+    // COPC <source> <destination.copc.laz>, as katana_cli has it: each path
+    // one word or quoted, read by the interpreter's own rules. What the GIS
+    // menu's item runs once its two files are chosen.
+    if (verb == "COPC") {
+        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
+        if (!tokens) {
+            logMessage(QString::fromStdString(tokens.error().describe()), true);
+            return;
+        }
+        if (tokens->size() != 3) {
+            logMessage("usage: COPC <source> <destination.copc.laz>", true);
+            return;
+        }
+        convertPointCloudToCopc(toPath(QString::fromStdString((*tokens)[1])),
+                                toPath(QString::fromStdString((*tokens)[2])));
         return;
     }
     // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
@@ -2130,6 +2534,41 @@ void MainWindow::runCommandLine()
             logMessage(QString("file=\"%1\"").arg(QDir::toNativeSeparators(file)));
         }
         errorsLogged_ = errorsBefore;
+        return;
+    }
+    // PLOT <file.pdf> [paper=] [landscape|portrait] [fit|scale=] [dpi=]
+    // [style=] [lineweight=] [margin=]: the drawing on one sheet, as File >
+    // Plot to PDF and --plot plot it (plotting/plot_drawing_dialog.hpp). The
+    // window's, as PLOTSHEETS is: the painter is Qt.
+    if (verb == "PLOT") {
+        const auto request = parsePlotDrawing(line);
+        if (!request) {
+            logMessage(QString::fromStdString(request.error().describe()), true);
+            return;
+        }
+        if (const auto status = plotDrawingToPdf(request->path, request->settings, request->fit);
+            !status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+        }
+        return;
+    }
+    // SNAPSHOT <file> | CLIPBOARD [width=] [height=] [scale=] [bg=] [view=]:
+    // a picture of the plan or 3D view (plotting/view_image_export.hpp).
+    if (verb == "SNAPSHOT") {
+        const auto request = parseSnapshot(line);
+        if (!request) {
+            logMessage(QString::fromStdString(request.error().describe()), true);
+            return;
+        }
+        snapshotView(*request);
+        return;
+    }
+    // HELP (or ?) alone: the interpreter's commands, then the verbs this
+    // front end runs itself, which the interpreter cannot know of. With a
+    // word, HELP SHEETS and HELP UTILITY stay the interpreter's.
+    if ((verb == "HELP" || verb == "?") && words.size() == 1) {
+        runInterpreterLine(line, verb);
+        logMessage(windowHelpText());
         return;
     }
     // A bare tool word starts the tool, as in any CAD package: an alias
@@ -2178,6 +2617,148 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     historyCursor_ = static_cast<int>(interpreter_.history().size());
 }
 
+// ---- scripts ----------------------------------------------------------------------------------
+
+namespace {
+
+// The Recent Scripts list, newest first, in the settings as the online keys
+// are: a person's, not a drawing's.
+constexpr const char* kRecentScriptsKey = "scripts/recent";
+// As many as a File menu lists of recent files in most programs.
+constexpr qsizetype kRecentScripts = 8;
+
+} // namespace
+
+void MainWindow::runScript(const QString& path, bool continueOnError)
+{
+    // A script that runs itself, directly or through another, would never
+    // end: refused by the file, as the file is what a person would fix.
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (!canonical.isEmpty() && runningScripts_.contains(canonical)) {
+        logMessage("SCRIPT: " + QFileInfo(path).fileName() +
+                       " is already running; a script may not run itself.",
+                   true);
+        return;
+    }
+    const auto lines = readScript(path);
+    if (!lines) {
+        logMessage(QString::fromStdString(lines.error().describe()), true);
+        return;
+    }
+    runningScripts_ << canonical;
+    runLines(*lines, QDir::fromNativeSeparators(path), continueOnError);
+    runningScripts_.removeLast();
+    // A headless run is a test's or an agent's, and leaves a person's list
+    // alone.
+    if (!headless_ && !canonical.isEmpty()) {
+        QSettings settings;
+        QStringList recent = settings.value(kRecentScriptsKey).toStringList();
+        recent.removeAll(canonical);
+        recent.prepend(canonical);
+        settings.setValue(kRecentScriptsKey, recent.mid(0, kRecentScripts));
+        refreshRecentScripts();
+    }
+}
+
+void MainWindow::runPastedLines(const QString& text)
+{
+    const std::vector<ScriptLine> lines = scriptLines(text);
+    if (lines.empty()) {
+        return;
+    }
+    runLines(lines, QString(), false);
+}
+
+void MainWindow::runLines(const std::vector<ScriptLine>& lines, const QString& name,
+                          bool continueOnError)
+{
+    ScriptOptions options;
+    options.continueOnError = continueOnError;
+    // A long script shows how far it has got and can be stopped between two
+    // lines; a short one finishes before the dialog would appear. Never in a
+    // headless run, which has nobody to press Cancel.
+    std::unique_ptr<QProgressDialog> progress;
+    if (!headless_ && lines.size() > 1) {
+        progress = std::make_unique<QProgressDialog>(
+            "Running " + (name.isEmpty() ? QString("the pasted lines") : QFileInfo(name).fileName()) +
+                "...",
+            "Cancel", 0, static_cast<int>(lines.size()), this);
+        progress->setObjectName("scriptProgress");
+        progress->setWindowTitle("Run Script");
+        progress->setWindowModality(Qt::WindowModal);
+        progress->setMinimumDuration(500);
+        options.progress = [&progress](int done, int) {
+            progress->setValue(done);
+            return !progress->wasCanceled();
+        };
+    }
+    const ScriptReport report = runScriptLines(lines, commandRunner(), options);
+    progress.reset();
+    logMessage(formatScriptReport(name, report));
+    const QString shown = name.isEmpty() ? QString("The pasted lines") : QFileInfo(name).fileName();
+    const auto textAt = [&lines](int number) {
+        const auto found = std::ranges::find(lines, number, &ScriptLine::number);
+        return found != lines.end() ? found->text : QString();
+    };
+    if (report.cancelled) {
+        logMessage(QString("%1: cancelled before line %2; the lines from there were not run.")
+                       .arg(shown)
+                       .arg(report.stoppedAt),
+                   true);
+    } else if (report.failed > 0 && !continueOnError) {
+        logMessage(QString("%1 stopped at line %2, which was refused: %3")
+                       .arg(shown)
+                       .arg(report.stoppedAt)
+                       .arg(textAt(report.stoppedAt)),
+                   true);
+    } else if (report.failed > 0) {
+        logMessage(QString("%1: %2 of the %3 lines run were refused.")
+                       .arg(shown)
+                       .arg(report.failed)
+                       .arg(report.ran),
+                   true);
+    }
+}
+
+void MainWindow::showRunScript()
+{
+    if (scriptDialog_ == nullptr) {
+        ScriptDialogContext context;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        scriptDialog_ = new ScriptRunDialog(std::move(context), this);
+    }
+    scriptDialog_->show();
+    scriptDialog_->raise();
+    scriptDialog_->activateWindow();
+}
+
+void MainWindow::refreshRecentScripts()
+{
+    recentScriptsMenu_->clear();
+    const QStringList recent = QSettings().value(kRecentScriptsKey).toStringList();
+    // Named by position, so --trigger recentScript1 runs the newest, as a
+    // click on the first item does.
+    for (qsizetype at = 0; at < recent.size() && at < kRecentScripts; ++at) {
+        const QString path = recent[at];
+        QAction* item = recentScriptsMenu_->addAction(
+            QString("&%1 %2").arg(at + 1).arg(QFileInfo(path).fileName()), this,
+            [this, path] { (void)runVerbLine(scriptCommandLine(path, false)); });
+        item->setObjectName(QString("recentScript%1").arg(at + 1));
+        item->setStatusTip("Run " + QDir::toNativeSeparators(path));
+    }
+    if (recent.isEmpty()) {
+        recentScriptsMenu_->addAction("(none)")->setEnabled(false);
+        return;
+    }
+    recentScriptsMenu_->addSeparator();
+    QAction* clear = recentScriptsMenu_->addAction("&Clear the List", this, [this] {
+        QSettings().remove(kRecentScriptsKey);
+        refreshRecentScripts();
+    });
+    clear->setObjectName("recentScriptsClear");
+}
+
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched == commandInput_ && event->type() == QEvent::KeyPress) {
@@ -2200,6 +2781,18 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             commandInput_->clear();
             views_->cancel();
             return true;
+        }
+        // Several lines pasted run at once, a line at a time, as pasting a
+        // script into AutoCAD's command line runs it; one line (with or
+        // without its line end) is pasted to be edited, as ever. Whatever
+        // was typed before the paste starts the first line.
+        if (key->matches(QKeySequence::Paste)) {
+            const QString pasted = QApplication::clipboard()->text();
+            if (pasted.trimmed().contains('\n') || pasted.trimmed().contains('\r')) {
+                commandInput_->insert(pasted);
+                runCommandLine();
+                return true;
+            }
         }
     }
     return QMainWindow::eventFilter(watched, event);
@@ -2393,16 +2986,25 @@ QString importFilter()
 
 } // namespace
 
-void MainWindow::importPath(const QString& path)
+void MainWindow::importPath(const QString& path, bool local)
 {
     const std::filesystem::path file = toPath(path);
     if (katana::dxf::isDxfPath(file)) {
-        importDxfFile(file);
+        importDxfFile(file, local);
         return;
     }
-    switch (interop::kindForPath(file)) {
+    const interop::SourceKind kind = interop::kindForPath(file);
+    // Refused by name, in katana_cli's words, rather than dropped: a raster
+    // or a cloud has no shift to take.
+    if (local && (kind == interop::SourceKind::Raster || kind == interop::SourceKind::PointCloud)) {
+        logMessage("InvalidArgument: LOCAL is not supported for rasters and point clouds, which "
+                   "are reference data drawn at their own coordinates",
+                   true);
+        return;
+    }
+    switch (kind) {
     case interop::SourceKind::Vector:
-        importVectorFile(file);
+        importVectorFile(file, {}, local);
         return;
     case interop::SourceKind::Raster:
         importRasterFile(file);
@@ -2411,7 +3013,7 @@ void MainWindow::importPath(const QString& path)
         importPointCloudFile(file);
         return;
     case interop::SourceKind::Archive12d:
-        importArchive12dFile(file);
+        importArchive12dFile(file, local);
         return;
     case interop::SourceKind::Unknown:
         break;
@@ -2496,6 +3098,10 @@ void MainWindow::loadDefaultCustomisation()
 void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
 {
     const bool replace = mode == katana::archive12d::LoadMode::Replace;
+    if (refuseFileDialog(replace ? "CUSTOMISE REPLACE <file> [<file>...]"
+                                 : "CUSTOMISE <file> [<file>...]")) {
+        return;
+    }
     const QStringList chosen = QFileDialog::getOpenFileNames(
         this, replace ? "Replace Loaded Customisation" : "Load Customisation", QString(),
         "Customisation files (*.4d *.mapfile);;Style and symbol libraries (*.4d);;"
@@ -2705,6 +3311,9 @@ void MainWindow::reportCustomisationCoverage()
 
 void MainWindow::importFile()
 {
+    if (refuseFileDialog("IMPORT <file> [LOCAL]")) {
+        return;
+    }
     const QString selected =
         QFileDialog::getOpenFileName(this, "Import", QString(), importFilter());
     if (selected.isEmpty()) {
@@ -2740,10 +3349,16 @@ void MainWindow::importFile()
 }
 
 void MainWindow::importVectorFile(const std::filesystem::path& path,
-                                  interop::VectorImportOptions options)
+                                  interop::VectorImportOptions options, bool local)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = interop::importVector(path, options);
+    // LOCAL: read again with the shift rather than moved afterwards, so the
+    // one reader applies the one shift to everything, as katana_cli does.
+    if (imported.ok() && local && !imported->bounds.empty()) {
+        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
+        imported = interop::importVector(path, options);
+    }
     QApplication::restoreOverrideCursor();
 
     if (!imported.ok()) {
@@ -2752,17 +3367,22 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
                              QString::fromStdString(imported.error().describe()));
         return;
     }
+    if (local && options.originShift) {
+        logLocalShift(*options.originShift);
+    }
 
     // Survey data in a projected CRS carries coordinates like (255440, 7410850)
     // while a drawing started from scratch sits near the origin. Merging them
     // succeeds and leaves the existing drawing a dot smaller than a pixel, so
     // the choice is put to the user BEFORE anything is added rather than left
     // to be discovered by zooming to extents.
+    // With LOCAL the place is chosen already: nothing to ask.
     const auto advice =
         interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    if (advice.farApart && headless_) {
+    const bool ask = advice.farApart && !local;
+    if (ask && headless_) {
         logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (advice.farApart) {
+    } else if (ask) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle("Far from the current drawing");
@@ -2853,10 +3473,19 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
     views_->zoomExtentsAll();
 }
 
-void MainWindow::importArchive12dFile(const std::filesystem::path& path)
+void MainWindow::importArchive12dFile(const std::filesystem::path& path, bool local)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = interop::importArchive12d(path);
+    // LOCAL: read again with the shift, which the importer applies to
+    // everything - entities, surfaces and clouds alike.
+    std::optional<katana::geometry::Vec2> localShift;
+    if (imported.ok() && local && !imported->bounds.empty()) {
+        interop::Archive12dImportOptions options;
+        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
+        localShift = options.originShift;
+        imported = interop::importArchive12d(path, options);
+    }
     QApplication::restoreOverrideCursor();
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
@@ -2864,15 +3493,20 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
                              QString::fromStdString(imported.error().describe()));
         return;
     }
+    if (localShift) {
+        logLocalShift(*localShift);
+    }
 
     // The same question a vector import asks, for the same reason: a 12da is
     // survey data at survey coordinates. Surfaces and clouds are shifted with
     // the entities - the shift is applied inside the importer, to everything.
+    // With LOCAL the place is chosen already.
     const auto advice =
         interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    if (advice.farApart && headless_) {
+    const bool ask = advice.farApart && !local;
+    if (ask && headless_) {
         logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (advice.farApart) {
+    } else if (ask) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle("Far from the current drawing");
@@ -3087,7 +3721,14 @@ void MainWindow::exportVectorFile()
 {
     if (document_.model().entities.empty() && document_.model().alignments.empty() &&
         sceneSurfaces_.empty()) {
-        QMessageBox::information(this, "Export", "The drawing is empty.");
+        if (headless_) {
+            logMessage("Export: the drawing is empty.", true);
+        } else {
+            QMessageBox::information(this, "Export", "The drawing is empty.");
+        }
+        return;
+    }
+    if (refuseFileDialog("EXPORT <file>")) {
         return;
     }
 
@@ -3645,8 +4286,25 @@ void MainWindow::exportSurfaceAsDem()
     logMessage("  the DEM declares no coordinate system; its coordinates are the drawing's");
 }
 
+void MainWindow::logLocalShift(const katana::geometry::Vec2& shift)
+{
+    // 0.0 - rather than a unary minus, which makes a shift of 0 "-0.000".
+    logMessage(QString("LOCAL: moved as one piece by %1,%2, so its lower-left corner sits at 0,0.")
+                   .arg(0.0 - shift.x, 0, 'f', 3)
+                   .arg(0.0 - shift.y, 0, 'f', 3));
+}
+
 void MainWindow::convertPointCloudToCopc()
 {
+    // Two file dialogs nobody could close: a headless session is pointed at
+    // the verb that asks nothing instead, where --action convertCopc would
+    // wait on the first one for ever.
+    if (headless_) {
+        logMessage("A headless session opens no file dialog: type COPC <source> "
+                   "<destination.copc.laz> instead.",
+                   true);
+        return;
+    }
     const QString source = QFileDialog::getOpenFileName(
         this, "Convert Point Cloud to COPC", QString(),
         "Point cloud (" + patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
@@ -3672,20 +4330,37 @@ void MainWindow::convertPointCloudToCopc()
     if (!destination.endsWith(".copc.laz", Qt::CaseInsensitive)) {
         destination += ".copc.laz";
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = engine.convertToCopc(toPath(source), toPath(destination));
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        warnUser("Conversion failed", QString::fromStdString(status.error().describe()));
+    // The dialogs chose the files; the conversion is the COPC verb's, run as
+    // if typed, so it is logged as one and an agent's COPC is the same code.
+    const VerbOutcome outcome = runVerbLine(QString("COPC \"%1\" \"%2\"")
+                                                .arg(QDir::fromNativeSeparators(source),
+                                                     QDir::fromNativeSeparators(destination)));
+    if (!outcome.ok) {
+        warnUser("Conversion failed", outcome.error);
         return;
     }
-    logMessage("Converted " + fromPath(toPath(source).filename()) + " to " +
-               fromPath(toPath(destination).filename()) + ", every point kept.");
     if (!headless_ && QMessageBox::question(this, "Convert Point Cloud to COPC",
                                             "Import the COPC file now?") == QMessageBox::Yes) {
         importWithOptions(destination);
     }
+}
+
+void MainWindow::convertPointCloudToCopc(const std::filesystem::path& source,
+                                         const std::filesystem::path& destination)
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(source, destination);
+    QApplication::restoreOverrideCursor();
+    if (!status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
+    }
+    logMessage("Converted " + fromPath(source.filename()) + " to " +
+               fromPath(destination.filename()) + ", every point kept.");
+    // The next step, as a line to type: a COPC file is read at a level of
+    // detail, which the import asks for.
+    logMessage("  IMPORT \"" + QDir::fromNativeSeparators(fromPath(destination)) +
+               "\" reads it at a level of detail");
 }
 
 
@@ -4506,72 +5181,84 @@ void MainWindow::corridorSurface()
 
 void MainWindow::plotToPdf()
 {
-    ViewportWidget* view = views_->activePlanView();
-    if (view == nullptr) {
-        logMessage("Open a plan viewport to plot from.", true);
+    // The dialog writes the PLOT line and runs it through the one executor;
+    // it asks nothing modally, so a headless run can drive it too.
+    if (plotDialog_ == nullptr) {
+        PlotDrawingDialogContext context;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        context.suggestedPath = suggestedPlotFile(document_);
+        plotDialog_ = new PlotDrawingDialog(std::move(context), this);
+    }
+    plotDialog_->show();
+    plotDialog_->raise();
+    plotDialog_->activateWindow();
+}
+
+void MainWindow::showViewImageExport()
+{
+    if (imageDialog_ == nullptr) {
+        ViewImageDialogContext context;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        QString suggested = suggestedPlotFile(document_);
+        suggested = suggested.isEmpty() ? QString("view.png")
+                                        : QFileInfo(suggested).path() + "/" +
+                                              QFileInfo(suggested).completeBaseName() + ".png";
+        context.suggestedPath = QDir::toNativeSeparators(suggested);
+        imageDialog_ = new ViewImageDialog(std::move(context), this);
+    }
+    imageDialog_->show();
+    imageDialog_->raise();
+    imageDialog_->activateWindow();
+}
+
+void MainWindow::snapshotView(const SnapshotRequest& request)
+{
+    QImage image;
+    QString viewName;
+    if (request.view == SnapshotRequest::View::Plan) {
+        ViewportWidget* view = views_->activePlanView();
+        if (view == nullptr) {
+            logMessage("SNAPSHOT: no plan view is open; open one, or ask for view=3d.", true);
+            return;
+        }
+        const QColor background = request.background == SnapshotRequest::Background::Theme
+                                      ? theme::viewport()
+                                  : request.background == SnapshotRequest::Background::White
+                                      ? QColor(Qt::white)
+                                      : QColor(Qt::transparent);
+        // On white it is drawn as a plot draws it: the screen's white pens
+        // would vanish into the ground.
+        image = view->renderToImage(snapshotSize(request, view->size()), background,
+                                    request.background == SnapshotRequest::Background::White);
+        viewName = "plan";
+    } else {
+        RenderViewWidget* view = views_->activeRenderView();
+        if (view == nullptr) {
+            logMessage("SNAPSHOT: no 3D view is open; open one, or ask for view=plan.", true);
+            return;
+        }
+        // Grabbed as drawn - the renderer's own frame - and scaled.
+        const QSize size = snapshotSize(request, view->size());
+        image = view->grab().toImage();
+        if (image.size() != size) {
+            image = image.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+        viewName = "3d";
+    }
+    const QString record =
+        QString("view=%1 width=%2 height=%3").arg(viewName).arg(image.width()).arg(image.height());
+    if (request.clipboard) {
+        QApplication::clipboard()->setImage(image);
+        logMessage("clipboard=yes " + record);
         return;
     }
-
-    QDialog dialog(this);
-    dialog.setWindowTitle("Plot to PDF");
-    auto* form = new QFormLayout(&dialog);
-    auto* paperBox = new QComboBox(&dialog);
-    paperBox->addItems({"A4", "A3", "A2", "A1", "A0"});
-    paperBox->setCurrentIndex(1);
-    auto* orientationBox = new QComboBox(&dialog);
-    orientationBox->addItems({"Landscape", "Portrait"});
-    // Fitting is the default because it is what a first plot of any drawing
-    // wants, and it picks a scale a scale rule carries.
-    auto* fit = new QCheckBox("Fit the drawing to the sheet at a standard scale", &dialog);
-    fit->setChecked(true);
-    auto* scale = new QDoubleSpinBox(&dialog);
-    scale->setRange(1.0, 1000000.0);
-    scale->setDecimals(0);
-    scale->setValue(1000.0);
-    scale->setPrefix("1 : ");
-    auto* dpi = new QDoubleSpinBox(&dialog);
-    dpi->setRange(72.0, 1200.0);
-    dpi->setDecimals(0);
-    dpi->setValue(300.0);
-    auto* margin = new QDoubleSpinBox(&dialog);
-    margin->setRange(0.0, 50.0);
-    margin->setDecimals(1);
-    margin->setValue(10.0);
-    margin->setSuffix(" mm");
-    form->addRow("Paper", paperBox);
-    form->addRow("Orientation", orientationBox);
-    form->addRow(fit);
-    form->addRow("Scale, when not fitting", scale);
-    form->addRow("Resolution (dpi)", dpi);
-    form->addRow("Margin", margin);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    form->addRow(buttons);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    cad::PlotSettings settings;
-    const std::array<cad::PaperSize, 5> sizes{cad::PaperSize::A4, cad::PaperSize::A3,
-                                              cad::PaperSize::A2, cad::PaperSize::A1,
-                                              cad::PaperSize::A0};
-    settings.paper = sizes[static_cast<std::size_t>(paperBox->currentIndex())];
-    settings.landscape = orientationBox->currentIndex() == 0;
-    settings.dpi = dpi->value();
-    settings.marginMm = margin->value();
-    settings.scaleDenominator = scale->value();
-
-    QString path = QFileDialog::getSaveFileName(this, "Plot to PDF", QString(), "PDF (*.pdf)");
-    if (path.isEmpty()) {
-        return;
-    }
-    if (!path.endsWith(".pdf", Qt::CaseInsensitive)) {
-        path += ".pdf";
-    }
-    if (const auto status = plotDrawingToPdf(path, settings, fit->isChecked()); !status) {
+    if (const auto status = writeSnapshot(image, request.path); !status) {
         logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
     }
+    logMessage(QString("file=\"%1\" ").arg(QDir::toNativeSeparators(request.path)) + record);
 }
 
 namespace {
@@ -4625,6 +5312,16 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
                    .arg(path, paperName(settings.paper), settings.landscape ? "landscape" : "portrait")
                    .arg(settings.scaleDenominator, 0, 'f', 0)
                    .arg(settings.dpi, 0, 'f', 0));
+    // The same as a record, for a script or an agent to read: what PLOT and
+    // --plot made, with the scale a fitted plot chose.
+    const std::string_view style = cad::toString(settings.colourMode);
+    logMessage(QString("file=\"%1\" paper=%2 orientation=%3 scale=%4 dpi=%5 style=%6 lineweight=%7")
+                   .arg(QDir::toNativeSeparators(path), paperName(settings.paper),
+                        settings.landscape ? "landscape" : "portrait")
+                   .arg(settings.scaleDenominator, 0, 'g', 10)
+                   .arg(settings.dpi, 0, 'g', 10)
+                   .arg(QString::fromUtf8(style.data(), static_cast<qsizetype>(style.size())))
+                   .arg(settings.lineWeightScale, 0, 'g', 10));
     return {};
 }
 

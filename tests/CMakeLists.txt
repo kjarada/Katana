@@ -1196,3 +1196,309 @@ if(TARGET katana_qt_widget_tests)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
         TIMEOUT 120)
 endif()
+
+# The session verbs on the window's command line and the window's one
+# executor (docs/desktop.md, "One executor: the command runner"). Typed with
+# --command as an agent types them: INFO with an entity's id, CODE CENSUS,
+# MAPFILE CHECK, CUSTOMISE alone, COPC and IMPORT ... LOCAL, each of which the
+# window once refused or misread. Run with --run-line as a dialog runs its
+# line: never a running tool's answer, with what it logged coming back.
+if(TARGET katana)
+    set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
+    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    # A 10 x 5 rectangle: perimeter 30, area 50, described by INFO 1 and
+    # again by INFO #1 (a typed line's echo is not printed). The fixture survey code file
+    # holds 11 rules over 8 distinct codes (counted by hand in its head
+    # comment), none of which cannot be applied as written; the rectangle
+    # carries no code.
+    add_test(NAME qt_the_session_verbs_run_on_the_windows_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_fixture}/test_survey.mapfile\"|>CODE CENSUS|>MAPFILE CHECK|>CUSTOMISE"
+            "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50[\r\n]+1  Polyline  layer=0  vertices=4  closed  length=30  area=50.*0 entities carry a code in \"[^\"]*\", 0 distinct codes.*11 rules checked: 0 errors, [0-9]+ warnings?.*11 survey code rules over 8 distinct codes[\r\n]+Loaded files, in load order:.*\"test_survey\\.mapfile\", a survey code file"
+            "-DFORBID=unknown command|usage: CUSTOMISE"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/session_verbs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # COPC typed, into a folder name with blanks, then described: every point
+    # of the sample's 40 000 (`pdal info`, as cli.copc_then_info) kept, and
+    # the IMPORT line that reads the result said after it. One path is a
+    # usage error; the menu item, whose two file dialogs no headless session
+    # can answer, points at the verb instead of waiting on them.
+    set(_window_copc "${CMAKE_CURRENT_BINARY_DIR}/qt copc/window scan.copc.laz")
+    add_test(NAME qt_copc_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/qt copc")
+    add_test(NAME qt_copc_folder
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/qt copc")
+    add_test(NAME qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>COPC \"${_gis}/survey_scan.las\" \"${_window_copc}\"|>INFO \"${_window_copc}\"|>COPC \"${_gis}/survey_scan.las\"|*convertCopc"
+            "-DEXPECT=Converted survey_scan\\.las to window scan\\.copc\\.laz, every point kept\\.[\r\n]+  IMPORT \"[^\r\n]*/qt copc/window scan\\.copc\\.laz\" reads it at a level of detail.*Point cloud: 40,000 points.*COPC: yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/copc_typed_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_copc_cleanup PROPERTIES FIXTURES_SETUP qt_copc_clean)
+    set_tests_properties(qt_copc_folder PROPERTIES
+        FIXTURES_REQUIRED qt_copc_clean FIXTURES_SETUP qt_copc)
+    set_tests_properties(qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
+        PROPERTIES FIXTURES_REQUIRED qt_copc)
+    # IMPORT ... LOCAL typed, the path quoted: parcels.geojson spans (180, 0)
+    # to (365, 165) (its coordinates, by hand), so it is moved by -180,0 and
+    # spans (0, 0) to (185, 165); nobody is asked where to put it. A raster's
+    # LOCAL is refused by name, as katana_cli refuses it.
+    add_test(NAME qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>IMPORT \"${_gis}/parcels.geojson\" LOCAL|>IMPORT ${_gis}/terrain.asc local"
+            "-DEXPECT=LOCAL: moved as one piece by -180\\.000,0\\.000, so its lower-left corner sits at 0,0\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 0\\.00,0\\.00 to 185\\.00,165\\.00.*LOCAL is not supported for rasters and point clouds"
+            "-DFORBID=No importer|Far from|no one to ask"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_local_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A dialog's line while a tool waits for a point: the CIRCLE is drawn,
+    # not taken for the Line's first point, its reply comes back, and the
+    # typed points then draw the line as ever - entity 2, from 0,0 to 10,0;
+    # the first Enter ends the chain, the second the tool. A refused line
+    # comes back not ok, with why.
+    add_test(NAME qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE|<CIRCLE 5,5 2|>0,0|>10,0|>|>|<CIRCLE 0,0 -1|>LIST"
+            "-DEXPECT=--run-line CIRCLE 5,5 2: ok=yes[\r\n]+  reply: circle created.*--run-line CIRCLE 0,0 -1: ok=no[\r\n]+  error: InvalidGeometry: [^\r\n]*radius.*2 entities[\r\n]+1  Circle  layer=0  centre 5,5  radius=2 [^\r\n]*[\r\n]+2  Line  layer=0  0,0 -> 10,0  length=10"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/run_line_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_session_verbs_run_on_the_windows_command_line_headless
+        qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
+        qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
+        qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# File > Run Script, the SCRIPT verb and --script (docs/desktop.md, "Run
+# Script"): a katana_cli script run in the window, each line through the one
+# executor. good.kcs holds three commands among comments and blank lines, on
+# its lines 4, 6 and 8; bad.kcs's second command, on line 5, is a circle of
+# radius -1, which the interpreter refuses. A headless run prints what each
+# line logged (not its echo), and the run ends with its record.
+if(TARGET katana)
+    set(_scripts "${CMAKE_CURRENT_SOURCE_DIR}/qt_widgets/data/scripts")
+    # --script as a step, then LIST: every command ran, in order.
+    add_test(NAME qt_script_switch_runs_every_line_of_a_script_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSCRIPT=${_scripts}/good.kcs"
+            "-DDRIVE=>LIST"
+            "-DEXPECT=rectangle created[\r\n]+circle created[\r\n]+line created[\r\n]+script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities"
+            "-DFORBID=unknown command|a line that was refused"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_switch_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A refused line stops the run there and fails it: the third command is
+    # never run (ran=2).
+    add_test(NAME qt_script_switch_stops_at_the_first_refused_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSCRIPT=${_scripts}/bad.kcs"
+            "-DREFUSED=rectangle created[\r\n]+[^!]*! InvalidGeometry: circle radius must be positive \\[-1\\][\r\n]+script=\"[^\"]*/bad\\.kcs\" lines=3 ran=2 failed=1 stopped_at=5[\r\n]+! bad\\.kcs stopped at line 5, which was refused: CIRCLE 0,0 -1[\r\n]+--script [^\r\n]*bad\\.kcs stopped at a line that was refused"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_switch_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Typed, with CONTINUE: every line runs and the refused one is counted,
+    # leaving the rectangle and the line. A typed '#' line is a note that
+    # runs nothing (the interpreter would have called it an unknown command);
+    # SCRIPT alone is its usage, and a missing file is NotFound by its path.
+    add_test(NAME qt_typed_script_continue_runs_every_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SCRIPT \"${_scripts}/bad.kcs\" continue|># a note, not a command|>LIST|>SCRIPT|>SCRIPT \"${_scripts}/no_such_script.kcs\""
+            "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+line created[\r\n]+script=\"[^\"]*/bad\\.kcs\" lines=3 ran=3 failed=1[\r\n]+! bad\\.kcs: 1 of the 3 lines run were refused\\.[\r\n]+2 entities.*! InvalidArgument: usage: SCRIPT <file\\.kcs> \\[CONTINUE\\][\r\n]+! NotFound: no such script \\[[^\r\n]*no_such_script\\.kcs\\]"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/typed_script_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A script whose second line runs the script itself: refused as already
+    # running, so the run stops there rather than recursing for ever, and
+    # its third line never runs.
+    set(_runs_itself "${CMAKE_CURRENT_BINARY_DIR}/qt_scripts/runs_itself.kcs")
+    file(WRITE "${_runs_itself}" "RECT 0,0 1,1\nSCRIPT \"${_runs_itself}\"\nLINE 0,0 1,0\n")
+    add_test(NAME qt_a_script_may_not_run_itself_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SCRIPT \"${_runs_itself}\"|>LIST"
+            "-DEXPECT=rectangle created[\r\n]+! SCRIPT: runs_itself\\.kcs is already running; a script may not run itself\\.[\r\n]+script=\"[^\"]*/runs_itself\\.kcs\" lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! runs_itself\\.kcs stopped at line 2, which was refused: SCRIPT [^\r\n]*[\r\n]+1 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_runs_itself_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # File > Run Script, driven as a person drives it: the dialog shows the
+    # file's commands with their line numbers and the SCRIPT line it will
+    # run; Browse, headless, says what to do instead; Run runs the line
+    # through the one executor and says how it ended.
+    add_test(NAME qt_run_script_dialog_runs_the_line_it_shows_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileRunScript|scriptPath=${_scripts}/good.kcs|scriptContinueOnError=on|?scriptPreview|?scriptCommand|!scriptBrowse|?scriptStatus|!scriptRun|?scriptStatus|>LIST"
+            "-DEXPECT=opened fileRunScriptDialog \"Run Script\"[\r\n]+scriptPreview: 4 RECT 0,0 10,5 6 CIRCLE 5,5 2 8 LINE 0,0 10,0[\r\n]+scriptCommand: SCRIPT \"[^\"]*/good\\.kcs\" CONTINUE[\r\n]+scriptStatus: A headless session opens no file dialog: fill scriptPath with the path instead\\.[\r\n]+rectangle created[\r\n]+circle created[\r\n]+line created[\r\n]+script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+scriptStatus: Done: script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/run_script_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A dialog that runs a SCRIPT line gets back what every line of the script
+    # logged, not only the record: a line run inside another line's run adds
+    # to both captures. A script that stops is not ok, with its refusal.
+    add_test(NAME qt_a_dialogs_script_line_gets_back_what_every_line_said_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=<SCRIPT \"${_scripts}/good.kcs\"|<SCRIPT \"${_scripts}/bad.kcs\""
+            "-DEXPECT=--run-line SCRIPT \"[^\"]*/good\\.kcs\": ok=yes[\r\n]+  reply: rectangle created[\r\n]+  reply: circle created[\r\n]+  reply: line created[\r\n]+  reply: script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+.*--run-line SCRIPT \"[^\"]*/bad\\.kcs\": ok=no[\r\n]+  reply: rectangle created[\r\n]+  reply: script=[^\r\n]*stopped_at=5[\r\n]+  error: InvalidGeometry: circle radius must be positive \\[-1\\][\r\n]+  error: bad\\.kcs stopped at line 5, which was refused: CIRCLE 0,0 -1"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_run_line_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Several lines at once on the command line - what a paste puts there -
+    # run as a script that stops at the first refused: the circle of radius
+    # -1 stops it, and the LINE after it is never run.
+    add_test(NAME qt_several_lines_on_the_command_line_run_as_a_script_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 0,0 10,5\nCIRCLE 0,0 -1\nLINE 0,0 10,0|>LIST"
+            "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+script=pasted lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! The pasted lines stopped at line 2, which was refused: CIRCLE 0,0 -1[\r\n]+1 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pasted_lines_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Without --screenshot, --script is a batch run as katana_cli's is: never
+    # shown, over when its steps are, 0 when every line ran and 1 at the first
+    # refused.
+    add_test(NAME qt_script_batch_run_exits_when_the_script_is_done_headless
+        COMMAND katana --script "${_scripts}/good.kcs" --command LIST)
+    set_tests_properties(qt_script_batch_run_exits_when_the_script_is_done_headless PROPERTIES
+        PASS_REGULAR_EXPRESSION "script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities")
+    add_test(NAME qt_script_batch_run_fails_at_a_refused_line_headless
+        COMMAND katana --script "${_scripts}/bad.kcs")
+    set_tests_properties(qt_script_batch_run_fails_at_a_refused_line_headless PROPERTIES
+        WILL_FAIL TRUE)
+    set_tests_properties(qt_script_switch_runs_every_line_of_a_script_headless
+        qt_script_switch_stops_at_the_first_refused_line_headless
+        qt_typed_script_continue_runs_every_line_headless
+        qt_a_script_may_not_run_itself_headless
+        qt_run_script_dialog_runs_the_line_it_shows_headless
+        qt_a_dialogs_script_line_gets_back_what_every_line_said_headless
+        qt_several_lines_on_the_command_line_run_as_a_script_headless
+        qt_script_batch_run_exits_when_the_script_is_done_headless
+        qt_script_batch_run_fails_at_a_refused_line_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# Help > Command Reference, Sheets and Plotting Commands and Keyboard Shortcuts
+# (docs/desktop.md, "The Command Reference and the keyboard shortcuts"), and
+# the typed HELP, which adds the window's own verbs to the interpreter's
+# list. A search for COPC finds the window's verb; the Sheets item opens the
+# reference at the sheet verbs' introduction; the shortcuts list Ctrl+L as
+# Format > Layers and no key reaching two commands.
+if(TARGET katana)
+    add_test(NAME qt_the_help_menu_finds_a_verb_and_lists_every_key_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>HELP|@helpCommandReference|commandReferenceSearch=COPC|?commandReferenceTree|?commandReferenceCount|@helpSheetCommands|?commandReferenceDetail|@helpKeyboardShortcuts|?keyboardShortcutsTable|keyboardShortcutsSearch=Ctrl+L|?keyboardShortcutsCount|?keyboardShortcutsClashes"
+            "-DEXPECT=History   UNDO \\[n\\].*PLOTSHEETS path\\.pdf [^\r\n]*the desktop window's alone.*Script    SCRIPT <file\\.kcs> \\[CONTINUE\\].*opened commandReferenceDialog \"Command Reference\"[\r\n]+commandReferenceTree: Commands \\| 0 of [0-9]+ ; .*Window \\| [1-9][0-9]* of [0-9]+ ; .*Draw tools \\| 0 of [0-9]+[^\r\n]*[\r\n]+commandReferenceCount: [1-9][0-9]* of [0-9]+ entries[\r\n]+[^\r\n]*opened commandReferenceDialog[^\r\n]*[\r\n]+commandReferenceDetail: Sheets on the command line.*opened keyboardShortcutsDialog \"Keyboard Shortcuts\"[\r\n]+keyboardShortcutsTable: [^\r\n]*Ctrl\\+L \\| Layers \\| Format \\|[^\r\n]*[\r\n]+keyboardShortcutsCount: 1 of [0-9]+ keys[\r\n]+keyboardShortcutsClashes: Every key reaches one command\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/help_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_help_menu_finds_a_verb_and_lists_every_key_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# STATUS [JSON] typed in the window, the status bar's selection count, and File
+# > Drawing Summary (docs/desktop.md, "File > Drawing Summary"). The style
+# "kerb" is drawn with the fixture's TEST Dashed Kerb, and the library that
+# defines it is then replaced by the symbol fixture, so the name is
+# unresolved: the summary lists it, and Show in Styles and Linetypes leaves the
+# style manager showing only the styles that name it - kerb, not "other".
+# Copy as JSON runs STATUS JSON through the one executor.
+if(TARGET katana)
+    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    add_test(NAME qt_drawing_summary_and_status_json_describe_the_drawing_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_fixture}/test_linestyles.4d\"|>STYLE NEW kerb|>STYLE NEW other|>STYLE SET kerb linetype \"TEST Dashed Kerb\"|>CUSTOMISE REPLACE \"${_fixture}/test_symbols.4d\"|>RECT 0,0 10,5|>SELECT ALL|>STATUS|>STATUS JSON|?statusSelectionCount|@fileDrawingSummary|?drawingSummaryDrawing|?drawingSummaryCurrent|?drawingSummarySelection|?drawingSummaryHistory|?drawingSummaryUnresolved|drawingSummaryUnresolved=TEST Dashed Kerb|!drawingSummaryShowMissing|?drawingSummaryStatus|!drawingSummaryCopyJson|?drawingSummaryStatus|@formatStyles|?styleTable"
+            "-DEXPECT=Entities: 1  Layers: 1  Alignments: 0[\r\n]+Current layer: 0[\r\n]+Selected: 1  Undo steps: 4  Redo steps: 0[\r\n]+Customisation: 4 linestyles and symbols, 0 survey code rules[\r\n]+{[\r\n]+  \"alignments\": 0,[\r\n]+  \"currentLayer\": \"0\",[\r\n]+  \"currentStyle\": \"\",[\r\n]+  \"entities\": 1,.*  \"undoSteps\": 4[\r\n]+}[\r\n]+statusSelectionCount: 1 selected / 1 entities[\r\n]+[^\r\n]*opened drawingSummaryDialog \"Drawing Summary\"[\r\n]+drawingSummaryDrawing: 1 entity, 1 layer, 0 alignments, 0 sheets[\r\n]+drawingSummaryCurrent: layer 0, style ByLayer, annotation scale 1:[0-9]+, no coordinate system[\r\n]+drawingSummarySelection: 1 entity selected[\r\n]+drawingSummaryHistory: 4 steps to undo \\(next: [^)]+\\), 0 steps to redo[\r\n]+drawingSummaryUnresolved: TEST Dashed Kerb[\r\n]+drawingSummaryStatus: Styles and Linetypes shows the styles that name TEST Dashed Kerb\\.[\r\n]+{.*}[\r\n]+drawingSummaryStatus: Copied the drawing's state as JSON \\(STATUS JSON\\)\\.[\r\n]+[^\r\n]*opened styleManagerDialog[^\r\n]*[\r\n]+styleTable: kerb \\| [^;\r\n]*TEST Dashed Kerb[^;\r\n]*[\r\n]"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/drawing_summary_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_drawing_summary_and_status_json_describe_the_drawing_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# File > Plot to PDF, File > Export View as Image and Edit > Copy View as
+# Image, driven as a person drives them, and the PLOT and SNAPSHOT verbs they
+# run (docs/desktop.md, "Plot to PDF and view images"). The plot dialog's
+# colours and line weights reach the line, and the line's record says the
+# plot was made with them; the image dialog's custom size is the PNG's size,
+# read from its header; the 3D view is grabbed once the active view shows 3D.
+# The inks each plot style prints are checked by qt_plot_headless
+# (tools/check_plot.cmake).
+if(TARGET katana)
+    set(_out "${CMAKE_CURRENT_BINARY_DIR}/qt_output")
+    file(MAKE_DIRECTORY "${_out}")
+    add_test(NAME qt_plot_and_view_image_dialogs_run_their_verbs_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=@filePlot|plotDrawingPath=${_out}/dialog_plot.pdf|plotDrawingPaper=A4|plotDrawingOrientation=Portrait|plotDrawingFit=off|plotDrawingScale=250|plotDrawingDpi=150|plotDrawingColourMode=Greyscale|plotDrawingLineWeightScale=0.7|plotDrawingMargin=5|?plotDrawingCommand|!plotDrawingPlot|?plotDrawingStatus|@fileExportViewImage|viewImagePath=${_out}/dialog_view.png|viewImageSize=Custom size|viewImageWidth=300|viewImageHeight=150|viewImageBackground=White|?viewImageCommand|!viewImageExport|?viewImageStatus|*editCopyViewImage|>SNAPSHOT \"${_out}/typed_view.png\" width=320 height=200 bg=none|>SNAPSHOT \"${_out}/view.bmp\"|>PLOT|*viewShows3D|>SNAPSHOT \"${_out}/view_3d.png\" view=3d width=200 height=100"
+            "-DEXPECT=opened plotDrawingDialog \"Plot to PDF\"[\r\n]+plotDrawingCommand: PLOT \"[^\"]*/dialog_plot\\.pdf\" paper=A4 portrait scale=250 dpi=150 style=greyscale lineweight=0\\.7 margin=5[\r\n]+Plotted to [^\r\n]*dialog_plot\\.pdf: A4 portrait at 1 : 250, 150 dpi[^\r\n]*[\r\n]+file=\"[^\"]*dialog_plot\\.pdf\" paper=A4 orientation=portrait scale=250 dpi=150 style=greyscale lineweight=0\\.7[\r\n]+plotDrawingStatus: Plotted: file=[^\r\n]*dialog_plot\\.pdf[^\r\n]*[\r\n]+[^\r\n]*opened viewImageDialog \"Export View as Image\"[\r\n]+viewImageCommand: SNAPSHOT \"[^\"]*/dialog_view\\.png\" width=300 height=150 bg=white[\r\n]+file=\"[^\"]*dialog_view\\.png\" view=plan width=300 height=150[\r\n]+viewImageStatus: Exported: file=[^\r\n]*dialog_view\\.png[^\r\n]*[\r\n]+clipboard=yes view=plan width=[1-9][0-9]* height=[1-9][0-9]*[\r\n]+file=\"[^\"]*typed_view\\.png\" view=plan width=320 height=200[\r\n]+! InvalidArgument: the file's extension names its format[^\r\n]*[\r\n]+! InvalidArgument: usage: PLOT <file\\.pdf>.*file=\"[^\"]*view_3d\\.png\" view=3d width=200 height=100"
+            "-DIMAGE_SIZE=${_out}/dialog_view.png|300|150"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_and_view_image_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_plot_and_view_image_dialogs_run_their_verbs_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# The Edit toolbar's Undo and Redo lists (docs/desktop.md, "Undo and Redo
+# lists"): four points, so the Undo list holds four CREATE_POINT steps, newest
+# first; its third entry runs UNDO 3 and leaves one point; the Redo list then
+# holds three, and its second entry runs REDO 2, leaving three points and one
+# step still to redo.
+if(TARGET katana)
+    add_test(NAME qt_the_undo_and_redo_lists_step_through_the_history_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>POINT 1,1|>POINT 2,2|>POINT 3,3|>RECT 0,0 4,4|?editUndoMenu|*undoStep3|>LIST|?editRedoMenu|*redoStep2|>LIST|?editRedoMenu"
+            "-DEXPECT=editUndoMenu: : 1 CREATE_POLYLINE \\[UNDO 1: CREATE_POLYLINE\\] ; 2 CREATE_POINT \\[UNDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POINT \\[UNDO 3: the last 3 steps, down to CREATE_POINT\\] ; 4 CREATE_POINT \\[UNDO 4: the last 4 steps, down to CREATE_POINT\\][\r\n]+3 undone[\r\n]+1 entities[\r\n]+1  Point [^\r\n]*[\r\n]+editRedoMenu: : 1 CREATE_POINT \\[REDO 1: CREATE_POINT\\] ; 2 CREATE_POINT \\[REDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POLYLINE \\[REDO 3: the last 3 steps, down to CREATE_POLYLINE\\][\r\n]+2 redone[\r\n]+3 entities[\r\n]+.*editRedoMenu: : 1 CREATE_POLYLINE \\[REDO 1: CREATE_POLYLINE\\][\r\n]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/undo_lists_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_undo_and_redo_lists_step_through_the_history_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
+# The File items that ask for a file, reached by the object names they now
+# carry: in a headless session each opens no file dialog - nobody could close
+# it - and names the line that does the same without one, as GIS > Convert
+# Point Cloud to COPC does. Save of a drawing with no project is Save As. The
+# empty drawing's Export says so in the log, not in a box.
+if(TARGET katana)
+    add_test(NAME qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*fileOpen|*fileSaveAs|*fileImport|*fileExportVector|>RECT 0,0 1,1|*fileExportVector|*loadCustomisation|*replaceCustomisation|*fileSave"
+            "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type CUSTOMISE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type CUSTOMISE REPLACE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_items_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

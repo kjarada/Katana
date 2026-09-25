@@ -65,8 +65,8 @@ bool importDxf(katana::cad::Document& document, const std::filesystem::path& fil
     const auto advice = katana::interop::advisePlacement(existingBounds, bounds);
     if (advice.farApart) {
         std::cout << "  WARNING: " << advice.message << '\n'
-                  << "  undo, then re-import with  IMPORT <file> LOCAL  to shift it "
-                     "alongside the drawing\n";
+                  << "  undo, then re-import with  IMPORT <file> LOCAL  to move it as one "
+                     "piece so its lower-left corner sits at 0,0\n";
     }
 #endif
     return true;
@@ -96,39 +96,16 @@ bool exportDxf(const katana::cad::Document& document, const std::filesystem::pat
     return true;
 }
 
-std::string unquoted(std::string text)
-{
-    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
-        return text.substr(1, text.size() - 2);
-    }
-    return text;
-}
-
 } // namespace
 
 std::optional<bool> runDxfVerb(katana::cad::Document& document, std::string_view verb,
-                               std::string argument)
+                               const std::string& path, bool local)
 {
-    bool local = false;
-    if (verb == "IMPORT") {
-        // IMPORT <file> LOCAL: the last word, in any case.
-        const std::size_t space = argument.find_last_of(" \t");
-        if (space != std::string::npos) {
-            std::string tail = argument.substr(space + 1);
-            std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) {
-                return static_cast<char>(std::toupper(c));
-            });
-            if (tail == "LOCAL") {
-                local = true;
-                argument = argument.substr(0, argument.find_last_not_of(" \t", space) + 1);
-            }
-        }
-    }
-    const std::filesystem::path path(unquoted(argument));
-    if (argument.empty() || !katana::dxf::isDxfPath(path)) {
+    const std::filesystem::path file(path);
+    if (path.empty() || !katana::dxf::isDxfPath(file)) {
         return std::nullopt;
     }
-    return verb == "IMPORT" ? importDxf(document, path, local) : exportDxf(document, path);
+    return verb == "IMPORT" ? importDxf(document, file, local) : exportDxf(document, file);
 }
 
 } // namespace katana::app

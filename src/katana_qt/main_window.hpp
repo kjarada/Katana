@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "annotation/annotation_workbench.hpp"
+#include "command_reference_dialog.hpp"
+#include "command_runner.hpp"
 #include "icons.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_record.hpp"
@@ -33,10 +35,14 @@
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "gis_online.hpp"
+#include "keyboard_shortcuts_dialog.hpp"
+#include "script_runner.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
+#include "plotting/plot_drawing_dialog.hpp"
 #include "plotting/plot_output.hpp"
+#include "plotting/view_image_export.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -63,6 +69,7 @@ class StyleManagerDialog;
 class AttributeManagerDialog;
 class LayerManagerDialog;
 class DatasetInfoDialog;
+class DrawingSummaryDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -71,8 +78,12 @@ class MainWindow final : public QMainWindow {
     // Opens a project given on the command line.
     void openProject(const QString& directory);
     // Imports a data file given on the command line, routed by its extension
-    // exactly as File > Import does.
-    void importPath(const QString& path);
+    // exactly as File > Import does. With `local` - a typed IMPORT <file>
+    // LOCAL - vector data, a .12da archive or a DXF is moved as one piece so the
+    // lower-left corner of what it holds sits at 0,0, and nobody is asked
+    // where to put it; a raster or a point cloud refuses it by name, being
+    // reference data drawn at its own coordinates.
+    void importPath(const QString& path, bool local = false);
     // Plots the drawing to `path` on the active plan viewport. With
     // `fitToDrawing` the scale is the first standard one the drawing fits at
     // and the sheet is centred on it; otherwise `settings.scaleDenominator`
@@ -174,6 +185,15 @@ class MainWindow final : public QMainWindow {
     // Enter, or the last tool again. False when the line logged an error, so
     // a headless run can stop at a command that was refused.
     bool runCommand(const QString& line);
+    // The window's one executor for a dialog (command_runner.hpp): `line`
+    // echoed in the command log and run by the dispatcher a typed line goes
+    // to - but never offered to a running tool, and what is being typed on
+    // the command line is left alone - with what it logged returned. An empty
+    // line runs nothing and is not ok.
+    VerbOutcome runVerbLine(const QString& line);
+    // runVerbLine as a CommandRunner, for the workbenches to hand their
+    // dialogs.
+    [[nodiscard]] CommandRunner commandRunner();
 
     // Every key sequence the window's actions and menus answer to that two
     // of them share, one line each ("Ctrl+L: formatLayers, Line"); empty
@@ -184,6 +204,10 @@ class MainWindow final : public QMainWindow {
     // (Format) > L"). `sequences`, when given, is set to how many distinct
     // sequences there are. For the headless --check-shortcuts switch.
     [[nodiscard]] QStringList shortcutClashes(int* sequences = nullptr) const;
+    // Every key those actions and shortcuts answer to, with the menu path
+    // its command is under, in the menus' order: Help > Keyboard Shortcuts'
+    // table. The keys are the ones shortcutClashes counts.
+    [[nodiscard]] std::vector<ShortcutRow> shortcutRows() const;
 
   protected:
     void closeEvent(QCloseEvent* event) override;
@@ -234,7 +258,15 @@ class MainWindow final : public QMainWindow {
     void cutSectionAlongAlignment();
     void corridorQuantities();
     void corridorSurface();
+    // File > Plot to PDF: the dialog, made the first time and kept, which
+    // runs the PLOT line.
     void plotToPdf();
+    // File > Export View as Image, kept likewise; it runs SNAPSHOT.
+    void showViewImageExport();
+    // SNAPSHOT: the active plan view painted afresh at the size asked, or the
+    // 3D view grabbed and scaled; written, or put on the clipboard, and a
+    // record logged (plotting/view_image_export.hpp).
+    void snapshotView(const SnapshotRequest& request);
 
     // What both corridor commands ask for: an alignment with a design
     // profile, a ground surface, the assembly and the interval, from one
@@ -266,6 +298,9 @@ class MainWindow final : public QMainWindow {
 
     void refreshAll();
     void refreshTitle();
+    // The Edit toolbar's Undo and Redo lists, from the history: the k-th
+    // entry (undoStepK, redoStepK) runs UNDO k or REDO k.
+    void refreshHistoryMenus();
     void refreshLayers();
     void refreshProperties();
     void refreshReferences();
@@ -290,9 +325,10 @@ class MainWindow final : public QMainWindow {
     void reportCustomisationCoverage();
     // The options are the GIS menu's dialogs' choices; File > Import and a
     // path on the command line take the defaults.
+    // `local`: moved to sit at 0,0, as importPath says.
     void importVectorFile(const std::filesystem::path& path,
-                          katana::interop::VectorImportOptions options = {});
-    void importArchive12dFile(const std::filesystem::path& path);
+                          katana::interop::VectorImportOptions options = {}, bool local = false);
+    void importArchive12dFile(const std::filesystem::path& path, bool local = false);
     void importRasterFile(const std::filesystem::path& path,
                           katana::interop::RasterImportOptions options = {});
     void importPointCloudFile(const std::filesystem::path& path,
@@ -306,7 +342,9 @@ class MainWindow final : public QMainWindow {
     // A .dxf, read and written natively rather than through GDAL
     // (main_window_dxf.cpp). The export honours the options' entities,
     // layers and origin shift; the rest are GDAL's.
-    void importDxfFile(const std::filesystem::path& path);
+    void importDxfFile(const std::filesystem::path& path, bool local = false);
+    // What an IMPORT ... LOCAL says it did: the shift, as the move it made.
+    void logLocalShift(const katana::geometry::Vec2& shift);
     bool exportDxfFile(const std::filesystem::path& path,
                        const katana::interop::VectorExportOptions& options);
 
@@ -321,7 +359,14 @@ class MainWindow final : public QMainWindow {
     void importWithOptions(const QString& path);
     void exportPointCloud();
     void exportSurfaceAsDem();
+    // GIS > Convert Point Cloud to COPC: asks for the two files, then runs the
+    // COPC line they make through runVerbLine, and offers to import the
+    // result.
     void convertPointCloudToCopc();
+    // COPC <source> <destination>, typed or from the menu item: converts,
+    // asks nothing, and logs the result and the IMPORT line that reads it.
+    void convertPointCloudToCopc(const std::filesystem::path& source,
+                                 const std::filesystem::path& destination);
     void showDatasetInformation();
     // The reference layer selected in the panel, or the only one of its kind
     // when the panel has no selection; nullptr, having said why, otherwise.
@@ -341,16 +386,59 @@ class MainWindow final : public QMainWindow {
 
     // Returns false when the user cancels (unsaved changes).
     [[nodiscard]] bool confirmDiscard();
+    // In a headless session, logs that no file dialog opens and names `verb`,
+    // the line that does the same without one, and returns true: what File >
+    // Open, Save As, Import, Export Vector and Load Customisation do there.
+    bool refuseFileDialog(const QString& verb);
     void newDocument();
     void openDocument();
     bool saveDocument();
     bool saveDocumentAs();
 
+    // Enter on the command line: the typed line echoed, then offered to the
+    // workbenches' verbs, to a running tool and to dispatchLine, in that order.
     void runCommandLine();
+    // The ONLINE and UTILITY verbs, run by their workbenches; false leaves the
+    // line to whoever asked.
+    bool runWorkbenchLine(const QString& line);
+    // Everything a line can be once no tool took it: a '#' comment, a view
+    // verb, the window's own verbs (SCRIPT, CUSTOMISE, IMPORT, EXPORT,
+    // INFO <file>, REFS, COPC, PLOTSHEETS), a tool's alias, or the
+    // interpreter's. Shared by the typed line and runVerbLine, so the two
+    // cannot come to differ.
+    void dispatchLine(const QString& line);
     // The part of the command line that is the CommandInterpreter's, for a
     // line no tool and no view verb took; `verb` is its first word, upper
     // case.
     void runInterpreterLine(const QString& line, const QString& verb);
+    // SCRIPT <file> [CONTINUE] (script_runner.hpp): the file's lines through
+    // runVerbLine, stopping at the first refused unless `continueOnError`,
+    // and the record the run ends with logged. A script already running is
+    // refused, so one cannot run itself. Remembered in Recent Scripts, except
+    // in a headless session.
+    void runScript(const QString& path, bool continueOnError);
+    // Several lines at once on the command line - pasted - run as a script
+    // that stops at the first refused.
+    void runPastedLines(const QString& text);
+    // What the two share: the progress dialog (not headless), the run, and
+    // the record and the reason it stopped, logged. `name` is the script's
+    // path, empty for pasted lines.
+    void runLines(const std::vector<ScriptLine>& lines, const QString& name, bool continueOnError);
+    // File > Run Script: the dialog, made the first time and kept.
+    void showRunScript();
+    // File > Recent Scripts, rebuilt from the settings.
+    void refreshRecentScripts();
+    // Help > Command Reference, made the first time and kept, brought
+    // forward at `section` when one is named (Help > Sheets and Plotting
+    // Commands: "Sheets").
+    void showCommandReference(const QString& section);
+    // Help > Keyboard Shortcuts, made the first time and kept.
+    void showKeyboardShortcuts();
+    // File > Drawing Summary, made the first time and kept.
+    void showDrawingSummary();
+    // Format > Styles and Linetypes on its Missing chip, searching for `name`:
+    // where the summary sends a name no loaded library defines.
+    void showMissingInStyles(const QString& name);
     void logMessage(const QString& text, bool isError = false);
     void addLayer();
     void addChildLayer();
@@ -419,6 +507,8 @@ class MainWindow final : public QMainWindow {
     // under the cursor, a 3D view's frame time - in a PERMANENT status-bar
     // label, so that it never overwrites a prompt or an error message.
     QLabel* frameStatsLabel_ = nullptr;
+    // "3 selected / 120 entities", permanent, refreshed with the panels.
+    QLabel* selectionCountLabel_ = nullptr;
     // The Properties panel's Style row, and the Properties toolbar's
     // current style for new work (D9).
     QComboBox* propertyStyle_ = nullptr;
@@ -433,6 +523,10 @@ class MainWindow final : public QMainWindow {
     std::vector<std::string> customisationMissingAtOpen_;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
+    // The drop-down lists of the Edit toolbar's Undo and Redo buttons
+    // (editUndoButton, editRedoButton): editUndoMenu, editRedoMenu.
+    QMenu* undoHistory_ = nullptr;
+    QMenu* redoHistory_ = nullptr;
     QAction* gridAction_ = nullptr;
     QAction* snapAction_ = nullptr;
     // The catalogue's tools, one action each, by id; and Select, checked
@@ -461,6 +555,31 @@ class MainWindow final : public QMainWindow {
     bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history
     int errorsLogged_ = 0;          // logMessage's errors so far, for runCommand
+    // What runVerbLine's line has logged so far, while it runs: logMessage
+    // and warnUser add to it. Null otherwise.
+    struct VerbCapture {
+        QStringList reply;
+        QStringList errors;
+        // A failure warnUser showed in a box, which is not an error logged.
+        bool failed = false;
+    };
+    VerbCapture* capture_ = nullptr;
+    // The scripts running now, outermost first, by canonical path: a SCRIPT
+    // line naming one of them is refused rather than recursing for ever.
+    QStringList runningScripts_;
+    // File > Run Script's dialog, a child of the window; and the Recent
+    // Scripts submenu.
+    ScriptRunDialog* scriptDialog_ = nullptr;
+    QMenu* recentScriptsMenu_ = nullptr;
+    // The Help menu's two dialogs, children of the window.
+    CommandReferenceDialog* referenceDialog_ = nullptr;
+    KeyboardShortcutsDialog* shortcutsDialog_ = nullptr;
+    // File > Drawing Summary, a child of the window. It holds the Document
+    // through a DocumentWatcher, which is safe when the Document goes first.
+    DrawingSummaryDialog* summaryDialog_ = nullptr;
+    // File > Plot to PDF and Export View as Image, children of the window.
+    PlotDrawingDialog* plotDialog_ = nullptr;
+    ViewImageDialog* imageDialog_ = nullptr;
 };
 
 } // namespace katana::qt
