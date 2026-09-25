@@ -699,7 +699,22 @@ if(TARGET katana)
             "-DEXPECT=--dialog utilityDraw opened utilityDialog.*utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=[0-9]+ bounds=334000(\\.0*)?,6250000(\\.0*)?,334040(\\.0*)?,6250007\\.20*[\r\n].*line id=W1 type=water length=30\\.02[0-9]* ql_a=1\\.42[0-9]* ql_b=16\\.10[0-9]* ql_c=12\\.50[0-9]* ql_d=0(\\.0*)?[\r\n].*utilityStatus: Drawn as one undo step.*utilityOutput: utilities drawn lines=4 vertices=14 segments=10 entities=21 [^\r\n]*line id=G1 type=gas length=40(\\.0*)? ql_a=0(\\.0*)? ql_b=0(\\.0*)? ql_c=0(\\.0*)? ql_d=40(\\.0*)?.*FrameStatsLabel: Plan +21 drawn"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same draw TYPED on the command line, as an agent types it, with the
+    # MINCOVER the draw also takes: framed just the same, because the window
+    # frames the reply, not the dialog. layers=11 by hand from the runs above:
+    # water QL-A, QL-B, QL-C and points; electricity QL-B, QL-C and points;
+    # telecommunications QL-C and points; gas QL-D and points. The grab is the
+    # window, so the PNG shows the four services where they were drawn.
+    add_test(NAME qt_utility_draw_typed_frames_the_views_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>UTILITY DRAW ${_utility_samples}/schedule.csv MINCOVER 0.6|?FrameStatsLabel"
+            "-DEXPECT=utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200[\r\n]+line id=W1 type=water .*FrameStatsLabel: Plan +21 drawn"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_draw_typed_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_utility_dialog_writes_the_line_headless qt_utility_dialog_headless
+        qt_utility_draw_typed_frames_the_views_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
