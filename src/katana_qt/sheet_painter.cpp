@@ -1903,8 +1903,10 @@ ResolvedViewport resolvePlanViewport(const Viewport& viewport, const SheetSource
             const ResolvedViewport at = resolvePlanViewport(plan, source);
             return plotting::PlanPlacement{at.scale, at.centre};
         });
+    // The drawing is only the fallback for a set with no plan to frame.
     const plotting::PlanPlacement fitted = plotting::fitKeyPlan(
-        viewport, outlines, planDrawnBounds(source.plan, viewport.hiddenLayers, {}));
+        viewport, outlines,
+        outlines.empty() ? planDrawnBounds(source.plan, viewport.hiddenLayers, {}) : Box2{});
     return {fitted.scale, fitted.centre};
 }
 
