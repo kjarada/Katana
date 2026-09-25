@@ -9,6 +9,7 @@
 #include "katana/entity/model.hpp"
 #include "katana/ifc/export.hpp"
 #include "katana/survey/subsurface/quality_level.hpp"
+#include "katana/survey/subsurface/utility_network.hpp"
 
 namespace katana::ifc::detail {
 
@@ -23,6 +24,11 @@ void exportUtilities(Builder& builder, const UtilityInput& utilities);
 // (utilities.cpp) or a services plan drawn from one (drawing.cpp) - so that
 // a file holding both classifies them in one standard.
 Id qualityLevelReference(Builder& builder, survey::subsurface::QualityLevel level);
+
+// A service's system LongName - its owner, when known, and its type
+// ("WaterCo water") - the same from the schedule's export and a plan drawn
+// from it.
+std::string serviceLongName(const survey::subsurface::UtilityAttributes& service);
 
 // The drawing's entities, by classification: drawing.cpp.
 void exportEntities(Builder& builder, const entity::Model& model,

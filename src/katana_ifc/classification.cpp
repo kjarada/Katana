@@ -826,7 +826,7 @@ std::string formatClassificationRules(const std::vector<ClassificationRule>& rul
     std::string out =
         "# Classification rules for EXPORT <file.ifc> RULES <this file> (docs/ifc.md).\n"
         "# Tried in order before the defaults; the first rule whose words the entity's\n"
-        "# layer, survey code or 12d name holds wins. Words are whole words, any case;\n"
+        "# layer, survey code or string name holds wins. Words are whole words, any case;\n"
         "# a trailing * matches a prefix. Kinds and system may be left empty.\n"
         "rule,words,kinds,class,predefined_type,object_type,system\n";
     for (const ClassificationRule& rule : rules) {

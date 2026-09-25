@@ -374,13 +374,13 @@ endif()
 # with the sample schedule, the export holds the alignment, 4 services of 10
 # graded segments - 6 of them in 3D, as tests/ifc/test_export.cpp works out -
 # 14 located points and the 5 entities, and read back into a new drawing it
-# is the 29 objects and MC01's 4 PIs again. The TfNSW-shaped schedule, with
-# the delivery schema of tests/ifc: W-0001's 3 points, E-0001's 2 and
+# is the 29 objects and MC01's 4 PIs again. The sample written to a delivery
+# schema (schedule_tfnsw.csv), with the schema of tests/ifc: W-0001's 3 points, E-0001's 2 and
 # G-0001's 2 make 4 segments, in 3D where a depth is recorded at both ends -
 # all but G-0001's, which is from the records.
 if(KATANA_BUILD_TESTS)
     set(_ifc "${CMAKE_CURRENT_BINARY_DIR}/cli site.ifc")
-    set(_ifc_tfnsw "${CMAKE_CURRENT_BINARY_DIR}/cli tfnsw.ifc")
+    set(_ifc_delivery "${CMAKE_CURRENT_BINARY_DIR}/cli delivery.ifc")
     add_test(NAME cli.ifc_the_scenario_and_the_sample_services_exported_and_imported_back
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
@@ -388,14 +388,14 @@ if(KATANA_BUILD_TESTS)
                 -c "NEW" -c "IMPORT \"${_ifc}\"" -c "ALIGN LIST")
     set_tests_properties(cli.ifc_the_scenario_and_the_sample_services_exported_and_imported_back
         PROPERTIES FIXTURES_SETUP cli_ifc_file PASS_REGULAR_EXPRESSION
-        "exported cli site\\.ifc \\(IFC4X3_ADD2.*1 alignments, 4 services \\(10 segments, 6 in 3D, 14 located points\\), 5 entities written, 0 skipped.*imported 29 entities, 1 alignments and 0 surfaces from cli site\\.ifc.*MC01  4 PIs  1000\\.000 to 1339\\.016")
-    add_test(NAME cli.ifc_a_tfnsw_schedule_exported_with_its_delivery_schema
+        "ifc exported file=\"cli site\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+\ncounts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5 entities_skipped=0 surfaces=0.*ifc imported file=\"cli site\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*MC01  4 PIs  1000\\.000 to 1339\\.016")
+    add_test(NAME cli.ifc_a_delivery_schedule_exported_with_its_schema
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli>
-                -c "EXPORT \"${_ifc_tfnsw}\" UTILITIES \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule_tfnsw.csv\" SCHEMA \"${PROJECT_SOURCE_DIR}/tests/ifc/data/delivery_schema.csv\" NODRAWING")
-    set_tests_properties(cli.ifc_a_tfnsw_schedule_exported_with_its_delivery_schema
-        PROPERTIES FIXTURES_SETUP cli_ifc_tfnsw_file PASS_REGULAR_EXPRESSION
-        "0 alignments, 3 services \\(4 segments, 3 in 3D, 7 located points\\), 0 entities written")
+                -c "EXPORT \"${_ifc_delivery}\" UTILITIES \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule_tfnsw.csv\" SCHEMA \"${PROJECT_SOURCE_DIR}/tests/ifc/data/delivery_schema.csv\" NODRAWING")
+    set_tests_properties(cli.ifc_a_delivery_schedule_exported_with_its_schema
+        PROPERTIES FIXTURES_SETUP cli_ifc_delivery_file PASS_REGULAR_EXPRESSION
+        "counts alignments=0 services=3 segments=4 segments_3d=3 located_points=7 entities_written=0 ")
     # A project's own rules (samples/ifc/classification_rules.csv), tried
     # before the defaults: a point on a lighting layer is a column, not a
     # survey annotation.
@@ -406,7 +406,7 @@ if(KATANA_BUILD_TESTS)
                 -c "POINT 30,10"
                 -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli rules.ifc\" RULES \"${PROJECT_SOURCE_DIR}/samples/ifc/classification_rules.csv\"")
     set_tests_properties(cli.ifc_a_projects_rules_classify_what_the_defaults_would_not PROPERTIES
-        PASS_REGULAR_EXPRESSION "classes: IfcColumn 1; IfcDistributionChamberElement 1; IfcDistributionSystem 1;")
+        PASS_REGULAR_EXPRESSION "\nclass name=IfcColumn count=1\nclass name=IfcDistributionChamberElement count=1\nclass name=IfcDistributionSystem count=1\n")
     # The sample schedule drawn (UTILITY DRAW) and the drawing exported: the
     # services the schedule's own export writes, class for class. The draw's
     # reply gives the runs - W1 three (QL-B, QL-A, QL-C), E1 two (QL-B,
@@ -422,11 +422,50 @@ if(KATANA_BUILD_TESTS)
                 -c "EXPORT \"${_ifc_drawn}\"")
     set_tests_properties(cli.ifc_a_drawn_services_plan_goes_out_by_service PROPERTIES
         FIXTURES_SETUP cli_ifc_drawn_file PASS_REGULAR_EXPRESSION
-        "21 entities written, 0 skipped.*classes: IfcAnnotation 14; IfcCableCarrierSegment 2; IfcCableSegment 1; IfcDistributionSystem 4; IfcPipeSegment 4;")
+        "entities_written=21 entities_skipped=0 surfaces=0\nclass name=IfcAnnotation count=14\nclass name=IfcCableCarrierSegment count=2\nclass name=IfcCableSegment count=1\nclass name=IfcDistributionSystem count=4\nclass name=IfcPipeSegment count=4\n")
     add_test(NAME cli.ifc_refuses_an_unknown_option
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "EXPORT \"${_ifc}\" UTILITIS x.csv")
     set_tests_properties(cli.ifc_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+    # Everything File > Export IFC and Import IFC can choose is a word an
+    # agent can type (docs/ifc.md, "Using it"). PREVIEW answers with the
+    # objects and writes nothing: the file named is never made. With
+    # NOALIGNMENTS the scenario is its 5 entities and no IfcAlignment. INFO
+    # describes it; IMPORT ... NOELEMENTS TAKECRS brings nothing but gives
+    # the new drawing the file's EPSG:7856, as its own step; IFC RULES writes
+    # the defaults.
+    set(_ifc_never "${CMAKE_CURRENT_BINARY_DIR}/cli never written.ifc")
+    file(REMOVE "${_ifc_never}")
+    add_test(NAME cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${_ifc_never}\" PREVIEW"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\" NOALIGNMENTS NOSURFACES"
+                -c "INFO \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\""
+                -c "NEW"
+                -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\" NOELEMENTS TAKECRS"
+                -c "IMPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli choices.ifc\" TOLERANCE 0.01 KEEPCRS"
+                -c "CRS"
+                -c "IFC RULES \"${CMAKE_CURRENT_BINARY_DIR}/cli default rules.csv\"")
+    set_tests_properties(cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "ifc previewed file=\"cli never written\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+\ncounts alignments=1 .*object from=\"layer Survey/Kerb\" count=1 class=\"IfcKerb\" predefined=\"NOTDEFINED\" object_type=\"\" system=\"\" why=\"rule kerb\".*ifc exported file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+\ncounts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=5 .*ifc described file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=5 alignments=0 .*ifc imported file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=0 alignments=0 .*note text=\"the project is now in EPSG:7856, the file's coordinate system\".*ifc imported file=\"cli choices\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=5 .*crs id=EPSG:7856 .*ifc rules file=\"cli default rules\\.csv\" rules=[0-9]+")
+    # PREVIEW wrote nothing: the file it named does not exist.
+    add_test(NAME cli.ifc_preview_writes_no_file
+        COMMAND ${CMAKE_COMMAND} -E rm "${_ifc_never}")
+    set_tests_properties(cli.ifc_preview_writes_no_file PROPERTIES WILL_FAIL TRUE
+        DEPENDS cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line)
+    # What would be contradictory is refused by name, and fails the script.
+    add_test(NAME cli.ifc_selected_with_nothing_selected_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli selected.ifc\" SELECTED")
+    set_tests_properties(cli.ifc_selected_with_nothing_selected_is_refused PROPERTIES
+        WILL_FAIL TRUE)
+    add_test(NAME cli.ifc_takecrs_with_local_is_refused
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "IMPORT \"${_ifc}\" LOCAL TAKECRS")
+    set_tests_properties(cli.ifc_takecrs_with_local_is_refused PROPERTIES WILL_FAIL TRUE)
 
     # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
     # EXPRESS rules, no proxy, and the alignment's geometry against its
@@ -440,10 +479,10 @@ if(KATANA_BUILD_TESTS)
                 COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc}")
             set_tests_properties(cli.ifc_the_scenario_export_is_valid_to_ifcopenshell
                 PROPERTIES FIXTURES_REQUIRED cli_ifc_file)
-            add_test(NAME cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell
-                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_tfnsw}")
-            set_tests_properties(cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell
-                PROPERTIES FIXTURES_REQUIRED cli_ifc_tfnsw_file)
+            add_test(NAME cli.ifc_the_delivery_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_delivery}")
+            set_tests_properties(cli.ifc_the_delivery_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_delivery_file)
             add_test(NAME cli.ifc_the_drawn_services_export_is_valid_to_ifcopenshell
                 COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_drawn}")
             set_tests_properties(cli.ifc_the_drawn_services_export_is_valid_to_ifcopenshell

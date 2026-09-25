@@ -311,24 +311,31 @@ class MainWindow final : public QMainWindow {
     void importDxfFile(const std::filesystem::path& path);
     bool exportDxfFile(const std::filesystem::path& path,
                        const katana::interop::VectorExportOptions& options);
-    // A .ifc, read and written natively (main_window_ifc.cpp, docs/ifc.md).
-    // File > Import, a path given to the window and a typed IMPORT take the
-    // request's defaults (a typed IMPORT says how to take the file's
-    // coordinate system rather than asking); File > Import IFC's dialog
-    // chooses. Failed or cancelled has been reported.
-    IfcImportOutcome importIfcFile(const IfcImportRequest& request);
-    // Writes the file `request` asks for and reports it, or with `write`
-    // false only accounts for what it would hold (the export dialog's
-    // preview), writing and logging nothing. The report, or the error.
-    katana::core::Result<katana::ifc::IfcExport> exportIfcFile(const IfcExportRequest& request,
-                                                               bool write);
-    // What an IFC file holds, read but not imported, as a person reads it:
-    // INFO, GIS > Dataset Information and the import dialog's Describe.
+    // A .ifc, read and written natively (main_window_ifc.cpp, docs/ifc.md),
+    // always by a line: IMPORT, EXPORT, INFO or IFC RULES with
+    // ifc/front_end.hpp's grammar, the same lines katana_cli takes.
+    //
+    // Who ran it: typed (or pasted) on the command line, which asks no one
+    // about the file's coordinate system and says how; File > Import or a
+    // path given to the window, which asks the person there and shows a
+    // failure in a box; a dialog, whose line says TAKECRS or KEEPCRS itself
+    // and which shows its own result.
+    enum class IfcLineFrom { CommandLine, Menu, Dialog };
+    // The line's reply - key=value records - or its error, both in the log;
+    // nullopt when `verb` and `rest` are not an IFC line (another format's).
+    // A cancelled import is CommandRejected.
+    std::optional<katana::core::Result<std::string>>
+    runIfcLine(const QString& verb, const QString& rest,
+               IfcLineFrom from = IfcLineFrom::CommandLine);
+    // `line` echoed as typed and run by runIfcLine: what the dialogs, File >
+    // Import and a path given to the window hand their lines to.
+    katana::core::Result<std::string> runIfcCommand(const QString& line, IfcLineFrom from);
+    katana::core::Result<std::string> importIfc(const katana::ifc::ImportArguments& arguments,
+                                                IfcLineFrom from);
+    katana::core::Result<std::string> exportIfc(const katana::ifc::ExportArguments& arguments);
+    // What an IFC file holds, read but not imported, as INFO answers it:
+    // GIS > Dataset Information and --import-options show it too.
     katana::core::Result<QString> describeIfcFile(const std::filesystem::path& path);
-    // A typed IMPORT or EXPORT that names a .ifc, with the verbs' options
-    // (ifc/front_end.hpp): true when it was one - done, or refused and said
-    // - and false when the line is another format's.
-    bool runIfcLine(const QString& verb, const QString& rest);
     // File > Import IFC and Export IFC: the dialogs, made on first use and
     // kept, shown non-modally; `file` fills the File field.
     void showIfcImport(const QString& file = {});

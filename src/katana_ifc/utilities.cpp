@@ -33,14 +33,14 @@
 //   Pset_<class>TypeCommon  Reference (the asset identifier), Status
 //                         (EXISTING, NEW ...), the diameter
 //   Pset_ConstructionOccurence  AssetIdentifier, InstallationDate
-//   TfNSW_UtilitySchema   the delivery schema's attributes exactly as the
+//   <the schema's title>  the delivery schema's attributes exactly as the
 //                         schedule wrote them (UtilityAttributes::written) -
 //                         by the schema's order and labels, and as
 //                         enumerated values of its domains, when the schema
 //                         is given
 //
 // and each is classified: IfcClassificationReference "QL-A" .. "QL-D" in
-// AS 5488.1-2019, and the asset type code in the TfNSW Utility Schema.
+// AS 5488.1-2019, and the asset type code in AS 5488.2-2019 Table A.4.
 //
 // GEOMETRY IS NEVER GUESSED. A segment has an Axis in 3D - and a Body, a
 // swept disk of its size - only when both of its ends give the level of the
@@ -63,7 +63,7 @@ namespace sub = katana::survey::subsurface;
 
 namespace {
 
-// The attributes of the TfNSW Utility Schema that the schedule reader
+// The delivery schema's attributes that the schedule reader
 // interprets (utility_csv.hpp accepts them as aliases of its own columns):
 // per service, and per point. The rest arrive already by their schema names
 // in UtilityAttributes::fields and UtilityVertex::fields.
@@ -123,7 +123,7 @@ std::string_view elementStatus(sub::UtilityStatus status)
     return "NOTKNOWN";
 }
 
-// "1998/06/01", as the TfNSW schema writes a date, as an IfcDate
+// "1998/06/01", as a delivery schema writes a date, as an IfcDate
 // ("1998-06-01"); empty for anything else.
 std::string isoDate(std::string_view text)
 {
@@ -202,12 +202,15 @@ std::string_view commonPropertySet(std::string_view entity)
     return {};
 }
 
-// The delivery schema's property set name: TfNSW's, or one made from another
-// client's schema title ("Acme Utility Spec" -> "Acme_Utility_Spec").
+// The delivery schema's property set name, made from the title the schema
+// file gives itself ("Acme Utility Spec" -> "Acme_Utility_Spec"), so that
+// the set says which schema its values were written to without the export
+// knowing any client by name; "Delivery_Attributes" for a schedule written
+// to a schema that was not given.
 std::string deliveryPropertySetName(const sub::DeliverySchema* schema)
 {
-    if (!schema || schema->title.empty() || schema->title.starts_with("TfNSW")) {
-        return "TfNSW_UtilitySchema";
+    if (!schema || schema->title.empty()) {
+        return "Delivery_Attributes";
     }
     std::string name;
     bool gap = false;
@@ -251,19 +254,18 @@ class UtilityWriter {
         return input_.schema != nullptr || line.attributes.written.contains("AssetIdentifier");
     }
 
-    Id schemaClassification()
+    // The asset type codes a delivery schema's type attribute takes are
+    // AS 5488.2's (Table A.4), whichever schema the schedule was written to,
+    // so they are references into that standard; the schema itself is named
+    // by the property set its values are in.
+    Id assetTypeClassification()
     {
-        if (schemaClassification_ == 0) {
-            const sub::DeliverySchema* schema = input_.schema;
-            const bool tfnsw = schema == nullptr || schema->title.starts_with("TfNSW");
-            schemaClassification_ = b_.classification(
-                "delivery", tfnsw ? "Transport for NSW" : "",
-                schema ? schema->version : std::string(),
-                schema && !schema->title.empty() ? schema->title
-                                                 : "TfNSW Utility Schema and Specification",
-                "Asset type codes (AS 5488.2 Table A.4) of the delivery schema");
+        if (assetTypeClassification_ == 0) {
+            assetTypeClassification_ =
+                b_.classification("as5488.2", "Standards Australia", "2019", "AS 5488.2-2019",
+                                  "Subsurface utility information: asset types (Table A.4)");
         }
-        return schemaClassification_;
+        return assetTypeClassification_;
     }
 
     Id qualityReference(sub::QualityLevel level) { return qualityLevelReference(b_, level); }
@@ -294,15 +296,16 @@ class UtilityWriter {
         const UtilityClass run = classifyUtilityRun(service);
         const std::string systemName =
             run.system == "USERDEFINED" ? run.systemObjectType : run.system;
-        const Id system =
-            b_.file().add("IfcDistributionSystem", Args()
-                                                       .string(b_.guid(key))
-                                                       .null()
-                                                       .string(line.id)
-                                                       .stringOrNull(service.description)
-                                                       .stringOrNull(run.systemObjectType)
-                                                       .stringOrNull(longName(service))
-                                                       .enumeration(run.system));
+        b_.noteScheduleService(line.id + "/" + sub::toString(service.type));
+        const Id system = b_.file().add("IfcDistributionSystem",
+                                        Args()
+                                            .string(b_.guid(key))
+                                            .null()
+                                            .string(b_.label(line.id, "service " + line.id))
+                                            .stringOrNull(service.description)
+                                            .stringOrNull(run.systemObjectType)
+                                            .stringOrNull(serviceLongName(service))
+                                            .enumeration(run.system));
         ++b_.report().classes["IfcDistributionSystem"];
         b_.referenceInSite(system);
         ++b_.report().services;
@@ -364,23 +367,13 @@ class UtilityWriter {
                                                         : std::string(assetTypeCode(service.type));
             }();
             if (!code.empty()) {
-                const Id typeReference = b_.classificationReference(schemaClassification(), code,
+                const Id typeReference = b_.classificationReference(assetTypeClassification(), code,
                                                                     sub::toString(service.type));
                 for (const Id object : described) {
                     b_.associate(typeReference, object);
                 }
             }
         }
-    }
-
-    [[nodiscard]] static std::string longName(const sub::UtilityAttributes& service)
-    {
-        std::vector<std::string> parts;
-        if (!service.owner.empty()) {
-            parts.push_back(service.owner);
-        }
-        parts.emplace_back(sub::toString(service.type));
-        return joined(parts, " ");
     }
 
     Id writeSegment(const sub::UtilityLine& line, const sub::GradedLine& graded,
@@ -738,7 +731,7 @@ class UtilityWriter {
 
     Builder& b_;
     const UtilityInput& input_;
-    Id schemaClassification_ = 0;
+    Id assetTypeClassification_ = 0;
 };
 
 } // namespace
@@ -746,6 +739,16 @@ class UtilityWriter {
 void exportUtilities(Builder& builder, const UtilityInput& utilities)
 {
     UtilityWriter(builder, utilities).write();
+}
+
+std::string serviceLongName(const sub::UtilityAttributes& service)
+{
+    std::vector<std::string> parts;
+    if (!service.owner.empty()) {
+        parts.push_back(service.owner);
+    }
+    parts.emplace_back(sub::toString(service.type));
+    return joined(parts, " ");
 }
 
 Id qualityLevelReference(Builder& builder, sub::QualityLevel level)

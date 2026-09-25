@@ -1,5 +1,5 @@
 kind,attribute,value,detail,label
-schema,TfNSW Utility Schema and Specification,1.2,,
+schema,Utility Delivery Schema,1.2,,
 identifier,AssetIdentifier,,,
 parent,AssetTypeCode,,,
 field,AssetIdentifier,Text,Yes,Asset Identifier

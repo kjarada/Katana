@@ -1,6 +1,8 @@
 // File > Import IFC and Export IFC (src/katana_qt/ifc_dialogs.hpp): the
-// choices, what refuses them, and what each hands the window - driven
-// through the widgets, with the window's side supplied by the test.
+// choices, what refuses them, and the line each hands the window's command
+// line - driven through the widgets, with the window's side supplied by the
+// test as a command line that records the line and answers as the verb does
+// (ifc/front_end.hpp's reply writers).
 
 #include <gtest/gtest.h>
 
@@ -14,14 +16,13 @@
 #include "ifc_dialogs.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/ifc/export.hpp"
+#include "katana/ifc/front_end.hpp"
 
 using katana::qt::IfcExportContext;
 using katana::qt::IfcExportDialog;
-using katana::qt::IfcExportRequest;
 using katana::qt::IfcExportState;
 using katana::qt::IfcImportContext;
 using katana::qt::IfcImportDialog;
-using katana::qt::IfcImportRequest;
 
 namespace {
 
@@ -52,6 +53,41 @@ IfcExportContext exportContext(IfcExportState state)
     return context;
 }
 
+// A kerb and a pit: two classes a preview names.
+katana::entity::Model kerbAndPit()
+{
+    katana::entity::Model model;
+    katana::entity::Entity kerb;
+    kerb.geometry = katana::geometry::Polyline2{{{0.0, 0.0}, {10.0, 0.0}}, false};
+    kerb.layer = "Survey/Kerb";
+    EXPECT_TRUE(model.entities.add(kerb).ok());
+    katana::entity::Entity pit;
+    pit.geometry = katana::entity::PointGeometry{{5.0, 2.0}};
+    pit.layer = "Sewer/Pits";
+    EXPECT_TRUE(model.entities.add(pit).ok());
+    return model;
+}
+
+// The window's command line, as far as an EXPORT line goes: `model` written
+// in memory, and answered as the verb answers.
+std::function<katana::core::Result<std::string>(const QString&)>
+exportLine(const katana::entity::Model& model, std::vector<QString>& lines)
+{
+    return [&model, &lines](const QString& line) -> katana::core::Result<std::string> {
+        lines.push_back(line);
+        const auto parsed = katana::ifc::parseExportArguments(
+            line.mid(QStringLiteral("EXPORT").size()).toStdString());
+        if (!parsed || !*parsed) {
+            return katana::core::makeError(katana::core::ErrorCode::InvalidArgument, "not EXPORT");
+        }
+        const auto written = katana::ifc::writeIfc({&model, {}, {}});
+        if (!written) {
+            return written.error();
+        }
+        return katana::ifc::formatExportReply(*written, (*parsed)->path, (*parsed)->preview);
+    };
+}
+
 } // namespace
 
 // ---- export -------------------------------------------------------------------------
@@ -67,8 +103,8 @@ TEST(IfcExportDialog, EveryControlHasItsObjectName)
           "ifcExportSchedule",     "ifcExportScheduleBrowse", "ifcExportSchema",
           "ifcExportSchemaBrowse", "ifcExportSpacing",        "ifcExportRules",
           "ifcExportRulesBrowse",  "ifcExportSaveRules",      "ifcExportCrs",
-          "ifcExportClasses",      "ifcExportCheck",          "ifcExportPreview",
-          "ifcExportExport",       "ifcExportClose"}) {
+          "ifcExportCommand",      "ifcExportClasses",        "ifcExportCheck",
+          "ifcExportPreview",      "ifcExportExport",         "ifcExportClose"}) {
         EXPECT_NE(dialog.findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
     }
 }
@@ -154,63 +190,59 @@ TEST(IfcExportDialog, ExportWaitsForAFileAPositiveSpacingAndTheScheduleASchemaDe
     EXPECT_TRUE(exportButton->isEnabled());
 }
 
-TEST(IfcExportDialog, TheRequestCarriesEveryChoiceAsTheVerbWouldReadIt)
+// The dialog's whole output is a line: every choice is a word of it, shown
+// as it is edited, and the verb reads it back as the choices made.
+TEST(IfcExportDialog, TheLineCarriesEveryChoiceAsTheVerbReadsIt)
 {
     IfcExportDialog dialog(exportContext(drawing(5, 3)));
+    auto* command = child<QLineEdit>(dialog, "ifcExportCommand");
+    ASSERT_NE(command, nullptr);
+    EXPECT_TRUE(command->isReadOnly());
+    EXPECT_TRUE(command->text().isEmpty()); // no file yet: no line to run
     child<QLineEdit>(dialog, "ifcExportFile")->setText("C:/jobs/site plan.ifc");
+    EXPECT_EQ(command->text(), "EXPORT \"C:/jobs/site plan.ifc\"");
     child<QLineEdit>(dialog, "ifcExportSchedule")->setText("schedule.csv");
     child<QLineEdit>(dialog, "ifcExportSchema")->setText("schema.csv");
     child<QLineEdit>(dialog, "ifcExportRules")->setText("rules.csv");
     child<QLineEdit>(dialog, "ifcExportSpacing")->setText("12.5");
     child<QCheckBox>(dialog, "ifcExportSelectedOnly")->setChecked(true);
     child<QCheckBox>(dialog, "ifcExportSurfaces")->setChecked(false);
+    const QString expected = "EXPORT \"C:/jobs/site plan.ifc\" UTILITIES \"schedule.csv\" SCHEMA "
+                             "\"schema.csv\" RULES \"rules.csv\" SPACING 12.5 NOSURFACES SELECTED";
+    EXPECT_EQ(dialog.line(), expected);
+    EXPECT_EQ(command->text(), expected);
 
-    const IfcExportRequest request = dialog.request();
-    EXPECT_EQ(request.arguments.path, "C:/jobs/site plan.ifc");
-    EXPECT_EQ(request.arguments.schedule, "schedule.csv");
-    EXPECT_EQ(request.arguments.schema, "schema.csv");
-    EXPECT_EQ(request.arguments.rules, "rules.csv");
-    EXPECT_EQ(request.arguments.spacing, 12.5);
-    EXPECT_TRUE(request.arguments.drawing);
-    EXPECT_TRUE(request.entities);
-    EXPECT_TRUE(request.selectedOnly);
-    EXPECT_TRUE(request.alignments);
-    EXPECT_FALSE(request.surfaces);
+    const auto back = katana::ifc::parseExportArguments(
+        dialog.line().mid(QStringLiteral("EXPORT").size()).toStdString());
+    ASSERT_TRUE(back && *back);
+    EXPECT_EQ(**back, dialog.arguments());
 
-    // Selected-only means nothing once the entities are left out.
+    // The spacing the verb takes by default is not said; selected-only
+    // means nothing once the entities are left out; leaving out every part
+    // of the drawing is NODRAWING.
+    child<QLineEdit>(dialog, "ifcExportSpacing")->setText("10");
     child<QCheckBox>(dialog, "ifcExportEntities")->setChecked(false);
-    EXPECT_FALSE(dialog.request().selectedOnly);
     child<QCheckBox>(dialog, "ifcExportAlignments")->setChecked(false);
-    EXPECT_FALSE(dialog.request().arguments.drawing); // NODRAWING
+    EXPECT_EQ(dialog.line(), "EXPORT \"C:/jobs/site plan.ifc\" UTILITIES \"schedule.csv\" SCHEMA "
+                             "\"schema.csv\" RULES \"rules.csv\" NODRAWING");
 }
 
-// The table is the writer's own account: here made by the real writer from
-// a real drawing, as the window's preview makes it.
+// The table is the writer's own account, read from the reply of the line
+// with PREVIEW added: here the real writer on a real drawing, answered as
+// the verb answers.
 TEST(IfcExportDialog, PreviewShowsTheWritersAccountClassByClass)
 {
-    katana::entity::Model model;
-    katana::entity::Entity kerb;
-    kerb.geometry = katana::geometry::Polyline2{{{0.0, 0.0}, {10.0, 0.0}}, false};
-    kerb.layer = "Survey/Kerb";
-    ASSERT_TRUE(model.entities.add(kerb).ok());
-    katana::entity::Entity pit;
-    pit.geometry = katana::entity::PointGeometry{{5.0, 2.0}};
-    pit.layer = "Sewer/Pits";
-    ASSERT_TRUE(model.entities.add(pit).ok());
-
+    const katana::entity::Model model = kerbAndPit();
+    std::vector<QString> lines;
     IfcExportContext context = exportContext(drawing(2));
-    std::optional<IfcExportRequest> previewed;
-    context.preview = [&](const IfcExportRequest& request) {
-        previewed = request;
-        return katana::ifc::writeIfc({&model, {}, {}});
-    };
+    context.runLine = exportLine(model, lines);
     IfcExportDialog dialog(context);
     auto* table = child<QTableWidget>(dialog, "ifcExportClasses");
     auto* check = child<QLabel>(dialog, "ifcExportCheck");
     ASSERT_TRUE(table && check);
     child<QPushButton>(dialog, "ifcExportPreview")->click();
-    ASSERT_TRUE(previewed);
-    EXPECT_EQ(previewed->arguments.path, "preview.ifc"); // no file named yet
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0], "EXPORT \"preview.ifc\" PREVIEW"); // no file named yet
     ASSERT_EQ(table->rowCount(), 2);
     EXPECT_EQ(table->item(0, 0)->text(), "layer Sewer/Pits");
     EXPECT_EQ(table->item(0, 2)->text(), "IfcDistributionChamberElement INSPECTIONPIT");
@@ -223,7 +255,7 @@ TEST(IfcExportDialog, PreviewShowsTheWritersAccountClassByClass)
         << check->text().toStdString();
 
     // A preview that is refused says why, and shows nothing.
-    context.preview = [](const IfcExportRequest&) -> katana::core::Result<katana::ifc::IfcExport> {
+    context.runLine = [](const QString&) -> katana::core::Result<std::string> {
         return katana::core::makeError(katana::core::ErrorCode::NotFound, "cannot read s.csv");
     };
     IfcExportDialog refused(context);
@@ -232,28 +264,23 @@ TEST(IfcExportDialog, PreviewShowsTheWritersAccountClassByClass)
     EXPECT_EQ(child<QLabel>(refused, "ifcExportCheck")->text(), "NotFound: cannot read s.csv");
 }
 
-TEST(IfcExportDialog, ExportHandsTheRequestToTheWindowAndShowsWhatWasWritten)
+TEST(IfcExportDialog, ExportHandsItsLineToTheWindowAndShowsWhatWasWritten)
 {
-    IfcExportContext context = exportContext(drawing(5));
-    std::optional<IfcExportRequest> ran;
-    context.run = [&](const IfcExportRequest& request) {
-        ran = request;
-        katana::ifc::IfcExport report;
-        report.instances = 1097;
-        report.entitiesWritten = 5;
-        report.tally = {{"layer Survey/Kerb", "IfcKerb", "NOTDEFINED", "", "", "rule kerb", 1}};
-        return katana::core::Result<katana::ifc::IfcExport>(std::move(report));
-    };
+    const katana::entity::Model model = kerbAndPit();
+    std::vector<QString> lines;
+    IfcExportContext context = exportContext(drawing(2));
+    context.runLine = exportLine(model, lines);
     IfcExportDialog dialog(context);
     child<QLineEdit>(dialog, "ifcExportFile")->setText("out.ifc");
     child<QPushButton>(dialog, "ifcExportExport")->click();
-    ASSERT_TRUE(ran);
-    EXPECT_EQ(ran->arguments.path, "out.ifc");
-    EXPECT_EQ(child<QTableWidget>(dialog, "ifcExportClasses")->rowCount(), 1);
-    const QString said = child<QLabel>(dialog, "ifcExportCheck")->text();
-    EXPECT_TRUE(said.startsWith("Wrote out.ifc: 1,097 instances, 5 entities") ||
-                said.startsWith("Wrote out.ifc: 1097 instances, 5 entities"))
-        << said.toStdString();
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0], "EXPORT \"out.ifc\"");
+    EXPECT_EQ(child<QTableWidget>(dialog, "ifcExportClasses")->rowCount(), 2);
+    const auto written = katana::ifc::writeIfc({&model, {}, {}});
+    ASSERT_TRUE(written.ok());
+    EXPECT_EQ(child<QLabel>(dialog, "ifcExportCheck")->text(),
+              "Wrote out.ifc: " + QString::number(written->instances) +
+                  " instances (the log has the reply).");
 }
 
 // Headless, a Browse button would open a box no one can answer: it says so.
@@ -263,7 +290,7 @@ TEST(IfcExportDialog, BrowseAsksNoOneInAHeadlessSession)
     child<QPushButton>(dialog, "ifcExportBrowse")->click();
     EXPECT_TRUE(child<QLabel>(dialog, "ifcExportCheck")->text().contains("type its path instead"));
     child<QPushButton>(dialog, "ifcExportSaveRules")->click();
-    EXPECT_TRUE(child<QLabel>(dialog, "ifcExportCheck")->text().contains("not available here"));
+    EXPECT_TRUE(child<QLabel>(dialog, "ifcExportCheck")->text().contains("type IFC RULES"));
 }
 
 // ---- import -------------------------------------------------------------------------
@@ -276,42 +303,42 @@ TEST(IfcImportDialog, EveryControlHasItsObjectName)
     for (const char* name :
          {"ifcImportFile", "ifcImportBrowse", "ifcImportDescribe", "ifcImportSummary",
           "ifcImportLocal", "ifcImportAlignments", "ifcImportElements", "ifcImportSurfaces",
-          "ifcImportTolerance", "ifcImportTakeCrs", "ifcImportCheck", "ifcImportImport",
-          "ifcImportClose"}) {
+          "ifcImportTolerance", "ifcImportTakeCrs", "ifcImportCommand", "ifcImportCheck",
+          "ifcImportImport", "ifcImportClose"}) {
         EXPECT_NE(dialog.findChild<QWidget*>(QString::fromLatin1(name)), nullptr) << name;
     }
 }
 
-TEST(IfcImportDialog, TheRequestCarriesEveryChoiceAndLocalTakesNoCoordinateSystem)
+TEST(IfcImportDialog, TheLineCarriesEveryChoiceAndLocalTakesNoCoordinateSystem)
 {
     IfcImportDialog dialog(IfcImportContext{});
     auto* import = child<QPushButton>(dialog, "ifcImportImport");
-    ASSERT_NE(import, nullptr);
+    auto* command = child<QLineEdit>(dialog, "ifcImportCommand");
+    ASSERT_TRUE(import && command);
     EXPECT_FALSE(import->isEnabled());
     EXPECT_EQ(dialog.check(), "Name the IFC file to import.");
     dialog.setFile("site.ifc");
     EXPECT_TRUE(import->isEnabled());
-
-    IfcImportRequest request = dialog.request();
-    EXPECT_EQ(request.arguments.path, "site.ifc");
-    EXPECT_FALSE(request.arguments.local);
-    EXPECT_TRUE(request.alignments && request.elements && request.surfaces);
-    EXPECT_EQ(request.curveTolerance, 0.001);
-    EXPECT_EQ(request.takeCoordinateSystem, true);
+    // The dialog always answers the coordinate-system question, so its line
+    // never asks: ticked by default, TAKECRS.
+    EXPECT_EQ(command->text(), "IMPORT \"site.ifc\" TAKECRS");
+    child<QCheckBox>(dialog, "ifcImportTakeCrs")->setChecked(false);
+    EXPECT_EQ(dialog.line(), "IMPORT \"site.ifc\" KEEPCRS");
 
     child<QCheckBox>(dialog, "ifcImportLocal")->setChecked(true);
     child<QCheckBox>(dialog, "ifcImportSurfaces")->setChecked(false);
     child<QLineEdit>(dialog, "ifcImportTolerance")->setText("0.01");
     // Moved to the origin, the data is in no system the file names.
     EXPECT_FALSE(child<QCheckBox>(dialog, "ifcImportTakeCrs")->isEnabled());
-    request = dialog.request();
-    EXPECT_TRUE(request.arguments.local);
-    EXPECT_FALSE(request.surfaces);
-    EXPECT_EQ(request.curveTolerance, 0.01);
-    EXPECT_EQ(request.takeCoordinateSystem, false);
+    EXPECT_EQ(dialog.line(), "IMPORT \"site.ifc\" LOCAL NOSURFACES TOLERANCE 0.01");
+    const auto back = katana::ifc::parseImportArguments(
+        dialog.line().mid(QStringLiteral("IMPORT").size()).toStdString());
+    ASSERT_TRUE(back && *back);
+    EXPECT_EQ(**back, dialog.arguments());
 
     child<QLineEdit>(dialog, "ifcImportTolerance")->setText("0");
     EXPECT_FALSE(import->isEnabled());
+    EXPECT_TRUE(command->text().isEmpty());
     child<QLineEdit>(dialog, "ifcImportTolerance")->setText("0.01");
     for (const char* name : {"ifcImportAlignments", "ifcImportElements"}) {
         child<QCheckBox>(dialog, name)->setChecked(false);
@@ -320,34 +347,43 @@ TEST(IfcImportDialog, TheRequestCarriesEveryChoiceAndLocalTakesNoCoordinateSyste
     EXPECT_TRUE(dialog.check().startsWith("Nothing to import"));
 }
 
-TEST(IfcImportDialog, DescribeShowsWhatTheFileHoldsAndImportHandsTheRequestOver)
+TEST(IfcImportDialog, DescribeRunsInfoAndImportRunsItsLine)
 {
+    std::vector<QString> lines;
+    bool cancel = false;
     IfcImportContext context;
-    context.describe = [](const QString& path) -> katana::core::Result<QString> {
-        if (path == "missing.ifc") {
+    context.runLine = [&](const QString& line) -> katana::core::Result<std::string> {
+        lines.push_back(line);
+        if (line == "INFO \"missing.ifc\"") {
             return katana::core::makeError(katana::core::ErrorCode::NotFound,
                                            "the file cannot be read");
         }
-        return QString("site.ifc: IFC4X3_ADD2, EPSG:7856");
-    };
-    std::optional<IfcImportRequest> ran;
-    katana::qt::IfcImportOutcome outcome = katana::qt::IfcImportOutcome::Imported;
-    context.run = [&](const IfcImportRequest& request) {
-        ran = request;
-        return outcome;
+        if (line.startsWith("INFO")) {
+            return std::string("ifc described file=\"site.ifc\" schema=IFC4X3_ADD2");
+        }
+        if (cancel) {
+            return katana::core::makeError(katana::core::ErrorCode::CommandRejected,
+                                           "Import cancelled.");
+        }
+        return std::string("ifc imported file=\"site.ifc\" schema=IFC4X3_ADD2 crs=\"\" "
+                           "entities=29 alignments=1 surfaces=0");
     };
     IfcImportDialog dialog(context);
     dialog.setFile("site.ifc");
     child<QPushButton>(dialog, "ifcImportDescribe")->click();
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0], "INFO \"site.ifc\"");
     EXPECT_EQ(child<QPlainTextEdit>(dialog, "ifcImportSummary")->toPlainText(),
-              "site.ifc: IFC4X3_ADD2, EPSG:7856");
+              "ifc described file=\"site.ifc\" schema=IFC4X3_ADD2");
     child<QPushButton>(dialog, "ifcImportImport")->click();
-    ASSERT_TRUE(ran);
-    EXPECT_EQ(ran->arguments.path, "site.ifc");
-    EXPECT_TRUE(child<QLabel>(dialog, "ifcImportCheck")->text().startsWith("Imported site.ifc"));
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[1], "IMPORT \"site.ifc\" TAKECRS");
+    EXPECT_EQ(child<QLabel>(dialog, "ifcImportCheck")->text(),
+              "Imported 29 entities, 1 alignments and 0 surfaces from site.ifc: the log has the "
+              "reply.");
 
     // A person who cancels the far-apart question has not had a failure.
-    outcome = katana::qt::IfcImportOutcome::Cancelled;
+    cancel = true;
     child<QPushButton>(dialog, "ifcImportImport")->click();
     EXPECT_EQ(child<QLabel>(dialog, "ifcImportCheck")->text(), "Import cancelled.");
 
@@ -372,9 +408,9 @@ TEST(IfcExportDialog, ASelectionClearedWhileItIsOpenRefusesSelectedOnly)
     IfcExportContext context = exportContext(now);
     context.state = [&now] { return now; };
     bool ran = false;
-    context.run = [&](const IfcExportRequest&) -> katana::core::Result<katana::ifc::IfcExport> {
+    context.runLine = [&](const QString&) -> katana::core::Result<std::string> {
         ran = true;
-        return katana::ifc::IfcExport{};
+        return std::string();
     };
     IfcExportDialog dialog(context);
     child<QLineEdit>(dialog, "ifcExportFile")->setText("out.ifc");
@@ -393,22 +429,16 @@ TEST(IfcExportDialog, ASelectionClearedWhileItIsOpenRefusesSelectedOnly)
 // it, and a problem replaces the last result instead of standing behind it.
 TEST(IfcExportDialog, AChangedChoiceClearsThePreviewAndAProblemReplacesTheLastResult)
 {
-    katana::entity::Model model;
-    katana::entity::Entity kerb;
-    kerb.geometry = katana::geometry::Polyline2{{{0.0, 0.0}, {10.0, 0.0}}, false};
-    kerb.layer = "Kerb";
-    ASSERT_TRUE(model.entities.add(kerb).ok());
-    IfcExportContext context = exportContext(drawing(1));
-    context.preview = [&](const IfcExportRequest&) {
-        return katana::ifc::writeIfc({&model, {}, {}});
-    };
-    context.run = [&](const IfcExportRequest&) { return katana::ifc::writeIfc({&model, {}, {}}); };
+    const katana::entity::Model model = kerbAndPit();
+    std::vector<QString> lines;
+    IfcExportContext context = exportContext(drawing(2));
+    context.runLine = exportLine(model, lines);
     IfcExportDialog dialog(context);
     auto* table = child<QTableWidget>(dialog, "ifcExportClasses");
     auto* check = child<QLabel>(dialog, "ifcExportCheck");
     auto* spacing = child<QLineEdit>(dialog, "ifcExportSpacing");
     child<QPushButton>(dialog, "ifcExportPreview")->click();
-    ASSERT_EQ(table->rowCount(), 1);
+    ASSERT_EQ(table->rowCount(), 2);
     spacing->setText("12"); // grades differently: the account is no longer this one
     EXPECT_EQ(table->rowCount(), 0);
 

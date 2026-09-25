@@ -1,20 +1,29 @@
 // The window's IFC import and export, through the native module (katana_ifc,
 // docs/ifc.md). Its own file, so that main_window.cpp - where every feature
-// meets - carries one-line hooks. What a typed line means, which files an
-// export names and the GlobalIds' namespace are ifc/front_end.hpp's, shared
-// with katana_cli, so the two front ends write the same file from the same
-// line; what only the window has - its surfaces, its selection, a person to
-// ask - is added here.
+// meets - carries one-line hooks.
+//
+// ONE DOOR: every IFC action in the window is a line - IMPORT, EXPORT, INFO
+// or IFC RULES - with ifc/front_end.hpp's grammar, which katana_cli reads
+// too. A typed line comes here from runCommandLine; File > Import IFC and
+// Export IFC write their line (formatImportLine, formatExportLine) and hand
+// it to runIfcCommand, which echoes it as typed and runs it here; File >
+// Import and a path given to the window do the same. So a dialog cannot do
+// what a line cannot, an agent can do all a dialog can, and the reply - the
+// key=value records katana_cli prints - is the same whoever asked. What only
+// the window has - its surfaces, its selection, a person to ask - is added
+// here.
 
 #include "main_window.hpp"
 
 #include "format.hpp"
 
 #include <chrono>
-#include <fstream>
+#include <cstdio>
+#include <format>
 
 #include <QApplication>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 
 #include "katana/cad/project_crs.hpp"
@@ -27,47 +36,52 @@ namespace katana::qt {
 
 namespace interop = katana::interop;
 
-namespace {
+using katana::core::ErrorCode;
+using katana::core::makeError;
+using katana::core::Result;
 
-QString nameOf(const std::filesystem::path& path)
-{
-    return QString::fromStdWString(path.filename().wstring());
-}
+namespace {
 
 QString qs(const std::string& text)
 {
     return QString::fromStdString(text);
 }
 
-// "IfcKerb 1; IfcPipeSegment 6;" - the classes line both front ends print.
-QString classesLine(const std::map<std::string, std::size_t>& classes)
+// The arguments of a line that names the file and nothing else: what INFO
+// takes.
+katana::ifc::ImportArguments fileAlone(const std::string& path)
 {
-    QString line;
-    for (const auto& [name, count] : classes) {
-        line += ' ' + qs(name) + ' ' + grouped(count) + ';';
-    }
-    return line;
+    katana::ifc::ImportArguments bare;
+    bare.path = path;
+    return bare;
+}
+
+std::string fileNameOf(const std::string& utf8Path)
+{
+    const auto name = katana::ifc::pathFromUtf8(utf8Path).filename().u8string();
+    return {name.begin(), name.end()};
 }
 
 } // namespace
 
 // ---- import -------------------------------------------------------------------------
 
-IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
+Result<std::string> MainWindow::importIfc(const katana::ifc::ImportArguments& arguments,
+                                          IfcLineFrom from)
 {
-    const std::filesystem::path path = katana::ifc::pathFromUtf8(request.arguments.path);
+    const std::filesystem::path path = katana::ifc::pathFromUtf8(arguments.path);
     katana::ifc::ImportOptions options;
-    options.importAlignments = request.alignments;
-    options.importElements = request.elements;
-    options.importSurfaces = request.surfaces;
-    options.curveTolerance = request.curveTolerance;
+    options.importAlignments = arguments.alignments;
+    options.importElements = arguments.elements;
+    options.importSurfaces = arguments.surfaces;
+    if (arguments.tolerance) {
+        options.curveTolerance = *arguments.tolerance;
+    }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = katana::ifc::readIfcFile(path, options);
     QApplication::restoreOverrideCursor();
     if (!imported.ok()) {
-        logMessage(qs(imported.error().describe()), true);
-        warnUser("Import failed", qs(imported.error().describe()));
-        return IfcImportOutcome::Failed;
+        return imported.error();
     }
 
     // LOCAL, as katana_cli has it: read again shifted by the extent's corner,
@@ -76,11 +90,12 @@ IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
     // coordinates merged into a drawing near the origin make one of the two
     // a dot. The extent is everything the file brings, alignments and
     // surfaces too (IfcImport::bounds).
+    std::vector<std::string> notes;
     bool shifted = false;
-    if (request.arguments.local && !imported->bounds.empty()) {
+    if (arguments.local && !imported->bounds.empty()) {
         options.originShift = imported->bounds.min;
         shifted = true;
-    } else if (!request.arguments.local) {
+    } else if (!arguments.local) {
         // Weighed against everything the drawing has too - its alignments
         // and the session's surfaces are not entities, and a drawing of an
         // alignment alone is as far from a file as one of lines.
@@ -97,7 +112,7 @@ IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
         }
         const auto advice = interop::advisePlacement(existing, imported->bounds);
         if (advice.farApart && headless_) {
-            logMessage(qs(advice.message) + " (kept: no one to ask).", true);
+            notes.push_back(advice.message + " (kept: no one to ask)");
         } else if (advice.farApart) {
             QMessageBox box(this);
             box.setIcon(QMessageBox::Question);
@@ -112,14 +127,14 @@ IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
             box.setDefaultButton(shift);
             box.exec();
             if (box.clickedButton() == cancel) {
-                logMessage("Import cancelled.");
-                return IfcImportOutcome::Cancelled;
+                // Declined, not failed: the dialog says it as a cancel.
+                return makeError(ErrorCode::CommandRejected, "Import cancelled.");
             }
             if (box.clickedButton() == shift) {
                 options.originShift = advice.suggestedShift;
                 shifted = true;
             } else {
-                logMessage(qs(advice.message) + ".", true);
+                notes.push_back(advice.message + " (kept)");
             }
         }
     }
@@ -128,49 +143,37 @@ IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
         auto moved = katana::ifc::readIfcFile(path, options);
         QApplication::restoreOverrideCursor();
         if (!moved.ok()) {
-            logMessage(qs(moved.error().describe()), true);
-            return IfcImportOutcome::Failed;
+            return moved.error();
         }
         imported = std::move(moved);
-        logMessage(QString("Shifted the imported data by %1,%2 %3.")
-                       .arg(options.originShift->x, 0, 'f', 3)
-                       .arg(options.originShift->y, 0, 'f', 3)
-                       .arg(request.arguments.local ? "to sit at the origin"
-                                                    : "to sit beside the drawing"));
+        notes.push_back(std::format(
+            "shifted by {:.3f},{:.3f} {}", options.originShift->x, options.originShift->y,
+            arguments.local ? "to sit at the origin" : "to sit beside the drawing"));
     }
 
     // Layers, alignments and entities: ONE transaction, one Ctrl+Z. The
-    // counts first - the command takes the entities, and adds its renames to
-    // the warnings.
+    // count first - the command takes the entities - and the reply after it,
+    // since it adds its renames to the warnings.
     const std::size_t entities = imported->entities.size();
-    const std::size_t alignments = imported->alignments.size();
-    const std::size_t surfaces = imported->surfaces.size();
     if (auto command = katana::ifc::importCommand(*imported, document_.model())) {
         if (const auto status = document_.execute(std::move(command)); !status) {
-            logMessage(qs(status.error().describe()), true);
-            warnUser("Import failed", qs(status.error().describe()));
-            return IfcImportOutcome::Failed;
+            return status.error();
         }
     }
-    logMessage("Imported " + grouped(entities) + " entities, " + grouped(alignments) +
-               " alignments and " + grouped(surfaces) + " surfaces from " + nameOf(path) + " (" +
-               qs(imported->schema) + ")");
-    logMessage("  " + grouped(imported->products) +
-               " objects read: " + grouped(imported->productsImported) + " drawn, " +
-               grouped(imported->productsAsPoints) + " as a point at their placement; " +
-               grouped(imported->alignmentsAsPolylines) + " alignments as polylines");
-    if (!imported->classes.empty()) {
-        logMessage("  classes:" + classesLine(imported->classes));
-    }
+    std::string reply =
+        katana::ifc::formatImportReply(*imported, fileNameOf(arguments.path), entities);
 
     // The file's coordinate system. Taken only when the project has none and
     // the data is where the file put it - shifted, it is in no system at all.
     // Its own undoable step (Document::setCoordinateSystem), after the import.
+    // TAKECRS and KEEPCRS answer; without either, File > Import asks the
+    // person there, and a typed line - a script typed or pasted in - is
+    // answered in the log as katana_cli answers it.
     const std::string& project = document_.metadata().coordinateSystem;
     const std::string& file = imported->coordinateSystem;
     if (!file.empty() && project.empty() && !shifted) {
-        bool take = request.takeCoordinateSystem.value_or(false);
-        if (!request.takeCoordinateSystem && !headless_) {
+        bool take = arguments.takeCoordinateSystem.value_or(false);
+        if (!arguments.takeCoordinateSystem && from == IfcLineFrom::Menu && !headless_) {
             QString named = qs(file);
             if (const auto described = katana::cad::describeCoordinateSystem(file)) {
                 named += " (" + qs(described->name) + ")";
@@ -184,33 +187,24 @@ IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
         }
         if (take) {
             if (const auto status = document_.setCoordinateSystem(file, "IMPORT_CRS"); !status) {
-                logMessage("  the file's coordinate system " + qs(file) +
-                               " could not be set: " + qs(status.error().describe()),
-                           true);
+                notes.push_back("the file's coordinate system " + file +
+                                " could not be set: " + status.error().describe());
             } else {
-                logMessage("  the project is now in " + qs(file) +
-                           ", the file's coordinate system");
+                notes.push_back("the project is now in " + file + ", the file's coordinate system");
             }
         } else {
-            logMessage("  the file is in " + qs(file) +
-                       " and the project has no coordinate system: File > Project Coordinate "
-                       "System or CRS SET " +
-                       qs(file) + " sets it");
+            notes.push_back("the file is in " + file +
+                            " and the project has no coordinate system: File > Project "
+                            "Coordinate System or CRS SET " +
+                            file + " sets it");
         }
     } else if (!file.empty() && !project.empty() && project != file) {
-        logMessage("  the file is in " + qs(file) + " and the project in " + qs(project) +
-                   "; nothing was reprojected");
+        reply +=
+            "\n" + katana::ifc::warningRecord("the file is in " + file + " and the project in " +
+                                              project + "; nothing was reprojected");
     }
-    for (const std::string& warning : imported->warnings) {
-        logMessage("  " + qs(warning));
-    }
-    const auto& bounds = imported->bounds;
-    if (!bounds.empty()) {
-        logMessage(QString("  extent %1,%2 to %3,%4")
-                       .arg(bounds.min.x, 0, 'f', 2)
-                       .arg(bounds.min.y, 0, 'f', 2)
-                       .arg(bounds.max.x, 0, 'f', 2)
-                       .arg(bounds.max.y, 0, 'f', 2));
+    for (const std::string& note : notes) {
+        reply += "\n" + katana::ifc::noteRecord(note);
     }
 
     // Surfaces are session data, outside undo (interop/reference_data.hpp),
@@ -220,10 +214,10 @@ IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
     }
     views_->refreshAll();
     views_->zoomExtentsAll();
-    return IfcImportOutcome::Imported;
+    return reply;
 }
 
-katana::core::Result<QString> MainWindow::describeIfcFile(const std::filesystem::path& path)
+Result<QString> MainWindow::describeIfcFile(const std::filesystem::path& path)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     const auto read = katana::ifc::readIfcFile(path);
@@ -231,71 +225,31 @@ katana::core::Result<QString> MainWindow::describeIfcFile(const std::filesystem:
     if (!read.ok()) {
         return read.error();
     }
-    QString text = nameOf(path) + ": " + qs(read->schema) + ", " +
-                   (read->coordinateSystem.empty() ? QString("no coordinate system")
-                                                   : qs(read->coordinateSystem)) +
-                   "\n";
-    text += "  " + grouped(read->products) + " objects: " + grouped(read->productsImported) +
-            " drawn, " + grouped(read->productsAsPoints) + " as a point at their placement\n";
-    if (!read->classes.empty()) {
-        text += "  classes:" + classesLine(read->classes) + "\n";
-    }
-    text += "  " + grouped(read->alignments.size()) + " alignments with a PI definition";
-    for (const auto& alignment : read->alignments) {
-        text += (&alignment == &read->alignments.front() ? ": " : ", ") + qs(alignment.name) +
-                " (" + grouped(alignment.horizontal.pis.size()) + " PIs" +
-                (alignment.vertical ? ", " + grouped(alignment.vertical->pvis.size()) + " PVIs"
-                                    : QString()) +
-                ")";
-    }
-    text += "; " + grouped(read->alignmentsAsPolylines) + " as polylines\n";
-    text += "  " + grouped(read->surfaces.size()) + " surfaces";
-    for (const auto& surface : read->surfaces) {
-        text += (&surface == &read->surfaces.front() ? ": " : ", ") + qs(surface.name) + " (" +
-                grouped(surface.surface.triangleCount()) + " triangles)";
-    }
-    text += "\n  " + grouped(read->layers.size()) + " layers, " + grouped(read->entities.size()) +
-            " entities\n";
-    if (!read->bounds.empty()) {
-        text += QString("  extent %1,%2 to %3,%4\n")
-                    .arg(read->bounds.min.x, 0, 'f', 2)
-                    .arg(read->bounds.min.y, 0, 'f', 2)
-                    .arg(read->bounds.max.x, 0, 'f', 2)
-                    .arg(read->bounds.max.y, 0, 'f', 2);
-    }
-    for (const std::string& warning : read->warnings) {
-        text += "  " + qs(warning) + "\n";
-    }
-    return text.trimmed();
+    const auto name = path.filename().u8string();
+    return qs(katana::ifc::formatDescription(*read, std::string(name.begin(), name.end())));
 }
 
 // ---- export -------------------------------------------------------------------------
 
-katana::core::Result<katana::ifc::IfcExport>
-MainWindow::exportIfcFile(const IfcExportRequest& request, bool write)
+Result<std::string> MainWindow::exportIfc(const katana::ifc::ExportArguments& arguments)
 {
     // The files the export names, read before anything is written.
-    auto files = katana::ifc::readExportFiles(request.arguments);
+    auto files = katana::ifc::readExportFiles(arguments);
     if (!files) {
-        if (write) {
-            logMessage(qs(files.error().describe()), true);
-            warnUser("Export failed", qs(files.error().describe()));
-        }
         return files.error();
     }
     katana::ifc::ExportInput input;
-    const bool drawing = request.arguments.drawing && (request.entities || request.alignments);
-    if (drawing) {
+    if (arguments.entities || arguments.alignments) {
         input.model = &document_.model();
     }
-    if (request.arguments.drawing && request.surfaces) {
+    if (arguments.surfaces) {
         for (const cad::SceneSurface& item : sceneSurfaces_) {
             input.surfaces.push_back({item.name, item.surface});
         }
     }
     input.utilities = std::move(files->utilities);
 
-    // The options the CLI sets, from the same metadata by the same
+    // The options katana_cli sets, from the same metadata by the same
     // functions, so that an object's GlobalId is the same whichever front
     // end wrote it.
     const auto& metadata = document_.metadata();
@@ -313,94 +267,113 @@ MainWindow::exportIfcFile(const IfcExportRequest& request, bool write)
             options.georeference.description = described->name;
         }
     }
-    options.exportEntities = drawing && request.entities;
-    options.exportAlignments = drawing && request.alignments;
-    if (options.exportEntities && request.selectedOnly) {
+    options.exportEntities = arguments.entities;
+    options.exportAlignments = arguments.alignments;
+    if (arguments.selected) {
         options.entities = document_.selection().ids();
         // An empty list is every entity (ExportOptions::entities): a
         // selection cleared since it was asked for must not become the
-        // whole drawing.
+        // whole drawing. katana_cli refuses in the same words.
         if (options.entities.empty()) {
-            const auto refused = katana::core::makeError(
-                katana::core::ErrorCode::InvalidState,
-                "nothing is selected: select the entities to export, or export them all");
-            if (write) {
-                logMessage(qs(refused.describe()), true);
-                warnUser("Export failed", qs(refused.describe()));
-            }
-            return refused;
+            return makeError(ErrorCode::InvalidState,
+                             "SELECTED, and nothing is selected: select the entities to export, "
+                             "or leave SELECTED out");
         }
     }
 
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const std::filesystem::path path = katana::ifc::pathFromUtf8(request.arguments.path);
-    auto written = write ? katana::ifc::writeIfcFile(input, path, options)
-                         : katana::ifc::writeIfc(input, options);
+    const std::filesystem::path path = katana::ifc::pathFromUtf8(arguments.path);
+    auto written = arguments.preview ? katana::ifc::writeIfc(input, options)
+                                     : katana::ifc::writeIfcFile(input, path, options);
     QApplication::restoreOverrideCursor();
     if (!written) {
-        if (write) {
-            logMessage(qs(written.error().describe()), true);
-            warnUser("Export failed", qs(written.error().describe()));
-        }
         return written.error();
     }
-    if (!write) {
-        written->text.clear();
-        return written;
-    }
-    logMessage("Exported " + grouped(written->entitiesWritten) + " entities, " +
-               grouped(written->alignments) + " alignments, " + grouped(written->services) +
-               " services (" + grouped(written->serviceSegments) + " segments, " +
-               grouped(written->segmentsIn3d) + " in 3D, " + grouped(written->locatedPoints) +
-               " located points) and " + grouped(written->surfaces) + " surfaces to " +
-               nameOf(path) + " (IFC4X3_ADD2, " + grouped(written->instances) + " instances)");
-    logMessage("  classes:" + classesLine(written->classes));
-    for (const std::string& warning : written->warnings) {
-        logMessage("  " + qs(warning));
-    }
-    return written;
+    return katana::ifc::formatExportReply(*written, fileNameOf(arguments.path), arguments.preview);
 }
 
-// ---- the command line and the dialogs ----------------------------------------------
+// ---- the lines ---------------------------------------------------------------------
 
-bool MainWindow::runIfcLine(const QString& verb, const QString& rest)
+std::optional<Result<std::string>> MainWindow::runIfcLine(const QString& verb, const QString& rest,
+                                                          IfcLineFrom from)
 {
     const std::string argument = rest.toStdString();
+    std::optional<Result<std::string>> reply;
     if (verb == "EXPORT") {
         const auto parsed = katana::ifc::parseExportArguments(argument);
         if (!parsed) {
-            return false; // not an .ifc: the other exporters' line
+            return std::nullopt; // not an .ifc: the other exporters' line
         }
-        if (!*parsed) {
-            logMessage(qs(parsed->error().describe()), true);
-            return true;
-        }
-        IfcExportRequest request;
-        request.arguments = **parsed;
-        request.entities = request.alignments = request.surfaces = request.arguments.drawing;
-        (void)exportIfcFile(request, true);
-        return true;
-    }
-    if (verb == "IMPORT") {
+        reply = *parsed ? exportIfc(**parsed) : Result<std::string>(parsed->error());
+    } else if (verb == "IMPORT") {
         const auto parsed = katana::ifc::parseImportArguments(argument);
         if (!parsed) {
-            return false;
+            return std::nullopt;
+        }
+        reply = *parsed ? importIfc(**parsed, from) : Result<std::string>(parsed->error());
+    } else if (verb == "INFO") {
+        const auto parsed = katana::ifc::parseImportArguments(argument);
+        if (!parsed) {
+            return std::nullopt; // not an .ifc: GIS's INFO
         }
         if (!*parsed) {
-            logMessage(qs(parsed->error().describe()), true);
-            return true;
+            reply = Result<std::string>(parsed->error());
+        } else if (**parsed != fileAlone((*parsed)->path)) {
+            reply = Result<std::string>(makeError(
+                ErrorCode::InvalidArgument, "INFO <file.ifc> takes the file and nothing else"));
+        } else {
+            auto described = describeIfcFile(katana::ifc::pathFromUtf8((*parsed)->path));
+            reply = described ? Result<std::string>(described->toStdString())
+                              : Result<std::string>(described.error());
         }
-        IfcImportRequest request;
-        request.arguments = **parsed;
-        // A typed line is answered in the log, as katana_cli answers it:
-        // the file's coordinate system is named with how to set it, and
-        // no box interrupts a script typed or pasted in.
-        request.takeCoordinateSystem = false;
-        (void)importIfcFile(request);
-        return true;
+    } else if (verb == "IFC") {
+        const auto path = katana::ifc::parseRulesArguments(argument);
+        if (!path) {
+            return std::nullopt; // IFC <something else>: no verb of the window's
+        }
+        reply = *path ? katana::ifc::writeDefaultRules(**path) : Result<std::string>(path->error());
+    } else {
+        return std::nullopt;
     }
-    return false;
+    if (*reply) {
+        logMessage(qs(**reply));
+    } else if (reply->error().code == ErrorCode::CommandRejected) {
+        logMessage(qs(reply->error().message)); // a cancel, said as one
+    } else {
+        logMessage(qs(reply->error().describe()), true);
+        if (from == IfcLineFrom::Menu) {
+            warnUser(verb == "EXPORT" ? "Export failed" : "Import failed",
+                     qs(reply->error().describe()));
+        }
+    }
+    return reply;
 }
+
+Result<std::string> MainWindow::runIfcCommand(const QString& line, IfcLineFrom from)
+{
+    // Echoed as a typed line is, and run as runCommandLine runs a typed IFC
+    // line - but never offered to a running tool first, since the line is
+    // never an answer to one.
+    commandLog_->appendPlainText("> " + line);
+    if (headless_) {
+        // What a script - or a ctest check - can see of which line a dialog
+        // ran, as logMessage echoes what it reported.
+        std::fprintf(stderr, "> %s\n", line.toUtf8().constData());
+    }
+    const QString trimmed = line.trimmed();
+    const qsizetype space = trimmed.indexOf(' ');
+    const QString verb = trimmed.left(space < 0 ? trimmed.size() : space).toUpper();
+    const QString rest = space < 0 ? QString() : trimmed.mid(space);
+    if (auto reply = runIfcLine(verb, rest, from)) {
+        return std::move(*reply);
+    }
+    const auto refused =
+        makeError(ErrorCode::InvalidArgument, "not an IFC line: " + line.toStdString());
+    logMessage(qs(refused.describe()), true);
+    return refused;
+}
+
+// ---- the dialogs -------------------------------------------------------------------
 
 IfcExportContext MainWindow::ifcExportContext()
 {
@@ -421,21 +394,8 @@ IfcExportContext MainWindow::ifcExportContext()
         state.georeferenced = katana::ifc::isEpsgCode(code);
         return state;
     };
-    context.preview = [this](const IfcExportRequest& request) {
-        return exportIfcFile(request, false);
-    };
-    context.run = [this](const IfcExportRequest& request) { return exportIfcFile(request, true); };
-    context.saveDefaultRules = [this](const QString& path) -> katana::core::Status {
-        std::ofstream file(katana::ifc::pathFromUtf8(path.toStdString()),
-                           std::ios::binary | std::ios::trunc);
-        file << katana::ifc::formatClassificationRules(katana::ifc::defaultClassificationRules());
-        file.close();
-        if (!file) {
-            return katana::core::makeError(katana::core::ErrorCode::FileExportFailure,
-                                           "the rules could not be written", path.toStdString());
-        }
-        logMessage("Wrote the default IFC classification rules to " + path);
-        return {};
+    context.runLine = [this](const QString& line) {
+        return runIfcCommand(line, IfcLineFrom::Dialog);
     };
     context.headless = [this] { return headless_; };
     return context;
@@ -444,10 +404,9 @@ IfcExportContext MainWindow::ifcExportContext()
 IfcImportContext MainWindow::ifcImportContext()
 {
     IfcImportContext context;
-    context.describe = [this](const QString& path) {
-        return describeIfcFile(katana::ifc::pathFromUtf8(path.toStdString()));
+    context.runLine = [this](const QString& line) {
+        return runIfcCommand(line, IfcLineFrom::Dialog);
     };
-    context.run = [this](const IfcImportRequest& request) { return importIfcFile(request); };
     context.headless = [this] { return headless_; };
     return context;
 }
