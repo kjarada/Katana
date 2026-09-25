@@ -146,6 +146,9 @@ struct PlanGridOptions {
     // How wide a label is set, in paper millimetres. Empty: estimated at
     // 0.75 x the cap height a character, which is Arial's figures.
     std::function<double(std::string_view)> labelWidthMm;
+    // The least paper between two labels' knock-outs: two labels closer than
+    // this read as one ("E 305 240 N 6 250 480"), so the later is left out.
+    double labelSpacingMm = 1.5;
 };
 
 // What the painter draws for a plan's grid.
