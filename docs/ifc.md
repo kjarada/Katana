@@ -237,6 +237,30 @@ else: a pipe drawn at a depth nobody measured would be taken for one
 somebody had. On the sample schedule that is 6 of 10 segments - W1-2 to W1-4
 and all of E1 (`IfcExportUtilities.EveryGradedSegmentIsOneElementAndOnlyThoseWithLevelsAreIn3d`).
 
+**A services plan drawn from a schedule** (`UTILITY DRAW`,
+`docs/subsurface_utilities.md`, "Drawing the services") is in the drawing,
+not the schedule, and is laid out for a plan: a layer per type and quality
+level, each run a polyline carrying what the grading found as `utility.*`
+properties. Exported by its layers' words it would be one system per level,
+and E1's conduits a cable; so an entity with `utility.line` and
+`utility.type` is written as the service it belongs to. Each run is the
+class the schedule's own export gives the service, from the same attributes
+the run carries (`ifc::classifyUtilityRun`: E1's "4 x 100 mm conduits" an
+`IfcCableCarrierSegment` CONDUITSEGMENT); each point an `IfcAnnotation`
+SURVEY; all of a service one `IfcDistributionSystem` named by its line,
+within the `<prefix>/<type>` it was drawn under, so that two schedules drawn
+under two prefixes stay apart. Each is classified by its level in AS 5488.1,
+the classification the schedule's services use, written once for both, and
+carries what the drawing kept of its grade in the same sets, a run's
+`AS5488_QualityLevel` and a point's `AS5488_LocatedPoint`; what the drawing
+does not keep (a run's claimed level, its path evidence) is absent. A drawn
+run is one per stretch of one level, not one per segment, so the sample
+drawn gives W1 three pipes where the schedule gives five segments
+(`IfcExportDrawing.ADrawnServicesPlanGoesOutByServiceAsTheScheduleWouldClassIt`,
+`cli.ifc_a_drawn_services_plan_goes_out_by_service`). The drawing is plan
+only, so the runs have their `FootPrint`; the schedule export is the one
+that draws a service in 3D where its levels allow.
+
 ### Drawing entities
 
 An entity becomes the class of the first rule whose words its layer path,
