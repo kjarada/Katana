@@ -27,6 +27,12 @@ namespace katana::cad::tools::annotate {
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeAlignedDimensionTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeLinearDimensionTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeLeaderTool(const ToolContext& context);
+// annotate_dimension_kinds.cpp: the kinds the DIM verb makes beside aligned
+// and linear.
+[[nodiscard]] std::unique_ptr<InteractiveTool> makeAngularDimensionTool(const ToolContext& context);
+[[nodiscard]] std::unique_ptr<InteractiveTool> makeRadiusDimensionTool(const ToolContext& context);
+[[nodiscard]] std::unique_ptr<InteractiveTool> makeDiameterDimensionTool(const ToolContext& context);
+[[nodiscard]] std::unique_ptr<InteractiveTool> makeOrdinateDimensionTool(const ToolContext& context);
 
 // True when `typed` names the option `keyword`: the keyword or any prefix of it
 // at least `shortest` letters long, in any case - "u", "UN" and "Undo" all name
