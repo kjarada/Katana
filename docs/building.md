@@ -321,7 +321,13 @@ failing:
 `bin/` sits beside `share/` because that is where both data-hungry libraries
 look: PROJ finds `proj.db` at `<its DLL>/../share/proj` by itself, and
 `locateGdalData` (in `gdal_adapter.cpp`) does the same for GDAL. See
-`docs/interop.md` for why GDAL needed telling.
+`docs/interop.md` for why GDAL needed telling. libcurl, which GDAL and GIS >
+Online Data fetch through, is the third: it checks every `https://` answer
+against `<its DLL>/../etc/ssl/certs/ca-bundle.crt`, so the deploy copies the
+toolchain's bundle there too. Until it did, every online request from
+`bin/katana.exe` failed with "error adding trust anchors from file" while the
+tests passed - they load libcurl from the toolchain, beside its own bundle.
+`runtime_has_the_certificates_https_is_checked_against` checks it is there.
 
 The bundle is 388 MB. Almost all of it is the dependency chain of GDAL and PDAL
 as MSYS2 builds them; Katana's own code is a few megabytes. The install rules
