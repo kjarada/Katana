@@ -81,6 +81,7 @@
 #include <set>
 #include <utility>
 
+#include "katana/cad/annotation/label_layout.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
@@ -180,11 +181,16 @@ QString point(const katana::geometry::Point2& p)
     return number(p.x) + ", " + number(p.y);
 }
 
-// Rows shown in the property panel for one entity.
-std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::Geometry& geometry)
+// Rows shown in the property panel for one entity of `model`.
+std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::Model& model,
+                                                          const katana::entity::Geometry& geometry)
 {
     using Rows = std::vector<std::pair<QString, QString>>;
     struct Visitor {
+        // A label's words are worked out from its target, which is in the
+        // model, not in the label.
+        const katana::entity::Model& model;
+
         Rows operator()(const katana::entity::PointGeometry& g) const
         {
             return {{"Position", point(g.position)}};
@@ -267,6 +273,12 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
             if (!g.rule.empty()) {
                 rows.push_back({"Rule", QString::fromStdString(g.rule)});
             }
+            // What it says and where, as LABEL LIST replies them: the words
+            // through the same resolver, so the two cannot disagree.
+            rows.push_back(
+                {"Text", QString::fromStdString(katana::cad::annotation::shownLabelText(model, g))});
+            rows.push_back({"Position", g.position ? "pinned at " + point(*g.position)
+                                                   : QString("automatic")});
             return rows;
         }
         Rows operator()(const katana::entity::LeaderGeometry& g) const
@@ -277,7 +289,7 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
                     {"Callout", QString::fromUtf8(katana::entity::toString(g.callout))}};
         }
     };
-    return std::visit(Visitor{}, geometry);
+    return std::visit(Visitor{model}, geometry);
 }
 
 // How many of the loaded library's definitions are symbols by decision D3 -
@@ -869,6 +881,9 @@ void MainWindow::buildActions()
     // Annotate > Edit Text...: the annotation workbench's, which exists only
     // from here, after the tools filled the menu.
     annotation_->addEditTextAction(*annotateMenu);
+    // Annotate > Edit Label... and Label Layout Report..., after the
+    // catalogue's tools: the annotation workbench's, which Format made.
+    annotation_->addLabelActions(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
     buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);
@@ -1497,6 +1512,9 @@ void MainWindow::buildDocks()
     styleRow->addWidget(propertyStyleApply_);
     propertyLayout->addLayout(styleRow);
     propertyTable_ = new QTableWidget(0, 2, propertyPanel);
+    // Named, so the headless --report can read the rows (a label's Text and
+    // Position, qt_labels_are_made_edited_and_reported_in_the_window_headless).
+    propertyTable_->setObjectName("propertyTable");
     propertyTable_->setHorizontalHeaderLabels({"Property", "Value"});
     propertyTable_->verticalHeader()->setVisible(false);
     propertyTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1914,7 +1932,7 @@ void MainWindow::refreshProperties()
         rows.push_back({"Layer", QString::fromStdString(entity.layer)});
         rows.push_back({"Colour", entity.color ? QString::fromStdString(entity.color->toHex())
                                                : QString("ByLayer")});
-        for (auto& row : describeGeometry(entity.geometry)) {
+        for (auto& row : describeGeometry(document_.model(), entity.geometry)) {
             rows.push_back(std::move(row));
         }
         for (const auto& [key, value] : entity.properties) {

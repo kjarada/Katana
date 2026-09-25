@@ -2,12 +2,14 @@
 
 // The annotation front end in the Format menu (docs/annotation.md, "In the
 // window"): Text Styles..., Label Styles and Rules..., Dimension Styles...,
-// the plan view's annotation scale on the Format toolbar, and Annotate >
-// Edit Text....
+// the plan view's annotation scale on the Format toolbar; and in the Annotate
+// menu, after its tools, Edit Text..., Edit Label... and Label Layout
+// Report....
 //
 // No dialog here changes the drawing itself: each builds the line a person
-// would type - TEXTSTYLE, LABELSTYLE, AUTOLABEL, DIMSTYLE, TEXTEDIT - and
-// runs it through the window's one executor (commandRunner), and the scale
+// would type - TEXTSTYLE, LABELSTYLE, AUTOLABEL, DIMSTYLE, TEXTEDIT,
+// LABEL SET, LABEL LAYOUT - and runs it through the window's one executor
+// (commandRunner), and the scale
 // box sets the scale as ANNOSCALE does, by Document::setAnnotationScale - each
 // ONE undoable step, so nothing here decides anything a script or an agent
 // could not do the same way. Stable object names throughout, for the
@@ -36,6 +38,8 @@ class TextStyleManagerDialog;
 class LabelStyleManagerDialog;
 class DimensionStyleManagerDialog;
 class TextEditDialog;
+class LabelEditDialog;
+class LabelLayoutReportDialog;
 
 class AnnotationWorkbench {
   public:
@@ -64,6 +68,16 @@ class AnnotationWorkbench {
     void setCommandRunner(CommandRunner run) { run_ = std::move(run); }
     [[nodiscard]] const CommandRunner& commandRunner() const { return run_; }
 
+    // Annotate > Edit Label... (annotateEditLabel) and Label Layout
+    // Report... (annotateLabelLayout), put after the menu's tools by the
+    // window, each with a menu letter the tools have left free.
+    void addLabelActions(QMenu& annotateMenu);
+    // Edit Label on the selected label; with none it says so and runs
+    // nothing (label_edit_dialog.hpp).
+    LabelEditDialog& showEditLabel();
+    // The report, run afresh each time it is shown (label_layout_report.hpp).
+    LabelLayoutReportDialog& showLabelLayout();
+
   private:
     // The box shows the document's scale; called whenever the document
     // changes, since an undo or an ANNOSCALE typed changes it too.
@@ -84,6 +98,8 @@ class AnnotationWorkbench {
     QPointer<LabelStyleManagerDialog> labelStyles_;
     QPointer<DimensionStyleManagerDialog> dimStyles_;
     QPointer<TextEditDialog> textEdit_;
+    QPointer<LabelEditDialog> editLabel_;
+    QPointer<LabelLayoutReportDialog> labelLayout_;
     CommandRunner run_;
     struct Listener;
     std::unique_ptr<Listener> listener_;
