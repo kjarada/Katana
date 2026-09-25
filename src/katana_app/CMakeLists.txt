@@ -276,6 +276,18 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.generate_fit_rotate_turns_the_plan_to_fill_the_sheet PROPERTIES
         PASS_REGULAR_EXPRESSION "generated 1 sheet: 1.*view id=vp1 kind=plan rect=[^\r\n]* scale=1250 centre=[^\r\n]* rotation=3\\.6[12]"
         FAIL_REGULAR_EXPRESSION "error")
+    # SHEETS APPEND, what the Sheets editor's Sheet Set > Append Sheets From
+    # File runs: a set saved, the sheet renamed, and the saved set appended
+    # after it, renumbered s2 (docs/plotting.md, "The Sheet Set menu and Page
+    # Setup").
+    set(_append_file "${CMAKE_CURRENT_BINARY_DIR}/cli append set.json")
+    add_test(NAME cli.sheets_append_puts_another_sets_sheets_after_these
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SHEET NEW NORTH" -c "SHEETS SAVE \"${_append_file}\""
+                -c "SHEET RENAME 1 COVER" -c "SHEETS APPEND \"${_append_file}\"" -c "SHEETS")
+    set_tests_properties(cli.sheets_append_puts_another_sets_sheets_after_these PROPERTIES
+        PASS_REGULAR_EXPRESSION "appended 1 sheet from \"[^\"]*cli append set\\.json\": 2.*2 sheets${_eol}sheet 1 id=s1 name=\"COVER\"[^\r\n]*${_eol}sheet 2 id=s2 name=\"NORTH\""
+        FAIL_REGULAR_EXPRESSION "error")
 endif()
 
 # UTILITY on the sample investigation (samples/utilities, worked by hand in

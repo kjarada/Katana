@@ -67,12 +67,14 @@ QWidget* browseRow(QLineEdit*& edit, const QString& editName, const QString& but
 // ---- the dialog -------------------------------------------------------------------------
 
 PlotDialog::PlotDialog(const plotting::SheetSet& set, std::size_t current, bool allSheets,
-                       const QString& suggestedFile, QWidget* parent)
+                       const QString& suggestedFile, QWidget* parent, Mode mode)
     : QDialog(parent), set_(set), current_(std::min(current, set.sheets.empty() ? std::size_t{0}
-                                                                              : set.sheets.size() - 1))
+                                                                              : set.sheets.size() - 1)),
+      mode_(mode)
 {
-    setObjectName(QStringLiteral("plotDialog"));
-    setWindowTitle(QStringLiteral("Plot Sheets"));
+    const bool pageSetupOnly = mode_ == Mode::PageSetup;
+    setObjectName(pageSetupOnly ? QStringLiteral("pageSetupDialog") : QStringLiteral("plotDialog"));
+    setWindowTitle(pageSetupOnly ? QStringLiteral("Page Setup") : QStringLiteral("Plot Sheets"));
     setMinimumWidth(520);
     const plotting::PageSetup& setup = set_.pageSetup;
     auto* layout = new QVBoxLayout(this);
@@ -111,6 +113,7 @@ PlotDialog::PlotDialog(const plotting::SheetSet& set, std::size_t current, bool 
     sheetsLayout->addWidget(sheetsSummary_);
     (allSheets ? all_ : currentOnly_)->setChecked(true);
     form_->addRow(QStringLiteral("Sheets"), sheets);
+    sheetsRow_ = sheets;
 
     // What is made.
     format_ = new QComboBox(this);
@@ -151,6 +154,14 @@ PlotDialog::PlotDialog(const plotting::SheetSet& set, std::size_t current, bool 
     dpi_->setValue(static_cast<int>(std::lround(setup.dpi)));
     dpi_->setToolTip(QStringLiteral("The resolution of an image, and of a PDF's 3D snapshot"));
     form_->addRow(QStringLiteral("Resolution"), dpi_);
+    if (pageSetupOnly) {
+        // The page setup's own choice of output; a plot chooses its format
+        // itself.
+        filePerSheet_ = new QCheckBox(QStringLiteral("A PDF per sheet, named by the pattern"), this);
+        filePerSheet_->setObjectName(QStringLiteral("pageSetupFilePerSheet"));
+        filePerSheet_->setChecked(setup.filePerSheet);
+        form_->addRow(QString(), filePerSheet_);
+    }
 
     // Where it goes.
     const QFileInfo suggested(suggestedFile);
@@ -211,9 +222,17 @@ PlotDialog::PlotDialog(const plotting::SheetSet& set, std::size_t current, bool 
     layout->addWidget(problem_);
 
     auto* buttons = new QDialogButtonBox(this);
-    run_ = buttons->addButton(QStringLiteral("Plot"), QDialogButtonBox::AcceptRole);
-    run_->setObjectName(QStringLiteral("plotRun"));
+    run_ = buttons->addButton(pageSetupOnly ? QStringLiteral("Save") : QStringLiteral("Plot"),
+                              QDialogButtonBox::AcceptRole);
+    run_->setObjectName(pageSetupOnly ? QStringLiteral("pageSetupSave") : QStringLiteral("plotRun"));
     run_->setDefault(true);
+    if (pageSetupOnly) {
+        // What only a plot asks: which sheets, where to, and what then.
+        form_->setRowVisible(sheetsRow_, false);
+        form_->setRowVisible(format_, false);
+        openAfter_->setVisible(false);
+        keepSetup_->setVisible(false);
+    }
     QPushButton* cancel = buttons->addButton(QDialogButtonBox::Cancel);
     cancel->setObjectName(QStringLiteral("plotCancel"));
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -235,7 +254,43 @@ PlotDialog::PlotDialog(const plotting::SheetSet& set, std::size_t current, bool 
     }
     connect(lineWeightScale_, &QDoubleSpinBox::valueChanged, this, [this] { refresh(); });
     connect(dpi_, &QSpinBox::valueChanged, this, [this] { refresh(); });
+    if (filePerSheet_ != nullptr) {
+        connect(filePerSheet_, &QCheckBox::toggled, this, [this] { refresh(); });
+    }
     refresh();
+}
+
+plotting::PageSetup PlotDialog::pageSetup() const
+{
+    plotting::PageSetup setup = set_.pageSetup;
+    setup.colourMode = katana::cad::plotColourModeFrom(colourMode_->currentData().toString().toStdString())
+                           .value_or(katana::cad::PlotColourMode::Colour);
+    setup.lineWeightScale = lineWeightScale_->value();
+    setup.dpi = dpi_->value();
+    setup.fileNamePattern = pattern_->text().toStdString();
+    setup.filePerSheet = filePerSheet_ != nullptr ? filePerSheet_->isChecked()
+                                                  : format_->currentData().toString() == QStringLiteral("pdfs");
+    return setup;
+}
+
+QString PlotDialog::pageSetupLine() const
+{
+    // The line weight to the hundredth the box holds, without trailing
+    // zeros: 0.7, not 0.70.
+    QString weight = QString::number(lineWeightScale_->value(), 'f', 2);
+    while (weight.endsWith('0')) {
+        weight.chop(1);
+    }
+    if (weight.endsWith('.')) {
+        weight.chop(1);
+    }
+    // A typed "\\" is read back as one backslash, and any other as itself:
+    // doubled, every backslash comes back as it was.
+    QString pattern = pattern_->text();
+    pattern.replace('\\', QStringLiteral("\\\\"));
+    return QString("SHEETS PAGESETUP style=%1 lineweight=%2 dpi=%3 pattern=\"%4\" filepersheet=%5")
+        .arg(colourMode_->currentData().toString(), weight, QString::number(dpi_->value()), pattern,
+             pageSetup().filePerSheet ? QStringLiteral("on") : QStringLiteral("off"));
 }
 
 bool PlotDialog::toPrinter() const
@@ -286,6 +341,14 @@ PlotRequest PlotDialog::request() const
 
 Status PlotDialog::check() const
 {
+    if (mode_ == Mode::PageSetup) {
+        if (pattern_->text().contains('"')) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a file-name pattern cannot hold a double quote: the command line has "
+                             "no way to type one");
+        }
+        return plotting::validatePageSetup(pageSetup());
+    }
     const PlotRequest asked = request();
     if (toPrinter()) {
         if (printer_->count() == 0) {
@@ -301,6 +364,23 @@ Status PlotDialog::check() const
 
 void PlotDialog::refresh()
 {
+    if (mode_ == Mode::PageSetup) {
+        // The pattern is always the page setup's to keep, a file per sheet
+        // or not; the first sheet's file shows what it makes.
+        for (QWidget* row : {fileRow_, folderRow_, static_cast<QWidget*>(printer_)}) {
+            form_->setRowVisible(row, false);
+        }
+        const std::string first =
+            set_.sheets.empty() ? std::string()
+                                : plotting::sheetFileName(set_, 0, pattern_->text().toStdString());
+        patternPreview_->setText(first.empty() ? QString()
+                                               : QStringLiteral("First file: ") + qtText(first) +
+                                                     QStringLiteral(".pdf"));
+        const Status status = check();
+        problem_->setText(status ? QString() : qtText(status.error().message));
+        run_->setEnabled(static_cast<bool>(status));
+        return;
+    }
     const PlotRequest asked = request();
     listText_->setEnabled(list_->isChecked());
     // The sheets the choice names, as the set numbers them.

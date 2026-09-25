@@ -316,6 +316,9 @@ class SheetEditor final : public QMainWindow {
     // question is ever put; the item says instead which verb asks nothing.
     void setHeadless(bool headless) { headless_ = headless; }
     [[nodiscard]] bool headless() const { return headless_; }
+    // `text` on the status bar and through onMessage into the window's log,
+    // as an error when `error`: what the editor's menus say.
+    void report(const QString& text, bool error = false);
 
     // ---- the preflight checks (plotting/sheet_checks.hpp) -----------------------------
     // The Checks dock, run again a moment after every change; its findings
@@ -365,7 +368,6 @@ class SheetEditor final : public QMainWindow {
     // run as VIEW SET id hide= show= for what changed.
     void chooseHiddenLayers(const std::string& id, const katana::cad::LayerOverrides& hidden);
     void showContextMenu(const QPointF& global, const std::string& viewportId);
-    void report(const QString& text, bool error = false);
     void plotInteractive(bool allSheets);
     // Runs the checks on the sheets a plot takes (the current one, or all),
     // shows the Checks dock when they find an error, and says how many.
