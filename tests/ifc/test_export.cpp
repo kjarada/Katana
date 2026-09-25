@@ -720,3 +720,118 @@ TEST(IfcExportDrawing, ADrainageStringWithNothingToDrawIsSkippedAndSaysSo)
         return w.find("no extent to write; it is not written") != std::string::npos;
     }));
 }
+
+namespace {
+
+// What UTILITY DRAW puts on a run and a point: the drawing's record of the
+// grading (docs/subsurface_utilities.md, "What the grading found is on the
+// entities"), written here by hand from that table.
+Entity drawnRun(std::string layer, std::string line, std::string type, std::string level,
+                std::vector<Point2> vertices, std::string configuration)
+{
+    Entity run;
+    run.geometry = Polyline2{std::move(vertices), false};
+    run.layer = std::move(layer);
+    run.properties["utility.line"] = line;
+    run.properties["utility.type"] = std::move(type);
+    run.properties["utility.quality_level"] = std::move(level);
+    run.properties["utility.from"] = line + "-1";
+    run.properties["utility.to"] = line + "-2";
+    run.properties["utility.length"] = 20.0;
+    if (!configuration.empty()) {
+        run.properties["utility.configuration"] = std::move(configuration);
+    }
+    return run;
+}
+
+Entity drawnPoint(std::string layer, std::string line, std::string type, std::string vertex,
+                  std::string level, Point2 at)
+{
+    Entity point;
+    point.geometry = katana::entity::PointGeometry{at};
+    point.layer = std::move(layer);
+    point.properties["utility.line"] = std::move(line);
+    point.properties["utility.type"] = std::move(type);
+    point.properties["utility.vertex"] = std::move(vertex);
+    point.properties["utility.quality_level"] = std::move(level);
+    point.properties["utility.method"] = std::string("EML");
+    return point;
+}
+
+} // namespace
+
+// A services plan drawn from a schedule is laid out a layer per type and
+// quality level; it goes out as the services it is. Worked out from the
+// schedule export's own rules (classifyUtilityRun): an electricity run whose
+// configuration says conduits is an IfcCableCarrierSegment CONDUITSEGMENT, as
+// the schedule's E1 is (IfcExportUtilities above), not the cable its layer's
+// words would make it; water is an IfcPipeSegment RIGIDSEGMENT. One system a
+// service - E1 over its QL-B and QL-C layers is one - and W1 drawn under two
+// prefixes is two services. Each run and point is classified by its level in
+// AS 5488.1-2019: four levels used, four references, one standard.
+TEST(IfcExportDrawing, ADrawnServicesPlanGoesOutByServiceAsTheScheduleWouldClassIt)
+{
+    Model model;
+    const std::string conduits = "4 x 100 mm conduits";
+    for (Entity entity :
+         {drawnRun("utilities/electricity/QL-B", "E1", "electricity", "QL-B",
+                   {{0.0, 0.0}, {9.0, 0.0}}, conduits),
+          drawnRun("utilities/electricity/QL-C", "E1", "electricity", "QL-C",
+                   {{9.0, 0.0}, {27.0, 0.0}}, conduits),
+          drawnPoint("utilities/electricity/points", "E1", "electricity", "E1-1", "QL-B",
+                     {0.0, 0.0}),
+          drawnPoint("utilities/electricity/points", "E1", "electricity", "E1-2", "QL-C",
+                     {27.0, 0.0}),
+          drawnRun("utilities/water/QL-A", "W1", "water", "QL-A", {{0.0, 5.0}, {20.0, 5.0}}, ""),
+          drawnPoint("utilities/water/points", "W1", "water", "W1-1", "QL-A", {0.0, 5.0}),
+          drawnPoint("utilities/water/points", "W1", "water", "W1-2", "QL-A", {20.0, 5.0}),
+          drawnRun("site b/water/QL-D", "W1", "water", "QL-D", {{0.0, 50.0}, {20.0, 50.0}}, ""),
+          drawnPoint("site b/water/points", "W1", "water", "W1-1", "QL-D", {0.0, 50.0})}) {
+        ASSERT_TRUE(model.entities.add(std::move(entity)).ok());
+    }
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_EQ(out.classes.at("IfcCableCarrierSegment"), 2u);
+    EXPECT_FALSE(out.classes.contains("IfcCableSegment"));
+    EXPECT_EQ(out.classes.at("IfcPipeSegment"), 2u);
+    EXPECT_EQ(out.classes.at("IfcAnnotation"), 5u);
+    EXPECT_EQ(out.classes.at("IfcDistributionSystem"), 3u);
+    EXPECT_EQ(out.entitiesWritten, 9u);
+
+    std::multiset<std::string> systems;
+    for (const std::string& line : instancesOf(out.text, "IFCDISTRIBUTIONSYSTEM")) {
+        const auto arguments = argumentsOf(line);
+        systems.insert(arguments[2] + " " + arguments[6]);
+    }
+    EXPECT_EQ(systems, (std::multiset<std::string>{"'E1' .ELECTRICAL.", "'W1' .WATERSUPPLY.",
+                                                   "'W1' .WATERSUPPLY."}));
+    for (const std::string& line : instancesOf(out.text, "IFCCABLECARRIERSEGMENT")) {
+        EXPECT_EQ(argumentsOf(line).back(), ".CONDUITSEGMENT.");
+    }
+
+    EXPECT_EQ(instancesOf(out.text, "IFCCLASSIFICATION").size(), 1u);
+    std::set<std::string> levels;
+    for (const std::string& line : instancesOf(out.text, "IFCCLASSIFICATIONREFERENCE")) {
+        levels.insert(argumentsOf(line)[1]);
+    }
+    EXPECT_EQ(levels, (std::set<std::string>{"'QL-A'", "'QL-B'", "'QL-C'", "'QL-D'"}));
+    EXPECT_EQ(instancesOf(out.text, "IFCRELASSOCIATESCLASSIFICATION").size(), 4u);
+    // The grade in the sets the schedule's export writes: one a run, one a point.
+    std::size_t grades = 0;
+    std::size_t located = 0;
+    for (const std::string& line : instancesOf(out.text, "IFCPROPERTYSET")) {
+        grades += line.find("'AS5488_QualityLevel'") != std::string::npos ? 1 : 0;
+        located += line.find("'AS5488_LocatedPoint'") != std::string::npos ? 1 : 0;
+    }
+    EXPECT_EQ(grades, 4u);
+    EXPECT_EQ(located, 5u);
+
+    // The preview says so, by service.
+    const auto e1 = std::find_if(out.tally.begin(), out.tally.end(), [](const ifc::ClassTally& t) {
+        return t.source == "service E1" && t.entity == "IfcCableCarrierSegment";
+    });
+    ASSERT_NE(e1, out.tally.end());
+    EXPECT_EQ(e1->predefinedType, "CONDUITSEGMENT");
+    EXPECT_EQ(e1->system, "ELECTRICAL");
+    EXPECT_EQ(e1->count, 2u);
+    EXPECT_EQ(e1->why, "a drawn run: configuration \"4 x 100 mm conduits\"");
+}

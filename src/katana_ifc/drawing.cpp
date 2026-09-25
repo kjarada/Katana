@@ -24,6 +24,15 @@
 // an IfcDistributionChamberElement from its lowest connected invert to its
 // top, all in one IfcDistributionSystem per string.
 //
+// A SERVICES PLAN drawn from an AS 5488 schedule (UTILITY DRAW,
+// docs/subsurface_utilities.md, "Drawing the services": each run and point
+// carries what the grading found as utility.* properties) is laid out for a
+// plan, a layer per type and quality level. It is written as the service it
+// is: each run the class the schedule's own export gives the service
+// (classifyUtilityRun, from the same attributes), each point an IfcAnnotation
+// SURVEY, all of a service in one IfcDistributionSystem named by its line,
+// and each classified by its quality level in AS 5488.1-2019.
+//
 // Each entity keeps its layer (IfcPresentationLayerAssignment), its colour
 // (a curve style), its properties (Katana_Attributes) and where it came from
 // (Katana_Provenance). Labels are not written: what a label says and where
@@ -38,6 +47,7 @@
 
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
+#include "katana/survey/subsurface/utility_network.hpp"
 #include "parts.hpp"
 
 namespace katana::ifc::detail {
@@ -212,6 +222,7 @@ class DrawingWriter {
                 chosen.push_back(&entity);
             }
         });
+        writeDrawnServices(chosen);
         writeDrainage(chosen);
         for (const Entity* entity : chosen) {
             if (handled_.contains(entity->id)) {
@@ -543,6 +554,29 @@ class DrawingWriter {
             return;
         }
 
+        const Id representation = representationOf(entity, drawn, annotation);
+
+        const std::string key = "entity/" + std::to_string(entity.id);
+        const Id product = b_.product(classified.ifcClass, key, nameOf(entity), classified.rule,
+                                      b_.productShape({representation}), std::to_string(entity.id));
+        ++b_.report().entitiesWritten;
+        b_.tally("layer " + entity.layer, classified.ifcClass, classified.system,
+                 classified.rule.empty()
+                     ? "no rule: a " + core::lowered(entity::toString(entity.type()))
+                     : "rule " + classified.rule);
+
+        if (!classified.system.empty()) {
+            systems_[{entity.layer, classified.system}].push_back(product);
+        }
+        writeEntityProperties(entity, key, product,
+                              classified.rule.empty() ? "kind" : "rule " + classified.rule,
+                              classified.ifcClass);
+    }
+
+    // The entity's shape as its class expects it, styled in its colour and
+    // on its layer.
+    Id representationOf(const Entity& entity, const Drawn& drawn, bool annotation)
+    {
         Id representation = 0;
         if (annotation) {
             representation =
@@ -571,24 +605,13 @@ class DrawingWriter {
             }
         }
         b_.layer(entity.layer, representation);
-
-        const std::string key = "entity/" + std::to_string(entity.id);
-        const Id product = b_.product(classified.ifcClass, key, nameOf(entity), classified.rule,
-                                      b_.productShape({representation}), std::to_string(entity.id));
-        ++b_.report().entitiesWritten;
-        b_.tally("layer " + entity.layer, classified.ifcClass, classified.system,
-                 classified.rule.empty()
-                     ? "no rule: a " + core::lowered(entity::toString(entity.type()))
-                     : "rule " + classified.rule);
-
-        if (!classified.system.empty()) {
-            systems_[{entity.layer, classified.system}].push_back(product);
-        }
-        writeEntityProperties(entity, key, product, classified);
+        return representation;
     }
 
+    // Its properties, and where it came from: `classifiedBy` says what chose
+    // `ifcClass`.
     void writeEntityProperties(const Entity& entity, const std::string& key, Id product,
-                               const EntityClass& classified)
+                               const std::string& classifiedBy, const IfcClass& ifcClass)
     {
         PropertyList attributes;
         addEntityProperties(attributes, entity.properties);
@@ -599,8 +622,7 @@ class DrawingWriter {
         provenance.integer("EntityId", static_cast<long long>(entity.id));
         provenance.label("Layer", entity.layer);
         provenance.label("Style", entity.style);
-        provenance.label("ClassifiedBy",
-                         classified.rule.empty() ? "kind" : "rule " + classified.rule);
+        provenance.label("ClassifiedBy", classifiedBy);
         for (const auto& [name, value] : entity.metadata) {
             // What 12d knew and Katana keeps only to write back (12d.x.*,
             // symbols, text formatting) is not the entity's provenance.
@@ -613,7 +635,7 @@ class DrawingWriter {
         b_.defines(key + "/provenance",
                    b_.propertySet(key + "/provenance", "Katana_Provenance", provenance), {product});
 
-        if (classified.ifcClass.predefinedType == "CONTOURLINE") {
+        if (ifcClass.predefinedType == "CONTOURLINE") {
             PropertyList contour;
             contour.length("ContourValue",
                            uniformHeight(entity::heightsOf(
@@ -648,6 +670,166 @@ class DrawingWriter {
             b_.referenceInSite(id);
             b_.group(id, key, members);
         }
+    }
+
+    // ---- services drawn from an AS 5488 schedule -------------------------------------
+
+    // The runs and points UTILITY DRAW made, by service: the names of the
+    // utility.* properties are the drawing's documented record
+    // (docs/subsurface_utilities.md, "What the grading found is on the
+    // entities"; cad/utilities/utility_drawing.hpp, which this layer cannot
+    // see). A service is its line id within the layers it was drawn on - the
+    // <prefix>/<type> above its QL and points layers - so that two schedules
+    // drawn under two prefixes, each with a W1, stay two services.
+    void writeDrawnServices(const std::vector<const Entity*>& chosen)
+    {
+        std::map<std::pair<std::string, std::string>, std::vector<const Entity*>> services;
+        for (const Entity* entity : chosen) {
+            const std::string line = text(entity->properties, "utility.line");
+            if (line.empty() || text(entity->properties, "utility.type").empty() ||
+                (!std::holds_alternative<geometry::Polyline2>(entity->geometry) &&
+                 !std::holds_alternative<entity::PointGeometry>(entity->geometry))) {
+                continue;
+            }
+            const std::size_t slash = entity->layer.rfind('/');
+            services[{slash == std::string::npos ? std::string() : entity->layer.substr(0, slash),
+                      line}]
+                .push_back(entity);
+        }
+        for (const auto& [where, members] : services) {
+            writeDrawnService(where.first, where.second, members);
+        }
+    }
+
+    void writeDrawnService(const std::string& drawnOn, const std::string& lineId,
+                           const std::vector<const Entity*>& members)
+    {
+        namespace sub = survey::subsurface;
+        // The service's attributes, which UTILITY DRAW puts on each of its
+        // runs alike; a service drawn as points alone has only its type.
+        sub::UtilityAttributes service;
+        service.type = sub::parseUtilityType(text(members.front()->properties, "utility.type"))
+                           .value_or(sub::UtilityType::Unknown);
+        const auto run = std::find_if(members.begin(), members.end(), [](const Entity* entity) {
+            return std::holds_alternative<geometry::Polyline2>(entity->geometry);
+        });
+        if (run != members.end()) {
+            const entity::PropertyMap& properties = (*run)->properties;
+            service.owner = text(properties, "utility.owner");
+            service.material = text(properties, "utility.material");
+            service.configuration = text(properties, "utility.configuration");
+            service.description = text(properties, "utility.description");
+            for (const auto& [name, value] : properties) {
+                if (name.starts_with("utility.field.")) {
+                    service.fields[name.substr(std::string_view("utility.field.").size())] =
+                        entity::toString(value);
+                }
+            }
+        }
+        const UtilityClass runClass = classifyUtilityRun(service);
+        const std::string systemName =
+            runClass.system == "USERDEFINED" ? runClass.systemObjectType : runClass.system;
+        const std::string key = "drawn service/" + drawnOn + "/" + lineId;
+
+        std::vector<Id> written;
+        for (const Entity* entity : members) {
+            handled_.insert(entity->id);
+            const bool point = std::holds_alternative<entity::PointGeometry>(entity->geometry);
+            const IfcClass ifcClass =
+                point ? IfcClass{"IfcAnnotation", "SURVEY", {}} : runClass.element;
+            const Drawn drawn = draw(*entity);
+            if (drawn.items.empty()) {
+                ++b_.report().entitiesSkipped;
+                b_.warn("service " + lineId + ": " + std::string(entity::toString(entity->type())) +
+                        " " + std::to_string(entity->id) +
+                        " has no extent to write and is not written");
+                b_.tally("service " + lineId, {}, {}, "nothing to draw");
+                continue;
+            }
+            const Id representation = representationOf(*entity, drawn, point);
+            const std::string entityKey = "entity/" + std::to_string(entity->id);
+            const std::string level = text(entity->properties, "utility.quality_level");
+            const std::string name = point
+                                         ? text(entity->properties, "utility.vertex")
+                                         : lineId + " " + text(entity->properties, "utility.from") +
+                                               " to " + text(entity->properties, "utility.to");
+            const Id product =
+                b_.product(ifcClass, entityKey, name.empty() ? lineId : name,
+                           point ? "Located point of " + lineId
+                                 : std::string("AS 5488.1-2019 ") + level + " run of " + lineId,
+                           b_.productShape({representation}), std::to_string(entity->id));
+            ++b_.report().entitiesWritten;
+            b_.tally("service " + lineId, ifcClass, systemName,
+                     point ? std::string("a drawn located point")
+                           : "a drawn run: " + runClass.reason);
+            if (const auto graded = sub::parseQualityLevel(level)) {
+                b_.associate(qualityLevelReference(b_, *graded), product);
+            }
+            writeDrawnGrade(*entity, entityKey, product, point);
+            writeEntityProperties(*entity, entityKey, product, "a drawn AS 5488 service", ifcClass);
+            written.push_back(product);
+        }
+        if (written.empty()) {
+            return; // nothing of the service was written: no system of nothing
+        }
+        // As the schedule's export writes a service's system (utilities.cpp).
+        const Id id =
+            b_.file().add("IfcDistributionSystem", Args()
+                                                       .string(b_.guid(key))
+                                                       .null()
+                                                       .string(lineId)
+                                                       .stringOrNull(service.description)
+                                                       .stringOrNull(runClass.systemObjectType)
+                                                       .null()
+                                                       .enumeration(runClass.system));
+        ++b_.report().classes["IfcDistributionSystem"];
+        b_.referenceInSite(id);
+        b_.group(id, key, written);
+    }
+
+    // What the grading found, in the property sets the schedule's own
+    // export writes (utilities.cpp), from what the drawing kept of it: a
+    // run's AS5488_QualityLevel, a point's AS5488_LocatedPoint. What the
+    // drawing does not keep - a run's claimed level, its path evidence - is
+    // absent, not guessed.
+    void writeDrawnGrade(const Entity& entity, const std::string& key, Id product, bool point)
+    {
+        const entity::PropertyMap& p = entity.properties;
+        const auto flag = [&](std::string_view name) -> std::optional<bool> {
+            const auto found = p.find(name);
+            if (found == p.end()) {
+                return std::nullopt;
+            }
+            if (const auto* value = std::get_if<bool>(&found->second)) {
+                return *value;
+            }
+            return std::nullopt;
+        };
+        PropertyList grade;
+        grade.label("QualityLevel", text(p, "utility.quality_level"),
+                    point ? "The AS 5488.1-2019 quality level the point's evidence supports"
+                          : "The AS 5488.1-2019 quality level the run's evidence supports");
+        if (point) {
+            grade.label("LocateMethod", text(p, "utility.method"));
+            grade.label("QualityLevelClaimed", text(p, "utility.claimed"));
+            grade.text("OverClaim", text(p, "utility.over_claim"));
+            grade.label("LevelReference", text(p, "utility.level_ref"));
+            grade.length("Level", number(p, "utility.service_level"));
+            grade.boolean("LevelQualified", flag("utility.level_qualified"));
+            grade.length("SurfaceLevel", number(p, "utility.surface_level"));
+            grade.length("DepthOfCover", number(p, "utility.cover"));
+            grade.text("CoverNote", text(p, "utility.cover_note"));
+            grade.boolean("CoverBelowMinimum", flag("utility.cover_below_minimum"));
+            grade.identifier("Verifies", text(p, "utility.verifies"));
+        } else {
+            grade.text("LimitedBy", text(p, "utility.limited_by"));
+            grade.identifier("StartPoint", text(p, "utility.from"));
+            grade.identifier("EndPoint", text(p, "utility.to"));
+            grade.length("PlanLength", number(p, "utility.length"));
+        }
+        grade.label("Standard", "AS 5488.1-2019");
+        const std::string name = point ? "AS5488_LocatedPoint" : "AS5488_QualityLevel";
+        b_.defines(key + "/grade", b_.propertySet(key + "/grade", name, grade), {product});
     }
 
     // ---- 12d drainage ------------------------------------------------------------

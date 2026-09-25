@@ -285,6 +285,11 @@ from what is on the screen. `utilities::drawReplyBounds` reads it back from
 the reply, so every front end reads it the same way. `cli.utility_draw_adds_the_graded_sample_to_the_drawing`
 and `tests/cad/utilities/test_utility_verbs.cpp` run it on the sample.
 
+A drawn plan exported to IFC (`EXPORT <file.ifc>`, File > Export IFC) goes
+out by service, not by layer: each run the class the schedule's own export
+gives it, each point a survey annotation, one system a service, each
+classified by its quality level (`docs/ifc.md`, "Subsurface utilities").
+
 ## The TfNSW Utility Schema and Specification
 
 TfNSW's Utility Schema and Specification (DMS-FT-493, v1.2, December 2022) is

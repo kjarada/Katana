@@ -8,6 +8,7 @@
 #include "builder.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/ifc/export.hpp"
+#include "katana/survey/subsurface/quality_level.hpp"
 
 namespace katana::ifc::detail {
 
@@ -16,6 +17,12 @@ void exportAlignments(Builder& builder, const entity::Model& model);
 
 // The services of a subsurface utility investigation: utilities.cpp.
 void exportUtilities(Builder& builder, const UtilityInput& utilities);
+
+// The reference "QL-A" .. "QL-D" into AS 5488.1-2019, the classification
+// written once whichever part asks first - the schedule's services
+// (utilities.cpp) or a services plan drawn from one (drawing.cpp) - so that
+// a file holding both classifies them in one standard.
+Id qualityLevelReference(Builder& builder, survey::subsurface::QualityLevel level);
 
 // The drawing's entities, by classification: drawing.cpp.
 void exportEntities(Builder& builder, const entity::Model& model,

@@ -238,10 +238,6 @@ class UtilityWriter {
         if (input_.lines.empty()) {
             return;
         }
-        standard_ =
-            b_.classification("as5488", "Standards Australia", "2019", std::string(kStandard),
-                              "Classification of subsurface utility information: quality "
-                              "levels A to D");
         for (const sub::UtilityLine& line : input_.lines) {
             writeService(line);
         }
@@ -270,10 +266,7 @@ class UtilityWriter {
         return schemaClassification_;
     }
 
-    Id qualityReference(sub::QualityLevel level)
-    {
-        return b_.classificationReference(standard_, sub::toString(level), qualityName(level));
-    }
+    Id qualityReference(sub::QualityLevel level) { return qualityLevelReference(b_, level); }
 
     void writeService(const sub::UtilityLine& line)
     {
@@ -745,7 +738,6 @@ class UtilityWriter {
 
     Builder& b_;
     const UtilityInput& input_;
-    Id standard_ = 0;
     Id schemaClassification_ = 0;
 };
 
@@ -754,6 +746,15 @@ class UtilityWriter {
 void exportUtilities(Builder& builder, const UtilityInput& utilities)
 {
     UtilityWriter(builder, utilities).write();
+}
+
+Id qualityLevelReference(Builder& builder, sub::QualityLevel level)
+{
+    const Id standard =
+        builder.classification("as5488", "Standards Australia", "2019", std::string(kStandard),
+                               "Classification of subsurface utility information: quality "
+                               "levels A to D");
+    return builder.classificationReference(standard, sub::toString(level), qualityName(level));
 }
 
 } // namespace katana::ifc::detail
