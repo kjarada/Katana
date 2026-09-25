@@ -1171,6 +1171,42 @@ katana::core::Status ViewportWidget::plotToPdf(const QString& path,
                          plotCache_, title);
 }
 
+QImage ViewportWidget::renderToImage(const QSize& size, const QColor& background,
+                                     bool asPlotted) const
+{
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.fill(background);
+    PlanFrame frame = paintFrame();
+    PlanPaintOptions options = screenOptions();
+    // The grid helps a person place a point; in a picture of the drawing it
+    // is a mesh of lines over it.
+    options.grid = false;
+    // Before the first paint the view has no size of its own, and the image
+    // is drawn at the view's scale as it stands.
+    if (frame.transform.widthPixels > 1.0 && frame.transform.heightPixels > 1.0) {
+        const double enlarge = std::min(size.width() / frame.transform.widthPixels,
+                                        size.height() / frame.transform.heightPixels);
+        frame.transform.scale *= enlarge;
+        options.pixelsPerMillimetre *= enlarge;
+    }
+    frame.transform.resize(size.width(), size.height());
+    // As a plot draws on paper, at the image's own millimetre: the paper
+    // colour rule needs the plot's settings, the defaults of which are a
+    // colour plot with white pens printing black.
+    const cad::PlotSettings plotted;
+    if (asPlotted) {
+        options.medium = PlanMedium::Paper;
+        options.plot = &plotted;
+        options.symbolSprites = false;
+    }
+    // A cache of its own: the view's kept drawing and its cache stay as the
+    // screen left them.
+    PlanPaintCache cache;
+    QPainter painter(&image);
+    (void)paintPlan(painter, paintSource(), frame, options, cache);
+    return image;
+}
+
 katana::core::Result<cad::PlotSettings> ViewportWidget::fittedPlot(cad::PlotSettings settings) const
 {
     // What this view draws - its layers, reference layers, meshes and

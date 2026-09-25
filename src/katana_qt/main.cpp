@@ -7,6 +7,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
@@ -219,6 +220,19 @@ bool fillField(QWidget& dialog, const QString& assignment)
         spin->setValue(number);
         return true;
     }
+    // A number with decimals - a plot's scale, a line weight - read as the
+    // box itself reads typed text, so "0.7" means what it does in the box.
+    if (auto* spin = qobject_cast<QDoubleSpinBox*>(widget)) {
+        bool ok = false;
+        const double number = text.toDouble(&ok);
+        if (!ok || number < spin->minimum() || number > spin->maximum()) {
+            std::fprintf(stderr, "--fill: %s takes a number from %g to %g, not '%s'\n",
+                         qPrintable(name), spin->minimum(), spin->maximum(), qPrintable(text));
+            return false;
+        }
+        spin->setValue(number);
+        return true;
+    }
     if (auto* check = qobject_cast<QCheckBox*>(widget); check != nullptr &&
                                                          (text == "on" || text == "off")) {
         check->setChecked(text == "on");
@@ -395,7 +409,8 @@ bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
 // on stderr what opened, and grabs that dialog instead of the window.
 // --survey-dialog is its first name and does the same. --fill types TEXT into the dialog's field with object name FIELD - a
 // line, a text box (where "\n" is a line break, so a field book fits on a
-// command line), a choice by its item text, or a check box by on/off - and
+// command line), a choice by its item text, a number box (whole or with
+// decimals) by its number, or a check box by on/off - and
 // --press clicks the button with object name BUTTON. Fills and presses run in
 // the order given, so a paged dialog (the import wizard) can be filled page by
 // page between its Next presses, and the event loop runs after each one, as

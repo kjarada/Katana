@@ -260,7 +260,8 @@ PDAL or the archive and customisation readers: the application's command line
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
-report, `cad::customisationReport`), `PLOTSHEETS`, `SCRIPT <file> [CONTINUE]`,
+report, `cad::customisationReport`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
+`SCRIPT <file> [CONTINUE]`,
 the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
 `HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
 "The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
@@ -709,9 +710,12 @@ sample project before opening it, because opening can touch the project
 directory and a test must never change repository data. And it compares the
 header as hex: CMake's plain `file(READ ... LIMIT 4)` on this platform
 returned `%PDF` plus a newline - five characters - and failed a perfectly
-good PDF, while the `HEX` read is byte-exact. The dialog and the switch
-share one `plotDrawingToPdf`, so the test exercises the same code the menu
-does.
+good PDF, while the `HEX` read is byte-exact. The dialog, the window's
+`PLOT` verb and the switch share one `plotDrawingToPdf`, so the test
+exercises the same code the menu does; since 2026-09-26 the dialog writes a
+`PLOT` line with the colour mode and the line weight scale `--plot` always
+took (`docs/desktop.md`, "Plot to PDF and view images"), and the same test
+holds each style's inks to what it means.
 
 ## Point symbols
 
