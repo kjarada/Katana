@@ -858,21 +858,30 @@ double-quoted when it is empty or holds a blank. A name with a double quote or
 a line break in it cannot be carried, because the tokenizer has no escape, so it
 is refused. Otherwise the line would run on the name cut short at the quote.
 An annotation text uses `annotationTextWord`, which also writes a line break
-as `\n`. `src/katana_qt/command_word.hpp` hands a QString to the same rule and
-names the field in the refusal. The Alignment Manager, the Hatch Patterns tab,
-Edit Label and the plan view's shortcut menu write their names with it. The
-menu lists a layer or style whose name holds a quote (a DXF can bring one)
-disabled, with the reason as its tip. The parallel lanes of the 2026-09-26
-UI work first wrote four copies of this rule, and the integration folded them
-into this one.
+as `\n`. `src/katana_qt/command_word.hpp` hands a QString to the same rules
+(`commandWord`, `annotationTextWord`) and names the field in the refusal, and
+writes a number exactly (`exactNumber`). The Alignment Manager, the Hatch
+Patterns tab, Edit Label, the text and label style managers, the Dimension
+Styles manager's numbers and the plan view's shortcut menu write their words
+with it. The menu lists a layer or style whose name holds a quote (a DXF can
+bring one) disabled, with the reason as its tip. The parallel lanes of the
+2026-09-26 UI work first wrote four copies of this rule, and the integration
+folded them into this one; Edit Label and the style managers still carried
+QString wrappers of their own over it, and four files their own exact-number
+helper, until these were folded in too.
 
-Not done: the Sheets editor still quotes every name and path it writes
-(`sheet_editor.cpp` `quoted`, `plotting/sheet_set_menu.cpp` `quotedPath`),
-and File > Import builds its `IMPORT "<file>"` line itself
-(`import_placement.cpp`). A path cannot hold a double quote on Windows, and
-the Sheets dialogs offer none. Still, each is a second spelling of the rule
-and should move onto `commandWord`. Doing so changes the lines those dialogs'
-tests pin.
+Not done: these lines still quote a name or a path by hand, always, rather
+than through `commandWord` - the Sheets editor (`sheet_editor.cpp` `quoted`),
+the Sheet Set menu (`plotting/sheet_set_menu.cpp` `quotedPath`), File >
+Import's `IMPORT "<file>"` (`import_placement.cpp`), Plot to PDF's
+`PLOT "<file>"` (`plotting/plot_drawing_dialog.cpp`), Export View as Image's
+`SNAPSHOT "<file>"` (`plotting/view_image_export.cpp`), Run Script's
+`SCRIPT "<file>"` (`script_runner.cpp`), the GIS menu's `COPC "<source>"
+"<destination>"` (`main_window.cpp`), and Page Setup's `pattern="..."`, with
+its own backslash doubling (`plotting/plot_dialog.cpp`). A Windows path
+cannot hold a double quote, and none of these dialogs offers one. Still, each
+is a second spelling of the rule and should move onto `commandWord`; doing so
+changes the lines those dialogs' tests pin.
 
 ### The session's verbs on the window's command line
 

@@ -14,7 +14,7 @@
 #include <QStringList>
 #include <QVBoxLayout>
 
-#include "katana/cad/annotation/command_words.hpp"
+#include "command_word.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/annotation.hpp"
 
@@ -25,22 +25,6 @@ namespace {
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
-
-QString exact(double value)
-{
-    return QString::fromStdString(katana::core::formatExactReal(value));
-}
-
-// A value as a word of the LABEL SET line, by the rule every dialog writes
-// words with (cad/annotation/command_words.hpp); a refusal names the field.
-Result<QString> written(Result<std::string> word, const char* field)
-{
-    if (!word) {
-        return makeError(word.error().code, std::string(field) + ": " + word.error().message,
-                         word.error().context);
-    }
-    return QString::fromStdString(*word);
-}
 
 std::optional<double> number(const QString& text)
 {
@@ -68,8 +52,8 @@ Result<LabelEditForm> labelEditFormOf(const katana::entity::Model& model,
     form.text = QString::fromStdString(label->textOverride);
     form.pinned = label->position.has_value();
     const katana::geometry::Point2 at = label->position.value_or(label->anchor);
-    form.easting = exact(at.x);
-    form.northing = exact(at.y);
+    form.easting = exactNumber(at.x);
+    form.northing = exactNumber(at.y);
     form.layer = QString::fromStdString(entity->layer);
     return form;
 }
@@ -79,7 +63,6 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
     if (form.id == 0) {
         return makeError(ErrorCode::InvalidArgument, "no label is chosen: select one label first");
     }
-    namespace ann = katana::cad::annotation;
     const QString style = form.style.trimmed();
     const QString layer = form.layer.trimmed();
     if (style.isEmpty()) {
@@ -90,11 +73,11 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
     }
     // Every field is written, even one left as it was, so a value no line
     // can carry is refused whichever field changed.
-    const auto styleWord = written(ann::commandWord(style.toStdString()), "Style");
+    const auto styleWord = commandWord(style, QStringLiteral("Style"));
     if (!styleWord) {
         return styleWord.error();
     }
-    const auto layerWord = written(ann::commandWord(layer.toStdString()), "Layer");
+    const auto layerWord = commandWord(layer, QStringLiteral("Layer"));
     if (!layerWord) {
         return layerWord.error();
     }
@@ -118,8 +101,7 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
         // the text is written as the annotation verbs' texts are - and one
         // holding a typed backslash and n, which would come back a break, is
         // refused.
-        const auto textWord = written(ann::annotationTextWord(form.text.toStdString()),
-                                      "Own text");
+        const auto textWord = annotationTextWord(form.text, QStringLiteral("Own text"));
         if (!textWord) {
             return textWord.error();
         }
@@ -143,7 +125,7 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
         const auto wasX = number(current.easting);
         const auto wasY = number(current.northing);
         if (!current.pinned || wasX != x || wasY != y) {
-            words << "at=" + exact(*x) + "," + exact(*y);
+            words << "at=" + exactNumber(*x) + "," + exactNumber(*y);
         }
     } else if (current.pinned) {
         words << QStringLiteral("at=none");

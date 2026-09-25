@@ -19,6 +19,7 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include "command_word.hpp"
 #include "katana/cad/annotation/command_words.hpp"
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
 #include "katana/cad/dimension_draw.hpp"
@@ -73,11 +74,6 @@ QPushButton* button(QWidget* parent, const char* name, const QString& text, cons
     push->setToolTip(tip);
     push->setAutoDefault(false);
     return push;
-}
-
-QString number(double value)
-{
-    return QString::fromStdString(katana::core::formatExactReal(value));
 }
 
 // A typed number, or the sentence that says which field did not read.
@@ -392,18 +388,18 @@ void DimensionStyleManagerDialog::showStyle(const DimensionStyle& style)
     shown_ = QString::fromStdString(style.name);
     loaded_ = style;
     const bool wasLoading = std::exchange(loading_, true);
-    text_->setText(number(style.textHeight));
-    gap_->setText(number(style.textGap));
+    text_->setText(exactNumber(style.textHeight));
+    gap_->setText(exactNumber(style.textGap));
     prefix_->setText(QString::fromStdString(style.prefix));
     suffix_->setText(QString::fromStdString(style.suffix));
-    extOff_->setText(number(style.extensionOffset));
-    extBeyond_->setText(number(style.extensionBeyond));
-    arrow_->setText(number(style.arrowSize));
+    extOff_->setText(exactNumber(style.extensionOffset));
+    extBeyond_->setText(exactNumber(style.extensionBeyond));
+    arrow_->setText(exactNumber(style.arrowSize));
     head_->setCurrentIndex(
         head_->findData(QString::fromUtf8(katana::entity::toString(style.arrowHead))));
-    scale_->setText(number(style.unitScale));
+    scale_->setText(exactNumber(style.unitScale));
     decimals_->setValue(style.decimals);
-    round_->setText(number(style.roundTo));
+    round_->setText(exactNumber(style.roundTo));
     trim_->setChecked(style.suppressTrailingZeros);
     paper_->setChecked(style.paperSized);
     loading_ = wasLoading;
@@ -416,7 +412,7 @@ void DimensionStyleManagerDialog::showUnits()
     units_->setText(paper_->isChecked()
                         ? QStringLiteral("Sizes are millimetres on paper, drawn at 1:%1 here "
                                          "(the drawing's annotation scale).")
-                              .arg(number(document_.annotationScale()))
+                              .arg(exactNumber(document_.annotationScale()))
                         : QStringLiteral("Sizes are model units: the dimension is drawn at its "
                                          "size on the ground."));
 }
@@ -441,7 +437,7 @@ void DimensionStyleManagerDialog::showPreview()
     const QString reads =
         QString::fromStdString(katana::entity::formatMeasurement(kSampleLength, *style));
     preview_->setText(QStringLiteral("a dimension of %1 reads as %2")
-                          .arg(number(kSampleLength), reads));
+                          .arg(exactNumber(kSampleLength), reads));
     // The dimension line above its points by two and a half texts: room for
     // the text above the line whatever the sizes.
     const double scale = document_.annotationScale();
