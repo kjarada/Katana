@@ -275,3 +275,45 @@ TEST(AnnotationVerbs, DimstylePaperSizesAStyle)
     EXPECT_TRUE(s.document.model().dimensionStyles.find("Standard")->paperSized);
     EXPECT_TRUE(contains(s.run("DIMSTYLE LIST"), "paper-sized"));
 }
+
+TEST(AnnotationVerbs, LabelLayoutNamesEachPieceThatFoundNoRoom)
+{
+    // Five numbered points at one place in a style that may not move its
+    // labels: the first label (6) is placed and the other four (7 to 10)
+    // find no room - the placer's WithNoRoomALabelIsSuppressedAndCounted.
+    Session s;
+    s.run("LABELSTYLE NEW pt kind=point text={point} displace=off");
+    for (int i = 1; i <= 5; ++i) {
+        s.run("POINT 0,0");
+        s.run("SELECT " + std::to_string(s.document.lastCreatedEntities().front()));
+        s.run("PROP SET point P" + std::to_string(i));
+    }
+    s.run("LABEL 1 2 3 4 5 style=pt");
+    const std::string layout = s.run("LABEL LAYOUT");
+    EXPECT_TRUE(contains(layout, "considered=5 placed=1 displaced=0 suppressed=4 orphaned=0"))
+        << layout;
+    EXPECT_TRUE(contains(layout, "\nlabel=6 piece=0 x=")) << layout;
+    EXPECT_TRUE(contains(layout, "\nlabel=7 piece=0 suppressed=yes\nlabel=8 piece=0 suppressed=yes"
+                                 "\nlabel=9 piece=0 suppressed=yes\nlabel=10 piece=0 suppressed=yes"))
+        << layout;
+    // Every label at its own place: none is named.
+    EXPECT_FALSE(contains(s.run("LABEL LAYOUT collisions=off"), "suppressed=yes"));
+}
+
+TEST(AnnotationVerbs, LabelSetMovesAndRestylesALabelAsOneStepAndNoneTakesBack)
+{
+    Session s;
+    s.run("LABELSTYLE DEFAULTS");
+    s.run("LAYER NEW labels");
+    s.run("PLINE 0,0 30,0 30,40 0,40 CLOSE");
+    s.run("LABEL 1 style=\"Lot Area\"");
+    const std::size_t before = s.steps();
+    EXPECT_EQ(s.run("LABEL SET 2 at=12,34 text=\"LOT 7\" layer=labels"), "updated label id=2");
+    EXPECT_EQ(s.steps(), before + 1);
+    EXPECT_TRUE(contains(s.run("LABEL LIST 2"), "layer=labels rule=\"\" at=12,34 text=\"LOT 7\""));
+    s.run("LABEL SET 2 at=none text=none");
+    // 30 x 40 = 1200 m2, 0.12 ha, a line each: the style's own words again.
+    EXPECT_TRUE(contains(s.run("LABEL LIST 2"), "rule=\"\" text=\"1200.0 m²\\n0.1200 ha\""))
+        << s.run("LABEL LIST 2");
+    EXPECT_TRUE(s.refused("LABEL SET 1 at=0,0")) << "a polyline is not a label";
+}

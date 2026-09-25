@@ -465,7 +465,9 @@ void ViewportWidget::toolClick(const QPointF& screen)
     case cad::ToolInput::Point:
     case cad::ToolInput::Value:
         updateCursor(screen);
-        (void)tools_.point(cursorWorld_);
+        // With what the snap found, so a point of an entity is handed on as
+        // one (an annotation made from it follows the entity).
+        (void)tools_.point(cursorWorld_, activeSnap_);
         break;
     case cad::ToolInput::Selection:
         break; // selected at the release, as the Select tool does
