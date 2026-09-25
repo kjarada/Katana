@@ -41,10 +41,12 @@ using katana::entity::PropertyValue;
 
 namespace {
 
-// The line attributes every point of a line carries, and must agree on.
-constexpr std::array kLineKeys{keys::kType,          keys::kOwner,   keys::kMaterial,
+// The line attributes every point of a line carries, and must agree on -
+// with the settings the line was graded with.
+constexpr std::array kLineKeys{keys::kType,          keys::kOwner,       keys::kMaterial,
                                keys::kDiameter,      keys::kDiameterInside,
-                               keys::kConfiguration, keys::kDescription, keys::kStatus};
+                               keys::kConfiguration, keys::kDescription, keys::kStatus,
+                               keys::kSpacing,       keys::kMinimumCover};
 
 // Every key UTILITY DRAW writes: what REGRADE replaces on a point. Another
 // "utility." property - a person's own note - is theirs, and stays.
@@ -59,12 +61,38 @@ constexpr std::array kDrawnKeys{
     keys::kHorizontalUncertainty, keys::kVerticalUncertainty, keys::kPath,
     keys::kServiceLevel,  keys::kLevelReference, keys::kLevelQualified,
     keys::kSurfaceLevel,  keys::kCover,        keys::kCoverNote,
-    keys::kCoverBelowMinimum, keys::kVerifies};
+    keys::kCoverBelowMinimum, keys::kVerifies,   keys::kSpacing,
+    keys::kMinimumCover};
 
 bool isDrawnKey(std::string_view key)
 {
-    return key.starts_with(keys::kFieldPrefix) ||
+    return key.starts_with(keys::kFieldPrefix) || key.starts_with(keys::kRecordedPrefix) ||
            std::ranges::find(kDrawnKeys, key) != kDrawnKeys.end();
+}
+
+// A cell kept as the schedule wrote it that is the line's, not a vertex's:
+// the schedule reader keeps type, status and size per service, and ql and
+// level_ref per vertex (subsurface::UtilityAttributes::recorded).
+bool isLineRecorded(std::string_view column)
+{
+    return column == "type" || column == "status" || column == "size";
+}
+
+// The kept cells of `point` that are the line's (`line`) or its own.
+std::map<std::string, std::string> recordedOf(const Entity& point, bool line)
+{
+    std::map<std::string, std::string> recorded;
+    for (const auto& [key, value] : point.properties) {
+        if (!key.starts_with(keys::kRecordedPrefix)) {
+            continue;
+        }
+        const std::string_view column =
+            std::string_view(key).substr(keys::kRecordedPrefix.size());
+        if (isLineRecorded(column) == line) {
+            recorded.emplace(std::string(column), katana::entity::toString(value));
+        }
+    }
+    return recorded;
 }
 
 // A kept field the schedule format carries per service, as it did when the
@@ -158,12 +186,43 @@ PropertyMap lineAttributesOf(const Entity& point)
         }
     }
     for (const auto& [key, value] : point.properties) {
-        if (key.starts_with(keys::kFieldPrefix) &&
-            isLineField(std::string_view(key).substr(keys::kFieldPrefix.size()))) {
+        if ((key.starts_with(keys::kFieldPrefix) &&
+             isLineField(std::string_view(key).substr(keys::kFieldPrefix.size()))) ||
+            (key.starts_with(keys::kRecordedPrefix) &&
+             isLineRecorded(std::string_view(key).substr(keys::kRecordedPrefix.size())))) {
             attributes.emplace(key, value);
         }
     }
     return attributes;
+}
+
+// A point that is a vertex of a schedule - it has a point id or a place
+// along a line - read with no utility.line, or an empty one.
+bool isStrayVertex(const Entity& entity)
+{
+    return entity.type() == EntityType::Point &&
+           (valueOf(entity, keys::kVertex) != nullptr || valueOf(entity, keys::kOrder) != nullptr);
+}
+
+// Refuses a stray vertex by its point id and entity id, and names the lines
+// it is most likely a point of.
+Error strayRefusal(const Entity& point, const std::vector<std::string>& lines)
+{
+    const PropertyValue* vertex = valueOf(point, keys::kVertex);
+    std::string text = "point " +
+                       (vertex ? katana::entity::toString(*vertex) + " " : std::string()) + "(#" +
+                       std::to_string(point.id) + ") is a vertex of a schedule and has no " +
+                       std::string(keys::kLine) + ", the line it is a point of";
+    if (!lines.empty()) {
+        std::string names;
+        for (const std::string& line : lines) {
+            names += (names.empty() ? "" : " or ") + line;
+        }
+        text += "; by its attributes it is a point of line " + names;
+    }
+    return makeError(ErrorCode::InvalidArgument,
+                     text + "; give it its line again, or delete its " +
+                         std::string(keys::kVertex) + " and " + std::string(keys::kOrder));
 }
 
 // Every point must say what the first says of its line.
@@ -242,6 +301,7 @@ Result<sub::UtilityAttributes> readAttributes(const PointReader& reader)
             attributes.fields.emplace(std::string(name), katana::entity::toString(value));
         }
     }
+    attributes.recorded = recordedOf(reader.point, true);
     return attributes;
 }
 
@@ -314,6 +374,7 @@ Result<sub::UtilityVertex> readVertex(const PointReader& reader)
             vertex.fields.emplace(std::string(name), katana::entity::toString(value));
         }
     }
+    vertex.recorded = recordedOf(reader.point, false);
     vertex.evidence.hasLevel = sub::hasVerticalMeasurement(vertex);
     return vertex;
 }
@@ -358,6 +419,18 @@ Result<DrawnService> readService(const std::string& id, const std::vector<const 
         return attributes.error();
     }
     service.line.attributes = std::move(attributes).value();
+    for (const auto& [key, out] : {std::pair{keys::kSpacing, &service.spacing},
+                                   std::pair{keys::kMinimumCover, &service.minimumCover}}) {
+        auto metres = first.number(key);
+        if (!metres) {
+            return metres.error();
+        }
+        if (*metres && !(**metres >= 0.0)) {
+            return first.refuse("has a " + std::string(key) +
+                                " that is not a number of metres, not negative");
+        }
+        *out = *metres;
+    }
 
     std::vector<std::optional<std::string>> paths;
     std::set<std::string, std::less<>> vertexIds;
@@ -468,9 +541,16 @@ Result<UtilityData> readUtilityData(const Model& model, std::span<const EntityId
         std::vector<EntityId> runs;
     };
     std::map<std::string, Members, std::less<>> byLine;
-    model.entities.forEach([&byLine](const Entity& entity) {
+    // Points that are a vertex of a schedule - they carry a point id or a
+    // place along a line - but say no line: a utility.line deleted or
+    // emptied by hand. Never ignored, or a line would be read short of them.
+    std::vector<const Entity*> strays;
+    model.entities.forEach([&byLine, &strays](const Entity& entity) {
         const PropertyValue* line = valueOf(entity, keys::kLine);
-        if (line == nullptr) {
+        if (line == nullptr || katana::entity::toString(*line).empty()) {
+            if (isStrayVertex(entity)) {
+                strays.push_back(&entity);
+            }
             return;
         }
         Members& members = byLine[katana::entity::toString(*line)];
@@ -480,6 +560,20 @@ Result<UtilityData> readUtilityData(const Model& model, std::span<const EntityId
             members.runs.push_back(entity.id);
         }
     });
+    // The lines a stray point is most likely one of: those whose points
+    // carry the line attributes it carries.
+    const auto linesOf = [&byLine](const Entity& stray) {
+        const PropertyMap attributes = lineAttributesOf(stray);
+        std::vector<std::string> lines;
+        for (const auto& [name, members] : byLine) {
+            if (std::ranges::any_of(members.points, [&attributes](const Entity* point) {
+                    return lineAttributesOf(*point) == attributes;
+                })) {
+                lines.push_back(name);
+            }
+        }
+        return lines;
+    };
 
     UtilityData data;
     std::map<std::string, std::size_t, std::less<>> pointsTaken;
@@ -489,8 +583,11 @@ Result<UtilityData> readUtilityData(const Model& model, std::span<const EntityId
         if (entity == nullptr) {
             continue;
         }
+        if (std::ranges::find(strays, entity) != strays.end()) {
+            return strayRefusal(*entity, linesOf(*entity));
+        }
         const PropertyValue* line = valueOf(*entity, keys::kLine);
-        if (line == nullptr) {
+        if (line == nullptr || katana::entity::toString(*line).empty()) {
             ++data.ignored;
             continue;
         }
@@ -498,6 +595,16 @@ Result<UtilityData> readUtilityData(const Model& model, std::span<const EntityId
         wanted.insert(name);
         if (entity->type() == EntityType::Point) {
             ++pointsTaken[name];
+        }
+    }
+    // A stray outside the scope still refuses a line it may be a point of:
+    // read without it, that line would be graded, reported or written short.
+    for (const Entity* stray : strays) {
+        const std::vector<std::string> lines = linesOf(*stray);
+        if (std::ranges::any_of(lines, [&wanted](const std::string& name) {
+                return wanted.contains(name);
+            })) {
+            return strayRefusal(*stray, lines);
         }
     }
 
@@ -540,7 +647,7 @@ std::string utilityDataKeys(const UtilityData& data)
 }
 
 Result<UtilityRegrade> planUtilityRegrade(const Model& model, const UtilityData& data,
-                                          const UtilityDrawOptions& options)
+                                          const UtilityRegradeOptions& options)
 {
     UtilityRegrade result;
     UtilityDrawing& total = result.drawing;
@@ -551,8 +658,13 @@ Result<UtilityRegrade> planUtilityRegrade(const Model& model, const UtilityData&
     std::set<std::string> holding;
 
     for (const DrawnService& service : data.services) {
-        UtilityDrawOptions own = options;
+        // What it was drawn with, unless the regrade says otherwise.
+        UtilityDrawOptions own;
         own.layerPrefix = prefixOf(model, service, options.layerPrefix);
+        if (const auto spacing = options.spacing ? options.spacing : service.spacing) {
+            own.grading.maximumDetectedSpacing = *spacing;
+        }
+        own.minimumCover = options.minimumCover ? options.minimumCover : service.minimumCover;
         auto drawn = drawUtilities({service.line}, own);
         if (!drawn) {
             return drawn.error();
@@ -778,15 +890,28 @@ Result<SampledAlignment> sampleAlignment(const katana::entity::Alignment& alignm
             divide(element.startStation, element.length, static_cast<std::size_t>(pieces));
         }
     }
+    // The ends are the alignment's own, and every station is held inside
+    // them rather than dropped: the last element's end is the elements'
+    // lengths summed from the start, which can come out one rounding past
+    // endStation() - and dropping it would drop the whole last tangent. A
+    // profile station off either end folds onto that end, and the unique
+    // below makes it one with it.
     const double first = solved->startStation();
     const double last = solved->endStation();
-    std::erase_if(stations, [first, last](double s) { return s < first || s > last; });
+    for (double& station : stations) {
+        station = std::clamp(station, first, last);
+    }
+    stations.push_back(first);
+    stations.push_back(last);
     std::ranges::sort(stations);
     // Stations a rounding apart are one: a key station of the profile falls
     // on an element's end as often as not.
     stations.erase(std::unique(stations.begin(), stations.end(),
                                [](double a, double b) { return std::abs(a - b) < 1e-9; }),
                    stations.end());
+    // A station within that of an end is the end itself.
+    stations.front() = first;
+    stations.back() = last;
     return SampledAlignment{std::move(solved).value(), std::move(profile), std::move(stations)};
 }
 

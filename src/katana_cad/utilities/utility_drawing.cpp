@@ -1,6 +1,7 @@
 #include "katana/cad/utilities/utility_drawing.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -56,10 +57,11 @@ void setReal(PropertyMap& properties, std::string_view key, std::optional<double
     }
 }
 
-void setFields(PropertyMap& properties, const std::map<std::string, std::string>& fields)
+void setFields(PropertyMap& properties, const std::map<std::string, std::string>& fields,
+               std::string_view prefix = keys::kFieldPrefix)
 {
     for (const auto& [name, value] : fields) {
-        setText(properties, std::string(keys::kFieldPrefix) + name, value);
+        setText(properties, std::string(prefix) + name, value);
     }
 }
 
@@ -87,6 +89,7 @@ PropertyMap lineProperties(const sub::UtilityLine& line)
                                     std::string(sub::toString(attributes.status)));
     }
     setFields(properties, attributes.fields);
+    setFields(properties, attributes.recorded, keys::kRecordedPrefix);
     return properties;
 }
 
@@ -160,7 +163,13 @@ Entity vertexPoint(const sub::UtilityLine& line, std::size_t index, const sub::G
         properties.insert_or_assign(std::string(keys::kCoverBelowMinimum), cover.belowMinimum);
     }
     setText(properties, keys::kVerifies, vertex.verifies);
+    if (std::isfinite(options.grading.maximumDetectedSpacing)) {
+        properties.insert_or_assign(std::string(keys::kSpacing),
+                                    options.grading.maximumDetectedSpacing);
+    }
+    setReal(properties, keys::kMinimumCover, options.minimumCover);
     setFields(properties, vertex.fields);
+    setFields(properties, vertex.recorded, keys::kRecordedPrefix);
     return point;
 }
 

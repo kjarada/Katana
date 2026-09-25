@@ -49,6 +49,10 @@ struct DrawnService {
     std::vector<katana::entity::EntityId> runs;
     // The scope took some, not all, of its points - or none, only a run.
     bool completed = false;
+    // The settings it was graded with when drawn (keys::kSpacing,
+    // keys::kMinimumCover); empty when its points do not say.
+    std::optional<double> spacing{};
+    std::optional<double> minimumCover{};
 };
 
 struct UtilityData {
@@ -71,7 +75,12 @@ struct UtilityData {
 // point has; a point with no method, or a method, level reference, claimed
 // level or path that does not read; a number that is not a finite number, a
 // depth above the surface; a point whose line attributes differ from its
-// line's first point's, or lack one it has.
+// line's first point's, or lack one it has. And, naming the point and the
+// lines whose attributes it carries, for a point that is a vertex of a
+// schedule (it has a utility.vertex or a utility.order) but no utility.line,
+// or an empty one - a line deleted by hand: in `matched`, or anywhere when
+// it carries the attributes of a line `matched` takes, which read without it
+// would be read short of a vertex.
 [[nodiscard]] katana::core::Result<UtilityData>
 readUtilityData(const katana::entity::Model& model,
                 std::span<const katana::entity::EntityId> matched);
@@ -99,6 +108,19 @@ struct UtilityRegrade {
     katana::commands::CommandPtr command;
 };
 
+// What UTILITY REGRADE was told. A setting given grades every service with
+// it; one left out grades each service with the one it was drawn with
+// (DrawnService::spacing, minimumCover), else the default - so a regrade of
+// what nobody edited changes nothing, whatever SPACING and MINCOVER it was
+// drawn with, and a regrade after one edit changes only what the edit does.
+struct UtilityRegradeOptions {
+    std::optional<double> spacing{};
+    std::optional<double> minimumCover{};
+    // The prefix a service is drawn under when neither its points' layer nor
+    // its runs' says one.
+    std::string layerPrefix{kDefaultUtilityLayerPrefix};
+};
+
 // The services of `data` graded again from their points with `options`. Each
 // service is drawn under the prefix it was drawn under - read from its
 // points' layer "<prefix>/<type>/points", else its runs' "<prefix>/<type>/
@@ -106,7 +128,7 @@ struct UtilityRegrade {
 // service that cannot be graded refuses the whole regrade by name.
 [[nodiscard]] katana::core::Result<UtilityRegrade>
 planUtilityRegrade(const katana::entity::Model& model, const UtilityData& data,
-                   const UtilityDrawOptions& options = {});
+                   const UtilityRegradeOptions& options = {});
 
 // ---- the design CLEARANCE is measured against ----------------------------------------------
 
