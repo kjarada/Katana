@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "katana/cad/annotation/auto_label.hpp"
+#include "katana/cad/annotation/command_words.hpp"
 #include "katana/cad/annotation/dimension_build.hpp"
 #include "katana/cad/annotation/label_layout.hpp"
 #include "katana/cad/annotation/text_layout.hpp"
@@ -216,27 +217,11 @@ Result<EntityId> idOf(std::string_view text)
 
 // ---- replies --------------------------------------------------------------------------
 
-// A value as a record field: bare when it can be, quoted with \" and \\ and
-// \n escaped when it holds a space, a quote, a backslash or a line break.
+// A value as a record field (command_words.hpp, recordValue: the one rule,
+// shared with DIMSTYLE INFO's record).
 std::string field(std::string_view value)
 {
-    const bool needs = value.empty() || value.find_first_of(" \"\\\n=") != std::string_view::npos;
-    if (!needs) {
-        return std::string(value);
-    }
-    std::string out = "\"";
-    for (const char c : value) {
-        if (c == '"' || c == '\\') {
-            out += '\\';
-            out += c;
-        } else if (c == '\n') {
-            out += "\\n";
-        } else {
-            out += c;
-        }
-    }
-    out += '"';
-    return out;
+    return ann::recordValue(value);
 }
 
 // Shortest text that reads back as the same double, as every number in a

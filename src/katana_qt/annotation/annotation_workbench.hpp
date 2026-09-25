@@ -1,8 +1,8 @@
 #pragma once
 
 // The annotation front end in the Format menu (docs/annotation.md, "In the
-// window"): Text Styles..., Label Styles and Rules..., and the plan view's
-// annotation scale on the Format toolbar.
+// window"): Text Styles..., Label Styles and Rules..., Dimension Styles...,
+// and the plan view's annotation scale on the Format toolbar.
 //
 // Every one of them is a thin front end over katana_cad and katana_commands:
 // a text style is changed by updateTextStyle, a rule run by
@@ -33,6 +33,7 @@ namespace katana::qt {
 
 class TextStyleManagerDialog;
 class LabelStyleManagerDialog;
+class DimensionStyleManagerDialog;
 
 class AnnotationWorkbench {
   public:
@@ -44,6 +45,7 @@ class AnnotationWorkbench {
 
     TextStyleManagerDialog& showTextStyles();
     LabelStyleManagerDialog& showLabelStyles();
+    DimensionStyleManagerDialog& showDimensionStyles();
     // The Format toolbar's scale box ("annotationScaleCombo").
     [[nodiscard]] QComboBox* scaleBox() const { return scale_; }
 
@@ -63,9 +65,11 @@ class AnnotationWorkbench {
     katana::cad::Document& document_;
     QAction* textStylesAction_ = nullptr;
     QAction* labelStylesAction_ = nullptr;
+    QAction* dimStylesAction_ = nullptr;
     QComboBox* scale_ = nullptr;
     QPointer<TextStyleManagerDialog> textStyles_;
     QPointer<LabelStyleManagerDialog> labelStyles_;
+    QPointer<DimensionStyleManagerDialog> dimStyles_;
     CommandRunner run_;
     struct Listener;
     std::unique_ptr<Listener> listener_;

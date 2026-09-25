@@ -371,4 +371,31 @@ TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)
     EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
 }
 
+// What the window's Dimension Styles manager sends, an agent sends too: one
+// SET of several fields is one undo step, and INFO reads the style back as a
+// record of every field.
+TEST_F(McpServer, DimensionStylesAreSetInOneStepAndReadBackAsARecord)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"DIMSTYLE NEW site", "DIMSTYLE SET site TEXT 3.5 HEAD Tick PAPER on",
+                                  "DIMSTYLE INFO site"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json& lines = made["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 3U);
+    EXPECT_NE(lines[2]["output"].get<std::string>().find(
+                  "name=site text=3.5 gap=0.625 extoff=0.625 extbeyond=1.25 arrow=2.5 head=Tick"),
+              std::string::npos)
+        << lines[2]["output"];
+    EXPECT_EQ(made["structuredContent"]["status"]["undoSteps"], 2) << "NEW, then the one SET";
+
+    const Json undone = call("katana_undo");
+    EXPECT_FALSE(undone["isError"].get<bool>());
+    const Json info = call("katana_run_commands", Json{{"commands", {"DIMSTYLE INFO site"}}});
+    EXPECT_NE(textOf(info).find("text=2.5"), std::string::npos) << textOf(info);
+    EXPECT_NE(textOf(info).find("head=ClosedFilled"), std::string::npos) << textOf(info);
+    EXPECT_NE(textOf(info).find("paper=off"), std::string::npos) << textOf(info);
+}
+
 } // namespace

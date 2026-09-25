@@ -265,6 +265,22 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
 endif()
 
+# The annotation styles with no window (docs/annotation.md): the lines the
+# window's style managers send, typed. A SET of three fields undone by ONE
+# UNDO: INFO reads the defaults back (tables.hpp: DIMTXT 2.5, closed filled
+# arrows, model units).
+if(KATANA_BUILD_TESTS)
+    add_test(NAME cli.a_dimension_style_set_of_several_fields_is_one_undo_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "DIMSTYLE NEW site"
+                -c "DIMSTYLE SET site TEXT 3.5 HEAD Tick PAPER on" -c "DIMSTYLE INFO site"
+                -c "UNDO" -c "DIMSTYLE INFO site")
+    set_tests_properties(cli.a_dimension_style_set_of_several_fields_is_one_undo_step PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "name=site text=3\\.5 [^\r\n]*head=Tick [^\r\n]*paper=on layers=0 reads=10\\.000[\r\n]+.*name=site text=2\\.5 [^\r\n]*head=ClosedFilled [^\r\n]*paper=off layers=0"
+        FAIL_REGULAR_EXPRESSION "error")
+endif()
+
 # UTILITY on the sample investigation (samples/utilities, worked by hand in
 # docs/subsurface_utilities.md). E1-3 is a radar pick at 350 mm claimed as
 # QL-B: the report must say so. The pothole W1-X1 checks the detection W1-3:
