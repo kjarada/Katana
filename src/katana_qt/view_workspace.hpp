@@ -204,6 +204,13 @@ class ViewWorkspace final : public QMainWindow {
     // Every plan view, floating and minimised ones included: the clicks
     // collected anywhere belong to the drawing that is going away.
     void resetInteraction();
+    // The drawing was replaced (File > New, Open) and the window has emptied
+    // the surfaces and meshes it lends the views. Every 3D view rebuilds its
+    // WHOLE scene - the document's own notification marks only the entities
+    // dirty, so the terrain layer kept the previous drawing's surface - and
+    // every section, docked or kept by a view of another kind, is dropped:
+    // it was cut from surfaces that are gone.
+    void drawingReplaced();
 
     // Frames the ACTIVE view only, as the View menu and the Z command mean it;
     // one view's zoom is not another's business.

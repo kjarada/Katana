@@ -997,6 +997,24 @@ void ViewWorkspace::resetInteraction()
     }
 }
 
+void ViewWorkspace::drawingReplaced()
+{
+    // States first: a view turned from a section into plan keeps its section
+    // to show again when it turns back.
+    for (ViewState* state : views_.views()) {
+        state->section.reset();
+    }
+    for (View& view : docks_) {
+        if (view.render != nullptr) {
+            view.render->invalidateScene();
+        } else if (view.section != nullptr) {
+            view.section->clearSection(); // for its framing; the state is empty already
+        } else if (QWidget* widget = view.widget()) {
+            widget->update(); // a plan view's mesh footprints
+        }
+    }
+}
+
 void ViewWorkspace::zoomExtents()
 {
     if (const ViewState* state = views_.active()) {
