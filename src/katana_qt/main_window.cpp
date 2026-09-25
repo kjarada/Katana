@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "katana/core/cpu_features.hpp"
+#include "katana/core/text.hpp"
 #if defined(KATANA_HAS_GPU)
 #include "gpu/renderer_choice.hpp"
 #endif
@@ -64,6 +65,7 @@
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QSettings>
+#include <QRegularExpression>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QTabWidget>
@@ -157,6 +159,12 @@ constexpr int kLayerPathRole = Qt::UserRole + 1;
 // The reference data panel's columns. The Name cell carries the layer's
 // ReferenceId as user data.
 enum ReferenceColumn { kRefName = 0, kRefType, kRefDetail, kRefDisplay, kRefColumns };
+
+// The vertical exaggeration a person may choose, the box's range since View >
+// Vertical Exaggeration had one: a hundredth flattens a section to a line,
+// and beyond a thousand a model of metres is a wall of spikes.
+constexpr double kLeastExaggeration = 0.01;
+constexpr double kMostExaggeration = 1000.0;
 
 // What the command line shows while nothing is typed and no tool is asking.
 constexpr const char* kCommandPlaceholder =
@@ -837,6 +845,9 @@ void MainWindow::buildActions()
           cad::SnapMode::Intersection, cad::SnapMode::Perpendicular, cad::SnapMode::Tangent,
           cad::SnapMode::Nearest, cad::SnapMode::Grid}) {
         QAction* action = snapMenu->addAction(cad::toString(mode));
+        // viewSnapModeEndpoint ... viewSnapModeGrid: what --trigger reaches
+        // it by, and what SNAP <mode> ON|OFF sets (dispatchLine).
+        action->setObjectName(QString("viewSnapMode") + cad::toString(mode));
         action->setCheckable(true);
         action->setChecked(cad::hasMode(views_->snapModes(), mode));
         connect(action, &QAction::toggled, this, [this, mode](bool on) {
@@ -1582,6 +1593,11 @@ void MainWindow::buildDocks()
     propertyDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::Properties));
     commandDock->toggleViewAction()->setIcon(katana::qt::icon(Icon::CommandLine));
     referenceDock_->toggleViewAction()->setIcon(katana::qt::icon(Icon::ReferenceData));
+    // Named, as every View item is, since Qt names none of its toggles.
+    layerDock->toggleViewAction()->setObjectName("viewPanelLayers");
+    propertyDock->toggleViewAction()->setObjectName("viewPanelProperties");
+    commandDock->toggleViewAction()->setObjectName("viewPanelCommandLine");
+    referenceDock_->toggleViewAction()->setObjectName("viewPanelReferenceData");
     viewMenu_->addSeparator();
     QMenu* panels = viewMenu_->addMenu("&Panels");
     panels->addActions({layerDock->toggleViewAction(), propertyDock->toggleViewAction(),
@@ -2377,11 +2393,38 @@ void MainWindow::runCommandLine()
     // Several lines at once - pasted, or a --command holding line breaks -
     // are a script, run a line at a time and stopping at the first refused
     // (runPastedLines). A single-line field shows the breaks as blanks, and
-    // the whole was once run as one line of nonsense.
+    // the whole was once run as one line of nonsense. But pasted at a prompt
+    // for text - a Text's or a Multiline Text's lines - they are that text:
+    // run as a script, a label's words became commands and a RECT was drawn.
     if (line.contains('\n') || line.contains('\r')) {
-        runPastedLines(line);
+        if (views_->toolTakesText()) {
+            typeLinesIntoTool(line);
+        } else {
+            runPastedLines(line);
+        }
         return;
     }
+    runTypedLine(line);
+}
+
+void MainWindow::typeLinesIntoTool(const QString& text)
+{
+    static const QRegularExpression kLineBreak(QStringLiteral("\r\n|\r|\n"));
+    // A blank line is left out rather than typed: to a Text it is the Enter
+    // that finishes it, and a paragraph break in what was copied is not the
+    // person pressing Enter. Each other line goes through the typed path, so
+    // one the tool no longer wants as text (it took an option's word and
+    // asks for a point) is what typing it would have been.
+    for (const QString& each : text.split(kLineBreak)) {
+        const QString line = each.trimmed();
+        if (!line.isEmpty()) {
+            runTypedLine(line);
+        }
+    }
+}
+
+void MainWindow::runTypedLine(const QString& line)
+{
     // What is typed is echoed - but an ONLINE KEY's value never is.
     commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
     // A tool waiting for typed text - a Text's string, a count - takes the
@@ -2400,7 +2443,7 @@ void MainWindow::runCommandLine()
     if (views_->typeIntoTool(line)) {
         return;
     }
-    dispatchLine(line);
+    dispatchLine(line, LineSource::Typed);
 }
 
 bool MainWindow::runWorkbenchLine(const QString& line)
@@ -2429,7 +2472,7 @@ VerbOutcome MainWindow::runVerbLine(const QString& line)
     const int errorsBefore = errorsLogged_;
     // Never typeIntoTool: that is the whole difference from a typed line.
     if (!runWorkbenchLine(trimmed)) {
-        dispatchLine(trimmed);
+        dispatchLine(trimmed, LineSource::Executor);
     }
     capture_ = outer;
     // A line run inside another's run - a script's, under the SCRIPT line a
@@ -2458,7 +2501,7 @@ CommandRunner MainWindow::commandRunner()
 // The verbs taken here before the interpreter are listed for people by
 // windowHelpText (command_reference_dialog.cpp): what the typed HELP adds and
 // the Command Reference's Window section. A verb added here is added there.
-void MainWindow::dispatchLine(const QString& line)
+void MainWindow::dispatchLine(const QString& line, LineSource source)
 {
     // A note, as a katana_cli script has them: a dialog's or a script's line
     // comes here without passing runCommandLine's check.
@@ -2474,14 +2517,80 @@ void MainWindow::dispatchLine(const QString& line)
         views_->zoomExtents();
         return;
     }
+    // ON, OFF, or nothing to toggle - and anything else refused: every other
+    // word once meant OFF, so SNAP ENDPOINT OFF turned object snap off
+    // altogether and said nothing.
+    const auto onOff = [](const QString& word, bool now) -> std::optional<bool> {
+        if (word.isEmpty()) {
+            return !now;
+        }
+        if (word == "ON" || word == "OFF") {
+            return word == "ON";
+        }
+        return std::nullopt;
+    };
     if (verb == "GRID") {
-        gridAction_->setChecked(argument.isEmpty() ? !gridAction_->isChecked() : argument == "ON");
-        views_->setGridVisible(gridAction_->isChecked());
+        const auto on =
+            words.size() <= 2 ? onOff(argument, gridAction_->isChecked()) : std::nullopt;
+        if (!on) {
+            logMessage("usage: GRID [ON|OFF]", true);
+            return;
+        }
+        gridAction_->setChecked(*on);
+        views_->setGridVisible(*on);
+        logMessage(QString("grid=%1").arg(*on ? "on" : "off"));
         return;
     }
     if (verb == "SNAP" || verb == "OSNAP") {
-        snapAction_->setChecked(argument.isEmpty() ? !snapAction_->isChecked() : argument == "ON");
-        views_->setSnapEnabled(snapAction_->isChecked());
+        // SNAP <mode> [ON|OFF]: one of View > Snap Modes, by its name there.
+        const QString mode = argument == "CENTRE" ? QString("CENTER") : argument;
+        for (QAction* each : findChildren<QAction*>()) {
+            if (!mode.isEmpty() && each->objectName().startsWith("viewSnapMode") &&
+                each->objectName().mid(12).toUpper() == mode) {
+                const auto on = words.size() <= 3
+                                    ? onOff(words.size() == 3 ? words[2].toUpper() : QString(),
+                                            each->isChecked())
+                                    : std::nullopt;
+                if (!on) {
+                    logMessage("usage: SNAP <mode> [ON|OFF]", true);
+                    return;
+                }
+                each->setChecked(*on); // toggled: the views take the modes
+                logMessage(QString("snap_mode=%1 state=%2")
+                               .arg(each->objectName().mid(12).toLower(), *on ? "on" : "off"));
+                return;
+            }
+        }
+        const auto on =
+            words.size() <= 2 ? onOff(argument, snapAction_->isChecked()) : std::nullopt;
+        if (!on) {
+            logMessage("usage: SNAP [ON|OFF] | SNAP <mode> [ON|OFF]   modes: Endpoint, Midpoint, "
+                       "Center, Intersection, Perpendicular, Tangent, Nearest, Grid",
+                       true);
+            return;
+        }
+        snapAction_->setChecked(*on);
+        views_->setSnapEnabled(*on);
+        logMessage(QString("snap=%1").arg(*on ? "on" : "off"));
+        return;
+    }
+    // EXAGGERATION [factor]: View > Vertical Exaggeration's line, and alone
+    // the factor now, as a record.
+    if (verb == "EXAGGERATION") {
+        if (words.size() == 1) {
+            logMessage("vertical_exaggeration=" +
+                       QString::fromStdString(katana::core::formatExactReal(
+                           views_->sceneOptions().verticalExaggeration)));
+            return;
+        }
+        const auto factor = words.size() == 2
+                                ? katana::core::parseFiniteDouble(words[1].toStdString())
+                                : std::nullopt;
+        if (!factor || *factor < kLeastExaggeration || *factor > kMostExaggeration) {
+            logMessage("usage: EXAGGERATION [factor]   elevations times 0.01 to 1000", true);
+            return;
+        }
+        setVerticalExaggeration(*factor);
         return;
     }
     if (verb == "QUIT" || verb == "EXIT") {
@@ -2720,11 +2829,14 @@ void MainWindow::dispatchLine(const QString& line)
         logMessage(windowHelpText());
         return;
     }
-    // A bare tool word starts the tool, as in any CAD package: an alias
-    // (L, LINE, C, TR) or a catalogue id (draw.circle.ttr). With arguments
-    // it stays the interpreter's (LINE 0,0 10,0 draws at once), which is
-    // what scripts and the headless checks type.
-    if (words.size() == 1) {
+    // A bare tool word typed by a person starts the tool, as in any CAD
+    // package: an alias (L, LINE, C, TR) or a catalogue id
+    // (draw.circle.ttr). With arguments it stays the interpreter's
+    // (LINE 0,0 10,0 draws at once). A script's, a paste's or a dialog's line
+    // is the interpreter's however short, as katana_cli runs it: ERASE in a
+    // script once started the Erase tool, erased nothing, and the script
+    // still reported every line run.
+    if (source == LineSource::Typed && words.size() == 1) {
         if (const auto id = tools::toolIdForCommand(verb.toStdString())) {
             startTool(*id);
             return;
@@ -4483,12 +4595,20 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
 {
     viewMenu->addSeparator();
 
+    // Every item below has an object name, so --trigger and DRIVE's '*' reach
+    // it as a click does; the layouts' and the standard views' are their
+    // enumerators', since their menu text ("Two: Vertical", "SW Isometric")
+    // is no name.
     QMenu* layoutMenu = viewMenu->addMenu("Viewport &Layout");
-    for (const cad::LayoutKind kind :
-         {cad::LayoutKind::Single, cad::LayoutKind::SplitVertical,
-          cad::LayoutKind::SplitHorizontal, cad::LayoutKind::ThreeLeft, cad::LayoutKind::ThreeTop,
-          cad::LayoutKind::Quad}) {
+    for (const auto& [kind, name] : std::initializer_list<std::pair<cad::LayoutKind, const char*>>{
+             {cad::LayoutKind::Single, "Single"},
+             {cad::LayoutKind::SplitVertical, "SplitVertical"},
+             {cad::LayoutKind::SplitHorizontal, "SplitHorizontal"},
+             {cad::LayoutKind::ThreeLeft, "ThreeLeft"},
+             {cad::LayoutKind::ThreeTop, "ThreeTop"},
+             {cad::LayoutKind::Quad, "Quad"}}) {
         QAction* action = layoutMenu->addAction(cad::toString(kind));
+        action->setObjectName(QString("viewLayout") + name);
         action->setData(static_cast<int>(kind));
         connect(action, &QAction::triggered, this, [this, kind] {
             views_->arrange(kind);
@@ -4516,20 +4636,29 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
     }
 
     QMenu* standard = viewMenu->addMenu("Standard &3D Views");
-    for (const render::StandardView view :
-         {render::StandardView::Top, render::StandardView::Bottom, render::StandardView::Front,
-          render::StandardView::Back, render::StandardView::Left, render::StandardView::Right,
-          render::StandardView::IsoSouthWest, render::StandardView::IsoSouthEast,
-          render::StandardView::IsoNorthEast, render::StandardView::IsoNorthWest}) {
-        standard->addAction(render::toString(view), this, [this, view] {
+    for (const auto& [view, name] :
+         std::initializer_list<std::pair<render::StandardView, const char*>>{
+             {render::StandardView::Top, "Top"},
+             {render::StandardView::Bottom, "Bottom"},
+             {render::StandardView::Front, "Front"},
+             {render::StandardView::Back, "Back"},
+             {render::StandardView::Left, "Left"},
+             {render::StandardView::Right, "Right"},
+             {render::StandardView::IsoSouthWest, "IsoSouthWest"},
+             {render::StandardView::IsoSouthEast, "IsoSouthEast"},
+             {render::StandardView::IsoNorthEast, "IsoNorthEast"},
+             {render::StandardView::IsoNorthWest, "IsoNorthWest"}}) {
+        QAction* action = standard->addAction(render::toString(view), this, [this, view] {
             if (RenderViewWidget* renderView = views_->activeRenderView()) {
                 renderView->setStandardView(view);
             } else {
                 logMessage("No 3D viewport is open. Use View > Viewport Layout.", true);
             }
         });
+        action->setObjectName(QString("viewStandard") + name);
     }
-    viewMenu->addAction("Toggle Pe&rspective", QKeySequence(Qt::Key_F9), this, [this] {
+    QAction* perspective = viewMenu->addAction("Toggle Pe&rspective", QKeySequence(Qt::Key_F9),
+                                               this, [this] {
         RenderViewWidget* renderView = views_->activeRenderView();
         if (renderView == nullptr) {
             logMessage("No 3D viewport is open.", true);
@@ -4541,8 +4670,10 @@ void MainWindow::buildViewMenu(QMenu* viewMenu)
                                                  : render::Projection::Perspective);
         logMessage(wasPerspective ? "Orthographic projection." : "Perspective projection.");
     });
-    viewMenu->addAction("&Vertical Exaggeration...", this,
-                        [this] { setVerticalExaggeration(); });
+    perspective->setObjectName("viewTogglePerspective");
+    QAction* exaggeration = viewMenu->addAction("&Vertical Exaggeration...", this,
+                                                [this] { askVerticalExaggeration(); });
+    exaggeration->setObjectName("viewVerticalExaggeration");
 }
 
 void MainWindow::refreshViewMenu()
@@ -4552,16 +4683,29 @@ void MainWindow::refreshViewMenu()
     }
 }
 
-void MainWindow::setVerticalExaggeration()
+void MainWindow::askVerticalExaggeration()
 {
-    bool accepted = false;
-    const double current = views_->sceneOptions().verticalExaggeration;
-    const double factor = QInputDialog::getDouble(this, "Vertical Exaggeration",
-                                                  "Multiply elevations by:", current, 0.01, 1000.0,
-                                                  2, &accepted);
-    if (!accepted) {
+    // The box would wait for ever in a headless run, which --trigger now
+    // reaches it from: pointed at the line instead, as COPC's two file
+    // dialogs are.
+    if (headless_) {
+        logMessage("A headless session opens no dialog: type EXAGGERATION <factor> instead.",
+                   true);
         return;
     }
+    bool accepted = false;
+    const double current = views_->sceneOptions().verticalExaggeration;
+    const double factor = QInputDialog::getDouble(
+        this, "Vertical Exaggeration", "Multiply elevations by:", current,
+        kLeastExaggeration, kMostExaggeration, 2, &accepted);
+    if (accepted) {
+        (void)runVerbLine("EXAGGERATION " +
+                          QString::fromStdString(katana::core::formatExactReal(factor)));
+    }
+}
+
+void MainWindow::setVerticalExaggeration(double factor)
+{
     cad::SceneOptions options = views_->sceneOptions();
     options.verticalExaggeration = factor;
     // About the middle of the data, so exaggerating does not also launch the
