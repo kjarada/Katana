@@ -1076,6 +1076,225 @@ The tests are `tests/cad/plotting/test_preflight.cpp` (each check with the
 smallest set that trips it and the nearest that does not, the order, the
 options, the JSON) and `tests/qt_widgets/plotting/test_sheet_checks.cpp`.
 
+## Arranging a sheet
+
+Layout advice and tidying, headless first. `include/katana/cad/plotting/arrange.hpp`
+holds pure functions on world points and on `Sheet` and `SheetSet` values.
+`include/katana/cad/plotting/arrange_commands.hpp` makes each of them ONE
+undoable step on a document, through `editSheet`, `editViewport` or
+`editSheetSet`. The sheet editor's Arrange menu calls those steps, and an
+agent or a command-line verb calls the same ones.
+
+**Content** is a set of world points; only its convex hull matters.
+`drawnOutline(model, layers)` is everything a plan with those layers hidden
+draws:
+- each entity by its vertices;
+- an arc or circle by a polygon whose sides touch it at points 1/32 of a turn
+  apart, so the hull holds the whole curve and not only its chords;
+- texts and dimensions by their boxes;
+- every alignment, chorded to 5 cm.
+
+`viewportContent(model, viewport)` is what a plan or key plan shows: its
+stretch of the alignment its source names (sampled every 0.5 m, with every
+element change), else the drawing; a key plan adds the outlines it marks. A
+chainage range wholly off the alignment shows none of it, and then, as the
+painter does, the drawing. The
+editor adds the window's reference layers and meshes
+(`src/katana_qt/plotting/sheet_arrange.hpp`, `drawingContent`).
+
+### The best rotation
+
+Rotations follow `Viewport::rotation`: radians counter-clockwise, the world
+direction that runs across the paper. A drawing turned half a turn needs the
+same room, so a rotation returned is in (-90, 90] degrees.
+
+`bestFitRotation(content, rectangle)` finds the rotation at which the content
+fills a rectangle of that shape at the largest scale, exactly:
+- It walks the rotating calipers of the hull. Between two orientations at
+  which a hull edge lies along or square to the paper, the same vertices are
+  widest across and up the paper. There the needed scale is the larger of two
+  concave curves, so its least is at an end of the stretch or where width and
+  height ask the same scale. Both kinds are tried.
+- Of rotations that tie, the one nearest 0 wins (the positive one of two
+  equally near).
+- A result within 1 degree of a multiple of 90 is snapped to it, at the scale
+  that costs (`kRotationSnapDegrees`).
+
+It returns a `RotationFit`: the rotation, the turned content's width, height
+and middle, the exact scale, and the first of `kSheetScales` at or above it.
+
+Examples, in the A3 tiling area (385 x 250 mm):
+- A 300 x 100 m rectangle lying along 30 degrees is turned back 30 degrees,
+  at 1 : 300000 / 385 = 779.2. Along 120 degrees the answer is -60, not 120.
+- The thin triangle (0, 0), (100, 10), (100, -10) fits best where its width
+  and height ask the same scale: tan t = 0.5875, t = 30.43 degrees, at
+  1 : 237.1 against 1 : 259.7 square.
+- A line fits along the rectangle's diagonal.
+
+A drawing turned only to gain a scale no one can print is a drawing with a
+north arrow askew for nothing. Two more functions work on the standard
+ladder:
+- `leastRotationToFit(content, rectangle, scale)` is the rotation nearest
+  north-up at which the content fits at 1 : `scale`. It is 0 when that
+  already fits. When no rotation fits, the message says what the best needs.
+- `bestStandardRotation(content, rectangle)` is the least turn that reaches
+  the largest STANDARD scale any rotation reaches. A 450 x 20 m strip along
+  45 degrees needs 1 : 2000 square and 1 : 1168.8 along its length; it is
+  turned only 3.62 degrees, the least turn that reaches 1 : 1250.
+
+`rotateToBestFit(viewport, content)` turns a plan or key plan by
+`bestStandardRotation` inside its rectangle, less the painter's 4% to spare
+(`kAutoScaleSpare`). It centres the view on the content, gives it that scale
+and turns automatic scale and centring off. The painter's automatic fit
+measures the drawing's box, which a turned drawing overfills.
+
+### Paper and scale
+
+`suggestPaper(content, {scale, rotation, frame, shareAcross, shareUp})` is
+the smallest ISO sheet whose tiling area holds the content at that scale:
+A4 to A0, landscape before portrait at each size. The shares say how much of
+the area the content may use, for a main view beside panels. A portrait sheet
+has no frame, so its area is the paper less 10 mm, inset 1. When not even A0
+holds it, the answer is `NotFound`, and the message names the scale at which
+A0 would. Examples:
+
+| Content | Scale | Sheet | Why |
+|---|---|---|---|
+| 100 x 60 m | 1:500 | A4 landscape | 200 x 120 mm in 271.64 x 176.18 |
+| 200 x 100 m | 1:500 | A2 landscape | 400 mm is wider than A3 landscape (385) and A3 portrait (275) |
+| 100 x 300 m | 1:1000 | A3 portrait, no frame | 300 mm is higher than A3 landscape (250); 275 x 398 holds it |
+| the same, turned 90 degrees | 1:1000 | A3 landscape | |
+| 272 x 100 m | 1:1000 | A3 with the frame, A4 without | A4's frame leaves 271.64 mm, its paper less 22 mm 275 |
+
+`suggestScale(content, sheet, rotation)` is the largest standard scale at
+which the content fits the sheet's tiling area.
+
+`fitPaperToViewport(sheet, id, content, scale)` is "Choose paper for this
+scale":
+- The sheet goes on the smallest paper that holds what the view shows at
+  that scale, with the painter's 4% to spare, in the share of the tiling area
+  the view takes now.
+- `applyPaper` then maps every placed view from the old tiling area onto the
+  new one, so the layout keeps its proportions.
+- The view keeps the scale and is centred on its content. Its automatic scale
+  is turned off, so the larger paper does not choose another.
+
+For example, 500 x 300 m at 1 : 1000 filling an A3 sheet is 520 x 312 mm
+with room to spare. That needs A2 landscape, 545.27 x 354.36. The same plan
+beside a legend has 251.1 of the 385 mm across, so it needs 797 mm of tiling
+width and gets A0.
+
+### Arranging the views
+
+`autoArrange(sheet)` removes the overlaps between the unlocked views inside
+the tiling area:
+- Locked views stay where they are, and the others keep clear of them.
+- The main view, the lowest tiling rank (ties in the sheet's order), keeps
+  its place and size.
+- Every other view that overlaps nothing kept before it, lies inside the
+  tiling area less half a gutter and is no larger than the main view stays.
+  One that has strayed outside that is brought back first.
+- The rest are packed in rank order into the free space, one gutter from
+  everything. Each goes to the highest, then the left-most, place it fits,
+  the order a sheet is read in.
+- An unplaced view is packed at the size of the cell tiling would give it.
+  So a plan and a legend with no place yet land exactly in "Main and panel
+  right".
+- When they do not all fit, they shrink together in 5% steps, never below
+  their kind's minimum. Next, every view but the main one is packed again.
+  Only then is the main view made smaller, from its top-left corner, in 10%
+  steps. A view that gives way is never made larger than the main view.
+- A main view with no place yet, or in the way of a locked view, is packed
+  first, with the rest, and nothing packed after it is made larger than it.
+- A view with no room even at its minimum stays where it was, and the views
+  placed after it keep clear of it.
+
+It is deterministic, and a sheet arranged completely does not change when it
+is arranged again. What it could not place is reported
+(`ArrangeResult::overlapping`, `ArrangeResult::unplaced`) and left where it
+was.
+
+The other commands act on a list of ids, so a multiple selection plugs
+straight in:
+
+| Function | What it does |
+|---|---|
+| `alignViewports(sheet, ids, edge)` | lines the views up on the outermost of their `left`, `right`, `top` or `bottom` edges, or on the middle of the box round them (`hcentre`: one vertical line; `vcentre`: one horizontal line). One view alone aligns to the tiling area. A locked view counts where it is and does not move |
+| `distributeViewports(sheet, ids, axis)` | equal gaps `horizontal`ly or `vertical`ly: the first and last stay and the others move between them; needs three that can move. When the views between are wider together than the room between the first and the last, equal gaps would lay them over each other: that is refused (`InvalidArgument`, saying both sizes) and nothing moves |
+| `matchScale(set, ids, fromId)` | the views, on any sheet, take `fromId`'s scale and lose their automatic scale; a section matched to a section takes its exaggeration too; views with no scale are left out |
+| `fitViewportToContent(viewport, content, area)` | the rectangle grows or shrinks about its centre until the content, with 5% round it, just fits at the view's scale (`kFitSpare`), never below the kind's minimum and kept inside the drawing area; the view is centred on its content. A section measures (chainage or offset, level) points, the level exaggerated |
+
+`AlignEdge` and `DistributeAxis` read and write those names (`alignEdgeFrom`,
+`distributeAxisFrom`), for a command line.
+
+### One step each, for the editor and for agents
+
+`arrange_commands.hpp` records each of these as one step. An edit that
+changes nothing records none, and a refused one changes nothing. When the
+caller gives no content, it is gathered from the document's drawing with
+`viewportContent`.
+
+| Call | Step |
+|---|---|
+| `autoArrangeSheet(document, sheetIndex)` | `AUTO_ARRANGE` |
+| `alignViewports(document, sheetIndex, ids, edge)` | `ALIGN_VIEWPORTS` |
+| `distributeViewports(document, sheetIndex, ids, axis)` | `DISTRIBUTE_VIEWPORTS` |
+| `matchScale(document, ids, fromId, fromScale)` | `MATCH_SCALE` |
+| `fitViewportToContent(document, id, content, scale)` | `FIT_VIEWPORT_TO_CONTENT` |
+| `rotateToBestFit(document, id, content)` | `ROTATE_TO_BEST_FIT` |
+| `choosePaperForScale(document, id, content, scale)` | `CHOOSE_PAPER` |
+
+An automatic view is measured at the scale it is drawn at. `drawnScale`
+applies the painter's rule to the content: the first standard scale that
+holds it with 4% to spare, measured about the content's middle for an
+automatic centre and about the view's own centre otherwise. A view along an
+alignment is measured by the content's points, any other by the four
+corners of the content's box, as the painter measures the drawing's box; so
+a turned automatic plan is matched at the scale it prints at. The editor
+passes the painter's exact answer instead. `mainPlanOf(set, sheetIndex)` is
+the plan "Choose paper" acts on: the sheet's first placed plan, else its
+first placed key plan.
+
+### In the editor
+
+The toolbar's **Arrange** button (`sheetArrangeButton`, its menu
+`sheetArrangeMenu`) and an **Arrange** submenu at the top of the canvas's
+context menu hold:
+
+| Command | Object name | Acts on |
+|---|---|---|
+| Auto Arrange | `sheetArrangeAuto` | the sheet |
+| Align Left, Right, Top, Bottom, Centres Horizontally, Centres Vertically | `sheetAlignLeft`, `sheetAlignRight`, `sheetAlignTop`, `sheetAlignBottom`, `sheetAlignHCentre`, `sheetAlignVCentre` | the selected view (to the tiling area), or every view |
+| Distribute Horizontally, Vertically | `sheetDistributeHorizontal`, `sheetDistributeVertical` | every view on the sheet, until a selection holds three |
+| Match Scale To | `sheetMatchScaleMenu`, each item `sheetMatchScale_<id>` | the selected view, or every scaled view on the sheet, takes the chosen view's scale as drawn |
+| Fit View to Content | `sheetFitToContent` | the selected plan, or the sheet's main plan |
+| Rotate to Best Fit | `sheetRotateToBestFit` | the same |
+
+The Match Scale list is filled when it opens: every view in the set drawn to
+a scale, but the selected one, with the scale it is drawn at. The ids come
+from `arrangeTargets`, the one place the selection is read. Every command
+reports what it did, or why it did nothing, in the status bar and the log.
+
+With nothing selected, the sheet's properties have a **Choose paper for this
+scale** button (`sheetChoosePaper`). It is disabled on a sheet with no plan.
+The Generate dialog's "The drawing, fitted" has **Rotate the drawing to fill
+the sheet** (`sheetGenerateRotate`), which calls `smartLayoutRotated`:
+- On an automatic scale, the plan is turned when that buys a larger standard
+  scale, and left square otherwise.
+- At a fixed scale that would need tiles, or a sheet of its own for the 3D
+  view and legend, the plan is tried turned on one sheet, beside its panels.
+  The tiles stay when it does not fit.
+
+The strip above, generated fitted, is one sheet at 1 : 2000 square and at
+1 : 1250 turned 3.62 degrees.
+
+The tests are `tests/cad/plotting/test_arrange.cpp`,
+`tests/cad/plotting/test_arrange_commands.cpp` and
+`tests/qt_widgets/plotting/test_sheet_arrange.cpp`. The last paints a turned
+plan at 4 px a millimetre and finds each corner of the strip inked where the
+view's rotation, centre and scale put it, so the rotation means to the
+painter what it means to the model.
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners
