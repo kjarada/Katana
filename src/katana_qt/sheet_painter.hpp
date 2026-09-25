@@ -160,6 +160,14 @@ SheetPaintStats paintSheet(QPainter& painter, const katana::cad::plotting::Sheet
 // middle of it. Plans only; a section's are decided when it is cut.
 [[nodiscard]] ResolvedViewport resolvePlanViewport(const katana::cad::plotting::Viewport& viewport,
                                                    const SheetSource& source);
+// The same for a viewport on sheet `sheetIndex` of `set`, which is what the
+// painter draws: an automatic key plan fits every sheet's plan outline
+// (keyPlanOutlines), the drawing only when there is none (fitKeyPlan). Any
+// other viewport resolves as above.
+[[nodiscard]] ResolvedViewport resolvePlanViewport(const katana::cad::plotting::Viewport& viewport,
+                                                   const SheetSource& source,
+                                                   const katana::cad::plotting::SheetSet& set,
+                                                   std::size_t sheetIndex);
 
 // The one mapping from paper to device and back.
 [[nodiscard]] QPointF paperToDevice(const katana::geometry::Point2& paper, double paperHeightMm,

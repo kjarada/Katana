@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "katana/cad/plotting/legend.hpp"
+#include "katana/cad/plotting/plan_grid.hpp"
 
 namespace katana::cad::plotting {
 
@@ -243,6 +244,10 @@ Json viewportJson(const Viewport& viewport)
     if (viewport.legendScope != d.legendScope) {
         json["legend_scope"] = toString(viewport.legendScope);
     }
+    if (viewport.gridStyle != d.gridStyle) {
+        json["grid_style"] = toString(viewport.gridStyle);
+    }
+    putNumber(json, "grid_interval", viewport.gridInterval, d.gridInterval);
     return json;
 }
 
@@ -304,6 +309,15 @@ Viewport viewportFrom(const Json& json)
         throw BadValue{"unknown legend scope \"" + scope + "\""};
     }
     viewport.legendScope = *parsedScope;
+    if (json.contains("grid_style")) {
+        const std::string grid = json.at("grid_style").get<std::string>();
+        const auto style = gridStyleFrom(grid);
+        if (!style) {
+            throw BadValue{"unknown grid style \"" + grid + "\""};
+        }
+        viewport.gridStyle = *style;
+    }
+    viewport.gridInterval = json.value("grid_interval", d.gridInterval);
     return viewport;
 }
 

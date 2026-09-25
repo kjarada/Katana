@@ -64,6 +64,11 @@ struct ViewportSource {
     friend bool operator==(const ViewportSource&, const ViewportSource&) = default;
 };
 
+// How a plan draws its coordinate grid (plan_grid.hpp): not at all, ticks in
+// from its border, a small cross at every intersection, or light lines right
+// across. Every style but None labels the eastings and northings at the edges.
+enum class GridStyle { None, Ticks, Crosses, Lines };
+
 // A line or outline drawn over a viewport in world coordinates: the match
 // line where the next sheet takes over, or a key plan's sheet outlines.
 struct WorldMark {
@@ -117,6 +122,10 @@ struct Viewport {
     // Revisions: only the newest so many; 0 shows every revision.
     std::size_t revisionLimit = 0;
     LegendScope legendScope = LegendScope::ThisSheet; // Legend only
+    // A plan's coordinate grid, and its spacing in metres; 0 is automatic: the
+    // round spacing about 50 mm apart on the paper (plan_grid.hpp).
+    GridStyle gridStyle = GridStyle::None;
+    double gridInterval = 0.0;
 
     friend bool operator==(const Viewport&, const Viewport&) = default;
 };
