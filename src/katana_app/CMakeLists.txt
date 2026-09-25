@@ -263,6 +263,19 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
     set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+    # GENERATE fit rotate=on, what the Sheets editor's "Rotate the drawing to
+    # fill the sheet" writes: a 450 x 20 m strip along 45 degrees (its
+    # corners by hand, to a millimetre) is 1:2000 square and 1:1250 turned
+    # 3.62 degrees (docs/plotting.md, "In the editor").
+    add_test(NAME cli.generate_fit_rotate_turns_the_plan_to_fill_the_sheet
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LINE -152.028,-166.170 166.170,152.028"
+                -c "LINE 166.170,152.028 152.028,166.170" -c "LINE 152.028,166.170 -166.170,-152.028"
+                -c "LINE -166.170,-152.028 -152.028,-166.170" -c "GENERATE fit rotate=on legend=off"
+                -c "VIEW LIST")
+    set_tests_properties(cli.generate_fit_rotate_turns_the_plan_to_fill_the_sheet PROPERTIES
+        PASS_REGULAR_EXPRESSION "generated 1 sheet: 1.*view id=vp1 kind=plan rect=[^\r\n]* scale=1250 centre=[^\r\n]* rotation=3\\.6[12]"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()
 
 # UTILITY on the sample investigation (samples/utilities, worked by hand in

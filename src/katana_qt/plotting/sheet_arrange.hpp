@@ -26,6 +26,7 @@
 #include "sheet_painter.hpp"
 
 class QMenu;
+class QDialog;
 class QPushButton;
 class QToolButton;
 class QWidget;
@@ -77,8 +78,6 @@ viewportContent(const katana::cad::plotting::Viewport& viewport, const SheetSour
 //                             scale `fromId` is drawn at
 //   fitSelectionToContent     the selected plan or key plan, else the sheet's
 //   rotateSelectionToBestFit  main plan (plotting::mainPlanOf)
-//   choosePaperForSheet       the sheet's main plan: the paper that holds its
-//                             content at the scale it is drawn at
 katana::core::Result<std::string> arrangeSheet(katana::cad::Document& document,
                                                SheetEditor& editor);
 katana::core::Result<std::string> alignSelection(katana::cad::Document& document,
@@ -94,8 +93,6 @@ katana::core::Result<std::string> fitSelectionToContent(katana::cad::Document& d
                                                         SheetEditor& editor);
 katana::core::Result<std::string> rotateSelectionToBestFit(katana::cad::Document& document,
                                                            SheetEditor& editor);
-katana::core::Result<std::string> choosePaperForSheet(katana::cad::Document& document,
-                                                      SheetEditor& editor);
 
 // Fills `menu` with the commands, each reporting through the editor's log and
 // status bar. The object names are stable, for tests and agents:
@@ -115,8 +112,20 @@ void fillMatchScaleMenu(QMenu& menu, katana::cad::Document& document, SheetEdito
                                              SheetEditor& editor);
 
 // The sheet properties' "Choose paper for this scale" button
-// (sheetChoosePaper), disabled on a sheet with no plan.
+// (sheetChoosePaper), disabled on a sheet with no plan. It opens the dialog
+// below.
 [[nodiscard]] QPushButton* choosePaperButton(QWidget* parent, katana::cad::Document& document,
                                              SheetEditor& editor);
+
+// Choose Paper for the editor's current sheet, opened and returned without
+// waiting (sheetSuggestPaperDialog): the scale its main plan is to be drawn
+// at - As drawn, a standard scale or one typed (sheetSuggestPaperScale) - and
+// the paper that holds it at that scale, worked out as the scale changes
+// (sheetSuggestPaperAdvice, "A1 landscape, 83% full at 1:500") by SHEET
+// SUGGESTPAPER itself, which changes nothing without apply=on. Apply
+// (sheetSuggestPaperApply) runs "SHEET SUGGESTPAPER n scale=... apply=on"
+// through the editor (SheetEditor::runLine): one step. Cancel is
+// sheetSuggestPaperCancel.
+QDialog* openSuggestPaperDialog(katana::cad::Document& document, SheetEditor& editor);
 
 } // namespace katana::qt
