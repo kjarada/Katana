@@ -41,6 +41,10 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     dock_chrome.hpp
     view_layers_popup.cpp
     view_layers_popup.hpp
+    plan_context_menu.cpp
+    plan_context_menu.hpp
+    select_by_id_dialog.cpp
+    select_by_id_dialog.hpp
     render_view_widget.cpp
     render_view_widget.hpp
     section_view_widget.cpp

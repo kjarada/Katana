@@ -268,6 +268,16 @@ class ViewWorkspace final : public QMainWindow {
     // command line. What is typed while a tool runs is the tool's and never
     // comes here (ViewportWidget::onTextTyped).
     std::function<void(const QString&)> onTextTyped;
+    // A plan view's shortcut menu, asked for with no tool running
+    // (ViewportWidget::onContextMenu, which has selected the entity under the
+    // cursor when nothing was selected), at this screen position.
+    std::function<void(const QPoint& globalPos)> onContextMenu;
+    // A double click on an entity in a plan view with no tool running
+    // (ViewportWidget::onEntityDoubleClicked).
+    std::function<void(katana::entity::EntityId id)> onEntityDoubleClicked;
+    // The tool Enter at no prompt would run again, in any plan view; "" until
+    // one has run. What the shortcut menu's Repeat names.
+    [[nodiscard]] const std::string& lastToolId() const { return lastToolId_; }
 
   private:
     struct View {
@@ -314,7 +324,8 @@ class ViewWorkspace final : public QMainWindow {
     void updateLayersButton(const View& view);
     // Forwards a plan view's tool hooks to this workspace's, and sends the
     // view's Enter-repeat (onRepeatTool) through startTool as view `id`.
-    // Its typed text too (onTextTyped).
+    // Its typed text too (onTextTyped), its shortcut menu and its double
+    // click on an entity.
     void wireTools(ViewportWidget& plan, katana::cad::ViewId id);
 
     katana::cad::Document& document_;

@@ -356,7 +356,7 @@ Modify    (act on the selection)
 Edit      OFFSET id distance side-point | TRIM id pick-point cutter-id...
           EXTEND id pick-point boundary-id... | FILLET id id radius
           CHAMFER id id distance [distance2]
-Select    SELECT ALL | NONE | id... | LAYER name | TYPE name
+Select    SELECT ALL | NONE | id... (or #id) | LAYER name | TYPE name
 Layers    LAYER LIST | NEW name [#RRGGBB] | SET name | DELETE name
           LAYER SHOW|HIDE|LOCK|UNLOCK name | LAYER LTYPE layer linetype
 Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DELETE name
@@ -1351,7 +1351,10 @@ CommandInterpreter::Reply CommandInterpreter::select(const Tokens& args)
         collect(filter);
     } else {
         for (const std::string& text : args) {
-            const auto id = parseId(text);
+            // #12 as well as 12, as INFO takes it: the id copied from a DIM
+            // line or a refusal is taken as it is.
+            const auto id = parseId(text.starts_with('#') ? std::string_view(text).substr(1)
+                                                          : std::string_view(text));
             if (!id) {
                 return id.error();
             }

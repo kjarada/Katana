@@ -38,6 +38,8 @@
 #include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "plotting/plot_output.hpp"
+// Whole, not declared: selectById_ is destroyed wherever the window is.
+#include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -172,6 +174,9 @@ class MainWindow final : public QMainWindow {
     // whose dialog acts on a selection.
     void selectAll();
     void selectOnly(katana::entity::EntityId id);
+    // Edit > Select by ID (select_by_id_dialog.hpp), made the first time and
+    // kept, as Format > Layers is.
+    void showSelectById();
     // Runs `line` as if it were typed on the command line and Enter pressed.
     // For the headless --command switch, so a test can set up a drawing -
     // styles, entities, a selection - through the verbs a person types. An
@@ -227,6 +232,16 @@ class MainWindow final : public QMainWindow {
     // back to its own when nothing runs.
     void showRunningTool(const std::string& id);
     void buildViewMenu(QMenu* viewMenu);
+    // A right-click in a plan view with no tool running: the shortcut menu
+    // (plan_context_menu.hpp) for the selection, at `globalPos`.
+    void showPlanContextMenu(const QPoint& globalPos);
+    // After Select by ID: the selection framed in the active plan view when
+    // `zoom`, and the Properties panel brought forward to show it.
+    void showSelection(bool zoom);
+    // A double click on entity `id` with no tool running: it alone selected,
+    // and its editor opened - a text's or a label's where the window has
+    // one, the Properties panel otherwise.
+    void editDoubleClicked(katana::entity::EntityId id);
     // `name`, when given, becomes the action's object name: what --action and
     // QMainWindow::saveState know it by.
     [[nodiscard]] QAction* makeAction(Icon icon, const QString& text, const QString& tip,
@@ -427,6 +442,8 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<LayerManagerDialog> layers_;
     // File > Sheets, kept between uses and owned here for the reason layers_ is.
     std::unique_ptr<SheetEditor> sheets_;
+    // Edit > Select by ID, kept between uses for the reason layers_ is.
+    std::unique_ptr<SelectByIdDialog> selectById_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
