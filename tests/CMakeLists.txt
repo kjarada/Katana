@@ -226,6 +226,72 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
+# Terrain > Alignment Manager (src/katana_qt/alignment_manager.hpp) through the
+# real window: an alignment made from the dialog's fields is the ALIGN NEW line
+# echoed in the command log and run by the window's executor; the dialog's list
+# follows a PI typed on the command line and its undo; the setting-out note and
+# ALIGN STATIONS agree. By hand, for (0,0) (100,0) (100,100) with no curve:
+# every 25 m is 0 to 175, eight stations, and the key stations are the start
+# (on the interval), the PI at 100 (on it) and the end at 200 (not): nine rows,
+# three of them key; every 150 m is 0 and 150, so the table is the start, the
+# PI - where the northward tangent begins, so azimuth 0 - 150 and the end.
+if(TARGET katana)
+    add_test(NAME qt_alignment_manager_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@terrainAlignmentManager|alignmentName=main road|alignmentPoints=0,0 100,0 100,100|!alignmentNew|?alignmentStatus|alignmentInterval=25|?alignmentStationsNote|?alignmentList|>ALIGN PI \"main road\" 200,100|?alignmentList|>UNDO|?alignmentList|>ALIGN STATIONS \"main road\" 150|?commandLog"
+            "-DEXPECT=--dialog terrainAlignmentManager opened alignmentManagerDialog \"Alignment Manager\".*alignmentStatus: alignment main road created with 3 PIs.*alignmentStationsNote: 9 stations, 3 of them key stations[.].*alignmentList: main road [|] 3 [|] 0[.]000 [|] 200[.]000 [|] 200[.]000 [|] none.*alignmentList: main road [|] 4 [|] 0[.]000 [|] 300[.]000 [|] 300[.]000 [|] none.*alignmentList: main road [|] 3 [|] 0[.]000 [|] 200[.]000.*station=0[.]000 x=0[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^0-9]+00'00\" radius=straight key=start[\r\n]+station=100[.]000 x=100[.]000 y=0[.]000 direction=90[.]000 azimuth=0[^0-9]+00'00\" radius=straight key=PI[\r\n]+station=150[.]000 x=100[.]000 y=50[.]000 direction=90[.]000 azimuth=0[^0-9]+00'00\" radius=straight[\r\n]+station=200[.]000 x=100[.]000 y=100[.]000 [^\r\n]* key=end.*commandLog: .*> ALIGN NEW \"main road\" 0,0 100,0 100,100 alignment main road created with 3 PIs"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/alignment_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The Terrain menu's section and corridor items by the object names
+    # --trigger reaches them by, in a drawing with no alignment: each says
+    # where one is defined - the Alignment Manager, which a headless run does
+    # not open - and the menu starts with it.
+    add_test(NAME qt_terrain_commands_point_to_the_alignment_manager_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*terrainSectionAlongAlignment|*terrainCorridorQuantities|*terrainCorridorSurface|*terrainSectionAlongSelection|?terrainMenu"
+            "-DEXPECT=Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW.*No alignment has a design profile[.] Define one in Terrain > Alignment Manager [(]Vertical[)].*No alignment has a design profile.*Select exactly one line or polyline to cut along.*terrainMenu: Terrain: Alignment Manager[.][.][.] [[]Define and edit alignments"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/terrain_commands_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Survey > Parcel Report through the real window, on the 100 by 50
+    # rectangle drawn counter-clockwise from the origin: by hand, 5000 m2 is
+    # 0.5 ha, the perimeter 300 and the centroid (50,25); the first course
+    # runs due east (N 90 E) 100, the second due north (N 0 E) 50. Label
+    # Courses is PARCEL 1 LABEL 2 run by the window's executor - four course
+    # labels and the area - and a headless Save opens no file dialog.
+    add_test(NAME qt_parcel_report_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>PLINE 0,0 100,0 100,50 0,50 CLOSE|>SELECT ALL|@surveyParcelReport|!useSelection|!compute|?parcelSummary|?parcelCourses|labelHeight=2|!label|?message|parcelName=Lot 7|?parcelLegalText|!parcelCsv|?message|?commandLog"
+            "-DEXPECT=--dialog surveyParcelReport opened surveyParcelReportDialog \"Parcel Report\".*parcelSummary: area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m, centroid 50[.]000,25[.]000, drawn counter-clockwise.*parcelCourses: 1 [|] 0[.]000 [|] 0[.]000 [|] N 90[^|]+ E [|] 100[.]000 ; 2 [|] 100[.]000 [|] 0[.]000 [|] N 0[^|]+ E [|] 50[.]000.*message: 5 labels created on layer 0, the current layer.*parcelLegalText: Lot 7: Beginning at E 0[.]000 N 0[.]000; thence N 90[^;]+, 100[.]000 m;.*Containing 5000[.]000 m[^ ]+ [(]0[.]5000 ha[)][.].*message: a headless session opens no file dialog.*commandLog: .*> PARCEL 1 LABEL 2 5 labels created on layer 0"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/parcel_report_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Format > Styles and Linetypes > Hatch Patterns through the real window:
+    # a style made from the tab (STYLE NEW ... HATCH, one line), a delete the
+    # layer's use refuses, a purge that takes only the pattern nothing uses,
+    # and the table following a HATCH SET typed on the command line. Layer 0
+    # names "none" outright, so even "none" is used by a layer.
+    add_test(NAME qt_hatch_patterns_tab_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>HATCH NEW brick 45 0.25|>LAYER NEW site|>LAYER HATCH site brick|@formatStyles|managerTabs=Hatch Patterns|hatchPatternTable=brick|?hatchPatternTable|?hatchPatternFamilies|hatchPatternName=brick paving|!hatchPatternNewStyle|?hatchPatternStatus|!hatchPatternDelete|?hatchPatternStatus|hatchPatternName=fill|!hatchPatternNewSolid|!hatchPatternPurge|?hatchPatternStatus|>HATCH SET brick 45 0.5 135 0.5|?hatchPatternTable|?commandLog"
+            "-DEXPECT=hatchPatternTable: brick [|] 1 family [|] used by 1 layer[^;]* ; none [|] draws nothing [|] used by 1 layer, e[.]g[.] +layer=0.*hatchPatternFamilies: 45 [|] 0[.]25.*hatchPatternStatus: style brick paving created.*hatchPatternStatus: [^\r\n]*used by 1 layer and 1 style.*hatchPatternStatus: purged 0 styles, 0 linetypes and 1 hatch pattern.*hatchPatternTable: brick [|] 2 families [|] used by 1 layer and 1 style.*commandLog: .*> STYLE NEW \"brick paving\" HATCH brick style brick paving created"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hatch_patterns_tab_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_alignment_manager_headless
+        qt_terrain_commands_point_to_the_alignment_manager_headless
+        qt_parcel_report_headless
+        qt_hatch_patterns_tab_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # The whole main window with a customisation loaded into it: the two
 # libraries and the survey code file read, resolved against each other, and
 # reported. This is the path the Format > Load Customisation menu item takes, so what

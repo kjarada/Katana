@@ -1,10 +1,14 @@
 #include "katana/cad/parcel.hpp"
 
 #include <cmath>
+#include <format>
+#include <iomanip>
 #include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "katana/cad/code_edit.hpp"
 #include "katana/entity/dimension_text.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/math/numerics.hpp"
@@ -116,6 +120,57 @@ Result<ParcelReport> parcelReport(const Polyline2& boundary)
     }
     report.perimeter = perimeter.value();
     return report;
+}
+
+std::string formatParcelSummary(const ParcelReport& report)
+{
+    std::ostringstream out;
+    out << std::fixed;
+    out.precision(3);
+    out << "area " << report.area << " m2 (" << report.area / 10000.0 << " ha), perimeter "
+        << report.perimeter << " m, centroid " << report.centroid.x << "," << report.centroid.y
+        << ", drawn " << (report.clockwise ? "clockwise" : "counter-clockwise");
+    return out.str();
+}
+
+std::string formatParcelReport(const ParcelReport& report)
+{
+    std::ostringstream out;
+    out << std::fixed;
+    out.precision(3);
+    out << "  course  from                      bearing           distance\n";
+    std::size_t index = 1;
+    for (const ParcelCourse& course : report.courses) {
+        out << "  " << std::setw(4) << index++ << "    " << std::setw(10) << course.from.x << ","
+            << std::setw(10) << course.from.y << "   " << course.bearing << "   " << std::setw(10)
+            << course.distance << "\n";
+    }
+    out << "  " << formatParcelSummary(report);
+    return out.str();
+}
+
+std::string parcelCoursesCsv(const ParcelReport& report)
+{
+    // Coordinates may be negative in a local grid, which the measurement
+    // formatter (fixed() above) is not for; std::format is the locale-free
+    // one that takes a sign.
+    const auto number = [](double value, int decimals) {
+        std::string text = std::format("{:.{}f}", value, decimals);
+        if (text.front() == '-' && text.find_first_of("123456789") == std::string::npos) {
+            text.erase(0, 1); // "-0.000" is zero to the precision shown
+        }
+        return text;
+    };
+    std::string text = "Course,From easting,From northing,To easting,To northing,"
+                       "Azimuth (deg),Bearing,Distance\r\n";
+    std::size_t index = 1;
+    for (const ParcelCourse& course : report.courses) {
+        text += std::to_string(index++) + "," + number(course.from.x, 3) + "," +
+                number(course.from.y, 3) + "," + number(course.to.x, 3) + "," +
+                number(course.to.y, 3) + "," + number(course.azimuth * katana::math::kRadToDeg, 6) +
+                "," + csvField(course.bearing) + "," + number(course.distance, 3) + "\r\n";
+    }
+    return text;
 }
 
 std::string legalDescription(const ParcelReport& report, std::string_view name)

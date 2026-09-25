@@ -51,6 +51,9 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     render_view_widget.hpp
     section_view_widget.cpp
     section_view_widget.hpp
+    alignment_manager.cpp
+    alignment_manager.hpp
+    command_word.hpp
     style_manager.cpp
     style_manager.hpp
     attribute_manager.cpp

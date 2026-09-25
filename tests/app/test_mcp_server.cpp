@@ -544,3 +544,84 @@ TEST_F(McpServer, LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem)
 }
 
 } // namespace
+
+// What Terrain > Alignment Manager does, as an agent does it: the PIs read
+// back exactly as records, rewritten as one line (one undo step), and the
+// setting-out table a record a station with its key stations named.
+TEST_F(McpServer, AnAgentReadsAndRewritesAnAlignmentsPIsAndItsSettingOutTable)
+{
+    initialize();
+    const Json result =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"ALIGN NEW road 0,0 100,0 100,100", "ALIGN PIS road",
+                    "ALIGN PIS road 0,0 100,0,50 100,100", "ALIGN STATIONS road 1000"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 4U);
+    EXPECT_NE(lines[1]["output"].get<std::string>().find(
+                  "pi index=1 x=100 y=0 radius=0 spiral_in=0 spiral_out=0"),
+              std::string::npos)
+        << lines[1].dump();
+    EXPECT_NE(lines[2]["output"].get<std::string>().find("alignment road now has 3 PIs"),
+              std::string::npos)
+        << lines[2].dump();
+    const std::string table = lines[3]["output"].get<std::string>();
+    for (const char* key : {"key=start", "key=TC", "key=CT", "key=end"}) {
+        EXPECT_NE(table.find(key), std::string::npos) << key << "\n" << table;
+    }
+    const Json undone = call("katana_undo");
+    EXPECT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    const Json back = call("katana_run_commands", Json{{"commands", {"ALIGN PIS road"}}});
+    EXPECT_NE(back["structuredContent"]["commands"][0]["output"].get<std::string>().find(
+                  "pi index=1 x=100 y=0 radius=0 "),
+              std::string::npos)
+        << textOf(back);
+}
+
+// What Survey > Parcel Report does, as an agent does it: the report, the deed
+// wording under a name, and the labels as one undo step naming their layer.
+TEST_F(McpServer, AnAgentReportsDescribesAndLabelsAParcel)
+{
+    initialize();
+    const Json result = call("katana_run_commands",
+                             Json{{"commands",
+                                   {"PLINE 0,0 100,0 100,50 0,50 CLOSE", "PARCEL 1",
+                                    "PARCEL 1 LEGAL Lot7", "PARCEL 1 LABEL 2"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 4U);
+    EXPECT_NE(lines[1]["output"].get<std::string>().find(
+                  "area 5000.000 m2 (0.500 ha), perimeter 300.000 m"),
+              std::string::npos)
+        << lines[1].dump();
+    EXPECT_NE(lines[2]["output"].get<std::string>().find("Lot7: Beginning at E 0.000 N 0.000"),
+              std::string::npos)
+        << lines[2].dump();
+    EXPECT_NE(lines[3]["output"].get<std::string>().find(
+                  "5 labels created on layer 0, the current layer"),
+              std::string::npos)
+        << lines[3].dump();
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 6);
+    const Json undone = call("katana_undo");
+    EXPECT_EQ(undone["structuredContent"]["status"]["entities"], 1);
+}
+
+// What the Hatch Patterns tab does, as an agent does it: a pattern edited in
+// one step, and a style made hatching with it in another.
+TEST_F(McpServer, AnAgentEditsAHatchPatternAndMakesAStyleThatUsesIt)
+{
+    initialize();
+    const Json result =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"HATCH NEW brick 45 0.25", "HATCH SET brick 45 0.5 135 0.5",
+                    "STYLE NEW paving HATCH brick"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 3U);
+    EXPECT_EQ(lines[1]["output"].get<std::string>(), "hatch pattern brick updated (2 families)");
+    EXPECT_EQ(lines[2]["output"].get<std::string>(), "style paving created");
+    const Json refused = call("katana_run_commands", Json{{"commands", {"HATCH DELETE brick"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>()) << "a style still hatches with it";
+}
