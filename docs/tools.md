@@ -82,7 +82,9 @@ spellings of the same verbs, so a word means one thing whichever reads it:
 | Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Leader (`LEADER`, `LEAD`, `LE`) |
 
 The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
-List), is listed and empty. The Survey menu's tools (`docs/survey.md`) are
+List), is listed and empty. The drawing system added Draw > Vertices
+(`modify_vertex.cpp`, eighteen tools gathered into a Vertices submenu of
+Draw by their "Vertices, <tool>" names); `docs/drawing.md` has its table. The Survey menu's tools (`docs/survey.md`) are
 dialogs, not catalogue tools.
 
 **One command per tool session.** A tool that completes returns ONE command,

@@ -963,6 +963,9 @@ void MainWindow::startTool(const std::string& id)
 
 void MainWindow::showRunningTool(const std::string& id)
 {
+    if (id == "draw.vertex.edit") {
+        drawingUi_.showVertices(); // the polyline it picks is shown there
+    }
     toolActions_.setActive(id);
     selectAction_->setChecked(id.empty());
     // The prompt belongs in the command line, where the answer is typed;
@@ -1211,6 +1214,8 @@ void MainWindow::buildDocks()
     QMenu* panels = viewMenu_->addMenu("&Panels");
     panels->addActions({layerDock->toggleViewAction(), propertyDock->toggleViewAction(),
                         commandDock->toggleViewAction(), referenceDock_->toggleViewAction()});
+    drawingUi_ = drawing::installDrawingUi(*this, document_, panels,
+                                           findChild<QMenu*>("drawMenu"));
 
     // Opening sizes. Left to itself Qt gives each dock its size hint, which
     // for a text log is a third of the window - so the drawing, which is the
