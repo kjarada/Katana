@@ -55,8 +55,18 @@ namespace katana::entity {
 // their defaults, and every other old kind), so a drawing that uses nothing
 // new is stored byte for byte as before and GeometryBlobWireFormat's pinned
 // bytes still hold; only what needs the new layout is written in it.
+//
+// Version 3 (2026-09-25, docs/annotation.md "Smart leaders") writes every
+// anchor reference with its parameter (a double after the index), allows the
+// Along and Inside anchor points, and appends a leader's `fields` (u8) and
+// `labelStyle` (string) to its version-2 payload. It is written only for a
+// dimension or a leader that needs it - an anchor Along or Inside, or a
+// smart leader - so every other annotation is still written in version 2
+// byte for byte, and an older build refuses exactly the entities it could
+// not read correctly, each as an unknown version.
 inline constexpr std::uint8_t kBlobVersion = 1;
 inline constexpr std::uint8_t kBlobVersionAnnotation = 2;
+inline constexpr std::uint8_t kBlobVersionSmartLeader = 3;
 
 // Encodes `geometry`. Fails with InvalidArgument for text that is not valid
 // UTF-8 or a string longer than the format can express - both of which are
