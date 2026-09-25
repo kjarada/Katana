@@ -5,6 +5,7 @@
 #include <QComboBox>
 #include <QAction>
 #include <QDialog>
+#include <QDir>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QLabel>
@@ -30,6 +31,7 @@
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "theme.hpp"
 #include "main_window.hpp"
+#include "plotting/plot_output.hpp"
 
 namespace {
 
@@ -252,9 +254,12 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] [data-file...] --plot out.pdf
 //                 [--fit | --scale N] [--paper A4|A3|A2|A1|A0]
 //                 [--landscape | --portrait] [--dpi N]
-//   katana [project-directory] [data-file...] --plot-sheets out.pdf
+//                 [--plot-style colour|grey|mono] [--line-weight-scale F]
 //   katana [project-directory] [data-file...] [--command TEXT...]
-//                 [--sheets-json out.json|-] [--plot-sheets out.pdf]
+//                 [--sheets-json out.json|-]
+//                 [--plot-sheets out.pdf|folder [--sheets 1,3-5]
+//                  [--format pdf|pdfs|png|tiff] [--plot-style colour|grey|mono]
+//                  [--dpi N] [--line-weight-scale F]]
 //   katana [project-directory] [data-file...] --screenshot out.png
 //   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
 //   katana [project-directory] [data-file...] --style-manager --screenshot out.png
@@ -281,7 +286,18 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //
 // --plot-sheets plots every sheet of the project to one PDF, a page a sheet,
 // and exits without showing a window, as --plot does; a project with no
-// sheets plots one fitted to the drawing (MainWindow::plotSheetsToPdf).
+// sheets plots one fitted to the drawing (MainWindow::sheetsToPlot). The
+// switches after it make the request MainWindow::plotSheets carries out
+// (plotting/plot_output.hpp); each one not given comes from the set's page
+// setup, except the format, which is one PDF unless --format says otherwise.
+// --sheets chooses the sheets ("1,3-5", sheet ids); --format pdfs, png or
+// tiff writes a file a sheet into the FOLDER given to --plot-sheets, named by
+// the page setup's pattern; --plot-style prints in colour, greyscale or
+// monochrome (colour, grey, mono); --dpi is the resolution of a raster and
+// of a PDF's 3D snapshot; --line-weight-scale multiplies every line weight
+// (0.1 to 5). Each file written is printed on stdout, a path a line; the
+// summary and any problem go to stderr. --plot takes --plot-style and
+// --line-weight-scale too.
 //
 // --sheets-json writes the project's sheets - every sheet, view, title-block
 // value and revision - as the JSON the project stores them in
@@ -383,6 +399,13 @@ int main(int argc, char* argv[])
     std::optional<QString> plotPath;
     std::optional<QString> sheetsPath;
     std::optional<QString> sheetsJsonPath;
+    // --plot-sheets' request, beyond the page setup; the style is --plot's
+    // too.
+    std::string sheetsSelection;
+    std::optional<katana::qt::PlotFormat> sheetsFormat;
+    std::optional<katana::cad::PlotColourMode> plotStyle;
+    std::optional<double> lineWeightScale;
+    bool dpiGiven = false;
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
     std::vector<std::filesystem::path> customisation;
@@ -413,6 +436,38 @@ int main(int argc, char* argv[])
             sheetsPath = value();
         } else if (argument == "--sheets-json") {
             sheetsJsonPath = value();
+        } else if (argument == "--sheets") {
+            sheetsSelection = value().toStdString();
+        } else if (argument == "--format") {
+            const QString format = value();
+            sheetsFormat = katana::qt::plotFormatFrom(format.toStdString());
+            if (!sheetsFormat) {
+                std::fprintf(stderr, "--format must be one of pdf, pdfs, png, tiff (not '%s')\n",
+                             qPrintable(format));
+                return 2;
+            }
+        } else if (argument == "--plot-style") {
+            const QString style = value();
+            plotStyle = katana::cad::plotColourModeFrom(style.toStdString());
+            if (!plotStyle) {
+                std::fprintf(stderr, "--plot-style must be one of colour, grey, mono (not '%s')\n",
+                             qPrintable(style));
+                return 2;
+            }
+            settings.colourMode = *plotStyle;
+        } else if (argument == "--line-weight-scale") {
+            const QString text = value();
+            bool number = false;
+            const double factor = text.toDouble(&number);
+            if (!number || !(factor >= katana::cad::plotting::kMinimumLineWeightScale &&
+                             factor <= katana::cad::plotting::kMaximumLineWeightScale)) {
+                std::fprintf(stderr, "--line-weight-scale must be a number from %g to %g (not '%s')\n",
+                             katana::cad::plotting::kMinimumLineWeightScale,
+                             katana::cad::plotting::kMaximumLineWeightScale, qPrintable(text));
+                return 2;
+            }
+            lineWeightScale = factor;
+            settings.lineWeightScale = factor;
         } else if (argument == "--screenshot") {
             screenshotPath = value();
         } else if (argument == "--toggle-layer") {
@@ -481,6 +536,7 @@ int main(int argc, char* argv[])
             settings.landscape = false;
         } else if (argument == "--dpi") {
             settings.dpi = value().toDouble();
+            dpiGiven = true;
         } else {
             inputs << argument;
         }
@@ -795,10 +851,31 @@ int main(int argc, char* argv[])
         }
     }
     if (sheetsPath) {
-        const auto status = window.plotSheetsToPdf(*sheetsPath);
-        if (!status) {
-            std::fprintf(stderr, "plot failed: %s\n", status.error().describe().c_str());
+        const auto set = window.sheetsToPlot();
+        if (!set) {
+            std::fprintf(stderr, "plot failed: %s\n", set.error().describe().c_str());
             return 1;
+        }
+        katana::qt::PlotRequest request =
+            katana::qt::plotRequestFor(set->pageSetup, *sheetsPath, sheetsSelection);
+        request.format = sheetsFormat.value_or(katana::qt::PlotFormat::Pdf);
+        if (plotStyle) {
+            request.colourMode = *plotStyle;
+        }
+        if (dpiGiven) {
+            request.dpi = settings.dpi;
+        }
+        if (lineWeightScale) {
+            request.lineWeightScale = *lineWeightScale;
+        }
+        const auto result = window.plotSheets(*set, request);
+        if (!result) {
+            std::fprintf(stderr, "plot failed: %s\n", result.error().describe().c_str());
+            return 1;
+        }
+        // What was written, for a script to pick up: one path a line.
+        for (const QString& file : result->files) {
+            std::printf("%s\n", QDir::toNativeSeparators(file).toUtf8().constData());
         }
         return 0;
     }

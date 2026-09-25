@@ -166,7 +166,8 @@ class SheetEditor final : public QMainWindow {
     katana::core::Status tile(katana::cad::plotting::TilingPreset preset);
     katana::core::Status addBlankSheet();
     katana::core::Status removeSelectedViewport();
-    // Plots the current sheet, or every sheet, to `path`. Problems are
+    // Plots the current sheet, or every sheet, to one PDF at `path` in the
+    // set's page setup (its plot style and resolution). Problems are
     // reported through onMessage, and so are the errors the checks find on
     // the sheets plotted (the Checks dock is shown), which never stop it.
     katana::core::Status plotToPdf(const QString& path, bool allSheets);
@@ -195,6 +196,9 @@ class SheetEditor final : public QMainWindow {
     void showContextMenu(const QPointF& global, const std::string& viewportId);
     void report(const QString& text, bool error = false);
     void plotInteractive(bool allSheets);
+    // Runs the checks on the sheets a plot takes (the current one, or all),
+    // shows the Checks dock when they find an error, and says how many.
+    std::size_t checkBeforePlot(bool allSheets);
 
     katana::cad::Document& document_;
     SourceProvider source_;
