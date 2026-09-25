@@ -50,6 +50,10 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     layer_manager.hpp
     gis_dialogs.cpp
     gis_dialogs.hpp
+    gis_online.cpp
+    gis_online.hpp
+    gis_online_dialog.cpp
+    gis_online_dialog.hpp
     format.hpp
     icons.cpp
     icons.hpp
