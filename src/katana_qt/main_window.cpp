@@ -8,6 +8,10 @@
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
+#include "plotting/plot_dialog.hpp"
+#include "plotting/sheet_arrange.hpp"
+#include "plotting/sheet_checks.hpp"
+#include "plotting/sheet_tables.hpp"
 #include "project_crs_dialog.hpp"
 #include "style_manager.hpp"
 
@@ -304,6 +308,37 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
+    // GENERATE on the command line lays out what Generate Sheets would: what
+    // the plan view draws, and the visible surfaces for the sections.
+    interpreter_.setSheetContext([this] {
+        cad::plotting::SheetVerbContext context;
+        PlanSource plan = planSourceOf(document_);
+        plan.reference = &reference_;
+        plan.meshes = &sceneMeshes_;
+        context.drawingExtent = planDrawnBounds(plan, {}, {});
+        for (const auto& surface : sceneSurfaces_) {
+            if (surface.visible && surface.surface != nullptr) {
+                context.surfaces.push_back({surface.name, surface.surface});
+            }
+        }
+        // SHEETS CHECK with what the painter knows, as the Checks dock runs
+        // them; and what a view shows for ARRANGE, VIEW FIT and the rest, as
+        // the editor's Arrange menu measures it.
+        context.check = [this](std::span<const std::size_t> sheets) {
+            return checkSheetsFor(document_.sheetSet(), sheetSource(), sheets);
+        };
+        context.content = [this](const cad::plotting::Viewport& viewport) {
+            return viewportContent(viewport, sheetSource(), document_.sheetSet());
+        };
+        context.fitSection = [this](const cad::plotting::Viewport& viewport) {
+            SheetPaintCache cache;
+            return resolveSectionViewport(viewport, sheetSource(), cache);
+        };
+        context.drawn = [this](const cad::plotting::SheetSet& set) {
+            return resolvedSheetSet(set, sheetSource());
+        };
+        return context;
+    });
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -432,14 +467,18 @@ void MainWindow::buildActions()
         makeAction(Icon::Plot, "Plot Sheets to P&DF...",
                    "Plot every sheet of the project to one PDF", QKeySequence(), "filePlotSheets");
     connect(plotSheetsAction, &QAction::triggered, this, [this] {
-        const QString path = QFileDialog::getSaveFileName(this, "Plot Sheets to PDF", QString(),
-                                                          "PDF (*.pdf)");
-        if (path.isEmpty()) {
+        // The Plot dialog (plotting/plot_dialog.hpp) over every sheet; the
+        // page setup is kept only for sheets the project has.
+        const auto set = sheetsToPlot();
+        if (!set) {
+            logMessage(QString::fromStdString(set.error().describe()), true);
             return;
         }
-        if (const auto status = plotSheetsToPdf(path); !status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-        }
+        plotInteractively(this, *set, 0, true, suggestedPlotFile(document_),
+                          QString::fromStdString(document_.metadata().name),
+                          [this] { return sheetSource(); },
+                          document_.sheetSet().sheets.empty() ? nullptr : &document_,
+                          [this](const QString& text, bool isError) { logMessage(text, isError); });
     });
 
     QAction* customiseAction =
@@ -1816,6 +1855,7 @@ void MainWindow::logMessage(const QString& text, bool isError)
     const QString line = isError ? "! " + text : text;
     commandLog_->appendPlainText(line);
     if (isError) {
+        ++errorsLogged_;
         statusBar()->showMessage(text, 6000);
     }
     // A headless run has no window to read the log in. Echoed, it is what a
@@ -1825,10 +1865,12 @@ void MainWindow::logMessage(const QString& text, bool isError)
     }
 }
 
-void MainWindow::runCommand(const QString& line)
+bool MainWindow::runCommand(const QString& line)
 {
+    const int errors = errorsLogged_;
     commandInput_->setText(line);
     runCommandLine();
+    return errorsLogged_ == errors;
 }
 
 void MainWindow::runCommandLine()
@@ -1965,6 +2007,49 @@ void MainWindow::runCommandLine()
                            .arg(grouped(cloud.points.size()))
                            .arg(grouped(cloud.sourcePointCount)));
         }
+        return;
+    }
+    // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
+    // [folder=] [pattern=]: the sheets plotted as the Plot dialog and
+    // --plot-sheets plot them, the set's page setup filling in what is not
+    // given. Here and not in the interpreter because the painter is Qt; the
+    // line is read by the interpreter's own rules (sheet_verbs.hpp,
+    // parsePlotSheets). Each file written is logged on a line of its own,
+    // file="path", after the summary, for a script to pick up.
+    if (verb == "PLOTSHEETS") {
+        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
+        if (!tokens) {
+            logMessage(QString::fromStdString(tokens.error().describe()), true);
+            return;
+        }
+        // A project with no sheets plots one fitted to the drawing, so
+        // sheets= is read against that one sheet.
+        const auto set = sheetsToPlot();
+        if (!set) {
+            logMessage(QString::fromStdString(set.error().describe()), true);
+            return;
+        }
+        const auto parsed = cad::plotting::parsePlotSheets(
+            *set, std::vector<std::string>(tokens->begin() + 1, tokens->end()));
+        if (!parsed) {
+            logMessage(QString::fromStdString(parsed.error().describe()), true);
+            return;
+        }
+        const PlotRequest request = plotRequestFor(set->pageSetup, *parsed);
+        // What cannot be drawn on a sheet is logged as a problem, and the
+        // files are still written: the line was carried out, not refused, so
+        // those do not count against it (runCommand), as they do not fail
+        // --plot-sheets.
+        const int errorsBefore = errorsLogged_;
+        const auto result = plotSheets(*set, request);
+        if (!result) {
+            logMessage(QString::fromStdString(result.error().describe()), true);
+            return;
+        }
+        for (const QString& file : result->files) {
+            logMessage(QString("file=\"%1\"").arg(QDir::toNativeSeparators(file)));
+        }
+        errorsLogged_ = errorsBefore;
         return;
     }
     // A bare tool word starts the tool, as in any CAD package: an alias
@@ -4502,39 +4587,65 @@ void MainWindow::showSheets()
     sheets_->activateWindow();
 }
 
-katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+katana::core::Result<cad::plotting::SheetSet> MainWindow::sheetsToPlot()
 {
-    const SheetSource source = sheetSource();
     cad::plotting::SheetSet set = document_.sheetSet();
     if (set.sheets.empty()) {
         // Nothing laid out yet: one sheet fitted to the drawing, for this plot.
         cad::plotting::LayoutRequest request;
-        request.planArea = planDrawnBounds(source.plan, {}, {});
-        auto sheets = cad::plotting::smartLayout(document_.model(), request);
-        if (!sheets) {
-            return sheets.error();
+        request.planArea = planDrawnBounds(sheetSource().plan, {}, {});
+        auto fitted = cad::plotting::smartLayout(document_.model(), request);
+        if (!fitted) {
+            return fitted.error();
         }
-        cad::plotting::prepareForAppend(set, *sheets);
-        set.sheets = std::move(*sheets);
+        cad::plotting::prepareForAppend(set, *fitted);
+        set.sheets = std::move(*fitted);
         logMessage("The project has no sheets: plotting one fitted to the drawing.");
     }
-    SheetPaintCache cache;
-    std::vector<std::string> problems;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = katana::qt::plotSheetsToPdf(path, set, {}, source, 300.0, cache,
-                                                    QString::fromStdString(document_.metadata().name),
-                                                    &problems);
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        return status;
+    return set;
+}
+
+katana::core::Result<PlotReport> MainWindow::plotSheets(const cad::plotting::SheetSet& set,
+                                                        const PlotRequest& request)
+{
+    PlotRequest titled = request;
+    if (titled.title.isEmpty()) {
+        titled.title = QString::fromStdString(document_.metadata().name);
     }
-    for (const std::string& problem : problems) {
+    // The checks first, on the sheets this plot takes: what they find is
+    // logged, and the plot goes ahead - an error there is paper wasted, not
+    // a file that cannot be written. A selection that does not parse is
+    // left to the plot to refuse, with its own words.
+    if (const auto selected = cad::plotting::parseSheetSelection(titled.sheets, set)) {
+        for (const QString& line : preflightLog(checkSheetsFor(set, sheetSource(), *selected))) {
+            logMessage(line);
+        }
+    }
+    SheetPaintCache cache;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto result = katana::qt::plotSheets(set, titled, [this] { return sheetSource(); }, cache);
+    QApplication::restoreOverrideCursor();
+    if (!result) {
+        return result.error();
+    }
+    for (const std::string& problem : result->problems) {
         logMessage(QString::fromStdString(problem), true);
     }
-    logMessage(QString("Plotted %1 sheet%2 to %3.")
-                   .arg(set.sheets.size())
-                   .arg(set.sheets.size() == 1 ? "" : "s")
-                   .arg(path));
+    logMessage(result->summary(titled));
+    return result;
+}
+
+katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+{
+    const auto set = sheetsToPlot();
+    if (!set) {
+        return set.error();
+    }
+    PlotRequest request = plotRequestFor(set->pageSetup, path);
+    request.format = PlotFormat::Pdf;
+    if (auto result = plotSheets(*set, request); !result) {
+        return result.error();
+    }
     return {};
 }
 
