@@ -136,7 +136,7 @@ void AnnotationWorkbench::showScale()
 TextStyleManagerDialog& AnnotationWorkbench::showTextStyles()
 {
     if (textStyles_.isNull()) {
-        textStyles_ = new TextStyleManagerDialog(document_, &window_);
+        textStyles_ = new TextStyleManagerDialog(document_, lateRunner(), &window_);
         textStyles_->setModal(false);
     }
     raise(*textStyles_);
@@ -192,7 +192,7 @@ TextEditDialog& AnnotationWorkbench::showTextEdit()
 LabelStyleManagerDialog& AnnotationWorkbench::showLabelStyles()
 {
     if (labelStyles_.isNull()) {
-        labelStyles_ = new LabelStyleManagerDialog(document_, &window_);
+        labelStyles_ = new LabelStyleManagerDialog(document_, lateRunner(), &window_);
         labelStyles_->setModal(false);
     }
     raise(*labelStyles_);

@@ -404,14 +404,13 @@ annotation scale box on the Format toolbar (`annotationScaleCombo`), all built b
 `AnnotationWorkbench` (`src/katana_qt/annotation/annotation_workbench.hpp`)
 so `MainWindow` gains one member. The managers
 (`src/katana_qt/annotation/annotation_managers.hpp`, which lists every
-field's object name) are a list and a form: Apply runs the table command -
-one undo step, nothing when the form is unchanged - and a refusal is shown
-in the dialog's problem line in the command's own words. The label manager's
-template field is checked as it is typed, and its second tab holds the rules
-with Run and Clear, which report what `AUTOLABEL` replies. The dialogs keep
-no copy of the tables: an undo or a verb typed while one is open shows at
-once. The Annotate menu's tools are in `docs/tools.md`; the painting is in
-`docs/plan_view.md`, "Annotation".
+field's object name) are a list and a form: Apply stores the form - one undo
+step, nothing when the form is unchanged - and a refusal is shown in the
+dialog's problem line in the verb's own words. The label manager's template
+field is checked as it is typed, and its second tab holds the rules. The
+dialogs keep no copy of the tables: an undo or a verb typed while one is
+open shows at once. The Annotate menu's tools are in `docs/tools.md`; the
+painting is in `docs/plan_view.md`, "Annotation".
 
 The Dimension Styles manager
 (`src/katana_qt/annotation/dimension_style_manager.hpp`, which lists every
@@ -436,6 +435,38 @@ what the plan view draws. The numbers are typed, not spun: a spin box of two
 places showed `Standard`'s 0.625 gap as 0.63, and Apply would have stored it.
 A form's unapplied edits survive a change that leaves their style alone (a
 layer made elsewhere) and give way to one that changes it.
+
+Since 2026-09-26 the Text Style and Label Style managers change nothing
+themselves either: every button builds the verb line and runs it through
+the one executor. **New** takes its name from the box beside it
+(`textStyleNewName`, `labelStyleNewName`; blank gives the fresh name its
+placeholder shows) and, for a label style, its kind from `labelStyleNewKind`
+- `TEXTSTYLE NEW "name"`, `LABELSTYLE NEW "name" kind=area` - where it used
+to make "Text Style 2" and leave the renaming to nobody, since no verb
+renames a style. **Apply** sends `TEXTSTYLE SET` or `LABELSTYLE SET` with the
+keys the form changed, one step, and nothing when none did; **Add Standard
+Set** is `LABELSTYLE DEFAULTS`. Beside the template, **Insert Value**
+(`labelTemplateInsert`) lists what a template of the style's kind may say -
+`LABELSTYLE VALUES` - each with the steps that apply to it, and puts
+`{value:step}` at the cursor (`{prop.NAME}` with `NAME` selected to type
+over). What it offers is what `checkLabelTemplate` accepts, asked value by
+value and step by step, so it cannot offer a field the template would
+refuse; each choice is an action named `labelValue:VALUE[:STEP]`, which a
+headless run can trigger.
+
+The rules tab's form has the rule's **Type** (`labelRuleType`: Any, an
+entity type or Alignment, or any glob) and **Enabled** (`labelRuleEnabled`);
+a row chosen in the table fills the form, **Update Rule** stores the form
+over the rule of its name with `AUTOLABEL RULE SET` (every field, so a
+filter emptied is cleared), and the table's Enabled box switches a rule with
+a line of its own, `AUTOLABEL RULE SET name enabled=off`. The table takes
+several rows: **Run Rules**, **Preview** and **Remove Rule Labels** act on
+the rules chosen - `AUTOLABEL RUN lots sides`, `PREVIEW lots`, `CLEAR
+sides` - and on every enabled rule when none is chosen, which was all they
+could do before; a rule switched off labels nothing even when chosen
+(`ruleMatches`). Preview changes nothing and says what a run would. The
+report under the table is the verb's first reply line word for word, and
+the table's **Labels** column the `rule=NAME labels=N` lines after it.
 
 ## Stored with the project
 
@@ -502,7 +533,8 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/cad/tools/test_annotate.cpp` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
 | `tests/cad/tools/test_annotate_text_options.cpp` | the Text tool's Style, Justify and Paper options and Multiline Text, each checked against what `TEXT` and `MTEXT` make |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
-| `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
+| `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
+| `qt_the_label_style_manager_runs_chosen_rules_headless` (`tests/CMakeLists.txt`) | the real window: a label style named with its kind, a rule with its type previewed and run as the one chosen |
 | `tests/qt_widgets/annotation/test_text_edit_dialog.cpp` | Edit Text by object name: the selection followed, one `TEXTEDIT` of the changed keys, a value no line can carry refused |
 | `qt_multiline_text_and_edit_text_run_in_the_window_headless` (`tests/CMakeLists.txt`) | the real window: `MT` typed, two lines made one text; Edit Text on a selected text |
 | `tests/qt_widgets/annotation/test_dimension_style_manager.cpp` | the Dimension Styles manager by object name: every field in one line and one step, New, Duplicate, a refused Delete, the preview and sample, Revert |
@@ -529,6 +561,9 @@ it skipped dimensions, and so does the archive exporter.
   anchor, and moved off its placed position with `LABEL SET id at=x,y`
   rather than by dragging.
 * **PURGE** does not purge unused text or label styles.
+* **No style is renamed.** No verb or command renames a text, label or
+  dimension style, so the managers offer no Rename; New names a style as it
+  is made instead.
 * **DXF**: no MTEXT, masks, width factors or slants on export, and nothing
   on import becomes a label, a leader or a dimension kind.
 * **The 3D view** draws a label as a marker at its anchor and a leader as

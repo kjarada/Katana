@@ -292,6 +292,21 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "1  Text  layer=0  \"PIT 12.nIL 10\\.50\"  height=3\\.5  style=Notes  justify=MC.*1  Text  layer=0  \"old\"  height=2\\.5[\r\n]"
         FAIL_REGULAR_EXPRESSION "error")
+    # The rules tab's lines, typed: a rule added switched off with its type
+    # labels nothing even named (auto_label.cpp, ruleMatches); switched on,
+    # it is previewed and run by name while another rule waits. One label a
+    # target: the rectangle once for its area (auto_label.hpp).
+    add_test(NAME cli.chosen_label_rules_are_previewed_and_run_by_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LABELSTYLE DEFAULTS" -c "RECT 0,0 20,20"
+                -c "AUTOLABEL RULE ADD lots style=\"Lot Area\" type=Polyline enabled=off"
+                -c "AUTOLABEL RULE ADD sides style=\"Bearing Distance\""
+                -c "AUTOLABEL PREVIEW lots" -c "AUTOLABEL RULE SET lots enabled=on"
+                -c "AUTOLABEL PREVIEW lots" -c "AUTOLABEL RUN lots" -c "AUTOLABEL RULE LIST")
+    set_tests_properties(cli.chosen_label_rules_are_previewed_and_run_by_name PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "preview created=0 kept=0 removed=0 skipped=0[\r\n]+.*preview created=1 kept=0 removed=0 skipped=0[\r\n]+rule=lots labels=1[\r\n]+autolabel created=1 kept=0 removed=0 skipped=0[\r\n]+rule=lots labels=1[\r\n]+.*name=lots style=\"Lot Area\" layer=\"\" code=\"\" type=Polyline labellayer=\"\" enabled=on"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()
 
 # UTILITY on the sample investigation (samples/utilities, worked by hand in

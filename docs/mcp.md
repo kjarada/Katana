@@ -87,7 +87,11 @@ and what a dimension of ten reads as, and `DIMSTYLE SET name field value
 edited as the window's Edit Text edits it, several keys in one `TEXTEDIT`
 with `\n` for a line break, and `katana_describe_entity` reads it back with
 the break written the same way
-(`McpServer.ATextIsEditedInOneStepAndDescribedWithItsLineBreaks`).
+(`McpServer.ATextIsEditedInOneStepAndDescribedWithItsLineBreaks`). The label
+rules tab's Preview is `AUTOLABEL PREVIEW` of the rules named, which answers
+the counts and a `rule=NAME labels=N` record a rule, and `LABELSTYLE VALUES
+kind` lists what a template may say
+(`McpServer.ChosenLabelRulesArePreviewedByNameWithACountForEach`).
 
 Each tool that runs commands answers with a transcript (`> command`, then what
 it printed and any error or warning) and, to clients of MCP 2025-06-18 or later,

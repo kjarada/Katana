@@ -1306,8 +1306,21 @@ if(TARGET katana)
             "-DEXPECT=textEditStatus: Text 2.*updated text id=2.*1  Text  layer=0  \"PIT 12.nIL 10\\.50\"  height=1\\.25  style=Standard[\r\n]+2  Text  layer=0  \"new words\"  height=2\\.5  justify=MC"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/text_tools_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Format > Label Styles and Rules...: a style named and given its kind,
+    # a rule added with its type, previewed and run as the rule chosen in the
+    # table - one label for the rectangle's area (auto_label.hpp) - and read
+    # back by the verbs.
+    add_test(NAME qt_the_label_style_manager_runs_chosen_rules_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@formatLabelStyles|!labelStyleDefaults|labelStyleNewName=Lot areas|labelStyleNewKind=area|!labelStyleNew|labelStyleTabs=Auto-Label Rules|labelRuleName=lots|labelRuleStyle=Lot Area|labelRuleType=Polyline|!labelRuleAdd|>RECT 0,0 20,20|labelRuleTable=lots|!labelRulePreview|?labelRuleReport|?labelRuleTable|!labelRuleRun|>AUTOLABEL RULE LIST"
+            "-DEXPECT=created label style name=\"Lot areas\" kind=area.*labelRuleReport: preview created=1 kept=0 removed=0 skipped=0.*labelRuleTable: lots \\| Lot Area \\| \\| \\| Polyline \\| \\| yes \\| 1.*autolabel created=1 kept=0 removed=0 skipped=0.*name=lots style=\"Lot Area\" layer=\"\" code=\"\" type=Polyline labellayer=\"\" enabled=on"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/label_rules_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_dimension_styles_manager_runs_its_lines_headless
         qt_multiline_text_and_edit_text_run_in_the_window_headless
+        qt_the_label_style_manager_runs_chosen_rules_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
