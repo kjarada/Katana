@@ -136,6 +136,11 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] tools::ToolHost& toolHost() { return tools_; }
     // The grips shown on the selection while no tool runs (docs/drawing.md).
     [[nodiscard]] drawing::GripController& gripController() { return grips_; }
+    // The points object snap tracking has acquired, most recent first.
+    [[nodiscard]] const std::vector<katana::geometry::Point2>& trackingPoints() const
+    {
+        return tracking_.points();
+    }
     // A whole line of typed input handed to the running tool, as the command
     // line hands it over when Enter is pressed there. False, and nothing
     // done, when no tool is running: the line is then the command line's.
@@ -378,6 +383,10 @@ class ViewportWidget final : public QWidget {
     std::optional<katana::cad::SnapResult> activeSnap_;
     // What constrained the cursor (Ortho, Polar 45°, a lock): its tooltip.
     QString trackingLabel_;
+    // Object snap tracking (docs/drawing.md): the points acquired, and the
+    // one the cursor's tracking path runs from, drawn dotted.
+    katana::cad::TrackingPoints tracking_;
+    std::optional<Point2> trackingFrom_;
 
     bool gridVisible_ = true;
 

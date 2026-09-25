@@ -133,6 +133,29 @@ struct ConstrainedPoint {
 trackAcquired(const std::vector<katana::geometry::Point2>& acquired,
               const katana::geometry::Point2& cursor, double aperture);
 
+// The points object snap tracking has acquired: each point-like object snap
+// the cursor lands on (an end, a middle, a centre, a crossing, a node, a
+// quadrant) while tracking is on, most recent first, at most kMost of them
+// - AutoCAD's limit, and as many paths as a user can follow. Landing on an
+// acquired point again moves it to the front. The view keeps one and clears
+// it when no tool wants a point.
+class TrackingPoints {
+  public:
+    static constexpr std::size_t kMost = 7;
+
+    // True when `mode` is a snap whose point is worth tracking from: not the
+    // along-a-line snaps (Nearest, Perpendicular, Tangent, Extension,
+    // Parallel) nor the grid.
+    [[nodiscard]] static bool tracks(SnapMode mode);
+
+    void acquire(const katana::geometry::Point2& point, double tolerance);
+    void clear() { points_.clear(); }
+    [[nodiscard]] const std::vector<katana::geometry::Point2>& points() const { return points_; }
+
+  private:
+    std::vector<katana::geometry::Point2> points_;
+};
+
 // ---- one-shot snaps ------------------------------------------------------------------------------
 
 // From: the base point plus a typed offset ("@3,4", "@5<30").

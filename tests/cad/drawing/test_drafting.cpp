@@ -207,3 +207,23 @@ TEST(DraftingTypedInput, ARadiusIsStillTheToolsValue)
     });
     EXPECT_TRUE(found);
 }
+
+TEST(Drafting, TrackingPointsKeepTheSevenMostRecentAndMoveARepeatToTheFront)
+{
+    TrackingPoints tracking;
+    for (int i = 0; i < 9; ++i) {
+        tracking.acquire(Point2(i, 0), 1e-9);
+    }
+    ASSERT_EQ(tracking.points().size(), TrackingPoints::kMost);
+    EXPECT_EQ(tracking.points().front(), Point2(8, 0));
+    EXPECT_EQ(tracking.points().back(), Point2(2, 0));
+    tracking.acquire(Point2(5, 0), 1e-9);
+    EXPECT_EQ(tracking.points().front(), Point2(5, 0));
+    EXPECT_EQ(tracking.points().size(), TrackingPoints::kMost) << "moved, not added again";
+    EXPECT_TRUE(TrackingPoints::tracks(SnapMode::Endpoint));
+    EXPECT_TRUE(TrackingPoints::tracks(SnapMode::Quadrant));
+    EXPECT_FALSE(TrackingPoints::tracks(SnapMode::Nearest));
+    EXPECT_FALSE(TrackingPoints::tracks(SnapMode::Grid));
+    tracking.clear();
+    EXPECT_TRUE(tracking.points().empty());
+}
