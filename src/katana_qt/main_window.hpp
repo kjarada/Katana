@@ -32,6 +32,7 @@
 #include "customisation/customisation_workbench.hpp"
 #include "survey/survey_workbench.hpp"
 #include "tools/tool_menus.hpp"
+#include "plotting/plot_output.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -119,6 +120,15 @@ class MainWindow final : public QMainWindow {
     // with no sheets plots one sheet fitted to the drawing, laid out for this
     // plot only and not added to the project. Public for --plot-sheets.
     [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path);
+    // What File > Plot Sheets and --plot-sheets plot: the project's sheets,
+    // or, when it has none, one sheet fitted to the drawing, laid out for
+    // this plot only and not added to the project (logged).
+    [[nodiscard]] katana::core::Result<katana::cad::plotting::SheetSet> sheetsToPlot();
+    // Plots `set` as `request` asks (plotting/plot_output.hpp) from this
+    // window's source, logging each problem and the summary. Public for
+    // --plot-sheets, whose switches make the request.
+    [[nodiscard]] katana::core::Result<PlotReport>
+    plotSheets(const katana::cad::plotting::SheetSet& set, const PlotRequest& request);
     // What sheets are drawn from: the drawing, this window's surfaces, meshes
     // and reference layers, the set's logo and the project's fields.
     [[nodiscard]] SheetSource sheetSource() const;

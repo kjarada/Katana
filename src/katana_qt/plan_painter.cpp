@@ -244,6 +244,9 @@ class PlanPainter {
         QPen entityPen; // the entity's pen WITHOUT a model linetype's dashes
         QPen pen;       // the pen the plain line is drawn with
         StylePaintTarget target;
+        // A solid hatch's fill on paper: the fill rule of the plot style
+        // (cad::paperFillColour), which in monochrome is not the pen's black.
+        QColor paperFill;
     };
     // What a point symbol stamp is, worked out once per symbol and size in
     // a paint: where it reaches from its insertion point and whether it is
@@ -329,6 +332,7 @@ class PlanPainter {
     // model, which outlives the paint.
     katana::entity::DimensionStyle dimensionStyle_{};
     const katana::entity::HatchPattern* hatch_ = nullptr;
+    QColor hatchPaperFill_; // Resolved::paperFill of that entity; invalid: the pen's
 
     // This paint's resolutions, and the last one asked for: consecutive
     // entities mostly share a layer and style, and comparing two short
@@ -716,7 +720,12 @@ const PlanPainter::Resolved& PlanPainter::resolve(const Entity& entity)
         // paper" - which means what it says.
         double penWidthPixels = 1.5;
         if (paper()) {
-            penWidthPixels = r.display.lineWeight * options_.pixelsPerMillimetre;
+            // The plot style's line weight scale, when there is a plot.
+            const double lineScale = options_.plot != nullptr ? options_.plot->lineWeightScale : 1.0;
+            penWidthPixels = r.display.lineWeight * lineScale * options_.pixelsPerMillimetre;
+            if (options_.plot != nullptr) {
+                r.paperFill = toQColor(cad::paperFillColour(r.display.color, *options_.plot));
+            }
         } else if (options_.thinLines) {
             penWidthPixels = 1.0;
         }
@@ -882,6 +891,7 @@ void PlanPainter::drawEntities()
             }
             const StylePaintTarget& target = selected ? *selectedTarget : resolved.target;
             hatch_ = resolved.hatch;
+            hatchPaperFill_ = resolved.paperFill;
             // Looked up only for a dimension, the one entity that can use it.
             if (dimension) {
                 dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
@@ -1260,6 +1270,14 @@ void PlanPainter::drawAlignments()
     // read the same at every resolution.
     const double linePen = markSize(2.0, kAlignmentLinePaperMillimetres);
     const double tickPen = markSize(1.0, kAlignmentTickPenPaperMillimetres);
+    // On paper the overlay's amber is a colour like any other: the plot
+    // style prints it grey in greyscale and black in monochrome.
+    const katana::entity::Color amber{static_cast<std::uint8_t>(kAlignment.red()),
+                                      static_cast<std::uint8_t>(kAlignment.green()),
+                                      static_cast<std::uint8_t>(kAlignment.blue()), 255};
+    const QColor ink = paper() && options_.plot != nullptr
+                           ? toQColor(cad::paperColour(amber, *options_.plot))
+                           : kAlignment;
     const double tickPixels = markSize(6.0, kAlignmentTickPaperMillimetres);
     const double textPixels = markSize(11.0, kAlignmentTextPaperMillimetres);
     // About one "0+000.00" at the text size: 70 px at 11 px.
@@ -1294,10 +1312,10 @@ void PlanPainter::drawAlignments()
         for (const Point2& vertex : line.vertices) {
             polygon << toScreen(vertex);
         }
-        painter_.setPen(QPen(kAlignment, linePen));
+        painter_.setPen(QPen(ink, linePen));
         painter_.drawPolyline(polygon);
 
-        painter_.setPen(QPen(kAlignment, tickPen));
+        painter_.setPen(QPen(ink, tickPen));
         // Key stations bunch up - a 10 m spiral puts TS and SC ten metres
         // apart - and their labels then print over one another into a smear
         // nobody can read. A label is skipped when it would land within its
@@ -1347,6 +1365,8 @@ void PlanPainter::drawHatch(const Polyline2& boundary, const QPolygonF& screen)
         QColor fill = color;
         if (!paper()) {
             fill.setAlpha(90);
+        } else if (hatchPaperFill_.isValid()) {
+            fill = hatchPaperFill_;
         }
         painter_.fillPath(
             [&] {
@@ -1368,7 +1388,9 @@ void PlanPainter::drawHatch(const Polyline2& boundary, const QPolygonF& screen)
     // pen, since a PDF hairline is one device pixel and its width on the
     // page would follow the resolution.
     const QPen previous = painter_.pen();
-    painter_.setPen(QPen(color, paper() ? kHatchLinePaperMillimetres * options_.pixelsPerMillimetre
+    const double lineScale = options_.plot != nullptr ? options_.plot->lineWeightScale : 1.0;
+    painter_.setPen(QPen(color, paper() ? kHatchLinePaperMillimetres * lineScale *
+                                              options_.pixelsPerMillimetre
                                         : 0.0));
     for (const Segment2& line : cad::hatchSegments(boundary, *hatch_)) {
         painter_.drawLine(toScreen(line.start), toScreen(line.end));

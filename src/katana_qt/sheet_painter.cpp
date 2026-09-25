@@ -24,6 +24,7 @@
 #include "katana/render/camera.hpp"
 #include "katana/render/framebuffer.hpp"
 #include "katana/render/rasterizer.hpp"
+#include "plotting/plot_style.hpp"
 
 namespace katana::qt {
 
@@ -66,27 +67,46 @@ const QColor kInk(0, 0, 0);
 const QColor kGridInk(190, 190, 190);
 const QColor kFaint(150, 150, 150);
 
-// A pen of `widthMm` on paper, round-capped as the frame is drawn.
+// The plot style (plotting/plot_style.hpp) is applied HERE, in the pens, the
+// text setter and paperFill, and nowhere else: every colour the sheet painter
+// puts on paper passes through one of them, so a colour mode or a line
+// weight scale cannot miss a line. The paper's white is not a colour of the
+// drawing and is used as it is.
+
+// A pen of `widthMm` on paper, round-capped as the frame is drawn; its colour
+// and width as the plot style prints them.
 QPen paperPen(const Paper& paper, const QColor& colour, double widthMm,
               Qt::PenStyle style = Qt::SolidLine)
 {
-    QPen pen(colour, std::max(paper.mm(widthMm), 0.01), style, Qt::RoundCap, Qt::RoundJoin);
+    const katana::cad::PlotSettings& plot = paper.options().plot;
+    QPen pen(plotInk(colour, plot), std::max(paper.mm(widthMm * plot.lineWeightScale), 0.01),
+             style, Qt::RoundCap, Qt::RoundJoin);
     return pen;
 }
 
 // A dashed pen: `pattern` in paper millimetres, flat-capped so that a dash is
-// exactly as long as it says (Qt measures a pattern in pen widths).
+// exactly as long as it says (Qt measures a pattern in pen widths, so the
+// pattern is divided by the width the style gives the pen).
 QPen dashedPen(const Paper& paper, const QColor& colour, double widthMm,
                std::initializer_list<double> patternMm)
 {
-    QPen pen(colour, std::max(paper.mm(widthMm), 0.01), Qt::CustomDashLine, Qt::FlatCap,
-             Qt::RoundJoin);
+    const katana::cad::PlotSettings& plot = paper.options().plot;
+    const double width = widthMm * plot.lineWeightScale;
+    QPen pen(plotInk(colour, plot), std::max(paper.mm(width), 0.01), Qt::CustomDashLine,
+             Qt::FlatCap, Qt::RoundJoin);
     QList<qreal> pattern;
     for (const double length : patternMm) {
-        pattern << std::max(length / std::max(widthMm, 1e-3), 0.01);
+        pattern << std::max(length / std::max(width, 1e-3), 0.01);
     }
     pen.setDashPattern(pattern);
     return pen;
+}
+
+// An area of ink - a scale bar's black cells, a north arrow's half, a key
+// plan's tinted sheet - as the plot style prints a fill.
+QBrush paperFill(const Paper& paper, const QColor& colour)
+{
+    return QBrush(plotFill(colour, paper.options().plot));
 }
 
 Point2 rotated(const Point2& v, double radians)
@@ -143,7 +163,7 @@ class TextSetter {
             style.lineSpacingMm > 0.0 ? style.lineSpacingMm : 1.5 * style.capMm;
         painter_.save();
         painter_.setFont(m.font);
-        painter_.setPen(style.colour);
+        painter_.setPen(plotInk(style.colour, paper_.options().plot));
         painter_.setBrush(Qt::NoBrush);
         painter_.translate(paper_.at(anchor));
         painter_.rotate(-style.angleDegrees);
@@ -382,7 +402,8 @@ void paintFrame(QPainter& painter, const Paper& paper, TextSetter& text,
             painter.rotate(-symbol.rotationDegrees);
             const double size = paper.mm(std::max(symbol.sizeMm, 0.01));
             painter.scale(size, size);
-            glyph(painter, symbol.style, qColour(symbol.colour), 0.18 / std::max(symbol.sizeMm, 0.01));
+            glyph(painter, symbol.style, plotInk(qColour(symbol.colour), options.plot),
+                  0.18 * options.plot.lineWeightScale / std::max(symbol.sizeMm, 0.01));
             painter.restore();
         }
     }
@@ -394,7 +415,7 @@ void paintFrame(QPainter& painter, const Paper& paper, TextSetter& text,
             if (!at.empty()) {
                 painter.save();
                 painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-                painter.drawImage(paper.at(at), source.logo);
+                painter.drawImage(paper.at(at), plotImage(source.logo, options.plot));
                 painter.restore();
                 stats.logoDrawn = true;
             }
@@ -567,7 +588,7 @@ void paintScaleBar(QPainter& painter, const Paper& paper, TextSetter& text, cons
         const double x0 = left + lengthMm * i / divisions;
         const double x1 = left + lengthMm * (i + 1) / divisions;
         const QRectF cell = paper.at(Box2(Point2(x0, base), Point2(x1, base + barH)));
-        painter.setBrush(i % 2 == 0 ? QBrush(kInk) : QBrush(Qt::white));
+        painter.setBrush(i % 2 == 0 ? paperFill(paper, kInk) : QBrush(Qt::white));
         painter.drawRect(cell);
     }
     painter.setBrush(Qt::NoBrush);
@@ -599,7 +620,7 @@ void paintNorthArrow(QPainter& painter, const Paper& paper, TextSetter& text, co
     const QPointF tail = at(-radius + 0.8, 0.0);
     const QPointF left = at(-radius * 0.6, radius * 0.45);
     const QPointF right = at(-radius * 0.6, -radius * 0.45);
-    painter.setBrush(kInk);
+    painter.setBrush(paperFill(paper, kInk));
     painter.drawPolygon(QPolygonF{tip, left, tail});
     painter.setBrush(Qt::white);
     painter.drawPolygon(QPolygonF{tip, right, tail});
@@ -1156,7 +1177,7 @@ void SheetPainter::paintMarks(const Viewport& viewport, const ResolvedViewport& 
         if (mark.kind == plotting::WorldMark::Kind::SheetOutline) {
             const QColor ink(200, 0, 30);
             painter_.setPen(paperPen(paper, ink, 0.35));
-            painter_.setBrush(QColor(200, 0, 30, 18));
+            painter_.setBrush(paperFill(paper, QColor(200, 0, 30, 18)));
             painter_.drawPolygon(line);
             painter_.setBrush(Qt::NoBrush);
             Point2 centroid;
@@ -1322,7 +1343,7 @@ bool SheetPainter::paintSnapshot(const Viewport& viewport, const Paper& paper)
     }
     painter_.save();
     painter_.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter_.drawImage(paper.at(viewport.rect), entry.image);
+    painter_.drawImage(paper.at(viewport.rect), plotImage(entry.image, options_.plot));
     painter_.restore();
     return true;
 }
@@ -1385,8 +1406,7 @@ void SheetPainter::paintLegend(const Viewport& viewport, TextSetter& text, const
         if (x + 20.0 > r.max.x) {
             break;
         }
-        const QColor ink = qColour(katana::cad::paperColour(layer.color, options_.plot));
-        painter_.setPen(paperPen(paper, ink, std::max(layer.lineWeight, 0.13)));
+        painter_.setPen(paperPen(paper, qColour(layer.color), std::max(layer.lineWeight, 0.13)));
         painter_.drawLine(paper.at(Point2(x, y)), paper.at(Point2(x + 10.0, y)));
         const double room = std::min(columnW - 14.0, r.max.x - x - 13.0);
         const QString name = QString::fromStdString(layer.name).toUpper();
@@ -1450,7 +1470,7 @@ bool SheetPainter::paintImage(const Viewport& viewport, const Paper& paper)
     const Box2 at = plotting::fitImage(viewport.rect, image.width(), image.height());
     painter_.save();
     painter_.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter_.drawImage(paper.at(at), image);
+    painter_.drawImage(paper.at(at), plotImage(image, options_.plot));
     painter_.restore();
     return true;
 }
