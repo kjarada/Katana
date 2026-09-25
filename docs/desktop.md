@@ -699,6 +699,21 @@ modal box** - every question the window would ask becomes a line in the log
 or a refusal. `docs/headless.md` ("A headless session never opens a modal
 box") lists what each one does.
 
+## GIS > Online Data: a workbench of its own
+
+The online import (`docs/gis_online.md`) is `OnlineDataWorkbench`
+(`src/katana_qt/gis_online.hpp`), built as the Survey and Format workbenches
+are: `MainWindow::buildGisActions` hands it the GIS menu and a few callbacks
+(the document, the views, the log, whether the session is headless, and one
+that adds a raster to the reference data), and `MainWindow::runCommandLine`
+hands it any line that starts with `ONLINE`. Nothing else of it is in
+`main_window.cpp`. Its dialog (`src/katana_qt/gis_online_dialog.hpp`) is
+non-modal, has an object name on every control, and imports only by building
+the `ONLINE IMPORT` command the verb would parse and handing it back to the
+workbench - one executor, so no path exists in the dialog that an agent cannot
+take on the command line. The download runs as a background job with its
+progress and Cancel in the status bar; the entities arrive as one command.
+
 ## The rules a dialog or panel follows
 
 Collected here because each was paid for once, and a new manager is where

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="Overpass API fixture">
+  <note>A fixture in the shape Overpass returns for (nwr[building];);(._;>;);out body;</note>
+  <node id="1" lat="-33.8700" lon="151.2050"/>
+  <node id="2" lat="-33.8700" lon="151.2056"/>
+  <node id="3" lat="-33.8694" lon="151.2056"/>
+  <node id="4" lat="-33.8694" lon="151.2050"/>
+  <node id="5" lat="-33.8690" lon="151.2080">
+    <tag k="amenity" v="cafe"/><tag k="name" v="Corner Cafe"/><tag k="building" v="yes"/>
+  </node>
+  <way id="100">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>
+    <tag k="building" v="office"/><tag k="name" v="Test House"/><tag k="building:levels" v="12"/>
+  </way>
+</osm>

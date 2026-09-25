@@ -1,0 +1,36 @@
+{
+ "help": "package_search",
+ "success": true,
+ "result": {
+  "count": 2,
+  "results": [
+   {
+    "title": "NSW Cadastre",
+    "license_title": "Creative Commons Attribution 4.0",
+    "resources": [
+     {
+      "name": "NSW Cadastre WMS",
+      "format": "WMS",
+      "url": "https://maps.six.nsw.gov.au/arcgis/services/public/NSW_Cadastre/MapServer/WMSServer?request=GetCapabilities&service=WMS"
+     },
+     {
+      "name": "Cadastre download",
+      "format": "ZIP",
+      "url": "https://example.invalid/cadastre.zip"
+     }
+    ]
+   },
+   {
+    "title": "Geoscience Australia DEM",
+    "license_title": "Creative Commons Attribution 4.0",
+    "resources": [
+     {
+      "name": "DEM REST",
+      "format": "esri rest",
+      "url": "https://services.ga.gov.au/gis/rest/services/DEM_SRTM_1Second_Hydro_Enforced_2024/MapServer"
+     }
+    ]
+   }
+  ]
+ }
+}
