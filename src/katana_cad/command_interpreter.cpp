@@ -393,8 +393,9 @@ DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
 Global    MODIFY [scope] [WHERE k=v ...] SET k=v ... [PREVIEW]   global modify, one undo step
-Scope     every verb on drawing data: SELECTION (the default) | DRAWING | VIEW [id] (the window's
-          plan view) | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] (ONLY: not their sublayers)
+Scope     every verb on drawing data: SELECTION (the default) | DRAWING | VIEW [id] [EXTENTS]
+          (the window's plan view as on screen; EXTENTS: its layers anywhere) |
+          AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] (ONLY: not their sublayers)
           WHERE: TYPE=point,line LAYER=pat STYLE=pat|ByLayer COLOUR=#RRGGBB|ByLayer
           PROP=key[:pat] TEXT=pat DRAWN ('*' '?' wildcards)
           SET entities: LAYER= COLOUR= STYLE=name|ByLayer VISIBLE=yes|no PROP=key:value
@@ -2423,8 +2424,8 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
 namespace {
 
 constexpr const char* kModifyUsage =
-    "MODIFY [SELECTION|DRAWING|VIEW [id]|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]] [WHERE key=value ...] "
-    "SET key=value ... [PREVIEW]; HELP lists the keys";
+    "MODIFY [SELECTION|DRAWING|VIEW [id] [EXTENTS]|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]] "
+    "[WHERE key=value ...] SET key=value ... [PREVIEW]; HELP lists the keys";
 
 Result<bool> parseYesNo(const std::string& text)
 {

@@ -13,6 +13,7 @@
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/scope_verbs.hpp"
+#include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/tables.hpp"
 
@@ -375,6 +376,114 @@ TEST_F(ScopeVerbsTest, ViewAsksTheWindowForItsLayersAndItsAreaAndHeadlessIsRefus
     EXPECT_TRUE(copy.scope.view->hides("survey/trees"));
     EXPECT_EQ(moved.scope.view, copy.scope.view);
     EXPECT_EQ(copy.view, std::optional<std::uint32_t>(1));
+}
+
+TEST_F(ScopeVerbsTest, ViewExtentsTakesWhatTheViewDrawsAnywhereNotOnlyWhatIsOnScreen)
+{
+    // Global Modify's "What a view shows" without "Only what is on screen":
+    // the view's own hidden layers, and no area.
+    std::string rest;
+    const ScopeWords active = parsed("VIEW EXTENTS SPACING 20", &rest);
+    EXPECT_EQ(active.source, ScopeSource::View);
+    EXPECT_FALSE(active.view.has_value());
+    EXPECT_TRUE(active.extents);
+    EXPECT_EQ(rest, "SPACING 20");
+    const ScopeWords third = parsed("view 3 extents WHERE DRAWN", &rest);
+    EXPECT_EQ(third.view, std::optional<std::uint32_t>(3));
+    EXPECT_TRUE(third.extents);
+    EXPECT_TRUE(third.filter.drawnOnly);
+    EXPECT_FALSE(parsed("VIEW 3").extents);
+    // Anywhere else it is refused by the word, as ONLY is.
+    EXPECT_TRUE(contains(refusal("DRAWING EXTENTS").describe(), "EXTENTS follows VIEW"));
+    EXPECT_TRUE(contains(refusal("EXTENTS").describe(), "EXTENTS follows VIEW"));
+
+    // Written back and read as the same.
+    ScopeWords words;
+    words.source = ScopeSource::View;
+    words.view = 4;
+    words.extents = true;
+    auto line = formatScopeWords(words);
+    ASSERT_TRUE(line.ok());
+    EXPECT_EQ(*line, "VIEW 4 EXTENTS");
+    const ScopeWords back = parsed(*line);
+    EXPECT_EQ(back.view, words.view);
+    EXPECT_TRUE(back.extents);
+
+    // One plan view, hiding nothing, showing x 5..25, y -1..1: pB and pC on
+    // screen; all five drawn somewhere.
+    const ScopeViewProvider views = [](std::optional<std::uint32_t>)
+        -> katana::core::Result<ScopeView> {
+        ScopeView view;
+        view.id = 2;
+        view.area = Box2(Point2(5, -1), Point2(25, 1));
+        return view;
+    };
+    EXPECT_EQ(match("VIEW", views), (std::vector<EntityId>{pB, pC}));
+    EXPECT_EQ(match("VIEW EXTENTS", views), (std::vector<EntityId>{pA, pB, pC, ln, tx}));
+    EXPECT_EQ(match("VIEW 2 EXTENTS WHERE TYPE=point", views),
+              (std::vector<EntityId>{pA, pB, pC}));
+    // The record says where "on screen" was, or that the area was dropped.
+    auto onScreen = matchScope(document, parsed("VIEW"), views);
+    ASSERT_TRUE(onScreen.ok());
+    EXPECT_EQ(scopeRecord(*onScreen), "scope=view view=2 area=5,-1,25,1 matched=2");
+    auto anywhere = matchScope(document, parsed("VIEW EXTENTS"), views);
+    ASSERT_TRUE(anywhere.ok());
+    EXPECT_EQ(scopeRecord(*anywhere), "scope=view view=2 extents=yes matched=5");
+    // Headless it is still the window's word, refused naming AREA.
+    auto headless = matchScope(document, parsed("VIEW EXTENTS"), {});
+    ASSERT_FALSE(headless.ok());
+    EXPECT_TRUE(contains(headless.error().message, "AREA")) << headless.error().message;
+}
+
+TEST_F(ScopeVerbsTest, AWorkspacesViewSetAnswersViewAsTheWindowDoes)
+{
+    ViewSet views;
+    // No plan view open, and none named: refused, naming AREA.
+    auto none = scopeViewOf(views, std::nullopt);
+    ASSERT_FALSE(none.ok());
+    EXPECT_EQ(none.error().code, ErrorCode::InvalidState);
+    EXPECT_TRUE(contains(none.error().message, "AREA x0,y0,x1,y1")) << none.error().message;
+
+    // A plan view centred on (15, 0) at 10 px a unit in 200 x 20 px shows
+    // x 15 -+ 10 and y 0 -+ 1, by hand; it hides the roads. A 3D view hides
+    // the survey layer (and so survey/trees).
+    ViewState& plan = views.add(ViewKind::Plan);
+    plan.plan.center = Point2(15, 0);
+    plan.plan.scale = 10.0;
+    plan.plan.widthPixels = 200.0;
+    plan.plan.heightPixels = 20.0;
+    plan.layers.hide("roads");
+    ViewState& model = views.add(ViewKind::Model3D);
+    model.layers.hide("survey");
+
+    auto active = scopeViewOf(views, std::nullopt);
+    ASSERT_TRUE(active.ok()) << active.error().describe();
+    EXPECT_EQ(active->id, plan.id);
+    ASSERT_TRUE(active->area.has_value());
+    EXPECT_EQ(active->area->min, Point2(5, -1));
+    EXPECT_EQ(active->area->max, Point2(25, 1));
+    EXPECT_TRUE(active->layers.hides("roads"));
+
+    auto byId = scopeViewOf(views, model.id);
+    ASSERT_TRUE(byId.ok()) << byId.error().describe();
+    EXPECT_EQ(byId->id, model.id);
+    EXPECT_FALSE(byId->area.has_value());
+    EXPECT_TRUE(byId->layers.hides("survey/trees"));
+
+    auto unknown = scopeViewOf(views, 999u);
+    ASSERT_FALSE(unknown.ok());
+    EXPECT_EQ(unknown.error().code, ErrorCode::NotFound);
+    EXPECT_EQ(unknown.error().context, "999");
+
+    // As the interpreter's provider: on screen pB and pC; anywhere every
+    // point, the roads being hidden; the 3D view the roads alone.
+    const ScopeViewProvider provider = [&views](std::optional<std::uint32_t> id) {
+        return scopeViewOf(views, id);
+    };
+    EXPECT_EQ(match("VIEW", provider), (std::vector<EntityId>{pB, pC}));
+    EXPECT_EQ(match("VIEW EXTENTS", provider), (std::vector<EntityId>{pA, pB, pC}));
+    EXPECT_EQ(match("VIEW " + std::to_string(model.id), provider),
+              (std::vector<EntityId>{ln, tx}));
 }
 
 TEST_F(ScopeVerbsTest, TheRecordSaysWhatTheScopeTook)

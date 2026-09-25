@@ -41,7 +41,9 @@ the drawing, and does the same to what is drawn
 data takes the shared scope words (`docs/cad.md`, "Scope and filter"), except
 that `VIEW` is the window's plan view: headless it is refused, and `AREA
 x0,y0,x1,y1` names the window instead
-(`cli.utility_view_is_refused_headless_naming_area`).
+(`cli.utility_view_is_refused_headless_naming_area`). The window itself, run
+headless with `--command`, does answer `VIEW` - it has plan views even
+offscreen (`qt_modify_view_takes_what_the_plan_view_shows_headless`).
 
 The same session is served to Claude over the Model Context Protocol by
 `katana_mcp` (`docs/mcp.md`).
@@ -160,11 +162,11 @@ every action, field, button and tab gets one. In a test they are one
 
 | Switch | `-DDRIVE` step | What it does |
 |---|---|---|
-| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`; the five Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
+| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`; the seven Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target; at the end its status line is printed |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
-| `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
+| `--press BUTTON` | `!BUTTON` | clicks it - a radio button too, which is how one is chosen (`!utilitySourceDrawing`); a disabled button fails the run |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`) |

@@ -10,8 +10,14 @@
 // already has (cad::matchEntities, global_modify.hpp), so MODIFY, the UTILITY
 // verbs and every verb after them take a scope the same way:
 //
-//   SELECTION | DRAWING | VIEW [<view id>] | AREA x0,y0,x1,y1 | LAYERS a,b[,c] [ONLY]
+//   SELECTION | DRAWING | VIEW [<view id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b[,c] [ONLY]
 //   then [WHERE key=value ...]
+//
+// VIEW is what the view shows now: its own hidden layers and the area on
+// screen. VIEW ... EXTENTS drops the area - what the view draws anywhere, as
+// it would show it zoomed to its extents - which is Global Modify's "What a
+// view shows" without "Only what is on screen"; without the word, the window's
+// controls said something no line could.
 //
 // Words are case-insensitive; SEL, ALL and LAYER are accepted for SELECTION,
 // DRAWING and LAYERS, as MODIFY accepted them. No scope word is the selection.
@@ -53,6 +59,8 @@
 
 namespace katana::cad {
 
+class ViewSet;
+
 // Which scope word was given.
 enum class ScopeSource { Selection, Drawing, View, Area, Layers };
 
@@ -62,6 +70,8 @@ struct ScopeWords {
     ScopeSource source = ScopeSource::Selection;
     // VIEW <id>: that view (a cad::ViewId); empty: the active plan view.
     std::optional<std::uint32_t> view{};
+    // VIEW ... EXTENTS: the view's own hidden layers without its area.
+    bool extents = false;
     // AREA: min before max, whichever corners were typed first.
     katana::geometry::Box2 area{};
     // LAYERS: the layer paths, each of which must exist, and whether each
@@ -84,9 +94,10 @@ struct ScopeWords {
 // a condition and anything else ends the filter.
 //
 // Refused, naming the word: two scope words; LAYERS with no layer after it;
-// ONLY other than after a LAYERS list; AREA without four finite numbers; VIEW
-// with an id of 0; a WHERE word with '=' whose key is not a WHERE key, or
-// whose value does not read (TYPE=blob, COLOUR=red).
+// ONLY other than after a LAYERS list; EXTENTS other than after VIEW [<id>];
+// AREA without four finite numbers; VIEW with an id of 0; a WHERE word with
+// '=' whose key is not a WHERE key, or whose value does not read (TYPE=blob,
+// COLOUR=red).
 [[nodiscard]] katana::core::Result<ScopeWords>
 parseScopeWords(const std::vector<std::string>& words, std::size_t& at);
 
@@ -111,7 +122,8 @@ struct ScopeView {
     // The layers it hides of its own (ViewState::layers).
     LayerOverrides layers{};
     // What it shows: ViewTransform::visibleWorldBounds. Empty: everything it
-    // draws, wherever it lies.
+    // draws, wherever it lies - a view with no plan extent (3D, a section)
+    // answers so. VIEW ... EXTENTS leaves it out whatever the window says.
     std::optional<katana::geometry::Box2> area{};
 };
 
@@ -120,6 +132,17 @@ struct ScopeView {
 // view, and InvalidState when no plan view is open.
 using ScopeViewProvider =
     std::function<katana::core::Result<ScopeView>(std::optional<std::uint32_t> id)>;
+
+// The answer of a front end that keeps its views in a ViewSet - the window's
+// workspace - so the rule is here, tested, and not in a widget: no id is the
+// plan view the Plot and the Standard Views act on (ViewSet::mostRecent); an
+// id is that view, of any kind. A plan view answers its own hidden layers and
+// ViewTransform::visibleWorldBounds; a view with no plan extent (3D, a
+// section, an elevation) its hidden layers only. NotFound for an id no open
+// view has; InvalidState when no plan view is open and none is named - each
+// naming AREA, which needs no window.
+[[nodiscard]] katana::core::Result<ScopeView> scopeViewOf(ViewSet& views,
+                                                          std::optional<std::uint32_t> id);
 
 // The words resolved to what matchEntities takes. It holds the view's layers,
 // which `scope.view` points at, so a copy or a move keeps `scope` good.
@@ -153,7 +176,10 @@ matchScope(const Document& document, const ScopeWords& words, const ScopeViewPro
 // The record a reply carries to say what the scope took, key=value:
 //   scope=drawing matched=21
 //   scope=layers layers=utilities/water sublayers=no where="PROP=utility.line:W1" matched=6
-//   scope=view view=3 matched=40      scope=area area=0,0,10,10 matched=2
+//   scope=view view=3 area=0,0,40,25 matched=40      scope=area area=0,0,10,10 matched=2
+//   scope=view view=3 extents=yes matched=52
+// A view's area is the one it had when the line ran, so a reply says which
+// part of the drawing "what I see" was.
 // A verb adds its own keys after it.
 [[nodiscard]] std::string scopeRecord(const ScopeMatch& match);
 

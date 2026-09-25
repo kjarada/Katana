@@ -729,9 +729,68 @@ if(TARGET katana)
             "-DFORBID=usage: UTILITY|[0-9]+ lines of text"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_line_text_tool_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same tools on what is drawn (docs/cad.md, "Scope and filter"), through the dialog's
+    # Source choice and the scope and filter controls Global Modify shares
+    # with it. The sample is drawn first by a typed line, which frames every
+    # plan view on it. The report of the drawing is the report of the
+    # schedule (cli.utility_report_of_the_drawing_is_the_report_of_the_schedule_drawn
+    # pins that text), led by what the scope took: the 7 runs and 14 points,
+    # 4 lines, each whole. Then VIEW, on screen: the plan view the window
+    # framed on the sample shows all 21, so the same 4 lines - and the record
+    # says which view and where it looked.
+    add_test(NAME qt_utility_dialog_reports_what_is_drawn_and_what_the_view_shows_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityReport|!utilitySourceDrawing|?utilityCommand|!utilityRun|?utilityOutput|!utilityScopeView|utilityView=Plan 1|utilityOnScreen=on|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput"
+            "-DEXPECT=utilityCommand: UTILITY REPORT DRAWING[\r\n]+.*utilityOutput: scope=drawing matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*utilityCommand: UTILITY REPORT VIEW [0-9]+[\r\n]+.*utilityStatus: Done\\. The report is below.*utilityOutput: scope=view view=[0-9]+ area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices"
+            "-DFORBID=there is none here"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_drawing_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Regrade with nothing moved: the drawing is as the draw left it, so no
+    # line changes and no undo step is added - said in the reply and the
+    # status - and the views are framed on what was graded, as after a draw.
+    add_test(NAME qt_utility_dialog_regrades_what_is_drawn_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityRegrade|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
+            "-DEXPECT=utilityCommand: UTILITY REGRADE DRAWING[\r\n]+.*utilityStatus: Nothing needed regrading.*utilityOutput: utilities regraded changed=0 lines=4 vertices=14 segments=10 entities=21 layers=[0-9]+ bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200 scope=drawing matched=21 lines=4 completed=0 ignored=0 line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502.*FrameStatsLabel: Plan +21 drawn"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_regrade_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The drawing written back as a schedule from the Schedule tab, and that
+    # schedule read by a typed REPORT as the sample is: 4 lines, 14 vertices,
+    # and the over-claim the sample carries.
+    set(_dialog_scheduled "${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_scheduled.csv")
+    add_test(NAME qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityWriteSchedule|utilityScheduleOut=${_dialog_scheduled}|!utilityRun|?utilityStatus|?utilityOutput|>UTILITY REPORT \"${_dialog_scheduled}\" MINCOVER 0.6"
+            "-DEXPECT=utilityStatus: Written\\..*utilityOutput: utilities scheduled path=[^ ]*utility_dialog_scheduled\\.csv\"? lines=4 vertices=14 scope=drawing matched=21 lines=4 completed=0 ignored=0.*AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_schedule_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # VIEW is the window's own word: typed in the window, MODIFY takes what
+    # the active plan view shows - here the sample's 14 points, framed on
+    # screen - where katana_cli refuses it
+    # (cli.utility_view_is_refused_headless_naming_area). EXTENTS drops the
+    # area and takes the same 14, the view hiding no layer of its own.
+    add_test(NAME qt_modify_view_takes_what_the_plan_view_shows_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|>MODIFY VIEW WHERE TYPE=point SET COLOUR=#FF0000|>MODIFY VIEW EXTENTS WHERE TYPE=point SET COLOUR=#00FF00 PREVIEW"
+            "-DEXPECT=14 entities matched; changing 14 entities\\. One UNDO restores it\\..*preview: 14 entities matched; changing 14 entities\\."
+            "-DFORBID=there is none here|no plan view is open"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/modify_view_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_utility_dialog_writes_the_line_headless qt_utility_dialog_headless
         qt_utility_draw_typed_frames_the_views_headless
         qt_utility_line_leaves_a_text_to_the_tool_headless
+        qt_utility_dialog_reports_what_is_drawn_and_what_the_view_shows_headless
+        qt_utility_dialog_regrades_what_is_drawn_headless
+        qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless
+        qt_modify_view_takes_what_the_plan_view_shows_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

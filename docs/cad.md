@@ -214,7 +214,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
-| `MODIFY [SELECTION\|DRAWING\|VIEW [id]\|AREA x0,y0,x1,y1\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter ("Scope and filter"), the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
+| `MODIFY [SELECTION\|DRAWING\|VIEW [id] [EXTENTS]\|AREA x0,y0,x1,y1\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter ("Scope and filter"), the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
 
 The annotation verbs (2026-09-25; `docs/annotation.md`, "The verbs") are
 `ANNOSCALE`, `TEXTSTYLE` (`TS`), `TEXT` and `MTEXT` with `style=`, `paper=`,
@@ -835,7 +835,7 @@ reads or changes drawing data takes the same words, read by one parser and
 resolved by the one matcher, `cad::matchEntities`.
 
 ```
-SELECTION | DRAWING | VIEW [<view id>] | AREA x0,y0,x1,y1 | LAYERS a,b[,c] [ONLY]
+SELECTION | DRAWING | VIEW [<view id>] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b[,c] [ONLY]
 then [WHERE key=value ...]
 ```
 
@@ -856,7 +856,8 @@ It is read in two steps, each tested alone
   nothing looked up, and refuses by the word what does not read: two scope
   words, `LAYERS` with no list, `ONLY` other than after one, an `AREA` that
   is not four finite numbers (its corners may come in either order), a view
-  id of 0, a `WHERE` word whose key or value does not read.
+  id of 0, `EXTENTS` other than after `VIEW`, a `WHERE` word whose key or
+  value does not read.
   `cad::formatScopeWords` writes `ScopeWords` back as words the parser reads
   as the same - what the window's scope and filter controls give a dialog to
   put in the line it runs - and refuses what a line cannot say: a double
@@ -868,7 +869,24 @@ It is read in two steps, each tested alone
 `CommandInterpreter::setScopeContext` takes a `cad::ScopeViewProvider`, as
 `setSheetContext` takes the sheet verbs' context: given no id it answers the
 active plan view, given an id that view, as its own hidden layers and its
-visible area (`ViewTransform::visibleWorldBounds`). Headless there is no
+visible area (`ViewTransform::visibleWorldBounds`). The window's answer is
+`cad::scopeViewOf(ViewSet&, id)`, here beside the grammar rather than in a
+widget so it is tested without one: no id is `ViewSet::mostRecent(Plan)`,
+the plan view Plot and the Standard Views act on; an id is that open view,
+of any kind, a view with no plan extent (3D, a section) answering its hidden
+layers alone. NotFound for an id no view has, InvalidState when no plan view
+is open, each naming `AREA`.
+
+**`VIEW ... EXTENTS`** drops the area: what the view draws anywhere, as it
+would show it zoomed to its extents. Global Modify's View scope always had
+two forms - "only what is on screen" ticked or not - and without the word
+the second could not be said on a line, so the shared scope controls
+(`docs/desktop.md`, "Global Modify") could hold what no line could run. A
+separate scope word was rejected: it is the same view and the same layers,
+and `ONLY` after `LAYERS` is the grammar's precedent for a modifier. The
+record says which: `scope=view view=3 area=x0,y0,x1,y1 matched=40` when the
+view's area was taken - where "on screen" was when the line ran, since the
+view moves - and `scope=view view=3 extents=yes matched=52` when not. Headless there is no
 provider, and `VIEW` is refused naming `AREA`: **`AREA x0,y0,x1,y1` is the
 same scope with the window typed in**, a view hiding nothing of its own
 looking at that box. That is why it is a `ScopeKind::View` scope with an
@@ -887,9 +905,11 @@ with the count.
 gained `VIEW` and `AREA`; its tests pass unchanged. One thing it no longer
 takes is `WHERE` after `SET`, which its help never offered. The `UTILITY`
 verbs are the second user (`docs/subsurface_utilities.md`, "Drawing data").
-The window's side - Global Modify's "Apply to" and "Only those that match"
-as one widget every dialog shares, and the window answering `VIEW` - is not
-built yet.
+The window's side is `ScopeFilterWidget`
+(`src/katana_qt/customisation/scope_filter_widget.*`): Global Modify's "Apply
+to" and "Only those that match" as one widget every dialog shares, whose
+`verbWords()` are these words (`docs/desktop.md`, "Global Modify"), and the
+window answering `VIEW` through `scopeViewOf`.
 
 ## What the managers stand on
 

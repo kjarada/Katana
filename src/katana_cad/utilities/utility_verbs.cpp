@@ -760,10 +760,11 @@ located vertices, one row each; a path with blanks is quoted. Lengths are metres
 
 Every verb but DRAW acts on a schedule file OR on what is drawn: a first word that is a
 scope word takes the lines UTILITY DRAW drew, by the scope and filter every verb shares
-(HELP: "Scope") - SELECTION | DRAWING | VIEW [id] | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY],
-then [WHERE key=value ...]. A scope that takes part of a line takes all of it; the reply
-leads with "scope=... matched= lines= completed= ignored=" (completed: lines read whole
-from beyond the scope; ignored: entities with no utility data).
+(HELP: "Scope") - SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 |
+LAYERS a,b [ONLY], then [WHERE key=value ...]. A scope that takes part of a line takes
+all of it; the reply leads with "scope=... matched= lines= completed= ignored="
+(completed: lines read whole from beyond the scope; ignored: entities with no utility
+data).
 
 UTILITY REPORT <schedule.csv> | <scope> [MINCOVER <m>] [SPACING <m>]
           grade located services by AS 5488 quality level: vertices, segments, length at

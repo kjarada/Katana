@@ -268,6 +268,9 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
         if (folded == "ONLY") {
             return makeError(ErrorCode::ParseFailure, "ONLY follows a LAYERS list", word);
         }
+        if (folded == "EXTENTS") {
+            return makeError(ErrorCode::ParseFailure, "EXTENTS follows VIEW [<view id>]", word);
+        }
         const bool scope = folded == "SELECTION" || folded == "SEL" || folded == "DRAWING" ||
                            folded == "ALL" || folded == "VIEW" || folded == "AREA" ||
                            folded == "LAYERS" || folded == "LAYER";
@@ -293,6 +296,10 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
                                      words[i]);
                 }
                 result.view = static_cast<std::uint32_t>(*id);
+                ++i;
+            }
+            if (i < words.size() && upper(words[i]) == "EXTENTS") {
+                result.extents = true;
                 ++i;
             }
         } else if (folded == "AREA") {
@@ -357,6 +364,9 @@ Result<std::string> formatScopeWords(const ScopeWords& words)
         parts.emplace_back("VIEW");
         if (words.view) {
             parts.push_back(std::to_string(*words.view));
+        }
+        if (words.extents) {
+            parts.emplace_back("EXTENTS");
         }
         break;
     case ScopeSource::Area:
@@ -444,11 +454,41 @@ Result<ResolvedScope> resolveScope(const ScopeWords& words, const ScopeViewProvi
         resolved.view = view->id;
         scope.kind = ScopeKind::View;
         scope.view = resolved.viewLayers.get();
-        scope.area = view->area;
+        if (!words.extents) {
+            scope.area = view->area;
+        }
         break;
     }
     }
     return resolved;
+}
+
+Result<ScopeView> scopeViewOf(ViewSet& views, std::optional<std::uint32_t> id)
+{
+    ViewState* state = nullptr;
+    if (id) {
+        state = views.find(*id);
+        if (state == nullptr) {
+            return makeError(ErrorCode::NotFound,
+                             "no open view has that id; VIEW alone is the plan view in use, "
+                             "and AREA x0,y0,x1,y1 names a window without one",
+                             std::to_string(*id));
+        }
+    } else {
+        state = views.mostRecent(ViewKind::Plan);
+        if (state == nullptr) {
+            return makeError(ErrorCode::InvalidState,
+                             "VIEW is the plan view in use, and no plan view is open; open one, "
+                             "or give the window instead: AREA x0,y0,x1,y1");
+        }
+    }
+    ScopeView answer;
+    answer.id = state->id;
+    answer.layers = state->layers;
+    if (state->kind == ViewKind::Plan) {
+        answer.area = state->plan.visibleWorldBounds();
+    }
+    return answer;
 }
 
 Result<ScopeMatch> matchScope(const Document& document, const ScopeWords& words,
@@ -473,6 +513,13 @@ std::string scopeRecord(const ScopeMatch& match)
     case ScopeSource::View:
         if (match.resolved.view) {
             record += " view=" + std::to_string(*match.resolved.view);
+        }
+        // Where "what I see" was when the line ran: the view moves.
+        if (match.resolved.scope.area) {
+            record += " area=" + areaText(*match.resolved.scope.area);
+        }
+        if (words.extents) {
+            record += " extents=yes";
         }
         break;
     case ScopeSource::Area:
