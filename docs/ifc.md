@@ -23,59 +23,121 @@ IFC 4.3 made for survey elements and which claims no more than is known.
 In the window, File > Import IFC and File > Export IFC (below, "In the
 window"); a .ifc also goes through File > Import, a path given to the window
 and Export Vector's IFC filter. On either command line - `katana_cli`, and so
-`katana_mcp`, and the window's own - the verbs:
+`katana_mcp`, and the window's own - the verbs, which are also all the
+dialogs do (each writes its line and runs it):
 
 ```
 EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>] [RULES <rules.csv>]
-                  [SPACING <m>] [NODRAWING]
-IMPORT <file.ifc> [LOCAL]
+                  [SPACING <m>] [NODRAWING] [NOENTITIES] [SELECTED] [NOALIGNMENTS]
+                  [NOSURFACES] [PREVIEW]
+IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES] [TOLERANCE <m>]
+                  [TAKECRS | KEEPCRS]
+INFO <file.ifc>
+IFC RULES <file.csv>
 ```
 
 ```sh
 katana_cli samples/ifc/scenario.txt -c "EXPORT site.ifc UTILITIES samples/utilities/schedule.csv"
+katana_cli samples/ifc/scenario.txt -c "EXPORT site.ifc PREVIEW"
 katana_cli -c "EXPORT services.ifc UTILITIES samples/utilities/schedule_tfnsw.csv SCHEMA tests/ifc/data/delivery_schema.csv NODRAWING"
-katana_cli -c "IMPORT site.ifc" -c "ALIGN LIST"
+katana_cli -c "INFO site.ifc" -c "IMPORT site.ifc TAKECRS" -c "ALIGN LIST"
 ```
 
 The grammar is one function both front ends call
 (`ifc::parseExportArguments`, `ifc::parseImportArguments` in
 `include/katana/ifc/front_end.hpp`), as are reading the files an export names
-(`ifc::readExportFiles`) and the GlobalId namespace, so the same line writes
-the same file in either. A path is quoted, or read up to the first ".ifc"
-that ends a word, so that one with blanks may be typed as it is; a path that
-holds ".ifc " before its end is quoted, and a quote opened before the .ifc
-and never closed is refused rather than read as part of the path.
+(`ifc::readExportFiles`), the GlobalId namespace and the replies, so the same
+line writes the same file and answers alike in either. A path is quoted, or
+read up to the first ".ifc" that ends a word, so that one with blanks may be
+typed as it is; a path that holds ".ifc " before its end is quoted, and a
+quote opened before the .ifc and never closed is refused rather than read as
+part of the path. Words are matched in any case, each once: a word given twice
+is refused, since the second would silently repeat or undo the first.
 
-EXPORT writes the drawing's entities and alignments, georeferenced by the
-project's coordinate system (`CRS SET`). UTILITIES adds an investigation in
-the schedule format of `docs/subsurface_utilities.md`; SCHEMA names the
-delivery schema it was written to (`UTILITY CHECK`'s schema file); RULES a
-project's classification rules ("Classification rules", below); SPACING is
-the longest detected spacing that keeps QL-B (10 m by default); NODRAWING
-leaves the drawing out. The report counts what was written by class, and
-every warning.
+EXPORT writes the drawing's entities and alignments and the window's
+surfaces, georeferenced by the project's coordinate system (`CRS SET`).
+UTILITIES adds an investigation in the schedule format of
+`docs/subsurface_utilities.md`; SCHEMA names the delivery schema it was
+written to (`UTILITY CHECK`'s schema file); RULES a project's classification
+rules ("Classification rules", below); SPACING is the longest detected
+spacing that keeps QL-B (10 m by default). NOENTITIES, NOALIGNMENTS and
+NOSURFACES leave those out - NODRAWING is all three, the investigation alone -
+and SELECTED writes only the selected entities, refusing when nothing is
+selected rather than writing them all (an empty list is every entity to the
+writer, `ExportOptions::entities`). PREVIEW writes nothing: it answers what
+the file would hold.
 
 IMPORT brings a file's alignments, elements and annotations in as one
-undoable step; LOCAL moves them to sit at the origin, as the other importers'
-LOCAL does - by the corner of everything the file brings, alignments and
-surfaces included (`IfcImport::bounds`). `katana_cli` holds no surfaces, so a
-terrain in the file is counted and not kept there; the window keeps it.
+undoable step; NOALIGNMENTS, NOELEMENTS and NOSURFACES leave those out, and
+all three together are refused. LOCAL moves them to sit at the origin, as the
+other importers' LOCAL does - by the corner of everything the file brings,
+alignments and surfaces included (`IfcImport::bounds`). TOLERANCE is how far
+a chorded curve may stand from the true one (`ImportOptions::curveTolerance`,
+1 mm by default). TAKECRS gives a project with no coordinate system the
+file's, as its own undoable step; KEEPCRS does not; with neither, the line
+says how (`CRS SET`), and File > Import asks. TAKECRS with LOCAL is refused:
+data moved to the origin is in no system. `katana_cli` holds no surfaces, so
+a terrain in the file is counted and not kept there; the window keeps it.
+INFO describes a file without importing it; IFC RULES writes the default
+classification rules, for a project to edit into its own.
 `src/katana_app/ifc_verbs.cpp` is the whole of `katana_cli`'s side.
+
+### Replies
+
+Every reply is `key=value` records, one a line, as the interpreter's verbs
+answer (`docs/cad.md`), so that a script or an agent reads what happened
+without parsing sentences. Text values are quoted (`core::replyQuoted`) and
+read back by `core::readReplyRecord`; the formats are written in one place
+(`ifc::formatExportReply`, `ifc::formatImportReply`,
+`ifc::formatDescription`) and File > Export IFC's table is read from them by
+`ifc::readExportObjects`, so the writer and its one reader are kept in step
+(`IfcReplies.AnExportsObjectRecordsReadBackAsItsTally`):
+
+```
+ifc exported file="site.ifc" schema=IFC4X3_ADD2 instances=1097 bytes=82906
+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5 entities_skipped=0 surfaces=0
+class name=IfcKerb count=1
+object from="layer Survey/Kerb" count=1 class="IfcKerb" predefined="NOTDEFINED" object_type="" system="" why="rule kerb"
+object from="service E1" count=3 class="IfcCableCarrierSegment" predefined="CONDUITSEGMENT" object_type="" system="ELECTRICAL" why="a graded segment: configuration \"4 x 100 mm conduits\""
+warning text="..."
+
+ifc imported file="site.ifc" schema=IFC4X3_ADD2 crs="EPSG:7856" entities=29 alignments=1 surfaces=0 objects=29 drawn=29 as_points=0 alignments_as_polylines=0
+class name=IfcKerb count=1
+extent min_x=333900.000 min_y=6249950.000 max_x=334200.000 max_y=6250060.000
+note text="the project is now in EPSG:7856, the file's coordinate system"
+
+ifc described file="site.ifc" ... layers=15
+alignment name="MC01" pis=4 pvis=4
+```
+
+PREVIEW's head is `ifc previewed`, with no `bytes`. A front end adds `note`
+records of its own after the reply - the coordinate system taken or how to
+take it, a shift - and an import's reply is written after the undoable
+command, whose renames of an alignment the file shares a name with are among
+its warnings. `IfcFrontEnd.EveryChoiceOfTheDialogsIsAWordOfTheLine`,
+`IfcFrontEnd.ContradictoryOrRepeatedWordsAreRefused`,
+`IfcFrontEnd.TheLineADialogWritesReadsBackAsItsArguments` and
+`cli.ifc_every_choice_of_the_dialogs_is_a_word_of_the_line` pin the grammar;
+`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines` is
+an agent doing all of it through `katana_mcp`.
 
 ### In the window
 
 File > Export IFC is a dialog (`src/katana_qt/ifc_dialogs.hpp`, `docs/desktop.md`)
-of what the verb takes and what only the window has: the file; the drawing's
-entities (or only the selected ones), its alignments and the session's
-surfaces, each with its count; the utility schedule, its delivery schema and
-the detected spacing; a rules file, which Save Default Rules starts from the
-defaults; and whether the file will be georeferenced, from the project's
-coordinate system. Its table previews the file: for each layer, service,
-alignment and surface, how many objects become which class, in which system,
-and why. That table is the writer's own account (`ifc::IfcExport::tally`,
-filled as each object is written, by writing the file in memory), so what a
-person checks before writing is exactly what is written. Four of its rows for
-the scenario with the sample schedule
+of the verb's choices, with what the window knows beside them: the file; the
+drawing's entities (or only the selected ones), its alignments and the
+session's surfaces, each with its count; the utility schedule, its delivery
+schema and the detected spacing; a rules file, which Save Default Rules starts
+from the defaults (`IFC RULES`); and whether the file will be georeferenced,
+from the project's coordinate system. It writes the EXPORT line its fields
+mean, shows it (`ifcExportCommand`), and runs it on the window's command line,
+as a person or an agent could type it. Its table previews the file: for each
+layer, service, alignment and surface, how many objects become which class,
+in which system, and why. It is read from the reply of the same line with
+PREVIEW added - the writer's own account (`ifc::IfcExport::tally`, filled as
+each object is written, by writing the file in memory) - so what a person
+checks before writing is exactly what is written, and what an agent asking
+PREVIEW reads. Four of its rows for the scenario with the sample schedule
 (`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`):
 
 | From | Objects | IFC class | System | Why |
@@ -97,16 +159,17 @@ before each preview and export, so "Selected entities only" with nothing
 selected is refused ("select what to export, or untick it") rather than
 writing the whole drawing or none of it.
 
-File > Import IFC reads a file's description first (Describe: schema,
+File > Import IFC describes a file first (Describe runs `INFO`: schema,
 coordinate system, classes, alignments, surfaces) and imports what is ticked -
 alignments, elements, surfaces - moved to the origin or not, with the curve
-tolerance. A file far from the drawing - its entities, alignments and
-surfaces - is shifted alongside or kept, as every import asks. A file naming
-an EPSG code gives the project its coordinate system when the project has
-none, as a step of its own: File > Import and a path given to the window ask,
-the dialog's "Take the file's coordinate system" answers in advance, and a
-typed IMPORT or a headless session asks no one and says how (`CRS SET`). Terrain comes in as surfaces of the session, which Export IFC
-writes out again.
+tolerance: its IMPORT line (`ifcImportCommand`) always says TAKECRS or
+KEEPCRS, from its "Take the file's coordinate system". A file far from the
+drawing - its entities, alignments and surfaces - is shifted alongside or
+kept, as every import asks; declining is a cancel, which the dialog says as
+one. File > Import and a path given to the window, whose line says neither,
+ask about the coordinate system; a typed IMPORT or a headless session asks no
+one and says how (`CRS SET`). Terrain comes in as surfaces of the session,
+which Export IFC writes out again.
 
 
 ## Export: what goes where
@@ -172,7 +235,7 @@ deflection 0.9021827588 rad, the first arc 80 × (0.9021827588 − 40/160) =
 52.1746 m, the second 60 × 0.9021827588 = 54.1310 m
 (`tests/ifc/test_export.cpp`).
 
-### Subsurface utilities (AS 5488, the TfNSW Utility Schema)
+### Subsurface utilities (AS 5488, and the delivery schema they were written to)
 
 Each **service** of the schedule is an `IfcDistributionSystem`, and each of
 its **graded segments** - the standard grades segments, not services - one
@@ -209,11 +272,14 @@ What each object carries:
 | `AS5488_Service` | the system and its elements | type, owner, material, size, configuration, status, the length at each level |
 | `Pset_Uncertainty` | segments and points | IFC's own statement of positional uncertainty: MEASUREMENT for QL-A and QL-B, INTERPRETATION for QL-C, ESTIMATE for QL-D, with the tolerance or the assessed uncertainty |
 | `Pset_<class>TypeCommon`, `Pset_PipeSegmentOccurrence`, `Pset_ConstructionOccurence`, `Pset_DistributionSystemCommon` | as the schema defines them | the asset identifier as Reference, status, diameters, length, gradient and invert where known, installation date |
-| `TfNSW_UtilitySchema` (or the schema's own title) | the system, its elements and points | the delivery schema's attributes **exactly as the schedule wrote them** |
+| the schema's own title, its words joined by '_' (`Utility_Delivery_Schema`); `Delivery_Attributes` when the schema was not given | the system, its elements and points | the delivery schema's attributes **exactly as the schedule wrote them** |
 
 and each segment and point is classified by an `IfcClassificationReference`
-"QL-A" .. "QL-D" in AS 5488.1-2019; a TfNSW schedule's services by their asset
-type code in the schema.
+"QL-A" .. "QL-D" in AS 5488.1-2019; a delivery schedule's services by their
+asset type code, which is AS 5488.2-2019 Table A.4's whichever schema carried
+it, so the reference is into that standard and the schema is named by the
+property set its values are in. The export names no client: a schema's name
+comes from its own file (`DeliverySchema::title`).
 
 **The delivery property set carries the schedule's values, not Katana's
 reading of them.** Reading a schedule turns "In service" into a status; a
@@ -244,27 +310,44 @@ level, each run a polyline carrying what the grading found as `utility.*`
 properties. Exported by its layers' words it would be one system per level,
 and E1's conduits a cable; so an entity with `utility.line` and
 `utility.type` is written as the service it belongs to. Each run is the
-class the schedule's own export gives the service, from the same attributes
-the run carries (`ifc::classifyUtilityRun`: E1's "4 x 100 mm conduits" an
-`IfcCableCarrierSegment` CONDUITSEGMENT); each point an `IfcAnnotation`
-SURVEY; all of a service one `IfcDistributionSystem` named by its line,
-within the `<prefix>/<type>` it was drawn under, so that two schedules drawn
-under two prefixes stay apart. Each is classified by its level in AS 5488.1,
-the classification the schedule's services use, written once for both, and
-carries what the drawing kept of its grade in the same sets, a run's
-`AS5488_QualityLevel` and a point's `AS5488_LocatedPoint`; what the drawing
-does not keep (a run's claimed level, its path evidence) is absent. A drawn
-run is one per stretch of one level, not one per segment, so the sample
-drawn gives W1 three pipes where the schedule gives five segments
+class the schedule's own export gives the service, from the attributes the
+run carries (`ifc::classifyUtilityRun`: E1's "4 x 100 mm conduits" an
+`IfcCableCarrierSegment` CONDUITSEGMENT); a line an EXPLODE made of a run is
+still a run of it. A service is the runs of one line id, drawn under one
+`<prefix>/<type>`, with the same attributes: two schedules drawn under one
+prefix that both have an "E1" are two services, each classed by its own
+attributes, and the clash of ids is said. Each located point is an
+`IfcAnnotation` SURVEY of the service whose run it stands on, whatever layer
+it has been moved to, at the level the grading took it at where the drawing
+kept one, as the schedule's export places its points. A project's own rules
+(a RULES file) still name the class of what it drew; only the defaults give
+way to the service's class. Each service is one `IfcDistributionSystem`
+named by its line, with the schedule export's description and LongName
+(`serviceLongName`); each run and point is classified by its level in
+AS 5488.1 - the classification the schedule's services use, written once for
+both - and carries what the drawing kept of its grade in the same sets, a
+run's `AS5488_QualityLevel` and a point's `AS5488_LocatedPoint`. What the
+drawing does not keep is absent: a run's claimed level and path evidence, a
+point's recorded level and depth; the level the grading took a point at is
+`ServiceLevel`, since the schedule's `Level` is only a recorded one. A level
+that is not one of QL-A to QL-D is said and the object written unclassified.
+The drawn plan together with its schedule (UTILITIES) is each service twice,
+drawn and graded: written, as asked, and said. A drawn run is one per stretch
+of one level, not one per segment, so the sample drawn gives W1 three pipes
+where the schedule gives five segments
 (`IfcExportDrawing.ADrawnServicesPlanGoesOutByServiceAsTheScheduleWouldClassIt`,
+`IfcExportDrawing.TwoServicesDrawnWithOneLineIdStayTwoServices`,
+`IfcExportDrawing.AnExplodedRunStaysInItsService`,
+`IfcExportDrawing.APointMovedToAnotherLayerStaysWithTheRunItStandsOn`,
+`IfcExportDrawing.AProjectsRuleStillClassesADrawnRun`,
 `cli.ifc_a_drawn_services_plan_goes_out_by_service`). The drawing is plan
-only, so the runs have their `FootPrint`; the schedule export is the one
-that draws a service in 3D where its levels allow.
+only, so the runs have their `FootPrint`; the schedule export is the one that
+draws a service in 3D where its levels allow.
 
 ### Drawing entities
 
 An entity becomes the class of the first rule whose words its layer path,
-survey code or 12d string name holds - whole words, any case, a trailing `*`
+survey code or string name (from a .12da archive) holds - whole words, any case, a trailing `*`
 a prefix - among the rules that apply to its kind (`ifc::classifyEntity`,
 `ifc::defaultClassificationRules`):
 
@@ -309,7 +392,7 @@ vertex has a height, else its `FootPrint`; a point feature's `FootPrint` point
 written: what a label says and where it stands are the placer's, which this
 layer cannot see; they are counted in the report.
 
-**12d drainage** is taken as the network it is: pipe i of a drainage string
+**Drainage from a .12da archive** is taken as the network it is: pipe i of a drainage string
 (its `pipe.<i>.*` properties) an `IfcPipeSegment` from vertex i to i + 1, its
 centre at its inverts plus half its diameter where the upstream end is known -
 from the string's own vertex levels, or a `flow_direction` of 1 - and in plan
@@ -348,8 +431,9 @@ schema's own, generated from IfcOpenShell's IFC4X3_ADD2
 `src/katana_ifc/predefined_types.inc`), and every default rule and service
 class is checked against them
 (`IfcRulesFile.EveryClassTheExportChoosesIsOneTheSchemaHas`). Save Default
-Rules in the export dialog writes the defaults
-(`ifc::formatClassificationRules`) as a starting point.
+Rules in the export dialog, and `IFC RULES <file.csv>` on any command line,
+write the defaults (`ifc::writeDefaultRules`, `ifc::formatClassificationRules`)
+as a starting point.
 
 ### Surfaces
 
@@ -405,7 +489,7 @@ CIRCULARARC [CLOTHOID] between two LINEs is one PI at the intersection of
 those lines, with the arc's radius and the transitions' lengths; each
 PARABOLICARC one PVI at the intersection of its grades. Katana then solves
 the reconstruction, and every segment the file states must start within
-`ifc::kAlignmentTolerance` (10 mm, the 12d archive import's tolerance) of
+`ifc::kAlignmentTolerance` (10 mm, the .12da import's tolerance) of
 where the solution puts it. Where the check fails, or the geometry has no PI
 form - it starts or ends on a curve, compounds two arcs, or uses a transition
 other than the clothoid (Katana has the clothoid) - the alignment comes in as
@@ -422,11 +506,11 @@ The files are judged by implementations that are not Katana's, so that a
 mistake in the writer and the same mistake in the reader cannot agree:
 
 - **IfcOpenShell 0.8.5** (`tools/check_ifc.py`, the `cli.ifc_the_scenario_export_is_valid_to_ifcopenshell`
-  and `cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell` tests, registered
+  and `cli.ifc_the_delivery_export_is_valid_to_ifcopenshell` tests, registered
   where the configuring Python can import ifcopenshell): the schema - types,
   cardinalities, enumerations, inverses - and its EXPRESS rules: **0 findings**
-  on the scenario with the sample services (1097 instances) and on the TfNSW
-  export (461 instances). The same tool evaluates each alignment's geometry
+  on the scenario with the sample services (1097 instances) and on the
+  delivery-schema export (461 instances). The same tool evaluates each alignment's geometry
   with IfcOpenShell's own kernel and compares it with the business logic,
   segment by segment: on MC01 they agree to under 1 µm. Checked the other way,
   a clothoid's start direction moved by 0.01 rad and a vertical curve's
@@ -436,8 +520,8 @@ mistake in the writer and the same mistake in the reader cannot agree:
   scenario draws warnings from IFC431, "entities in scope for the
   Alignment-based view": its text is an `IfcTextLiteralWithExtent` with an
   `IfcPlanarExtent`, which that view does not list. The text is kept - a lot
-  number is worth more than a clean report - and the TfNSW export, services
-  alone, draws none. GRP001 raises an exception of its own on any
+  number is worth more than a clean report - and the delivery-schema export,
+  services alone, draws none. GRP001 raises an exception of its own on any
   `IfcDistributionSystem` (it looks up the relationship by the exact name
   `IfcGroup`, not its subtypes); that is the rule's defect, not the file's.
 - **The window's files**: the export dialog's, the typed EXPORT's and the
@@ -457,8 +541,8 @@ mistake in the writer and the same mistake in the reader cannot agree:
   Katana has no solid entity, so an extruded wall or a B-rep comes in as a
   point at its placement with its properties.
 - **Export of 3D solids** other than swept disks (a pit as a box, a culvert as
-  its section) is not attempted; a pit is its footprint and, from 12d, a
-  cylinder from invert to top.
+  its section) is not attempted; a pit is its footprint and, from a .12da
+  archive, a cylinder from invert to top.
 - **Cant**, IFC4X1-form alignments, and transitions other than the clothoid
   have no Katana equivalent, so they come in as exact polylines.
 - **Labels** are not exported (above), and the delivery schema's conditional

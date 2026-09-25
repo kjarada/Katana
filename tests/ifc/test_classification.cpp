@@ -169,7 +169,7 @@ TEST(IfcUtilityClass, APointServiceIsThePitValveHydrantOrMarkerItsWordsName)
     EXPECT_FALSE(ifc::classifyUtilityPoint(withFeature(sub::UtilityType::Water, "Pipe")));
 }
 
-// AS 5488.2-2019 Table A.4, as the TfNSW Utility Schema's AssetTypeCode.
+// AS 5488.2-2019 Table A.4, as a delivery schema's AssetTypeCode takes it.
 TEST(IfcUtilityClass, AssetTypeCodesAreThoseOfAs5488Part2TableA4)
 {
     EXPECT_EQ(ifc::assetTypeCode(sub::UtilityType::Telecommunications), "C");
@@ -189,7 +189,7 @@ TEST(IfcUtilityClass, AssetTypeCodesAreThoseOfAs5488Part2TableA4)
 
 // ---- drawing entities ---------------------------------------------------------------
 
-TEST(IfcEntityClass, TheTextIsTheLayerTheCodeAndThe12dNameInWordsOfCapitals)
+TEST(IfcEntityClass, TheTextIsTheLayerTheCodeAndTheStringNameInWordsOfCapitals)
 {
     Entity kerb = point("Survey/Kerb_line", "KB01");
     EXPECT_EQ(ifc::classificationText(kerb), "SURVEY KERB LINE KB01");

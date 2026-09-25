@@ -139,8 +139,21 @@ class Builder {
     // An element or annotation instance of `ifcClass`, placed at
     // elementPlacement(), and contained in the site. `tag` is written where
     // the class has a Tag.
+    // A name, object type or tag longer than IFC's 255 characters (IfcLabel,
+    // IfcIdentifier) is cut there, and the cut said in the warnings.
     Id product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
                std::string_view description, Id representation, std::string_view tag = {});
+    // `text` as an IfcLabel: at most 255 characters, a cut said in the
+    // warnings naming `what` - for the names written outside product().
+    [[nodiscard]] std::string label(std::string_view text, std::string_view what);
+
+    // The services of the schedule written (UTILITIES), by "<line id>/<type>",
+    // so that the same service drawn in the drawing can be said to be twice.
+    void noteScheduleService(std::string service) { scheduleServices_.insert(std::move(service)); }
+    [[nodiscard]] bool isScheduleService(const std::string& service) const
+    {
+        return scheduleServices_.contains(service);
+    }
 
     // ---- properties -------------------------------------------------------------
     // An IfcPropertySet, or 0 when the list is empty.
@@ -201,6 +214,7 @@ class Builder {
     std::vector<Id> aggregatedInProject_;
     std::map<std::string, std::vector<Id>> layers_;
     std::map<std::string, Id> classifications_;
+    std::set<std::string> scheduleServices_;
     std::map<std::pair<Id, std::string>, Id> references_;
     std::map<Id, std::string> referenceKeys_; // a reference -> "<classification>/<identification>"
     std::map<Id, std::vector<Id>> associations_;

@@ -887,10 +887,12 @@ bool runLine(SessionState& session, const std::string& line)
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
     }
-    // A .ifc is read and written natively, with or without GDAL (ifc_verbs.hpp).
-    // The rest of the line goes as it is, not through argumentOf: the IFC
-    // grammar reads its own quotes, and a line may quote more than one path.
-    if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
+    // A .ifc is read, written and described natively, with or without GDAL
+    // (ifc_verbs.hpp). The rest of the line goes as it is, not through
+    // argumentOf: the IFC grammar reads its own quotes, and a line may quote
+    // more than one path.
+    if (const std::string verb = upperVerb(line);
+        verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") {
         const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
         if (const std::optional<bool> handled = katana::app::runIfcVerb(
                 session.document, verb,

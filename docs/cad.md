@@ -228,7 +228,10 @@ Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
 (`MainWindow::runCommandLine`) adds `IMPORT`, `EXPORT`, `INFO <file>`,
 `REFS`, `CUSTOMISE [REPLACE] <file>...`, the view verbs `ZOOM`, `GRID` and
-`SNAP`, and `QUIT`; `katana_cli` adds `IMPORT`, `EXPORT`, `REFS`, `COPC` and
+`SNAP`, and `QUIT`; both add IFC's `IMPORT`, `EXPORT` and `INFO` of a .ifc
+and `IFC RULES`, with one grammar and one set of replies
+(`include/katana/ifc/front_end.hpp`, `docs/ifc.md`); `katana_cli` adds
+`IMPORT`, `EXPORT`, `REFS`, `COPC` and
 the survey-code verbs (`CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`,
 `MAPFILE CHECK`, `CUSTOMISE [REPLACE]`; `docs/survey_coding.md`) - its
 `--help` lists them. Of the survey-code verbs only `CUSTOMISE` is on the

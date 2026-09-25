@@ -91,6 +91,13 @@ watching the window:
 * **`QUIT` is not a command here.** The client ends the session by closing it;
   a `QUIT` in a batch is reported and skipped.
 
+IFC 4.3 is reached as the window's IFC dialogs reach it, by lines: `EXPORT
+<file.ifc> ... PREVIEW` for the class each object would become, `EXPORT`,
+`INFO` and `IMPORT` with every choice the dialogs offer, and `IFC RULES` for a
+project's rules to start from (`docs/ifc.md`, "Using it"). Their replies are
+`key=value` records ("Replies" there), which an agent reads as it reads any
+other verb's (`McpServer.AnAgentPreviewsExportsDescribesAndImportsIfcByTheDialogsLines`).
+
 Nothing is written to disk until a `SAVE`. Opening a project can back it up or
 migrate it in place (`docs/headless.md`), so point Claude at a copy of a
 project that matters.

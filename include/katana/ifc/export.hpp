@@ -40,12 +40,12 @@
 //                             AS5488_QualityLevel property set, Pset_Uncertainty
 //                             and an IfcClassificationReference to its quality
 //                             level) and the delivery schema's attributes
-//                             (TfNSW_UtilitySchema) with the values the
+//                             (a set named by the schema's title) with the values the
 //                             schedule wrote.
 //
 //   a drawing entity          the class classifyEntity gives: an IfcKerb, an
 //                             IfcRailing, a pipe or a pit, or an IfcAnnotation.
-//                             12d drainage strings become pipes pit to pit and
+//                             A .12da archive's drainage strings become pipes pit to pit and
 //                             the pits chambers, in one system per string.
 //   a surface                 IfcGeographicElement TERRAIN, an
 //                             IfcTriangulatedFaceSet
@@ -62,7 +62,7 @@
 // alignments, and that buildingSMART's validation service is built on, is
 // IfcOpenShell, whose C++ core is a large dependency to take for the writing
 // of a text file, and which would be a second model of the drawing beside
-// Katana's own. So, like the DXF and 12d writers, this
+// Katana's own. So, like the DXF and .12da writers, this
 // module needs nothing above the domain model and builds with
 // -DKATANA_BUILD_IO=OFF. IfcOpenShell is used instead where it is worth most -
 // as the independent judge of what is written (tools/check_ifc.py, the
@@ -181,7 +181,7 @@ struct ClassTally {
     std::string objectType; // what a USERDEFINED one is
     std::string system;     // the IfcDistributionSystemEnum value, for a service element
     // What decided it: "rule kerb", "no rule: a surveyed point",
-    // "AssetFeature \"Conduit (with Cable)\"", "12d drainage pipe".
+    // "AssetFeature \"Conduit (with Cable)\"", "drainage pipe".
     std::string why;
     std::size_t count = 0;
 

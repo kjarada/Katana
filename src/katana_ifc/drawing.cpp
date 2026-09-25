@@ -17,7 +17,7 @@
 // circles IfcCircle: never chords. A height is written where Katana has one
 // (entity::heightsOf) and nowhere else.
 //
-// 12d DRAINAGE (archive12d/domain.hpp: the line carries its pipes as
+// DRAINAGE from a .12da archive (archive12d/domain.hpp: the line carries its pipes as
 // pipe.<i>.* properties, each pit is a point carrying pit.*) is taken as the
 // network it is: pipe i an IfcPipeSegment from vertex i to vertex i + 1 of
 // the line, its centre at its inverts plus half its diameter, and each pit
@@ -171,7 +171,7 @@ bool isSystemEnumeration(std::string_view value)
     return kValues.contains(value);
 }
 
-// A 12d pit type ("1050 dia Access Chamber", "Headwall") as a chamber type.
+// A .12da pit type ("1050 dia Access Chamber", "Headwall") as a chamber type.
 IfcClass pitClass(std::string_view type)
 {
     const std::string words = [&] {
@@ -212,6 +212,14 @@ class DrawingWriter {
                   const std::vector<ClassificationRule>& rules)
         : b_(builder), model_(model), rules_(rules)
     {
+        // A project's own rules: what the caller gave that is not one of the
+        // defaults (a RULES file's, which the front ends put before them).
+        const auto& defaults = defaultClassificationRules();
+        for (const ClassificationRule& rule : rules_) {
+            if (std::find(defaults.begin(), defaults.end(), rule) == defaults.end()) {
+                projectRules_.push_back(rule);
+            }
+        }
     }
 
     void write()
@@ -349,7 +357,7 @@ class DrawingWriter {
 
     // Text, as IfcTextLiteralWithExtent: IFC 4.3 deprecates IfcTextLiteral
     // (IFC102), and the extent is what the current one asks for. There is no
-    // font here, so the box is ESTIMATED as the 12d import estimates a
+    // font here, so the box is ESTIMATED as the .12da import estimates a
     // text's width - 0.6 of the height per character of its longest line -
     // and a line's height per line; the corner the box alignment names sits
     // on the text's justification point, as Katana places it. Written in
@@ -624,7 +632,7 @@ class DrawingWriter {
         provenance.label("Style", entity.style);
         provenance.label("ClassifiedBy", classifiedBy);
         for (const auto& [name, value] : entity.metadata) {
-            // What 12d knew and Katana keeps only to write back (12d.x.*,
+            // What the archive knew and Katana keeps only to write back (12d.x.*,
             // symbols, text formatting) is not the entity's provenance.
             if (name.starts_with("12d.x.") || name.starts_with("12d.symbol.") ||
                 name.starts_with("12d.text.")) {
@@ -674,101 +682,197 @@ class DrawingWriter {
 
     // ---- services drawn from an AS 5488 schedule -------------------------------------
 
-    // The runs and points UTILITY DRAW made, by service: the names of the
+    // Whether `entity` is part of a plan UTILITY DRAW made: the names of the
     // utility.* properties are the drawing's documented record
     // (docs/subsurface_utilities.md, "What the grading found is on the
     // entities"; cad/utilities/utility_drawing.hpp, which this layer cannot
-    // see). A service is its line id within the layers it was drawn on - the
-    // <prefix>/<type> above its QL and points layers - so that two schedules
-    // drawn under two prefixes, each with a W1, stay two services.
+    // see). A run is a polyline, or a line an EXPLODE made of one, which
+    // keeps its properties; a located point is a point.
+    [[nodiscard]] static bool isDrawnRun(const Entity& entity)
+    {
+        return (std::holds_alternative<geometry::Polyline2>(entity.geometry) ||
+                std::holds_alternative<geometry::Segment2>(entity.geometry)) &&
+               !text(entity.properties, "utility.line").empty() &&
+               !text(entity.properties, "utility.type").empty();
+    }
+    [[nodiscard]] static bool isDrawnPoint(const Entity& entity)
+    {
+        return std::holds_alternative<entity::PointGeometry>(entity.geometry) &&
+               !text(entity.properties, "utility.line").empty() &&
+               !text(entity.properties, "utility.type").empty();
+    }
+
+    // The service's attributes, as UTILITY DRAW put them on a run.
+    [[nodiscard]] static survey::subsurface::UtilityAttributes attributesOf(const Entity& run)
+    {
+        namespace sub = survey::subsurface;
+        const entity::PropertyMap& properties = run.properties;
+        sub::UtilityAttributes service;
+        service.type = sub::parseUtilityType(text(properties, "utility.type"))
+                           .value_or(sub::UtilityType::Unknown);
+        service.owner = text(properties, "utility.owner");
+        service.material = text(properties, "utility.material");
+        service.configuration = text(properties, "utility.configuration");
+        service.description = text(properties, "utility.description");
+        for (const auto& [name, value] : properties) {
+            if (name.starts_with("utility.field.")) {
+                service.fields[name.substr(std::string_view("utility.field.").size())] =
+                    entity::toString(value);
+            }
+        }
+        return service;
+    }
+
+    // What says one service from another among runs of one line id: two
+    // schedules drawn under one prefix may both have an "E1", and E1 from
+    // each is its own service, classed by its own attributes.
+    [[nodiscard]] static std::string fingerprintOf(const Entity& run)
+    {
+        std::string out;
+        for (const auto& [name, value] : run.properties) {
+            if (name == "utility.type" || name == "utility.owner" || name == "utility.material" ||
+                name == "utility.configuration" || name == "utility.description" ||
+                name.starts_with("utility.field.")) {
+                out += name + '\x1f' + entity::toString(value) + '\x1e';
+            }
+        }
+        return out;
+    }
+
+    struct DrawnService {
+        std::string drawnOn; // the <prefix>/<type> its runs were drawn under
+        std::string line;    // utility.line
+        std::string fingerprint;
+        std::vector<const Entity*> runs;
+        std::vector<const Entity*> points;
+    };
+
+    // The services of a drawn plan, then each written. A service is the runs
+    // of one line id drawn under one <prefix>/<type> (the layer above their
+    // QL layer) with the same attributes; each point goes to the service it
+    // stands on - a vertex of one of its runs, as a pit goes to its drainage
+    // string - whatever layer it has since been moved to, and only when it
+    // stands on none to the one service of its line and type, or to its own
+    // layer's.
     void writeDrawnServices(const std::vector<const Entity*>& chosen)
     {
-        std::map<std::pair<std::string, std::string>, std::vector<const Entity*>> services;
+        std::vector<DrawnService> services;
         for (const Entity* entity : chosen) {
-            const std::string line = text(entity->properties, "utility.line");
-            if (line.empty() || text(entity->properties, "utility.type").empty() ||
-                (!std::holds_alternative<geometry::Polyline2>(entity->geometry) &&
-                 !std::holds_alternative<entity::PointGeometry>(entity->geometry))) {
+            if (!isDrawnRun(*entity)) {
                 continue;
             }
             const std::size_t slash = entity->layer.rfind('/');
-            services[{slash == std::string::npos ? std::string() : entity->layer.substr(0, slash),
-                      line}]
-                .push_back(entity);
+            const std::string drawnOn =
+                slash == std::string::npos ? std::string() : entity->layer.substr(0, slash);
+            const std::string line = text(entity->properties, "utility.line");
+            const std::string fingerprint = fingerprintOf(*entity);
+            auto found =
+                std::find_if(services.begin(), services.end(), [&](const DrawnService& service) {
+                    return service.drawnOn == drawnOn && service.line == line &&
+                           service.fingerprint == fingerprint;
+                });
+            if (found == services.end()) {
+                services.push_back({drawnOn, line, fingerprint, {}, {}});
+                found = std::prev(services.end());
+            }
+            found->runs.push_back(entity);
         }
-        for (const auto& [where, members] : services) {
-            writeDrawnService(where.first, where.second, members);
+        for (const Entity* entity : chosen) {
+            if (!isDrawnPoint(*entity)) {
+                continue;
+            }
+            const std::string line = text(entity->properties, "utility.line");
+            const std::string type = text(entity->properties, "utility.type");
+            const Point2 at = std::get<entity::PointGeometry>(entity->geometry).position;
+            const auto sameLine = [&](const DrawnService& service) {
+                return service.line == line &&
+                       text(service.runs.front()->properties, "utility.type") == type;
+            };
+            const auto standsOn = [&](const DrawnService& service) {
+                return sameLine(service) &&
+                       std::any_of(service.runs.begin(), service.runs.end(),
+                                   [&](const Entity* run) { return passesThrough(*run, at); });
+            };
+            auto owner = std::find_if(services.begin(), services.end(), standsOn);
+            if (owner == services.end() &&
+                std::count_if(services.begin(), services.end(), sameLine) == 1) {
+                owner = std::find_if(services.begin(), services.end(), sameLine);
+            }
+            if (owner == services.end()) {
+                const std::size_t slash = entity->layer.rfind('/');
+                const std::string drawnOn =
+                    slash == std::string::npos ? std::string() : entity->layer.substr(0, slash);
+                owner = std::find_if(services.begin(), services.end(),
+                                     [&](const DrawnService& service) {
+                                         return service.runs.empty() &&
+                                                service.drawnOn == drawnOn && service.line == line;
+                                     });
+                if (owner == services.end()) {
+                    services.push_back({drawnOn, line, {}, {}, {}});
+                    owner = std::prev(services.end());
+                }
+            }
+            owner->points.push_back(entity);
+        }
+
+        // A line id drawn from services that differ is said, and each
+        // written as its own system: "E1" and "E1 (2)" in the report.
+        std::map<std::pair<std::string, std::string>, std::size_t> seen;
+        for (const DrawnService& service : services) {
+            const std::size_t nth = ++seen[{service.drawnOn, service.line}];
+            if (nth == 2) {
+                b_.warn("line " + service.line + " under " + service.drawnOn +
+                        " was drawn from services with different attributes (two schedules "
+                        "with one line id?): each is written as its own system");
+            }
+            writeDrawnService(service, nth);
         }
     }
 
-    void writeDrawnService(const std::string& drawnOn, const std::string& lineId,
-                           const std::vector<const Entity*>& members)
+    // Whether a vertex of `run` is at `at`, to the centimetre writeDrainage
+    // gives a pit to its string with.
+    [[nodiscard]] static bool passesThrough(const Entity& run, Point2 at)
+    {
+        const auto near = [&](Point2 vertex) { return (vertex - at).length() < 0.01; };
+        if (const auto* polyline = std::get_if<geometry::Polyline2>(&run.geometry)) {
+            return std::any_of(polyline->vertices.begin(), polyline->vertices.end(), near);
+        }
+        const auto& segment = std::get<geometry::Segment2>(run.geometry);
+        return near(segment.start) || near(segment.end);
+    }
+
+    void writeDrawnService(const DrawnService& drawn, std::size_t nth)
     {
         namespace sub = survey::subsurface;
-        // The service's attributes, which UTILITY DRAW puts on each of its
-        // runs alike; a service drawn as points alone has only its type.
-        sub::UtilityAttributes service;
-        service.type = sub::parseUtilityType(text(members.front()->properties, "utility.type"))
-                           .value_or(sub::UtilityType::Unknown);
-        const auto run = std::find_if(members.begin(), members.end(), [](const Entity* entity) {
-            return std::holds_alternative<geometry::Polyline2>(entity->geometry);
-        });
-        if (run != members.end()) {
-            const entity::PropertyMap& properties = (*run)->properties;
-            service.owner = text(properties, "utility.owner");
-            service.material = text(properties, "utility.material");
-            service.configuration = text(properties, "utility.configuration");
-            service.description = text(properties, "utility.description");
-            for (const auto& [name, value] : properties) {
-                if (name.starts_with("utility.field.")) {
-                    service.fields[name.substr(std::string_view("utility.field.").size())] =
-                        entity::toString(value);
-                }
-            }
-        }
+        // Every run of the service carries its attributes alike (they are its
+        // fingerprint); a service drawn as points alone has only its type.
+        const Entity& first = drawn.runs.empty() ? *drawn.points.front() : *drawn.runs.front();
+        const sub::UtilityAttributes service = attributesOf(first);
         const UtilityClass runClass = classifyUtilityRun(service);
         const std::string systemName =
             runClass.system == "USERDEFINED" ? runClass.systemObjectType : runClass.system;
-        const std::string key = "drawn service/" + drawnOn + "/" + lineId;
+        const std::string numbered =
+            nth == 1 ? drawn.line : drawn.line + " (" + std::to_string(nth) + ")";
+        const std::string key = "drawn service/" + drawn.drawnOn + "/" + numbered;
+        // Named apart from the schedule's "service W1" rows, and with where it
+        // was drawn, so the report names each system the file holds once.
+        const std::string source =
+            "drawn service " + numbered + (drawn.drawnOn.empty() ? "" : " in " + drawn.drawnOn);
+        if (b_.isScheduleService(drawn.line + "/" + sub::toString(service.type))) {
+            b_.warn(source + " is also in the schedule given with UTILITIES: the file holds "
+                             "it twice, drawn and graded; leave out one (NOENTITIES, or no "
+                             "UTILITIES)");
+        }
 
         std::vector<Id> written;
-        for (const Entity* entity : members) {
-            handled_.insert(entity->id);
-            const bool point = std::holds_alternative<entity::PointGeometry>(entity->geometry);
-            const IfcClass ifcClass =
-                point ? IfcClass{"IfcAnnotation", "SURVEY", {}} : runClass.element;
-            const Drawn drawn = draw(*entity);
-            if (drawn.items.empty()) {
-                ++b_.report().entitiesSkipped;
-                b_.warn("service " + lineId + ": " + std::string(entity::toString(entity->type())) +
-                        " " + std::to_string(entity->id) +
-                        " has no extent to write and is not written");
-                b_.tally("service " + lineId, {}, {}, "nothing to draw");
-                continue;
-            }
-            const Id representation = representationOf(*entity, drawn, point);
-            const std::string entityKey = "entity/" + std::to_string(entity->id);
-            const std::string level = text(entity->properties, "utility.quality_level");
-            const std::string name = point
-                                         ? text(entity->properties, "utility.vertex")
-                                         : lineId + " " + text(entity->properties, "utility.from") +
-                                               " to " + text(entity->properties, "utility.to");
-            const Id product =
-                b_.product(ifcClass, entityKey, name.empty() ? lineId : name,
-                           point ? "Located point of " + lineId
-                                 : std::string("AS 5488.1-2019 ") + level + " run of " + lineId,
-                           b_.productShape({representation}), std::to_string(entity->id));
-            ++b_.report().entitiesWritten;
-            b_.tally("service " + lineId, ifcClass, systemName,
-                     point ? std::string("a drawn located point")
-                           : "a drawn run: " + runClass.reason);
-            if (const auto graded = sub::parseQualityLevel(level)) {
-                b_.associate(qualityLevelReference(b_, *graded), product);
-            }
-            writeDrawnGrade(*entity, entityKey, product, point);
-            writeEntityProperties(*entity, entityKey, product, "a drawn AS 5488 service", ifcClass);
-            written.push_back(product);
+        for (const Entity* entity : drawn.runs) {
+            written.push_back(
+                writeDrawnMember(*entity, false, drawn, runClass, systemName, source));
         }
+        for (const Entity* entity : drawn.points) {
+            written.push_back(writeDrawnMember(*entity, true, drawn, runClass, systemName, source));
+        }
+        std::erase(written, Id{0});
         if (written.empty()) {
             return; // nothing of the service was written: no system of nothing
         }
@@ -777,22 +881,107 @@ class DrawingWriter {
             b_.file().add("IfcDistributionSystem", Args()
                                                        .string(b_.guid(key))
                                                        .null()
-                                                       .string(lineId)
+                                                       .string(b_.label(numbered, source))
                                                        .stringOrNull(service.description)
                                                        .stringOrNull(runClass.systemObjectType)
-                                                       .null()
+                                                       .stringOrNull(serviceLongName(service))
                                                        .enumeration(runClass.system));
         ++b_.report().classes["IfcDistributionSystem"];
         b_.referenceInSite(id);
         b_.group(id, key, written);
     }
 
+    // One run or located point of a drawn service; 0 when it has nothing to
+    // draw, which is said.
+    Id writeDrawnMember(const Entity& entity, bool point, const DrawnService& drawn,
+                        const UtilityClass& runClass, const std::string& systemName,
+                        const std::string& source)
+    {
+        namespace sub = survey::subsurface;
+        handled_.insert(entity.id);
+        // A project's own rules still name the class of what it drew (a
+        // "gas flexible" rule makes a gas run a FLEXIBLESEGMENT); only the
+        // defaults give way to the service's own class.
+        const EntityClass ruled = classifyEntity(entity, projectRules_);
+        const bool byRule = !ruled.rule.empty();
+        const IfcClass ifcClass = byRule  ? ruled.ifcClass
+                                  : point ? IfcClass{"IfcAnnotation", "SURVEY", {}}
+                                          : runClass.element;
+        const std::string system = byRule && !ruled.system.empty() ? ruled.system : systemName;
+
+        // A located point at its level where the drawing kept one (the
+        // level the grading took it at, as the schedule's export places its
+        // points); in plan where it did not.
+        Drawn shape;
+        const auto level =
+            point ? number(entity.properties, "utility.service_level") : std::nullopt;
+        if (level) {
+            const Point2 at = std::get<entity::PointGeometry>(entity.geometry).position;
+            shape.items = {b_.point(Vec3(at.x, at.y, *level))};
+            shape.type = "Point";
+            shape.in3d = true;
+        } else {
+            shape = draw(entity);
+        }
+        if (shape.items.empty()) {
+            ++b_.report().entitiesSkipped;
+            b_.warn(source + ": " + std::string(entity::toString(entity.type())) + " " +
+                    std::to_string(entity.id) + " has no extent to write and is not written");
+            b_.tally(source, {}, {}, "nothing to draw");
+            return 0;
+        }
+        const bool annotation = ifcClass.entity == "IfcAnnotation";
+        const Id representation = representationOf(entity, shape, annotation);
+
+        // The level the drawing recorded, read as AS 5488's or not at all: a
+        // level the standard does not have is said, and written unclassified.
+        const std::string recorded = text(entity.properties, "utility.quality_level");
+        const auto graded = sub::parseQualityLevel(recorded);
+        if (!graded) {
+            b_.warn(source + ": " + std::string(entity::toString(entity.type())) + " " +
+                    std::to_string(entity.id) +
+                    (recorded.empty() ? std::string(" has no quality level")
+                                      : " has quality level \"" + recorded +
+                                            "\", which is not one of AS 5488.1-2019's QL-A to "
+                                            "QL-D") +
+                    ": it is written unclassified");
+        }
+        const std::string entityKey = "entity/" + std::to_string(entity.id);
+        const std::string name = point
+                                     ? text(entity.properties, "utility.vertex")
+                                     : drawn.line + " " + text(entity.properties, "utility.from") +
+                                           " to " + text(entity.properties, "utility.to");
+        const std::string description =
+            point ? "Located point of " + drawn.line
+            : graded
+                ? std::string("AS 5488.1-2019 ") + sub::toString(*graded) + " run of " + drawn.line
+                : "Run of " + drawn.line + ", its quality level not one of AS 5488's";
+        const Id product =
+            b_.product(ifcClass, entityKey, name.empty() ? drawn.line : name, description,
+                       b_.productShape({representation}), std::to_string(entity.id));
+        ++b_.report().entitiesWritten;
+        b_.tally(source, ifcClass, system,
+                 byRule  ? "rule " + ruled.rule
+                 : point ? std::string("a drawn located point")
+                         : "a drawn run: " + runClass.reason);
+        if (graded) {
+            b_.associate(qualityLevelReference(b_, *graded), product);
+        }
+        writeDrawnGrade(entity, entityKey, product, point, graded);
+        writeEntityProperties(entity, entityKey, product,
+                              byRule ? "rule " + ruled.rule : "a drawn AS 5488 service", ifcClass);
+        return product;
+    }
+
     // What the grading found, in the property sets the schedule's own
     // export writes (utilities.cpp), from what the drawing kept of it: a
     // run's AS5488_QualityLevel, a point's AS5488_LocatedPoint. What the
-    // drawing does not keep - a run's claimed level, its path evidence - is
-    // absent, not guessed.
-    void writeDrawnGrade(const Entity& entity, const std::string& key, Id product, bool point)
+    // drawing does not keep - a run's claimed level, its path evidence, a
+    // point's recorded level and depth - is absent, not guessed; the level
+    // the grading took a point at, which the drawing keeps, is ServiceLevel,
+    // since the schedule's Level is only a recorded one.
+    void writeDrawnGrade(const Entity& entity, const std::string& key, Id product, bool point,
+                         std::optional<survey::subsurface::QualityLevel> graded)
     {
         const entity::PropertyMap& p = entity.properties;
         const auto flag = [&](std::string_view name) -> std::optional<bool> {
@@ -806,15 +995,17 @@ class DrawingWriter {
             return std::nullopt;
         };
         PropertyList grade;
-        grade.label("QualityLevel", text(p, "utility.quality_level"),
-                    point ? "The AS 5488.1-2019 quality level the point's evidence supports"
-                          : "The AS 5488.1-2019 quality level the run's evidence supports");
+        if (graded) {
+            grade.label("QualityLevel", survey::subsurface::toString(*graded),
+                        point ? "The AS 5488.1-2019 quality level the point's evidence supports"
+                              : "The AS 5488.1-2019 quality level the run's evidence supports");
+        }
         if (point) {
             grade.label("LocateMethod", text(p, "utility.method"));
             grade.label("QualityLevelClaimed", text(p, "utility.claimed"));
             grade.text("OverClaim", text(p, "utility.over_claim"));
             grade.label("LevelReference", text(p, "utility.level_ref"));
-            grade.length("Level", number(p, "utility.service_level"));
+            grade.length("ServiceLevel", number(p, "utility.service_level"));
             grade.boolean("LevelQualified", flag("utility.level_qualified"));
             grade.length("SurfaceLevel", number(p, "utility.surface_level"));
             grade.length("DepthOfCover", number(p, "utility.cover"));
@@ -832,15 +1023,18 @@ class DrawingWriter {
         b_.defines(key + "/grade", b_.propertySet(key + "/grade", name, grade), {product});
     }
 
-    // ---- 12d drainage ------------------------------------------------------------
+    // ---- drainage from a .12da archive -------------------------------------------
 
     void writeDrainage(const std::vector<const Entity*>& chosen)
     {
         // The strings, and their pits and house connections, by the string
-        // they came from: 12d gives them one header (layer and name).
+        // they came from: the archive gives them one header (layer and name).
         std::map<std::pair<std::string, std::string>, std::vector<const Entity*>> parts;
         std::vector<const Entity*> lines;
         for (const Entity* entity : chosen) {
+            if (handled_.contains(entity->id)) {
+                continue; // already written, as a drawn service
+            }
             const std::string element = text(entity->metadata, "12d.element");
             if (element == "string drainage" &&
                 std::holds_alternative<geometry::Polyline2>(entity->geometry)) {
@@ -849,7 +1043,7 @@ class DrawingWriter {
                 parts[{entity->layer, text(entity->metadata, "12d.name")}].push_back(entity);
             }
         }
-        // Each pit and connection goes to ONE string. 12d names a string's
+        // Each pit and connection goes to ONE string. The archive names a string's
         // parts by its header, and two strings may share a name - or have
         // none - so a part goes to the string of its name it stands on (a
         // vertex of it), and to the first of its name only when it stands on
@@ -896,7 +1090,8 @@ class DrawingWriter {
         const std::string key = "drainage/" + std::to_string(line.id);
         std::string system = serviceSystemFor(classificationText(line));
         if (system.empty()) {
-            system = "STORMWATER"; // a 12d drainage string with nothing else said drains stormwater
+            system = "STORMWATER"; // an archive's drainage string with nothing else said drains
+                                   // stormwater
         }
         const auto heights = entity::heightsOf(line.properties, shape.vertices.size());
         const auto flow = number(line.properties, "flow_direction");
@@ -928,13 +1123,12 @@ class DrawingWriter {
                         ? b_.shape(b_.axisContext(), "Axis", "Curve3D", drawn.items)
                         : b_.shape(b_.footPrintContext(), "FootPrint", "Curve2D", drawn.items);
                 b_.layer(line.layer, representation);
-                members.push_back(b_.product({"IfcPipeSegment", "RIGIDSEGMENT", {}}, key + "/line",
-                                             name, "12d drainage string",
-                                             b_.productShape({representation}),
-                                             std::to_string(line.id)));
+                members.push_back(b_.product(
+                    {"IfcPipeSegment", "RIGIDSEGMENT", {}}, key + "/line", name, "drainage string",
+                    b_.productShape({representation}), std::to_string(line.id)));
                 ++b_.report().entitiesWritten;
                 b_.tally("layer " + line.layer, {"IfcPipeSegment", "RIGIDSEGMENT", {}}, system,
-                         "12d drainage string, its pipes not given: one pipe along it");
+                         "drainage string, its pipes not given: one pipe along it");
             }
         } else {
             for (std::size_t i = 0; i < pipes; ++i) {
@@ -961,7 +1155,7 @@ class DrawingWriter {
                                         .string(b_.guid(key))
                                         .null()
                                         .string(name)
-                                        .string("12d drainage string")
+                                        .string("drainage string")
                                         .stringOrNull(listed ? "" : system)
                                         .null()
                                         .enumeration(listed ? system : "USERDEFINED"));
@@ -984,7 +1178,7 @@ class DrawingWriter {
 
         // Which end is upstream. The string's own heights at its vertices
         // say it where there are any; otherwise a flow_direction of 1 puts
-        // it at the string's start, as every 12d file seen writes it. Any
+        // it at the string's start, as every .12da file seen writes it. Any
         // other case is not guessed at.
         std::optional<std::pair<double, double>> inverts; // at a, at b
         std::string how;
@@ -1042,7 +1236,7 @@ class DrawingWriter {
             pipeClass, pipeKey,
             pipeName.empty() ? nameOf(line) + " pipe " + std::to_string(index + 1) : pipeName, type,
             b_.productShape(representations), pipeName);
-        b_.tally("layer " + line.layer, pipeClass, system, "12d drainage pipe");
+        b_.tally("layer " + line.layer, pipeClass, system, "drainage pipe");
 
         PropertyList common;
         common.identifier("Reference", pipeName);
@@ -1123,7 +1317,7 @@ class DrawingWriter {
         const Id product = b_.product(ifcClass, key, name.empty() ? nameOf(part) : name, type,
                                       b_.productShape(representations), name);
         b_.tally("layer " + part.layer, ifcClass, system,
-                 pit ? "12d drainage pit" : "12d drainage house connection");
+                 pit ? "drainage pit" : "drainage house connection");
         if (pit) {
             PropertyList common;
             common.identifier("Reference", name);
@@ -1157,6 +1351,7 @@ class DrawingWriter {
     Builder& b_;
     const entity::Model& model_;
     const std::vector<ClassificationRule>& rules_;
+    std::vector<ClassificationRule> projectRules_;
     std::set<entity::EntityId> handled_;
     std::map<std::pair<std::string, std::string>, std::vector<Id>> systems_;
     std::size_t labelsSkipped_ = 0;
