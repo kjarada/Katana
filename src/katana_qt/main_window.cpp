@@ -264,6 +264,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
+    // GENERATE on the command line lays out what Generate Sheets would: what
+    // the plan view draws, and the visible surfaces for the sections.
+    interpreter_.setSheetContext([this] {
+        cad::plotting::SheetVerbContext context;
+        PlanSource plan = planSourceOf(document_);
+        plan.reference = &reference_;
+        plan.meshes = &sceneMeshes_;
+        context.drawingExtent = planDrawnBounds(plan, {}, {});
+        for (const auto& surface : sceneSurfaces_) {
+            if (surface.visible && surface.surface != nullptr) {
+                context.surfaces.push_back({surface.name, surface.surface});
+            }
+        }
+        return context;
+    });
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -1732,6 +1747,7 @@ void MainWindow::logMessage(const QString& text, bool isError)
     const QString line = isError ? "! " + text : text;
     commandLog_->appendPlainText(line);
     if (isError) {
+        ++errorsLogged_;
         statusBar()->showMessage(text, 6000);
     }
     // A headless run has no window to read the log in. Echoed, it is what a
@@ -1741,10 +1757,12 @@ void MainWindow::logMessage(const QString& text, bool isError)
     }
 }
 
-void MainWindow::runCommand(const QString& line)
+bool MainWindow::runCommand(const QString& line)
 {
+    const int errors = errorsLogged_;
     commandInput_->setText(line);
     runCommandLine();
+    return errorsLogged_ == errors;
 }
 
 void MainWindow::runCommandLine()
@@ -1874,6 +1892,42 @@ void MainWindow::runCommandLine()
                            .arg(grouped(cloud.points.size()))
                            .arg(grouped(cloud.sourcePointCount)));
         }
+        return;
+    }
+    // PLOTSHEETS path [sheets=1,3-5] [dpi=300]: the sheets to PDF. Here and
+    // not in the interpreter because the painter is Qt; the line is read by
+    // the interpreter's own rules (sheet_verbs.hpp, parsePlotSheets).
+    if (verb == "PLOTSHEETS") {
+        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
+        if (!tokens) {
+            logMessage(QString::fromStdString(tokens.error().describe()), true);
+            return;
+        }
+        // A project with no sheets plots one fitted to the drawing, so
+        // sheets= is read against that one sheet.
+        cad::plotting::SheetSet against = document_.sheetSet();
+        if (against.sheets.empty()) {
+            cad::plotting::Sheet fitted;
+            fitted.id = "s1";
+            against.sheets.push_back(std::move(fitted));
+        }
+        const auto request = cad::plotting::parsePlotSheets(
+            against, std::vector<std::string>(tokens->begin() + 1, tokens->end()));
+        if (!request) {
+            logMessage(QString::fromStdString(request.error().describe()), true);
+            return;
+        }
+        const QString path = QString::fromStdWString(request->path.wstring());
+        // What cannot be drawn on a sheet is logged as a problem, and the
+        // PDF is still written: the line was carried out, not refused, so
+        // those do not count against it (runCommand), as they do not fail
+        // --plot-sheets.
+        const int errorsBefore = errorsLogged_;
+        if (const auto status = plotSheetsToPdf(path, request->sheets, request->dpi); !status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+            return;
+        }
+        errorsLogged_ = errorsBefore;
         return;
     }
     // A bare tool word starts the tool, as in any CAD package: an alias
@@ -4411,7 +4465,8 @@ void MainWindow::showSheets()
     sheets_->activateWindow();
 }
 
-katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+katana::core::Status MainWindow::plotSheetsToPdf(const QString& path,
+                                                 std::span<const std::size_t> sheets, double dpi)
 {
     const SheetSource source = sheetSource();
     cad::plotting::SheetSet set = document_.sheetSet();
@@ -4419,18 +4474,18 @@ katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
         // Nothing laid out yet: one sheet fitted to the drawing, for this plot.
         cad::plotting::LayoutRequest request;
         request.planArea = planDrawnBounds(source.plan, {}, {});
-        auto sheets = cad::plotting::smartLayout(document_.model(), request);
-        if (!sheets) {
-            return sheets.error();
+        auto fitted = cad::plotting::smartLayout(document_.model(), request);
+        if (!fitted) {
+            return fitted.error();
         }
-        cad::plotting::prepareForAppend(set, *sheets);
-        set.sheets = std::move(*sheets);
+        cad::plotting::prepareForAppend(set, *fitted);
+        set.sheets = std::move(*fitted);
         logMessage("The project has no sheets: plotting one fitted to the drawing.");
     }
     SheetPaintCache cache;
     std::vector<std::string> problems;
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = katana::qt::plotSheetsToPdf(path, set, {}, source, 300.0, cache,
+    const auto status = katana::qt::plotSheetsToPdf(path, set, sheets, source, dpi, cache,
                                                     QString::fromStdString(document_.metadata().name),
                                                     &problems);
     QApplication::restoreOverrideCursor();
@@ -4440,9 +4495,10 @@ katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
     for (const std::string& problem : problems) {
         logMessage(QString::fromStdString(problem), true);
     }
+    const std::size_t plotted = sheets.empty() ? set.sheets.size() : sheets.size();
     logMessage(QString("Plotted %1 sheet%2 to %3.")
-                   .arg(set.sheets.size())
-                   .arg(set.sheets.size() == 1 ? "" : "s")
+                   .arg(plotted)
+                   .arg(plotted == 1 ? "" : "s")
                    .arg(path));
     return {};
 }
