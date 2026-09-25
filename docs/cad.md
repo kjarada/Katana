@@ -177,7 +177,7 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `MIRROR`, `ARRAY`, `ERASE`), editing (`OFFSET`, `TRIM`, `EXTEND`, `FILLET`,
 `CHAMFER`), `SELECT`, `LAYER`, the tables (`LINETYPE`, `DIMSTYLE`, `HATCH`,
 `STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
-`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`, and the sheet,
+`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `STATUS`, `HELP`, and the sheet,
 annotation, utility and survey-code families below. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
 and civil verbs until the audit of 2026-09-23.
@@ -234,6 +234,25 @@ the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
 which cad may not see, so each front end passes the table with
 `CommandInterpreter::setColourLookup`; without one no colour is known and
 colours are left alone.
+
+### STATUS
+
+`STATUS` prints the drawing at a glance - its project, whether it has unsaved
+changes, how many entities, layers and alignments, the current layer and
+style, the selection, the undo and redo depth and the customisation counts -
+and `STATUS JSON` the same as one JSON object, its keys in alphabetical order
+and indented by two. Both come from `cad::documentStatus`
+(`include/katana/cad/document_status.hpp`), with `cad::formatStatus` and
+`cad::statusJson`. Until 2026-09-26 this was `katana_mcp`'s alone, built in
+`mcp_server.cpp` as `katana_status` and `katana://status`; the window showed
+pieces of it and nothing could ask for it from the window or `katana_cli`.
+The MCP tool and resource now call the same functions, and their text is
+unchanged: the resource, the tool's text and its structured content were
+compared byte for byte with the previous `katana_mcp` over one session
+(`McpServer.TheStatusToolAndResourceSayWhatTheStatusVerbSays` pins them with
+the text written out by hand). Asking changes nothing and is no undo step. A
+name that is not UTF-8 is written with U+FFFD rather than thrown. File >
+Drawing Summary copies `STATUS JSON` (`docs/desktop.md`).
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
