@@ -27,7 +27,6 @@
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
 #include "ifc_verbs.hpp"
-#include "utility_verbs.hpp"
 #include "session.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
@@ -888,14 +887,9 @@ bool runLine(SessionState& session, const std::string& line)
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
     }
-    // The AS 5488 subsurface utility tools read schedules and report; they
-    // never touch the drawing (utility_verbs.hpp).
-    if (upperVerb(line) == "UTILITY") {
-        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
-        return katana::app::runUtilityVerb(
-            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space));
-    }
     // A .ifc is read and written natively, with or without GDAL (ifc_verbs.hpp).
+    // The rest of the line goes as it is, not through argumentOf: the IFC
+    // grammar reads its own quotes, and a line may quote more than one path.
     if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
         const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
         if (const std::optional<bool> handled = katana::app::runIfcVerb(
@@ -938,7 +932,21 @@ bool runLine(SessionState& session, const std::string& line)
     }
     const auto reply = session.interpreter.run(line);
     if (!reply) {
-        std::cerr << "error: " << reply.error().describe() << '\n';
+        // A refusal's first line is what was refused and why. Lines after it
+        // are the report behind it - UTILITY CHECK refuses a schedule with
+        // errors and carries the whole check - and go where a report goes, so
+        // a script that keeps stdout has the check exactly when it failed.
+        katana::core::Error refusal = reply.error();
+        const std::size_t lineEnd = refusal.message.find('\n');
+        const std::string report =
+            lineEnd == std::string::npos ? std::string() : refusal.message.substr(lineEnd + 1);
+        if (lineEnd != std::string::npos) {
+            refusal.message.resize(lineEnd);
+        }
+        std::cerr << "error: " << refusal.describe() << '\n';
+        if (!report.empty()) {
+            std::cout << report << '\n';
+        }
         return false;
     }
     if (!reply->empty()) {
@@ -1015,7 +1023,6 @@ std::string Session::helpText()
             "          CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
             "          libraries (.4d) and survey code files (.mapfile), merged\n"
             "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
-    text += katana::app::utilityHelpText();
     text += katana::app::ifcHelpText();
 #if defined(KATANA_WITH_INTEROP)
     text += "Interop   IMPORT <file> [LOCAL] | EXPORT <file> | REFS\n"

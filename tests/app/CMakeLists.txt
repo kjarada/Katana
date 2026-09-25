@@ -6,4 +6,5 @@ katana_add_test_suite(app
     LIBS katana_app nlohmann_json::nlohmann_json
     SOURCES
         test_mcp_server.cpp
+        test_session.cpp
 )

@@ -998,6 +998,32 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     QToolBar* surveyBar = makeToolBar("Survey", Qt::TopToolBarArea);
     survey_ = std::make_unique<SurveyWorkbench>(*this, std::move(services), surveyMenu,
                                                 *surveyBar);
+    // Subsurface Utilities (AS 5488): its own section after Survey Coding,
+    // filled by its workbench. The verb is the interpreter's; the dialog's
+    // Run comes back through this window's command line.
+    UtilityServices utilities;
+    utilities.views = views_;
+    utilities.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                  const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    utilities.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    utilities.headless = [this] { return headless_; };
+    utilities.interpret = [this](const std::string& line) {
+        auto reply = interpreter_.run(line);
+        historyCursor_ = static_cast<int>(interpreter_.history().size());
+        return reply;
+    };
+    utilities.runCommand = [this](const QString& line) {
+        // Echoed as a typed line is, and run as runCommandLine runs a typed
+        // UTILITY line - but never handed to a running tool first: a tool
+        // waiting for a text's string would take any typed line for it, and
+        // the dialog's line is never a text. What was being typed on the
+        // command line is left as it was.
+        commandLog_->appendPlainText("> " + line);
+        (void)utilities_->runLine(line);
+    };
+    utilities_ = std::make_unique<UtilityWorkbench>(*this, std::move(utilities), surveyMenu);
 }
 
 void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
@@ -1961,10 +1987,22 @@ void MainWindow::runCommandLine()
     }
     // What is typed is echoed - but an ONLINE KEY's value never is.
     commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // A tool waiting for typed text - a Text's string, a count - takes the
+    // whole line before any verb below, as a transparent ZOOM gives way to it
+    // (tools::isTransparentCommand): "Utility pit" is a label on a services
+    // plan, not a UTILITY line to refuse.
+    const bool toolTakesText = views_->toolTakesText();
     // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
     // workbench's, as the interoperability verbs below are the window's - and
-    // before a running tool, which would take the line for an answer.
-    if (online_ != nullptr && online_->runLine(line)) {
+    // before a running tool at a point or a pick, which would take the line
+    // for an answer.
+    if (online_ != nullptr && !toolTakesText && online_->runLine(line)) {
+        return;
+    }
+    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
+    // through the utilities workbench, which frames what a DRAW added - and
+    // before a running tool, for ONLINE's reason.
+    if (utilities_ != nullptr && !toolTakesText && utilities_->runLine(line)) {
         return;
     }
     // While a tool runs, what is typed is its answer - a point, a distance,
