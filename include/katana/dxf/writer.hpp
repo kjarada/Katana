@@ -65,6 +65,10 @@ struct ExportOptions {
     std::vector<std::string> layers;
     // Added back to every plan coordinate, undoing an import's originShift.
     std::optional<katana::geometry::Vec2> originShift;
+    // The scale paper-sized annotation is written at (docs/annotation.md): a
+    // 2.5 mm text is 2.5 x scale / 1000 model units in the file, since a DXF
+    // TEXT has one height. The application passes its annotation scale.
+    double annotationScale = 1000.0;
 };
 
 struct DxfExport {

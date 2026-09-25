@@ -39,6 +39,10 @@ set(_qt_survey_sources
 # tests: globbed, as they are in the application.
 file(GLOB _qt_plotting_sources CONFIGURE_DEPENDS "${_qt_src}/plotting/*.cpp")
 file(GLOB _qt_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp")
+# The annotation front end (src/katana_qt/annotation/) and its tests: globbed,
+# as it is in the application.
+file(GLOB _qt_annotation_sources CONFIGURE_DEPENDS "${_qt_src}/annotation/*.cpp")
+file(GLOB _qt_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
 add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
@@ -77,6 +81,8 @@ add_executable(katana_qt_widget_tests
     ${_qt_survey_tests}
     ${_qt_plotting_sources}
     ${_qt_plotting_tests}
+    ${_qt_annotation_sources}
+    ${_qt_annotation_tests}
 )
 target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
                                                           "${CMAKE_CURRENT_SOURCE_DIR}")

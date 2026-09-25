@@ -166,6 +166,17 @@ struct TouchesBox {
     {
         return katana::entity::boundingBox(g).intersects(box);
     }
+    // A label by its anchor (and dragged position), which is all of it the
+    // model can place without a scale.
+    bool operator()(const katana::entity::LabelGeometry& g) const
+    {
+        return katana::entity::boundingBox(g).intersects(box);
+    }
+    // A leader by its line, as a polyline is.
+    bool operator()(const katana::entity::LeaderGeometry& g) const
+    {
+        return (*this)(Polyline2{g.vertices, false});
+    }
 
     template <typename Curve> bool crossesAnEdge(const Curve& curve) const
     {

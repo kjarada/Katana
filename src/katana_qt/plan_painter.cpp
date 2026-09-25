@@ -37,6 +37,12 @@
 #include "katana/geometry/chording.hpp"
 #include "katana/geometry/polygon.hpp"
 
+// The annotation system (docs/annotation.md): laid out in katana_cad, painted here.
+#include "annotation/annotation_painter.hpp"
+#include "katana/cad/annotation/label_layout.hpp"
+#include "katana/cad/annotation/leader_draw.hpp"
+#include "katana/cad/annotation/text_layout.hpp"
+
 namespace katana::qt {
 
 namespace cad = katana::cad;
@@ -66,6 +72,26 @@ constexpr int kPaperFontReferencePixels = 100;
 // hundreds of thousands of pixels, one zoom step from a survey's extent,
 // makes the raster engine allocate glyphs larger than any screen.
 constexpr double kMaximumTextPixels = 2000.0;
+
+// How far past its entity's box a paper-sized note, leader or dimension may
+// reach, in millimetres on paper: what the index is asked for beyond the
+// view, so a leader whose line is off the view and whose note is on it is
+// still drawn. Each is then culled by its own laid-out extent.
+constexpr double kAnnotationReachMillimetres = 60.0;
+// Lines kept for the label placer to keep text off: past this many in one
+// paint the rest are not collected, and labels may sit on them - a view that
+// shows this much linework shows labels too small to read anyway.
+constexpr std::size_t kMaximumLinework = 200000;
+
+// A text as every text was before styles: no style, no paper height, the
+// baseline-left anchor, one line. Drawn exactly as it always was, by
+// drawText; anything else goes through the annotation layout.
+bool isPlainText(const katana::entity::TextGeometry& text)
+{
+    return text.style.empty() && text.paperHeight == 0.0 &&
+           text.justify == katana::entity::TextJustify::BottomLeft &&
+           text.text.find('\n') == std::string::npos;
+}
 
 // A symbol stamp larger than this across, in device pixels, is stroked and
 // not cached: a sprite of it would cost more memory than it saves time, and
@@ -208,7 +234,8 @@ class PlanPainter {
                 const PlanPaintOptions& options, PlanPaintCache& cache)
         : painter_(painter), source_(source), frame_(frame), options_(options), cache_(cache),
           library_(source.library != nullptr ? *source.library : noLibrary()),
-          view_(frame.transform), visible_(visibleBox(frame))
+          view_(frame.transform), visible_(visibleBox(frame)),
+          annotationFonts_(options.fontFamily)
     {
         if (cache_.fontFamily_ != options_.fontFamily) {
             cache_.fonts_.clear();
@@ -312,6 +339,17 @@ class PlanPainter {
     void drawHatch(const Polyline2& boundary, const QPolygonF& screen);
     void drawText(const Point2& position, const std::string& text, double height,
                   double rotation);
+    // The annotation system's part of a paint (docs/annotation.md): a laid-out
+    // drawing in the painter's current pen, and the labels' own pass after
+    // the entities, when the placer can see every label in view at once.
+    [[nodiscard]] AnnotationPaintTarget annotationTarget(const QPen& pen) const;
+    void drawAnnotation(const katana::cad::annotation::Drawing& drawing);
+    void drawLabels();
+    // The model a text or leader is resolved against: the source's, or an
+    // empty one for a preview drawn with no model.
+    [[nodiscard]] const katana::entity::Model& annotationModel() const;
+    // The straight pieces of a line, polyline, arc or circle, into linework_.
+    void collectLinework(const katana::entity::Geometry& geometry);
 
     QPainter& painter_;
     const PlanSource& source_;
@@ -356,6 +394,12 @@ class PlanPainter {
     // Scratch for clipping and for arcs, reused across entities.
     katana::geometry::PolylineRuns runs_;
     std::vector<Point2> arcPoints_;
+    // The faces annotation text is set in, and the lines drawn this paint
+    // that labels keep out of (collected by drawEntities when there are
+    // labels to place).
+    AnnotationFonts annotationFonts_;
+    std::vector<Segment2> linework_;
+    bool collectLinework_ = false;
 };
 
 const QFont& PlanPainter::fontFor(double pixels)
@@ -445,6 +489,9 @@ PlanPaintStats PlanPainter::paint()
     }
     if (source_.model != nullptr) {
         drawEntities();
+        if (options_.labels) {
+            drawLabels();
+        }
         if (options_.alignments) {
             drawAlignments();
         }
@@ -833,8 +880,21 @@ void PlanPainter::drawEntities()
     // back to the ordered scan for a zoomed-out repaint, where asking the
     // index for everything would be slower than walking the model once.
     std::vector<katana::geometry::SpatialId> scratch;
+    // A paper-sized note or dimension reaches past its entity's box by its
+    // size at this scale (docs/annotation.md): the index is asked for that
+    // much more, and each is then culled by what it draws.
+    const double annotationReach =
+        katana::entity::annotationModelSize(kAnnotationReachMillimetres, options_.annotationScale);
+    collectLinework_ = options_.labels && options_.avoidLabelCollisions &&
+                       model.labelStyles.size() > 0;
+    linework_.clear();
     cad::detail::forEachCandidate(
-        model, source_.index, visible.inflated(furthestReach), scratch, [&](const Entity& entity) {
+        model, source_.index, visible.inflated(std::max(furthestReach, annotationReach)), scratch,
+        [&](const Entity& entity) {
+            // Labels are placed together, after everything else (drawLabels).
+            if (std::holds_alternative<katana::entity::LabelGeometry>(entity.geometry)) {
+                return;
+            }
             const Resolved& resolved = resolve(entity);
             // cad::isDrawn, with the layer's half answered once per layer.
             if (!entity.visible || !resolved.layerDrawn) {
@@ -852,8 +912,32 @@ void PlanPainter::drawEntities()
             // the box by its reach, for the same reason.
             const bool dimension =
                 std::holds_alternative<katana::entity::DimensionGeometry>(entity.geometry);
-            Box2 drawn = dimension ? cad::detail::queryExtents(model, entity)
-                                   : katana::entity::boundingBox(entity.geometry);
+            // A styled, justified, multi-line or paper-sized text and a leader
+            // are laid out here, once, and culled and drawn from the layout.
+            std::optional<cad::annotation::Drawing> annotation;
+            if (const auto* text = std::get_if<katana::entity::TextGeometry>(&entity.geometry);
+                text != nullptr && !isPlainText(*text)) {
+                annotation = cad::annotation::layoutTextEntity(
+                    model, *text, options_.annotationScale, annotationFonts_.measure());
+            } else if (const auto* leader =
+                           std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
+                annotation = cad::annotation::buildLeader(model, *leader, options_.annotationScale,
+                                                          annotationFonts_.measure());
+            }
+            Box2 drawn;
+            if (annotation) {
+                drawn = annotation->extent;
+            } else if (dimension) {
+                drawn = cad::buildDimension(std::get<katana::entity::DimensionGeometry>(entity.geometry),
+                                            cad::resolveDimensionStyle(model, entity),
+                                            options_.annotationScale)
+                            .extent;
+                if (drawn.empty()) {
+                    drawn = katana::entity::boundingBox(entity.geometry);
+                }
+            } else {
+                drawn = katana::entity::boundingBox(entity.geometry);
+            }
             if (!resolved.display.symbol.empty()) {
                 if (const auto reach = symbolReach.find(entity.style); reach != symbolReach.end()) {
                     drawn = drawn.inflated(reach->second);
@@ -885,6 +969,13 @@ void PlanPainter::drawEntities()
             // Looked up only for a dimension, the one entity that can use it.
             if (dimension) {
                 dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
+            }
+            if (collectLinework_) {
+                collectLinework(entity.geometry);
+            }
+            if (annotation) {
+                drawAnnotation(*annotation);
+                return;
             }
             if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity.geometry);
                 point != nullptr && !display.symbol.empty()) {
@@ -1209,15 +1300,30 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
         }
         void operator()(const katana::entity::TextGeometry& g) const
         {
-            self.drawText(g.position, g.text, g.height, g.rotation);
+            if (isPlainText(g)) {
+                self.drawText(g.position, g.text, g.height, g.rotation);
+                return;
+            }
+            self.drawAnnotation(cad::annotation::layoutTextEntity(
+                self.annotationModel(), g, self.options_.annotationScale,
+                self.annotationFonts_.measure()));
+        }
+        // Labels are placed together by drawLabels, not one at a time.
+        void operator()(const katana::entity::LabelGeometry&) const {}
+        void operator()(const katana::entity::LeaderGeometry& g) const
+        {
+            self.drawAnnotation(cad::annotation::buildLeader(self.annotationModel(), g,
+                                                             self.options_.annotationScale,
+                                                             self.annotationFonts_.measure()));
         }
         void operator()(const katana::entity::DimensionGeometry& g) const
         {
             // Through the shared builder, so this draws exactly what the 3D
-            // view draws and exactly what the cull box covers. Everything is in
-            // MODEL units: a dimension is part of the drawing, not an overlay
-            // on it, so it plots at its size on the ground.
-            const auto drawing = cad::buildDimension(g, self.dimensionStyle_);
+            // view draws and exactly what the cull box covers. A model-unit
+            // style is part of the drawing and plots at its size on the
+            // ground; a paper-sized one is drawn for this paint's scale.
+            const auto drawing =
+                cad::buildDimension(g, self.dimensionStyle_, self.options_.annotationScale);
             if (drawing.empty()) {
                 return;
             }
@@ -1227,7 +1333,12 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
             for (const Segment2& segment : drawing.extensionLines) {
                 line(segment);
             }
-            line(drawing.dimensionLine);
+            if (drawing.hasDimensionLine) {
+                line(drawing.dimensionLine);
+            }
+            for (const std::vector<Point2>& curve : drawing.curves) {
+                self.strokePolyline(curve, false);
+            }
             for (const Segment2& stroke : drawing.arrowStrokes) {
                 line(stroke);
             }
@@ -1402,6 +1513,120 @@ void PlanPainter::drawText(const Point2& position, const std::string& text, doub
     }
     painter_.drawText(QPointF(0.0, 0.0), QString::fromStdString(text));
     painter_.restore();
+}
+
+// ---- annotation -------------------------------------------------------------------------
+
+const katana::entity::Model& PlanPainter::annotationModel() const
+{
+    // A tool's preview is painted with no model; its text is resolved against
+    // an empty one, which has the Standard text style and nothing else.
+    static const katana::entity::Model empty;
+    return source_.model != nullptr ? *source_.model : empty;
+}
+
+AnnotationPaintTarget PlanPainter::annotationTarget(const QPen& pen) const
+{
+    AnnotationPaintTarget target;
+    target.toDevice = [this](const Point2& p) { return toScreen(p); };
+    target.pixelsPerUnit = view_.scale;
+    target.pen = pen;
+    target.colourOf = [this](const katana::entity::Color& colour) {
+        return toQColor(paper() && options_.plot != nullptr ? cad::paperColour(colour, *options_.plot)
+                                                            : colour);
+    };
+    target.background = paper() ? QColor(Qt::white) : options_.screenBackground;
+    return target;
+}
+
+void PlanPainter::drawAnnotation(const cad::annotation::Drawing& drawing)
+{
+    paintAnnotationDrawing(painter_, drawing, annotationTarget(painter_.pen()), annotationFonts_);
+}
+
+void PlanPainter::collectLinework(const katana::entity::Geometry& geometry)
+{
+    if (linework_.size() >= kMaximumLinework) {
+        return;
+    }
+    const auto chord = [&](const Arc2& arc) {
+        // Sixteen chords a turn: the placer asks only whether a text box
+        // crosses the curve, and at a label's size that is the curve.
+        const int count = std::max(4, static_cast<int>(std::ceil(16.0 * std::abs(arc.sweep) /
+                                                                 katana::math::kTwoPi)));
+        Point2 previous = arc.pointAt(0.0);
+        for (int i = 1; i <= count; ++i) {
+            const Point2 next = arc.pointAt(static_cast<double>(i) / count);
+            linework_.push_back(Segment2{previous, next});
+            previous = next;
+        }
+    };
+    if (const auto* line = std::get_if<Segment2>(&geometry)) {
+        linework_.push_back(*line);
+    } else if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
+        const auto& v = polyline->vertices;
+        for (std::size_t i = 0; i + 1 < v.size(); ++i) {
+            linework_.push_back(Segment2{v[i], v[i + 1]});
+        }
+        if (polyline->closed && v.size() > 2) {
+            linework_.push_back(Segment2{v.back(), v.front()});
+        }
+    } else if (const auto* arc = std::get_if<Arc2>(&geometry)) {
+        chord(*arc);
+    } else if (const auto* circle = std::get_if<Circle2>(&geometry)) {
+        chord(Arc2{circle->center, circle->radius, 0.0, katana::math::kTwoPi});
+    }
+}
+
+void PlanPainter::drawLabels()
+{
+    const auto& model = *source_.model;
+    if (model.labelStyles.size() == 0) {
+        return; // no label can have a style, so no label draws
+    }
+    // Every label that is drawn: its own flag and its layer, through the one
+    // visibility rule. Whether it is in view is asked of its pieces, which
+    // are where its target is now, not where it was made.
+    std::vector<const Entity*> labels;
+    model.entities.forEach([&](const Entity& entity) {
+        if (!std::holds_alternative<katana::entity::LabelGeometry>(entity.geometry)) {
+            return;
+        }
+        if (entity.visible && resolve(entity).layerDrawn) {
+            labels.push_back(&entity);
+        }
+    });
+    if (labels.empty()) {
+        return;
+    }
+    cad::annotation::LabelLayoutOptions layoutOptions;
+    layoutOptions.scale = options_.annotationScale;
+    layoutOptions.measure = annotationFonts_.measure();
+    layoutOptions.visible = visible_;
+    layoutOptions.linework = std::move(linework_);
+    layoutOptions.avoidCollisions = options_.avoidLabelCollisions;
+    layoutOptions.horizontal = -frame_.rotation;
+    const cad::annotation::LabelLayout layout =
+        cad::annotation::layoutLabels(model, labels, layoutOptions);
+    stats_.labelsPlaced += layout.placed.size();
+    stats_.labelsDisplaced += layout.displaced;
+    stats_.labelsSuppressed += layout.suppressed;
+
+    const auto penOf = [&](katana::entity::EntityId id) {
+        const Entity* entity = model.entities.find(id);
+        if (!paper() && source_.selection != nullptr && source_.selection->contains(id)) {
+            return QPen(kSelection, 2);
+        }
+        return entity != nullptr ? resolve(*entity).entityPen : painter_.pen();
+    };
+    for (const cad::annotation::PlacedLabel& marks : layout.marksOnly) {
+        paintAnnotationDrawing(painter_, marks.drawing, annotationTarget(penOf(marks.label)),
+                               annotationFonts_);
+    }
+    for (const cad::annotation::PlacedLabel& placed : layout.placed) {
+        paintAnnotationDrawing(painter_, placed.drawing, annotationTarget(penOf(placed.label)),
+                               annotationFonts_);
+    }
 }
 
 // ---- entry points ---------------------------------------------------------------------
@@ -1582,6 +1807,8 @@ katana::core::Status plotPlanToPdf(const QString& path, const katana::cad::PlotS
     options.medium = PlanMedium::Paper;
     options.pixelsPerMillimetre = cad::millimetresToPixels(1.0, settings.dpi);
     options.plot = &settings;
+    // Paper-sized annotation at the plot's own scale (docs/annotation.md).
+    options.annotationScale = settings.scaleDenominator;
     painter.setRenderHint(QPainter::Antialiasing, true);
     (void)paintPlan(painter, source, *frame, options, cache);
     if (!painter.end()) {

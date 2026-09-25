@@ -21,6 +21,8 @@
 
 using katana::core::ErrorCode;
 using katana::entity::DimensionGeometry;
+using katana::entity::LabelGeometry;
+using katana::entity::LeaderGeometry;
 using katana::entity::Geometry;
 using katana::entity::geometryFromBlob;
 using katana::entity::geometryToBlob;
@@ -358,6 +360,8 @@ TEST(GeometryBlobWireFormat, TheKindByteIsPinnedToTheVariantOrder)
         {4, "Circle", Circle2{Point2(0.0, 0.0), 1.0}},
         {5, "Text", TextGeometry{Point2(0.0, 0.0), "x", 2.5, 0.0}},
         {6, "Dimension", DimensionGeometry{Point2(0.0, 0.0), Point2(1.0, 0.0), 0.0, ""}},
+        {7, "Label", LabelGeometry{.target = 1, .style = "S"}},
+        {8, "Leader", LeaderGeometry{.vertices = {Point2(0.0, 0.0), Point2(1.0, 1.0)}}},
     };
 
     ASSERT_EQ(pinned.size(), std::variant_size_v<Geometry>)
@@ -372,7 +376,12 @@ TEST(GeometryBlobWireFormat, TheKindByteIsPinnedToTheVariantOrder)
         const auto blob = geometryToBlob(item.geometry);
         ASSERT_TRUE(blob.ok()) << item.name;
         ASSERT_GE(blob->size(), 2u);
-        EXPECT_EQ(static_cast<std::uint8_t>((*blob)[0]), katana::entity::kBlobVersion);
+        // The kinds version 1 had are written in it; the two added with the
+        // annotation layout exist only in version 2 (geometry_blob.hpp).
+        EXPECT_EQ(static_cast<std::uint8_t>((*blob)[0]),
+                  item.kind <= 6 ? katana::entity::kBlobVersion
+                                 : katana::entity::kBlobVersionAnnotation)
+            << item.name;
         EXPECT_EQ(static_cast<std::uint8_t>((*blob)[1]), item.kind)
             << item.name << ": the on-disk kind byte changed, which reinterprets every "
                             "project already saved";

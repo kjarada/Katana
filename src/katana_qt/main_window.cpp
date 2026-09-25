@@ -170,17 +170,56 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
         }
         Rows operator()(const katana::entity::TextGeometry& g) const
         {
-            return {{"Position", point(g.position)},
-                    {"Text", QString::fromStdString(g.text)},
-                    {"Height", number(g.height)},
-                    {"Rotation", number(g.rotation * katana::math::kRadToDeg) + " deg"}};
+            Rows rows = {{"Position", point(g.position)},
+                         {"Text", QString::fromStdString(g.text)},
+                         {"Height", number(g.height)},
+                         {"Rotation", number(g.rotation * katana::math::kRadToDeg) + " deg"}};
+            if (!g.style.empty()) {
+                rows.push_back({"Text style", QString::fromStdString(g.style)});
+            }
+            if (g.paperHeight > 0.0) {
+                rows.push_back({"Paper height", number(g.paperHeight) + " mm"});
+            }
+            rows.push_back({"Justify", QString::fromUtf8(katana::entity::toString(g.justify))});
+            return rows;
         }
         Rows operator()(const katana::entity::DimensionGeometry& g) const
         {
-            return {{"Start", point(g.start)},
-                    {"End", point(g.end)},
-                    {"Measurement", number(g.measurement())},
-                    {"Offset", number(g.offset)}};
+            Rows rows = {{"Kind", QString::fromUtf8(katana::entity::toString(g.kind))},
+                         {"Start", point(g.start)},
+                         {"End", point(g.end)},
+                         {"Measurement", number(g.measurement())},
+                         {"Offset", number(g.offset)}};
+            if (g.usesVertex()) {
+                rows.push_back({"Vertex", point(g.vertex)});
+            }
+            if (g.startRef.associated() || g.endRef.associated() || g.vertexRef.associated()) {
+                rows.push_back({"Associative", "yes"});
+            }
+            return rows;
+        }
+        Rows operator()(const katana::entity::LabelGeometry& g) const
+        {
+            Rows rows = {{"Label style", QString::fromStdString(g.style)}};
+            if (g.target != 0) {
+                rows.push_back({"Labels", QString::number(g.target)});
+            } else {
+                rows.push_back({"Alignment", QString::fromStdString(g.alignment)});
+            }
+            if (g.part >= 0) {
+                rows.push_back({"Part", QString::number(g.part)});
+            }
+            if (!g.rule.empty()) {
+                rows.push_back({"Rule", QString::fromStdString(g.rule)});
+            }
+            return rows;
+        }
+        Rows operator()(const katana::entity::LeaderGeometry& g) const
+        {
+            return {{"Tip", point(g.vertices.front())},
+                    {"Vertices", QString::number(g.vertices.size())},
+                    {"Text", QString::fromStdString(g.text)},
+                    {"Callout", QString::fromUtf8(katana::entity::toString(g.callout))}};
         }
     };
     return std::visit(Visitor{}, geometry);

@@ -63,6 +63,7 @@
 #include "katana/cad/style_resolver.hpp"
 #include "katana/cad/view_transform.hpp"
 #include "katana/core/error.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/style_library.hpp"
 #include "katana/geometry/point_splat.hpp"
@@ -164,6 +165,19 @@ struct PlanPaintOptions {
     // The face plain text (TextGeometry, dimension labels, the overlay) is
     // drawn in. A library text names its own.
     QString fontFamily = QStringLiteral("Segoe UI");
+    // The annotation scale, 1 : annotationScale (docs/annotation.md): paper-
+    // sized text, labels, leaders and paper-sized dimensions are drawn at
+    // paperMm x annotationScale / 1000 model units. The plan view passes the
+    // document's annotation scale, a plot its sheet's scale and a sheet
+    // viewport its own - never read from a widget.
+    double annotationScale = katana::entity::kDefaultAnnotationScale;
+    // Labels, laid out for this scale by the placer (cad/annotation/
+    // label_layout.hpp), and whether it keeps them apart and off the lines.
+    bool labels = true;
+    bool avoidLabelCollisions = true;
+    // What an annotation's mask is painted in on screen: the plan view's
+    // ground. On paper it is the paper.
+    QColor screenBackground = QColor(0x1e, 0x23, 0x29);
 };
 
 // What one paint did, for a view's statistics and for tests that cannot
@@ -181,6 +195,11 @@ struct PlanPaintStats {
     // how many were drawn: fewer only when the point budget thinned them.
     std::size_t cloudPointsInView = 0;
     std::size_t cloudPointsDrawn = 0;
+    // Label pieces the placer placed, of those how many away from their
+    // first place, and how many found no room (docs/annotation.md).
+    std::size_t labelsPlaced = 0;
+    std::size_t labelsDisplaced = 0;
+    std::size_t labelsSuppressed = 0;
 };
 
 // Sizes of the marks the painter draws that are not the drawing's own: on
