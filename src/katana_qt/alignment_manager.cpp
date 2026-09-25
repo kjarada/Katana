@@ -51,13 +51,38 @@ namespace {
 
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
-// A stored number as the editable grids show it: exactly, the shortest text
-// that reads back as the same double, so writing an unedited cell back
-// changes nothing.
-QString exact(double value) { return qs(katana::core::formatExactReal(value)); }
-
 // A computed number, to the millimetre a table reads in.
 QString fixed3(double value) { return QString::number(value, 'f', 3); }
+
+// The grids' cells, each one number: empty stays empty, a number is written
+// back exactly, and anything else is refused naming its row and column. The
+// cells were once glued into the line as they stood, so a decimal comma
+// ("100,5") or an "x,y" pasted into one cell shifted every number after it
+// into the next field, and the verb took the line without a word.
+Result<QStringList> gridNumbers(const QTableWidget& table, int row, int first, int last,
+                                const QString& rowName)
+{
+    QStringList values;
+    for (int column = first; column <= last; ++column) {
+        const QTableWidgetItem* item = table.item(row, column);
+        const QString text = item != nullptr ? item->text().trimmed() : QString();
+        if (text.isEmpty()) {
+            values << QString();
+            continue;
+        }
+        const auto number = katana::core::parseFiniteDouble(text.toStdString());
+        if (!number) {
+            const QTableWidgetItem* header = table.horizontalHeaderItem(column);
+            return makeError(ErrorCode::InvalidArgument,
+                             (rowName + ": the " + (header != nullptr ? header->text() : "value") +
+                              " '" + text + "' is not a number; type one number, with a "
+                              "decimal point")
+                                 .toStdString());
+        }
+        values << exactNumber(*number);
+    }
+    return values;
+}
 
 QTableWidget* makeTable(QWidget* parent, const QString& objectName, const QStringList& headers,
                         bool editable)
@@ -742,11 +767,11 @@ void AlignmentManagerDialog::Impl::loadHorizontal(const katana::entity::Alignmen
             const int row = static_cast<int>(i);
             piTable->insertRow(row);
             piTable->setItem(row, PiIndex, cell({}, false));
-            piTable->setItem(row, PiEasting, cell(exact(pis[i].point.x), true));
-            piTable->setItem(row, PiNorthing, cell(exact(pis[i].point.y), true));
-            piTable->setItem(row, PiRadius, cell(exact(pis[i].radius), true));
-            piTable->setItem(row, PiSpiralIn, cell(exact(pis[i].spiralIn), true));
-            piTable->setItem(row, PiSpiralOut, cell(exact(pis[i].spiralOut), true));
+            piTable->setItem(row, PiEasting, cell(exactNumber(pis[i].point.x), true));
+            piTable->setItem(row, PiNorthing, cell(exactNumber(pis[i].point.y), true));
+            piTable->setItem(row, PiRadius, cell(exactNumber(pis[i].radius), true));
+            piTable->setItem(row, PiSpiralIn, cell(exactNumber(pis[i].spiralIn), true));
+            piTable->setItem(row, PiSpiralOut, cell(exactNumber(pis[i].spiralOut), true));
         }
         renumberPis();
         loading = false;
@@ -755,7 +780,7 @@ void AlignmentManagerDialog::Impl::loadHorizontal(const katana::entity::Alignmen
     }
     const double start = alignment != nullptr ? alignment->horizontal.startStation : 0.0;
     if (alignmentName != startFor || start != startFrom) {
-        startStation->setText(alignment != nullptr ? exact(start) : QString());
+        startStation->setText(alignment != nullptr ? exactNumber(start) : QString());
         startFor = alignmentName;
         startFrom = start;
     }
@@ -777,9 +802,9 @@ void AlignmentManagerDialog::Impl::loadVertical(const katana::entity::Alignment*
             for (const geo::ProfilePVI& pvi : profile->pvis) {
                 const int row = pviTable->rowCount();
                 pviTable->insertRow(row);
-                pviTable->setItem(row, 0, cell(exact(pvi.station), true));
-                pviTable->setItem(row, 1, cell(exact(pvi.elevation), true));
-                pviTable->setItem(row, 2, cell(exact(pvi.curveLength), true));
+                pviTable->setItem(row, 0, cell(exactNumber(pvi.station), true));
+                pviTable->setItem(row, 1, cell(exactNumber(pvi.elevation), true));
+                pviTable->setItem(row, 2, cell(exactNumber(pvi.curveLength), true));
             }
         }
         loading = false;
@@ -920,7 +945,7 @@ void AlignmentManagerDialog::Impl::useSelection()
     }
     QStringList words;
     for (const geo::Point2& vertex : vertices) {
-        words << exact(vertex.x) + "," + exact(vertex.y);
+        words << exactNumber(vertex.x) + "," + exactNumber(vertex.y);
     }
     points->setText(words.join(' '));
     setStatus(QString("%1 PIs from the selection's vertices.").arg(vertices.size()), false);
@@ -961,11 +986,13 @@ void AlignmentManagerDialog::Impl::applyPis()
 {
     QStringList pis;
     for (int row = 0; row < piTable->rowCount(); ++row) {
-        QStringList values;
-        for (int column = PiEasting; column <= PiSpiralOut; ++column) {
-            const QTableWidgetItem* item = piTable->item(row, column);
-            values << (item != nullptr ? item->text().trimmed() : QString());
+        const auto read =
+            gridNumbers(*piTable, row, PiEasting, PiSpiralOut, QString("PI %1").arg(row));
+        if (!read) {
+            setStatus(qs(read.error().message), true);
+            return;
         }
+        const QStringList& values = *read;
         if (std::all_of(values.begin(), values.end(), [](const QString& v) { return v.isEmpty(); })) {
             continue; // a row added and never filled
         }
@@ -1002,13 +1029,15 @@ void AlignmentManagerDialog::Impl::applyProfile()
 {
     QStringList pvis;
     for (int row = 0; row < pviTable->rowCount(); ++row) {
-        const auto value = [this, row](int column) {
-            const QTableWidgetItem* item = pviTable->item(row, column);
-            return item != nullptr ? item->text().trimmed() : QString();
-        };
-        const QString station = value(0);
-        const QString level = value(1);
-        const QString length = value(2);
+        const auto read =
+            gridNumbers(*pviTable, row, 0, 2, QString("Profile row %1").arg(row + 1));
+        if (!read) {
+            setStatus(qs(read.error().message), true);
+            return;
+        }
+        const QString& station = (*read)[0];
+        const QString& level = (*read)[1];
+        const QString& length = (*read)[2];
         if (station.isEmpty() && level.isEmpty() && length.isEmpty()) {
             continue; // a row added and never filled
         }

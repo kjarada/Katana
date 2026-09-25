@@ -544,7 +544,14 @@ dialog or panel follows"):
   line runs from a table's own signal. They show the stored numbers exactly,
   so applying an edit to one easting writes every other number back
   unchanged. Unapplied edits survive a reload that did not change what they
-  were made to, and a refused Apply keeps them for correcting.
+  were made to, and a refused Apply keeps them for correcting. A cell holds
+  one number, read by `core::parseFiniteDouble` and written back exactly;
+  anything else is refused naming its row and column before a line runs. The
+  cells were once joined into the line as typed, so a decimal comma
+  (`100,5`) or an `x,y` pasted into one cell moved every number after it
+  into the next field - `100,5` in an easting made the PI x=100 y=5 with the
+  northing for its radius - and the verb took it
+  (`AlignmentManager.ACellThatIsNotOneNumberIsRefusedNamingItBeforeAnythingRuns`).
 - **What it shows is the verbs' own.** The setting-out table is
   `cad::settingOutStations`, as `ALIGN STATIONS` prints it; the profile's
   elements, grades, K values (`cad::curveK`: the curve's length over its

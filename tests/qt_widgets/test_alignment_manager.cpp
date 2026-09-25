@@ -374,6 +374,45 @@ TEST(AlignmentManager, AnIncompleteProfileRowIsRefusedBeforeAnythingRuns)
     EXPECT_EQ(status(*f.dialog).toStdString(), "Profile row 2 needs a chainage and a level.");
 }
 
+// A cell is one number. A decimal comma, or an x,y pasted into one cell, was
+// once glued into the line as it stood: "100,5" in the easting made the PI
+// x=100 y=5 and the northing its radius, and the verb took it without a word.
+TEST(AlignmentManager, ACellThatIsNotOneNumberIsRefusedNamingItBeforeAnythingRuns)
+{
+    Fixture f;
+    edit(*f.dialog, "alignmentPiTable", 1, 1, "100,5");
+    click(*f.dialog, "alignmentApplyPis");
+    EXPECT_TRUE(f.executor.lines.empty());
+    EXPECT_EQ(status(*f.dialog).toStdString(),
+              "PI 1: the Easting '100,5' is not a number; type one number, with a decimal point");
+    EXPECT_EQ(f.road()->horizontal.pis[1].point, Point2(100, 0));
+    click(*f.dialog, "alignmentRevertPis");
+    edit(*f.dialog, "alignmentPiTable", 1, 3, "150,5");
+    click(*f.dialog, "alignmentApplyPis");
+    EXPECT_TRUE(f.executor.lines.empty());
+    EXPECT_EQ(status(*f.dialog).toStdString(),
+              "PI 1: the Radius '150,5' is not a number; type one number, with a decimal point");
+    // A number in another spelling is written exactly, as the verb reads it.
+    edit(*f.dialog, "alignmentPiTable", 1, 3, " 5e1 ");
+    click(*f.dialog, "alignmentApplyPis");
+    EXPECT_EQ(f.executor.last().toStdString(), "ALIGN PIS road 0,0 100,0,50 100,100");
+
+    auto* grid = child<QTableWidget>(*f.dialog, "alignmentPviTable");
+    click(*f.dialog, "alignmentAddPvi");
+    click(*f.dialog, "alignmentAddPvi");
+    grid->item(0, 0)->setText("0,5");
+    grid->item(0, 1)->setText("10");
+    grid->item(1, 0)->setText("100");
+    grid->item(1, 1)->setText("12");
+    const std::size_t ran = f.executor.lines.size();
+    click(*f.dialog, "alignmentApplyProfile");
+    EXPECT_EQ(f.executor.lines.size(), ran);
+    EXPECT_EQ(status(*f.dialog).toStdString(),
+              "Profile row 1: the Chainage '0,5' is not a number; type one number, with a "
+              "decimal point");
+    EXPECT_FALSE(f.road()->vertical.has_value());
+}
+
 TEST(AlignmentManager, UnappliedProfileEditsSurviveAnotherEditsReload)
 {
     Fixture f;
