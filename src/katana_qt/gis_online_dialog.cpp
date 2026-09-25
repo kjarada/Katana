@@ -12,6 +12,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -32,6 +33,12 @@ namespace interop = katana::interop;
 
 constexpr int kProviderRole = Qt::UserRole;
 constexpr int kLayerRole = Qt::UserRole + 1;
+// A catalogue result's service address.
+constexpr int kUrlRole = Qt::UserRole;
+// What a headless import gives a service before it cancels (gis_online.cpp,
+// kHeadlessDeadlineSeconds): the Advanced group's starting value, so ticking
+// it changes nothing until the number does.
+constexpr int kDefaultTimeoutSeconds = 600;
 
 QString qs(const std::string& text)
 {
@@ -174,6 +181,21 @@ OnlineDataDialog::OnlineDataDialog(OnlineDialogContext context, QWidget* parent)
     cloud_->setRange(0.0, 100.0);
     cloud_->setValue(20.0);
     cloud_->setSuffix(" % cloud at most");
+    // A time-enabled layer's date: the layer's own (the latest) unless one is
+    // chosen.
+    timeDefault_ = new QCheckBox("Default (latest)", this);
+    timeDefault_->setObjectName("onlineTimeDefault");
+    timeDefault_->setChecked(true);
+    time_ = new QDateEdit(QDate::currentDate(), this);
+    time_->setObjectName("onlineTime");
+    time_->setDisplayFormat("yyyy-MM-dd");
+    time_->setCalendarPopup(true);
+    connect(timeDefault_, &QCheckBox::toggled, time_, [this](bool latest) {
+        time_->setEnabled(timeDefault_->isEnabled() && !latest);
+    });
+    auto* timeRow = new QHBoxLayout;
+    timeRow->addWidget(timeDefault_);
+    timeRow->addWidget(time_, 1);
 
     projectCrs_ = new QLabel(this);
     projectCrs_->setObjectName("onlineProjectCrs");
@@ -199,6 +221,7 @@ OnlineDataDialog::OnlineDataDialog(OnlineDialogContext context, QWidget* parent)
     form->addRow("OpenStreetMap tag:", tag_);
     form->addRow("Scene dates:", datesRow);
     form->addRow("Cloud:", cloud_);
+    form->addRow("Date:", timeRow);
     // The project's coordinate system, and the way to set it: an import needs
     // one, and the dialog suggests the zone of the box being fetched.
     auto* setCrs = new QPushButton("Set Project CRS...", this);
@@ -234,6 +257,55 @@ OnlineDataDialog::OnlineDataDialog(OnlineDialogContext context, QWidget* parent)
     form->addRow("Use CRS:", crs_);
     form->addRow("Key:", keyRow);
 
+    // Advanced: a deadline. A person can always cancel from the status bar;
+    // this is for an import left to run, and for a script's.
+    auto* advanced = new QGroupBox("Advanced", this);
+    advanced->setObjectName("onlineAdvanced");
+    timeoutOn_ = new QCheckBox("Give up after", advanced);
+    timeoutOn_->setObjectName("onlineTimeoutOn");
+    timeout_ = new QSpinBox(advanced);
+    timeout_->setObjectName("onlineTimeout");
+    // The range ONLINE IMPORT's timeout= takes (interop::parseOnlineCommand).
+    timeout_->setRange(1, 86400);
+    timeout_->setValue(kDefaultTimeoutSeconds);
+    timeout_->setSuffix(" s");
+    timeout_->setEnabled(false);
+    connect(timeoutOn_, &QCheckBox::toggled, timeout_, &QSpinBox::setEnabled);
+    auto* advancedRow = new QHBoxLayout(advanced);
+    advancedRow->addWidget(timeoutOn_);
+    advancedRow->addWidget(timeout_);
+    advancedRow->addStretch(1);
+
+    // A catalogue layer's search, in place of the import it cannot do.
+    catalogue_ = new QGroupBox("Search this catalogue for services", this);
+    catalogue_->setObjectName("onlineCatalogue");
+    catalogueSearch_ = new QLineEdit(catalogue_);
+    catalogueSearch_->setObjectName("onlineCatalogueSearch");
+    catalogueSearch_->setPlaceholderText("words, e.g. flood mapping");
+    catalogueRun_ = new QPushButton("Search", catalogue_);
+    catalogueRun_->setObjectName("onlineCatalogueRun");
+    catalogueResults_ = new QTreeWidget(catalogue_);
+    catalogueResults_->setObjectName("onlineCatalogueResults");
+    catalogueResults_->setHeaderLabels({"Title", "Dataset", "Format", "Address"});
+    catalogueResults_->setRootIsDecorated(false);
+    catalogueResults_->setUniformRowHeights(true);
+    catalogueResults_->setMinimumHeight(120);
+    catalogueAdd_ = new QPushButton("Add Service", catalogue_);
+    catalogueAdd_->setObjectName("onlineCatalogueAdd");
+    catalogueAdd_->setToolTip("Ask the chosen service what it offers and add its layers under "
+                              "Custom, as ONLINE CUSTOM <address> does");
+    catalogueAdd_->setEnabled(false);
+    auto* searchRow = new QHBoxLayout;
+    searchRow->addWidget(catalogueSearch_, 1);
+    searchRow->addWidget(catalogueRun_);
+    auto* catalogueLayout = new QVBoxLayout(catalogue_);
+    catalogueLayout->addLayout(searchRow);
+    catalogueLayout->addWidget(catalogueResults_, 1);
+    catalogueLayout->addWidget(catalogueAdd_, 0, Qt::AlignRight);
+    catalogue_->setVisible(false);
+    connect(catalogueResults_, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem* item) { catalogueAdd_->setEnabled(item != nullptr); });
+
     import_ = new QPushButton("Import", this);
     import_->setObjectName("onlineImport");
     import_->setDefault(true);
@@ -251,7 +323,9 @@ OnlineDataDialog::OnlineDataDialog(OnlineDialogContext context, QWidget* parent)
     auto* rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->addWidget(details_);
+    rightLayout->addWidget(catalogue_, 1);
     rightLayout->addLayout(form);
+    rightLayout->addWidget(advanced);
     rightLayout->addStretch(1);
 
     auto* splitter = new QSplitter(this);
@@ -270,6 +344,11 @@ OnlineDataDialog::OnlineDataDialog(OnlineDialogContext context, QWidget* parent)
     connect(tree_, &QTreeWidget::currentItemChanged, this, [this] { showDetails(); });
     connect(import_, &QPushButton::clicked, this, [this] { importChosen(); });
     connect(addCustom_, &QPushButton::clicked, this, [this] { addCustomService(); });
+    connect(catalogueRun_, &QPushButton::clicked, this, [this] { searchCatalogue(); });
+    connect(catalogueSearch_, &QLineEdit::returnPressed, this, [this] { searchCatalogue(); });
+    connect(catalogueAdd_, &QPushButton::clicked, this, [this] { addCatalogueResult(); });
+    connect(catalogueResults_, &QTreeWidget::itemDoubleClicked, this,
+            [this] { addCatalogueResult(); });
     connect(saveKey_, &QPushButton::clicked, this, [this] { saveKey(); });
     connect(close, &QPushButton::clicked, this, &QDialog::close);
 
@@ -367,12 +446,13 @@ void OnlineDataDialog::showDetails()
 {
     const interop::OnlineLayer* layer = chosenLayer();
     import_->setEnabled(layer != nullptr && layer->kind != interop::OnlineLayerKind::Catalogue);
+    catalogue_->setVisible(layer != nullptr && layer->kind == interop::OnlineLayerKind::Catalogue);
     if (layer == nullptr) {
         details_->setText("Choose a layer to see what it is, where it comes from and on what "
                           "terms.");
         for (QWidget* widget : std::initializer_list<QWidget*>{
                  key_, saveKey_, tag_, useDates_, from_, to_, cloud_, resolutionAuto_, resolution_,
-                 targetLayer_}) {
+                 targetLayer_, timeDefault_, time_}) {
             widget->setEnabled(false);
         }
         return;
@@ -394,6 +474,18 @@ void OnlineDataDialog::showDetails()
     html += row("Service", qs(interop::toString(layer->type)) +
                                (layer->layerName.empty() ? QString() : " - " + qs(layer->layerName)));
     html += row("Address", qs(katana::gis::redactUrl(layer->endpoint)));
+    // What ONLINE INFO says of the service, in a person's words: the system
+    // it is asked in, its version, and what one import may take of it.
+    html += row("Service CRS", layer->crs.empty() ? QString("the service's own") : qs(layer->crs));
+    if (!layer->version.empty()) {
+        html += row("Version", qs(layer->version));
+    }
+    if (const QString limits = limitsText(*layer); !limits.isEmpty()) {
+        html += row("Limits", limits);
+    }
+    if (hasTime(*layer)) {
+        html += row("Date", "a time series; the latest unless a date is chosen below");
+    }
     html += row("Coverage", coverage + " (WGS 84)");
     if (layer->resolution) {
         html += row("Resolution", QString::number(*layer->resolution) + " m");
@@ -407,10 +499,10 @@ void OnlineDataDialog::showDetails()
                                                    : "answered " + qs(layer->verified));
     html += "</table>";
     if (layer->kind == interop::OnlineLayerKind::Catalogue) {
-        html += "<p>This is a search, not data: type <tt>ONLINE LAYERS " +
+        html += "<p>This is a search, not data: search it below and add a service it finds, "
+                "or type <tt>ONLINE LAYERS " +
                 qs(layer->providerId).toHtmlEscaped() +
-                " &lt;words&gt;</tt> on the command line, then add a service it finds with Add "
-                "Custom Service.</p>";
+                " &lt;words&gt;</tt> and <tt>ONLINE CUSTOM &lt;address&gt;</tt>.</p>";
     }
     details_->setText(html);
     const bool usesTag = layer->type == interop::OnlineServiceType::Overpass;
@@ -420,6 +512,9 @@ void OnlineDataDialog::showDetails()
     from_->setEnabled(usesDates);
     to_->setEnabled(usesDates);
     cloud_->setEnabled(usesDates);
+    const bool dated = hasTime(*layer);
+    timeDefault_->setEnabled(dated);
+    time_->setEnabled(dated && !timeDefault_->isChecked());
     const bool raster = layer->kind == interop::OnlineLayerKind::Imagery ||
                         layer->kind == interop::OnlineLayerKind::Elevation;
     resolutionAuto_->setEnabled(raster);
@@ -520,6 +615,12 @@ katana::core::Result<interop::OnlineCommand> OnlineDataDialog::command() const
     if (cloud_->isEnabled()) {
         line << "cloud=" + QString::number(cloud_->value());
     }
+    if (time_->isEnabled()) {
+        line << "time=" + time_->date().toString("yyyy-MM-dd");
+    }
+    if (timeoutOn_->isChecked()) {
+        line << "timeout=" + QString::number(timeout_->value());
+    }
     if (!crs_->text().trimmed().isEmpty()) {
         line << "crs=" + crs_->text().trimmed().remove(' ');
     }
@@ -563,6 +664,122 @@ void OnlineDataDialog::addCustomService()
     if (const auto started = context_.addCustom(url); !started) {
         setStatus(qs(started.error().describe()), true);
     }
+}
+
+void OnlineDataDialog::searchCatalogue()
+{
+    const interop::OnlineLayer* layer = chosenLayer();
+    if (layer == nullptr || layer->kind != interop::OnlineLayerKind::Catalogue) {
+        setStatus("Choose a catalogue in the list first.", true);
+        return;
+    }
+    const QString words = catalogueSearch_->text().simplified();
+    if (words.isEmpty()) {
+        setStatus("Type what to search the catalogue for first.", true);
+        return;
+    }
+    // The line the verb would be, read by the verb's own parser, as Import's.
+    auto parsed = interop::parseOnlineCommand(
+        ("ONLINE LAYERS " + qs(layer->providerId) + " " + words).toStdString());
+    if (!parsed) {
+        setStatus(qs(parsed.error().describe()), true);
+        return;
+    }
+    if (!context_.run) {
+        setStatus("nothing here can run a search", true);
+        return;
+    }
+    catalogueResults_->clear();
+    catalogueAdd_->setEnabled(false);
+    // Said first, for the reason importChosen gives.
+    setStatus("Searching " + qs(layer->providerTitle) + " for \"" + words + "\"...");
+    if (const auto started = context_.run(*parsed); !started) {
+        setStatus(qs(started.error().describe()), true);
+    }
+}
+
+void OnlineDataDialog::showCatalogueResults(const std::vector<interop::CkanResource>& found)
+{
+    catalogueResults_->clear();
+    for (const interop::CkanResource& resource : found) {
+        auto* item = new QTreeWidgetItem(
+            catalogueResults_, {qs(resource.title), qs(resource.dataset), qs(resource.format),
+                                qs(katana::gis::redactUrl(resource.url))});
+        item->setData(0, kUrlRole, qs(resource.url));
+        item->setToolTip(0, qs(resource.licence));
+    }
+    catalogueResults_->resizeColumnToContents(2);
+    if (!found.empty()) {
+        catalogueResults_->setCurrentItem(catalogueResults_->topLevelItem(0));
+    }
+    setStatus(found.empty() ? QString("The catalogue found no web service for those words.")
+                            : QString("%1 web service%2 found: choose one and Add Service.")
+                                  .arg(found.size())
+                                  .arg(found.size() == 1 ? "" : "s"));
+}
+
+void OnlineDataDialog::addCatalogueResult()
+{
+    const QTreeWidgetItem* item = catalogueResults_->currentItem();
+    if (item == nullptr) {
+        setStatus("Choose a service in the results first.", true);
+        return;
+    }
+    const QString url = item->data(0, kUrlRole).toString();
+    // Quoted, as the verb's words may be: an address is one word however
+    // the catalogue spelt it.
+    auto parsed =
+        interop::parseOnlineCommand(("ONLINE CUSTOM \"" + url + "\"").toStdString());
+    if (!parsed) {
+        setStatus(qs(parsed.error().describe()), true);
+        return;
+    }
+    if (!context_.run) {
+        return;
+    }
+    // Said first, for the reason importChosen gives.
+    setStatus("Asking " + qs(katana::gis::redactUrl(url.toStdString())) + " what it offers...");
+    if (const auto started = context_.run(*parsed); !started) {
+        setStatus(qs(started.error().describe()), true);
+    }
+}
+
+QString OnlineDataDialog::limitsText(const interop::OnlineLayer& layer)
+{
+    // The same facts, from the same fields, as interop::formatInfo reports.
+    switch (layer.type) {
+    case interop::OnlineServiceType::XyzTiles:
+    case interop::OnlineServiceType::Wmts:
+        return QString("tiles to zoom %1, at most %2 tiles an import")
+            .arg(layer.maxZoom)
+            .arg(layer.maxTiles);
+    case interop::OnlineServiceType::ArcgisQuery:
+    case interop::OnlineServiceType::Wfs:
+    case interop::OnlineServiceType::OgcApiFeatures:
+        return QString("%1 features a page").arg(layer.pageSize);
+    case interop::OnlineServiceType::ArcgisExport:
+    case interop::OnlineServiceType::ArcgisExportImage:
+    case interop::OnlineServiceType::Wms:
+    case interop::OnlineServiceType::Wcs:
+        return QString("at most %1 x %1 pixels a request; a larger area is several")
+            .arg(layer.maxRequestPixels);
+    case interop::OnlineServiceType::Overpass:
+        return QString("at most %1 square kilometres an import").arg(layer.maxAreaKm2);
+    case interop::OnlineServiceType::Stac:
+        return QString("scenes of the last %1 days, cloud at most %2%")
+            .arg(layer.days)
+            .arg(layer.maxCloud);
+    case interop::OnlineServiceType::Cog:
+    case interop::OnlineServiceType::File:
+    case interop::OnlineServiceType::Ckan:
+        break;
+    }
+    return {};
+}
+
+bool OnlineDataDialog::hasTime(const interop::OnlineLayer& layer)
+{
+    return !layer.time.empty() || layer.endpoint.find("{time}") != std::string::npos;
 }
 
 void OnlineDataDialog::saveKey()

@@ -3,14 +3,17 @@
 #include <map>
 
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
 #include "katana/cad/project_crs.hpp"
+#include "katana/gis/reproject.hpp"
 
 namespace katana::qt {
 
@@ -19,6 +22,42 @@ namespace {
 QString qs(const std::string& text) { return QString::fromStdString(text); }
 
 constexpr int kIdRole = Qt::UserRole;
+
+// "151.21, -33.87" (or with blanks between) as a longitude and a latitude;
+// nullopt for anything else. The range is suggestCoordinateSystems's to
+// judge, so it can say which number is wrong.
+std::optional<std::pair<double, double>> parsePlace(const QString& text)
+{
+    static const QRegularExpression separators(QStringLiteral("[,\\s]+"));
+    const QStringList parts = text.trimmed().split(separators, Qt::SkipEmptyParts);
+    if (parts.size() != 2) {
+        return std::nullopt;
+    }
+    bool longitude = false;
+    bool latitude = false;
+    const std::pair<double, double> place{parts[0].toDouble(&longitude),
+                                          parts[1].toDouble(&latitude)};
+    return longitude && latitude ? std::optional(place) : std::nullopt;
+}
+
+// Where the drawing is, as a longitude and a latitude: its centre, taken
+// from the project's system to WGS 84 in the longitude-first order the
+// reprojection keeps (gis/reproject.hpp). nullopt for a project with no
+// system or an empty drawing, which have no place to give.
+std::optional<std::pair<double, double>> drawingPlace(const katana::cad::Document& document)
+{
+    const std::string& crs = document.metadata().coordinateSystem;
+    const katana::geometry::Box2 extent = document.model().entities.bounds();
+    if (crs.empty() || extent.empty()) {
+        return std::nullopt;
+    }
+    const katana::geometry::Point2 centre = extent.center();
+    const auto lonLat = katana::gis::transformPoint(centre.x, centre.y, crs, "EPSG:4326");
+    if (!lonLat) {
+        return std::nullopt;
+    }
+    return std::pair{(*lonLat)[0], (*lonLat)[1]};
+}
 
 } // namespace
 
@@ -53,6 +92,27 @@ ProjectCrsDialog::ProjectCrsDialog(katana::cad::Document& document,
     search_->setPlaceholderText(QStringLiteral("Search: mga 56, gda2020, utm 55s, 27700 ..."));
     search_->setClearButtonEnabled(true);
     layout->addWidget(search_);
+
+    // A place to suggest systems for, as CRS SUGGEST lon,lat does: the one
+    // the dialog was opened with, or else the drawing's centre when the
+    // project's system can say where that is.
+    placeText_ = new QLineEdit(this);
+    placeText_->setObjectName(QStringLiteral("projectCrsPlace"));
+    placeText_->setPlaceholderText(QStringLiteral("longitude, latitude - e.g. 151.21, -33.87"));
+    if (const auto known = place_ ? place_ : drawingPlace(document_)) {
+        placeText_->setText(
+            QString("%1, %2").arg(known->first, 0, 'f', 6).arg(known->second, 0, 'f', 6));
+    }
+    auto* suggestButton = new QPushButton(QStringLiteral("Suggest"), this);
+    suggestButton->setObjectName(QStringLiteral("projectCrsSuggest"));
+    suggestButton->setToolTip(QStringLiteral("List the systems that suit this place first"));
+    auto* placeRow = new QHBoxLayout;
+    placeRow->addWidget(new QLabel(QStringLiteral("Suggest for a place:"), this));
+    placeRow->addWidget(placeText_, 1);
+    placeRow->addWidget(suggestButton);
+    layout->addLayout(placeRow);
+    connect(suggestButton, &QPushButton::clicked, this, [this] { (void)suggest(); });
+    connect(placeText_, &QLineEdit::returnPressed, this, [this] { (void)suggest(); });
 
     list_ = new QTreeWidget(this);
     list_->setObjectName(QStringLiteral("projectCrsList"));
@@ -184,6 +244,29 @@ void ProjectCrsDialog::recheck()
         }
     }
     check_->setText(line);
+}
+
+bool ProjectCrsDialog::suggest()
+{
+    const auto place = parsePlace(placeText_->text());
+    if (!place) {
+        check_->setText(QStringLiteral("Not a place: type a longitude and a latitude, e.g. "
+                                       "151.21, -33.87"));
+        return false;
+    }
+    if (auto valid = katana::cad::suggestCoordinateSystems(place->first, place->second); !valid) {
+        check_->setText(QStringLiteral("Not a place: ") + qs(valid.error().message));
+        return false;
+    }
+    place_ = place;
+    // The suggestions head the whole list, which a search would narrow.
+    if (search_->text().isEmpty()) {
+        fill(QString());
+    } else {
+        search_->clear(); // fills
+    }
+    recheck();
+    return true;
 }
 
 QString ProjectCrsDialog::text() const { return text_->text(); }
