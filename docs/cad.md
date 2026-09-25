@@ -210,6 +210,8 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LINETYPE MERGE <from> <into>` | repoints every layer and style, then deletes `from`; `into` must be a model linetype |
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
+| `HATCH SET <name> angle spacing [angle spacing ...]` or `HATCH SET <name> SOLID` | replaces a pattern's families (degrees, model units) or makes it a solid fill, one undo step; keeps its description and each family's offset by position, none being typeable; an unchanged SET is no step; `none` is refused a fill. The Hatch Patterns tab's Save (`docs/desktop.md`) |
+| `STYLE NEW <name> [field value]` | a style made with one field set as `STYLE SET` would set it, one undo step - the Hatch Patterns tab's New Style Using This (`STYLE NEW name HATCH pattern`); a second word that is no field is still refused as a name that wanted quotes |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 | `MODIFY [SELECTION\|DRAWING\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter, the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
 
