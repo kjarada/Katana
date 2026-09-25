@@ -9,8 +9,12 @@
 #include <string>
 #include <utility>
 
+#include "katana/cad/annotation/leader_draw.hpp"
 #include "katana/cad/annotation/text_layout.hpp"
+#include "katana/cad/selection.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/text_block.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad::annotation {
@@ -356,16 +360,23 @@ void areaCandidates(const LabelPiece& piece, const LabelStyle& style, double hei
 {
     const Vec2 x = unit(horizontal);
     const Vec2 y = x.perpendicular();
-    out.push_back(Candidate{piece.anchor, horizontal, TextJustify::MiddleCentre, false, true});
     if (!style.displace) {
+        // Where the style puts it, over a mask if a line runs through.
+        out.push_back(Candidate{piece.anchor, horizontal, TextJustify::MiddleCentre, false, true});
         return;
     }
-    // Stepped a line up and down, then sideways: still inside most lots.
+    // Clear of every line first: the interior point, then stepped a line up
+    // and down and sideways - still inside most lots. Only when none of those
+    // is clear does the interior point take the text over a mask, which hides
+    // what it covers: a pit or a kerb inside the lot drawn out of sight
+    // before its time.
+    out.push_back(Candidate{piece.anchor, horizontal, TextJustify::MiddleCentre, false, false});
     for (const auto& [dx, dy] : {std::pair{0.0, 1.5}, std::pair{0.0, -1.5}, std::pair{3.0, 0.0},
                                  std::pair{-3.0, 0.0}, std::pair{0.0, 3.0}, std::pair{0.0, -3.0}}) {
         out.push_back(Candidate{piece.anchor + (x * dx + y * dy) * height, horizontal,
-                                TextJustify::MiddleCentre, false, true});
+                                TextJustify::MiddleCentre, false, false});
     }
+    out.push_back(Candidate{piece.anchor, horizontal, TextJustify::MiddleCentre, false, true});
 }
 
 void stationCandidates(const LabelPiece& piece, const LabelStyle& style, double tick, double gap,
@@ -429,6 +440,120 @@ bool convexOverlap(const std::vector<Point2>& a, const std::vector<Point2>& b)
         return false;
     }
     return !separated(a, b) && !separated(b, a);
+}
+
+namespace {
+
+void appendPath(const std::vector<Point2>& path, bool closed, std::vector<Segment2>& out,
+                std::size_t limit)
+{
+    for (std::size_t i = 0; i + 1 < path.size() && out.size() < limit; ++i) {
+        out.push_back(Segment2{path[i], path[i + 1]});
+    }
+    if (closed && path.size() > 2 && out.size() < limit) {
+        out.push_back(Segment2{path.back(), path.front()});
+    }
+}
+
+void appendBox(const std::vector<Point2>& box, std::vector<Segment2>& out, std::size_t limit)
+{
+    appendPath(box, true, out, limit);
+    if (box.size() == 4 && out.size() + 2 <= limit) {
+        out.push_back(Segment2{box[0], box[2]});
+        out.push_back(Segment2{box[1], box[3]});
+    }
+}
+
+} // namespace
+
+void appendKeepOut(const Drawing& drawing, std::vector<Segment2>& out, std::size_t limit)
+{
+    for (const auto& stroke : drawing.strokes) {
+        appendPath(stroke, false, out, limit);
+    }
+    for (const auto& outline : drawing.outlines) {
+        appendPath(outline, true, out, limit);
+    }
+    for (const auto& box : drawing.textBoxes) {
+        appendBox(box, out, limit);
+    }
+}
+
+void appendKeepOut(const DimensionDrawing& dimension, std::vector<Segment2>& out, std::size_t limit)
+{
+    for (const Segment2& line : dimension.extensionLines) {
+        if (out.size() < limit) {
+            out.push_back(line);
+        }
+    }
+    if (dimension.hasDimensionLine && out.size() < limit) {
+        out.push_back(dimension.dimensionLine);
+    }
+    for (const auto& curve : dimension.curves) {
+        appendPath(curve, false, out, limit);
+    }
+    if (dimension.text.empty() || !(dimension.textHeight > 0.0)) {
+        return;
+    }
+    // The figures' box from the baseline's left end, as the dimension draws
+    // them: its estimated width, and a quarter height of room either side.
+    const double width = katana::entity::estimatedWidth(dimension.text) * dimension.textHeight;
+    const Vec2 along = unit(dimension.textRotation);
+    const Vec2 up = along.perpendicular();
+    const double margin = 0.25 * dimension.textHeight;
+    const Point2 corner = dimension.textAnchor - along * margin - up * margin;
+    const Vec2 x = along * (width + 2.0 * margin);
+    const Vec2 y = up * (dimension.textHeight + 2.0 * margin);
+    appendBox({corner, corner + x, corner + x + y, corner + y}, out, limit);
+}
+
+void appendLinework(const katana::entity::Geometry& geometry, std::vector<Segment2>& out,
+                    std::size_t limit)
+{
+    const auto chord = [&](const katana::geometry::Arc2& arc) {
+        const int count = std::max(4, static_cast<int>(std::ceil(16.0 * std::abs(arc.sweep) /
+                                                                 katana::math::kTwoPi)));
+        Point2 previous = arc.pointAt(0.0);
+        for (int i = 1; i <= count && out.size() < limit; ++i) {
+            const Point2 next = arc.pointAt(static_cast<double>(i) / count);
+            out.push_back(Segment2{previous, next});
+            previous = next;
+        }
+    };
+    if (const auto* line = std::get_if<Segment2>(&geometry)) {
+        if (out.size() < limit) {
+            out.push_back(*line);
+        }
+    } else if (const auto* polyline = std::get_if<katana::geometry::Polyline2>(&geometry)) {
+        appendPath(polyline->vertices, polyline->closed, out, limit);
+    } else if (const auto* arc = std::get_if<katana::geometry::Arc2>(&geometry)) {
+        chord(*arc);
+    } else if (const auto* circle = std::get_if<katana::geometry::Circle2>(&geometry)) {
+        chord(katana::geometry::Arc2{circle->center, circle->radius, 0.0, katana::math::kTwoPi});
+    }
+}
+
+std::vector<Segment2> labelKeepOut(const katana::entity::Model& model, double scale,
+                                   const TextMeasure& measure, std::size_t limit)
+{
+    std::vector<Segment2> out;
+    model.entities.forEach([&](const Entity& entity) {
+        if (out.size() >= limit || std::holds_alternative<LabelGeometry>(entity.geometry) ||
+            !isDrawn(model, entity, kNoLayerOverrides)) {
+            return;
+        }
+        appendLinework(entity.geometry, out, limit);
+        if (const auto* text = std::get_if<katana::entity::TextGeometry>(&entity.geometry)) {
+            appendKeepOut(layoutTextEntity(model, *text, scale, measure), out, limit);
+        } else if (const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry)) {
+            appendKeepOut(buildLeader(model, *leader, scale, measure), out, limit);
+        } else if (const auto* dimension =
+                       std::get_if<katana::entity::DimensionGeometry>(&entity.geometry)) {
+            appendKeepOut(buildDimension(*dimension, resolveDimensionStyle(model, entity), scale),
+                          out, limit);
+        }
+    });
+    return out;
 }
 
 std::vector<const Entity*> labelEntities(const katana::entity::Model& model)
