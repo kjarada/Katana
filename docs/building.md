@@ -44,11 +44,14 @@ ctest --preset debug            # every test, output shown on failure
 | `relwithdebinfo` | RelWithDebInfo | - |
 | `sanitize` | Debug | `KATANA_ENABLE_SANITIZERS=ON`, `KATANA_BUILD_QT_APP=OFF`, `KATANA_BUILD_BENCHMARKS=OFF` |
 | `tidy` | Debug | `KATANA_ENABLE_CLANG_TIDY=ON`, `KATANA_ENABLE_CPPCHECK=ON` |
-| `linux-debug` | Debug | system packages instead of MSYS2, on hosts other than Windows |
+| `linux-debug` | Debug | the Linux toolchain prefix instead of MSYS2 ("Linux", below) |
+| `linux-release` | Release | as `linux-debug` |
+| `linux-relwithdebinfo` | RelWithDebInfo | as `linux-debug` |
 | `linux-sanitize` | Debug | as `linux-debug`, with `KATANA_ENABLE_SANITIZERS=ON` |
 
 The Windows presets set the compiler to `C:/msys64/ucrt64/bin/g++.exe` and
-`CMAKE_PREFIX_PATH` to `C:/msys64/ucrt64`; every preset uses Ninja and exports
+`CMAKE_PREFIX_PATH` to `C:/msys64/ucrt64`; the Linux ones name the toolchain
+file `cmake/toolchains/katana-linux.cmake`. Every preset uses Ninja and exports
 `compile_commands.json`. Each has a build and a test preset of the same name
 (the test preset for `tidy` excepted).
 
@@ -64,6 +67,73 @@ ctest --test-dir build/wt -j 8
 With no `CMAKE_BUILD_TYPE` the root `CMakeLists.txt` chooses RelWithDebInfo.
 Judge a build by its exit code, never by filtering its output ("Working
 rules" in `docs/architecture.md`).
+
+## Linux
+
+Katana builds, and its whole suite passes, on Linux x86-64. What makes that
+take one command is a toolchain of its own, because distributions lag the
+compiler this code needs: Ubuntu 24.04 ships GCC 14 (no `#embed`), CGAL 5.6
+(no `Constraint_id::index`) and PROJ 9.4, and each fails the build somewhere.
+
+```sh
+python3 tools/setup_linux_toolchain.py      # once: into /opt/katana-toolchain, or $KATANA_TOOLCHAIN
+cmake --preset linux-release
+cmake --build --preset linux-release
+ctest --preset linux-release -j 4
+```
+
+**The toolchain** (`tools/setup_linux_toolchain.py`) is one prefix of
+conda-forge packages: GCC 16.2 (the version MSYS2 gives the Windows build),
+CMake, Ninja, clang-format, Qt 6, CGAL, Eigen, PROJ, GDAL, PDAL, SQLite,
+nlohmann-json, GoogleTest and Google Benchmark. It is solved and installed by
+py-rattler, from PyPI, so it needs neither conda nor root beyond write access
+to the prefix, and it reaches only `conda.anaconda.org` and `pypi.org`. The
+solve is frozen at a date (`SNAPSHOT` in the script), so every machine gets
+the same versions until that date is moved; a prefix whose stamp matches is
+left alone, so running it again takes a second. On 2026-09-26 the snapshot
+resolved to GCC 16.2.0, Qt 6.11.2, CGAL 6.1.1, PROJ 9.8.1, GDAL 3.13.2,
+PDAL 2.10.1, Eigen 3.4.0, GoogleTest 1.18.0 and Google Benchmark 1.9.5.
+
+**The toolchain file** `cmake/toolchains/katana-linux.cmake`, which the
+`linux-*` presets name, points CMake at that prefix: its compilers, its
+packages first on `CMAKE_PREFIX_PATH`, and its `lib/` as the programs'
+run-time path, so they load its libstdc++, Qt, GDAL and PROJ without an
+`LD_LIBRARY_PATH`. A missing prefix fails the configure, saying how to make
+it, rather than falling back to the system compiler, which configures cleanly
+and then fails in half a dozen files. Without a preset:
+`-DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/katana-linux.cmake`.
+
+**GoogleTest and Google Benchmark** come from the prefix too: the toolchain
+file sets `KATANA_FIND_TEST_FRAMEWORKS`, which makes
+`cmake/KatanaThirdParty.cmake` find them with `find_package` instead of
+downloading them, so a Linux configure needs no network. The Windows build
+leaves it off and keeps its pinned downloads.
+
+**PROJ's data.** In a relocated prefix PROJ's compiled-in search path is
+rewritten at install time, and with PDAL loaded - in the application and in
+every `katana_io` test - PROJ then opened its data directory as `proj.db` and
+as each grid: GDAL identified no coordinate system, and PROJ called a grid
+that is not installed available, so a transformation chose it and failed.
+Katana therefore looks for PROJ's data beside the loaded `libproj`
+(`include/katana/core/library_data.hpp`), as it already looks for GDAL's
+beside the GDAL DLL on Windows, and hands it to each PROJ user's own search
+path: its own contexts, and GDAL's (so PDAL's). An explicit `PROJ_DATA` still
+wins, and a distribution's PROJ, whose compiled-in path is right, is left to
+it.
+
+What is Windows-only: `KATANA_DEPLOY_RUNTIME` and the `bundle` and `package`
+targets (the Linux build tree runs from its run-time path), and the
+customisation compiled in from `resources/customisation/`, which is
+third-party material kept out of the repository - the tests that need it
+skip without it, on every platform.
+
+**Claude Code cloud sessions** run `.claude/hooks/session-start.sh` when they
+start: it runs the setup script into `/opt/katana-toolchain`, puts the
+prefix's `cmake`, `ctest`, `ninja` and `clang-format` on `PATH`, configures
+`build/linux-release`, and tells the session how to build and test. The
+container is kept after the hook, so the toolchain is downloaded once and
+every later session finds it current. The hook does nothing in a local
+session.
 
 ## Options
 

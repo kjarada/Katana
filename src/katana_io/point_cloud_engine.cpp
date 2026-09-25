@@ -5,6 +5,7 @@
 #include <string>
 
 #include "katana/core/text.hpp"
+#include "proj_search_paths.hpp"
 
 #include <pdal/io/BufferReader.hpp>
 #include <pdal/Dimension.hpp>
@@ -31,6 +32,7 @@ auto guarded(Callable&& callable, ErrorCode code, const char* what)
     -> decltype(callable())
 {
     try {
+        katana::io_detail::pointGdalAtProjData();
         return callable();
     } catch (const std::exception& error) {
         return makeError(code, what, error.what());
