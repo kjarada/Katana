@@ -1,0 +1,5 @@
+{"providers": [{"id": "headless-local", "title": "Headless check (local files)", "group": "Global",
+  "licence": "test licence", "attribution": "test attribution",
+  "services": [{"id": "files", "title": "Local files", "type": "file", "crs": "EPSG:4326",
+    "endpoint": "file://@KATANA_ONLINE_TEST_DATA_URL@/arcgis_query_page1.geojson",
+    "layers": [{"id": "lots", "title": "Four lots", "kind": "vector"}]}]}]}
