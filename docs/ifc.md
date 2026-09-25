@@ -20,10 +20,14 @@ IFC 4.3 made for survey elements and which claims no more than is known.
 
 ## Using it
 
-From `katana_cli` (the window has no menu entry yet - "Not done"):
+In the window, File > Import IFC and File > Export IFC (below, "In the
+window"); a .ifc also goes through File > Import, a path given to the window
+and Export Vector's IFC filter. On either command line - `katana_cli`, and so
+`katana_mcp`, and the window's own - the verbs:
 
 ```
-EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>] [SPACING <m>] [NODRAWING]
+EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>] [RULES <rules.csv>]
+                  [SPACING <m>] [NODRAWING]
 IMPORT <file.ifc> [LOCAL]
 ```
 
@@ -33,19 +37,63 @@ katana_cli -c "EXPORT services.ifc UTILITIES samples/utilities/schedule_tfnsw.cs
 katana_cli -c "IMPORT site.ifc" -c "ALIGN LIST"
 ```
 
+The grammar is one function both front ends call
+(`ifc::parseExportArguments`, `ifc::parseImportArguments` in
+`include/katana/ifc/front_end.hpp`), as are reading the files an export names
+(`ifc::readExportFiles`) and the GlobalId namespace, so the same line writes
+the same file in either.
+
 EXPORT writes the drawing's entities and alignments, georeferenced by the
 project's coordinate system (`CRS SET`). UTILITIES adds an investigation in
 the schedule format of `docs/subsurface_utilities.md`; SCHEMA names the
-delivery schema it was written to (`UTILITY CHECK`'s schema file); SPACING is
+delivery schema it was written to (`UTILITY CHECK`'s schema file); RULES a
+project's classification rules ("Classification rules", below); SPACING is
 the longest detected spacing that keeps QL-B (10 m by default); NODRAWING
 leaves the drawing out. The report counts what was written by class, and
 every warning.
 
 IMPORT brings a file's alignments, elements and annotations in as one
 undoable step; LOCAL moves them to sit at the origin, as the other importers'
-LOCAL does. The command line holds no surfaces, so a terrain in the file is
-counted and not kept; `ifc::readIfc` returns it for a caller that can.
-`src/katana_app/ifc_verbs.cpp` is the whole of the command-line side.
+LOCAL does - by the corner of everything the file brings, alignments and
+surfaces included (`IfcImport::bounds`). `katana_cli` holds no surfaces, so a
+terrain in the file is counted and not kept there; the window keeps it.
+`src/katana_app/ifc_verbs.cpp` is the whole of `katana_cli`'s side.
+
+### In the window
+
+File > Export IFC is a dialog (`src/katana_qt/ifc_dialogs.hpp`, `docs/desktop.md`)
+of what the verb takes and what only the window has: the file; the drawing's
+entities (or only the selected ones), its alignments and the session's
+surfaces, each with its count; the utility schedule, its delivery schema and
+the detected spacing; a rules file, which Save Default Rules starts from the
+defaults; and whether the file will be georeferenced, from the project's
+coordinate system. Its table previews the file: for each layer, service,
+alignment and surface, how many objects become which class, in which system,
+and why. That table is the writer's own account (`ifc::IfcExport::tally`,
+filled as each object is written, by writing the file in memory), so what a
+person checks before writing is exactly what is written. Four of its rows for
+the scenario with the sample schedule
+(`qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless`):
+
+| From | Objects | IFC class | System | Why |
+|---|---|---|---|---|
+| layer Survey/Kerb | 1 | IfcKerb NOTDEFINED | | rule kerb |
+| layer Stormwater/Pits | 1 | IfcDistributionChamberElement INSPECTIONPIT | STORMWATER | rule pit |
+| layer Survey/Points | 1 | IfcAnnotation TEXT | | no rule: a text |
+| service E1 | 3 | IfcCableCarrierSegment CONDUITSEGMENT | ELECTRICAL | a graded segment: configuration "4 x 100 mm conduits" |
+
+What is not written is accounted for too: a label is "not written", "a
+label: labels are not exported".
+
+File > Import IFC reads a file's description first (Describe: schema,
+coordinate system, classes, alignments, surfaces) and imports what is ticked -
+alignments, elements, surfaces - moved to the origin or not, with the curve
+tolerance. A file far from the drawing is shifted alongside or kept, as every
+import asks; a file naming an EPSG code gives the project its coordinate
+system when the project has none (asked, or answered in the dialog), as a step
+of its own. Terrain comes in as surfaces of the session, which Export IFC
+writes out again.
+
 
 ## Export: what goes where
 
@@ -204,7 +252,7 @@ pit on a "STORMWATER PITS" layer is in STORMWATER without a rule per service
 (`ifc::serviceSystemFor`). What no rule names is an `IfcAnnotation` of its
 kind: SURVEY for a point, or a line with heights or a survey code; TEXT,
 DIMENSION, LEADER; NOTDEFINED for other linework. The rules are data
-(`ExportOptions::rules`): a project whose layers are named otherwise passes
+(`ExportOptions::rules`, and a RULES file: "Classification rules" below): a project whose layers are named otherwise passes
 its own, which replace the defaults, and a rule naming a class the export does
 not write, or USERDEFINED without saying what, is refused.
 `IfcBuildingElementProxy` is written only when such a rule asks for it.
@@ -229,6 +277,35 @@ headwall USERDEFINED "HEADWALL"), from its lowest connected invert to its top;
 a house connection an `IfcPipeFitting` JUNCTION; all in one
 `IfcDistributionSystem` per string, STORMWATER unless its words say otherwise.
 
+### Classification rules
+
+A project whose layers are named otherwise than the defaults expect writes
+its own rules - a CSV file, a rule a row, the columns found by name
+(`ifc::parseClassificationRules`):
+
+```
+rule,words,kinds,class,predefined_type,object_type,system
+light pole,POLE*;LP;LIGHTING,Point,IfcColumn,COLUMN,,
+headwall,HEADWALL*;HW,Point;Circle,IfcDistributionChamberElement,USERDEFINED,HEADWALL,STORMWATER
+```
+
+`words` are separated by ';' and matched as the defaults' are; `kinds` limit
+a rule to Point, Line, Arc, Polyline, Circle, Text, Dimension, Label or
+Leader, and are empty for any; `system` names the distribution system an
+element serves. A file's rules are tried BEFORE the defaults, so a project
+names only its exceptions (`samples/ifc/classification_rules.csv`:
+`cli.ifc_a_projects_rules_classify_what_the_defaults_would_not`). Everything
+that would make an invalid file is refused when the file is read, naming
+its line: a class the export does not write, a predefined type the class does
+not have, USERDEFINED without an object type. The predefined types are the
+schema's own, generated from IfcOpenShell's IFC4X3_ADD2
+(`tools/ifc_product_classes.py --predefined`,
+`src/katana_ifc/predefined_types.inc`), and every default rule and service
+class is checked against them
+(`IfcRulesFile.EveryClassTheExportChoosesIsOneTheSchemaHas`). Save Default
+Rules in the export dialog writes the defaults
+(`ifc::formatClassificationRules`) as a starting point.
+
 ### Surfaces
 
 Each surface passed in is an `IfcGeographicElement` TERRAIN whose `Body` is an
@@ -238,8 +315,8 @@ Each surface passed in is an `IfcGeographicElement` TERRAIN whose `Body` is an
 
 Every GlobalId is made from a key that names the object - "entity/41",
 "alignment/MC01/horizontal/3" - within a namespace that names the project
-(`ExportOptions::guidNamespace`; the command line passes the project's name and
-creation time), by two 64-bit FNV-1a hashes mixed and encoded in IFC's base
+(`ExportOptions::guidNamespace`; both front ends pass the project's name and
+creation time, `ifc::guidNamespaceFor`), by two 64-bit FNV-1a hashes mixed and encoded in IFC's base
 64 (`ifc::guidFor`). The same project exported twice gives each object the
 same GlobalId, so a consumer can track an object across issues; two projects
 give different ones. The writer reads no clock and no random source: the same
@@ -318,6 +395,11 @@ mistake in the writer and the same mistake in the reader cannot agree:
   alone, draws none. GRP001 raises an exception of its own on any
   `IfcDistributionSystem` (it looks up the relationship by the exact name
   `IfcGroup`, not its subtypes); that is the rule's defect, not the file's.
+- **The window's files**: the export dialog's, the typed EXPORT's and the
+  surfaces round trip's (the `qt_ifc_*_headless` checks) give **0 findings**
+  too - 1097, 1097 and 58 instances - and
+  `qt_ifc_the_windows_export_is_valid_to_ifcopenshell` checks the first where
+  IfcOpenShell is installed.
 - **Import**: all 46 files of buildingSMART's IFC 4.3 sample models
   (`IFC4.3.x-sample-models` at 50e6c5c) import without error by hand; the
   railway sample's alignment is reconstructed to 4 PIs, and the UTM and
@@ -326,8 +408,6 @@ mistake in the writer and the same mistake in the reader cannot agree:
 
 ## Not done
 
-- **The desktop application** has no File > Import/Export entry for IFC
-  yet; the command line (`katana_cli`, and so `katana_mcp`) has both verbs.
 - **Solids** are not read beyond swept disks and triangulated surfaces:
   Katana has no solid entity, so an extruded wall or a B-rep comes in as a
   point at its placement with its properties.

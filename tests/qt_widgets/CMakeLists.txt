@@ -80,6 +80,9 @@ add_executable(katana_qt_widget_tests
     # File > Project Coordinate System (test_project_crs_dialog).
     ${_qt_src}/project_crs_dialog.cpp
     test_project_crs_dialog.cpp
+    # File > Import IFC and Export IFC (test_ifc_dialogs).
+    ${_qt_src}/ifc_dialogs.cpp
+    test_ifc_dialogs.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}
@@ -97,10 +100,11 @@ target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
 # katana_surveyio and katana_survey: the survey pages read and reduce field files.
 target_link_libraries(katana_qt_widget_tests PRIVATE
     katana_cad katana_interop katana_render katana_archive12d katana_survey katana_surveyio
-    Qt6::Widgets Qt6::PrintSupport GTest::gtest)
+    katana_ifc Qt6::Widgets Qt6::PrintSupport GTest::gtest)
 target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
-    KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data")
+    KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data"
+    KATANA_SAMPLES="${PROJECT_SOURCE_DIR}/samples")
 katana_target_defaults(katana_qt_widget_tests)
 # The 3D view hosts the GPU renderer where it is built, so the widget tests
 # compile what the application does; offscreen, the rules choose software.

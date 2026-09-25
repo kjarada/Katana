@@ -529,6 +529,7 @@ class DrawingWriter {
         if (entity.type() == EntityType::Label) {
             ++labelsSkipped_;
             ++b_.report().entitiesSkipped;
+            b_.tally("layer " + entity.layer, {}, {}, "a label: labels are not exported");
             return;
         }
         const EntityClass classified = classifyEntity(entity, rules_);
@@ -538,6 +539,7 @@ class DrawingWriter {
             ++b_.report().entitiesSkipped;
             b_.warn(std::string(entity::toString(entity.type())) + " " + std::to_string(entity.id) +
                     " has no extent to write and is not written");
+            b_.tally("layer " + entity.layer, {}, {}, "nothing to draw");
             return;
         }
 
@@ -574,6 +576,10 @@ class DrawingWriter {
         const Id product = b_.product(classified.ifcClass, key, nameOf(entity), classified.rule,
                                       b_.productShape({representation}), std::to_string(entity.id));
         ++b_.report().entitiesWritten;
+        b_.tally("layer " + entity.layer, classified.ifcClass, classified.system,
+                 classified.rule.empty()
+                     ? "no rule: a " + core::lowered(entity::toString(entity.type()))
+                     : "rule " + classified.rule);
 
         if (!classified.system.empty()) {
             systems_[{entity.layer, classified.system}].push_back(product);
@@ -703,10 +709,12 @@ class DrawingWriter {
                                              b_.productShape({representation}),
                                              std::to_string(line.id)));
                 ++b_.report().entitiesWritten;
+                b_.tally("layer " + line.layer, {"IfcPipeSegment", "RIGIDSEGMENT", {}}, system,
+                         "12d drainage string, its pipes not given: one pipe along it");
             }
         } else {
             for (std::size_t i = 0; i < pipes; ++i) {
-                members.push_back(writePipe(line, i, shape, heights, flow, invertAt, key));
+                members.push_back(writePipe(line, i, shape, heights, flow, invertAt, key, system));
             }
             ++b_.report().entitiesWritten;
         }
@@ -716,7 +724,7 @@ class DrawingWriter {
             if (!std::holds_alternative<entity::PointGeometry>(part->geometry)) {
                 continue;
             }
-            members.push_back(writePit(*part, shape, invertAt));
+            members.push_back(writePit(*part, shape, invertAt, system));
             handled_.insert(part->id);
             ++b_.report().entitiesWritten;
         }
@@ -737,7 +745,8 @@ class DrawingWriter {
 
     Id writePipe(const Entity& line, std::size_t index, const geometry::Polyline2& shape,
                  const std::vector<std::optional<double>>& heights, std::optional<double> flow,
-                 std::vector<std::optional<double>>& invertAt, const std::string& key)
+                 std::vector<std::optional<double>>& invertAt, const std::string& key,
+                 const std::string& system)
     {
         const std::string prefix = "pipe." + std::to_string(index + 1) + ".";
         const auto diameter = number(line.properties, prefix + "diameter");
@@ -806,6 +815,7 @@ class DrawingWriter {
             pipeClass, pipeKey,
             pipeName.empty() ? nameOf(line) + " pipe " + std::to_string(index + 1) : pipeName, type,
             b_.productShape(representations), pipeName);
+        b_.tally("layer " + line.layer, pipeClass, system, "12d drainage pipe");
 
         PropertyList common;
         common.identifier("Reference", pipeName);
@@ -842,7 +852,7 @@ class DrawingWriter {
     }
 
     Id writePit(const Entity& part, const geometry::Polyline2& shape,
-                const std::vector<std::optional<double>>& invertAt)
+                const std::vector<std::optional<double>>& invertAt, const std::string& system)
     {
         const bool pit = text(part.metadata, "12d.element") == "drainage pit";
         const std::string prefix = pit ? "pit." : "house_connection.";
@@ -885,6 +895,8 @@ class DrawingWriter {
         const std::string key = "entity/" + std::to_string(part.id);
         const Id product = b_.product(ifcClass, key, name.empty() ? nameOf(part) : name, type,
                                       b_.productShape(representations), name);
+        b_.tally("layer " + part.layer, ifcClass, system,
+                 pit ? "12d drainage pit" : "12d drainage house connection");
         if (pit) {
             PropertyList common;
             common.identifier("Reference", name);

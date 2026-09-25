@@ -5,6 +5,7 @@
 #include <cctype>
 
 #include "katana/core/text.hpp"
+#include "product_layout.hpp"
 
 namespace katana::ifc {
 
@@ -522,6 +523,302 @@ EntityClass classifyEntity(const entity::Entity& entity,
     }
     }
     return result;
+}
+
+// ---- a project's rules, as a file ------------------------------------------------------
+
+namespace {
+
+struct PredefinedTypes {
+    std::string_view entity;
+    std::string_view values; // the enumeration's values, separated by blanks
+};
+
+// Every IFC4X3_ADD2 entity whose PredefinedType is an enumeration, and its
+// values (tools/ifc_product_classes.py --predefined).
+constexpr PredefinedTypes kPredefinedTypes[] = {
+#include "predefined_types.inc"
+};
+
+std::optional<std::string_view> predefinedTypesOf(std::string_view entity)
+{
+    for (const PredefinedTypes& row : kPredefinedTypes) {
+        if (row.entity == entity) {
+            return row.values;
+        }
+    }
+    return std::nullopt;
+}
+
+bool listsWord(std::string_view values, std::string_view word)
+{
+    std::size_t at = 0;
+    while (at <= values.size()) {
+        const std::size_t end = std::min(values.find(' ', at), values.size());
+        if (values.substr(at, end - at) == word) {
+            return true;
+        }
+        at = end + 1;
+    }
+    return false;
+}
+
+// The rows of a small CSV file: an optional BOM, '#' comment lines and blank
+// lines skipped, fields separated by commas, a field double-quoted with ""
+// for a quote. Each row with its 1-based line number.
+struct CsvRow {
+    std::size_t line = 0;
+    std::vector<std::string> fields;
+};
+
+core::Result<std::vector<CsvRow>> readCsv(std::string_view text)
+{
+    if (text.starts_with("\xEF\xBB\xBF")) {
+        text.remove_prefix(3);
+    }
+    std::vector<CsvRow> rows;
+    std::size_t line = 1;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        // One record, which a quoted field may carry over line breaks.
+        CsvRow row;
+        row.line = line;
+        std::string field;
+        bool quoted = false;
+        bool wasQuoted = false;
+        bool blank = true;
+        for (; at < text.size(); ++at) {
+            const char c = text[at];
+            if (quoted) {
+                if (c == '"' && at + 1 < text.size() && text[at + 1] == '"') {
+                    field.push_back('"');
+                    ++at;
+                } else if (c == '"') {
+                    quoted = false;
+                } else {
+                    if (c == '\n') {
+                        ++line;
+                    }
+                    field.push_back(c);
+                }
+                continue;
+            }
+            if (c == '\n' || c == '\r') {
+                break;
+            }
+            if (c == '"' && core::trimmed(field).empty()) {
+                field.clear();
+                quoted = true;
+                wasQuoted = true;
+                blank = false;
+            } else if (c == ',') {
+                row.fields.push_back(wasQuoted ? field : std::string(core::trimmed(field)));
+                field.clear();
+                wasQuoted = false;
+                blank = false;
+            } else {
+                field.push_back(c);
+                if (!core::isAsciiSpace(c)) {
+                    blank = false;
+                }
+            }
+        }
+        if (quoted) {
+            return core::makeError(core::ErrorCode::ParseFailure, "a quoted field is never closed",
+                                   "line " + std::to_string(row.line));
+        }
+        row.fields.push_back(wasQuoted ? field : std::string(core::trimmed(field)));
+        // Past the line break: \r\n, \n or \r.
+        if (at < text.size() && text[at] == '\r') {
+            ++at;
+        }
+        if (at < text.size() && text[at] == '\n') {
+            ++at;
+        }
+        ++line;
+        const bool comment = !row.fields.empty() && row.fields.front().starts_with('#');
+        if (!blank && !comment) {
+            rows.push_back(std::move(row));
+        }
+    }
+    return rows;
+}
+
+std::string upperCase(std::string_view text)
+{
+    std::string out(text);
+    for (char& c : out) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
+std::vector<std::string> splitList(std::string_view text)
+{
+    std::vector<std::string> out;
+    std::size_t at = 0;
+    while (at <= text.size()) {
+        const std::size_t end = std::min(text.find(';', at), text.size());
+        const std::string_view part = core::trimmed(text.substr(at, end - at));
+        if (!part.empty()) {
+            out.emplace_back(part);
+        }
+        at = end + 1;
+    }
+    return out;
+}
+
+constexpr std::array<EntityType, 9> kKinds{
+    EntityType::Point,     EntityType::Line,   EntityType::Arc,
+    EntityType::Polyline,  EntityType::Circle, EntityType::Text,
+    EntityType::Dimension, EntityType::Label,  EntityType::Leader};
+
+std::string csvField(std::string_view text)
+{
+    if (text.find_first_of(",\"\r\n#") == std::string_view::npos && core::trimmed(text) == text) {
+        return std::string(text);
+    }
+    std::string out = "\"";
+    for (const char c : text) {
+        out += c == '"' ? std::string("\"\"") : std::string(1, c);
+    }
+    return out + "\"";
+}
+
+} // namespace
+
+core::Result<std::vector<ClassificationRule>> parseClassificationRules(std::string_view text)
+{
+    using core::ErrorCode;
+    auto rows = readCsv(text);
+    if (!rows) {
+        return rows.error();
+    }
+    if (rows->empty()) {
+        return core::makeError(ErrorCode::ParseFailure,
+                               "no header row: rule,words,kinds,class,predefined_type,"
+                               "object_type,system");
+    }
+    const std::array<std::string_view, 7> kColumns{
+        "rule", "words", "kinds", "class", "predefined_type", "object_type", "system"};
+    std::array<std::optional<std::size_t>, 7> column{};
+    const CsvRow& header = rows->front();
+    for (std::size_t i = 0; i < header.fields.size(); ++i) {
+        const std::string name = core::lowered(header.fields[i]);
+        const auto known = std::find(kColumns.begin(), kColumns.end(), name);
+        if (known == kColumns.end()) {
+            return core::makeError(ErrorCode::ParseFailure,
+                                   "unknown column \"" + header.fields[i] +
+                                       "\"; the columns are rule, words, kinds, class, "
+                                       "predefined_type, object_type and system",
+                                   "line " + std::to_string(header.line));
+        }
+        column[static_cast<std::size_t>(known - kColumns.begin())] = i;
+    }
+    for (const std::size_t required : {0u, 1u, 3u}) {
+        if (!column[required]) {
+            return core::makeError(ErrorCode::ParseFailure,
+                                   "\"" + std::string(kColumns[required]) + "\" is missing",
+                                   "line " + std::to_string(header.line));
+        }
+    }
+    std::vector<ClassificationRule> rules;
+    for (std::size_t r = 1; r < rows->size(); ++r) {
+        const CsvRow& row = (*rows)[r];
+        const std::string where = "line " + std::to_string(row.line);
+        if (row.fields.size() != header.fields.size()) {
+            return core::makeError(ErrorCode::ParseFailure,
+                                   std::to_string(row.fields.size()) +
+                                       " fields where the header has " +
+                                       std::to_string(header.fields.size()),
+                                   where);
+        }
+        const auto cell = [&](std::size_t index) -> std::string_view {
+            return column[index] ? std::string_view(row.fields[*column[index]])
+                                 : std::string_view();
+        };
+        const auto fail = [&](std::string message) {
+            return core::makeError(ErrorCode::ParseFailure, std::move(message), where);
+        };
+        ClassificationRule rule;
+        rule.name = std::string(cell(0));
+        if (rule.name.empty()) {
+            return fail("a rule has no name");
+        }
+        rule.words = splitList(cell(1));
+        if (rule.words.empty()) {
+            return fail("rule \"" + rule.name + "\" has no words");
+        }
+        for (const std::string& kind : splitList(cell(2))) {
+            const auto found = std::find_if(kKinds.begin(), kKinds.end(), [&](EntityType type) {
+                return core::equalsIgnoringCase(entity::toString(type), kind);
+            });
+            if (found == kKinds.end()) {
+                return fail("\"" + kind +
+                            "\" is not a kind: Point, Line, Arc, Polyline, Circle, Text, "
+                            "Dimension, Label or Leader");
+            }
+            rule.kinds.push_back(*found);
+        }
+        const std::string_view named = cell(3);
+        const auto layout =
+            std::find_if(std::begin(detail::kProductLayouts), std::end(detail::kProductLayouts),
+                         [&](const detail::ProductLayout& candidate) {
+                             return core::equalsIgnoringCase(candidate.entity, named);
+                         });
+        if (layout == std::end(detail::kProductLayouts)) {
+            std::string known;
+            for (const detail::ProductLayout& candidate : detail::kProductLayouts) {
+                known += (known.empty() ? "" : ", ") + std::string(candidate.entity);
+            }
+            return fail("\"" + std::string(named) +
+                        "\" is not a class this export writes; it writes " + known);
+        }
+        rule.target.entity = std::string(layout->entity);
+        rule.target.predefinedType = upperCase(cell(4));
+        rule.target.objectType = std::string(cell(5));
+        if (!rule.target.predefinedType.empty()) {
+            const auto values = predefinedTypesOf(rule.target.entity);
+            if (!layout->hasPredefinedType || !values) {
+                return fail(rule.target.entity + " has no predefined type");
+            }
+            if (!listsWord(*values, rule.target.predefinedType)) {
+                return fail("\"" + rule.target.predefinedType + "\" is not a predefined type of " +
+                            rule.target.entity + ": " + std::string(*values));
+            }
+        }
+        if (rule.target.predefinedType == "USERDEFINED" && rule.target.objectType.empty()) {
+            return fail("rule \"" + rule.name +
+                        "\" is USERDEFINED and says nothing of what it is (object_type)");
+        }
+        rule.system = upperCase(cell(6));
+        rules.push_back(std::move(rule));
+    }
+    return rules;
+}
+
+std::string formatClassificationRules(const std::vector<ClassificationRule>& rules)
+{
+    std::string out =
+        "# Classification rules for EXPORT <file.ifc> RULES <this file> (docs/ifc.md).\n"
+        "# Tried in order before the defaults; the first rule whose words the entity's\n"
+        "# layer, survey code or 12d name holds wins. Words are whole words, any case;\n"
+        "# a trailing * matches a prefix. Kinds and system may be left empty.\n"
+        "rule,words,kinds,class,predefined_type,object_type,system\n";
+    for (const ClassificationRule& rule : rules) {
+        std::string words;
+        for (const std::string& word : rule.words) {
+            words += (words.empty() ? "" : ";") + word;
+        }
+        std::string kinds;
+        for (const EntityType kind : rule.kinds) {
+            kinds += (kinds.empty() ? "" : ";") + std::string(entity::toString(kind));
+        }
+        out += csvField(rule.name) + "," + csvField(words) + "," + csvField(kinds) + "," +
+               csvField(rule.target.entity) + "," + csvField(rule.target.predefinedType) + "," +
+               csvField(rule.target.objectType) + "," + csvField(rule.system) + "\n";
+    }
+    return out;
 }
 
 } // namespace katana::ifc

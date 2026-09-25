@@ -262,7 +262,7 @@ may not see GDAL, PDAL or the archive readers:
 |---|---|---|
 | the interpreter's verbs (`HELP`) | yes | yes |
 | `IMPORT`, `EXPORT`, `REFS`, `INFO <file>` (the interpreter's `INFO id` describes an entity) | yes (with `KATANA_BUILD_IO`) | yes |
-| `IMPORT <file.ifc>`, `EXPORT <file.ifc>` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | no: no menu entry yet |
+| `IMPORT <file.ifc>`, `EXPORT <file.ifc>` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | yes, with the same options, and File > Import IFC / Export IFC |
 | `COPC` | yes | no |
 | `CUSTOMISE [REPLACE] <file>...` | yes | yes |
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` | yes | no: the Survey Code Manager's tabs |

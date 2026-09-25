@@ -336,6 +336,17 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.ifc_a_tfnsw_schedule_exported_with_its_delivery_schema
         PROPERTIES FIXTURES_SETUP cli_ifc_tfnsw_file PASS_REGULAR_EXPRESSION
         "0 alignments, 3 services \\(4 segments, 3 in 3D, 7 located points\\), 0 entities written")
+    # A project's own rules (samples/ifc/classification_rules.csv), tried
+    # before the defaults: a point on a lighting layer is a column, not a
+    # survey annotation.
+    add_test(NAME cli.ifc_a_projects_rules_classify_what_the_defaults_would_not
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LAYER NEW Lighting/Poles" -c "LAYER SET Lighting/Poles"
+                -c "POINT 10,10" -c "LAYER NEW Drainage/Headwalls" -c "LAYER SET Drainage/Headwalls"
+                -c "POINT 30,10"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli rules.ifc\" RULES \"${PROJECT_SOURCE_DIR}/samples/ifc/classification_rules.csv\"")
+    set_tests_properties(cli.ifc_a_projects_rules_classify_what_the_defaults_would_not PROPERTIES
+        PASS_REGULAR_EXPRESSION "classes: IfcColumn 1; IfcDistributionChamberElement 1; IfcDistributionSystem 1;")
     add_test(NAME cli.ifc_refuses_an_unknown_option
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "EXPORT \"${_ifc}\" UTILITIS x.csv")

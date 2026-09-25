@@ -7,7 +7,7 @@
 //
 //   IMPORT <file.ifc> [LOCAL]
 //   EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]
-//                     [SPACING <m>] [NODRAWING]
+//                     [RULES <rules.csv>] [SPACING <m>] [NODRAWING]
 //
 // IMPORT brings the file's alignments, elements and annotations into the
 // drawing as ONE undoable step (ifc/import.hpp); LOCAL moves them to sit at
@@ -19,8 +19,10 @@
 // subsurface utility investigation (the schedule format of
 // survey/subsurface/utility_csv.hpp, TfNSW Utility Schema columns included),
 // SCHEMA the delivery schema it was written to (delivery_schema.hpp), SPACING
-// the longest detected spacing that keeps QL-B (default 10 m), and NODRAWING
-// leaves the drawing out, for a file of the investigation alone.
+// the longest detected spacing that keeps QL-B (default 10 m), RULES a
+// project's classification rules (classification.hpp), and NODRAWING leaves
+// the drawing out, for a file of the investigation alone. The grammar is
+// ifc/front_end.hpp's, which the window's command line and dialogs share.
 
 #include <optional>
 #include <string>

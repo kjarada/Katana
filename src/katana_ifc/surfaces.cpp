@@ -47,6 +47,8 @@ void exportSurfaces(Builder& builder, const std::vector<SurfaceInput>& surfaces)
         const std::string key = "surface/" + input.name;
         const Id element = builder.product({"IfcGeographicElement", "TERRAIN", {}}, key, input.name,
                                            "Surface", builder.productShape({representation}));
+        builder.tally("surface " + input.name, {"IfcGeographicElement", "TERRAIN", {}}, {},
+                      "a surface: its triangles");
         PropertyList list;
         list.integer("Points", static_cast<long long>(surface->vertexCount()));
         list.integer("Triangles", static_cast<long long>(surface->triangleCount()));

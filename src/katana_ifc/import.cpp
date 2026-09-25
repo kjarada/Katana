@@ -2037,6 +2037,19 @@ class Reader {
 
     void finish()
     {
+        // The extent of everything the import brings, not only its entities:
+        // what LOCAL shifts by and what the far-apart question weighs, so a
+        // file of an alignment or a terrain alone is placed like any other.
+        for (const entity::Alignment& alignment : out_.alignments) {
+            for (const geometry::AlignmentPI& pi : alignment.horizontal.pis) {
+                out_.bounds.expand(pi.point);
+            }
+        }
+        for (const ImportedSurface& surface : out_.surfaces) {
+            if (surface.surface.vertexCount() > 0) {
+                out_.bounds.expand(surface.surface.bounds());
+            }
+        }
         for (const std::string& name : layers_) {
             entity::Layer layer;
             layer.name = name;

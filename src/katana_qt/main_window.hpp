@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <QMainWindow>
+#include <QPointer>
 #include <QStringList>
 
 #include <filesystem>
@@ -33,6 +34,7 @@
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "gis_online.hpp"
+#include "ifc_dialogs.hpp"
 #include "survey/survey_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "plotting/plot_output.hpp"
@@ -308,6 +310,29 @@ class MainWindow final : public QMainWindow {
     void importDxfFile(const std::filesystem::path& path);
     bool exportDxfFile(const std::filesystem::path& path,
                        const katana::interop::VectorExportOptions& options);
+    // A .ifc, read and written natively (main_window_ifc.cpp, docs/ifc.md).
+    // File > Import, a path given to the window and a typed IMPORT take the
+    // request's defaults; File > Import IFC's dialog chooses. False when it
+    // failed, which has been reported.
+    bool importIfcFile(const IfcImportRequest& request);
+    // Writes the file `request` asks for and reports it, or with `write`
+    // false only accounts for what it would hold (the export dialog's
+    // preview), writing and logging nothing. The report, or the error.
+    katana::core::Result<katana::ifc::IfcExport> exportIfcFile(const IfcExportRequest& request,
+                                                               bool write);
+    // What an IFC file holds, read but not imported, as a person reads it:
+    // INFO, GIS > Dataset Information and the import dialog's Describe.
+    katana::core::Result<QString> describeIfcFile(const std::filesystem::path& path);
+    // A typed IMPORT or EXPORT that names a .ifc, with the verbs' options
+    // (ifc/front_end.hpp): true when it was one - done, or refused and said
+    // - and false when the line is another format's.
+    bool runIfcLine(const QString& verb, const QString& rest);
+    // File > Import IFC and Export IFC: the dialogs, made on first use and
+    // kept, shown non-modally; `file` fills the File field.
+    void showIfcImport(const QString& file = {});
+    void showIfcExport(const QString& file = {});
+    [[nodiscard]] IfcImportContext ifcImportContext();
+    [[nodiscard]] IfcExportContext ifcExportContext();
 
     // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ---------------
     // The imports ask for a file of their kind, describe it, and offer its
@@ -388,6 +413,11 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<LayerManagerDialog> layers_;
     // File > Sheets, kept between uses and owned here for the reason layers_ is.
     std::unique_ptr<SheetEditor> sheets_;
+    // File > Import IFC and Export IFC, kept between uses. They hold no
+    // Document - only callbacks into this window - so Qt may delete them
+    // with its other children.
+    QPointer<IfcImportDialog> ifcImport_;
+    QPointer<IfcExportDialog> ifcExport_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for

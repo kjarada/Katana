@@ -288,6 +288,8 @@ class AlignmentWriter {
                                                              .ref(shape)
                                                              .null());
         ++b_.report().classes["IfcAlignment"];
+        b_.tally("alignment " + alignment_.name, {"IfcAlignment", {}, {}}, {},
+                 gradient != 0 ? "its PIs and its profile's PVIs" : "its PIs");
         const Id layoutH = file.add(
             "IfcAlignmentHorizontal",
             Args().string(b_.guid(key_ + "/horizontal")).null().null().null().null().null().null());
@@ -603,6 +605,8 @@ class AlignmentWriter {
                                    .null()
                                    .enumeration("STATION"));
             ++b_.report().classes["IfcReferent"];
+            b_.tally("alignment " + alignment_.name, {"IfcReferent", "STATION", {}}, {},
+                     "a key station");
             PropertyList stationing;
             stationing.length("Station", station);
             const std::string psetKey = key_ + "/station/" + stationText(station);
