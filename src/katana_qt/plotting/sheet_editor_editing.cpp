@@ -203,16 +203,25 @@ void SheetEditor::setUpEditing()
         rulers->setChecked(canvas_->rulersShown());
     });
     view->addSeparator();
-    connect(make(view, QStringLiteral("Pre&vious Sheet"), "sheetPreviousSheet",
-                 QKeySequence(Qt::Key_PageUp), QStringLiteral("Show the sheet before this one")),
-            &QAction::triggered, this, [this] {
-                if (currentSheet() > 0) {
-                    setCurrentSheet(currentSheet() - 1);
-                }
-            });
-    connect(make(view, QStringLiteral("&Next Sheet"), "sheetNextSheet", QKeySequence(Qt::Key_PageDown),
-                 QStringLiteral("Show the sheet after this one")),
-            &QAction::triggered, this, [this] { setCurrentSheet(currentSheet() + 1); });
+    QAction* previous = make(view, QStringLiteral("Pre&vious Sheet"), "sheetPreviousSheet",
+                             QKeySequence(Qt::Key_PageUp), QStringLiteral("Show the sheet before this one"));
+    connect(previous, &QAction::triggered, this, [this] {
+        if (currentSheet() > 0) {
+            setCurrentSheet(currentSheet() - 1);
+        }
+    });
+    QAction* next = make(view, QStringLiteral("&Next Sheet"), "sheetNextSheet", QKeySequence(Qt::Key_PageDown),
+                         QStringLiteral("Show the sheet after this one"));
+    connect(next, &QAction::triggered, this, [this] { setCurrentSheet(currentSheet() + 1); });
+    // PgUp and PgDn step through the sheets from the canvas and the list, not
+    // the window: a spin box or a text box of the properties keeps them for
+    // its own paging (it does not claim them from a window shortcut).
+    for (QAction* action : {previous, next}) {
+        removeAction(action);
+        action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        canvas_->addAction(action);
+        list_->addAction(action);
+    }
 
     // Paste follows the clipboard, which another program may fill.
     if (QClipboard* clipboard = QGuiApplication::clipboard()) {

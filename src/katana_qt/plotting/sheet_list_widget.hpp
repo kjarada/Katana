@@ -24,7 +24,8 @@ class SheetListWidget final : public QListWidget {
 
     // The row a drop at `position` (in the viewport) goes before: the row
     // under it, or the one after when it is on the lower half of that row;
-    // count() below the last.
+    // in the spacing between two rows, the lower of them; count() below the
+    // last.
     [[nodiscard]] int insertionRowAt(const QPoint& position) const;
 
     // What a drop at `position` does, without the drag: asks for the current

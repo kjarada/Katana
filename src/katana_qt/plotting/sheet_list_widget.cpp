@@ -18,13 +18,15 @@ SheetListWidget::SheetListWidget(QWidget* parent) : QListWidget(parent)
 
 int SheetListWidget::insertionRowAt(const QPoint& position) const
 {
-    const QModelIndex index = indexAt(position);
-    if (!index.isValid()) {
-        // Above the first row or below the last.
-        return count() > 0 && position.y() < visualRect(model()->index(0, 0)).top() ? 0 : count();
+    // Before the first row whose middle is below the point. Not indexAt: in
+    // the spacing between two rows, or beside a short row, it finds nothing,
+    // and a drop there must still go between those rows, not to the end.
+    for (int row = 0; row < count(); ++row) {
+        if (position.y() <= visualItemRect(item(row)).center().y()) {
+            return row;
+        }
     }
-    const QRect rect = visualRect(index);
-    return position.y() > rect.center().y() ? index.row() + 1 : index.row();
+    return count();
 }
 
 bool SheetListWidget::dropAt(const QPoint& position)

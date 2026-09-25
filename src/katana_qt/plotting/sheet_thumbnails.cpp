@@ -29,6 +29,19 @@ std::string fieldsText(const plotting::FieldContext& fields)
     return text;
 }
 
+// What the marks of `sheet` print, as markLabel writes them in `set`.
+std::string markLabelsText(const SheetSet& set, const Sheet& sheet)
+{
+    std::string text;
+    for (const plotting::Viewport& viewport : sheet.viewports) {
+        for (const plotting::WorldMark& mark : viewport.marks) {
+            text += plotting::markLabel(set, mark);
+            text += '\x1f';
+        }
+    }
+    return text;
+}
+
 bool sameOrder(const std::vector<std::string>& order, const SheetSet& set)
 {
     return std::ranges::equal(order, set.sheets, {}, {}, &Sheet::id);
@@ -64,6 +77,7 @@ bool SheetThumbnails::matches(const Key& key, const SheetSet& set, std::size_t i
     return key.index == index && key.sheet == sheet && sameOrder(key.order, set) &&
            key.defaults == set.defaults && key.numbering == set.numbering &&
            key.revisions == set.revisions && key.fields == fieldsText(source.fields) &&
+           key.markLabels == markLabelsText(set, sheet) &&
            (!showsTheDrawing(sheet) || key.revision == source.revision);
 }
 
@@ -139,6 +153,7 @@ QImage SheetThumbnails::thumbnail(const SheetSet& set, std::size_t index, const 
     key.fields = fieldsText(source.fields);
     key.revision = source.revision;
     key.pixelRatio = pixelRatio;
+    key.markLabels = markLabelsText(set, sheet);
     entries_.insert_or_assign(sheet.id, Entry{std::move(key), image});
     return image;
 }

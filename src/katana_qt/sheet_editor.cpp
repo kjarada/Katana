@@ -653,7 +653,8 @@ void SheetCanvas::paintEvent(QPaintEvent* /*event*/)
 
     // The primary, its handles, and the rectangle being dragged.
     if (const Viewport* v = viewport(selected_)) {
-        const bool dragging = pressMoved_ && (drag_ == Drag::Move || drag_ == Drag::Resize);
+        const bool dragging = pressMoved_ && ((drag_ == Drag::Move && !startRects_.empty()) ||
+                                              drag_ == Drag::Resize);
         const Box2 box = dragging && selection_.size() > 1 ? bounds : liveRect(selected_);
         const QRectF r = widgetRect(liveRect(selected_));
         painter.setPen(QPen(kSelection, 2.0));
@@ -815,11 +816,9 @@ void SheetCanvas::mousePressEvent(QMouseEvent* event)
     const Viewport* v = viewport(hit);
     if (v == nullptr) {
         // Empty paper: a rubber band, adding to the selection with Ctrl or
-        // Shift, else replacing it.
+        // Shift, else replacing it when it is let go - so Escape part way
+        // leaves the selection as it was.
         bandAdds_ = shift || control;
-        if (!bandAdds_) {
-            select({});
-        }
         drag_ = Drag::Band;
         bandCorner_ = pressPaper_;
         return;
@@ -854,7 +853,9 @@ void SheetCanvas::mousePressEvent(QMouseEvent* event)
             startBounds_.expand(each.rect);
         }
     }
-    if (!startRects_.empty()) {
+    // A press on a locked member of a group still waits for the release: let
+    // go without moving, it is selected alone; dragged, nothing moves.
+    if (!startRects_.empty() || narrowOnClick_) {
         drag_ = Drag::Move;
         startRect_ = liveRect_ = startBounds_;
     }
@@ -895,7 +896,9 @@ void SheetCanvas::updateDrag(const QPointF& widget, Qt::KeyboardModifiers modifi
     }
     guideX_.reset();
     guideY_.reset();
-    if (drag_ == Drag::Move) {
+    if (drag_ == Drag::Move && startRects_.empty()) {
+        // Only locked viewports under the hand: nothing to move.
+    } else if (drag_ == Drag::Move) {
         // The group's bounds snap, and every member moves as they do.
         Box2 moved(startBounds_.min + delta, startBounds_.max + delta);
         if (snap) {
@@ -1004,8 +1007,12 @@ void SheetCanvas::commitDrag()
     }
     Status status;
     if (drag == Drag::Band) {
-        // A click on empty paper has already cleared the selection.
-        if (moved) {
+        if (!moved) {
+            // A click on empty paper: nothing selected, unless it was to add.
+            if (!bandAdds_) {
+                select({});
+            }
+        } else {
             const Box2 band(Point2(std::min(pressPaper_.x, bandCorner_.x),
                                    std::min(pressPaper_.y, bandCorner_.y)),
                             Point2(std::max(pressPaper_.x, bandCorner_.x),
@@ -1238,8 +1245,11 @@ void SheetCanvas::leaveEvent(QEvent* event)
 
 void SheetCanvas::focusOutEvent(QFocusEvent* event)
 {
-    // Space let go where the canvas could not hear it.
+    // Space let go where the canvas could not hear it: no hand left behind.
     spaceHeld_ = false;
+    if (drag_ == Drag::None) {
+        unsetCursor();
+    }
     QWidget::focusOutEvent(event);
 }
 
@@ -1560,12 +1570,14 @@ void SheetEditor::rebuildProperties()
             }
         };
         if (const std::size_t count = canvas_->selectedIds().size(); count > 1) {
-            auto* group = new QLabel(QString("%1 views selected: a drag, the arrows, Delete, Copy and "
-                                             "Duplicate act on them all. These properties are %2's.")
+            // Short lines, wrapped: the panel may be narrow.
+            auto* group = new QLabel(QString("%1 views selected.\nThe properties are %2's.")
                                          .arg(count)
                                          .arg(QString::fromStdString(id)),
                                      panel);
             group->setObjectName(QStringLiteral("sheetSelectionNote"));
+            group->setToolTip(QStringLiteral("A drag, the arrows, Delete, Cut, Copy and Duplicate act on "
+                                             "every selected view"));
             group->setWordWrap(true);
             layout->addWidget(group);
         }

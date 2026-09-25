@@ -722,7 +722,8 @@ edit in `sheet_commands.hpp` does, as ONE undoable step.
 - **A group drag.** Dragging any selected viewport moves them all. Their
   bounds snap, and each moves by the same distance: ONE step
   (`moveViewports`). A locked viewport stays where it is. A click on one of
-  a group without a drag selects it alone, and Escape abandons a drag.
+  a group without a drag, locked or not, selects it alone, and Escape
+  abandons a drag - a rubber band too, the selection left as it was.
 - **The keys.** The arrows move every selected viewport by 1 mm (Shift:
   10 mm), one step a press. Delete or Backspace removes them all, locked or
   not, in one step (`removeViewports`). Tab and Shift+Tab step the selection
@@ -807,7 +808,8 @@ double-click on empty paper or the desk, or Home, fits the page.
 Each sheet in the list has a picture of itself (`SheetThumbnails`), painted
 by `paintSheet`, the function that plots it, at 112 x 80 pixels. A picture
 is kept until something it shows changes: the sheet, its position, the order
-of the sheets (its number and the numbers its marks print), the title-block
+of the sheets (its number and the numbers its marks print, and the sheet
+numbers the sheets its marks lead to override), the title-block
 values the sheets share, the project's field values, and, only for a sheet
 that shows the drawing (a plan, section, 3D snapshot, legend or key plan),
 the drawing's revision. So an edit to one sheet of a hundred paints one
@@ -817,8 +819,10 @@ the old picture standing in until then.
 
 A sheet dragged up or down the list is moved with `moveSheet` as one step,
 and the list is built again from the document, so it never shows an order
-the set does not have (`SheetListWidget::dropAt`). PgUp and PgDn show the
-previous and the next sheet.
+the set does not have (`SheetListWidget::dropAt`); a drop in the spacing
+between two rows goes between them. PgUp and PgDn show the previous and the
+next sheet while the canvas or the list has the focus, and are left to a
+spin box of the properties, which pages with them.
 
 ### The actions
 
@@ -838,7 +842,7 @@ a public function that an agent calls directly:
 | `sheetFitPage` | Home | `SheetCanvas::fitPage` |
 | `sheetSnapGrid` | F9 | `SheetCanvas::setSnapToGrid` |
 | `sheetShowRulers` | Ctrl+R | `SheetCanvas::setRulersShown` |
-| `sheetPreviousSheet`, `sheetNextSheet` | PgUp, PgDn | `SheetEditor::setCurrentSheet` |
+| `sheetPreviousSheet`, `sheetNextSheet` | PgUp, PgDn on the canvas or the list | `SheetEditor::setCurrentSheet` |
 
 The arrows call `SheetEditor::nudgeSelection`, and a drop in the list
 `SheetEditor::moveSheetTo`. Cut, Copy, Duplicate, Delete and Zoom to

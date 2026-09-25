@@ -6,7 +6,8 @@
 // shows changes:
 //
 //   the sheet itself, its position and the number of sheets (its number and
-//   the numbers its match lines and key plan print), the order of the sheets,
+//   the numbers its match lines and key plan print, overridden or not), the
+//   order of the sheets,
 //   the title-block values the sheets share, the project's field values, and
 //   - only for a sheet that shows the drawing - the drawing's revision.
 //
@@ -75,6 +76,10 @@ class SheetThumbnails {
         std::string fields;
         std::uint64_t revision = 0;
         double pixelRatio = 1.0;
+        // The labels its match lines and key-plan outlines print: they carry
+        // the number of the sheet they lead to, which that sheet's own
+        // sheet_number override can change.
+        std::string markLabels;
     };
     struct Entry {
         Key key;
