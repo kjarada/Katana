@@ -17,7 +17,12 @@
 // Words are case-insensitive and a path with blanks is quoted. <scope> is the
 // shared scope and filter words (scope_verbs.hpp): a first word that is one,
 // or WHERE, takes the services UTILITY DRAW drew (utility_data.hpp) instead
-// of a file, each line whole, and the reply leads with what the scope took.
+// of a file, each line whole. REPORT, VERIFY, CLEARANCE and CHECK take a file
+// or the drawing, and on the drawing lead their reply with what the scope
+// took (scopeRecord); REGRADE and SCHEDULE take only the drawing, and lead
+// with their own record, then the scope's; DRAW takes only a file. A scope
+// that takes no utility line is answered with the scope's record and "no
+// utility lines in the scope", by every verb, and is not a failure.
 // REPORT, VERIFY, CLEARANCE, CHECK and SCHEDULE read and report; they never
 // touch the drawing. CHECK is refused when the schedule has errors against
 // the schema, with the whole check in the refusal, so a script stops there

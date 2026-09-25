@@ -4,8 +4,13 @@
 that Claude - in Claude Desktop, Claude Code or any other MCP client - can run
 an engineering project in Katana: open a project, draw and edit it, run the
 survey calculations, lay out alignments and parcels, apply survey codes,
-grade, check and draw located buried services by AS 5488 quality level
-(`UTILITY`, `docs/subsurface_utilities.md`), import and export, and save it.
+grade, check and draw located buried services by AS 5488 quality level, and
+grade again, report, check and write back as a schedule what is drawn
+(`UTILITY REPORT`, `VERIFY`, `CLEARANCE`, `CHECK`, `DRAW`, `REGRADE`,
+`SCHEDULE`, `docs/subsurface_utilities.md`), change what a scope and a filter
+take (`MODIFY`, `docs/cad.md`, "Scope and filter"), import and export, and
+save it. The tool that runs commands names each `UTILITY` action and the
+scope words in its description, since that is what a client reads first.
 The window can then open the same project.
 
 It is the session `katana_cli` runs (`src/katana_app/session.hpp`), served to a

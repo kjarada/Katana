@@ -1973,9 +1973,9 @@ void MainWindow::runCommandLine()
     if (online_ != nullptr && !toolTakesText && online_->runLine(line)) {
         return;
     }
-    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
-    // through the utilities workbench, which frames what a DRAW added - and
-    // before a running tool, for ONLINE's reason.
+    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW, REGRADE, SCHEDULE: the
+    // interpreter's verb, through the utilities workbench, which frames what a
+    // DRAW or a REGRADE drew - and before a running tool, for ONLINE's reason.
     if (utilities_ != nullptr && !toolTakesText && utilities_->runLine(line)) {
         return;
     }
