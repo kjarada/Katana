@@ -10,6 +10,7 @@
 #include "layer_manager.hpp"
 #include "style_manager.hpp"
 
+#include <chrono>
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -58,6 +59,8 @@
 #include <set>
 
 #include "katana/cad/plot.hpp"
+#include "katana/cad/plotting/generators.hpp"
+#include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/cad/corridor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -380,6 +383,24 @@ void MainWindow::buildActions()
     connect(importAction, &QAction::triggered, this, [this] { importFile(); });
     connect(exportAction, &QAction::triggered, this, [this] { exportVectorFile(); });
     connect(plotAction, &QAction::triggered, this, [this] { plotToPdf(); });
+    QAction* sheetsAction =
+        makeAction(Icon::Plot, "S&heets...",
+                   "Lay the drawing out on sheets with a title block, and plot them",
+                   QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), "fileSheets");
+    connect(sheetsAction, &QAction::triggered, this, [this] { showSheets(); });
+    QAction* plotSheetsAction =
+        makeAction(Icon::Plot, "Plot Sheets to P&DF...",
+                   "Plot every sheet of the project to one PDF", QKeySequence(), "filePlotSheets");
+    connect(plotSheetsAction, &QAction::triggered, this, [this] {
+        const QString path = QFileDialog::getSaveFileName(this, "Plot Sheets to PDF", QString(),
+                                                          "PDF (*.pdf)");
+        if (path.isEmpty()) {
+            return;
+        }
+        if (const auto status = plotSheetsToPdf(path); !status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+        }
+    });
 
     QAction* customiseAction =
         makeAction(Icon::Import, "Loa&d Customisation...",
@@ -437,7 +458,7 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({importAction, exportAction});
     fileMenu->addSeparator();
-    fileMenu->addAction(plotAction);
+    fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
     fileMenu->addSeparator();
     QAction* quitAction =
         fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
@@ -446,7 +467,7 @@ void MainWindow::buildActions()
     QToolBar* fileBar = makeToolBar("File", Qt::TopToolBarArea);
     fileBar->addActions({newAction, openAction, saveAction});
     fileBar->addSeparator();
-    fileBar->addActions({importAction, exportAction, plotAction});
+    fileBar->addActions({importAction, exportAction, plotAction, sheetsAction});
 
     // ---- Edit ------------------------------------------------------------------------
     undoAction_ = makeAction(Icon::Undo, "&Undo", "Undo the last command", QKeySequence::Undo);
@@ -4348,6 +4369,81 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
                    .arg(path, paperName(settings.paper), settings.landscape ? "landscape" : "portrait")
                    .arg(settings.scaleDenominator, 0, 'f', 0)
                    .arg(settings.dpi, 0, 'f', 0));
+    return {};
+}
+
+SheetSource MainWindow::sheetSource() const
+{
+    SheetSource source;
+    source.plan = planSourceOf(document_);
+    source.plan.reference = &reference_;
+    source.plan.meshes = &sceneMeshes_;
+    source.document = &document_;
+    source.surfaces = sceneSurfaces_;
+    // The drawing's revision, and which surfaces there are: a section cut
+    // before a surface was built is cut again once there is one.
+    source.revision = document_.modelRevision();
+    for (const auto& surface : sceneSurfaces_) {
+        source.revision = source.revision * 1'000'003u +
+                          reinterpret_cast<std::uintptr_t>(surface.surface) +
+                          (surface.visible ? 1u : 0u);
+    }
+    const auto today = std::chrono::year_month_day(
+        std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
+    source.fields = cad::plotting::fieldContextFor(document_, cad::plotting::frameDate(today));
+    if (const auto logo = cad::plotting::logoPath(document_)) {
+        source.logo.load(QString::fromStdWString(logo->wstring()));
+    }
+    if (const auto directory = document_.projectDirectory()) {
+        source.assets = *directory / "assets";
+    }
+    return source;
+}
+
+void MainWindow::showSheets()
+{
+    if (!sheets_) {
+        sheets_ = std::make_unique<SheetEditor>(document_, [this] { return sheetSource(); }, this);
+        sheets_->onMessage = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    }
+    sheets_->show();
+    sheets_->raise();
+    sheets_->activateWindow();
+}
+
+katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+{
+    const SheetSource source = sheetSource();
+    cad::plotting::SheetSet set = document_.sheetSet();
+    if (set.sheets.empty()) {
+        // Nothing laid out yet: one sheet fitted to the drawing, for this plot.
+        cad::plotting::LayoutRequest request;
+        request.planArea = planDrawnBounds(source.plan, {}, {});
+        auto sheets = cad::plotting::smartLayout(document_.model(), request);
+        if (!sheets) {
+            return sheets.error();
+        }
+        cad::plotting::prepareForAppend(set, *sheets);
+        set.sheets = std::move(*sheets);
+        logMessage("The project has no sheets: plotting one fitted to the drawing.");
+    }
+    SheetPaintCache cache;
+    std::vector<std::string> problems;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto status = katana::qt::plotSheetsToPdf(path, set, {}, source, 300.0, cache,
+                                                    QString::fromStdString(document_.metadata().name),
+                                                    &problems);
+    QApplication::restoreOverrideCursor();
+    if (!status) {
+        return status;
+    }
+    for (const std::string& problem : problems) {
+        logMessage(QString::fromStdString(problem), true);
+    }
+    logMessage(QString("Plotted %1 sheet%2 to %3.")
+                   .arg(set.sheets.size())
+                   .arg(set.sheets.size() == 1 ? "" : "s")
+                   .arg(path));
     return {};
 }
 

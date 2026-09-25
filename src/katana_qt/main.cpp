@@ -250,6 +250,7 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] [data-file...] --plot out.pdf
 //                 [--fit | --scale N] [--paper A4|A3|A2|A1|A0]
 //                 [--landscape | --portrait] [--dpi N]
+//   katana [project-directory] [data-file...] --plot-sheets out.pdf
 //   katana [project-directory] [data-file...] --screenshot out.png
 //   katana [project-directory] [data-file...] --toggle-layer NAME --screenshot out.png
 //   katana [project-directory] [data-file...] --style-manager --screenshot out.png
@@ -273,6 +274,10 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // widget and otherwise needs a person: the qt_plot_headless test runs this
 // under QT_QPA_PLATFORM=offscreen and opens the result. --fit is the default;
 // --scale N plots at 1 : N about the view centre.
+//
+// --plot-sheets plots every sheet of the project to one PDF, a page a sheet,
+// and exits without showing a window, as --plot does; a project with no
+// sheets plots one fitted to the drawing (MainWindow::plotSheetsToPdf).
 //
 // --toggle-layer flips a layer's visibility box in the layer panel the way a
 // click does, before the screenshot, and fails if the application does not
@@ -361,6 +366,7 @@ int main(int argc, char* argv[])
     application.setWindowIcon(katana::qt::applicationIcon());
 
     std::optional<QString> plotPath;
+    std::optional<QString> sheetsPath;
     std::optional<QString> screenshotPath;
     std::optional<QString> toggleLayer;
     std::vector<std::filesystem::path> customisation;
@@ -387,6 +393,8 @@ int main(int argc, char* argv[])
         };
         if (argument == "--plot") {
             plotPath = value();
+        } else if (argument == "--plot-sheets") {
+            sheetsPath = value();
         } else if (argument == "--screenshot") {
             screenshotPath = value();
         } else if (argument == "--toggle-layer") {
@@ -459,13 +467,18 @@ int main(int argc, char* argv[])
             inputs << argument;
         }
     }
+    if (sheetsPath.has_value() && sheetsPath->isEmpty()) {
+        std::fprintf(stderr, "--plot-sheets needs an output path\n");
+        return 2;
+    }
     if (plotPath.has_value() && plotPath->isEmpty()) {
         std::fprintf(stderr, "--plot needs an output path\n");
         return 2;
     }
 
     katana::qt::MainWindow window;
-    window.setHeadless(plotPath.has_value() || screenshotPath.has_value());
+    window.setHeadless(plotPath.has_value() || sheetsPath.has_value() ||
+                       screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
     // --customise on the command line is merged in next, as Format > Load
     // Customisation would, and so is loaded when a project is opened: its
@@ -474,7 +487,7 @@ int main(int argc, char* argv[])
     if (!customisation.empty()) {
         window.applyCustomisation(customisation);
     }
-    if (!plotPath && !screenshotPath) {
+    if (!plotPath && !sheetsPath && !screenshotPath) {
         window.show();
     }
     for (const QString& input : inputs) {
@@ -710,6 +723,14 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    if (sheetsPath) {
+        const auto status = window.plotSheetsToPdf(*sheetsPath);
+        if (!status) {
+            std::fprintf(stderr, "plot failed: %s\n", status.error().describe().c_str());
+            return 1;
+        }
+        return 0;
+    }
     if (plotPath) {
         const auto status = window.plotDrawingToPdf(*plotPath, settings, fit);
         if (!status) {
