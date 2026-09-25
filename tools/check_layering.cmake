@@ -71,7 +71,7 @@ set(KATANA_ALLOWED_cad
 set(KATANA_ALLOWED_app
     "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop")
 set(KATANA_ALLOWED_qt
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;app")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;app;gpu")
 # The GPU renderer (src/katana_qt/gpu, docs/gpu.md) lives under katana_qt for
 # Qt's sake, but it is the software rasteriser's twin behind the same seam: it
 # may see a DrawList, a Camera and the point cloud's plain types, and never a

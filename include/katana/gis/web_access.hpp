@@ -88,6 +88,23 @@ using TransferProgress = std::function<void(std::uint64_t received, std::uint64_
                                                            const std::stop_token& stop = {},
                                                            const TransferProgress& progress = {});
 
+// A transfer that failed after its retries, as httpFetch saw it.
+struct HttpFailure {
+    int status = 0;   // the HTTP status, 0 when none arrived
+    int curlCode = 0; // libcurl's CURLcode, 0 for none
+    std::string error; // libcurl's (or GDAL's) message
+    std::string body;  // what the server sent, if anything
+    int timeoutSeconds = 0;
+};
+
+// What a failure means, in words a person can act on - a key, the
+// network's proxy, a service that answers only from its own country, the
+// certificates https:// is checked against - with `context` (the redacted
+// URL, the status and the server's first words) kept beside it. httpFetch's
+// own classification, public so that every case is tested without a network.
+[[nodiscard]] katana::core::Error explainHttpFailure(const HttpFailure& failure,
+                                                     std::string context);
+
 // The URL with the value of every query parameter whose name suggests a
 // secret (key, apikey, api_key, token, access_token, password, sig,
 // signature, and anything ending in "key" or "token") replaced by "***", and

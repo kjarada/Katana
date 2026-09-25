@@ -124,6 +124,52 @@ TEST(OnlineWeb, AStoppedFetchEndsAsCancelledBeforeAnyRequest)
     EXPECT_EQ(stopped.error().message, "cancelled");
 }
 
+TEST(OnlineWeb, AFailureIsExplainedByWhatActuallyStoppedIt)
+{
+    const auto explain = [](int status, int curlCode, std::string error, std::string body = {}) {
+        gis::HttpFailure failure;
+        failure.status = status;
+        failure.curlCode = curlCode;
+        failure.error = std::move(error);
+        failure.body = std::move(body);
+        failure.timeoutSeconds = 120;
+        return gis::explainHttpFailure(failure, "https://a.org/x");
+    };
+    const auto says = [](const katana::core::Error& error, std::string_view words) {
+        return error.message.find(words) != std::string::npos;
+    };
+
+    // The certificates https:// is checked against are missing - what every
+    // request from the deployed program did while the deploy left out
+    // etc/ssl/certs/ca-bundle.crt, reported by libcurl in these words.
+    const auto noBundle =
+        explain(0, 77, "error adding trust anchors from file: C:/k/bin/../etc/ssl/certs/ca-bundle.crt");
+    EXPECT_EQ(noBundle.code, ErrorCode::FileImportFailure);
+    EXPECT_TRUE(says(noBundle, "ca-bundle.crt")) << noBundle.message;
+    EXPECT_TRUE(says(explain(0, 35, "error adding trust anchors from file: x"), "certificates"));
+    EXPECT_TRUE(says(explain(0, 60, "SSL certificate problem"), "could not be verified"));
+
+    // CloudFront's own 403 page: the network in front of the service
+    // refused, typically a service that answers only from its own country.
+    const auto blocked = explain(403, 22, "HTTP error code : 403",
+                                 "<HTML><TITLE>ERROR: The request could not be satisfied</TITLE>"
+                                 "<H1>403 ERROR</H1> Request blocked. We can't connect");
+    EXPECT_TRUE(says(blocked, "own country")) << blocked.message;
+    // Any other 403 is the service's own refusal.
+    const auto refused = explain(403, 22, "HTTP error code : 403", "{\"error\":\"forbidden\"}");
+    EXPECT_TRUE(says(refused, "ONLINE KEY")) << refused.message;
+    EXPECT_FALSE(says(refused, "own country"));
+
+    EXPECT_EQ(explain(404, 22, "HTTP error code : 404").code, ErrorCode::NotFound);
+    EXPECT_TRUE(says(explain(429, 22, ""), "limiting"));
+    EXPECT_TRUE(says(explain(0, 6, "Could not resolve host"), "host name"));
+    EXPECT_TRUE(says(explain(0, 28, "Operation timed out"), "within 120 s"));
+    EXPECT_TRUE(says(explain(0, 56, "CONNECT tunnel failed, response 403"), "proxy"));
+    const auto other = explain(0, 7, "Failed to connect");
+    EXPECT_EQ(other.message, "the request failed");
+    EXPECT_EQ(other.context, "https://a.org/x");
+}
+
 TEST(OnlineWeb, XmlIsReadIntoElementsByLocalName)
 {
     auto root = gis::parseXml(

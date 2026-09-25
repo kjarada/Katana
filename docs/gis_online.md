@@ -286,6 +286,14 @@ the dialog that the verbs cannot do
 (`qt_widgets.GisOnlineDialog.ImportHandsOnExactlyTheCommandTheVerbWouldParse`,
 `qt_online_dialog_headless`).
 
+**What arrives is framed.** An import of any area but `view` moves every
+plan view to what it brought (`ViewWorkspace::zoomTo`): a typed box is
+usually elsewhere, and web data in a real coordinate system lands thousands
+of kilometres from a drawing in local coordinates - left alone, the view
+showed the old drawing and a successful import looked like one that did
+nothing. `area=view` leaves the view where the person is looking
+(`qt_online_verbs_headless` reads the plan's count of what it drew).
+
 ## Verbs
 
 ```
@@ -368,11 +376,30 @@ environment described above:
   deadline, nothing added. An area too large at the asked resolution:
   refused with the resolution that fits.
 
-Not verified live, because the environment could not reach them: every NSW,
-Queensland, Victorian, South Australian, Tasmanian, ACT, Geoscience Australia,
-DEA, data.gov.au, Overpass, OpenStreetMap tile, Earth Search search and NASA
-GIBS request. Their request builders are tested against the specifications
-and their answers against fixtures of the services' published shapes.
+On the owner's Windows machine the same evening, with an ordinary network
+(outside Australia), `bin/katana.exe` headless over 151.205,-33.870 to
+151.210,-33.866 into MGA 56 - the first time these services were asked by
+Katana:
+
+- NSW Imagery at 0.23 m (240 tiles, 2048 x 1967), NSW cadastre lots (284),
+  the NSW 5 m DEM (95 x 91), NSW roads (62), OpenStreetMap buildings through
+  Overpass (230) and OpenStreetMap standard tiles (64): all imported, lying
+  on one another in the view.
+- `OnlineLive.EveryBuiltInEndpointAnswers`: every built-in service answered
+  but Location SA's two base maps, whose CloudFront distribution refuses
+  requests from outside Australia (403 "Request blocked", from a browser's
+  User-Agent too); the test names such a service and does not fail on it.
+- Before this, every request from `bin/katana.exe` had failed: the deploy
+  left out the certificates libcurl checks `https://` against
+  (`docs/building.md`), which no test saw because the tests load the
+  toolchain's libcurl.
+
+Not verified live: Queensland, Victorian, Tasmanian, ACT, Geoscience
+Australia, DEA, data.gov.au, Earth Search search and NASA GIBS imports
+(their services answered the live check above; an import over their areas
+has not been run). Their request builders are tested against the
+specifications and their answers against fixtures of the services'
+published shapes.
 
 ## Failure modes
 
@@ -383,8 +410,11 @@ and their answers against fixtures of the services' published shapes.
 | a limit above | `InvalidArgument` or `Unsupported`, saying what fits |
 | the service answers with an error document | `FileImportFailure` with the service's own words; not cached |
 | 404 | `NotFound`; a missing tile or Copernicus tile is a hole, with a warning |
-| 401, 403 | `FileImportFailure`: it may need a key or not allow this use |
+| 401, 403 | `FileImportFailure`: it may need a key, not allow this use, or not answer from where this computer is |
+| CloudFront's own 403 "Request blocked" page | `FileImportFailure`: the service may answer only from its own country |
 | a proxy refuses the host | `FileImportFailure`: the host may be blocked where Katana runs |
+| the certificate bundle beside libcurl is missing (curl 77, "trust anchors") | `FileImportFailure` naming `etc/ssl/certs/ca-bundle.crt` |
+| the service's certificate does not verify (curl 60) | `FileImportFailure`: a proxy or antivirus inspecting `https://` may be in the way |
 | no answer in time | retried, then `FileImportFailure` saying how long it waited |
 | cancelled | `InvalidState` "cancelled"; nothing applied |
 | a feature outside the project CRS's domain | `InvalidCRS` naming the feature |
@@ -393,9 +423,8 @@ and their answers against fixtures of the services' published shapes.
 
 ## Not done
 
-- The Australian services and the global ones outside S3 have not answered
-  Katana yet (above); an owner runs `OnlineLive.EveryBuiltInEndpointAnswers`
-  with a network and fills in `verified`.
+- The catalogue's `verified` fields are still empty for the services that
+  answered on 2026-09-25 (above); filling them in is the owner's call.
 - WMTS is read only on the Web Mercator (GoogleMapsCompatible) grid; a service
   offering only a national grid is listed by discovery as unsupported. WCS is
   1.0.0 only.

@@ -1,9 +1,11 @@
 // The GPU renderer against the software rasteriser, pixel by pixel, within a
 // tolerance (docs/gpu.md, "Testing").
 //
-// Every case runs twice: on the machine's GPU and on WARP, Windows' software
-// Direct3D 11 device, which is on every Windows machine and so is what a GPU-
-// less CI runner would still test. A case SKIPS when its device is missing.
+// Every case runs twice: on the machine's GPU and on its software device -
+// WARP, Windows' software Direct3D 11 device, which is on every Windows
+// machine, or lavapipe, Mesa's Vulkan on the CPU - which is what a GPU-less
+// CI runner or cloud session would still test. A case SKIPS when its device
+// is missing.
 //
 // A GPU frame is never bit-identical to the CPU's: 4x multisampling blends
 // edge pixels, lines get an analytic antialiased fringe, and the two fill rules
@@ -25,8 +27,12 @@
 #include <string>
 #include <vector>
 
+#include <rhi/qrhi.h>
+
 #include "gpu/scene_origin.hpp"
+#if defined(KATANA_GPU_D3D11)
 #include "gpu/shader_compiler.hpp"
+#endif
 #include "gpu/shader_library.hpp"
 #include "gpu_test_support.hpp"
 
@@ -144,10 +150,10 @@ Camera siteCamera(const Vec3& offset, int width, int height)
 } // namespace
 
 INSTANTIATE_TEST_SUITE_P(Devices, GpuRender,
-                         ::testing::Values(GpuDevice::Hardware, GpuDevice::Warp),
+                         ::testing::Values(GpuDevice::Hardware, GpuDevice::Software),
                          [](const ::testing::TestParamInfo<GpuDevice>& param) {
                              return std::string(param.param == GpuDevice::Hardware ? "Hardware"
-                                                                                   : "Warp");
+                                                                                   : "Software");
                          });
 
 TEST_P(GpuRender, AShadedTriangleCoversTheSoftwarePathsPixelsInItsColours)
@@ -756,8 +762,11 @@ TEST_P(GpuRender, TheGeometryShaderAndInstancingDrawTheSameLinesPointsAndCloud)
     auto instanced = makeGpu(kWidth, kHeight, GetParam(), skipReason, instancedOptions);
     ASSERT_NE(instanced, nullptr) << skipReason;
     // Every Direct3D 11 device has a geometry stage (feature level 10 and up),
-    // so the preferred way is the one used.
-    EXPECT_EQ(geometry->renderer().expansion(), Expansion::GeometryShader);
+    // so the preferred way is the one used; a Vulkan device may not have one
+    // (the geometryShader feature), and then both draw instanced.
+    if (geometry->rhi()->isFeatureSupported(QRhi::GeometryShader)) {
+        EXPECT_EQ(geometry->renderer().expansion(), Expansion::GeometryShader);
+    }
     EXPECT_EQ(instanced->renderer().expansion(), Expansion::Instanced);
 
     DrawList list;
@@ -844,9 +853,10 @@ TEST_P(GpuRender, CloudPointsAreRoundSpritesOfTheirScreenSizeAtSurveyCoordinates
     }
 }
 
-// The seam precompiled shaders will use: the same shaders serialized (as qsb
-// would write them) and read back through SerializedShaderLibrary draw the
-// same frame as the runtime library.
+// The seam precompiled shaders use: the default library's shaders serialized
+// (as qsb writes them) and read back through SerializedShaderLibrary draw the
+// same frame as the library itself. On Linux the default library IS such a
+// table, baked by qsb, so this is its round trip.
 TEST_P(GpuRender, SerializedShadersDrawWhatTheRuntimeShadersDraw)
 {
     constexpr int kWidth = 96;
@@ -855,9 +865,10 @@ TEST_P(GpuRender, SerializedShadersDrawWhatTheRuntimeShadersDraw)
     if (!runtime) {
         GTEST_SKIP() << skipReason;
     }
-    // The default library's shaders - bytecode, as a .qsb for Direct3D holds.
+    // The default library's shaders: bytecode, as a .qsb for Direct3D holds,
+    // or SPIR-V.
     auto table = katana::qt::gpu::SerializedShaderLibrary::serialize(
-        katana::qt::gpu::compiledHlslShaders());
+        katana::qt::gpu::defaultShaders());
     ASSERT_TRUE(table.ok()) << table.error().describe();
     const katana::qt::gpu::SerializedShaderLibrary serialized(std::move(*table));
     katana::qt::gpu::OffscreenOptions options;
@@ -890,8 +901,10 @@ TEST(SerializedShaderLibrary, ReportsABlobThatDoesNotDeserialize)
     EXPECT_NE(stages.error().describe().find("do not deserialize"), std::string::npos);
 }
 
+#if defined(KATANA_GPU_D3D11)
 // The default library compiles the HLSL itself (shader_compiler.hpp); QRhi
-// compiling the same source must draw the same frame.
+// compiling the same source must draw the same frame. Direct3D 11 only, like
+// everything HLSL.
 TEST_P(GpuRender, BytecodeCompiledHereDrawsWhatQRhiCompilingTheSourceDraws)
 {
     constexpr int kWidth = 96;
@@ -938,3 +951,4 @@ TEST(ShaderCompiler, ReportsACompileErrorWithTheCompilersOwnMessage)
     EXPECT_NE(message.find("did not compile"), std::string::npos) << message;
     EXPECT_NE(message.find("undefinedColour"), std::string::npos) << message;
 }
+#endif // KATANA_GPU_D3D11

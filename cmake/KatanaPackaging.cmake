@@ -14,6 +14,7 @@
 #     bin/*.dll                          Qt, GDAL, PDAL, PROJ, the C++ runtime
 #     bin/platforms, styles, ...         Qt plugins, where Qt looks for them
 #     share/proj, share/gdal             proj.db and the GDAL support files
+#     etc/ssl/certs/ca-bundle.crt        what libcurl checks https:// against
 #     share/katana/samples               a project to open
 #
 # bin/ beside share/ is not arbitrary: PROJ looks for its database at
@@ -154,6 +155,17 @@ if(WIN32 AND KATANA_DEPLOY_RUNTIME AND _katana_bundle_targets)
         COMMENT "Katana runtime: GDAL, PDAL, PROJ and Qt beside the programs in ${CMAKE_BINARY_DIR}/bin"
         VERBATIM)
     add_dependencies(katana_runtime ${_katana_bundle_targets})
+    if(KATANA_BUILD_TESTS)
+        # The deploy copies libcurl beside the programs, and libcurl reads the
+        # certificates it checks https:// against from ../etc/ssl/certs beside
+        # its own DLL. Every web request of GIS > Online Data failed while the
+        # deploy left them out, and no other test saw it: the tests load
+        # libcurl from the toolchain, whose bundle is in place.
+        add_test(NAME runtime_has_the_certificates_https_is_checked_against
+            COMMAND ${CMAKE_COMMAND} -E cat "${CMAKE_BINARY_DIR}/etc/ssl/certs/ca-bundle.crt")
+        set_tests_properties(runtime_has_the_certificates_https_is_checked_against PROPERTIES
+            PASS_REGULAR_EXPRESSION "-----BEGIN CERTIFICATE-----")
+    endif()
 endif()
 
 # --- CPack -----------------------------------------------------------------------

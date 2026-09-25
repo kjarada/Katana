@@ -525,11 +525,17 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
     // Everything the job reads is copied here, on the GUI thread.
     const interop::OnlineLayer layer = *found;
     const interop::OnlineEnvironment environment = this->environment();
+    // What arrives is framed unless it was asked for the view already on
+    // screen: a typed box or the drawing's extent is usually somewhere else,
+    // and web data in a real coordinate system lands kilometres - often
+    // thousands - from a drawing in local coordinates. Left unframed, a
+    // successful import looked like one that had done nothing.
+    const bool frame = command.area != interop::OnlineAreaKind::View;
     auto result = std::make_shared<interop::OnlineImport>();
     JobRunner& runner = JobRunner::of(window_);
     const JobId id = runner.start(
         "Online: " + qs(layer.providerTitle + " - " + layer.title),
-        [this, layer, options, environment, result, targetLayer, crsToSet](JobControl& control)
+        [this, layer, options, environment, result, targetLayer, crsToSet, frame](JobControl& control)
             -> Result<JobRunner::Apply> {
             (void)interop::pruneCache(environment.cacheDirectory, kCacheDays, kCacheBytes);
             auto fetched = interop::fetchOnlineLayer(
@@ -544,7 +550,7 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
                 return fetched.error();
             }
             *result = std::move(*fetched);
-            return JobRunner::Apply([this, layer, result, targetLayer, crsToSet] {
+            return JobRunner::Apply([this, layer, result, targetLayer, crsToSet, frame] {
                 if (!crsToSet.empty() && projectCrs().empty()) {
                     katana::storage::ProjectMetadata metadata = services_.document->metadata();
                     metadata.coordinateSystem = crsToSet;
@@ -552,7 +558,9 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
                     reply("project coordinate_system=" + interop::replyValue(crsToSet) + " set=yes\n");
                 }
                 std::size_t added = 0;
+                katana::geometry::Box2 arrived;
                 if (result->raster) {
+                    arrived = result->raster->worldBounds();
                     // The pixels go to the reference data; the reply needs only
                     // the name, the size and the id, which are kept.
                     const std::string name = result->raster->name;
@@ -571,6 +579,7 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
                         }
                     }
                     added = vectors.entities.size();
+                    arrived = vectors.bounds;
                     if (added != 0) {
                         transaction->add(cmd::createEntities(std::move(vectors.entities)));
                     }
@@ -583,6 +592,9 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
                     }
                 }
                 reply(interop::formatImport(layer, *result, added, targetLayer));
+                if (frame && !arrived.empty() && services_.views != nullptr) {
+                    services_.views->zoomTo(arrived);
+                }
             });
         },
         [this](const JobReport& report) {

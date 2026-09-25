@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include <rhi/qrhi.h>
 
@@ -152,6 +153,27 @@ constexpr std::size_t kProgramCount = kAllPrograms.size();
 
 } // namespace
 
+// One layer of the scene: what was packed, its GPU buffers, and whether it
+// must be uploaded again.
+struct GpuLayer {
+    GpuSceneData data;
+    bool depthWrite = true;
+    bool dirty = true;
+    std::unique_ptr<QRhiBuffer> vertices;
+    std::unique_ptr<QRhiBuffer> indices;
+    std::unique_ptr<QRhiBuffer> lines;
+    std::unique_ptr<QRhiBuffer> points;
+
+    void releaseGpu()
+    {
+        vertices.reset();
+        indices.reset();
+        lines.reset();
+        points.reset();
+        dirty = true; // whatever was uploaded went with the buffers
+    }
+};
+
 struct GpuRenderer::Resources {
     QRhi* rhi = nullptr;
     int sampleCount = 1;
@@ -162,16 +184,15 @@ struct GpuRenderer::Resources {
     std::unique_ptr<QRhiBuffer> cloudUniforms;
     std::unique_ptr<QRhiShaderResourceBindings> sceneBindings;
     std::unique_ptr<QRhiShaderResourceBindings> cloudBindings;
+    // Per program, the pipeline that writes depth and, for the programs a
+    // layer that writes none can hold (not the cloud), the one that does not.
     std::array<std::unique_ptr<QRhiGraphicsPipeline>, kProgramCount> pipelines;
+    std::array<std::unique_ptr<QRhiGraphicsPipeline>, kProgramCount> noWritePipelines;
 
-    std::unique_ptr<QRhiBuffer> vertices;
-    std::unique_ptr<QRhiBuffer> indices;
-    std::unique_ptr<QRhiBuffer> lines;
-    std::unique_ptr<QRhiBuffer> points;
+    // The scene, in drawing order, every layer relative to `origin`.
+    std::vector<GpuLayer> layers;
+    katana::math::Vec3 origin{0.0, 0.0, 0.0};
     std::unique_ptr<QRhiBuffer> cloud;
-
-    GpuSceneData scene;
-    bool sceneDirty = true;
     PointCloudData cloudData;
     bool cloudDirty = false;
     std::size_t uploads = 0;
@@ -181,18 +202,18 @@ struct GpuRenderer::Resources {
         for (auto& pipeline : pipelines) {
             pipeline.reset();
         }
+        for (auto& pipeline : noWritePipelines) {
+            pipeline.reset();
+        }
         sceneBindings.reset();
         cloudBindings.reset();
         sceneUniforms.reset();
         cloudUniforms.reset();
-        vertices.reset();
-        indices.reset();
-        lines.reset();
-        points.reset();
+        for (GpuLayer& layer : layers) {
+            layer.releaseGpu();
+        }
         cloud.reset();
         rhi = nullptr;
-        // Whatever was uploaded went with the buffers.
-        sceneDirty = true;
         cloudDirty = !cloudData.points.empty();
     }
 };
@@ -207,7 +228,25 @@ Expansion GpuRenderer::expansion() const { return resources_->expansion; }
 
 std::size_t GpuRenderer::uploadCount() const { return resources_->uploads; }
 
-const GpuSceneData& GpuRenderer::scene() const { return resources_->scene; }
+const GpuSceneData& GpuRenderer::scene() const
+{
+    static const GpuSceneData kEmpty;
+    return resources_->layers.empty() ? kEmpty : resources_->layers.front().data;
+}
+
+std::size_t GpuRenderer::layerCount() const { return resources_->layers.size(); }
+
+katana::math::AABB GpuRenderer::sceneBounds() const
+{
+    katana::math::AABB box;
+    for (const GpuLayer& layer : resources_->layers) {
+        if (!layer.data.bounds.empty()) {
+            box.expand(layer.data.bounds.min);
+            box.expand(layer.data.bounds.max);
+        }
+    }
+    return box;
+}
 
 void GpuRenderer::releaseResources() { resources_->releaseGpu(); }
 
@@ -252,10 +291,14 @@ katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor
     }
 
     for (const Program program : kAllPrograms) {
-        auto shaderStages = shaders.program(program, r.expansion);
-        if (!shaderStages) {
-            r.releaseGpu();
-            return shaderStages.error();
+      auto shaderStages = shaders.program(program, r.expansion);
+      if (!shaderStages) {
+          r.releaseGpu();
+          return shaderStages.error();
+      }
+      for (const bool depthWrite : {true, false}) {
+        if (!depthWrite && program == Program::CloudPoints) {
+            continue; // a cloud is drawn after the scene, writing depth
         }
         std::unique_ptr<QRhiGraphicsPipeline> pipeline(rhi->newGraphicsPipeline());
         if (shaderStages->geometry.isValid()) {
@@ -270,7 +313,7 @@ katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor
         pipeline->setVertexInputLayout(layoutFor(program, r.expansion));
         pipeline->setSampleCount(r.sampleCount);
         pipeline->setDepthTest(true);
-        pipeline->setDepthWrite(true);
+        pipeline->setDepthWrite(depthWrite);
         // Reversed Z: nearer is GREATER. Strictly greater, so of two
         // primitives at exactly the same depth the first drawn wins, as the
         // software path's strictly-less test does.
@@ -299,24 +342,72 @@ katana::core::Status GpuRenderer::initialise(QRhi* rhi, QRhiRenderPassDescriptor
                                  shaders.describe() +
                                  "; the shader compiler's message is in the Qt log)");
         }
-        r.pipelines[indexOf(program)] = std::move(pipeline);
+        (depthWrite ? r.pipelines : r.noWritePipelines)[indexOf(program)] = std::move(pipeline);
+      }
     }
     r.rhi = rhi;
-    r.sceneDirty = true;
+    for (GpuLayer& layer : r.layers) {
+        layer.dirty = true;
+    }
     r.cloudDirty = !r.cloudData.points.empty();
     return {};
 }
 
 void GpuRenderer::setDrawList(const katana::render::DrawList& list)
 {
-    packDrawList(list, resources_->scene);
-    resources_->sceneDirty = true;
+    const LayerSource only{&list, true};
+    setLayers(std::span<const LayerSource>(&only, 1));
+}
+
+void GpuRenderer::setLayers(std::span<const LayerSource> layers)
+{
+    Resources& r = *resources_;
+    // Each layer bounded once: for the joint box, and then for its packing.
+    std::vector<katana::math::AABB> bounds(layers.size());
+    katana::math::AABB box;
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (layers[i].list != nullptr) {
+            bounds[i] = layers[i].list->bounds();
+            if (!bounds[i].empty()) {
+                box.expand(bounds[i].min);
+                box.expand(bounds[i].max);
+            }
+        }
+    }
+    r.origin = chooseSceneOrigin(box);
+    // Kept, not rebuilt, so a layer's buffers are reused by the next upload.
+    r.layers.resize(layers.size());
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        GpuLayer& layer = r.layers[i];
+        layer.depthWrite = layers[i].depthWrite;
+        if (layers[i].list != nullptr) {
+            packDrawList(*layers[i].list, r.origin, bounds[i], layer.data);
+        } else {
+            layer.data.clear();
+            layer.data.origin = r.origin;
+        }
+        layer.dirty = true;
+    }
+}
+
+void GpuRenderer::updateLayer(std::size_t index, const katana::render::DrawList& list)
+{
+    Resources& r = *resources_;
+    if (index >= r.layers.size()) {
+        return;
+    }
+    packDrawList(list, r.origin, r.layers[index].data);
+    r.layers[index].dirty = true;
 }
 
 void GpuRenderer::setScene(GpuSceneData scene)
 {
-    resources_->scene = std::move(scene);
-    resources_->sceneDirty = true;
+    Resources& r = *resources_;
+    r.origin = scene.origin;
+    r.layers.resize(1);
+    r.layers.front().data = std::move(scene);
+    r.layers.front().depthWrite = true;
+    r.layers.front().dirty = true;
 }
 
 void GpuRenderer::setPointCloud(PointCloudData cloud)
@@ -443,16 +534,19 @@ katana::core::Result<GpuFrameStats> GpuRenderer::render(QRhiCommandBuffer* comma
 
     GpuFrameStats stats;
     QRhiResourceUpdateBatch* batch = r.rhi->nextResourceUpdateBatch();
-    if (r.sceneDirty) {
-        const GpuSceneData& s = r.scene;
+    for (GpuLayer& layer : r.layers) {
+        if (!layer.dirty) {
+            continue;
+        }
+        const GpuSceneData& s = layer.data;
         const bool ok =
-            upload(*r.rhi, *batch, r.vertices, QRhiBuffer::VertexBuffer, s.vertices.data(),
+            upload(*r.rhi, *batch, layer.vertices, QRhiBuffer::VertexBuffer, s.vertices.data(),
                    s.vertices.size() * sizeof(GpuVertex)) &&
-            upload(*r.rhi, *batch, r.indices, QRhiBuffer::IndexBuffer, s.triangleIndices.data(),
-                   s.triangleIndices.size() * sizeof(std::uint32_t)) &&
-            upload(*r.rhi, *batch, r.lines, QRhiBuffer::VertexBuffer, s.lines.data(),
+            upload(*r.rhi, *batch, layer.indices, QRhiBuffer::IndexBuffer,
+                   s.triangleIndices.data(), s.triangleIndices.size() * sizeof(std::uint32_t)) &&
+            upload(*r.rhi, *batch, layer.lines, QRhiBuffer::VertexBuffer, s.lines.data(),
                    s.lines.size() * sizeof(GpuLine)) &&
-            upload(*r.rhi, *batch, r.points, QRhiBuffer::VertexBuffer, s.points.data(),
+            upload(*r.rhi, *batch, layer.points, QRhiBuffer::VertexBuffer, s.points.data(),
                    s.points.size() * sizeof(GpuPoint));
         if (!ok) {
             batch->release();
@@ -460,10 +554,12 @@ katana::core::Result<GpuFrameStats> GpuRenderer::render(QRhiCommandBuffer* comma
                              "the GPU refused a scene buffer of " +
                                  std::to_string(s.byteSize()) + " bytes");
         }
-        r.sceneDirty = false;
-        ++r.uploads;
+        layer.dirty = false;
         stats.uploaded = true;
         stats.uploadedBytes += s.byteSize();
+    }
+    if (stats.uploaded) {
+        ++r.uploads;
     }
     if (r.cloudDirty) {
         const std::size_t bytes = r.cloudData.points.size() * sizeof(GpuCloudPoint);
@@ -479,7 +575,7 @@ katana::core::Result<GpuFrameStats> GpuRenderer::render(QRhiCommandBuffer* comma
     }
 
     const FrameUniforms sceneUniforms =
-        uniformsFor(camera, r.scene.origin, settings, *r.rhi, size.width(), size.height());
+        uniformsFor(camera, r.origin, settings, *r.rhi, size.width(), size.height());
     batch->updateDynamicBuffer(r.sceneUniforms.get(), 0, sizeof(FrameUniforms), &sceneUniforms);
     const bool drawCloud = !r.cloudData.points.empty() && r.cloud;
     if (drawCloud) {
@@ -494,27 +590,28 @@ katana::core::Result<GpuFrameStats> GpuRenderer::render(QRhiCommandBuffer* comma
                        katana::render::blueOf(bg), katana::render::alphaOf(bg));
     // Depth clears to 0: the FAR end of a reversed-Z buffer.
     commands->beginPass(target, clear, {0.0f, 0}, batch);
-    commands->setViewport(QRhiViewport(0.0f, 0.0f, static_cast<float>(size.width()),
-                                       static_cast<float>(size.height())));
-
-    const GpuSceneData& s = r.scene;
-    if (!s.triangleIndices.empty() && r.vertices && r.indices) {
-        commands->setGraphicsPipeline(r.pipelines[indexOf(Program::Triangles)].get());
+    // Set after each pipeline is bound, not once at the start of the pass: on
+    // a backend whose scissor is always on - Vulkan - QRhi sets the scissor
+    // from the viewport only for the pipeline active when setViewport is
+    // called. Set before any pipeline, Direct3D 11 drew and Vulkan's scissor
+    // was left undefined, which lavapipe took as nothing at all.
+    const QRhiViewport viewport(0.0f, 0.0f, static_cast<float>(size.width()),
+                                static_cast<float>(size.height()));
+    const auto bind = [&](QRhiGraphicsPipeline* pipeline) {
+        commands->setGraphicsPipeline(pipeline);
+        commands->setViewport(viewport);
         commands->setShaderResources();
-        const QRhiCommandBuffer::VertexInput input(r.vertices.get(), 0);
-        commands->setVertexInput(0, 1, &input, r.indices.get(), 0, QRhiCommandBuffer::IndexUInt32);
-        commands->drawIndexed(static_cast<quint32>(s.triangleIndices.size()));
-        stats.triangles = s.triangleCount();
-    }
+    };
+
     // Lines and points after the fills they lie on, as the software path
-    // orders them, and blended over them.
+    // orders them, and blended over them; each layer whole before the next,
+    // as cad::renderLayers draws them.
     // Through the geometry shader every line is two vertices and every point
     // one; instanced, each is one instance of a six-vertex quad.
     const bool instanced = r.expansion == Expansion::Instanced;
-    const auto drawQuads = [&](Program program, QRhiBuffer* buffer, std::size_t count,
-                               quint32 verticesEach) {
-        commands->setGraphicsPipeline(r.pipelines[indexOf(program)].get());
-        commands->setShaderResources();
+    const auto drawQuads = [&](QRhiGraphicsPipeline* pipeline, QRhiBuffer* buffer,
+                               std::size_t count, quint32 verticesEach) {
+        bind(pipeline);
         const QRhiCommandBuffer::VertexInput input(buffer, 0);
         commands->setVertexInput(0, 1, &input);
         if (instanced) {
@@ -523,16 +620,31 @@ katana::core::Result<GpuFrameStats> GpuRenderer::render(QRhiCommandBuffer* comma
             commands->draw(static_cast<quint32>(count) * verticesEach);
         }
     };
-    if (!s.lines.empty() && r.lines) {
-        drawQuads(Program::Lines, r.lines.get(), s.lines.size(), 2);
-        stats.lines = s.lines.size();
-    }
-    if (!s.points.empty() && r.points) {
-        drawQuads(Program::Points, r.points.get(), s.points.size(), 1);
-        stats.points = s.points.size();
+    for (const GpuLayer& layer : r.layers) {
+        const auto& pipelines = layer.depthWrite ? r.pipelines : r.noWritePipelines;
+        const GpuSceneData& s = layer.data;
+        if (!s.triangleIndices.empty() && layer.vertices && layer.indices) {
+            bind(pipelines[indexOf(Program::Triangles)].get());
+            const QRhiCommandBuffer::VertexInput input(layer.vertices.get(), 0);
+            commands->setVertexInput(0, 1, &input, layer.indices.get(), 0,
+                                     QRhiCommandBuffer::IndexUInt32);
+            commands->drawIndexed(static_cast<quint32>(s.triangleIndices.size()));
+            stats.triangles += s.triangleCount();
+        }
+        if (!s.lines.empty() && layer.lines) {
+            drawQuads(pipelines[indexOf(Program::Lines)].get(), layer.lines.get(), s.lines.size(),
+                      2);
+            stats.lines += s.lines.size();
+        }
+        if (!s.points.empty() && layer.points) {
+            drawQuads(pipelines[indexOf(Program::Points)].get(), layer.points.get(),
+                      s.points.size(), 1);
+            stats.points += s.points.size();
+        }
     }
     if (drawCloud) {
-        drawQuads(Program::CloudPoints, r.cloud.get(), r.cloudData.points.size(), 1);
+        drawQuads(r.pipelines[indexOf(Program::CloudPoints)].get(), r.cloud.get(),
+                  r.cloudData.points.size(), 1);
         stats.cloudPoints = r.cloudData.points.size();
     }
     commands->endPass();
