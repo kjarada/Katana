@@ -177,8 +177,8 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `MIRROR`, `ARRAY`, `ERASE`), editing (`OFFSET`, `TRIM`, `EXTEND`, `FILLET`,
 `CHAMFER`), `SELECT`, `LAYER`, the tables (`LINETYPE`, `DIMSTYLE`, `HATCH`,
 `STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
-`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`, and the sheet,
-annotation and utility families below. Aliases include
+`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `STATUS`, `HELP`, and the sheet,
+annotation, utility and survey-code families below. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
 and civil verbs until the audit of 2026-09-23.
 
@@ -224,15 +224,52 @@ is one undo step. `CommandInterpreter::annotationHelpText` is their
 reference, and `HELP` prints it after the rest. The plain `TEXT p height
 "text"` and `DIM p p offset` are unchanged.
 
+The survey-code verbs (`CODE [property]`, `CODE EXPLAIN code`, `CODE CENSUS
+[property]`, `MAPFILE LIST [filter]`, `MAPFILE CHECK`; `docs/survey_coding.md`)
+are handed to `runSurveyCodeVerb` (`include/katana/cad/survey_code_verbs.hpp`)
+since 2026-09-26; they were `katana_cli`'s own, and the window refused them.
+`CODE` is one undo step, and `MAPFILE CHECK` is refused - its whole lint in
+the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
+(`mapfileCheckReply`). The standard colour names they need are archive12d's,
+which cad may not see, so each front end passes the table with
+`CommandInterpreter::setColourLookup`; without one no colour is known and
+colours are left alone.
+
+### STATUS
+
+`STATUS` prints the drawing at a glance - its project, whether it has unsaved
+changes, how many entities, layers and alignments, the current layer and
+style, the selection, the undo and redo depth and the customisation counts -
+and `STATUS JSON` the same as one JSON object, its keys in alphabetical order
+and indented by two. Both come from `cad::documentStatus`
+(`include/katana/cad/document_status.hpp`), with `cad::formatStatus` and
+`cad::statusJson`. Until 2026-09-26 this was `katana_mcp`'s alone, built in
+`mcp_server.cpp` as `katana_status` and `katana://status`; the window showed
+pieces of it and nothing could ask for it from the window or `katana_cli`.
+The MCP tool and resource now call the same functions, and their text is
+unchanged: the resource, the tool's text and its structured content were
+compared byte for byte with the previous `katana_mcp` over one session
+(`McpServer.TheStatusToolAndResourceSayWhatTheStatusVerbSays` pins them with
+the text written out by hand). Asking changes nothing and is no undo step. A
+name that is not UTF-8 is written with U+FFFD rather than thrown. File >
+Drawing Summary copies `STATUS JSON` (`docs/desktop.md`).
+
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
-(`MainWindow::runCommandLine`) adds `IMPORT`, `EXPORT`, `INFO <file>`,
-`REFS`, `CUSTOMISE [REPLACE] <file>...`, the view verbs `ZOOM`, `GRID` and
-`SNAP`, and `QUIT`; `katana_cli` adds `IMPORT`, `EXPORT`, `REFS`, `COPC` and
-the survey-code verbs (`CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`,
-`MAPFILE CHECK`, `CUSTOMISE [REPLACE]`; `docs/survey_coding.md`) - its
-`--help` lists them. Of the survey-code verbs only `CUSTOMISE` is on the
-application's command line; the rest are the Survey Code Manager's tabs.
+(`MainWindow::runCommandLine`, whose `dispatchLine` the window's dialogs run
+their lines through too - `docs/desktop.md`, "One executor: the command
+runner") adds `IMPORT <file> [LOCAL]`, `EXPORT`, `INFO <file>`, `REFS`,
+`COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
+report, `cad::customisationReport`), `PLOTSHEETS`, `PLOT`, `SNAPSHOT`,
+`SCRIPT <file> [CONTINUE]`,
+the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
+`HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
+"The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
+same interoperability verbs and `CUSTOMISE` - its `--help` lists them - and
+the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read an `IMPORT` line's
+path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
+with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)
+to the interpreter unless a file of that name exists.
 
 In the application a typed line is routed before the interpreter sees it
 (`docs/tools.md`, "The tool host"): while a tool runs, the whole line is that tool's
@@ -673,9 +710,12 @@ sample project before opening it, because opening can touch the project
 directory and a test must never change repository data. And it compares the
 header as hex: CMake's plain `file(READ ... LIMIT 4)` on this platform
 returned `%PDF` plus a newline - five characters - and failed a perfectly
-good PDF, while the `HEX` read is byte-exact. The dialog and the switch
-share one `plotDrawingToPdf`, so the test exercises the same code the menu
-does.
+good PDF, while the `HEX` read is byte-exact. The dialog, the window's
+`PLOT` verb and the switch share one `plotDrawingToPdf`, so the test
+exercises the same code the menu does; since 2026-09-26 the dialog writes a
+`PLOT` line with the colour mode and the line weight scale `--plot` always
+took (`docs/desktop.md`, "Plot to PDF and view images"), and the same test
+holds each style's inks to what it means.
 
 ## Point symbols
 

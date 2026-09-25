@@ -1,6 +1,6 @@
 // The command-line session that katana_cli and katana_mcp both drive: one
 // Document, the CommandInterpreter over it, and the verbs the front ends add
-// above katana_cad (CUSTOMISE, CODE, MAPFILE, IMPORT, EXPORT...). Each line is
+// above katana_cad (CUSTOMISE, IMPORT, EXPORT, INFO <file>, COPC...). Each line is
 // reported on std::cout (what it did) and std::cerr (errors and warnings), as
 // katana_cli always has; katana_mcp captures both around each line.
 
@@ -21,6 +21,7 @@
 #include "katana/archive12d/domain.hpp"
 #include "katana/cad/code_table.hpp"
 #include "katana/cad/customisation_record.hpp"
+#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
@@ -57,8 +58,8 @@ bool isQuit(const std::string& line)
 
 // The rest of the line after the verb: leading and trailing blanks removed, and
 // one layer of surrounding quotes stripped, so a path with spaces works.
-// Outside the interoperability guard: CODE, MAPFILE and CUSTOMISE use them too,
-// and they are offered in a build with no GDAL.
+// Outside the interoperability guard: the DXF verbs use it too, and they are
+// offered in a build with no GDAL.
 std::string argumentOf(const std::string& line, std::size_t verbLength)
 {
     std::string rest = line.substr(verbLength);
@@ -105,21 +106,11 @@ void reportCoverage(const katana::cad::Document& document)
 }
 
 // The standard colour names reach cad only through a callback: cad may not
-// see archive12d, which owns the table.
+// see archive12d, which owns the table. The interpreter's CODE and MAPFILE
+// CHECK are given it (CommandInterpreter::setColourLookup).
 std::optional<katana::entity::Color> colourOf(std::string_view name)
 {
     return katana::archive12d::standardColour(name);
-}
-
-// The first word of `text`, upper-cased, and the rest as argumentOf reads it.
-std::pair<std::string, std::string> splitWord(const std::string& text)
-{
-    const std::size_t first = text.find_first_not_of(" \t");
-    if (first == std::string::npos) {
-        return {};
-    }
-    const std::size_t end = text.find_first_of(" \t", first);
-    return {upperVerb(text), end == std::string::npos ? std::string{} : argumentOf(text, end)};
 }
 
 // The files of a load, by name and kind, for the record a project keeps of
@@ -216,33 +207,11 @@ bool runCustomise(katana::cad::Document& document,
         std::cerr << "error: InvalidArgument: CUSTOMISE REPLACE needs a file\n";
         return false;
     }
+    // Alone, it reports: what is loaded, from which files, what the project
+    // was drawn with that is not, and what it covers here - the words the
+    // window's CUSTOMISE says too (cad/customisation_report.hpp).
     if (paths.empty()) {
-        const auto& library = document.styleLibrary();
-        const auto& map = document.surveyMap();
-        if (library.empty() && map.empty()) {
-            std::cout << "No customisation is loaded.\n"
-                      << "  CUSTOMISE <file> [<file>...]  loads style libraries (.4d) and "
-                         "survey code files (.mapfile)\n";
-            return true;
-        }
-        // Counted as the pickers offer them (decision D3, cad::symbolChoices
-        // and cad::linetypeChoices), library definitions only. This line once
-        // said "157 of them symbols", counting `mode vertex` alone - one of
-        // D3's four reasons, and a minority of the symbols the reference
-        // survey code files use - so here one definition can be counted in both.
-        const auto fromLibrary = [](const std::vector<katana::cad::CatalogueEntry>& entries) {
-            return std::ranges::count(entries, katana::cad::DefinitionSource::Library,
-                                      &katana::cad::CatalogueEntry::source);
-        };
-        std::cout << library.size() << " linestyle and symbol definitions in "
-                  << katana::entity::styleGroups(library).size() << " groups: "
-                  << fromLibrary(katana::cad::symbolChoices(document))
-                  << " offered as symbols, "
-                  << fromLibrary(katana::cad::linetypeChoices(document, false))
-                  << " as linestyles (one definition can be both)\n"
-                  << map.size() << " survey code rules over " << map.keys().size()
-                  << " distinct codes\n";
-        reportCoverage(document);
+        std::cout << katana::cad::customisationReport(document, record, missingAtOpen);
         return true;
     }
 
@@ -326,94 +295,6 @@ bool runCustomise(katana::cad::Document& document,
     return true;
 }
 
-bool requireMap(const katana::cad::Document& document)
-{
-    if (document.surveyMap().empty()) {
-        std::cerr << "error: InvalidState: no survey codes are loaded; use CUSTOMISE <file> "
-                     "first\n";
-        return false;
-    }
-    return true;
-}
-
-// CODE [<property>] applies the loaded survey codes to the drawing: every entity
-// carrying a field code gets the model, the style and the attributes the
-// survey codes say it should have, as ONE undoable command. CODE EXPLAIN <code>
-// says why a code gets what it gets, and CODE CENSUS [<property>] lists the
-// codes the drawing carries - so a property cannot be called EXPLAIN or
-// CENSUS here, which no survey format does.
-bool runCode(katana::cad::Document& document, const std::string& rest)
-{
-    if (!requireMap(document)) {
-        return false;
-    }
-    const auto [word, argument] = splitWord(rest);
-    if (word == "EXPLAIN") {
-        if (argument.empty()) {
-            std::cerr << "error: InvalidArgument: CODE EXPLAIN <code>\n";
-            return false;
-        }
-        const auto explanation = katana::cad::explainCode(
-            document.surveyMap(), argument,
-            [&document](std::string_view name) { return document.definitionFor(name); },
-            colourOf);
-        std::cout << katana::cad::formatCodeExplanation(explanation);
-        return true;
-    }
-    if (word == "CENSUS") {
-        std::cout << katana::cad::formatCodeCensus(katana::cad::codeCensus(document, argument));
-        return true;
-    }
-
-    katana::cad::SurveyCodingOptions options;
-    options.property = argumentOf(rest, 0);
-    options.colourOf = colourOf;
-    katana::cad::SurveyCodingReport report;
-    auto command = katana::cad::applySurveyCodes(document, options, &report);
-    if (!command) {
-        std::cerr << "error: " << command.error().describe() << "\n";
-        return false;
-    }
-    std::cout << katana::cad::formatCodingReport(report);
-    if (*command == nullptr) {
-        std::cout << "Nothing to change.\n";
-        return true;
-    }
-    if (const auto status = document.execute(std::move(*command)); !status) {
-        std::cerr << "error: " << status.error().describe() << "\n";
-        return false;
-    }
-    std::cout << "Applied as one command. UNDO puts it all back.\n";
-    return true;
-}
-
-// MAPFILE LIST [<filter>] lists the loaded map one code per line, filtered
-// with case ignored; MAPFILE CHECK lints it, and fails - so a script stops -
-// when a rule cannot be applied as written.
-bool runMapfile(const katana::cad::Document& document, const std::string& rest)
-{
-    const auto [word, argument] = splitWord(rest);
-    if (word != "LIST" && word != "CHECK") {
-        std::cerr << "error: InvalidArgument: MAPFILE LIST [<filter>] | CHECK\n";
-        return false;
-    }
-    if (!requireMap(document)) {
-        return false;
-    }
-    const katana::entity::SurveyMap& map = document.surveyMap();
-    if (word == "LIST") {
-        std::cout << katana::cad::formatCodeTable(katana::cad::codeTable(map), argument);
-        return true;
-    }
-    const auto issues = katana::cad::lintSurveyMap(
-        map, document.styleLibrary(), colourOf,
-        [](std::string_view name) { return katana::entity::isBuiltInSymbolName(name); });
-    std::cout << katana::cad::formatLint(issues, map.size());
-    return std::none_of(issues.begin(), issues.end(), [](const katana::cad::LintIssue& issue) {
-        return issue.severity == katana::cad::LintSeverity::Error;
-    });
-}
-
 #if defined(KATANA_WITH_INTEROP)
 
 // IMPORT, EXPORT and REFS live here rather than in CommandInterpreter because
@@ -424,29 +305,16 @@ struct InteropState {
     katana::interop::ReferenceData reference;
 };
 
-bool importPath(katana::cad::Document& document, InteropState& state, const std::string& text)
+// IMPORT <file> LOCAL moves the data as one piece so that the lower-left
+// corner of what it holds sits at 0,0, instead of at its own survey
+// coordinates: `shiftToLocal`, read off the line with the path by
+// CommandInterpreter::importArgument.
+bool importPath(katana::cad::Document& document, InteropState& state, const std::string& text,
+                bool shiftToLocal)
 {
     namespace interop = katana::interop;
     namespace cmd = katana::commands;
-    const std::filesystem::path path(text);
-
-    // IMPORT <file> LOCAL shifts the data to sit alongside the drawing instead
-    // of at its own survey coordinates.
-    std::filesystem::path file = path;
-    bool shiftToLocal = false;
-    {
-        const std::string raw = path.string();
-        const std::size_t space = raw.find_last_of(" 	");
-        if (space != std::string::npos) {
-            std::string tail = raw.substr(space + 1);
-            std::transform(tail.begin(), tail.end(), tail.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-            if (tail == "LOCAL") {
-                shiftToLocal = true;
-                file = std::filesystem::path(raw.substr(0, space));
-            }
-        }
-    }
+    const std::filesystem::path file(text);
 
     switch (interop::kindForPath(file)) {
     case interop::SourceKind::Vector: {
@@ -491,8 +359,8 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         const auto advice = interop::advisePlacement(existingBounds, bounds);
         if (advice.farApart) {
             std::cout << "  WARNING: " << advice.message << '\n'
-                      << "  undo, then re-import with  IMPORT <file> LOCAL  to shift it "
-                         "alongside the drawing\n";
+                      << "  undo, then re-import with  IMPORT <file> LOCAL  to move it as one "
+                         "piece so its lower-left corner sits at 0,0\n";
         }
         return true;
     }
@@ -584,8 +452,8 @@ bool importPath(katana::cad::Document& document, InteropState& state, const std:
         const auto advice = interop::advisePlacement(existingBounds, imported->bounds);
         if (advice.farApart) {
             std::cout << "  WARNING: " << advice.message << '\n'
-                      << "  undo, then re-import with  IMPORT <file> LOCAL  to shift it "
-                         "alongside the drawing\n";
+                      << "  undo, then re-import with  IMPORT <file> LOCAL  to move it as one "
+                         "piece so its lower-left corner sits at 0,0\n";
         }
         return true;
     }
@@ -669,47 +537,23 @@ bool describePath(const std::string& text)
     return true;
 }
 
-// The two paths of COPC <source> <destination>: each either "quoted" or one
-// word, so a path with spaces is quoted and one without need not be.
-std::vector<std::string> pathArguments(const std::string& text)
-{
-    std::vector<std::string> paths;
-    std::size_t at = 0;
-    while (at < text.size()) {
-        at = text.find_first_not_of(" \t", at);
-        if (at == std::string::npos) {
-            break;
-        }
-        std::size_t end = 0;
-        if (text[at] == '"') {
-            end = text.find('"', at + 1);
-            if (end == std::string::npos) {
-                end = text.size();
-            }
-            paths.push_back(text.substr(at + 1, end - at - 1));
-            at = end + 1;
-        } else {
-            end = text.find_first_of(" \t", at);
-            if (end == std::string::npos) {
-                end = text.size();
-            }
-            paths.push_back(text.substr(at, end - at));
-            at = end;
-        }
-    }
-    return paths;
-}
-
 // COPC <source> <destination.copc.laz>: the whole file rewritten as a Cloud
 // Optimised Point Cloud, every point kept, so that later reads can ask for a
-// level of detail instead of decimating (PLAN.MD Phase 17).
-bool convertToCopc(const std::string& text)
+// level of detail instead of decimating (PLAN.MD Phase 17). Each path is one
+// word or quoted, read by the interpreter's own rules - as the window's COPC
+// reads them - so a path with spaces is quoted and one without need not be.
+bool convertToCopc(const std::string& line)
 {
-    const std::vector<std::string> paths = pathArguments(text);
-    if (paths.size() != 2) {
+    const auto words = katana::cad::CommandInterpreter::tokenize(line);
+    if (!words) {
+        std::cerr << "error: " << words.error().describe() << '\n';
+        return false;
+    }
+    if (words->size() != 3) {
         std::cerr << "error: InvalidArgument: usage: COPC <source> <destination.copc.laz>\n";
         return false;
     }
+    const std::vector<std::string> paths(words->begin() + 1, words->end());
     const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(paths[0], paths[1]);
     if (!status) {
         std::cerr << "error: " << status.error().describe() << '\n';
@@ -774,14 +618,14 @@ std::optional<bool> runInterop(katana::cad::Document& document, InteropState& st
 {
     const std::string verb = upperVerb(line);
     if (verb == "IMPORT") {
-        const std::string argument = argumentOf(line, line.find_first_of(" \t") == std::string::npos
-                                                          ? line.size()
-                                                          : line.find_first_of(" \t"));
-        if (argument.empty()) {
-            std::cerr << "error: InvalidArgument: usage: IMPORT <file>\n";
+        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        const auto argument = katana::cad::CommandInterpreter::importArgument(
+            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space));
+        if (argument.path.empty()) {
+            std::cerr << "error: InvalidArgument: usage: IMPORT <file> [LOCAL]\n";
             return false;
         }
-        return importPath(document, state, argument);
+        return importPath(document, state, argument.path, argument.local);
     }
     if (verb == "EXPORT") {
         const std::string argument = argumentOf(line, line.find_first_of(" \t") == std::string::npos
@@ -805,9 +649,18 @@ std::optional<bool> runInterop(katana::cad::Document& document, InteropState& st
                       << (verb == "INFO" ? " <file>\n" : " <source> <destination.copc.laz>\n");
             return false;
         }
-        // COPC takes the raw rest of the line: argumentOf strips one pair of
+        // INFO 12 is the interpreter's: an entity, described. Every INFO was
+        // once taken for a file here, so katana_describe_entity, which sends
+        // INFO <id>, answered "file does not exist" in every build with GDAL.
+        // A file that is really called 12 is still described.
+        std::error_code error;
+        if (verb == "INFO" && katana::cad::CommandInterpreter::isEntityId(argument) &&
+            !std::filesystem::exists(std::filesystem::path(argument), error)) {
+            return std::nullopt;
+        }
+        // COPC takes the whole line: argumentOf strips one pair of
         // surrounding quotes, which would run two quoted paths together.
-        return verb == "INFO" ? describePath(argument) : convertToCopc(line.substr(space));
+        return verb == "INFO" ? describePath(argument) : convertToCopc(line);
     }
     return std::nullopt;
 }
@@ -836,13 +689,6 @@ bool runLine(SessionState& session, const std::string& line)
 {
     if (!line.empty() && line.front() == '#') {
         return true;
-    }
-    if (upperVerb(line) == "CODE" || upperVerb(line) == "MAPFILE") {
-        const std::size_t first = line.find_first_not_of(" \t");
-        const std::size_t space = line.find_first_of(" \t", first);
-        const std::string rest = space == std::string::npos ? std::string{} : line.substr(space);
-        return upperVerb(line) == "CODE" ? runCode(session.document, rest)
-                                         : runMapfile(session.document, rest);
     }
     if (upperVerb(line) == "CUSTOMISE" || upperVerb(line) == "CUSTOMIZE") {
         // Paths may have spaces, so they are taken as quoted words where they
@@ -889,9 +735,16 @@ bool runLine(SessionState& session, const std::string& line)
     // A .dxf is read and written natively, with or without GDAL (dxf_verbs.hpp).
     if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
         const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        const std::string_view rest =
+            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space);
+        const auto argument = verb == "IMPORT"
+                                  ? katana::cad::CommandInterpreter::importArgument(rest)
+                                  : katana::cad::CommandInterpreter::ImportArgument{
+                                        argumentOf(line, space == std::string::npos ? line.size()
+                                                                                    : space),
+                                        false};
         if (const std::optional<bool> handled = katana::app::runDxfVerb(
-                session.document, verb,
-                argumentOf(line, space == std::string::npos ? line.size() : space))) {
+                session.document, verb, argument.path, argument.local)) {
             return *handled;
         }
     }
@@ -971,6 +824,7 @@ struct Session::State {
 
 Session::Session(const char* executable) : state_(std::make_unique<State>())
 {
+    state_->interpreter.setColourLookup(colourOf);
     if (executable != nullptr) {
         loadDefaultCustomisation(state_->document, executable, state_->session.customisation);
     }
@@ -1002,12 +856,7 @@ std::string Session::helpText()
 {
     std::string text = katana::cad::CommandInterpreter::helpText();
     text += "\n"
-            "Survey    CODE [<property>]  apply the loaded survey codes to every\n"
-            "          entity carrying a field code (found when not named)\n"
-            "          CODE EXPLAIN <code>  why a code gets what it gets\n"
-            "          CODE CENSUS [<property>]  the codes this drawing carries\n"
-            "          MAPFILE LIST [<filter>] | CHECK  the loaded survey codes\n"
-            "          CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
+            "Customise CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
             "          libraries (.4d) and survey code files (.mapfile), merged\n"
             "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
 #if defined(KATANA_WITH_INTEROP)
@@ -1016,6 +865,7 @@ std::string Session::helpText()
             "reference layers\n"
             "          INFO <file>  what a GIS file or point cloud holds, "
             "without importing it\n"
+            "          (INFO <id> describes an entity, when no file has that name)\n"
             "          COPC <source> <destination.copc.laz>  rewrite a point "
             "cloud as COPC\n";
 #else

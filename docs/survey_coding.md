@@ -831,7 +831,13 @@ formatter, so the application and `katana_cli` print the same words (the two
 used to disagree about what applying codes had done; `formatCodingReport` is
 now the one report of an application, with a row per code):
 
-| Question | Function | CLI verb |
+The verbs are the `CommandInterpreter`'s (`include/katana/cad/survey_code_verbs.hpp`)
+since 2026-09-26, so the window's command line, `katana_cli` and `katana_mcp`
+all have them; until then they were `katana_cli`'s own, and the window
+answered "unknown command". `CODE` itself - apply the loaded codes, one undo
+step - is one of them too.
+
+| Question | Function | Verb (every command line) |
 |---|---|---|
 | Why does this code get what it gets? | `explainCode` → `formatCodeExplanation` | `CODE EXPLAIN <code>` |
 | What does the map say, one code per line? | `codeTable`, `codeTableRowMatches` → `formatCodeTable` | `MAPFILE LIST [<filter>]` |
@@ -877,7 +883,10 @@ written, a WARNING one that applies but not as its author meant.
 `SurveyMap::add` refuses a key with blanks and an invalid layer path, so those
 two can be met only by `lintSurveyRule` on a rule not yet in a map - an
 editor's form before it commits. `MAPFILE CHECK` fails the command when any
-error is found, so a script stops. On the compiled-in pair of mapfiles, run
+error is found, so a script stops: the refusal's first line counts the errors
+and the lint follows it, as `UTILITY CHECK` carries its check
+(`mapfileCheckReply`, tested on hand-made issues because no map can hold such
+a rule today). On the compiled-in pair of mapfiles, run
 on 2026-09-24:
 
 ```

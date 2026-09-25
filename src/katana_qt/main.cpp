@@ -7,6 +7,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
@@ -18,9 +19,11 @@
 #include <QTextEdit>
 #include <QToolBar>
 
+#include <algorithm>
 #include <cstdio>
 #include <optional>
 #include <thread>
+#include <utility>
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
@@ -33,6 +36,7 @@
 #include "theme.hpp"
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
+#include "script_runner.hpp"
 #if defined(KATANA_GPU_D3D11)
 #include "gpu/renderer_choice.hpp"
 #include "gpu/shader_compiler.hpp"
@@ -216,6 +220,19 @@ bool fillField(QWidget& dialog, const QString& assignment)
         spin->setValue(number);
         return true;
     }
+    // A number with decimals - a plot's scale, a line weight - read as the
+    // box itself reads typed text, so "0.7" means what it does in the box.
+    if (auto* spin = qobject_cast<QDoubleSpinBox*>(widget)) {
+        bool ok = false;
+        const double number = text.toDouble(&ok);
+        if (!ok || number < spin->minimum() || number > spin->maximum()) {
+            std::fprintf(stderr, "--fill: %s takes a number from %g to %g, not '%s'\n",
+                         qPrintable(name), spin->minimum(), spin->maximum(), qPrintable(text));
+            return false;
+        }
+        spin->setValue(number);
+        return true;
+    }
     if (auto* check = qobject_cast<QCheckBox*>(widget); check != nullptr &&
                                                          (text == "on" || text == "off")) {
         check->setChecked(text == "on");
@@ -259,6 +276,38 @@ bool fillField(QWidget& dialog, const QString& assignment)
     return false;
 }
 
+// --run-line: `text` through the window's one executor, as a dialog runs a
+// line, and the outcome the dialog gets printed back on stderr - the ok, then
+// each line of the reply and of the errors - so a test reads what a dialog
+// would show. Whether it was ok.
+bool runLine(katana::qt::MainWindow& window, const QString& text)
+{
+    const katana::qt::VerbOutcome outcome = window.runVerbLine(text);
+    std::fprintf(stderr, "--run-line %s: ok=%s\n", qPrintable(text), outcome.ok ? "yes" : "no");
+    for (const auto& [label, lines] : {std::pair("reply", outcome.reply),
+                                       std::pair("error", outcome.error)}) {
+        if (lines.isEmpty()) {
+            continue;
+        }
+        for (const QString& line : lines.split('\n')) {
+            std::fprintf(stderr, "  %s: %s\n", label, qPrintable(line));
+        }
+    }
+    return outcome.ok;
+}
+
+// --script: the file run by the window's SCRIPT verb, through the one
+// executor, as File > Run Script runs it; stopping at the first line refused.
+// Whether every line ran.
+bool runScriptFile(katana::qt::MainWindow& window, const QString& path)
+{
+    if (window.runVerbLine(katana::qt::scriptCommandLine(path, false)).ok) {
+        return true;
+    }
+    std::fprintf(stderr, "--script %s stopped at a line that was refused\n", qPrintable(path));
+    return false;
+}
+
 } // namespace
 
 // Usage:
@@ -283,7 +332,9 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
 //                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
 //                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
-//                 [--command TEXT...] [--enter] [--trigger NAME...] --screenshot out.png
+//                 [--command TEXT...] [--run-line TEXT...] [--enter] [--trigger NAME...]
+//                 [--script FILE...] --screenshot out.png
+//   katana [project-directory] [data-file...] --script FILE... [--command TEXT...]
 //   katana --check-shortcuts --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
@@ -358,7 +409,8 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // on stderr what opened, and grabs that dialog instead of the window.
 // --survey-dialog is its first name and does the same. --fill types TEXT into the dialog's field with object name FIELD - a
 // line, a text box (where "\n" is a line break, so a field book fits on a
-// command line), a choice by its item text, or a check box by on/off - and
+// command line), a choice by its item text, a number box (whole or with
+// decimals) by its number, or a check box by on/off - and
 // --press clicks the button with object name BUTTON. Fills and presses run in
 // the order given, so a paged dialog (the import wizard) can be filled page by
 // page between its Next presses, and the event loop runs after each one, as
@@ -376,9 +428,21 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // command line, wherever it comes among the steps, so a test can make the
 // styles, entities and selection a panel then acts on - or start a tool by
 // its alias and answer its prompts; --enter is Enter on an empty command
-// line. --report WIDGET prints what the target's WIDGET shows (reportWidget).
+// line. --run-line TEXT runs TEXT through the window's one executor, as a
+// dialog runs the line it built (MainWindow::runVerbLine): never a running
+// tool's answer, and what it logged is printed back as the dialog gets it -
+// "--run-line TEXT: ok=yes|no", then a "  reply: " or "  error: " line for each
+// line it logged. --report WIDGET prints what the target's WIDGET shows (reportWidget).
 // --trigger NAME is --action in its turn among these steps, for a menu
 // command that acts on what the steps before it made (formatPurge).
+//
+// --script FILE runs a katana_cli script (.kcs) in the window, a step among the
+// others: the window's SCRIPT verb through its one executor, each line echoed
+// and run as a dialog's line is, stopping at the first refused
+// (script_runner.hpp). A script that stops fails the run, exit 1. Without
+// --screenshot, --plot or --plot-sheets, a --script makes the run a batch as
+// katana_cli's is: headless, never shown, over when its steps are, and failed
+// by the first step refused.
 //
 // --check-shortcuts lists every key sequence two of the window's actions or
 // menus share, and fails the run when there is one: Qt disables an
@@ -441,8 +505,8 @@ int main(int argc, char* argv[])
     std::optional<QString> datasetInfo;
     std::optional<QString> importOptions;
     bool selectEverything = false;
-    // --dialog, --survey-dock, --fill, --press, --panel, --command, --enter
-    // and --report, in the order given.
+    // --dialog, --survey-dock, --fill, --press, --panel, --command,
+    // --run-line, --enter and --report, in the order given.
     std::vector<std::pair<QString, QString>> surveySteps;
     bool checkShortcuts = false;
     long long attributeEntity = 0;
@@ -519,7 +583,8 @@ int main(int argc, char* argv[])
             surveySteps.emplace_back("--dialog", value());
         } else if (argument == "--survey-dock" || argument == "--fill" || argument == "--press" ||
                    argument == "--panel" || argument == "--command" || argument == "--report" ||
-                   argument == "--trigger") {
+                   argument == "--trigger" || argument == "--run-line" ||
+                   argument == "--script") {
             surveySteps.emplace_back(argument, value());
         } else if (argument == "--enter") {
             // Enter on an empty command line, a step of its own: an empty
@@ -580,9 +645,14 @@ int main(int argc, char* argv[])
     }
     const bool writesOnly = plotPath.has_value() || sheetsPath.has_value() ||
                             sheetsJsonPath.has_value();
+    // A script with nothing to grab is a batch run, as katana_cli's is.
+    const bool scriptBatch =
+        !screenshotPath && std::ranges::any_of(surveySteps, [](const auto& step) {
+            return step.first == "--script";
+        });
 
     katana::qt::MainWindow window;
-    window.setHeadless(writesOnly || screenshotPath.has_value());
+    window.setHeadless(writesOnly || scriptBatch || screenshotPath.has_value());
     // Before anything is opened, so the first drawing is drawn with it. A
     // --customise on the command line is merged in next, as Format > Load
     // Customisation would, and so is loaded when a project is opened: its
@@ -591,7 +661,7 @@ int main(int argc, char* argv[])
     if (!customisation.empty()) {
         window.applyCustomisation(customisation);
     }
-    if (!writesOnly && !screenshotPath) {
+    if (!writesOnly && !screenshotPath && !scriptBatch) {
         window.show();
     }
     for (const QString& input : inputs) {
@@ -601,21 +671,23 @@ int main(int argc, char* argv[])
             window.importPath(input);
         }
     }
-    // Without --screenshot the --command lines run here, in order, before
-    // anything is written: lay the sheets out with the sheet verbs, then
-    // --sheets-json or --plot-sheets what they made, in one run. A headless
-    // run stops at the first line that is refused. (With --screenshot they
-    // run among its steps, below.)
+    // Without --screenshot the --command lines and scripts run here, in
+    // order, before anything is written: lay the sheets out with the sheet
+    // verbs, then --sheets-json or --plot-sheets what they made, in one run.
+    // A headless run stops at the first line that is refused. (With
+    // --screenshot they run among its steps, below.)
     if (!screenshotPath) {
         for (const auto& [kind, text] : surveySteps) {
-            if (kind != "--command") {
+            if (kind != "--command" && kind != "--run-line" && kind != "--script") {
                 continue;
             }
-            const bool ran = window.runCommand(text);
+            const bool ran = kind == "--command"    ? window.runCommand(text)
+                             : kind == "--run-line" ? runLine(window, text)
+                                                    : runScriptFile(window, text);
             QApplication::processEvents();
             QApplication::processEvents();
-            if (!ran && writesOnly) {
-                std::fprintf(stderr, "--command %s was refused\n", qPrintable(text));
+            if (!ran && (writesOnly || scriptBatch)) {
+                std::fprintf(stderr, "%s %s was refused\n", qPrintable(kind), qPrintable(text));
                 return 1;
             }
         }
@@ -677,6 +749,20 @@ int main(int argc, char* argv[])
                     window.runCommand(text);
                     // Twice: the document's listener defers the panels'
                     // refresh to the event loop, which the next step reads.
+                    QApplication::processEvents();
+                    QApplication::processEvents();
+                    continue;
+                }
+                if (kind == "--run-line") {
+                    (void)runLine(window, text);
+                    QApplication::processEvents();
+                    QApplication::processEvents();
+                    continue;
+                }
+                if (kind == "--script") {
+                    if (!runScriptFile(window, text)) {
+                        return 1;
+                    }
                     QApplication::processEvents();
                     QApplication::processEvents();
                     continue;
@@ -910,6 +996,9 @@ int main(int argc, char* argv[])
             std::fprintf(stderr, "plot failed: %s\n", status.error().describe().c_str());
             return 1;
         }
+        return 0;
+    }
+    if (scriptBatch) {
         return 0;
     }
     return application.exec();

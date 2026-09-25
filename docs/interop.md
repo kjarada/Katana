@@ -247,7 +247,7 @@ the file, and it still spans the whole extent - which is the difference
 between a level of detail and the `maxPoints` truncation it replaces.
 
 **Asked by a person since 2026-09-23.** GIS > Convert Point Cloud to COPC
-(and the CLI's `COPC`) converts a file, and GIS > Import Point Cloud offers a
+(and `COPC` on either command line) converts a file, and GIS > Import Point Cloud offers a
 point spacing when - and only when - the file is COPC
 (`PointCloudImportOptions::resolution`). **Not done yet:** nothing converts
 on import by itself, and the viewport still holds the one sample it was given;
@@ -376,6 +376,26 @@ application's, and `INFO` and `COPC <source> <destination.copc.laz>` added to
 `katana_cli`'s. `IMPORT <raster or cloud> LOCAL` in the CLI is refused by name
 (QT-13, QT-14): reference data is drawn at its own coordinates, and the old
 code left " LOCAL" on the path and reported a missing file.
+
+Since 2026-09-26 the two command lines read these verbs alike
+(`docs/desktop.md`, "The session's verbs on the window's command line"):
+
+- **`IMPORT <file> LOCAL`** moves a DXF, vector file or .12da archive as one
+  piece so the lower-left corner of what it holds sits at 0,0 - read again with
+  that `originShift`, so the one reader moves every kind of geometry alike -
+  in the window too, where it asks no placement question. Both front ends read
+  the argument with `CommandInterpreter::importArgument`: one pair of quotes
+  off the path, and `LOCAL` only as an unquoted last word. The session had
+  taken `LOCAL` off and left the quotes on, so `IMPORT "<path>" LOCAL` - what
+  `katana_import` sends with `local: true` - looked for a file named with its
+  quotes and failed for every GIS file; the window took `LOCAL` for part of
+  the path.
+- **`INFO <id>`** is the interpreter's entity description whenever the word
+  is an id (`CommandInterpreter::isEntityId`) and no file of that name exists;
+  both front ends had read every `INFO` as `INFO <file>`.
+- **`COPC`** is on the window's command line, its paths read by the
+  interpreter's `tokenize` in both front ends; GIS > Convert Point Cloud to
+  COPC runs the `COPC` line it makes through the window's one executor.
 
 Everything a menu item does can be driven headlessly: `--action <name>`
 triggers the QAction by its object name, `--dataset-info` and

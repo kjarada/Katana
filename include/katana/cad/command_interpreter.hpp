@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "katana/cad/code_table.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/core/error.hpp"
@@ -63,6 +64,31 @@ class CommandInterpreter {
     {
         sheetContext_ = std::move(provider);
     }
+
+    // A standard colour name's RGB, for CODE and MAPFILE CHECK
+    // (survey_code_verbs.hpp): the table is archive12d's, which cad may not
+    // see, so the front end that can see it passes it. Unset, no colour is
+    // known - CODE leaves colours alone and CHECK checks none.
+    void setColourLookup(ColourLookup colourOf) { colourOf_ = std::move(colourOf); }
+
+    // The rest of a front end's IMPORT line, after the verb: the path, one
+    // layer of surrounding quotes removed so that a path may hold blanks, and
+    // whether the line ended in the word LOCAL - a word of its own, in any
+    // case, never inside the quotes, so a quoted "site LOCAL" is a file. The
+    // window and the session both read the line with it: the session once
+    // took LOCAL off and left the quotes on, so every quoted IMPORT ... LOCAL
+    // - what katana_import sends - looked for a file named with its quotes.
+    struct ImportArgument {
+        std::string path{};
+        bool local = false;
+    };
+    [[nodiscard]] static ImportArgument importArgument(std::string_view rest);
+
+    // Whether `word` names an entity as INFO takes one: a positive whole
+    // number, or one written #n as an anchored point names its entity. For a
+    // front end that reads INFO <file> first, so that INFO 12 still reaches
+    // the entity when no file of that name exists.
+    [[nodiscard]] static bool isEntityId(std::string_view word);
 
     // Forgets the "last point" that relative (@dx,dy) and polar (@d<a) points
     // resolve against. The interpreter cannot see a document being replaced
@@ -131,6 +157,7 @@ class CommandInterpreter {
     std::vector<std::string> history_;
     std::optional<katana::geometry::Point2> lastPoint_;
     katana::cad::plotting::SheetVerbContextProvider sheetContext_;
+    ColourLookup colourOf_;
 };
 
 } // namespace katana::cad

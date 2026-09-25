@@ -17,6 +17,7 @@ someone - or a model - who cannot watch a screen. The window itself is
 ```
 katana_cli                                interactive
 katana_cli script.kcs                     run a script, '#' comments
+katana --script script.kcs                the same script in the window, headless
 katana_cli -c "RECT 0,0 30,20" -c LIST
 katana_cli --help                         every verb it knows
 ```
@@ -74,8 +75,10 @@ size comes out. It protects construction, not appearance: LOOK at the PNG.
 **`--plot out.pdf`** plots the drawing and exits (`docs/cad.md`, "Plotting to
 PDF"). `--fit` (the default) picks the first standard scale at which the
 drawing fits; `--scale N` plots at 1:N; `--paper` is A0 to A4; `--dpi` sets
-the resolution. The dialog and the switch share `plotDrawingToPdf`, so the
-`qt_plot_headless` test exercises the code the menu does.
+the resolution. The dialog, the window's `PLOT` verb and the switch share
+`plotDrawingToPdf`, so the `qt_plot_headless` test exercises the code the menu
+does; it also runs a `PLOT` script in each plot style and weight and checks
+the inks each prints (`docs/desktop.md`, "Plot to PDF and view images").
 
 **`--plot-sheets out.pdf`** plots the project's sheets and exits
 (`docs/plotting.md`, "Plot styles and output"); a project with no sheets
@@ -143,6 +146,7 @@ imported (anything else), in order, before any step runs.
 | `--attributes [ID]` | open the attribute manager (Edit > Attributes, still modal in a person's session) on entity ID and grab it |
 | `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it |
 | `--check-shortcuts` | fail the run when a key reaches more than one thing (`desktop.md`, "Every key reaches one thing") |
+| `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
 | the steps | below |
 
 ## The steps: driving dialogs, docks and the command line
@@ -162,6 +166,7 @@ every action, field, button and tab gets one. In a test they are one
 | `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
+| `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`) |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 
@@ -192,6 +197,8 @@ Its variables:
 | `-DTOGGLE_LAYER`, `-DSTYLE_MANAGER=ON`, `-DLAYER_MANAGER=ON`, `-DATTRIBUTES=<id>`, `-DDATASET_INFO`, `-DIMPORT_OPTIONS`, `-DSELECT_ALL=ON`, `-DCHECK_SHORTCUTS=ON` | the switches of the same names |
 | `-DACTIONS=a,b` | `--action` for each, commas because a CMake list does not survive `cmake -D` |
 | `-DDIALOG=NAME` (or `-DSURVEY_DIALOG`) with `-DFILL=f=t\|f=t` and `-DPRESS=a,b` | one dialog, filled and pressed |
+| `-DSCRIPT=<file.kcs>` | `--script`, before the `-DDRIVE` steps, so they can list what it made |
+| `-DIMAGE_SIZE=<file>\|<width>\|<height>` | the run must write a PNG of exactly that size (a `SNAPSHOT`'s), read from its header; the file is removed first |
 | `-DDRIVE=<step>\|<step>...` | the steps, by sigil, `\|` between them |
 | `-DEXPECT=<regex>` | what the run printed must match |
 | `-DFORBID=<regex>` | what the run printed must match NOTHING, after the run's own paths are replaced by `<path>` |
@@ -233,6 +240,20 @@ A modal box in a headless run is a hang until the test's timeout. So
   answered: a scripted `QUIT` with unapplied code edits, or `NEW` after an
   edit, fails, and the script can Apply or Revert, `SAVE` or `UNDO` first
   (`desktop.md`, "Failure modes");
+- File > Open, Save As (and Save of a drawing with no project), Import and
+  Export Vector, and Format > Load and Replace Customisation, open no file
+  dialog and name the line that does the same - `OPEN <directory>`,
+  `SAVE <directory>`, `IMPORT <file> [LOCAL]`, `EXPORT <file>`,
+  `CUSTOMISE [REPLACE] <file>...` - since `--trigger` reaches them by their
+  object names (`MainWindow::refuseFileDialog`,
+  `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
+  an empty drawing says so in the log, not in a box;
+- File > Run Script's Browse opens no file dialog and says to fill
+  `scriptPath` instead; a script's run shows no progress dialog, and the
+  person's Recent Scripts list is left alone;
+- GIS > Convert Point Cloud to COPC opens no file dialog and names the verb
+  that asks nothing, `COPC <source> <destination.copc.laz>`
+  (`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`);
 - Edit > Attributes, still `exec()`'d, logs that it is modal and names the
   switch that grabs it (`--attributes`) instead of opening; Format > Layers
   is non-modal and opens as any manager does;

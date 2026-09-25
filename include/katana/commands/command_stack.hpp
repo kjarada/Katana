@@ -44,6 +44,13 @@ class CommandStack {
     // Empty when there is nothing to undo / redo.
     [[nodiscard]] std::string_view undoName() const;
     [[nodiscard]] std::string_view redoName() const;
+    // Every step undo would take back, newest first - the first is
+    // undoName() - and every step redo would put back, the next first: what
+    // the Edit toolbar's history lists, where the k-th entry is UNDO k or
+    // REDO k. The names are the commands' own, valid until the history next
+    // changes.
+    [[nodiscard]] std::vector<std::string_view> undoNames() const;
+    [[nodiscard]] std::vector<std::string_view> redoNames() const;
 
     // Entities created by the most recently executed or redone command.
     [[nodiscard]] std::vector<katana::entity::EntityId> lastCreatedEntities() const;

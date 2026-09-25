@@ -13,11 +13,13 @@
 
 namespace katana::app {
 
-// `verb` is IMPORT or EXPORT, upper case; `argument` the rest of the line,
-// without surrounding quotes. nullopt when the path is not a .dxf, so the
-// caller carries on to its other importers; otherwise whether it worked,
-// which has been reported on stdout or stderr.
+// `verb` is IMPORT or EXPORT, upper case; `path` the file, without
+// surrounding quotes, and `local` whether an IMPORT ended in LOCAL - both as
+// CommandInterpreter::importArgument reads the line. nullopt when the path is
+// not a .dxf, so the caller carries on to its other importers; otherwise
+// whether it worked, which has been reported on stdout or stderr.
 [[nodiscard]] std::optional<bool> runDxfVerb(katana::cad::Document& document,
-                                             std::string_view verb, std::string argument);
+                                             std::string_view verb, const std::string& path,
+                                             bool local);
 
 } // namespace katana::app

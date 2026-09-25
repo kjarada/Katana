@@ -456,10 +456,13 @@ struct Bench {
             interpreted.push_back(line);
             return reply;
         };
-        services.runCommand = [this](const QString& line) {
+        // As MainWindow::runVerbLine does: echoed, then to the workbench -
+        // never to a running tool.
+        services.run = [this](const QString& line) {
             typed.push_back(line);
             log.emplace_back("> " + line, false);
             (void)workbench->runLine(line);
+            return katana::qt::VerbOutcome{true, {}, {}};
         };
         workbench = std::make_unique<UtilityWorkbench>(window, std::move(services), menu);
     }
@@ -570,7 +573,7 @@ TEST(UtilityWorkbench, ALineTheCommandLineDidNotRunIsAnError)
         action->setObjectName(name + "Other");
         return action;
     };
-    services.runCommand = [](const QString&) {};
+    services.run = [](const QString&) { return katana::qt::VerbOutcome{true, {}, {}}; };
     QMenu menu;
     UtilityWorkbench swallowed(bench.window, std::move(services), menu);
     const auto reply = swallowed.execute("UTILITY VERIFY C:/survey/schedule.csv");
