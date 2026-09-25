@@ -1,6 +1,7 @@
 #include "katana/cad/plot.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string>
 
@@ -91,6 +92,43 @@ Result<Sheet> sheetFor(const PlotSettings& settings)
     return sheet;
 }
 
+std::string_view toString(PlotColourMode mode)
+{
+    switch (mode) {
+    case PlotColourMode::Colour:
+        return "colour";
+    case PlotColourMode::Greyscale:
+        return "greyscale";
+    case PlotColourMode::Monochrome:
+        return "monochrome";
+    }
+    return "colour";
+}
+
+std::optional<PlotColourMode> plotColourModeFrom(std::string_view name)
+{
+    std::string lower;
+    for (const char c : name) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    if (lower == "colour" || lower == "color") {
+        return PlotColourMode::Colour;
+    }
+    if (lower == "greyscale" || lower == "grayscale" || lower == "grey" || lower == "gray") {
+        return PlotColourMode::Greyscale;
+    }
+    if (lower == "monochrome" || lower == "mono" || lower == "black") {
+        return PlotColourMode::Monochrome;
+    }
+    return std::nullopt;
+}
+
+std::uint8_t luminance(entity::Color colour)
+{
+    const unsigned weighted = 299u * colour.r + 587u * colour.g + 114u * colour.b;
+    return static_cast<std::uint8_t>((weighted + 500u) / 1000u);
+}
+
 entity::Color paperColour(entity::Color colour, const PlotSettings& settings)
 {
     const bool nearWhite = colour.r >= kNearWhiteChannel && colour.g >= kNearWhiteChannel &&
@@ -100,6 +138,37 @@ entity::Color paperColour(entity::Color colour, const PlotSettings& settings)
         colour.g = 0;
         colour.b = 0;
     }
+    switch (settings.colourMode) {
+    case PlotColourMode::Colour:
+        break;
+    case PlotColourMode::Greyscale: {
+        const std::uint8_t grey = luminance(colour);
+        colour.r = grey;
+        colour.g = grey;
+        colour.b = grey;
+        break;
+    }
+    case PlotColourMode::Monochrome:
+        colour.r = 0;
+        colour.g = 0;
+        colour.b = 0;
+        break;
+    }
+    return colour;
+}
+
+entity::Color paperFillColour(entity::Color colour, const PlotSettings& settings)
+{
+    if (settings.colourMode != PlotColourMode::Monochrome) {
+        return paperColour(colour, settings);
+    }
+    PlotSettings colourOnly = settings;
+    colourOnly.colourMode = PlotColourMode::Colour;
+    const entity::Color ink = paperColour(colour, colourOnly); // the white rule only
+    const std::uint8_t level = luminance(ink) < kMonochromeFillThreshold ? 0 : 255;
+    colour.r = level;
+    colour.g = level;
+    colour.b = level;
     return colour;
 }
 

@@ -50,6 +50,7 @@
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
+#include "plotting/plot_dialog.hpp"
 
 namespace katana::qt {
 
@@ -946,6 +947,7 @@ void SheetEditor::buildActions()
 
     bar->addSeparator();
     QAction* plotOne = bar->addAction(icon(Icon::Plot), QStringLiteral("Plot Sheet..."));
+    plotOne->setObjectName(QStringLiteral("sheetPlotSheet"));
     connect(plotOne, &QAction::triggered, this, [this] { plotInteractive(false); });
     QAction* plotAll = bar->addAction(icon(Icon::Plot), QStringLiteral("Plot All..."));
     plotAll->setObjectName(QStringLiteral("sheetPlotAll"));
@@ -1595,47 +1597,34 @@ Status SheetEditor::tile(TilingPreset preset)
 Status SheetEditor::plotToPdf(const QString& path, bool allSheets)
 {
     const SheetSet& set = document_.sheetSet();
-    std::vector<std::size_t> pages;
-    if (!allSheets) {
-        if (currentSheet() >= set.sheets.size()) {
-            return katana::core::makeError(katana::core::ErrorCode::InvalidArgument, "there is no sheet to plot");
-        }
-        pages.push_back(currentSheet());
+    if (!allSheets && currentSheet() >= set.sheets.size()) {
+        return katana::core::makeError(katana::core::ErrorCode::InvalidArgument, "there is no sheet to plot");
     }
+    // One PDF in the set's plot style (plotting/plot_output.hpp).
+    PlotRequest request = plotRequestFor(set.pageSetup, path,
+                                         allSheets ? std::string() : std::to_string(currentSheet() + 1));
+    request.format = PlotFormat::Pdf;
+    request.title = QString::fromStdString(document_.metadata().name);
     SheetPaintCache cache;
-    std::vector<std::string> problems;
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const Status status = plotSheetsToPdf(path, set, pages, source(), 300.0, cache,
-                                          QString::fromStdString(document_.metadata().name), &problems);
+    const auto result = plotSheets(set, request, source(), cache);
     QApplication::restoreOverrideCursor();
-    if (!status) {
-        return status;
+    if (!result) {
+        return result.error();
     }
-    for (const std::string& problem : problems) {
+    for (const std::string& problem : result->problems) {
         report(QString::fromStdString(problem), true);
     }
-    report(QString("Plotted %1 sheet%2 to %3.")
-               .arg(allSheets ? set.sheets.size() : 1)
-               .arg(allSheets && set.sheets.size() != 1 ? "s" : "")
-               .arg(path));
+    report(result->summary(request));
     return {};
 }
 
 void SheetEditor::plotInteractive(bool allSheets)
 {
-    if (document_.sheetSet().sheets.empty()) {
-        report(QStringLiteral("There are no sheets to plot. Generate some first."), true);
-        return;
-    }
-    const QString path = QFileDialog::getSaveFileName(this, allSheets ? QStringLiteral("Plot All Sheets")
-                                                                      : QStringLiteral("Plot Sheet"),
-                                                      QString(), QStringLiteral("PDF (*.pdf)"));
-    if (path.isEmpty()) {
-        return;
-    }
-    if (auto s = plotToPdf(path, allSheets); !s) {
-        report(QString::fromStdString(s.error().describe()), true);
-    }
+    // The Plot dialog, then the plot with its progress (plotting/plot_dialog.hpp).
+    plotInteractively(this, document_.sheetSet(), currentSheet(), allSheets,
+                      suggestedPlotFile(document_), QString::fromStdString(document_.metadata().name),
+                      source_, &document_, [this](const QString& text, bool error) { report(text, error); });
 }
 
 // ---- Generate Sheets ------------------------------------------------------------------
