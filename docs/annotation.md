@@ -90,6 +90,45 @@ font's (`AnnotationFonts::measure`), the tests and a file export the
 estimated one (0.6 of the height a character), so layout is exact on screen
 and deterministic headless.
 
+### Text in the window: the Text tools and Edit Text
+
+The Annotate menu's **Text** tool (`TEXT`, `DTEXT`, `DT`) takes the verb's
+options at its first prompt - `S` for a text style (`.` for none), `J` for
+the justification (`TL` to `BR`), `P` for a height on paper in millimetres
+(`0` for a model height) - and **Multiline Text** (`MTEXT`, `MT`; the
+`annotate.mtext` tool) takes the same, then a line at a time until an empty
+line, and makes ONE text of them, broken by `\n`, as `MTEXT p "a\nb"` does
+(`src/katana_cad/tools/annotate_text.cpp`). A bare `MT` or `MTEXT` starts the
+tool; with arguments the line is the interpreter's verb, as `TEXT` is. Both
+make a text by the verb's own rule, `fitModelHeight`
+(`include/katana/cad/annotation/text_layout.hpp`): a paper-sized one - a
+paper height, or a style with one - gets its model height for the drawing's
+annotation scale and is never asked a height, so a drawn text and a typed
+one of the same request are the same entity
+(`AnnotateTextOptions.AStyleAndAJustificationMakeWhatTheTextVerbMakes`,
+`AnnotateMultilineText.EveryLineIsOneEntityAsMtextMakesIt`). The choices are
+offered from the newest text in the drawing, as its height and rotation
+always were, so they carry from one text to the next and through an undo;
+Multiline Text starts in `Standard` - paper-sized, as `MTEXT` is - where the
+newest text would leave it in model units. The plan was a separate
+`annotate_mtext.cpp`; the two tools differ only in how they commit, so they
+are one class with two modes rather than two copies of the option prompts.
+
+**Annotate > Edit Text...** (`annotateEditText`, the dialog `textEditDialog`,
+`src/katana_qt/annotation/text_edit_dialog.hpp`) edits the one text
+selected: its words over several lines, style, height on paper, model
+height, justification, rotation and position. It follows the selection and,
+with no single text selected, says so and waits for one - it asks nothing in
+a box of its own, so a headless run is never stopped by it. Apply builds ONE
+`TEXTEDIT id key=value ...` of the fields the form changed and runs it
+through the window's one executor: one undo step, the verb's refusal in the
+dialog's words. A text or a name holding a double quote cannot be written on
+a command line at all (the interpreter's quotes have no escape), and is
+refused before anything runs rather than sent cut short
+(`include/katana/cad/annotation/command_words.hpp`). The plan-view
+double-click that opens it on the text under the cursor is the plan view's
+(`annotateEditText` is what it triggers).
+
 ## Labels
 
 A label (`LabelGeometry`) is an entity that says WHAT it labels and in which
@@ -278,6 +317,38 @@ An angle is written in DMS, a radius with `R` and a diameter with `Ø`.
 `buildDimension` draws every kind for the painters; the aligned drawing is
 exactly what it was before the kinds (`TheAlignedDrawingIsWhatItWasBeforeTheKinds`).
 
+### Dimension styles
+
+A dimension is drawn in its LAYER's dimension style (`LAYER DIMSTYLE layer
+style`), else `Standard`. `DIMSTYLE` names thirteen fields - `TEXT GAP EXTOFF
+EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM PAPER` - and
+`include/katana/cad/annotation/dimension_style_verbs.hpp` is the one
+statement of each: its name, how its value is read and how it is written
+back. The verb reads its lines with it, `DIMSTYLE INFO` writes its record with
+it, and the window's manager builds its lines with it, so the dialog cannot
+write a line the verb would read differently.
+
+* `DIMSTYLE SET name field value [field value ...]` sets every pair as ONE
+  undo step, all or nothing: one pair that does not read, or a style that
+  fails `validate`, refuses the whole line and changes nothing
+  (`DimstyleSetMany.OneBadPairRefusesTheWholeLineAndChangesNothing`). It took
+  one pair until 2026-09-26, so a dialog's Apply of five fields was five
+  undos.
+* `DIMSTYLE NEW name [field value ...]` takes the same pairs, so a copy of a
+  style is one step. The plan had Duplicate run NEW and then SET; that is two
+  undos for one act, and was rejected.
+* `DIMSTYLE INFO name` is one record: `name=`, every field in lower case,
+  `layers=` (how many layers name the style) and `reads=` (what a dimension
+  of ten units reads as). `DIMSTYLE LIST` keeps its short line a style.
+* `TRIM` and `PAPER` take on/off (yes/no, true/false, 1/0) and nothing else,
+  and `DECIMALS` a whole number: "PAPER of" once turned paper sizing off
+  without a word, and "DECIMALS 2.7" gave two places.
+
+A value that holds a blank is quoted (`PREFIX "L= "`, `SUFFIX ""` for none).
+The interpreter's quotes have no escape, so a prefix or suffix holding a
+double quote cannot be written on a line; the dialog says so rather than send
+a line that sets something else (`cad/annotation/command_words.hpp`).
+
 ## Leaders and callouts
 
 A leader (`LeaderGeometry`) is ONE entity from its arrow to its note: the
@@ -310,7 +381,7 @@ every reply is `key=value` records an agent can read without guessing:
 | `AUTOLABEL RULE ADD \| SET \| DELETE \| LIST`, `RUN`, `PREVIEW`, `CLEAR` | `autolabel created=2 kept=0 removed=0 skipped=0` and `rule=... labels=N` |
 | `DIM LINEAR \| HORIZONTAL \| VERTICAL \| ALIGNED \| ANGULAR \| RADIUS \| DIAMETER \| ORDINATE \| BASELINE \| CONTINUE` | `created dimension id=5 kind=diameter measures=10 text=Ø10.000 associative=yes`, `created dimensions=2 ids=7,8` |
 | `LEADER p p... text= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="PIT 12\nIL 10.50" associative=no` |
-| `DIMSTYLE SET name PAPER on` | the style, `paper-sized` in `DIMSTYLE LIST` |
+| `DIMSTYLE LIST \| INFO name \| NEW name [field value ...] \| SET name field value [field value ...] \| DELETE name` | `dimension style site updated`; `INFO`: `name=site text=3.5 gap=0.625 ... paper=on layers=1 reads=10.000` |
 
 `TS`, `LS`, `MT` and `LE` are aliases. `LABEL` of many entities, `AUTOLABEL
 RUN` and `DIM BASELINE` are each ONE undo step (`ManyLabelsAreOneStep`). A
@@ -327,19 +398,75 @@ session an agent might type:
 
 Format > **Text Styles...** (`formatTextStyles`, the dialog
 `textStyleManagerDialog`) and Format > **Label Styles and Rules...**
-(`formatLabelStyles`, `labelStyleManagerDialog`), and the annotation scale
-box on the Format toolbar (`annotationScaleCombo`), all built by
+(`formatLabelStyles`, `labelStyleManagerDialog`), Format > **Dimension
+Styles...** (`formatDimensionStyles`, `dimensionStyleManagerDialog`), and the
+annotation scale box on the Format toolbar (`annotationScaleCombo`), all built by
 `AnnotationWorkbench` (`src/katana_qt/annotation/annotation_workbench.hpp`)
 so `MainWindow` gains one member. The managers
 (`src/katana_qt/annotation/annotation_managers.hpp`, which lists every
-field's object name) are a list and a form: Apply runs the table command -
-one undo step, nothing when the form is unchanged - and a refusal is shown
-in the dialog's problem line in the command's own words. The label manager's
-template field is checked as it is typed, and its second tab holds the rules
-with Run and Clear, which report what `AUTOLABEL` replies. The dialogs keep
-no copy of the tables: an undo or a verb typed while one is open shows at
-once. The Annotate menu's tools are in `docs/tools.md`; the painting is in
-`docs/plan_view.md`, "Annotation".
+field's object name) are a list and a form: Apply stores the form - one undo
+step, nothing when the form is unchanged - and a refusal is shown in the
+dialog's problem line in the verb's own words. The label manager's template
+field is checked as it is typed, and its second tab holds the rules. The
+dialogs keep no copy of the tables: an undo or a verb typed while one is
+open shows at once. The Annotate menu's tools are in `docs/tools.md`; the
+painting is in `docs/plan_view.md`, "Annotation".
+
+The Dimension Styles manager
+(`src/katana_qt/annotation/dimension_style_manager.hpp`, which lists every
+object name) was the first of them to change nothing itself: each button
+builds the `DIMSTYLE` line a person would type and runs it through the
+window's one executor (`docs/desktop.md`, "One executor: the command
+runner"), so it is echoed in the command log, undone as a typed line is, and
+refused in the verb's own words in the dialog's problem line. The list shows
+each style and how many layers name it; New and Duplicate take their name
+from a box beside them (blank: the fresh name its placeholder shows), so no
+question is asked in a box of its own and a headless run can name one. The
+form is grouped Text, Lines and arrows, Units, and Paper-sized; a size is in
+model units or, paper-sized, in millimetres on paper, as the line under the
+form says. Apply sends only the fields the form changed, as one `DIMSTYLE
+SET`, and nothing when none did; Duplicate sends one `DIMSTYLE NEW name
+field value ...` of what the form shows; Delete is refused while a layer
+names the style, naming the layer; Revert drops the edits. Under the form, a
+dimension of ten reads as the formatter `DIMSTYLE LIST` uses says, and a
+sample is drawn by the plan painter (`paintPlanGeometry`) at the drawing's
+annotation scale - the arrowhead choices' pictures too - so what is shown is
+what the plan view draws. The numbers are typed, not spun: a spin box of two
+places showed `Standard`'s 0.625 gap as 0.63, and Apply would have stored it.
+A form's unapplied edits survive a change that leaves their style alone (a
+layer made elsewhere) and give way to one that changes it.
+
+Since 2026-09-26 the Text Style and Label Style managers change nothing
+themselves either: every button builds the verb line and runs it through
+the one executor. **New** takes its name from the box beside it
+(`textStyleNewName`, `labelStyleNewName`; blank gives the fresh name its
+placeholder shows) and, for a label style, its kind from `labelStyleNewKind`
+- `TEXTSTYLE NEW "name"`, `LABELSTYLE NEW "name" kind=area` - where it used
+to make "Text Style 2" and leave the renaming to nobody, since no verb
+renames a style. **Apply** sends `TEXTSTYLE SET` or `LABELSTYLE SET` with the
+keys the form changed, one step, and nothing when none did; **Add Standard
+Set** is `LABELSTYLE DEFAULTS`. Beside the template, **Insert Value**
+(`labelTemplateInsert`) lists what a template of the style's kind may say -
+`LABELSTYLE VALUES` - each with the steps that apply to it, and puts
+`{value:step}` at the cursor (`{prop.NAME}` with `NAME` selected to type
+over). What it offers is what `checkLabelTemplate` accepts, asked value by
+value and step by step, so it cannot offer a field the template would
+refuse; each choice is an action named `labelValue:VALUE[:STEP]`, which a
+headless run can trigger.
+
+The rules tab's form has the rule's **Type** (`labelRuleType`: Any, an
+entity type or Alignment, or any glob) and **Enabled** (`labelRuleEnabled`);
+a row chosen in the table fills the form, **Update Rule** stores the form
+over the rule of its name with `AUTOLABEL RULE SET` (every field, so a
+filter emptied is cleared), and the table's Enabled box switches a rule with
+a line of its own, `AUTOLABEL RULE SET name enabled=off`. The table takes
+several rows: **Run Rules**, **Preview** and **Remove Rule Labels** act on
+the rules chosen - `AUTOLABEL RUN lots sides`, `PREVIEW lots`, `CLEAR
+sides` - and on every enabled rule when none is chosen, which was all they
+could do before; a rule switched off labels nothing even when chosen
+(`ruleMatches`). Preview changes nothing and says what a run would. The
+report under the table is the verb's first reply line word for word, and
+the table's **Labels** column the `rule=NAME labels=N` lines after it.
 
 ## Stored with the project
 
@@ -401,10 +528,17 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/cad/annotation/test_auto_label.cpp` | rule matching, one step, re-runs, clearing, chainage rules, the default styles |
 | `tests/cad/annotation/test_dimensions_and_leaders.cpp` | every kind built and drawn, paper-sized styles, chains, leaders and callouts |
 | `tests/cad/annotation/test_annotation_verbs.cpp` | every verb and its reply, undo as one step |
+| `tests/cad/annotation/test_dimstyle_set_many.cpp` | `DIMSTYLE SET` and `NEW` with several pairs as one step, a bad pair refusing the line, `INFO`'s record, the changes between two styles reading back as the second, the words a dialog writes |
 | `tests/cad/annotation/test_export_annotation.cpp` | what a file is handed |
 | `tests/cad/tools/test_annotate.cpp` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
+| `tests/cad/tools/test_annotate_text_options.cpp` | the Text tool's Style, Justify and Paper options and Multiline Text, each checked against what `TEXT` and `MTEXT` make |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
-| `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
+| `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name: named New, Apply of the changed keys, Insert Value, rules added, updated and switched, and Run, Preview and Clear of the chosen rules |
+| `qt_the_label_style_manager_runs_chosen_rules_headless` (`tests/CMakeLists.txt`) | the real window: a label style named with its kind, a rule with its type previewed and run as the one chosen |
+| `tests/qt_widgets/annotation/test_text_edit_dialog.cpp` | Edit Text by object name: the selection followed, one `TEXTEDIT` of the changed keys, a value no line can carry refused |
+| `qt_multiline_text_and_edit_text_run_in_the_window_headless` (`tests/CMakeLists.txt`) | the real window: `MT` typed, two lines made one text; Edit Text on a selected text |
+| `tests/qt_widgets/annotation/test_dimension_style_manager.cpp` | the Dimension Styles manager by object name: every field in one line and one step, New, Duplicate, a refused Delete, the preview and sample, Revert |
+| `qt_the_dimension_styles_manager_runs_its_lines_headless` (`tests/CMakeLists.txt`) | the real window: Format > Dimension Styles..., a style made and applied, undone by one typed UNDO |
 
 ## Not yet
 
@@ -418,14 +552,18 @@ it skipped dimensions, and so does the archive exporter.
 * **Zoom Extents** frames an annotation by its entity's box, which for a
   paper-sized note or leader does not include its text: a note beyond the
   drawing can be cut off at the edge.
-* **The Text tool** asks for a model height as before; a style, a paper
-  height and a justification are the verb's (`TEXT ... style= paper=
-  justify=`, `TEXTEDIT`). The Linear Dimension tool stores the aligned
-  projection (`docs/tools.md`).
+* **The Linear Dimension tool** stores the aligned projection
+  (`docs/tools.md`).
+* **Edit Text works on one text.** A selection of several texts is not
+  edited together; `MODIFY` changes their layers and styles, and `TEXTEDIT`
+  is one text a line.
 * **Labels are not picked by their text**: a label is selected at its
   anchor, and moved off its placed position with `LABEL SET id at=x,y`
   rather than by dragging.
 * **PURGE** does not purge unused text or label styles.
+* **No style is renamed.** No verb or command renames a text, label or
+  dimension style, so the managers offer no Rename; New names a style as it
+  is made instead.
 * **DXF**: no MTEXT, masks, width factors or slants on export, and nothing
   on import becomes a label, a leader or a dimension kind.
 * **The 3D view** draws a label as a marker at its anchor and a leader as

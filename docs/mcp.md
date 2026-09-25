@@ -78,6 +78,21 @@ id and an `IMPORT` argument with the interpreter's own functions
 The tool's description of `local` said it imported "in the drawing's own
 coordinates rather than reprojecting"; it moves the data, and says so.
 
+The annotation styles are read and changed through `katana_run_commands`
+with the verbs the window's managers send (`docs/annotation.md`): `DIMSTYLE
+INFO name` answers one record of every field, the layers that name the style
+and what a dimension of ten reads as, and `DIMSTYLE SET name field value
+[field value ...]` changes several fields as one undo step
+(`McpServer.DimensionStylesAreSetInOneStepAndReadBackAsARecord`). A text is
+edited as the window's Edit Text edits it, several keys in one `TEXTEDIT`
+with `\n` for a line break, and `katana_describe_entity` reads it back with
+the break written the same way
+(`McpServer.ATextIsEditedInOneStepAndDescribedWithItsLineBreaks`). The label
+rules tab's Preview is `AUTOLABEL PREVIEW` of the rules named, which answers
+the counts and a `rule=NAME labels=N` record a rule, and `LABELSTYLE VALUES
+kind` lists what a template may say
+(`McpServer.ChosenLabelRulesArePreviewedByNameWithACountForEach`).
+
 Each tool that runs commands answers with a transcript (`> command`, then what
 it printed and any error or warning) and, to clients of MCP 2025-06-18 or later,
 the same as structured content: each command's `ok`, `output` and `messages`,

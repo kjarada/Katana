@@ -442,4 +442,79 @@ TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)
     EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
 }
 
+// What the window's Dimension Styles manager sends, an agent sends too: one
+// SET of several fields is one undo step, and INFO reads the style back as a
+// record of every field.
+TEST_F(McpServer, DimensionStylesAreSetInOneStepAndReadBackAsARecord)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"DIMSTYLE NEW site", "DIMSTYLE SET site TEXT 3.5 HEAD Tick PAPER on",
+                                  "DIMSTYLE INFO site"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json& lines = made["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 3U);
+    EXPECT_NE(lines[2]["output"].get<std::string>().find(
+                  "name=site text=3.5 gap=0.625 extoff=0.625 extbeyond=1.25 arrow=2.5 head=Tick"),
+              std::string::npos)
+        << lines[2]["output"];
+    EXPECT_EQ(made["structuredContent"]["status"]["undoSteps"], 2) << "NEW, then the one SET";
+
+    const Json undone = call("katana_undo");
+    EXPECT_FALSE(undone["isError"].get<bool>());
+    const Json info = call("katana_run_commands", Json{{"commands", {"DIMSTYLE INFO site"}}});
+    EXPECT_NE(textOf(info).find("text=2.5"), std::string::npos) << textOf(info);
+    EXPECT_NE(textOf(info).find("head=ClosedFilled"), std::string::npos) << textOf(info);
+    EXPECT_NE(textOf(info).find("paper=off"), std::string::npos) << textOf(info);
+}
+
+// The line the window's Edit Text sends, sent by an agent: several keys of a
+// text in one TEXTEDIT, its words over two lines, read back by
+// katana_describe_entity with the break written \n.
+TEST_F(McpServer, ATextIsEditedInOneStepAndDescribedWithItsLineBreaks)
+{
+    initialize();
+    const Json made = call("katana_run_commands",
+                           Json{{"commands",
+                                 {"TEXTSTYLE NEW Notes paper=3.5", "TEXT 10,20 2.5 old",
+                                  "TEXTEDIT 1 text=\"PIT 12\\nIL 10.50\" style=Notes justify=MC"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    EXPECT_EQ(made["structuredContent"]["status"]["undoSteps"], 3);
+    // Notes is 3.5 mm on paper; at the default 1:1000 that is 3.5 m.
+    const Json described = call("katana_describe_entity", Json{{"id", 1}});
+    EXPECT_NE(textOf(described).find(
+                  "1  Text  layer=0  \"PIT 12\\nIL 10.50\"  height=3.5  style=Notes  justify=MC"),
+              std::string::npos)
+        << textOf(described);
+}
+
+// What the window's rules tab sends, sent by an agent: a rule added with its
+// type, previewed by name with a record per rule of the labels it would
+// have, then switched off - after which it labels nothing, named or not
+// (auto_label.cpp, ruleMatches).
+TEST_F(McpServer, ChosenLabelRulesArePreviewedByNameWithACountForEach)
+{
+    initialize();
+    const Json result = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LABELSTYLE DEFAULTS", "RECT 0,0 20,20",
+               "AUTOLABEL RULE ADD lots style=\"Lot Area\" type=Polyline",
+               "AUTOLABEL PREVIEW lots", "AUTOLABEL RULE SET lots enabled=off",
+               "AUTOLABEL PREVIEW lots", "LABELSTYLE VALUES area"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 7U);
+    // One label a target (auto_label.hpp): the rectangle once for its area.
+    EXPECT_EQ(lines[3]["output"].get<std::string>(),
+              "preview created=1 kept=0 removed=0 skipped=0\nrule=lots labels=1");
+    EXPECT_EQ(lines[5]["output"].get<std::string>(),
+              "preview created=0 kept=0 removed=0 skipped=0");
+    EXPECT_NE(lines[6]["output"].get<std::string>().find("kind=area values=id,layer,code"),
+              std::string::npos)
+        << lines[6]["output"];
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 1) << "a preview makes nothing";
+}
+
 } // namespace

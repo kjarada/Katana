@@ -24,6 +24,9 @@
 namespace katana::cad::tools::annotate {
 
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeTextTool(const ToolContext& context);
+// annotate_text.cpp too: the Text tool's options and prompts, its lines made
+// ONE entity.
+[[nodiscard]] std::unique_ptr<InteractiveTool> makeMultilineTextTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeAlignedDimensionTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeLinearDimensionTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeLeaderTool(const ToolContext& context);
