@@ -1755,3 +1755,33 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# A step that closes a dialog which deletes itself on close - the Sheets
+# editor's Page Setup, opened with open() - leaves the window the target
+# (docs/headless.md, "The steps"): the run grabs the window and says so, and a
+# step that still wants the dialog is refused naming it. The driver once kept
+# a raw pointer to the dialog, and such a run crashed at the grab (exit
+# 0xC0000005) after every step had passed.
+if(TARGET katana)
+    add_test(NAME qt_a_dialog_that_deletes_itself_on_close_leaves_the_window_the_target_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SHEET NEW PLAN|*fileSheets|@sheetPageSetup|plotDpi=150|!pageSetupSave|>SHEETS PAGESETUP"
+            "-DEXPECT=pagesetup style=colour lineweight=1 dpi=150 pattern=\"[^\"]*\" filepersheet=off.*sheetPageSetup has closed: the window is grabbed"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/closed_target_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_a_step_for_a_dialog_that_has_closed_is_refused_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SHEET NEW PLAN|*fileSheets|@sheetPageSetup|!pageSetupSave|plotDpi=300"
+            "-DREFUSED=pagesetup style=colour[^\r\n]*[\r\n]+.*--fill plotDpi=300: sheetPageSetup has closed"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/closed_target_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_a_dialog_that_deletes_itself_on_close_leaves_the_window_the_target_headless
+        qt_a_step_for_a_dialog_that_has_closed_is_refused_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

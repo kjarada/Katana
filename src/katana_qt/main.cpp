@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTextDocumentFragment>
@@ -729,7 +730,11 @@ int main(int argc, char* argv[])
             QApplication::processEvents();
         }
         if (!surveySteps.empty()) {
-            QWidget* target = nullptr;
+            // Guarded: a dialog opened with open() may delete itself when a
+            // step closes it (the Sheets editor's Generate Sheets and Page
+            // Setup do), and a raw pointer left to it was a crash at the next
+            // step or at the grab. Gone, the window is the target again.
+            QPointer<QWidget> target;
             QString targetName;
             std::vector<QDockWidget*> docks;
             for (const auto& [kind, text] : surveySteps) {
@@ -810,6 +815,11 @@ int main(int argc, char* argv[])
                     continue;
                 }
                 if (target == nullptr) {
+                    if (!targetName.isEmpty()) {
+                        std::fprintf(stderr, "%s %s: %s has closed\n", qPrintable(kind),
+                                     qPrintable(text), qPrintable(targetName));
+                        return 1;
+                    }
                     std::fprintf(stderr, "%s %s comes before any --dialog\n", qPrintable(kind),
                                  qPrintable(text));
                     return 1;
@@ -845,8 +855,12 @@ int main(int argc, char* argv[])
                              status != nullptr ? qPrintable(status->text()) : "(no status)");
             }
             // Steps that were all --command leave no target: the window is
-            // what they changed.
-            QWidget* shot = target != nullptr ? target : static_cast<QWidget*>(&window);
+            // what they changed. So is it when the target closed itself.
+            if (target == nullptr && !targetName.isEmpty()) {
+                std::fprintf(stderr, "%s has closed: the window is grabbed\n",
+                             qPrintable(targetName));
+            }
+            QWidget* shot = target != nullptr ? target.data() : static_cast<QWidget*>(&window);
             if (!shot->grab().save(*screenshotPath, "PNG")) {
                 std::fprintf(stderr, "could not write %s\n", qPrintable(*screenshotPath));
                 return 1;
