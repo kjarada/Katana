@@ -13,13 +13,19 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <QApplication>
+#include <QMainWindow>
 #include <QWheelEvent>
 
+#include "katana/cad/scene.hpp"
+#include "katana/cad/section.hpp"
 #include "katana/cad/view_set.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/tables.hpp"
+#include "katana/terrain/tin_builder.hpp"
+#include "view_workspace.hpp"
 #include "widget_harness.hpp"
 
 using katana::cad::Document;
@@ -29,7 +35,9 @@ using katana::cad::ViewState;
 using katana::geometry::Point2;
 using katana::qt::RenderViewWidget;
 using katana::qt::ViewContext;
+using katana::qt::ViewWorkspace;
 using katana::qt::test::paint;
+using katana::qt::test::processEvents;
 
 namespace {
 
@@ -323,4 +331,56 @@ TEST(RenderView, TheFramebufferIsTheViewsSizeInDevicePixels)
     EXPECT_EQ(view->framebuffer().width(), static_cast<int>(std::lround(400 * ratio)));
     EXPECT_EQ(view->framebuffer().height(), static_cast<int>(std::lround(300 * ratio)));
     EXPECT_EQ(state.camera.viewportWidth(), view->framebuffer().width());
+}
+
+TEST(RenderView, ANewDrawingLeavesNoSurfaceOfThePreviousOneInTheThreeDView)
+{
+    // After File > New the previous drawing's TIN was still in the 3D view.
+    // Surfaces are lent to the views by the window, not kept in the document,
+    // and the document's notification for the new drawing marks only the
+    // entities dirty - the terrain layer was never built again. The window
+    // now empties its surfaces and tells the workspace, as done here, and a
+    // section cut from those surfaces goes with them.
+    Document document;
+    QMainWindow window;
+    auto* views = new ViewWorkspace(document, &window);
+    window.setCentralWidget(views);
+    window.resize(800, 600);
+    window.show();
+    processEvents();
+
+    katana::terrain::TinInput input;
+    input.points = {{0.0, 0.0, 10.0}, {100.0, 0.0, 12.0}, {100.0, 100.0, 14.0},
+                    {0.0, 100.0, 11.0}, {50.0, 50.0, 13.0}};
+    auto built = katana::terrain::buildTin(input);
+    ASSERT_TRUE(built.ok()) << built.error().describe();
+    std::vector<katana::cad::SceneSurface> surfaces(1);
+    surfaces.front().name = "Ground";
+    surfaces.front().surface = &built->surface;
+    views->setSurfaces(&surfaces);
+
+    const ViewState& model = views->openView(ViewKind::Model3D);
+    processEvents();
+    RenderViewWidget* render = views->renderView(model.id);
+    ASSERT_NE(render, nullptr);
+    paint(*render);
+    ASSERT_FALSE(render->sceneLayers().terrain.empty()) << "the surface was never drawn";
+
+    katana::cad::Section section;
+    section.length = 100.0;
+    ASSERT_TRUE(views->showSection(section));
+    const ViewState* cut = views->viewSet().mostRecent(ViewKind::Section);
+    ASSERT_NE(cut, nullptr);
+    ASSERT_TRUE(cut->section.has_value());
+
+    // What MainWindow::newDocument does: the new drawing, then the window's
+    // own surfaces emptied and the workspace told.
+    document.newDocument();
+    surfaces.clear();
+    views->drawingReplaced();
+    paint(*render);
+
+    EXPECT_TRUE(render->sceneLayers().terrain.empty())
+        << "the previous drawing's surface is still in the 3D view";
+    EXPECT_FALSE(cut->section.has_value()) << "the previous drawing's section is still shown";
 }

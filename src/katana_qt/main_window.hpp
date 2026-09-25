@@ -304,6 +304,10 @@ class MainWindow final : public QMainWindow {
     // beside (audit QT-17): File > New and Open must not leave the previous
     // drawing's orthophoto behind the next one.
     void clearReferenceData();
+    // Drops the surfaces and meshes the same way and for the same reason: they
+    // are session data beside the drawing, not in it, so replacing the
+    // drawing left the previous one's TIN in the 3D view.
+    void clearSceneData();
     void removeSelectedReference();
     void zoomToSelectedReference();
     void onReferenceCellChanged(int row, int column);
