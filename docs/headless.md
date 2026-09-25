@@ -38,6 +38,9 @@ QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
     <copy-of-project> [files to import] --screenshot out.png [steps...]
 QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
     <copy-of-project> --plot out.pdf [--fit | --scale N] [--paper A3] [--landscape | --portrait] [--dpi N]
+QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
+    <copy-of-project> --plot-sheets out.pdf|folder [--sheets 1,3-5] [--format pdf|pdfs|png|tiff] \
+    [--plot-style colour|grey|mono] [--dpi N] [--line-weight-scale F]
 ```
 
 Either switch makes the run HEADLESS (`MainWindow::setHeadless`): the window
@@ -64,9 +67,23 @@ drawing fits; `--scale N` plots at 1:N; `--paper` is A0 to A4; `--dpi` sets
 the resolution. The dialog and the switch share `plotDrawingToPdf`, so the
 `qt_plot_headless` test exercises the code the menu does.
 
-**`--plot-sheets out.pdf`** plots every sheet of the project to one PDF, a
-page a sheet, and exits; a project with no sheets plots one fitted to the
-drawing (`docs/plotting.md`). **`--sheets-json out.json`** writes the
+**`--plot-sheets out.pdf`** plots the project's sheets and exits
+(`docs/plotting.md`, "Plot styles and output"); a project with no sheets
+plots one fitted to the drawing, and what the sheet checks find on the
+sheets plotted is logged to stderr first. Each switch not given comes from
+the sheet set's page setup, except the format, which is one PDF unless
+`--format` says otherwise. `--sheets` chooses the sheets (`1,3-5`, sheet
+ids; all by default); `--format pdfs`, `png` or `tiff` writes a file a sheet
+into the FOLDER given to `--plot-sheets`, named by the page setup's
+file-name pattern; `--plot-style` prints in `colour`, `grey` or `mono`;
+`--dpi` is the resolution of a raster and of a PDF's 3D snapshot (300 by
+default); `--line-weight-scale` multiplies every line weight (0.1 to 5).
+Every file written is printed on stdout, a path a line. The File menu's Plot
+dialog and the switch share `plotSheets` in
+`src/katana_qt/plotting/plot_output.hpp`. `--plot` takes `--plot-style` and
+`--line-weight-scale` too.
+
+**`--sheets-json out.json`** writes the
 project's sheets as the JSON the project stores them in, and exits; `-`
 writes it to stdout. Given together, the JSON is written first. Without
 `--screenshot`, the `--command` lines run BEFORE either is written, and when
@@ -102,6 +119,10 @@ imported (anything else), in order, before any step runs.
 | `--screenshot PNG` | grab the target at the end - the window, or the dialog, dock or panel the steps made the target |
 | `--plot PDF` with `--fit`, `--scale N`, `--paper A0..A4`, `--landscape`, `--portrait`, `--dpi N` | plot the drawing to a PDF and exit |
 | `--plot-sheets PDF` | plot every sheet of the project to one PDF, a page a sheet, and exit; a project with no sheets plots one fitted to the drawing. What the sheet checks find is logged to stderr first (`docs/plotting.md`, "The sheet painter", "Preflight checks") |
+| `--plot-sheets` with `--sheets 1,3-5` | plot only those sheets (positions from 1, ranges, sheet ids), in that order |
+| `--plot-sheets` with `--format pdf\|pdfs\|png\|tiff` | one PDF (the default), or a PDF, PNG or TIFF a sheet in the FOLDER given to `--plot-sheets`, named by the page setup's pattern; each file written is printed on stdout |
+| `--plot-style colour\|grey\|mono`, `--line-weight-scale F` | with `--plot-sheets` or `--plot`: print in colour, greyscale or monochrome, every line weight times F (0.1 to 5) |
+| `--dpi N` with `--plot-sheets` | the resolution of a PNG or TIFF and of a PDF's 3D snapshot (the page setup's, 300 by default) |
 | `--sheets-json FILE` | write the project's sheets as JSON (`-`: to stdout) and exit; before `--plot-sheets` when both are given |
 | `--customise FILE...` | load style libraries and survey code files - every path until the next switch - merged into the built-in customisation before anything is drawn |
 | `--action NAME` | trigger the menu item with that object name after the imports, as a click does; repeatable, in order, before the steps |

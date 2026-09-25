@@ -1,4 +1,6 @@
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+# PrintSupport: the sheets are printed as well as plotted to files
+# (plotting/plot_output.hpp, printSheets).
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
 # The desktop application's Import/Export and its Reference Data panel are not
 # optional features, so the module they need is a hard requirement. Failing here
@@ -107,7 +109,8 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/katana.rc" @ONLY)
     target_sources(katana PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/katana.rc")
 endif()
-target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render Qt6::Widgets)
+target_link_libraries(katana PRIVATE katana_cad katana_interop katana_dxf katana_render Qt6::Widgets
+                                     Qt6::PrintSupport)
 
 # The developer tool that renders the icons to files - see make_icons.cpp for
 # why its output is committed rather than generated during the build. Not part

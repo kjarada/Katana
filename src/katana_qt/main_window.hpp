@@ -33,6 +33,7 @@
 #include "customisation/customisation_workbench.hpp"
 #include "survey/survey_workbench.hpp"
 #include "tools/tool_menus.hpp"
+#include "plotting/plot_output.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -116,14 +117,19 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
-    // Every sheet of the project to one PDF (docs/plotting.md), or those at
-    // `sheets` in that order, with 3D snapshots and images at `dpi`. A project
-    // with no sheets plots one sheet fitted to the drawing, laid out for this
-    // plot only and not added to the project. Public for --plot-sheets; the
-    // command line's PLOTSHEETS comes here too.
-    [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path,
-                                                       std::span<const std::size_t> sheets = {},
-                                                       double dpi = 300.0);
+    // Every sheet of the project to one PDF (docs/plotting.md) in the set's
+    // page setup. A project with no sheets plots one sheet fitted to the
+    // drawing, laid out for this plot only and not added to the project.
+    [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path);
+    // What File > Plot Sheets and --plot-sheets plot: the project's sheets,
+    // or, when it has none, one sheet fitted to the drawing, laid out for
+    // this plot only and not added to the project (logged).
+    [[nodiscard]] katana::core::Result<katana::cad::plotting::SheetSet> sheetsToPlot();
+    // Plots `set` as `request` asks (plotting/plot_output.hpp) from this
+    // window's source, logging each problem and the summary. Public for
+    // --plot-sheets, whose switches make the request.
+    [[nodiscard]] katana::core::Result<PlotReport>
+    plotSheets(const katana::cad::plotting::SheetSet& set, const PlotRequest& request);
     // The drawing, read only: for --sheets-json, which writes its sheets.
     [[nodiscard]] const katana::cad::Document& document() const { return document_; }
     // What sheets are drawn from: the drawing, this window's surfaces, meshes

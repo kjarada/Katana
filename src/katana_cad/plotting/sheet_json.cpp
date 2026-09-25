@@ -155,6 +155,38 @@ void putPoint(Json& json, const char* key, const Point2& value, const Point2& fa
     }
 }
 
+// The page setup: the colour mode by name, so the enum may grow and reorder.
+Json pageSetupJson(const PageSetup& setup)
+{
+    static const PageSetup d;
+    Json json = Json::object();
+    if (setup.colourMode != d.colourMode) {
+        json["colour_mode"] = toString(setup.colourMode);
+    }
+    putNumber(json, "line_weight_scale", setup.lineWeightScale, d.lineWeightScale);
+    putNumber(json, "dpi", setup.dpi, d.dpi);
+    putText(json, "file_name_pattern", setup.fileNamePattern, d.fileNamePattern);
+    putFlag(json, "file_per_sheet", setup.filePerSheet, d.filePerSheet);
+    return json;
+}
+
+PageSetup pageSetupFrom(const Json& json)
+{
+    const PageSetup d;
+    PageSetup setup;
+    const std::string mode = json.value("colour_mode", std::string(toString(d.colourMode)));
+    const auto parsedMode = plotColourModeFrom(mode);
+    if (!parsedMode) {
+        throw BadValue{"unknown colour mode \"" + mode + "\""};
+    }
+    setup.colourMode = *parsedMode;
+    setup.lineWeightScale = json.value("line_weight_scale", d.lineWeightScale);
+    setup.dpi = json.value("dpi", d.dpi);
+    setup.fileNamePattern = json.value("file_name_pattern", d.fileNamePattern);
+    setup.filePerSheet = json.value("file_per_sheet", d.filePerSheet);
+    return setup;
+}
+
 Json signOffJson(const SignOff& signOff)
 {
     Json json = Json::object();
@@ -427,6 +459,7 @@ Result<std::string> sheetSetToJson(const SheetSet& set)
     putText(root, "numbering", set.numbering, SheetSet{}.numbering);
     putList(root, "revisions", std::move(revisions));
     putList(root, "sheets", std::move(sheets));
+    putList(root, "page_setup", pageSetupJson(set.pageSetup));
     if (!allFinite(root)) {
         return makeError(ErrorCode::InvalidArgument,
                          "the sheet set holds a number that is not finite (an infinity or NaN)");
@@ -465,6 +498,9 @@ Result<SheetSet> sheetSetFromJson(std::string_view text)
         }
         for (const Json& sheet : root.value("sheets", Json::array())) {
             set.sheets.push_back(sheetFrom(sheet));
+        }
+        if (root.contains("page_setup")) {
+            set.pageSetup = pageSetupFrom(root.at("page_setup"));
         }
         return set;
     } catch (const Json::exception& error) {
