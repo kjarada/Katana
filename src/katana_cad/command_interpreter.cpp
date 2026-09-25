@@ -9,6 +9,7 @@
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
+#include "katana/cad/utilities/utility_verbs.hpp"
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/leader_values.hpp"
@@ -424,6 +425,8 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
           SHEET NEW|REMOVE|MOVE|COPY|RENAME|SET|FIELD | VIEW ADD|SET|REMOVE|LIST | TILE n preset
           GENERATE fit|grid|strips|profile|sections|frames | TITLEBLOCK [LIST] | field value
           TITLEBLOCK REVISION ADD|REMOVE | LOGO path | PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]
+Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW schedule.csv ...  AS 5488 subsurface utilities:
+          grade, verify, clear, check against a schema, draw by quality level (HELP UTILITY)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM ?  LE MT TS LS
 )" + annotationHelpText();
 }
@@ -595,6 +598,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         if (!args.empty() && plotting::isSheetVerb(args.front())) {
             return plotting::sheetVerbHelp();
         }
+        if (!args.empty() && utilities::isUtilityVerb(args.front())) {
+            return utilities::utilityVerbHelp();
+        }
         return helpText();
     }
     if (isAnnotationVerb(verb, args)) {
@@ -602,6 +608,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (plotting::isSheetVerb(verb)) {
         return plotting::runSheetVerb(document_, *tokens, sheetContext_);
+    }
+    if (utilities::isUtilityVerb(verb)) {
+        return utilities::runUtilityVerb(document_, *tokens);
     }
     for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {

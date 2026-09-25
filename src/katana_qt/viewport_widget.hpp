@@ -131,6 +131,11 @@ class ViewportWidget final : public QWidget {
     // The running tool's id, "" when the view is selecting.
     [[nodiscard]] std::string activeToolId() const { return tools_.activeId(); }
     [[nodiscard]] bool toolActive() const { return tools_.active(); }
+    // What the running tool wants next; nullopt when none runs.
+    [[nodiscard]] std::optional<katana::cad::ToolInput> toolExpects() const
+    {
+        return tools_.expects();
+    }
     // The host itself, for a caller that wants its hooks or to drive it.
     [[nodiscard]] tools::ToolHost& toolHost() { return tools_; }
     // A whole line of typed input handed to the running tool, as the command

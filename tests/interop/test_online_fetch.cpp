@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <string>
@@ -899,8 +900,12 @@ TEST(OnlineLive, EveryBuiltInEndpointAnswers)
                 url = layer.endpoint;
                 url.replace(url.find("{layer}"), 7, layer.layerName);
                 break;
-            case OnlineServiceType::Stac:
             case OnlineServiceType::Overpass:
+                // .../api/interpreter takes only queries; .../api/status is
+                // the server's own report of itself.
+                url = layer.endpoint.substr(0, layer.endpoint.find_last_of('/')) + "/status";
+                break;
+            case OnlineServiceType::Stac:
             case OnlineServiceType::Ckan:
                 url = layer.endpoint.substr(0, layer.endpoint.find_last_of('/'));
                 break;
@@ -913,6 +918,14 @@ TEST(OnlineLive, EveryBuiltInEndpointAnswers)
             request.maxBytes = 64ull << 20;
             request.retries = 1;
             const auto answer = gis::httpFetch(request);
+            // A service that answers only from its own country is alive -
+            // the network in front of it answered - and refuses only where
+            // this runs; it is named, not failed.
+            if (!answer && answer.error().message.find("own country") != std::string::npos) {
+                std::cout << provider.id << "/" << service.id
+                          << ": blocked from this network, not tested here\n";
+                continue;
+            }
             EXPECT_TRUE(answer.ok()) << provider.id << "/" << service.id << ": "
                                      << (answer ? "" : answer.error().describe());
         }
