@@ -43,7 +43,9 @@ std::vector<Geometry> oneOfEachGeometry()
             Polyline2{{Point2(0, 0), Point2(4, 0), Point2(4, 3)}, true},
             Circle2{Point2(-1, -1), 2.0},
             TextGeometry{Point2(5, 5), "BM \"A\" 102.45", 2.5, 0.5},
-            DimensionGeometry{Point2(0, 0), Point2(10, 0), 3.0, "10.00 m"}};
+            DimensionGeometry{Point2(0, 0), Point2(10, 0), 3.0, "10.00 m"},
+            LabelGeometry{.target = 7, .style = "Lot area", .anchor = Point2(3, 4)},
+            LeaderGeometry{.vertices = {Point2(0, 0), Point2(4, 3)}, .text = "PIT 12"}};
 }
 
 } // namespace
@@ -55,7 +57,7 @@ TEST(Entity, TypeFollowsGeometryAlternative)
     const auto geometries = oneOfEachGeometry();
     const EntityType expected[] = {EntityType::Point, EntityType::Line, EntityType::Arc,
                                    EntityType::Polyline, EntityType::Circle, EntityType::Text,
-                                   EntityType::Dimension};
+                                   EntityType::Dimension, EntityType::Label, EntityType::Leader};
     // The loop below walks `geometries` and indexes `expected`, so growing one
     // without the other was an out-of-bounds read - which a normal build may
     // well survive, failing only under the sanitizer job. Both are also pinned

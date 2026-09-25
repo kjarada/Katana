@@ -238,7 +238,8 @@ TEST_F(SurveyJobStorage, AProjectSavedBeforeSurveyJobsOpensUnchangedAndThenKeeps
 
     auto store = ProjectStore::open(projectDir());
     ASSERT_TRUE(store.ok()) << store.error().describe();
-    EXPECT_EQ(*store->schemaVersion(), 10);
+    // Migrated all the way: through survey jobs (10) and on to whatever is current.
+    EXPECT_EQ(*store->schemaVersion(), ProjectStore::kCurrentSchemaVersion);
     EXPECT_EQ(store->listBackups().size(), 1U); // taken before the migration
     auto contents = store->load();
     ASSERT_TRUE(contents.ok()) << contents.error().describe();

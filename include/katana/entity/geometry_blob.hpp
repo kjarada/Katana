@@ -45,8 +45,18 @@
 namespace katana::entity {
 
 // Bumped only when the layout changes. Readers accept every version they know
-// how to read; writers always emit the newest.
+// how to read.
+//
+// Version 2 (2026-09-25, docs/annotation.md) appends the annotation members
+// to a text's and a dimension's version-1 payload - style, paper height and
+// justification; kind, angle, vertex and the three anchor references - and
+// adds the Label and Leader kinds. The writer emits version 1 for a geometry
+// version 1 can hold (every text and dimension whose new members are all at
+// their defaults, and every other old kind), so a drawing that uses nothing
+// new is stored byte for byte as before and GeometryBlobWireFormat's pinned
+// bytes still hold; only what needs the new layout is written in it.
 inline constexpr std::uint8_t kBlobVersion = 1;
+inline constexpr std::uint8_t kBlobVersionAnnotation = 2;
 
 // Encodes `geometry`. Fails with InvalidArgument for text that is not valid
 // UTF-8 or a string longer than the format can express - both of which are
