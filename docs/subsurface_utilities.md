@@ -34,6 +34,8 @@ project specification, and set them where they differ.
 | Does the deliverable claim more than its evidence supports? | `GradedVertex::overClaim` | `REPORT` findings |
 | Can we build here? | `subsurface::checkClearance` | `CLEARANCE` |
 | Were the QL-B detections as good as the locator said? | `subsurface::verifyDetections` | `VERIFY` |
+| Does the deliverable meet the client's schema? | `subsurface::checkDelivery` | `CHECK ... SCHEMA` |
+| What should the schema's Clash attribute say? | `subsurface::clashOf` | `CLEARANCE` |
 
 ## Decisions, and where this is stricter than the standard
 
@@ -131,16 +133,91 @@ katana_cli -c "UTILITY VERIFY samples/utilities/schedule.csv"
 katana_cli -c "UTILITY CLEARANCE samples/utilities/schedule.csv samples/utilities/design.csv WIDTH 0.375"
 ```
 
+## The TfNSW Utility Schema and Specification
+
+TfNSW's Utility Schema and Specification (DMS-FT-493, v1.2, December 2022) is
+the delivery schema NSW transport projects require: 43 attributes per utility
+asset - `AssetIdentifier`, `AssetTypeCode`, `AssetOwner`, `Size`,
+`DepthLocation`, `Depth`, `QualityLevel`, `LocateMethod`, `Clash` and the rest -
+most of them mandatory, most of them taking a value from a list. Two things
+use it, and they are kept apart on purpose.
+
+**Grading reads its attribute names.** `subsurface::parseUtilityCsv` takes a
+schedule whose columns are the schema's attribute names, so that one file is
+both a TfNSW deliverable and something `REPORT`, `VERIFY` and `CLEARANCE` can
+grade. `samples/utilities/schedule_tfnsw.csv` is one. The schema has no
+geometry, so the schedule adds `point`, `easting`, `northing` (and, as wanted,
+`surface`, `h_unc`, `v_unc`). What each schema attribute becomes:
+
+| Schema attribute | Read as |
+|---|---|
+| `AssetIdentifier` | the service (`line`) |
+| `AssetTypeCode` | `UtilityType`: C D E F G I P S W N, AS 5488.2 Table A.4's letters |
+| `AssetOwner`, `AssetStatus`, `Material`, `Configuration` | the attributes of those names; `Disused` is a status of its own, not `Abandoned` |
+| `Size` | the diameter, as an INSIDE dimension (the schema measures pipes inside); `W x H` takes the larger side; `Not Applicable` and `Unknown` are no size |
+| `DepthLocation` | `LevelReference`: Top of Pipe, Obvert, Top of Concrete Encasement, Plastic Cover Protection Encountered and Ground Level are the top (cover is to whatever is met first), Top Row Invert is an invert, Other and Unknown are `LevelReference::Unknown` |
+| `Depth` | `UtilityVertex::depth`: below the surface, to the depth location |
+| `QualityLevel` | the claimed level; "Quality Level A" .. "D", and "Unknown" claims nothing |
+| `LocateMethod` | `LocationMethod`: Archive Drawings and Plans and Geographic Information System are records, Electronic Detection is EML, Ground Penetrating Radar is GPR, Potholing is non-destructive excavation, Survey (a surveyed feature) is a surface feature, Unknown caps the level at QL-D |
+| everything else | kept by its name (`UtilityAttributes::fields`, or `UtilityVertex::fields` for the per-point `DepthDescription`, `DateInfoObtained`, `PotholeReport`, `PitReport`, `Notes`), never interpreted; two rows of one asset may not disagree about an asset attribute |
+
+The schema's quality level is one per asset, so the claim is also tested
+along the asset: a segment between two points that both claim a level is
+claimed at the weaker, and the report says how many metres grade below it
+(on the sample, 18 m of a duct bank claimed QL-B between radar picks further
+apart than the detected spacing).
+
+Because the schema's `Size` is an inside dimension, the top found from an
+invert or a centre is the inside top: a cover from it is larger than the
+real one by the wall, and says so. Where both are given, an outside
+`diameter_mm` is used instead.
+
+**Checking reads the schema itself, at run time.** `UTILITY CHECK <schedule>
+SCHEMA <schema.csv>` tests every row for the mandatory attributes, each value
+against its list, dates as YYYY/MM/DD, numbers, subtypes, features and
+capacities against the row's asset type code, and that `AssetIdentifier` is
+prefixed with the asset type code, as the schema asks. Values must be spelt
+exactly - the schema says so - and one that matches only when case is
+ignored is a warning naming the listed spelling. The exit status is 1 when
+there are errors, so a script can gate a delivery on it.
+
+The schema file is made from the user's own copy of the workbook:
+
+```
+python tools/utility_schema_domains.py Utility-Schema-and-Specification-v1.2.xlsx tfnsw-utility-schema.csv
+katana_cli -c "UTILITY CHECK samples/utilities/schedule_tfnsw.csv SCHEMA tfnsw-utility-schema.csv"
+```
+
+It is not in the repository, and neither is the workbook: TfNSW's cover page
+says the document may be used only by those providing services to a NSW
+Government agency with its authority, and is not under an open licence. So
+the repository carries the means of reading it - the same arrangement as the
+12d reference files - and a checkout that has a copy, as
+Utility-Schema-and-Specification-v1.2.xlsx in the git-ignored folder
+"docs/TfNSW Reference Files", registers the `cli.utility_check_*` tests, which extract it
+and check the sample. The format of the schema file is in
+`include/katana/survey/subsurface/delivery_schema.hpp`; nothing in the
+checker is TfNSW's, so another client's schema can be written by hand.
+
+Two things found in v1.2 while writing the extraction:
+
+- its two organisation attributes are labelled the wrong way round -
+  `TfNSW_ContractOrgCode` is "Originator Name" and `TfNSW_ContractOrgName` is
+  "Originator Code". The extraction follows the attribute names, since those
+  are what a deliverable's columns carry: codes to `...Code`, names to
+  `...Name`.
+- `Size` and `Configuration` are called domain lists but list examples ending
+  "etc."; they are written as open domains, where any number or `N x M` is
+  accepted besides the listed words.
+
 ## Not done
 
-- **A client's utility delivery schema** - the attribute names and value
-  lists an asset owner or road authority requires a schedule to be delivered
-  in. None was to hand when this was written, so the schedule's aliases do
-  not yet cover one; mapping them is a matter of adding aliases to
-  `subsurface::utilityCsvColumns` and names to the `parse*` functions.
 - The utilities are reported, not drawn: no layers, linetypes by quality
   level, or symbols in the drawing yet, and no Survey menu entry.
 - Attribute quality levels (grading the type, owner or material of a service
   separately from its position) are not modelled.
+- `CHECK` does not evaluate the schema's conditional attributes (it cannot
+  know the condition) and does not check the `EPSG Code` beside the
+  coordinate system, which the schema lists with no attribute of its own.
 - Clearance is between centre lines widened by radius and tolerance, not
   between solids; a rectangular duct bank is treated as round.

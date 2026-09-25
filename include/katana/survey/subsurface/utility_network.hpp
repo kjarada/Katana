@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,9 +27,10 @@
 
 namespace katana::survey::subsurface {
 
-// The kinds of service the standard's attribute schedule distinguishes. Other
-// is a service whose kind is stated but not listed here; Unknown is one whose
-// kind nobody established, which is a finding in its own right.
+// The kinds of service the standard's attribute schedule distinguishes (AS
+// 5488.2 Table A.4, which delivery schemas such as TfNSW's code by a letter).
+// Other is a service whose kind is stated but not listed here; Unknown is one
+// whose kind nobody established, which is a finding in its own right.
 enum class UtilityType {
     Unknown,
     Electricity,
@@ -36,24 +38,29 @@ enum class UtilityType {
     Gas,
     Water,
     RecycledWater,
+    FireService,
     Sewer,
     Stormwater,
     Fuel,
+    IntelligentTransport, // ITS: traffic signals, cameras, loops, signalling
     Other,
 };
 
 [[nodiscard]] const char* toString(UtilityType type);
 
 // Enumerator names and common abbreviations ("elec", "power", "comms", "telco",
-// "nbn", "sw", "storm", "ww", "sewerage", "reuse", "oil" ...), any letter case.
-// nullopt for text that names nothing, so that a typo is an error and not an
-// Unknown service.
+// "nbn", "sw", "storm", "ww", "sewerage", "reuse", "oil" ...), the asset type
+// names of AS 5488.2 ("Communication", "Drainage", "Fire Service", "ITS",
+// "Petroleum", "Not Specified") and their one-letter codes (C D E F G I P S W
+// N), any letter case. nullopt for text that names nothing, so that a typo is
+// an error and not an Unknown service.
 [[nodiscard]] std::optional<UtilityType> parseUtilityType(std::string_view text);
 
 enum class UtilityStatus {
     Unknown,
     InService,
-    Abandoned,
+    Disused,   // out of use, still the owner's and possibly still charged
+    Abandoned, // given up by its owner
     Proposed,
 };
 
@@ -68,21 +75,41 @@ struct UtilityAttributes {
     UtilityStatus status = UtilityStatus::Unknown;
     std::string owner;         // asset owner / operator
     std::string material;      // "PVC", "DICL", "copper" ...
-    double diameter = 0.0;     // outside diameter or width of the service, metres
-    std::string configuration; // "4 x 100 conduits", "direct buried" ...
+    double diameter = 0.0;     // size of the service across, metres; see below
+    std::string configuration; // "4 x 100 conduits", "2 x 2", "Single" ...
     std::string description;
+    // True when `diameter` is an INSIDE dimension - a delivery schema's pipe
+    // size usually is (TfNSW's Size is the inside diameter, a culvert's inside
+    // width by height). The top of the service found from an invert or a centre
+    // is then the inside top, below the outside by the wall, and a cover
+    // computed from it is larger than the real one by that wall. Reports say so
+    // (depthOfCover's note); false means an outside dimension.
+    bool diameterIsInside = false;
+    // Attributes a delivery schema carries that nothing here interprets -
+    // subtype, feature, capacity, limitation, condition, clash, treatment ... -
+    // by the schema's own attribute name. Kept so that they can be checked
+    // (delivery_schema.hpp) and reported, never dropped.
+    std::map<std::string, std::string> fields;
 };
 
 // Which part of the service a recorded level is ON. A level without this is
 // ambiguous by up to a pipe diameter, which on a 600 mm main is more than
 // QL-B's whole vertical tolerance.
 enum class LevelReference {
-    Top,    // top of the service: crown, obvert of a duct, top of cable
-    Centre, // centre line
-    Invert, // bottom of the bore
+    Top,     // top of the service: crown, top of pipe or cable, or the first
+             // thing above it that is met - an encasement, a cover slab
+    Centre,  // centre line
+    Invert,  // bottom of the bore
+    Unknown, // stated as unknown or "other": the level cannot be placed on the
+             // service, so no top and no cover are computed from it
 };
 
 [[nodiscard]] const char* toString(LevelReference reference);
+// "top", "crown", "obvert", "centre", "invert", "unknown" and the Depth
+// Location names of AS 5488.2 as delivery schemas spell them: "Top of Pipe",
+// "Obvert", "Top of Concrete Encasement", "Plastic Cover Protection
+// Encountered" and "Ground Level" are Top, "Top Row Invert" is Invert,
+// "Other" is Unknown.
 [[nodiscard]] std::optional<LevelReference> parseLevelReference(std::string_view text);
 
 struct UtilityVertex {
@@ -91,6 +118,11 @@ struct UtilityVertex {
     std::optional<double> level; // of the service, on `levelReference`
     LevelReference levelReference = LevelReference::Top;
     std::optional<double> surfaceLevel; // finished surface directly above
+    // Depth of the `levelReference` point below the surface, metres, as a
+    // delivery schema records it instead of (or beside) a level. With a
+    // surface level it gives a level (serviceLevel); alone it still gives a
+    // cover. Where a level and a depth are both given the level is used.
+    std::optional<double> depth;
     PositionEvidence evidence;
     // The level the deliverable CLAIMS for this vertex, when it states one.
     // Checked against what the evidence supports; nullopt means "grade it".
@@ -98,7 +130,18 @@ struct UtilityVertex {
     // For an exposure made to check a detection: the id of the detected vertex
     // it checks (verification.hpp). Empty for any other vertex.
     std::string verifies;
+    // Per-vertex attributes of a delivery schema that nothing here interprets
+    // (a depth description, the date obtained, a pothole report), by the
+    // schema's attribute name.
+    std::map<std::string, std::string> fields;
 };
+
+// The level of the recorded point on the service: `level`, or else surface
+// level minus depth. nullopt when neither can be had.
+[[nodiscard]] std::optional<double> serviceLevel(const UtilityVertex& vertex);
+
+// True when anything vertical was measured at the vertex - a level, or a depth.
+[[nodiscard]] bool hasVerticalMeasurement(const UtilityVertex& vertex);
 
 // What is known about the service between one vertex and the next.
 enum class PathEvidence {
@@ -162,11 +205,17 @@ struct GradedLine {
 [[nodiscard]] core::Result<GradedLine> gradeLine(const UtilityLine& line,
                                                  const GradingSettings& settings = {});
 
-// The level of the TOP of the service at a vertex, from whatever part of it
-// the level was recorded on. From an invert the diameter is added whole, which
-// ignores the wall and so places the top slightly high - the direction that
-// under-states cover, never over-states it. nullopt without a level, or when
-// a Centre or Invert level has no diameter to convert with.
+// How far the top of the service is above the point a level or depth was
+// recorded on: 0 for Top, half the diameter for Centre, the diameter for
+// Invert. nullopt for Unknown, or for Centre and Invert without a diameter.
+[[nodiscard]] std::optional<double> topOffset(LevelReference reference, double diameter);
+
+// The level of the TOP of the service at a vertex (serviceLevel plus
+// topOffset). With an outside diameter, from an invert the diameter is added
+// whole, which ignores the wall and so places the top slightly high - the
+// direction that under-states cover. With an inside diameter it places the
+// top at the inside top, below the outside by the wall
+// (UtilityAttributes::diameterIsInside). nullopt when either is unknown.
 [[nodiscard]] std::optional<double> topLevel(const UtilityVertex& vertex, double diameter);
 
 struct CoverResult {
@@ -176,11 +225,13 @@ struct CoverResult {
     bool belowMinimum = false;   // cover < the minimum asked for
 };
 
-// Depth of cover at every vertex of `line`: surface level minus top of service.
+// Depth of cover at every vertex of `line`: surface level minus top of
+// service, or, where only a depth was recorded, that depth less topOffset.
 // A cover computed from a level that is not qualified (Classification::
 // levelQualified) is reported with a note, because the number is only as good
-// as the level under it. `minimumCover`, when given, flags each vertex whose
-// cover is below it.
+// as the level under it, and so is one found from an inside diameter below
+// the top. `minimumCover`, when given, flags each vertex whose cover is below
+// it.
 [[nodiscard]] core::Result<std::vector<CoverResult>>
 depthOfCover(const UtilityLine& line, std::optional<double> minimumCover = std::nullopt,
              const GradingSettings& settings = {});

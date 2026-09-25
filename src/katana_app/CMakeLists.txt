@@ -278,6 +278,31 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.utility_clearance_shows_the_crossing_within_tolerance PROPERTIES
         PASS_REGULAR_EXPRESSION "W1 W1-2 -> W1-3 +QL-B +within tolerance +-0\\.263 +0\\.300 +0\\.372")
     set_tests_properties(cli.utility_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY CHECK against the real TfNSW Utility Schema, when this checkout
+    # has the owner's copy (it is theirs to keep, not the repository's - see
+    # .gitignore). tools/utility_schema_domains.py makes the schema file, then
+    # the TfNSW-shaped sample is checked; its comments list the mistakes left
+    # in it on purpose, and each must be found. PASS_REGULAR_EXPRESSION
+    # ignores the exit status, which is 1 because there are errors.
+    set(_tfnsw_workbook
+        "${PROJECT_SOURCE_DIR}/docs/TfNSW Reference Files/Utility-Schema-and-Specification-v1.2.xlsx")
+    if(EXISTS "${_tfnsw_workbook}" AND Python3_Interpreter_FOUND)
+        set(_tfnsw_schema "${CMAKE_CURRENT_BINARY_DIR}/tfnsw-utility-schema.csv")
+        add_test(NAME cli.utility_check_schema_from_the_workbook
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/utility_schema_domains.py"
+                    "${_tfnsw_workbook}" "${_tfnsw_schema}")
+        add_test(NAME cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "UTILITY CHECK \"${_utilities}/schedule_tfnsw.csv\" SCHEMA \"${_tfnsw_schema}\"")
+        set_tests_properties(cli.utility_check_schema_from_the_workbook PROPERTIES
+            FIXTURES_SETUP cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "43 fields, 25 domains, 1084 values \\(schema version 1\\.2\\)")
+        set_tests_properties(cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong PROPERTIES
+            FIXTURES_REQUIRED cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "7 rows, 3 assets \\(AssetIdentifier\\): 7 errors, 2 warnings.*TfNSW_ContractOrgCode is mandatory and has no column.*DateInfoObtained \"2026-09-20\" is not a date.*Depth is empty \\(2 rows.*UtilityInstallDate is empty \\(2 rows.*AssetStatus \"In service\" is listed as \"In Service\"")
+    endif()
 endif()
 
 # A .dxf through the command line both ways, natively - no GDAL, so it runs
