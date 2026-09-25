@@ -99,10 +99,7 @@ ProjectCrsDialog::ProjectCrsDialog(katana::cad::Document& document,
     placeText_ = new QLineEdit(this);
     placeText_->setObjectName(QStringLiteral("projectCrsPlace"));
     placeText_->setPlaceholderText(QStringLiteral("longitude, latitude - e.g. 151.21, -33.87"));
-    if (const auto known = place_ ? place_ : drawingPlace(document_)) {
-        placeText_->setText(
-            QString("%1, %2").arg(known->first, 0, 'f', 6).arg(known->second, 0, 'f', 6));
-    }
+    showPlace();
     auto* suggestButton = new QPushButton(QStringLiteral("Suggest"), this);
     suggestButton->setObjectName(QStringLiteral("projectCrsSuggest"));
     suggestButton->setToolTip(QStringLiteral("List the systems that suit this place first"));
@@ -128,7 +125,8 @@ ProjectCrsDialog::ProjectCrsDialog(katana::cad::Document& document,
         this));
     text_ = new QLineEdit(this);
     text_->setObjectName(QStringLiteral("projectCrsText"));
-    text_->setText(qs(document_.metadata().coordinateSystem));
+    shownSystem_ = qs(document_.metadata().coordinateSystem);
+    text_->setText(shownSystem_);
     layout->addWidget(text_);
     check_ = new QLabel(this);
     check_->setObjectName(QStringLiteral("projectCrsCheck"));
@@ -172,6 +170,42 @@ ProjectCrsDialog::ProjectCrsDialog(katana::cad::Document& document,
 
     fill(QString());
     recheck();
+    listener_ = document_.addListener(
+        [this](const katana::cad::DocumentChange& change) { follow(change); });
+}
+
+void ProjectCrsDialog::showPlace()
+{
+    const auto known = place_ ? place_ : drawingPlace(document_);
+    placeText_->setText(known ? QString("%1, %2")
+                                    .arg(known->first, 0, 'f', 6)
+                                    .arg(known->second, 0, 'f', 6)
+                              : QString());
+}
+
+void ProjectCrsDialog::follow(const katana::cad::DocumentChange& change)
+{
+    // The system is set by an undoable step, which says only History, so
+    // every step is looked at - and passed over unless the system moved.
+    const bool replaced = change.has(katana::cad::DocumentChange::Replaced);
+    const QString stored = qs(document_.metadata().coordinateSystem);
+    if (!replaced && stored == shownSystem_) {
+        return;
+    }
+    current_->setText(QStringLiteral("Now: ") + projectCrsLabel(document_));
+    // What was typed is kept through a change to this drawing's system; a
+    // replaced drawing takes nothing of the last one's, the place its opener
+    // gave included.
+    if (replaced || text_->text() == shownSystem_) {
+        text_->setText(stored); // rechecks
+    }
+    shownSystem_ = stored;
+    if (replaced) {
+        place_.reset();
+        showPlace();
+        fill(search_->text());
+        recheck();
+    }
 }
 
 void ProjectCrsDialog::fill(const QString& filter)
@@ -280,7 +314,7 @@ bool ProjectCrsDialog::apply()
         check_->setText(QStringLiteral("Not set: ") + qs(status.error().describe()));
         return false;
     }
-    current_->setText(QStringLiteral("Now: ") + projectCrsLabel(document_));
+    // projectCrsCurrent is follow's to update, from the step just taken.
     return true;
 }
 
