@@ -35,8 +35,15 @@ if(TARGET katana)
     endif()
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/data/online/headless_catalogue.json.in"
                    "${CMAKE_CURRENT_BINARY_DIR}/online_headless_catalogue.json" @ONLY)
+    # Each test its own cache: they import the same area, and one cache shared
+    # by two tests running side by side made their results depend on which ran
+    # first (and, on Windows, on which held the clipped file open).
     set(_online_env
-        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_ONLINE_CATALOGUE=set:${CMAKE_CURRENT_BINARY_DIR}/online_headless_catalogue.json;KATANA_ONLINE_CACHE=set:${CMAKE_CURRENT_BINARY_DIR}/online_headless_cache")
+        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_ONLINE_CATALOGUE=set:${CMAKE_CURRENT_BINARY_DIR}/online_headless_catalogue.json")
+    set(_online_verbs_env
+        "${_online_env};KATANA_ONLINE_CACHE=set:${CMAKE_CURRENT_BINARY_DIR}/online_verbs_headless_cache")
+    set(_online_dialog_env
+        "${_online_env};KATANA_ONLINE_CACHE=set:${CMAKE_CURRENT_BINARY_DIR}/online_dialog_headless_cache")
     add_test(NAME qt_online_verbs_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -46,7 +53,7 @@ if(TARGET katana)
             "-DEXPECT=provider id=headless-local .*field name=service value=cog.*imported provider=headless-local layer=lots kind=vector entities=4 target=online/headless-local/lots.*attribution=\"test attribution\".*1 undone.*error verb=IMPORT code=InvalidCRS"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_online_verbs_headless PROPERTIES
-        ENVIRONMENT_MODIFICATION "${_online_env}" TIMEOUT 180)
+        ENVIRONMENT_MODIFICATION "${_online_verbs_env}" TIMEOUT 180)
     # The same import through the dialog's own controls: what a person clicks
     # reaches the same executor as the verb.
     add_test(NAME qt_online_dialog_headless
@@ -58,5 +65,5 @@ if(TARGET katana)
             "-DEXPECT=imported provider=headless-local layer=lots kind=vector entities=4.*onlineStatus: Imported"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_online_dialog_headless PROPERTIES
-        ENVIRONMENT_MODIFICATION "${_online_env}" TIMEOUT 180)
+        ENVIRONMENT_MODIFICATION "${_online_dialog_env}" TIMEOUT 180)
 endif()
