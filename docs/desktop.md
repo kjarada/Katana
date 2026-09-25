@@ -1223,8 +1223,10 @@ workbench is: `MainWindow::buildSurveyActions` makes it after the Survey
 workbench and hands it the Survey menu, which it ends with the section
 "Subsurface Utilities (AS 5488)" - Draw Utility Schedule, Utility
 Investigation Report, Verify Detections Against Exposures, Clearance of
-Proposed Works, Check Against a Delivery Schema (`utilityDraw`,
-`utilityReport`, `utilityVerify`, `utilityClearance`, `utilityCheck`).
+Proposed Works, Check Against a Delivery Schema, Regrade Drawn Utilities,
+Export Drawn Utilities as a Schedule (`utilityDraw`, `utilityReport`,
+`utilityVerify`, `utilityClearance`, `utilityCheck`, `utilityRegrade`,
+`utilityWriteSchedule`; N and X were the letters the Survey menu had left).
 `MainWindow::runCommandLine` hands it any line that starts with `UTILITY`,
 before a running tool can take the line for an answer - unless that tool is
 waiting for typed text (`ViewWorkspace::toolTakesText`: a Text's string, a
@@ -1234,9 +1236,9 @@ tool the same way (`qt_utility_line_leaves_a_text_to_the_tool_headless`).
 
 The verb is the `CommandInterpreter`'s, shared with `katana_cli`; the
 workbench runs it through the window's interpreter and adds the one thing
-only a window has: after a `UTILITY DRAW` that worked, every plan view is
-framed on the reply's `bounds=` box (`utilities::drawReplyBounds`,
-`ViewWorkspace::zoomTo`). A schedule in a real coordinate system lands far
+only a window has: after a `UTILITY DRAW` or a `UTILITY REGRADE` that worked,
+every plan view is framed on the reply's `bounds=` box
+(`utilities::drawReplyBounds`, `ViewWorkspace::zoomTo`). A schedule in a real coordinate system lands far
 from whatever the view was showing, and without the framing a draw that
 worked looked like one that did nothing - the lesson Online Data learnt. The
 box is read by the verb's own function, not a second parser in the window,
@@ -1244,16 +1246,48 @@ so the record's format has one reader to keep in step with its writer
 (`utilities::formatUtilityDrawing`); the two branches that built this each
 had one, and the window's was dropped when they were merged.
 
-All five items open ONE non-modal dialog (`UtilityToolsDialog`,
+All seven items open ONE non-modal dialog (`UtilityToolsDialog`,
 `src/katana_qt/survey/utility_dialog.hpp`, object name `utilityDialog`), each
 on its own tab; the header lists every control's object name. The detected
-spacing and the minimum cover sit under the schedule, shared by Draw and
-Report and live on those tabs only, because the verb reads `SPACING` and
-`MINCOVER` for both: a drawing and a report of one schedule are graded and
-flagged alike. The dialog never calls the AS 5488 library. `utilityCommandLine` - a pure function of
+spacing and the minimum cover sit above the tabs, shared by Draw, Report and
+Regrade and live on those tabs only, because the verb reads `SPACING` and
+`MINCOVER` for each: a drawing and a report of one schedule are graded and
+flagged alike. The dialog never calls the AS 5488 library.
+
+**Where the services come from** (`docs/cad.md`, "Scope and filter") is chosen above the tabs:
+a schedule file (`utilitySourceFile`) or what is drawn
+(`utilitySourceDrawing`), the lines `UTILITY DRAW` drew, taken by Global
+Modify's own "Apply to" and "Only those that match" controls - the shared
+`ScopeFilterWidget` (below), here named `utility...` - on the left. Its
+`verbWords()` are the line's scope and filter words, so Report on the
+drawing is `UTILITY REPORT DRAWING`, on a view `UTILITY REPORT VIEW 3` (or
+`VIEW 3 EXTENTS` without "Only what is on screen"), and so on. Report,
+Verify, Clearance and Check take either source; Draw always reads its file,
+Regrade and Schedule always the drawing, and the controls that do not apply
+to the tab in front are disabled rather than hidden, so the choice is still
+seen. The scope defaults to the whole drawing, what the utility tools
+usually mean. The layers, the views and the alignments follow the drawing
+through a `DocumentWatcher`, and the views are read again whenever the dialog
+is shown. Clearance's works are a design file (`utilityDesignFile`), a drawn
+line or polyline (`utilityDesignEntity`: its `#id`, Use Selected for the one
+entity selected, and a `LEVEL`) or one of the drawing's alignments
+(`utilityDesignAlignment`, a choice of their names). A schedule measured
+against a design file keeps the positional line it always had; every other
+works follows `DESIGN`, which also ends a `WHERE` filter plainly. The
+Regrade tab says that nothing is added to the undo history when nothing
+changed, and the status says which happened; the Schedule tab names the
+`.csv` to write and, optionally, the delivery schema whose words to write it
+in. The status is read from the reply's first record, never from the tab
+alone: a scope that takes no utility line is answered with the scope's
+record, and the status then says nothing was regraded or written, rather
+than offering an Undo that would take back the person's previous edit
+(`UtilityDialog.AScopeThatTakesNoUtilityLineIsSaidSoAndNothingIsSaidRegradedOrWritten`).
+
+`utilityCommandLine` - a pure function of
 the fields, tested without a window - writes the `UTILITY` line (a path with
-blanks quoted, a blank option left out, a file field left empty or a number
-that does not read refused with the field named, and nothing run; a file that
+blanks quoted, a blank option left out, a file field left empty, a number
+that does not read or a scope the controls cannot say refused with the field
+named, and nothing run; a file that
 cannot be read is the verb's refusal, by its path, once the line has run); `utilityCommand`
 shows that line as it is edited; Run hands it to the window's one executor
 (`UtilityServices::run`, "One executor: the command runner"), so it is echoed, kept in the history and
@@ -1266,9 +1300,27 @@ it came from, `utility_draw.txt`, not of the tab in front
 opens no file dialog: Browse and Save As say so, and a script fills the path
 fields instead. Tested in `tests/qt_widgets/survey/test_utility_dialog.cpp`
 and, through the real window, by `qt_utility_dialog_writes_the_line_headless`,
-`qt_utility_dialog_headless` (Run on Draw) and
+`qt_utility_dialog_headless` (Run on Draw),
 `qt_utility_draw_typed_frames_the_views_headless` (the same draw typed, as an
-agent types it, framed the same).
+agent types it, framed the same),
+`qt_utility_dialog_reports_what_is_drawn_and_what_the_view_shows_headless`
+(Report on the drawing and on the plan view, on screen),
+`qt_utility_dialog_regrades_what_is_drawn_headless` (nothing moved: no step,
+framed) and `qt_utility_dialog_writes_what_is_drawn_as_a_schedule_headless`
+(the Schedule tab's file read back by a typed `REPORT`).
+
+**The window answers `VIEW`.** The scope word `VIEW` (`docs/cad.md`, "Scope
+and filter") is the window's: `MainWindow` gives its interpreter
+`cad::scopeViewOf(views_->viewSet(), id)` through
+`CommandInterpreter::setScopeContext`, next to the sheet context. No id is
+the plan view Plot and the Standard Views act on (`ViewSet::mostRecent`); an
+id is that open view, of any kind, with its own hidden layers and, for a
+plan view, `ViewTransform::visibleWorldBounds` as it is when the line runs. So
+`MODIFY VIEW WHERE TYPE=point SET COLOUR=#FF0000` typed in the window acts on
+the points the plan view shows, where `katana_cli` refuses `VIEW` in favour
+of `AREA` (`qt_modify_view_takes_what_the_plan_view_shows_headless`). The
+rule lives in `katana_cad`, not a widget, so it is tested without a window
+(`ScopeVerbsTest.AWorkspacesViewSetAnswersViewAsTheWindowDoes`).
 
 ## Global Modify
 
@@ -1280,12 +1332,35 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
 
 - **Apply to**: the selection, a view, the checked layers (with their
   sublayers or not), or the whole drawing. The views are the workspace's
-  open ones, read afresh each time through `GlobalModifyDialog::views`, so a
-  closed view is never pointed at and a plan view's "only what is on screen"
-  is its visible area as it is now; the dialog itself never sees the
-  workspace, which is what lets a widget test give it views of its own.
+  open ones, read afresh each time through `GlobalModifyDialog::views`
+  (`scopeFilterViews(ViewSet&)`), so a closed view is never pointed at and a
+  plan view's "only what is on screen" is its visible area as it is now; the
+  dialog itself never sees the workspace, which is what lets a widget test
+  give it views of its own.
 - **Only those that match**: types, layer and style patterns, colour,
   property and value, text, drawn only.
+- These two groups are `ScopeFilterWidget`
+  (`src/katana_qt/customisation/scope_filter_widget.*`), the ONE set of
+  scope and filter controls every dialog on drawing data shows (`docs/cad.md`,
+  "Scope and filter"). Global Modify gives it the prefix `globalModify`, so its controls kept
+  their names and its tests pass unchanged. It says what it holds twice from
+  the same controls: `scope()` and `filter()`, what `matchEntities` takes and
+  Global Modify plans with, and `verbWords()`, the same as the shared
+  grammar's words (`cad::formatScopeWords`), for a dialog that builds a verb
+  line. A view is named by its id, which the view list shows beside its
+  title - "Plan 2 (VIEW 3)" - since the number in a title counts only the
+  views of its kind; "Only what is on screen" unticked is
+  `VIEW <id> EXTENTS`, a word added to the grammar for it, since without it
+  the controls could say what no line could. What a line cannot say - a `:`
+  in the property's name, a comma in a layer's - `verbWords()` refuses
+  rather than write words that take something else; a value with the
+  property left empty is `PROP=:value`, any property's. The fallback "Whole drawing
+  view" of a dialog with no workspace is read by `scope()` and refused by
+  `verbWords()`: a line can name only an open view.
+  `tests/qt_widgets/customisation/test_scope_filter_widget.cpp` shows every
+  scope and filter said in words, and those words, read back by the one
+  parser and resolved with the window's answer for `VIEW`, taking exactly
+  what the controls take.
 - **Modify**: three tabs - Entities, Their Layers, Their Styles. A field
   changes only when its box is ticked, and its editor is disabled until then,
   so an unticked field can never be written by accident (the rule "`<varies>`

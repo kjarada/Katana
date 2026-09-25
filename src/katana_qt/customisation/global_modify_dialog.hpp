@@ -10,6 +10,9 @@
 //              (with or without their sublayers) | the whole drawing
 //   Filter     types, layer and style patterns, colour, a property and its
 //              value, text, drawn only - each optional
+//              (these two are the shared ScopeFilterWidget,
+//              scope_filter_widget.hpp, which every dialog on drawing data
+//              shows; its controls keep the names they had here)
 //   Modify     three tabs: Entities (layer, colour, style, shown, symbol,
 //              text height, set and remove a property), Layers (colour,
 //              linetype, weight, hatch, dimension style, shown, locked) and
@@ -37,25 +40,15 @@
 #include <QDialog>
 #include <QString>
 
+#include "customisation/scope_filter_widget.hpp"
 #include "customisation_context.hpp"
 #include "katana/cad/global_modify.hpp"
-#include "katana/cad/layer_overrides.hpp"
-#include "katana/cad/view_set.hpp"
 #include "katana/core/error.hpp"
-#include "katana/geometry/primitives2d.hpp"
 
 namespace katana::qt {
 
-// One open view, as the View scope offers it. `hidden` and `onScreen` are
-// read at once by whoever asks for the list and never kept: the view may be
-// closed by the next turn of the event loop.
-struct GlobalModifyView {
-    katana::cad::ViewId id = katana::cad::kNoView;
-    QString title{}; // "Plan 1"
-    const katana::cad::LayerOverrides* hidden = nullptr;
-    // A plan view's visible area; none for a view with no plan extent.
-    std::optional<katana::geometry::Box2> onScreen{};
-};
+// One open view, as the View scope offers it: the shared widget's.
+using GlobalModifyView = ScopeFilterView;
 
 class GlobalModifyDialog : public QDialog {
   public:

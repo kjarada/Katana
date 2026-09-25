@@ -46,6 +46,8 @@ inline constexpr std::string_view kDefaultUtilityLayerPrefix = "utilities";
 
 // The undo step's name: what Edit > Undo and the history say.
 inline constexpr std::string_view kUtilityDrawStep = "UTILITY DRAW";
+// And UTILITY REGRADE's (utility_data.hpp).
+inline constexpr std::string_view kUtilityRegradeStep = "UTILITY REGRADE";
 
 // The properties a drawn service carries. One place for the names, since the
 // window, an agent and the tests all read them. A property is absent when
@@ -60,7 +62,7 @@ inline constexpr std::string_view kType = "utility.type";   // utilityTypeWord
 // The level the evidence supports: the run's level on a polyline, the
 // vertex's own on a point. "QL-A" .. "QL-D".
 inline constexpr std::string_view kQualityLevel = "utility.quality_level";
-// On a polyline: the service and the run.
+// The service, on its polylines and on each of its points.
 inline constexpr std::string_view kOwner = "utility.owner";
 inline constexpr std::string_view kMaterial = "utility.material";
 inline constexpr std::string_view kDiameter = "utility.diameter"; // metres
@@ -70,23 +72,43 @@ inline constexpr std::string_view kDescription = "utility.description";
 // "in service", "disused", "abandoned", "proposed"; absent when the schedule
 // gives none, which the report lists as a missing attribute.
 inline constexpr std::string_view kStatus = "utility.status";
+// On a polyline: the run.
 // Why the run is below the better of its segments' ends, each distinct
 // reason once, joined by "; ".
 inline constexpr std::string_view kLimitedBy = "utility.limited_by";
 inline constexpr std::string_view kLength = "utility.length"; // the run's plan length, metres
 inline constexpr std::string_view kFrom = "utility.from";     // the run's first vertex id
 inline constexpr std::string_view kTo = "utility.to";         // and its last
-// On a point: the vertex.
+// On a point: the vertex. A point carries the whole schedule row it was
+// drawn from - its line's attributes above as well as its own below - so the
+// points alone are the schedule, and the drawing can be graded, reported,
+// checked and written out again (utility_data.hpp). The runs are derived:
+// UTILITY REGRADE draws them again from the points.
 inline constexpr std::string_view kVertex = "utility.vertex";
+// The vertex's place along its line, from 1. Read as a number, so a point
+// put in between two may take 2.5; two points of one line at one place are
+// refused by name.
+inline constexpr std::string_view kOrder = "utility.order";
 inline constexpr std::string_view kMethod = "utility.method";
 inline constexpr std::string_view kClaimed = "utility.claimed";
 inline constexpr std::string_view kOverClaim = "utility.over_claim";
+// The level as recorded, and the depth as recorded: what the schedule gave.
+// kServiceLevel is what the grading made of them (the level, or the surface
+// less the depth).
+inline constexpr std::string_view kLevel = "utility.level";
+inline constexpr std::string_view kDepth = "utility.depth";
+inline constexpr std::string_view kHorizontalUncertainty = "utility.h_unc";
+inline constexpr std::string_view kVerticalUncertainty = "utility.v_unc";
+// What is known of the service from this vertex to the next: "detected",
+// "exposed" or "assumed". On every point but the last when the schedule gave
+// a path for any segment of the line, else on none (every segment detected).
+inline constexpr std::string_view kPath = "utility.path";
 inline constexpr std::string_view kServiceLevel = "utility.service_level";
-// With a service level, always: the part of the service it is on, "top",
-// "centre", "invert" or "unknown" - the reference the grading and the cover
-// took it on. A level given with no reference is read as on the top
-// (parseUtilityCsv), so "top" is also what an unrecorded one reads as: the
-// parsed schedule does not keep the difference.
+// With a level or a depth, always, and whenever it is not "top": the part of
+// the service it is on, "top", "centre", "invert" or "unknown" - the
+// reference the grading and the cover took it on. A level given with no
+// reference is read as on the top (parseUtilityCsv), so "top" is also what an
+// unrecorded one reads as: the parsed schedule does not keep the difference.
 inline constexpr std::string_view kLevelReference = "utility.level_ref";
 inline constexpr std::string_view kLevelQualified = "utility.level_qualified";
 inline constexpr std::string_view kSurfaceLevel = "utility.surface_level";
@@ -94,9 +116,27 @@ inline constexpr std::string_view kCover = "utility.cover";
 inline constexpr std::string_view kCoverNote = "utility.cover_note";
 inline constexpr std::string_view kCoverBelowMinimum = "utility.cover_below_minimum";
 inline constexpr std::string_view kVerifies = "utility.verifies";
+// The settings the line was graded with, on each of its points, so that
+// UTILITY REGRADE grades it again as it was drawn unless told otherwise:
+// SPACING (GradingSettings::maximumDetectedSpacing, metres; absent when it
+// is infinite, the rule off) and MINCOVER (metres; absent when none was
+// given). The points of one line must agree on them, as on its attributes.
+inline constexpr std::string_view kSpacing = "utility.spacing";
+inline constexpr std::string_view kMinimumCover = "utility.min_cover";
 // A delivery schema's attributes that nothing interprets, kept by their own
-// name after this prefix: "utility.field.AssetStatus".
+// name after this prefix: "utility.field.AssetStatus". A polyline carries its
+// service's; a point its service's and its own. Which are which is the
+// schedule format's to say (subsurface::utilityCsvColumns, CarriedOn), as it
+// said when the schedule was read.
 inline constexpr std::string_view kFieldPrefix = "utility.field.";
+// A cell the schedule reader reads as "not recorded", or reads only in part,
+// as the schedule wrote it (subsurface::UtilityAttributes::recorded and
+// UtilityVertex::recorded), by the reader's column name after this prefix:
+// "utility.recorded.size" = "Not Applicable". The line's - type, status,
+// size - on its polylines and points; a vertex's - ql, level_ref - on its
+// point. Nothing is graded from them: they are what UTILITY SCHEDULE and
+// CHECK of the drawing write back, while they still read as the value held.
+inline constexpr std::string_view kRecordedPrefix = "utility.recorded.";
 } // namespace keys
 
 // "water", "electricity", "telecommunications", "gas", "recycled-water",
@@ -199,7 +239,9 @@ drawUtilities(const std::vector<katana::survey::subsurface::UtilityLine>& lines,
 //   utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=x0,y0,x1,y1
 //   line id=W1 type=water length=30.024 ql_a=1.420 ql_b=16.102 ql_c=12.502 ql_d=0.000
 // Metres and coordinates to three decimals; an id with a blank, '"' or '='
-// in quotes.
-[[nodiscard]] std::string formatUtilityDrawing(const UtilityDrawing& drawing);
+// in quotes. UTILITY REGRADE replies the same with `record` "utilities
+// regraded", so a front end frames what it drew the same way.
+[[nodiscard]] std::string formatUtilityDrawing(const UtilityDrawing& drawing,
+                                               std::string_view record = "utilities drawn");
 
 } // namespace katana::cad::utilities

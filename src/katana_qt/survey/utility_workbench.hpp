@@ -8,14 +8,17 @@
 // (UtilityServices), and asks it to run any line that starts with UTILITY.
 // The verb itself is the CommandInterpreter's, shared with katana_cli; what
 // this class adds is what only a window has:
-//   - the menu section and its five actions (utilityDraw, utilityReport,
-//     utilityVerify, utilityClearance, utilityCheck), each opening the one
-//     dialog (utility_dialog.hpp) on its own tab;
-//   - after a UTILITY DRAW that worked - typed, or run from the dialog - every
-//     plan view framed on the reply's bounds= box, read by the verb's own
-//     utilities::drawReplyBounds. Survey data in a real coordinate system
-//     usually lands far from what the view was showing, and left unframed a
-//     successful draw looked like one that did nothing.
+//   - the menu section and its seven actions (utilityDraw, utilityReport,
+//     utilityVerify, utilityClearance, utilityCheck, utilityRegrade,
+//     utilityWriteSchedule), each opening the one dialog (utility_dialog.hpp)
+//     on its own tab;
+//   - the drawing and the open views the dialog's scope and filter controls
+//     list (UtilityServices::document, views);
+//   - after a UTILITY DRAW or REGRADE that worked - typed, or run from the
+//     dialog - every plan view framed on the reply's bounds= box, read by the
+//     verb's own utilities::drawReplyBounds. Survey data in a real coordinate
+//     system usually lands far from what the view was showing, and left
+//     unframed a successful draw looked like one that did nothing.
 // The dialog's Run goes back through the window's one executor
 // (UtilityServices::run, MainWindow::runVerbLine), so a line from the dialog
 // is echoed, kept in the history and undone exactly as a typed one; it reaches
@@ -42,13 +45,21 @@ class QKeySequence;
 class QMainWindow;
 class QMenu;
 
+namespace katana::cad {
+class Document;
+}
+
 namespace katana::qt {
 
 class ViewWorkspace;
 
 struct UtilityServices {
-    // The window's views, framed after a draw. May be null (a test's).
+    // The window's views, framed after a draw and offered to the dialog's
+    // View scope. May be null (a test's).
     ViewWorkspace* views = nullptr;
+    // The drawing, whose layers and alignments the dialog lists. May be
+    // null (a test's).
+    katana::cad::Document* document = nullptr;
     std::function<QAction*(Icon icon, const QString& text, const QString& tip,
                            const QKeySequence& shortcut, const QString& objectName)>
         makeAction;
@@ -66,7 +77,7 @@ struct UtilityServices {
 
 class UtilityWorkbench {
   public:
-    // Adds the "Subsurface Utilities (AS 5488)" section and its five actions
+    // Adds the "Subsurface Utilities (AS 5488)" section and its seven actions
     // to `surveyMenu`, after what is already there.
     UtilityWorkbench(QMainWindow& window, UtilityServices services, QMenu& surveyMenu);
     // Deletes the dialog, which calls back into this object.
@@ -78,9 +89,9 @@ class UtilityWorkbench {
     [[nodiscard]] QAction* action(UtilityTool tool) const;
 
     // True when `line` is a UTILITY line, which it then runs through the
-    // interpreter, replying to the log and, after a DRAW that worked, framing
-    // what was drawn in every plan view; false leaves the line to whoever
-    // asked.
+    // interpreter, replying to the log and, after a DRAW or a REGRADE that
+    // worked, framing what was drawn in every plan view; false leaves the
+    // line to whoever asked.
     bool runLine(const QString& line);
     // What the dialog's Run does: `line` through the window's one executor,
     // and the reply runLine had for it - the interpreter's own, so a refusal
@@ -96,7 +107,7 @@ class UtilityWorkbench {
   private:
     QMainWindow& window_;
     UtilityServices services_;
-    std::array<QAction*, 5> actions_{};
+    std::array<QAction*, kUtilityToolCount> actions_{};
     QPointer<UtilityToolsDialog> dialog_;
     // The reply of the last line runLine ran, for execute.
     std::optional<katana::core::Result<std::string>> lastReply_;

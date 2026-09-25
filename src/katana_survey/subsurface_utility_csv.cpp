@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include "katana/core/text.hpp"
@@ -157,6 +159,29 @@ std::optional<double> parseSize(std::string_view text)
     }
 }
 
+// Millimetre text that the reader's division by 1000 brings back to exactly
+// `metres`. The product is tried first, then its neighbours a few units in
+// the last place either side: a diameter read from a schedule came from such
+// a text, so one of them divides back; four is ample, since the product and
+// the quotient are each within half a unit of exact.
+std::string millimetres(double metres)
+{
+    const double product = metres * 1000.0;
+    double below = product;
+    double above = product;
+    for (int step = 0; step < 4; ++step) {
+        for (const double candidate : {below, above}) {
+            std::string text = core::formatExactReal(candidate);
+            if (const auto back = core::parseFiniteDouble(text); back && *back / 1000.0 == metres) {
+                return text;
+            }
+        }
+        below = std::nextafter(below, -std::numeric_limits<double>::infinity());
+        above = std::nextafter(above, std::numeric_limits<double>::infinity());
+    }
+    return core::formatExactReal(product);
+}
+
 // One line attribute from one row: set it if unset, refuse if it disagrees.
 struct AttributeSource {
     std::string value;
@@ -302,6 +327,7 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
         }
         if (auto claim = table->cell(row, "ql"); key(claim) == "unknown") {
             vertex.claimed.reset(); // a schedule's "Unknown" claims nothing
+            vertex.recorded.emplace("ql", std::string(claim));
         }
         std::optional<LevelReference> reference;
         if (auto status = optionalCell(*table, row, "level_ref", "a level reference",
@@ -310,6 +336,10 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
             return status.error();
         }
         vertex.levelReference = reference.value_or(LevelReference::Top);
+        // On the top with nothing measured is what an empty cell reads as.
+        if (reference == LevelReference::Top && !vertex.level && !vertex.depth) {
+            vertex.recorded.emplace("level_ref", std::string(table->cell(row, "level_ref")));
+        }
         vertex.verifies = std::string(table->cell(row, "verifies"));
 
         const std::string_view path = table->cell(row, "path");
@@ -357,18 +387,24 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
                     return bad(row, column, value, "a utility type");
                 }
                 attributes.type = *type;
+                if (*type == UtilityType::Unknown) {
+                    attributes.recorded.emplace("type", std::string(value));
+                }
             } else if (column == "status") {
                 const auto status = parseUtilityStatus(value);
                 if (!status) {
                     return bad(row, column, value, "a utility status");
                 }
                 attributes.status = *status;
+                if (*status == UtilityStatus::Unknown) {
+                    attributes.recorded.emplace("status", std::string(value));
+                }
             } else if (column == "diameter_mm") {
-                const auto millimetres = core::parseFiniteDouble(value);
-                if (!millimetres || *millimetres <= 0.0) {
+                const auto given = core::parseFiniteDouble(value);
+                if (!given || *given <= 0.0) {
                     return bad(row, column, value, "a positive number of millimetres");
                 }
-                attributes.diameter = *millimetres / 1000.0;
+                attributes.diameter = *given / 1000.0;
                 attributes.diameterIsInside = false;
             } else if (column == "size") {
                 const auto size = parseSize(value);
@@ -398,6 +434,18 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
     }
 
     for (UtilityLine& line : lines) {
+        // A size the writer would not say again from the diameter: one it
+        // writes nothing for (Not Applicable, Unknown, or a size beside a
+        // diameter_mm, which is the diameter), or one it words otherwise
+        // ("1200 x 900", "150.0").
+        const auto& sources = attributeSources[line.id];
+        if (const auto size = sources.find("size"); size != sources.end()) {
+            const std::string& given = size->second.value;
+            const double read = parseSize(given).value_or(0.0);
+            if (sources.contains("diameter_mm") || !(read > 0.0) || millimetres(read) != given) {
+                line.attributes.recorded.emplace("size", given);
+            }
+        }
         const std::vector<std::string>& cells = pathCells[line.id];
         bool any = false;
         for (std::size_t i = 0; i + 1 < cells.size(); ++i) {
@@ -452,6 +500,335 @@ core::Result<DesignAlignment> parseDesignCsv(std::string_view text, std::string 
         design.vertices.push_back(vertex);
     }
     return design;
+}
+
+// ---- writing a schedule --------------------------------------------------------------------
+
+namespace {
+
+// The reader's own spelling of each word value: what toString says, except
+// an unknown method, whose "unknown method" the reader would not take back.
+std::string ownSpelling(LocationMethod method)
+{
+    return method == LocationMethod::Unknown ? std::string("unknown") : toString(method);
+}
+
+// A cell as the reader splits it back: quoted when it holds a comma or a
+// quote, starts or ends with a blank (the reader trims an unquoted cell), or
+// starts with '#' (a row whose first cell does is a comment).
+std::string csvCell(std::string_view value)
+{
+    const bool quote = value.find_first_of(",\"") != std::string_view::npos ||
+                       (!value.empty() && (core::isAsciiSpace(value.front()) ||
+                                           core::isAsciiSpace(value.back()) ||
+                                           value.front() == '#'));
+    if (!quote) {
+        return std::string(value);
+    }
+    std::string out = "\"";
+    for (const char c : value) {
+        out += c;
+        if (c == '"') {
+            out += '"';
+        }
+    }
+    return out + "\"";
+}
+
+// A cell kept as the schedule wrote it (UtilityAttributes::recorded), when
+// it still reads as the value held - `reads` says whether it does - and so
+// can be written back without saying something else.
+template <typename Reads>
+std::optional<std::string> recordedAs(const std::map<std::string, std::string>& recorded,
+                                      const std::string& column, Reads reads)
+{
+    const auto found = recorded.find(column);
+    if (found == recorded.end() || found->second.empty() ||
+        !reads(std::string_view(found->second))) {
+        return std::nullopt;
+    }
+    return found->second;
+}
+
+const UtilityCsvColumn* columnNamed(std::string_view name)
+{
+    for (const UtilityCsvColumn& column : utilityCsvColumns()) {
+        if (column.name == name) {
+            return &column;
+        }
+    }
+    return nullptr;
+}
+
+core::Error unwritable(const UtilityLine& line, const UtilityVertex* vertex, std::string what)
+{
+    return makeError(ErrorCode::InvalidArgument,
+                     "line " + line.id + (vertex ? " point " + vertex->id : std::string()) + ": " +
+                         std::move(what) + "; a schedule cannot hold it");
+}
+
+} // namespace
+
+core::Result<std::string> writeUtilityCsv(const std::vector<UtilityLine>& lines,
+                                          const UtilityCsvDialect& dialect)
+{
+    const auto spelled = [&dialect](std::string_view column, std::string own) {
+        if (const auto found = dialect.spellings.find(column); found != dialect.spellings.end()) {
+            if (const auto word = found->second.find(own); word != found->second.end()) {
+                return word->second;
+            }
+        }
+        return own;
+    };
+    const auto real = [](double value) { return core::formatExactReal(value); };
+
+    // Each row as column -> text; a column absent from every row is not
+    // written unless the reader requires it.
+    std::vector<std::map<std::string, std::string, std::less<>>> rows;
+    std::set<std::string, std::less<>> used;
+    for (const UtilityLine& line : lines) {
+        if (line.id.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "a line with no id; a schedule cannot hold it");
+        }
+        const std::size_t count = line.vertices.size();
+        if (!line.pathEvidence.empty() && line.pathEvidence.size() + 1 != count) {
+            return unwritable(line, nullptr,
+                              std::to_string(line.pathEvidence.size()) +
+                                  " path evidences for " + std::to_string(count) + " vertices");
+        }
+        const UtilityAttributes& attributes = line.attributes;
+        if (!std::isfinite(attributes.diameter) || attributes.diameter < 0.0) {
+            return unwritable(line, nullptr, "a diameter that is not a positive number");
+        }
+        std::set<std::string, std::less<>> pointIds;
+        for (std::size_t i = 0; i < count; ++i) {
+            const UtilityVertex& vertex = line.vertices[i];
+            std::map<std::string, std::string, std::less<>> row;
+            const auto put = [&row](std::string_view column, std::string value) {
+                if (!value.empty()) {
+                    row.insert_or_assign(std::string(column), std::move(value));
+                }
+            };
+            if (vertex.id.empty() || !pointIds.insert(vertex.id).second) {
+                return unwritable(line, &vertex,
+                                  vertex.id.empty() ? "a point with no id" : "a point id twice");
+            }
+            for (const auto value : {vertex.position.easting, vertex.position.northing,
+                                     vertex.level.value_or(0.0), vertex.depth.value_or(0.0),
+                                     vertex.surfaceLevel.value_or(0.0),
+                                     vertex.evidence.horizontalUncertainty.value_or(0.0),
+                                     vertex.evidence.verticalUncertainty.value_or(0.0)}) {
+                if (!std::isfinite(value)) {
+                    return unwritable(line, &vertex, "a number that is not finite");
+                }
+            }
+            if (vertex.depth && *vertex.depth < 0.0) {
+                return unwritable(line, &vertex, "a depth above the surface");
+            }
+            put("line", line.id);
+            put("point", vertex.id);
+            put("easting", real(vertex.position.easting));
+            put("northing", real(vertex.position.northing));
+            put("method", spelled("method", ownSpelling(vertex.evidence.method)));
+            if (vertex.level) {
+                put("level", real(*vertex.level));
+            }
+            // Written wherever it bears on something, and wherever it is not
+            // what an empty cell reads as; where it is, as the schedule wrote
+            // it, if it did.
+            if (vertex.level || vertex.depth || vertex.levelReference != LevelReference::Top) {
+                put("level_ref", spelled("level_ref", toString(vertex.levelReference)));
+            } else if (const auto kept =
+                           recordedAs(vertex.recorded, "level_ref", [](std::string_view text) {
+                               return parseLevelReference(text) == LevelReference::Top;
+                           })) {
+                put("level_ref", *kept);
+            }
+            if (vertex.depth) {
+                put("depth", real(*vertex.depth));
+            }
+            if (vertex.surfaceLevel) {
+                put("surface", real(*vertex.surfaceLevel));
+            }
+            if (vertex.evidence.horizontalUncertainty) {
+                put("h_unc", real(*vertex.evidence.horizontalUncertainty));
+            }
+            if (vertex.evidence.verticalUncertainty) {
+                put("v_unc", real(*vertex.evidence.verticalUncertainty));
+            }
+            if (vertex.claimed) {
+                put("ql", spelled("ql", toString(*vertex.claimed)));
+            } else if (const auto kept = recordedAs(vertex.recorded, "ql", [](std::string_view text) {
+                           return key(text) == "unknown";
+                       })) {
+                put("ql", *kept);
+            }
+            if (!line.pathEvidence.empty() && i + 1 < count) {
+                put("path", spelled("path", toString(line.pathEvidence[i])));
+            }
+            put("verifies", vertex.verifies);
+            if (attributes.type != UtilityType::Unknown) {
+                put("type", spelled("type", toString(attributes.type)));
+            } else if (const auto kept =
+                           recordedAs(attributes.recorded, "type", [](std::string_view text) {
+                               return parseUtilityType(text) == UtilityType::Unknown;
+                           })) {
+                put("type", *kept);
+            }
+            put("owner", attributes.owner);
+            put("material", attributes.material);
+            // The size as the schedule wrote it while it still reads as the
+            // diameter held, or beside a diameter_mm, which the reader takes
+            // over it; else the diameter's own millimetres.
+            const auto keptSize = recordedAs(attributes.recorded, "size", [](std::string_view text) {
+                return parseSize(text).has_value();
+            });
+            const std::optional<double> keptReads =
+                keptSize ? parseSize(*keptSize) : std::optional<double>{};
+            if (attributes.diameter > 0.0 && attributes.diameterIsInside) {
+                put("size", keptReads == attributes.diameter ? *keptSize
+                                                             : millimetres(attributes.diameter));
+            } else if (attributes.diameter > 0.0) {
+                put("diameter_mm", millimetres(attributes.diameter));
+                put("size", keptSize.value_or(std::string()));
+            } else if (keptReads == 0.0) {
+                put("size", *keptSize);
+            }
+            if (attributes.status != UtilityStatus::Unknown) {
+                put("status", spelled("status", toString(attributes.status)));
+            } else if (const auto kept =
+                           recordedAs(attributes.recorded, "status", [](std::string_view text) {
+                               return parseUtilityStatus(text) == UtilityStatus::Unknown;
+                           })) {
+                put("status", *kept);
+            }
+            put("config", attributes.configuration);
+            put("description", attributes.description);
+            for (const auto& [fields, carried] :
+                 {std::pair{&attributes.fields, CarriedOn::Line},
+                  std::pair{&vertex.fields, CarriedOn::Vertex}}) {
+                for (const auto& [name, value] : *fields) {
+                    const UtilityCsvColumn* column = columnNamed(name);
+                    if (column == nullptr || column->carried != carried) {
+                        return unwritable(line, &vertex,
+                                          "kept attribute " + name +
+                                              (column == nullptr
+                                                   ? " is no column the schedule has"
+                                                   : " is carried by the other of a service "
+                                                     "and a point"));
+                    }
+                    put(name, value);
+                }
+            }
+            for (const auto& [column, value] : row) {
+                if (value.find_first_of("\r\n") != std::string::npos) {
+                    return unwritable(line, &vertex, column + " holds a line break");
+                }
+                used.insert(column);
+            }
+            rows.push_back(std::move(row));
+        }
+    }
+
+    std::vector<std::string_view> columns;
+    for (const UtilityCsvColumn& column : utilityCsvColumns()) {
+        if (column.required || used.contains(column.name)) {
+            columns.push_back(column.name);
+        }
+    }
+    std::string text;
+    for (std::size_t c = 0; c < columns.size(); ++c) {
+        const auto header = dialect.headers.find(columns[c]);
+        text += (c == 0 ? "" : ",") +
+                csvCell(header == dialect.headers.end() ? columns[c] : header->second);
+    }
+    text += '\n';
+    for (const auto& row : rows) {
+        for (std::size_t c = 0; c < columns.size(); ++c) {
+            const auto value = row.find(columns[c]);
+            text += (c == 0 ? "" : ",") + (value == row.end() ? std::string() : csvCell(value->second));
+        }
+        text += '\n';
+    }
+    return text;
+}
+
+UtilityCsvDialect utilityCsvDialect(const DeliverySchema& schema)
+{
+    UtilityCsvDialect dialect;
+    std::set<std::string, std::less<>> taken;
+    for (const UtilityCsvColumn& column : utilityCsvColumns()) {
+        // A kept column is written by its own name, which is the schema's.
+        if (column.carried != CarriedOn::Interpreted) {
+            continue;
+        }
+        std::set<std::string, std::less<>> names{key(column.name)};
+        for (const std::string_view alias : column.aliases) {
+            names.insert(key(alias));
+        }
+        const SchemaField* field = nullptr;
+        std::string header;
+        for (const SchemaField& candidate : schema.fields) {
+            // The attribute when it is one of the reader's names for the
+            // column, else the label: the reader must take the header back,
+            // and the check finds a column by either.
+            if (names.contains(key(candidate.attribute))) {
+                header = candidate.attribute;
+            } else if (!candidate.label.empty() && names.contains(key(candidate.label))) {
+                header = candidate.label;
+            } else {
+                continue;
+            }
+            if (taken.insert(header).second) {
+                field = &candidate;
+                break;
+            }
+        }
+        if (field == nullptr) {
+            continue;
+        }
+        dialect.headers.emplace(std::string(column.name), header);
+
+        const auto domain = schema.domains.find(field->attribute);
+        if (domain == schema.domains.end()) {
+            continue;
+        }
+        // The first listed spelling of each value, in the reader's reading.
+        const auto spellingOf = [&](const std::string& listed) -> std::optional<std::string> {
+            const std::string_view name = column.name;
+            if (name == "type") {
+                const auto type = parseUtilityType(listed);
+                return type ? std::optional<std::string>(toString(*type)) : std::nullopt;
+            }
+            if (name == "status") {
+                const auto status = parseUtilityStatus(listed);
+                return status ? std::optional<std::string>(toString(*status)) : std::nullopt;
+            }
+            if (name == "method") {
+                const auto method = parseLocationMethod(listed);
+                return method ? std::optional<std::string>(ownSpelling(*method)) : std::nullopt;
+            }
+            if (name == "level_ref") {
+                const auto reference = parseLevelReference(listed);
+                return reference ? std::optional<std::string>(toString(*reference)) : std::nullopt;
+            }
+            if (name == "ql") {
+                const auto level = parseQualityLevel(listed);
+                return level ? std::optional<std::string>(toString(*level)) : std::nullopt;
+            }
+            if (name == "path") {
+                const auto path = parsePathEvidence(listed);
+                return path ? std::optional<std::string>(toString(*path)) : std::nullopt;
+            }
+            return std::nullopt;
+        };
+        for (const SchemaValue& listed : domain->second.values) {
+            if (const auto own = spellingOf(listed.value)) {
+                dialect.spellings[std::string(column.name)].emplace(*own, listed.value);
+            }
+        }
+    }
+    return dialect;
 }
 
 } // namespace katana::survey::subsurface

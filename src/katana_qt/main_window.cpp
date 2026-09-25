@@ -389,6 +389,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // sheet editor's own lines get (sheetVerbContextFor).
     interpreter_.setSheetContext(
         [this] { return sheetVerbContextFor(document_, [this] { return sheetSource(); }); });
+    // VIEW in a verb's scope (cad/scope_verbs.hpp) - MODIFY VIEW, UTILITY
+    // REPORT VIEW - is a view of this window's: the plan view in use, or the
+    // one with the id given, with its own hidden layers and what it shows.
+    interpreter_.setScopeContext([this](std::optional<std::uint32_t> id) {
+        return cad::scopeViewOf(views_->viewSet(), id);
+    });
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -1127,6 +1133,7 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     // Run comes back through this window's command line.
     UtilityServices utilities;
     utilities.views = views_;
+    utilities.document = &document_;
     utilities.makeAction = [this](Icon icon, const QString& text, const QString& tip,
                                   const QKeySequence& shortcut, const QString& name) {
         return makeAction(icon, text, tip, shortcut, name);
@@ -2456,8 +2463,9 @@ bool MainWindow::runWorkbenchLine(const QString& line)
     if (online_ != nullptr && online_->runLine(line)) {
         return true;
     }
-    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
-    // through the utilities workbench, which frames what a DRAW added.
+    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW, REGRADE, SCHEDULE: the
+    // interpreter's verb, through the utilities workbench, which frames what a
+    // DRAW or a REGRADE drew.
     return utilities_ != nullptr && utilities_->runLine(line);
 }
 
