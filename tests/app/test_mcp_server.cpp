@@ -418,4 +418,32 @@ TEST_F(McpServer, ATextIsEditedInOneStepAndDescribedWithItsLineBreaks)
         << textOf(described);
 }
 
+// What the window's rules tab sends, sent by an agent: a rule added with its
+// type, previewed by name with a record per rule of the labels it would
+// have, then switched off - after which it labels nothing, named or not
+// (auto_label.cpp, ruleMatches).
+TEST_F(McpServer, ChosenLabelRulesArePreviewedByNameWithACountForEach)
+{
+    initialize();
+    const Json result = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LABELSTYLE DEFAULTS", "RECT 0,0 20,20",
+               "AUTOLABEL RULE ADD lots style=\"Lot Area\" type=Polyline",
+               "AUTOLABEL PREVIEW lots", "AUTOLABEL RULE SET lots enabled=off",
+               "AUTOLABEL PREVIEW lots", "LABELSTYLE VALUES area"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 7U);
+    // One label a target (auto_label.hpp): the rectangle once for its area.
+    EXPECT_EQ(lines[3]["output"].get<std::string>(),
+              "preview created=1 kept=0 removed=0 skipped=0\nrule=lots labels=1");
+    EXPECT_EQ(lines[5]["output"].get<std::string>(),
+              "preview created=0 kept=0 removed=0 skipped=0");
+    EXPECT_NE(lines[6]["output"].get<std::string>().find("kind=area values=id,layer,code"),
+              std::string::npos)
+        << lines[6]["output"];
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 1) << "a preview makes nothing";
+}
+
 } // namespace
