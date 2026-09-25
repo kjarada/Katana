@@ -176,6 +176,8 @@ struct SheetSet {
     // {n:02} the same padded to two digits, {N} the count, {set} the set
     // number. "{n}" by default, as the frame's SHEET No. cell expects.
     std::string numbering = "{n}";
+    // Oldest first, in the order issued: the last is the current revision,
+    // whatever its date or code says (resolveFields, tables.hpp).
     std::vector<Revision> revisions;
     std::vector<Sheet> sheets;
 

@@ -347,3 +347,65 @@ TEST(SheetTablePainter, TheRegisterCoverPlotsBothTablesAndNoUtilityLegend)
     const Box2 inside = legend->rect.inflated(-2.0);
     EXPECT_EQ(inkIn(paper, inside), 0);
 }
+
+TEST(SheetTablePainter, ARealisticCoverIsLegible)
+{
+    // Eleven sheets of mixed scales and papers, four revisions, one with a
+    // long description: every row and revision listed, nothing below 1.8 mm.
+    Model model;
+    SheetSource source;
+    source.plan.model = &model;
+    plotting::SheetSet set;
+    set.numbering = "{set}-{n:02}";
+    set.defaults.setNumber = "C-104";
+    set.revisions = {{"A", "12/01/26", "PRELIMINARY ISSUE FOR COMMENT", "JC"},
+                     {"B", "03/02/26", "KERBS ADDED ALONG THE NORTH SIDE", "RE"},
+                     {"C", "17/03/26",
+                      "DRAINAGE REDESIGNED BETWEEN CH 120 AND CH 480 FOLLOWING THE GEOTECHNICAL "
+                      "REPORT; PIT LIDS, INVERT LEVELS AND PIPE CLASSES REVISED THROUGHOUT; "
+                      "SEE SHEETS 04 TO 07",
+                      "JC"},
+                     {"D", "02/04/26", "ISSUED FOR CONSTRUCTION", "MK"}};
+    const char* names[] = {"GENERAL ARRANGEMENT AND KEY PLAN", "SITE PLAN", "PLAN SHEET 1",
+                           "PLAN SHEET 2", "PLAN SHEET 3", "LONGITUDINAL SECTION MC01",
+                           "CROSS SECTIONS CH 0 TO CH 240", "CROSS SECTIONS CH 260 TO CH 500",
+                           "DRAINAGE DETAILS", "PAVEMENT DETAILS AND TYPICAL SECTIONS",
+                           "GENERAL NOTES"};
+    const double scales[] = {2000, 1000, 500, 500, 500, 500, 200, 200, 50, 20, 0};
+    const katana::cad::PaperSize papers[] = {
+        katana::cad::PaperSize::A1, katana::cad::PaperSize::A1, katana::cad::PaperSize::A1,
+        katana::cad::PaperSize::A1, katana::cad::PaperSize::A1, katana::cad::PaperSize::A3,
+        katana::cad::PaperSize::A3, katana::cad::PaperSize::A3, katana::cad::PaperSize::A3,
+        katana::cad::PaperSize::A3, katana::cad::PaperSize::A4};
+    for (std::size_t i = 0; i < std::size(names); ++i) {
+        plotting::Sheet sheet = sheetNamed("s" + std::to_string(i + 1), names[i]);
+        sheet.paper = papers[i];
+        plotting::Viewport view;
+        view.id = "vp" + std::to_string(i + 1);
+        view.kind = scales[i] > 0 ? plotting::ViewportKind::Plan : plotting::ViewportKind::Notes;
+        view.scale = scales[i] > 0 ? scales[i] : 500.0;
+        view.rect = box(30.0, 40.0, 200.0, 200.0);
+        sheet.viewports.push_back(view);
+        set.sheets.push_back(std::move(sheet));
+    }
+    set.sheets[9].fields["revision"] = "B";
+    auto cover = plotting::registerSheet(set);
+    ASSERT_TRUE(cover.ok());
+    std::vector<plotting::Sheet> one{std::move(*cover)};
+    plotting::prepareForAppend(set, one);
+    set.sheets.insert(set.sheets.begin(), std::move(one.front()));
+
+    SheetPaintStats stats;
+    painted(set, source, &stats);
+    EXPECT_TRUE(stats.problems.empty()) << stats.problems.front();
+    const auto rows = plotting::layoutViewportTable(set, 0, set.sheets[0].viewports[0]);
+    const auto issued = plotting::layoutViewportTable(set, 0, set.sheets[0].viewports[1]);
+    EXPECT_EQ(rows.rowsHidden, 0u);
+    EXPECT_EQ(issued.rowsHidden, 0u);
+    for (const auto* layout : {&rows, &issued}) {
+        EXPECT_GE(layout->capMm, 1.8);
+        for (const auto& item : layout->texts) {
+            EXPECT_GE(item.squeeze, 0.8) << item.text;
+        }
+    }
+}

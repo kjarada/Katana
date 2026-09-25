@@ -826,3 +826,60 @@ TEST(SheetTables, TheRegisterCanStartAnEmptySet)
     ASSERT_EQ(rows.size(), 1u);
     EXPECT_EQ(rows[0].number, "1");
 }
+
+TEST(SheetTables, BlanksAtTheEndsOfACellAreDropped)
+{
+    // A description typed with a trailing line break is one line, not two,
+    // and a code with a trailing space is centred on the code.
+    TableSpec spec;
+    spec.columns = {{"REV", HorizontalJustify::Centre},
+                    {"DESCRIPTION", HorizontalJustify::Left, true, true}};
+    spec.rows = {{"B ", "FIRST ISSUE\n"}, {"A", "  \r\n"}};
+    const TableLayout layout = layoutTable(spec, box(0.0, 0.0, 80.0, 60.0), monospace);
+    ASSERT_EQ(layout.rowBoxes.size(), 2u);
+    EXPECT_DOUBLE_EQ(layout.rowBoxes[0].height(), 2.0 * layout.capMm);
+    EXPECT_DOUBLE_EQ(layout.rowBoxes[1].height(), 2.0 * layout.capMm);
+    EXPECT_NE(findText(layout, "B"), nullptr);
+    EXPECT_NE(findText(layout, "FIRST ISSUE"), nullptr);
+    for (const TableText& item : layout.texts) {
+        EXPECT_FALSE(item.text.empty());
+        EXPECT_EQ(item.text.find_first_of(" \r\n", item.text.size() - 1), std::string::npos)
+            << item.text;
+    }
+}
+
+TEST(SheetTables, ATableTooNarrowForOneBlockIsSqueezedIntoItAtTheSmallestText)
+{
+    // 12 mm cannot hold the register's columns even at 1.8 mm: one block,
+    // every column in proportion, every text squeezed inside the box.
+    SheetSet set = fourSheets();
+    Viewport view = viewportOf(ViewportKind::SheetIndex);
+    view.rect = box(10.0, 10.0, 22.0, 100.0);
+    const TableLayout layout = layoutViewportTable(set, 0, view);
+    EXPECT_DOUBLE_EQ(layout.capMm, 1.8);
+    EXPECT_EQ(layout.blocks, 1u);
+    EXPECT_EQ(layout.rowsShown, 4u);
+    for (const TableText& item : layout.texts) {
+        EXPECT_GE(item.capMm, 1.8) << item.text;
+    }
+    expectInside(layout, view.rect, estimateTextWidth);
+}
+
+TEST(SheetTables, ASingleWordWiderThanItsColumnHasALineOfItsOwnSqueezed)
+{
+    const std::string word(200, 'W');
+    TableSpec spec;
+    spec.columns = {{"REV", HorizontalJustify::Centre},
+                    {"DESCRIPTION", HorizontalJustify::Left, true, true}};
+    spec.rows = {{"A", "SEE " + word + " BELOW"}};
+    const Box2 rect = box(0.0, 0.0, 60.0, 40.0);
+    const TableLayout layout = layoutTable(spec, rect, monospace);
+    EXPECT_EQ(layout.rowsShown, 1u);
+    const TableText* own = findText(layout, word);
+    ASSERT_NE(own, nullptr);
+    EXPECT_LT(own->squeeze, 1.0);
+    EXPECT_NE(findText(layout, "SEE"), nullptr);
+    EXPECT_NE(findText(layout, "BELOW"), nullptr);
+    EXPECT_DOUBLE_EQ(layout.rowBoxes[0].height(), 5.0 * layout.capMm);
+    expectInside(layout, rect, monospace);
+}

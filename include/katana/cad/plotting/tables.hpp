@@ -84,6 +84,7 @@ struct TableColumn {
     // Wraps onto as many lines as it needs, and starts a new line at each
     // '\n'. A cell of any other column is one line - a '\n' in it prints as
     // a space - and one too wide is squeezed to fit, as the frame's fields are.
+    // Blanks and line breaks at either end of any cell are dropped.
     bool wrap = false;
 
     friend bool operator==(const TableColumn&, const TableColumn&) = default;
