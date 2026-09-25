@@ -946,6 +946,8 @@ viewport's in the order `preflightChecks()` lists them.
 | `section.no-surface` | Error | no surface to cut, and for a long section no design profile either |
 | `image.missing` | Error | an image panel names no file, or one the project does not have |
 | `notes.empty` | Info | a notes panel has no text |
+| `revisions.empty` | Info | a revision table on a set with no revisions prints its headings alone |
+| `table.overflow` | Warning | a drawing register or revision table has rows that do not fit, laid out as the painter lays it out (`layoutViewportTable`), and prints "+N more" or "+N earlier" |
 | `matchline.dangling` | Warning | a match line or key-plan outline leads to a sheet that no longer exists |
 
 How the harder checks decide:

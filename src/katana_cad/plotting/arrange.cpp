@@ -578,6 +578,8 @@ std::string_view kindWords(ViewportKind kind)
     case ViewportKind::Notes: return "notes";
     case ViewportKind::Image: return "image";
     case ViewportKind::KeyPlan: return "key plan";
+    case ViewportKind::SheetIndex: return "drawing register";
+    case ViewportKind::Revisions: return "revision table";
     }
     return "plan";
 }
