@@ -82,7 +82,7 @@ endfunction()
 set(_stamp "${_prefix}/CMakeFiles/katana_runtime.stamp")
 set(_key "@KATANA_DEPLOY_KEY@")
 if(_build_tree AND EXISTS "${_stamp}" AND IS_DIRECTORY "${_prefix}/share/proj"
-   AND IS_DIRECTORY "${_prefix}/share/gdal")
+   AND IS_DIRECTORY "${_prefix}/share/gdal" AND EXISTS "${_prefix}/etc/ssl/certs/ca-bundle.crt")
     file(STRINGS "${_stamp}" _recorded)
     list(POP_FRONT _recorded _recorded_key)
     set(_current TRUE)
@@ -238,6 +238,20 @@ foreach(_data proj gdal)
                         "the bundle will lack it")
     endif()
 endforeach()
+# The certificates every HTTPS request is checked against. libcurl - which
+# GDAL fetches through: GIS > Online Data, /vsicurl/ - reads them from a file
+# found, like proj.db, RELATIVE TO ITS OWN DLL: <bin>/../etc/ssl/certs/
+# ca-bundle.crt. Without it every https:// request failed before reaching the
+# server ("error adding trust anchors from file"), and it went unseen because
+# the tests load libcurl from the toolchain, whose bundle is in place.
+# file(COPY) re-copies it when the toolchain's ca-certificates update.
+set(_ca_bundle "${_toolchain_bin}/../etc/ssl/certs/ca-bundle.crt")
+if(EXISTS "${_ca_bundle}")
+    file(COPY "${_ca_bundle}" DESTINATION "${_prefix}/etc/ssl/certs")
+else()
+    message(WARNING "Katana deploy: ${_ca_bundle} was not found; "
+                    "no https:// request will be trusted")
+endif()
 
 # --- 4. The build tree records what it now holds --------------------------------------
 # Written LAST, so a deploy that failed part-way leaves no stamp and the next
