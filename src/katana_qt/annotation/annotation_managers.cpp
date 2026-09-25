@@ -1,5 +1,7 @@
 #include "annotation/annotation_managers.hpp"
 
+#include "annotation/form_widgets.hpp"
+
 #include <string>
 
 #include <QCheckBox>
@@ -29,74 +31,9 @@ namespace katana::qt {
 namespace cmd = katana::commands;
 namespace ann = katana::cad::annotation;
 using katana::core::Status;
+using namespace annotation_form;
 
 namespace {
-
-QDoubleSpinBox* spin(QWidget* parent, const char* name, double minimum, double maximum,
-                     double step, int decimals, const QString& suffix = {})
-{
-    auto* box = new QDoubleSpinBox(parent);
-    box->setObjectName(QString::fromLatin1(name));
-    box->setRange(minimum, maximum);
-    box->setSingleStep(step);
-    box->setDecimals(decimals);
-    box->setSuffix(suffix);
-    return box;
-}
-
-QCheckBox* check(QWidget* parent, const char* name, const QString& text)
-{
-    auto* box = new QCheckBox(text, parent);
-    box->setObjectName(QString::fromLatin1(name));
-    return box;
-}
-
-QLineEdit* edit(QWidget* parent, const char* name, const QString& placeholder = {})
-{
-    auto* line = new QLineEdit(parent);
-    line->setObjectName(QString::fromLatin1(name));
-    line->setPlaceholderText(placeholder);
-    return line;
-}
-
-QPushButton* button(QWidget* parent, const char* name, const QString& text)
-{
-    auto* push = new QPushButton(text, parent);
-    push->setObjectName(QString::fromLatin1(name));
-    push->setAutoDefault(false);
-    return push;
-}
-
-QLabel* problemLine(QWidget* parent, const char* name)
-{
-    auto* label = new QLabel(parent);
-    label->setObjectName(QString::fromLatin1(name));
-    label->setWordWrap(true);
-    label->setStyleSheet(QStringLiteral("color: #d9534f"));
-    return label;
-}
-
-// An enumeration's names in a combo, by value.
-template <typename Enum, std::size_t N>
-QComboBox* combo(QWidget* parent, const char* name, const Enum (&values)[N])
-{
-    auto* box = new QComboBox(parent);
-    box->setObjectName(QString::fromLatin1(name));
-    for (const Enum value : values) {
-        box->addItem(QString::fromUtf8(katana::entity::toString(value)), static_cast<int>(value));
-    }
-    return box;
-}
-
-template <typename Enum> Enum chosen(const QComboBox* box)
-{
-    return static_cast<Enum>(box->currentData().toInt());
-}
-
-template <typename Enum> void choose(QComboBox* box, Enum value)
-{
-    box->setCurrentIndex(box->findData(static_cast<int>(value)));
-}
 
 // "\n" in a line edit is a line break in the stored template, as on the
 // command line.
@@ -118,16 +55,6 @@ template <typename Table> QString freshName(const Table& table, const QString& b
         name = base + QStringLiteral(" ") + QString::number(n);
     }
     return name;
-}
-
-QString describe(const katana::core::Status& status)
-{
-    if (status) {
-        return {};
-    }
-    const auto& error = status.error();
-    return QString::fromStdString(error.message +
-                                  (error.context.empty() ? std::string() : ": " + error.context));
 }
 
 } // namespace

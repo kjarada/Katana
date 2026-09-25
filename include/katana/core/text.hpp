@@ -79,6 +79,13 @@ namespace katana::core {
 // parseFiniteDouble refuses; an exporter should not be handed one.
 [[nodiscard]] std::string formatExactReal(double value);
 
+// A text as typed on a command line, read back: "\n" is a line break - the
+// command line has no other way to put one in a note - and "\\" is a
+// backslash, so a text holding "\n" itself (a path, C:\new) can be typed as
+// a reply writes it. Any other backslash is itself. The one reader for the
+// verbs' text options (the annotation and the sheet verbs).
+[[nodiscard]] std::string unescapeTyped(std::string_view text);
+
 // ---- key=value replies ---------------------------------------------------------
 //
 // A verb's reply is records, one a line: leading words, then key=value fields
