@@ -29,6 +29,7 @@
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/frame.hpp"
+#include "katana/cad/plotting/page_setup.hpp"
 #include "katana/core/error.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
@@ -209,6 +210,9 @@ struct SheetSet {
     // whatever its date or code says (resolveFields, tables.hpp).
     std::vector<Revision> revisions;
     std::vector<Sheet> sheets;
+    // How the set is plotted: the plot style, the resolution, the file
+    // naming (page_setup.hpp).
+    PageSetup pageSetup;
 
     friend bool operator==(const SheetSet&, const SheetSet&) = default;
 };
