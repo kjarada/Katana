@@ -884,4 +884,90 @@ PolylineResult chamferVertex(const CurvePolyline2& polyline, std::size_t index, 
                          v + corner->forward * std::min(second, corner->forwardLength), 0.0);
 }
 
+// ---- sub-paths ------------------------------------------------------------------------------
+
+namespace {
+
+// The height a fraction `t` along segment `i`: a vertex's own at either end,
+// else interpolated when both ends have one.
+std::optional<double> heightOnSegment(const CurvePolyline2& polyline, std::size_t i, double t)
+{
+    const auto& h0 = polyline.vertices[i].height;
+    const auto& h1 = polyline.vertices[polyline.segmentEnd(i)].height;
+    if (t <= 0.0) {
+        return h0;
+    }
+    if (t >= 1.0) {
+        return h1;
+    }
+    if (h0 && h1) {
+        return *h0 + (*h1 - *h0) * t;
+    }
+    return std::nullopt;
+}
+
+Point2 pointOnSegment(const CurveSegment& piece, double t)
+{
+    return std::visit([t](const auto& s) { return s.pointAt(t); }, piece);
+}
+
+} // namespace
+
+CurvePolyline2 subPath(const CurvePolyline2& polyline, double from, double to)
+{
+    CurvePolyline2 out;
+    const double total = polyline.length();
+    from = std::clamp(from, 0.0, total);
+    to = std::clamp(to, from, total);
+    double walked = 0.0;
+    for (std::size_t i = 0; i < polyline.segmentCount(); ++i) {
+        const double length = polyline.segmentLength(i);
+        const double s0 = walked;
+        const double s1 = walked + length;
+        walked = s1;
+        const double a = std::max(from, s0);
+        const double b = std::min(to, s1);
+        if (b - a <= tol::kGeometric || !(length > 0.0)) {
+            continue;
+        }
+        // Snapped to the vertex within the tolerance, so a cut at a vertex
+        // keeps the vertex exactly rather than a point a hair off it.
+        const double ta = a - s0 <= tol::kGeometric ? 0.0 : (a - s0) / length;
+        const double tb = s1 - b <= tol::kGeometric ? 1.0 : (b - s0) / length;
+        const CurveSegment piece = polyline.segment(i);
+        // The part's sweep is the fraction of the arc's: tan(atan(bulge) * f).
+        const double bulge = std::tan(std::atan(polyline.vertices[i].bulge) * (tb - ta));
+        if (out.vertices.empty()) {
+            out.vertices.push_back(
+                CurveVertex{pointOnSegment(piece, ta), bulge, heightOnSegment(polyline, i, ta)});
+        } else {
+            out.vertices.back().bulge = bulge;
+        }
+        const Point2 end = tb >= 1.0 ? polyline.vertices[polyline.segmentEnd(i)].position
+                                     : pointOnSegment(piece, tb);
+        out.vertices.push_back(CurveVertex{end, 0.0, heightOnSegment(polyline, i, tb)});
+    }
+    if (out.vertices.size() == 1) {
+        out.vertices.clear();
+    }
+    return out;
+}
+
+CurvePolyline2 wrappingPath(const CurvePolyline2& polyline, double from, double to)
+{
+    CurvePolyline2 head = subPath(polyline, from, polyline.length());
+    const CurvePolyline2 tail = subPath(polyline, 0.0, to);
+    if (head.vertices.empty()) {
+        return tail;
+    }
+    if (tail.vertices.empty()) {
+        return head;
+    }
+    // head ends and tail starts at the first vertex: one vertex, carrying
+    // the bulge of the segment tail starts.
+    head.vertices.back().bulge = tail.vertices.front().bulge;
+    head.vertices.insert(head.vertices.end(), tail.vertices.begin() + 1, tail.vertices.end());
+    return head;
+}
+
 } // namespace katana::geometry

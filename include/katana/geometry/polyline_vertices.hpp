@@ -101,6 +101,17 @@ using PolylineResult = katana::core::Result<CurvePolyline2>;
 // polyline beyond the first and last heights stay without (no extrapolation).
 [[nodiscard]] PolylineResult interpolateHeights(const CurvePolyline2& polyline);
 
+// The open path from station `from` to station `to` along the polyline
+// (0 <= from < to <= length; the closing segment of a closed one counts):
+// every vertex between kept, an arc cut part-way keeping its circle (its
+// bulge rescaled to the part's sweep), and the heights of the cut ends
+// interpolated by length on their segments (none when either end has none;
+// a vertex's own when the cut falls on it). What Break and Trim cut out.
+[[nodiscard]] CurvePolyline2 subPath(const CurvePolyline2& polyline, double from, double to);
+// A closed polyline's open path from `from` forward, through the first
+// vertex, round to `to` (to < from).
+[[nodiscard]] CurvePolyline2 wrappingPath(const CurvePolyline2& polyline, double from, double to);
+
 // ---- whole polyline ---------------------------------------------------------------------------
 
 // Douglas-Peucker: removes vertices while no removed vertex lies farther than
