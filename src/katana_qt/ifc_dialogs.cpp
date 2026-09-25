@@ -238,15 +238,24 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
     buttons->addWidget(close);
     layout->addLayout(buttons);
 
-    for (QLineEdit* field : {file_, schedule_, schema_, spacing_, rules_}) {
+    // A changed choice makes the last account out of date: it is cleared,
+    // so that a table never stands beside "Ready" showing what would no
+    // longer be written. The file alone changes no class, and keeps it.
+    for (QLineEdit* field : {schedule_, schema_, spacing_, rules_}) {
         connect(field, &QLineEdit::textChanged, this, [this] {
             showingResult_ = false;
+            showTally({});
             recheck();
         });
     }
+    connect(file_, &QLineEdit::textChanged, this, [this] {
+        showingResult_ = false;
+        recheck();
+    });
     for (QCheckBox* box : {entities_, selectedOnly_, alignments_, surfaces_}) {
         connect(box, &QCheckBox::toggled, this, [this] {
             showingResult_ = false;
+            showTally({});
             recheck();
         });
     }
@@ -260,6 +269,10 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
 
 void IfcExportDialog::showEvent(QShowEvent* event)
 {
+    // Opened again, the last export's words and table are about a drawing
+    // that may have changed since.
+    showingResult_ = false;
+    showTally({});
     refresh();
     QDialog::showEvent(event);
 }
@@ -271,13 +284,14 @@ void IfcExportDialog::refresh()
     }
     entities_->setText(QStringLiteral("Drawing entities (") + grouped(state_.entities) + ')');
     if (state_.selected == 0) {
+        // Kept as chosen: a selection cleared while the dialog is open must
+        // refuse the export (check()), not quietly widen it to everything.
         selectedOnly_->setText(QStringLiteral("Selected entities only (nothing is selected)"));
-        selectedOnly_->setChecked(false);
     } else {
         selectedOnly_->setText(QStringLiteral("Selected entities only (") +
                                grouped(state_.selected) + QStringLiteral(" selected)"));
     }
-    selectedOnly_->setEnabled(state_.selected > 0 && entities_->isChecked());
+    selectedOnly_->setEnabled(entities_->isChecked());
     alignments_->setText(QStringLiteral("Alignments (") + grouped(state_.alignments) + ')');
     surfaces_->setText(QStringLiteral("Surfaces of this session (") + grouped(state_.surfaces) +
                        ')');
@@ -288,7 +302,9 @@ void IfcExportDialog::refresh()
                       : QStringLiteral("Not georeferenced: ") +
                             (state_.coordinateSystem.isEmpty()
                                  ? QStringLiteral("the project has no coordinate system")
-                                 : state_.coordinateSystem + QStringLiteral(" has no EPSG code")) +
+                                 : state_.coordinateSystem +
+                                       QStringLiteral(" is not one EPSG code, which is how "
+                                                      "IFC4X3_ADD2 names a system")) +
                             QStringLiteral(", so coordinates are written as they are. File > "
                                            "Project Coordinate System sets one."));
     crs_->setStyleSheet(QString("color: %1").arg(theme::textMuted().name()));
@@ -310,7 +326,7 @@ IfcExportRequest IfcExportDialog::request() const
     }
     out.arguments.spacing = core::parseFiniteDouble(spacing_->text().trimmed().toStdString());
     out.entities = entities_->isChecked();
-    out.selectedOnly = out.entities && selectedOnly_->isEnabled() && selectedOnly_->isChecked();
+    out.selectedOnly = out.entities && selectedOnly_->isChecked();
     out.alignments = alignments_->isChecked();
     out.surfaces = surfaces_->isChecked();
     out.arguments.drawing = out.entities || out.alignments || out.surfaces;
@@ -326,6 +342,11 @@ QString IfcExportDialog::check() const
     if (!isIfcName(file)) {
         return QStringLiteral("The file must end in .ifc.");
     }
+    return checkWithoutFile();
+}
+
+QString IfcExportDialog::checkWithoutFile() const
+{
     if (!pathOf(schema_).isEmpty() && pathOf(schedule_).isEmpty()) {
         return QStringLiteral(
             "A delivery schema describes a schedule: choose the schedule it describes too.");
@@ -335,6 +356,10 @@ QString IfcExportDialog::check() const
         return QStringLiteral("The detected spacing must be a positive number of metres.");
     }
     const IfcExportRequest asked = request();
+    if (asked.selectedOnly && state_.selected == 0) {
+        return QStringLiteral("Selected entities only is ticked, and nothing is selected: select "
+                              "what to export, or untick it.");
+    }
     const bool drawing =
         (asked.entities && (asked.selectedOnly ? state_.selected : state_.entities) > 0) ||
         (asked.alignments && state_.alignments > 0) || (asked.surfaces && state_.surfaces > 0);
@@ -347,19 +372,20 @@ QString IfcExportDialog::check() const
 
 void IfcExportDialog::recheck()
 {
-    selectedOnly_->setEnabled(state_.selected > 0 && entities_->isChecked());
+    selectedOnly_->setEnabled(entities_->isChecked());
     schema_->setEnabled(!pathOf(schedule_).isEmpty() || !pathOf(schema_).isEmpty());
     const QString problem = check();
     export_->setEnabled(problem.isEmpty());
     // A preview needs everything but the file.
-    const bool onlyTheFile = problem == QStringLiteral("Name the .ifc file to write.") ||
-                             problem == QStringLiteral("The file must end in .ifc.");
-    preview_->setEnabled(problem.isEmpty() || onlyTheFile);
-    if (showingResult_) {
+    preview_->setEnabled(checkWithoutFile().isEmpty());
+    if (!problem.isEmpty()) {
+        // What stops the export is said, even over the last result: a
+        // disabled button with a stale "Wrote ..." beside it says nothing.
+        showingResult_ = false;
+        say(problem, true);
         return;
     }
-    if (!problem.isEmpty()) {
-        say(problem, true);
+    if (showingResult_) {
         return;
     }
     const IfcExportRequest asked = request();
@@ -441,6 +467,11 @@ void IfcExportDialog::preview()
     if (!context_.preview) {
         return;
     }
+    refresh(); // the drawing, and its selection, as they are now
+    if (const QString problem = checkWithoutFile(); !problem.isEmpty()) {
+        say(problem, true);
+        return;
+    }
     IfcExportRequest asked = request();
     if (asked.arguments.path.empty() || !isIfcName(pathOf(file_))) {
         asked.arguments.path = "preview.ifc";
@@ -467,6 +498,7 @@ void IfcExportDialog::preview()
 
 void IfcExportDialog::exportFile()
 {
+    refresh(); // the drawing, and its selection, as they are now
     const QString problem = check();
     if (!problem.isEmpty()) {
         say(problem, true);
@@ -689,13 +721,17 @@ void IfcImportDialog::recheck()
 {
     const QString problem = check();
     import_->setEnabled(problem.isEmpty());
+    if (!problem.isEmpty()) {
+        showingResult_ = false;
+        say(problem, true);
+        return;
+    }
     if (showingResult_) {
         return;
     }
-    say(problem.isEmpty() ? QStringLiteral("Ready to import, as one step Undo takes back "
-                                           "(surfaces are session data and stay).")
-                          : problem,
-        !problem.isEmpty());
+    say(QStringLiteral("Ready to import, as one step Undo takes back (surfaces are session data "
+                       "and stay)."),
+        false);
 }
 
 void IfcImportDialog::setFile(const QString& path)
@@ -722,7 +758,15 @@ void IfcImportDialog::describe()
         say(QString::fromStdString(described.error().describe()), true);
         return;
     }
-    summary_->setPlainText(*described);
+    setSummary(*described);
+}
+
+void IfcImportDialog::setSummary(const QString& text)
+{
+    summary_->setPlainText(text);
+    // Read, the file's earlier failure no longer stands.
+    showingResult_ = false;
+    recheck();
 }
 
 void IfcImportDialog::importFile()
@@ -735,12 +779,21 @@ void IfcImportDialog::importFile()
     if (!context_.run) {
         return;
     }
-    const bool imported = context_.run(request());
+    const IfcImportOutcome outcome = context_.run(request());
     showingResult_ = true;
-    say(imported ? QStringLiteral("Imported ") + pathOf(file_) +
-                       QStringLiteral(": the log says what came in.")
-                 : QStringLiteral("The import failed: the log says why."),
-        !imported);
+    switch (outcome) {
+    case IfcImportOutcome::Imported:
+        say(QStringLiteral("Imported ") + pathOf(file_) +
+                QStringLiteral(": the log says what came in."),
+            false);
+        break;
+    case IfcImportOutcome::Cancelled:
+        say(QStringLiteral("Import cancelled."), false);
+        break;
+    case IfcImportOutcome::Failed:
+        say(QStringLiteral("The import failed: the log says why."), true);
+        break;
+    }
 }
 
 } // namespace katana::qt

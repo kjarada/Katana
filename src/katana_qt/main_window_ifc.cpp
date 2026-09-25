@@ -53,7 +53,7 @@ QString classesLine(const std::map<std::string, std::size_t>& classes)
 
 // ---- import -------------------------------------------------------------------------
 
-bool MainWindow::importIfcFile(const IfcImportRequest& request)
+IfcImportOutcome MainWindow::importIfcFile(const IfcImportRequest& request)
 {
     const std::filesystem::path path = katana::ifc::pathFromUtf8(request.arguments.path);
     katana::ifc::ImportOptions options;
@@ -67,7 +67,7 @@ bool MainWindow::importIfcFile(const IfcImportRequest& request)
     if (!imported.ok()) {
         logMessage(qs(imported.error().describe()), true);
         warnUser("Import failed", qs(imported.error().describe()));
-        return false;
+        return IfcImportOutcome::Failed;
     }
 
     // LOCAL, as katana_cli has it: read again shifted by the extent's corner,
@@ -81,8 +81,21 @@ bool MainWindow::importIfcFile(const IfcImportRequest& request)
         options.originShift = imported->bounds.min;
         shifted = true;
     } else if (!request.arguments.local) {
-        const auto advice =
-            interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
+        // Weighed against everything the drawing has too - its alignments
+        // and the session's surfaces are not entities, and a drawing of an
+        // alignment alone is as far from a file as one of lines.
+        katana::geometry::Box2 existing = document_.model().entities.bounds();
+        document_.model().alignments.forEach([&](const katana::entity::Alignment& alignment) {
+            for (const auto& pi : alignment.horizontal.pis) {
+                existing.expand(pi.point);
+            }
+        });
+        for (const cad::SceneSurface& item : sceneSurfaces_) {
+            if (item.surface != nullptr && item.surface->vertexCount() > 0) {
+                existing.expand(item.surface->bounds());
+            }
+        }
+        const auto advice = interop::advisePlacement(existing, imported->bounds);
         if (advice.farApart && headless_) {
             logMessage(qs(advice.message) + " (kept: no one to ask).", true);
         } else if (advice.farApart) {
@@ -100,7 +113,7 @@ bool MainWindow::importIfcFile(const IfcImportRequest& request)
             box.exec();
             if (box.clickedButton() == cancel) {
                 logMessage("Import cancelled.");
-                return false;
+                return IfcImportOutcome::Cancelled;
             }
             if (box.clickedButton() == shift) {
                 options.originShift = advice.suggestedShift;
@@ -116,7 +129,7 @@ bool MainWindow::importIfcFile(const IfcImportRequest& request)
         QApplication::restoreOverrideCursor();
         if (!moved.ok()) {
             logMessage(qs(moved.error().describe()), true);
-            return false;
+            return IfcImportOutcome::Failed;
         }
         imported = std::move(moved);
         logMessage(QString("Shifted the imported data by %1,%2 %3.")
@@ -136,7 +149,7 @@ bool MainWindow::importIfcFile(const IfcImportRequest& request)
         if (const auto status = document_.execute(std::move(command)); !status) {
             logMessage(qs(status.error().describe()), true);
             warnUser("Import failed", qs(status.error().describe()));
-            return false;
+            return IfcImportOutcome::Failed;
         }
     }
     logMessage("Imported " + grouped(entities) + " entities, " + grouped(alignments) +
@@ -207,7 +220,7 @@ bool MainWindow::importIfcFile(const IfcImportRequest& request)
     }
     views_->refreshAll();
     views_->zoomExtentsAll();
-    return true;
+    return IfcImportOutcome::Imported;
 }
 
 katana::core::Result<QString> MainWindow::describeIfcFile(const std::filesystem::path& path)
@@ -304,6 +317,19 @@ MainWindow::exportIfcFile(const IfcExportRequest& request, bool write)
     options.exportAlignments = drawing && request.alignments;
     if (options.exportEntities && request.selectedOnly) {
         options.entities = document_.selection().ids();
+        // An empty list is every entity (ExportOptions::entities): a
+        // selection cleared since it was asked for must not become the
+        // whole drawing.
+        if (options.entities.empty()) {
+            const auto refused = katana::core::makeError(
+                katana::core::ErrorCode::InvalidState,
+                "nothing is selected: select the entities to export, or export them all");
+            if (write) {
+                logMessage(qs(refused.describe()), true);
+                warnUser("Export failed", qs(refused.describe()));
+            }
+            return refused;
+        }
     }
 
     QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -366,6 +392,10 @@ bool MainWindow::runIfcLine(const QString& verb, const QString& rest)
         }
         IfcImportRequest request;
         request.arguments = **parsed;
+        // A typed line is answered in the log, as katana_cli answers it:
+        // the file's coordinate system is named with how to set it, and
+        // no box interrupts a script typed or pasted in.
+        request.takeCoordinateSystem = false;
         (void)importIfcFile(request);
         return true;
     }
@@ -386,7 +416,9 @@ IfcExportContext MainWindow::ifcExportContext()
         if (code.empty()) {
             state.coordinateSystem.clear();
         }
-        state.georeferenced = code.starts_with("EPSG:");
+        // The writer's own test, so the dialog cannot promise what the file
+        // will not do (a compound EPSG:7856+5711 is not georeferenced).
+        state.georeferenced = katana::ifc::isEpsgCode(code);
         return state;
     };
     context.preview = [this](const IfcExportRequest& request) {
@@ -429,6 +461,8 @@ void MainWindow::showIfcExport(const QString& file)
         ifcExport_->setFile(file);
     }
     ifcExport_->show();
+    // Already open, show() delivers no showEvent: the counts are read here.
+    ifcExport_->refresh();
     ifcExport_->raise();
     ifcExport_->activateWindow();
 }

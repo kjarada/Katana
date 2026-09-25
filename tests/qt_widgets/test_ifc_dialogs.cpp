@@ -81,9 +81,14 @@ TEST(IfcExportDialog, ItShowsTheWindowsCountsSelectionAndCoordinateSystem)
     auto* crs = child<QLabel>(dialog, "ifcExportCrs");
     ASSERT_TRUE(entities && selected && crs);
     EXPECT_EQ(entities->text(), "Drawing entities (5)");
-    // Nothing selected: the choice is off, and says why.
-    EXPECT_FALSE(selected->isEnabled());
+    // Nothing selected: the choice says so, and ticked, refuses the export
+    // rather than widening it to every entity.
     EXPECT_TRUE(selected->text().contains("nothing is selected"));
+    selected->setChecked(true);
+    EXPECT_TRUE(dialog.checkWithoutFile().startsWith("Selected entities only is ticked, and "
+                                                     "nothing is selected"))
+        << dialog.checkWithoutFile().toStdString();
+    selected->setChecked(false);
     EXPECT_TRUE(crs->text().startsWith("Georeferenced in EPSG:7856")) << crs->text().toStdString();
 
     IfcExportState local = drawing(5, 2);
@@ -326,9 +331,10 @@ TEST(IfcImportDialog, DescribeShowsWhatTheFileHoldsAndImportHandsTheRequestOver)
         return QString("site.ifc: IFC4X3_ADD2, EPSG:7856");
     };
     std::optional<IfcImportRequest> ran;
+    katana::qt::IfcImportOutcome outcome = katana::qt::IfcImportOutcome::Imported;
     context.run = [&](const IfcImportRequest& request) {
         ran = request;
-        return true;
+        return outcome;
     };
     IfcImportDialog dialog(context);
     dialog.setFile("site.ifc");
@@ -340,8 +346,89 @@ TEST(IfcImportDialog, DescribeShowsWhatTheFileHoldsAndImportHandsTheRequestOver)
     EXPECT_EQ(ran->arguments.path, "site.ifc");
     EXPECT_TRUE(child<QLabel>(dialog, "ifcImportCheck")->text().startsWith("Imported site.ifc"));
 
+    // A person who cancels the far-apart question has not had a failure.
+    outcome = katana::qt::IfcImportOutcome::Cancelled;
+    child<QPushButton>(dialog, "ifcImportImport")->click();
+    EXPECT_EQ(child<QLabel>(dialog, "ifcImportCheck")->text(), "Import cancelled.");
+
     dialog.setFile("missing.ifc");
     child<QPushButton>(dialog, "ifcImportDescribe")->click();
     EXPECT_TRUE(child<QPlainTextEdit>(dialog, "ifcImportSummary")->toPlainText().isEmpty());
     EXPECT_EQ(child<QLabel>(dialog, "ifcImportCheck")->text(), "NotFound: the file cannot be read");
+    // Read at last, the file's earlier failure no longer stands.
+    dialog.setFile("site.ifc");
+    child<QPushButton>(dialog, "ifcImportDescribe")->click();
+    EXPECT_TRUE(child<QLabel>(dialog, "ifcImportCheck")->text().startsWith("Ready to import"));
+}
+
+// ---- what the review found ----------------------------------------------------------
+
+// The selection is the drawing's, and changes while the dialog stays open:
+// read again before each export, a cleared one refuses "Selected entities
+// only" instead of writing every entity.
+TEST(IfcExportDialog, ASelectionClearedWhileItIsOpenRefusesSelectedOnly)
+{
+    IfcExportState now = drawing(5, 2);
+    IfcExportContext context = exportContext(now);
+    context.state = [&now] { return now; };
+    bool ran = false;
+    context.run = [&](const IfcExportRequest&) -> katana::core::Result<katana::ifc::IfcExport> {
+        ran = true;
+        return katana::ifc::IfcExport{};
+    };
+    IfcExportDialog dialog(context);
+    child<QLineEdit>(dialog, "ifcExportFile")->setText("out.ifc");
+    child<QCheckBox>(dialog, "ifcExportSelectedOnly")->setChecked(true);
+    EXPECT_TRUE(child<QPushButton>(dialog, "ifcExportExport")->isEnabled());
+    now.selected = 0; // SELECT NONE, in the drawing beside it
+    child<QPushButton>(dialog, "ifcExportExport")->click();
+    EXPECT_FALSE(ran);
+    EXPECT_TRUE(child<QLabel>(dialog, "ifcExportCheck")
+                    ->text()
+                    .startsWith("Selected entities only is ticked, and nothing is selected"));
+    EXPECT_TRUE(child<QCheckBox>(dialog, "ifcExportSelectedOnly")->isChecked()); // as chosen
+}
+
+// A table beside "Ready" is what will be written: a changed choice clears
+// it, and a problem replaces the last result instead of standing behind it.
+TEST(IfcExportDialog, AChangedChoiceClearsThePreviewAndAProblemReplacesTheLastResult)
+{
+    katana::entity::Model model;
+    katana::entity::Entity kerb;
+    kerb.geometry = katana::geometry::Polyline2{{{0.0, 0.0}, {10.0, 0.0}}, false};
+    kerb.layer = "Kerb";
+    ASSERT_TRUE(model.entities.add(kerb).ok());
+    IfcExportContext context = exportContext(drawing(1));
+    context.preview = [&](const IfcExportRequest&) {
+        return katana::ifc::writeIfc({&model, {}, {}});
+    };
+    context.run = [&](const IfcExportRequest&) { return katana::ifc::writeIfc({&model, {}, {}}); };
+    IfcExportDialog dialog(context);
+    auto* table = child<QTableWidget>(dialog, "ifcExportClasses");
+    auto* check = child<QLabel>(dialog, "ifcExportCheck");
+    auto* spacing = child<QLineEdit>(dialog, "ifcExportSpacing");
+    child<QPushButton>(dialog, "ifcExportPreview")->click();
+    ASSERT_EQ(table->rowCount(), 1);
+    spacing->setText("12"); // grades differently: the account is no longer this one
+    EXPECT_EQ(table->rowCount(), 0);
+
+    child<QLineEdit>(dialog, "ifcExportFile")->setText("out.ifc");
+    child<QPushButton>(dialog, "ifcExportExport")->click();
+    ASSERT_TRUE(check->text().startsWith("Wrote out.ifc")) << check->text().toStdString();
+    spacing->setText("0");
+    EXPECT_EQ(check->text(), "The detected spacing must be a positive number of metres.");
+}
+
+// Preview needs everything but the file - not merely a missing file.
+TEST(IfcExportDialog, PreviewWaitsForEverythingButTheFile)
+{
+    IfcExportDialog dialog(exportContext(drawing(5)));
+    auto* preview = child<QPushButton>(dialog, "ifcExportPreview");
+    EXPECT_TRUE(preview->isEnabled()); // no file yet
+    child<QLineEdit>(dialog, "ifcExportSpacing")->setText("-5");
+    EXPECT_FALSE(preview->isEnabled());
+    EXPECT_EQ(dialog.checkWithoutFile(),
+              "The detected spacing must be a positive number of metres.");
+    child<QLineEdit>(dialog, "ifcExportSpacing")->setText("5");
+    EXPECT_TRUE(preview->isEnabled());
 }

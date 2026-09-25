@@ -56,8 +56,9 @@ struct ImportArguments {
 // a word, so that an unquoted path with blanks still reads - and the caller's
 // other exporters and importers take the line. Otherwise the arguments, or
 // InvalidArgument saying what is wrong: an unclosed quote, an unknown word,
-// SCHEMA without UTILITIES, a SPACING that is not a positive number. Words
-// are matched in any letter case; a value may be double-quoted.
+// SCHEMA without UTILITIES, a SPACING that is not a positive number, a quote
+// opened before a .ifc and never closed. Words are matched in any letter
+// case; a value may be double-quoted.
 [[nodiscard]] std::optional<core::Result<ExportArguments>>
 parseExportArguments(std::string_view argument);
 [[nodiscard]] std::optional<core::Result<ImportArguments>>
