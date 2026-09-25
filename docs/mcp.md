@@ -150,7 +150,10 @@ anything else with the JSON-RPC error the specification names.
 * **No pictures.** A tool that plots the drawing with the window's headless
   `--plot` or `--screenshot` (`docs/headless.md`) and returns the image would
   let Claude check its own work by eye.
-* **Only what the command line has.** Terrain surfaces, corridors, grading,
-  sections and sheets exist in `katana_cad` but have no command-line verbs
-  yet, so no tools either; each verb added to the interpreter or the session
-  reaches Claude with no change here.
+* **Only what the command line has.** Terrain surfaces, corridors, grading
+  and sections exist in `katana_cad` but have no command-line verbs yet, so
+  no tools either; each verb added to the interpreter or the session
+  reaches Claude with no change here. The sheets have their verbs
+  (`docs/plotting.md`, "Sheets on the command line"), so an agent lays out,
+  saves, loads and appends sheet sets through `katana_run_commands` with the
+  lines the Sheets editor's dialogs and Sheet Set menu run.
