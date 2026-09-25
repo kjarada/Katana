@@ -1831,12 +1831,18 @@ is reported as a problem and the viewport is left empty.
   `placeLabels`: in priority order, each takes the first of its candidate
   places that lies inside the plot and clear of every label placed before.
   The labels nearest the middle go first. A label with no free place is
-  dropped, never drawn over another, and counted in
-  `SheetPaintStats::sectionNotesDropped`. The level labels, axis values,
-  band columns and caption are placed the same way inside the viewport.
+  dropped, never drawn over another; the notes dropped (a crossing's, the
+  centreline's levels) are counted in `SheetPaintStats::sectionNotesDropped`.
+  The level labels, axis values, band columns and caption are placed the
+  same way inside the viewport.
 - **Nothing outside the viewport.** Lines, shades and labels are clipped to
   the viewport, and a long section with a chainage range is cut to exactly
   that range.
+- **What cannot be drawn is said.** A section with no room in its viewport,
+  a range that lies off its plot, or a stored scale, chainage, centre or
+  width that is not a finite number is reported in
+  `SheetPaintStats::problems` and outlined empty, as any viewport that
+  cannot be drawn is; it is not counted as drawn.
 
 ### Cut and fill
 
@@ -1892,7 +1898,10 @@ range is the whole alignment, ends labelled the same way.
 ### In the editor
 
 A section's scale box offers Auto, as a plan's does. With Auto the
-exaggeration box is disabled, since it is chosen with the scale. New long
+exaggeration box is disabled, since it is chosen with the scale, and a fixed
+scale chosen from Auto keeps the exaggeration Auto drew. The tooltip is
+worked out through the canvas's own cache (`SheetCanvas::paintCache`), so a
+selection cuts nothing again. New long
 sections and cross sections are added with Auto on. Setting it is the usual
 one-step `editViewport` (`viewport.autoScale = true`).
 
