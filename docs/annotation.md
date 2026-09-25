@@ -110,9 +110,10 @@ one of the same request are the same entity
 offered from the newest text in the drawing, as its height and rotation
 always were, so they carry from one text to the next and through an undo;
 Multiline Text starts in `Standard` - paper-sized, as `MTEXT` is - where the
-newest text would leave it in model units. The plan was a separate
-`annotate_mtext.cpp`; the two tools differ only in how they commit, so they
-are one class with two modes rather than two copies of the option prompts.
+newest text would leave it in model units. A separate `annotate_mtext.cpp`
+was considered and rejected: the two tools differ only in how they commit, so
+they are one class with two modes rather than two copies of the option
+prompts.
 
 **Annotate > Edit Text...** (`annotateEditText`, the dialog `textEditDialog`,
 `src/katana_qt/annotation/text_edit_dialog.hpp`) edits the one text
@@ -348,8 +349,8 @@ write a line the verb would read differently.
   one pair until 2026-09-26, so a dialog's Apply of five fields was five
   undos.
 * `DIMSTYLE NEW name [field value ...]` takes the same pairs, so a copy of a
-  style is one step. The plan had Duplicate run NEW and then SET; that is two
-  undos for one act, and was rejected.
+  style is one step. Duplicate running NEW and then SET was considered and
+  rejected: that is two undos for one act.
 * `DIMSTYLE INFO name` is one record: `name=`, every field in lower case,
   `layers=` (how many layers name the style) and `reads=` (what a dimension
   of ten units reads as). `DIMSTYLE LIST` keeps its short line a style.

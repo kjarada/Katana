@@ -582,7 +582,7 @@ corridor items carry object names (`terrainSectionAlongAlignment`,
 Tested by `tests/cad/test_alignment_report.cpp` (the table worked by hand from
 the circle, `PIS`), `tests/qt_widgets/test_alignment_manager.cpp` (every
 button's line, one undo step each, the grids' buffering) and, through the
-window, `qt_alignment_manager_headless` and
+window, `qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless` and
 `qt_terrain_commands_point_to_the_alignment_manager_headless`.
 
 Not done: picking PIs in the plan view, or a Draw tool that makes an
