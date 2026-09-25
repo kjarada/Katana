@@ -52,6 +52,40 @@ Underneath all three:
 - **Tests and docs cover each surface.** A feature missing a surface is not
   done. At hand-off, say plainly which surface is missing, if any.
 
+### 1.1 Every tool acts on a scope and a filter - MANDATORY
+
+Any tool, verb or dialog that reads or changes drawing data must be able to
+act on the same choices as Global Modify. That includes reports, checks,
+labelling, coding, export, modify, measure, and drawing from data.
+
+- **Scope, where it acts:**
+  - the selection;
+  - what a view shows (its visible area and its own hidden layers);
+  - named layers, with or without their sublayers;
+  - the whole drawing;
+  - headless, an `AREA x0,y0,x1,y1` window.
+- **Filter, "only those that match":** entity types, layer patterns, style,
+  colour, property and value, text, drawn only.
+- **One mechanism.**
+  - `cad::ModifyScope` and `cad::ModifyFilter`, resolved by `cad::matchEntities`
+    (`include/katana/cad/global_modify.hpp`).
+  - The verb grammar
+    `[SELECTION|VIEW|DRAWING|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]] [WHERE k=v ...]`,
+    read by the one shared parser (`include/katana/cad/scope_verbs.hpp`).
+    `VIEW` is the window's active plan view, supplied to the interpreter by the
+    window; headless it is refused in favour of `AREA`.
+  - In the window, the same "Apply to" and "Only those that match" controls
+    as the Global Modify dialog, from one shared widget
+    (`src/katana_qt/customisation/scope_filter_widget.*`).
+  - Never write a second scope or filter implementation. If a tool needs more,
+    extend the shared one.
+- **Files stay an alternative source, not the only one.** A tool that also
+  reads files (a schedule, a CSV) keeps the file as one source beside the
+  drawing.
+- **Say what the scope took** ("12 matched ...") with the result, as Global
+  Modify's preview does. A scope that takes nothing is reported, not
+  treated as an error.
+
 ## 2. The working loop
 
 1. **Read before writing.** Find the existing abstraction. There is one way to
