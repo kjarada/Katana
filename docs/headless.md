@@ -240,6 +240,14 @@ A modal box in a headless run is a hang until the test's timeout. So
   answered: a scripted `QUIT` with unapplied code edits, or `NEW` after an
   edit, fails, and the script can Apply or Revert, `SAVE` or `UNDO` first
   (`desktop.md`, "Failure modes");
+- File > Open, Save As (and Save of a drawing with no project), Import and
+  Export Vector, and Format > Load and Replace Customisation, open no file
+  dialog and name the line that does the same - `OPEN <directory>`,
+  `SAVE <directory>`, `IMPORT <file> [LOCAL]`, `EXPORT <file>`,
+  `CUSTOMISE [REPLACE] <file>...` - since `--trigger` reaches them by their
+  object names (`MainWindow::refuseFileDialog`,
+  `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of
+  an empty drawing says so in the log, not in a box;
 - File > Run Script's Browse opens no file dialog and says to fill
   `scriptPath` instead; a script's run shows no progress dialog, and the
   person's Recent Scripts list is left alone;

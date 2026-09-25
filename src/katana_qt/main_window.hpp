@@ -386,6 +386,10 @@ class MainWindow final : public QMainWindow {
 
     // Returns false when the user cancels (unsaved changes).
     [[nodiscard]] bool confirmDiscard();
+    // In a headless session, logs that no file dialog opens and names `verb`,
+    // the line that does the same without one, and returns true: what File >
+    // Open, Save As, Import, Export Vector and Load Customisation do there.
+    bool refuseFileDialog(const QString& verb);
     void newDocument();
     void openDocument();
     bool saveDocument();

@@ -1482,3 +1482,23 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# The File items that ask for a file, reached by the object names they now
+# carry: in a headless session each opens no file dialog - nobody could close
+# it - and names the line that does the same without one, as GIS > Convert
+# Point Cloud to COPC does. Save of a drawing with no project is Save As. The
+# empty drawing's Export says so in the log, not in a box.
+if(TARGET katana)
+    add_test(NAME qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*fileOpen|*fileSaveAs|*fileImport|*fileExportVector|>RECT 0,0 1,1|*fileExportVector|*loadCustomisation|*replaceCustomisation|*fileSave"
+            "-DEXPECT=type OPEN <directory> instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\.[\r\n]+[^\r\n]*type IMPORT <file> \\[LOCAL\\] instead\\.[\r\n]+! Export: the drawing is empty\\.[\r\n]+rectangle created[\r\n]+[^\r\n]*type EXPORT <file> instead\\.[\r\n]+[^\r\n]*type CUSTOMISE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type CUSTOMISE REPLACE <file> \\[<file>\\.\\.\\.\\] instead\\.[\r\n]+[^\r\n]*type SAVE <directory> instead\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_items_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

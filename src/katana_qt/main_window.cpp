@@ -2047,9 +2047,21 @@ void MainWindow::newDocument()
     }
 }
 
+bool MainWindow::refuseFileDialog(const QString& verb)
+{
+    // A file dialog nobody can close is a hang, and --trigger reaches these
+    // items by their names: pointed at the verb that asks nothing instead,
+    // as the COPC item is.
+    if (!headless_) {
+        return false;
+    }
+    logMessage("A headless session opens no file dialog: type " + verb + " instead.", true);
+    return true;
+}
+
 void MainWindow::openDocument()
 {
-    if (!confirmDiscard()) {
+    if (!confirmDiscard() || refuseFileDialog("OPEN <directory>")) {
         return;
     }
     const QString directory =
@@ -2143,6 +2155,9 @@ bool MainWindow::saveDocument()
 
 bool MainWindow::saveDocumentAs()
 {
+    if (refuseFileDialog("SAVE <directory>")) {
+        return false;
+    }
     QString target = QFileDialog::getSaveFileName(this, "Save Project As", "untitled.katana",
                                                   "Katana project (*.katana)");
     if (target.isEmpty()) {
@@ -3083,6 +3098,10 @@ void MainWindow::loadDefaultCustomisation()
 void MainWindow::loadCustomisation(katana::archive12d::LoadMode mode)
 {
     const bool replace = mode == katana::archive12d::LoadMode::Replace;
+    if (refuseFileDialog(replace ? "CUSTOMISE REPLACE <file> [<file>...]"
+                                 : "CUSTOMISE <file> [<file>...]")) {
+        return;
+    }
     const QStringList chosen = QFileDialog::getOpenFileNames(
         this, replace ? "Replace Loaded Customisation" : "Load Customisation", QString(),
         "Customisation files (*.4d *.mapfile);;Style and symbol libraries (*.4d);;"
@@ -3292,6 +3311,9 @@ void MainWindow::reportCustomisationCoverage()
 
 void MainWindow::importFile()
 {
+    if (refuseFileDialog("IMPORT <file> [LOCAL]")) {
+        return;
+    }
     const QString selected =
         QFileDialog::getOpenFileName(this, "Import", QString(), importFilter());
     if (selected.isEmpty()) {
@@ -3699,7 +3721,14 @@ void MainWindow::exportVectorFile()
 {
     if (document_.model().entities.empty() && document_.model().alignments.empty() &&
         sceneSurfaces_.empty()) {
-        QMessageBox::information(this, "Export", "The drawing is empty.");
+        if (headless_) {
+            logMessage("Export: the drawing is empty.", true);
+        } else {
+            QMessageBox::information(this, "Export", "The drawing is empty.");
+        }
+        return;
+    }
+    if (refuseFileDialog("EXPORT <file>")) {
         return;
     }
 
