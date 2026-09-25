@@ -71,7 +71,7 @@ furniture.
 | `Viewport` | |
 |---|---|
 | `id` | `vp1`, `vp2`...: unique across the set |
-| `kind` | `Plan`, `LongSection`, `CrossSections`, `Model3D` (a snapshot of the 3D view), `Legend`, `Notes`, `Image`, `KeyPlan` |
+| `kind` | `Plan`, `LongSection`, `CrossSections`, `Model3D` (a snapshot of the 3D view), `Legend`, `Notes`, `Image`, `KeyPlan`, `SheetIndex` (the drawing register), `Revisions` (the revision table) |
 | `rect` | the rectangle on the paper, mm; empty until the viewport is placed |
 | `scale`, `autoScale` | 1 : `scale`; with `autoScale` the painter chooses the largest standard scale at which the content fits |
 | `centre`, `autoCentre` | the world point at the rectangle's centre: for a plan (easting, northing); for a long section (chainage, level); for a cross section (offset, level), offset 0 being the centreline. `autoCentre` asks the painter to centre what it draws and keep the scale |
@@ -85,6 +85,7 @@ furniture.
 | `locked` | tiling and snapping leave the viewport alone |
 | `text` | a Notes panel's text; an Image panel's asset file name |
 | `marks` | world lines drawn over the view: match lines and a key plan's sheet outlines (`WorldMark`) |
+| `revisionLimit` | a Revisions table's newest so many revisions; 0 for every one |
 
 Everything is a plain value with `operator==`, so a test, an undo step and
 the JSON round trip can each compare whole sets.
@@ -297,10 +298,10 @@ exactly 3 mm after the first ends at 215.
 **Every kind has a rank**, and the lowest rank takes the first (largest)
 cell:
 
-| Kind | Plan | LongSection | CrossSections | Model3D | KeyPlan | Image | Legend | Notes |
-|---|---|---|---|---|---|---|---|---|
-| Rank | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-| Minimum (mm) | 35 x 30 | 70 x 45 | 70 x 45 | 30 x 24 | 30 x 26 | 8 x 8 | 16 x 8 | 16 x 8 |
+| Kind | Plan | LongSection | CrossSections | Model3D | KeyPlan | Image | Legend | Notes | SheetIndex | Revisions |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Rank | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+| Minimum (mm) | 35 x 30 | 70 x 45 | 70 x 45 | 30 x 24 | 30 x 26 | 8 x 8 | 16 x 8 | 16 x 8 | 70 x 30 | 50 x 20 |
 
 The app sorted its panels by a table with no entry for its map panels. The
 comparator then returned NaN, and a map could land in the big cell. That was
@@ -1295,13 +1296,115 @@ plan at 4 px a millimetre and finds each corner of the strip inked where the
 view's rotation, centre and scale put it, so the rotation means to the
 painter what it means to the model.
 
+## The drawing register and the revision table
+
+A set of drawings is handed over with a cover that lists its sheets and the
+revisions they have been through. Two viewport kinds draw those lists as
+ruled tables:
+
+| Kind (stored as) | Columns | Rows |
+|---|---|---|
+| `SheetIndex` (`sheet_index`), the drawing register | SHEET No. \| TITLE \| SCALE \| PAPER \| REV | a row per sheet, in the set's order; the sheet it is drawn on shaded light grey |
+| `Revisions` (`revisions`), the revision table | REV \| DATE \| DESCRIPTION \| BY | `SheetSet::revisions`, newest at the top - the newest is the last in the list, the order they were issued in, not the latest date or code; with `revisionLimit` N only the newest N (0: every one) |
+
+The heading across the top is the viewport's title, else `DRAWING REGISTER`
+or `REVISIONS` (`automaticTitle`). A table writes no title in the corner as
+the views do. Both kinds tile (rank 8 and 9, after Notes, so the register
+takes the big cell) and need at least 70 x 30 and 50 x 20 mm. Neither is
+drawn to scale, so a sheet of tables is `N.T.S.`.
+
+**The rows are the title blocks'.** `drawingRegister(set)` reads each sheet's
+fields through `resolveFields`, so the register cannot disagree with the
+sheets:
+- the number is the one the numbering pattern gives the sheet where it is
+  now (`formatSheetNumber`), or the one typed on it. Move a sheet and its row
+  moves and is renumbered with it;
+- the title is the sheet's name, or its typed `sheet_name`;
+- the scale is what its title block reports (`sheetScaleText`). An automatic
+  plan scale is decided first, as the painter decides it for the title block
+  (`resolvedSheetSet` in `src/katana_qt/plotting/sheet_tables.hpp`), so a
+  plan drawn at 1:2000 is not listed at the 1:500 it was stored with;
+- the revision is the one typed on the sheet (its `revision` field), else
+  the set's latest - the last in `SheetSet::revisions`.
+
+**The layout is headless.** `include/katana/cad/plotting/tables.hpp` lays a
+table out: every rule, every text and its anchor in paper millimetres, the
+text size, the rows shown and the rows left out. The painter only draws what
+it is given, shading first, then rules, then text. The tests check the
+layout without pixels. Text is measured by a function the caller passes: the
+painter passes its own font's, so what was measured is what is drawn. Without
+one, `estimateTextWidth` uses Arial's published advance widths, the same on
+every machine.
+
+| Rule | Value |
+|---|---|
+| Text | 2.5 mm caps, stepping down by 0.1 mm to no less than 1.8 mm, condensed to 0.9 |
+| Heading, header | the heading bold at 1.25 times the text; the column headers bold |
+| Row | 2 cap heights; each further line of a wrapped description 1.5 more |
+| Padding | half a cap height each side of a cell's text |
+| Rules | 0.25 mm round the box, under the heading and the header, and between blocks; 0.13 mm between rows and columns, down to the foot of the box, so a short list is a ruled form with room below |
+| Columns | each as wide as its widest text; TITLE and DESCRIPTION take what is left, and the description wraps at spaces and starts a new line at each line break |
+
+**Fitting.** The layout takes the first of these that holds every row:
+1. the largest text at which the rows fit one block of columns;
+2. the register only: the largest at which they fit two blocks side by side,
+   each with its own header. A revision table stays one block, so an older
+   revision is never level with a newer one;
+3. otherwise the smallest text in as many blocks as are wide enough, with as
+   many rows as fit and a last line counting the rest, grey and right-aligned
+   (`+57 more`, or `+12 earlier` for revisions). The painter reports the
+   viewport (`vp3: 57 of 100 rows do not fit; make the view larger`), and the
+   editor shows that under its properties.
+
+A size that fits but presses any line below 0.8 of its width is tried only
+after every size that does not, so a long title is set a size smaller rather
+than squeezed to half its width. A line still too wide is squeezed to its
+cell, as the frame's fields are. Example: 100 rows in 200 x 89.2 mm need the
+1.8 mm text in two blocks of 22 rows. The last line of the second block is
+the count, so 43 rows are shown and `+57 more`.
+
+**The cover sheet.** `registerSheet(set, paper)` makes a sheet named
+`DRAWING REGISTER` with the register in the big cell of "Main and panel
+right" and the revision table in the panel beside it. It has no utility
+legend, which explains symbols a cover does not draw. A set that already
+has a register anywhere is refused (`AlreadyExists`, naming the sheet): two
+registers would be two lists to keep in step. `addRegisterSheet(document,
+paper)` puts it FIRST in the set with new ids (`prepareForAppend`), as ONE
+undoable step, and returns its id. The other sheets are numbered one on, and
+their marks follow them by id.
+
+**In the editor.**
+- Generate Sheets has the layout "Drawing register (cover sheet)"; scale and
+  "Replace" do not apply to it.
+- Add View has "Drawing register" and "Revision table". Every Add View action
+  is named `sheetAddView_` and the kind's stored name, such as
+  `sheetAddView_revisions`.
+- A revision table's properties have "Newest revisions" (`sheetRevisionLimit`,
+  All for 0), one step per value.
+- An empty revision table says in the editor, never on paper, that revisions
+  are added under Title Block.
+
+**The revision in the title block.** A frame text showing the `revision`
+field prints the current revision: typed on the sheet, else the set's
+latest. The built-in frame has no such text, and it is left as it was
+measured; its sheets show their revisions in a revision table. A frame
+written for Katana names the field directly, `REV {revision}`, and
+`parseFrame` reads that as a field text.
+
+**Storage.** The kinds are stored by their names above. `revision_limit` is
+written only when it is not 0, and a value that is not a whole number of at
+least 0 is refused rather than read as some other count.
+
+The tests are `tests/cad/plotting/test_tables.cpp`,
+`tests/qt_widgets/plotting/test_sheet_tables_painter.cpp` and
+`tests/qt_widgets/plotting/test_sheet_register_editor.cpp`.
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners
   like any model change, so it still rebuilds the 3D view's scene.
 - **Frames and furniture.** More frames, such as a plan-sheet frame with a
-  north-arrow zone, and a reader for title-block files. The revision table
-  is stored and edited but not yet drawn by any frame.
+  north-arrow zone, and a reader for title-block files.
 - **Background plotting.** A large set is plotted on the GUI thread with a
   wait cursor; the painter is reentrant, so moving it to a job is the next
   step.
