@@ -900,7 +900,7 @@ ReadjustSurveyJobCommand::State::build(const CommandContext& context) const
             katana::entity::setHeights(updated.properties, {now->elevation});
             if (now->coordinateSource != survey::CoordinateSource::Unknown) {
                 updated.properties.insert_or_assign(
-                    kCoordinateSourceProperty,
+                    std::string(kCoordinateSourceProperty),
                     katana::entity::PropertyValue(std::string(toString(now->coordinateSource))));
             }
             change.modify.push_back(std::move(updated));
