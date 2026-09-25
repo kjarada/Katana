@@ -210,6 +210,15 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
 
     VectorImportResult result;
     result.projectionWkt = (*layers)[static_cast<std::size_t>(firstLayer)].projectionWkt;
+    if (!options.targetCrs.empty()) {
+        // Every coordinate below is in the target, so that is what the
+        // result declares.
+        auto target = katana::gis::crsToWkt(options.targetCrs);
+        if (!target) {
+            return target.error();
+        }
+        result.projectionWkt = std::move(*target);
+    }
 
     const std::string sourceName = path.filename().string();
     std::uint64_t remaining = options.maxFeatures;
@@ -253,8 +262,8 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
             options.targetLayer.empty()
                 ? sanitizeLayerName(info.name.empty() ? path.stem().string() : info.name)
                 : options.targetLayer;
-        if (!info.projectionWkt.empty() && !result.projectionWkt.empty() &&
-            info.projectionWkt != result.projectionWkt) {
+        if (options.targetCrs.empty() && !info.projectionWkt.empty() &&
+            !result.projectionWkt.empty() && info.projectionWkt != result.projectionWkt) {
             result.warnings.push_back("layer '" + info.name +
                                       "' declares a different coordinate reference system from "
                                       "the first layer; coordinates are imported unchanged");
@@ -263,6 +272,41 @@ Result<VectorImportResult> importVector(const std::filesystem::path& path,
         auto features = (*dataset)->readFeatures(index, remaining);
         if (!features.ok()) {
             return features.error();
+        }
+        if (options.sourceFilter) {
+            const katana::gis::CrsBox& area = *options.sourceFilter;
+            std::erase_if(*features, [&](const katana::gis::VectorFeature& feature) {
+                katana::gis::CrsBox box{std::numeric_limits<double>::infinity(),
+                                        std::numeric_limits<double>::infinity(),
+                                        -std::numeric_limits<double>::infinity(),
+                                        -std::numeric_limits<double>::infinity()};
+                for (const auto& part : feature.geometry.parts) {
+                    for (const katana::gis::GeoPoint& point : part) {
+                        box.minX = std::min(box.minX, point.x);
+                        box.minY = std::min(box.minY, point.y);
+                        box.maxX = std::max(box.maxX, point.x);
+                        box.maxY = std::max(box.maxY, point.y);
+                    }
+                }
+                return box.maxX < area.minX || box.minX > area.maxX || box.maxY < area.minY ||
+                       box.minY > area.maxY;
+            });
+        }
+        if (!options.targetCrs.empty() && !features->empty()) {
+            const std::string& source =
+                info.projectionWkt.empty() ? options.assumedSourceCrs : info.projectionWkt;
+            if (source.empty()) {
+                return makeError(ErrorCode::InvalidCRS,
+                                 "the layer declares no coordinate system, so it cannot be moved "
+                                 "into the project's",
+                                 info.name);
+            }
+            auto moved = katana::gis::reprojectFeatures(std::move(*features), source,
+                                                        options.targetCrs);
+            if (!moved) {
+                return moved.error();
+            }
+            *features = std::move(*moved);
         }
 
         for (const katana::gis::VectorFeature& feature : *features) {

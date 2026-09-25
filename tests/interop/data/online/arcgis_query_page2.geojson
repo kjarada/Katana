@@ -1,0 +1,156 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": 4,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.20680000000002,
+       -33.87
+      ],
+      [
+       151.2073,
+       -33.87
+      ],
+      [
+       151.2073,
+       -33.869499999999995
+      ],
+      [
+       151.20680000000002,
+       -33.869499999999995
+      ],
+      [
+       151.20680000000002,
+       -33.87
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "objectid": 4,
+    "cadid": 100004,
+    "lotnumber": "4",
+    "planlabel": "DP1003"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 5,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.2074,
+       -33.87
+      ],
+      [
+       151.2079,
+       -33.87
+      ],
+      [
+       151.2079,
+       -33.869499999999995
+      ],
+      [
+       151.2074,
+       -33.869499999999995
+      ],
+      [
+       151.2074,
+       -33.87
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "objectid": 5,
+    "cadid": 100005,
+    "lotnumber": "5",
+    "planlabel": "DP1004"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 6,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.205,
+       -33.8694
+      ],
+      [
+       151.2055,
+       -33.8694
+      ],
+      [
+       151.2055,
+       -33.8689
+      ],
+      [
+       151.205,
+       -33.8689
+      ],
+      [
+       151.205,
+       -33.8694
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "objectid": 6,
+    "cadid": 100006,
+    "lotnumber": "6",
+    "planlabel": "DP1005"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 7,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.2056,
+       -33.8694
+      ],
+      [
+       151.2061,
+       -33.8694
+      ],
+      [
+       151.2061,
+       -33.8689
+      ],
+      [
+       151.2056,
+       -33.8689
+      ],
+      [
+       151.2056,
+       -33.8694
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "objectid": 7,
+    "cadid": 100007,
+    "lotnumber": "7",
+    "planlabel": "DP1006"
+   }
+  }
+ ],
+ "properties": {
+  "exceededTransferLimit": true
+ }
+}

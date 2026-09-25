@@ -31,6 +31,7 @@
 #include <ogr_spatialref.h>
 #include <ogrsf_frmts.h>
 
+#include "gdal_registry.hpp"
 #include "katana/core/text.hpp"
 
 namespace katana::gis {
@@ -476,6 +477,15 @@ class ScopedThreadConfig {
 };
 
 } // namespace
+
+namespace detail {
+
+void ensureGdalRegistered()
+{
+    ensureRegistered();
+}
+
+} // namespace detail
 
 // ---- lifetime -------------------------------------------------------------
 

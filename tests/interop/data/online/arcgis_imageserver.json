@@ -1,0 +1,21 @@
+{
+ "currentVersion": 10.91,
+ "serviceDescription": "5 m elevation",
+ "name": "NSW_5M_Elevation",
+ "extent": {
+  "xmin": 140.99,
+  "ymin": -37.51,
+  "xmax": 153.64,
+  "ymax": -28.15,
+  "spatialReference": {
+   "wkid": 4283
+  }
+ },
+ "pixelSizeX": 4.5e-05,
+ "pixelSizeY": 4.5e-05,
+ "bandCount": 1,
+ "pixelType": "F32",
+ "maxImageWidth": 4100,
+ "maxImageHeight": 4100,
+ "copyrightText": "Spatial Services"
+}

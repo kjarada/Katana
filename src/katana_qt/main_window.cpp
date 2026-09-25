@@ -824,6 +824,25 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     gisMenu.addActions({importCloud, exportCloud, copc});
     gisMenu.addSeparator();
     gisMenu.addAction(info);
+    // Online - Web Services: its own section, filled by the workbench.
+    OnlineServices online;
+    online.document = &document_;
+    online.views = views_;
+    online.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                               const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    online.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    online.headless = [this] { return headless_; };
+    online.addRaster = [this](interop::RasterOverlay raster) {
+        const interop::ReferenceId id = reference_.add(std::move(raster));
+        views_->invalidateReferenceCache();
+        refreshReferences();
+        views_->refreshAll();
+        return id;
+    };
+    online.version = KATANA_VERSION;
+    online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -1798,7 +1817,14 @@ void MainWindow::runCommandLine()
         views_->pressEnter();
         return;
     }
-    commandLog_->appendPlainText("> " + line);
+    // What is typed is echoed - but an ONLINE KEY's value never is.
+    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
+    // workbench's, as the interoperability verbs below are the window's - and
+    // before a running tool, which would take the line for an answer.
+    if (online_ != nullptr && online_->runLine(line)) {
+        return;
+    }
     // While a tool runs, what is typed is its answer - a point, a distance,
     // an option - before it is anything else: Polyline's C closes it, where
     // on its own C would start a Circle.

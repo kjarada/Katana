@@ -1,0 +1,381 @@
+{
+ "_about": "Katana's catalogue of public web services for GIS > Online Data and the ONLINE verbs (docs/gis_online.md). Providers hold services, services hold layers; a service's licence, attribution, crs, coverage and limits are inherited by its layers unless a layer sets its own, and a provider's licence and attribution by its services. coverage is a WGS 84 longitude/latitude box [west, south, east, north]. verified is the date the endpoint was seen to answer from Katana's own code, and empty when it has only been checked against the publisher's documentation (evidence says where). A user catalogue beside the settings (online_sources.json in the application's configuration folder) adds providers or replaces one with the same id. Services whose terms forbid use by a third-party application are not listed: Vicmap Basemaps (licensed, fee), Landgate SLIP cadastre (personal-use licence), the SA government imagery mosaic (stakeholders only), TASMAP rasters (CC BY-NC-ND) and the NT services found (licence version not stated).",
+ "version": 1,
+ "providers": [
+  {
+   "id": "nsw-spatial",
+   "title": "NSW Spatial Services",
+   "group": "Australia/NSW",
+   "homepage": "https://www.spatial.nsw.gov.au/",
+   "licence": "CC BY 4.0",
+   "attribution": "© State of New South Wales (Spatial Services, a business unit of the Department of Customer Service NSW)",
+   "coverage": [140.99, -37.51, 153.64, -28.15],
+   "services": [
+    {
+     "id": "imagery", "title": "NSW Imagery", "type": "xyz",
+     "endpoint": "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}",
+     "crs": "EPSG:3857", "maxZoom": 20, "maxTiles": 400,
+     "evidence": "ArcGIS REST directory public/NSW_Imagery (MapServer), cached, wkid 102100",
+     "layers": [ { "id": "imagery", "title": "NSW Imagery (aerial photography)", "kind": "imagery" } ]
+    },
+    {
+     "id": "basemap", "title": "NSW Base Map", "type": "xyz",
+     "endpoint": "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Base_Map/MapServer/tile/{z}/{y}/{x}",
+     "crs": "EPSG:3857", "maxZoom": 19, "maxTiles": 400,
+     "evidence": "ArcGIS REST directory public/NSW_Base_Map (MapServer), cached",
+     "layers": [ { "id": "basemap", "title": "NSW Base Map", "kind": "imagery" } ]
+    },
+    {
+     "id": "topo", "title": "NSW Topographic Map", "type": "xyz",
+     "endpoint": "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+     "crs": "EPSG:3857", "maxZoom": 17, "maxTiles": 400,
+     "evidence": "ArcGIS REST directory public/NSW_Topo_Map (MapServer) with WMTS",
+     "layers": [ { "id": "topo", "title": "NSW Topographic Map", "kind": "imagery" } ]
+    },
+    {
+     "id": "cadastre", "title": "NSW Cadastre", "type": "arcgis-query",
+     "endpoint": "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Cadastre/MapServer",
+     "crs": "EPSG:3857", "pageSize": 1000,
+     "evidence": "ArcGIS REST directory: Layer: Lot (ID: 9), polygon, supports geoJSON",
+     "layers": [ { "id": "lots", "title": "Cadastre - Lots", "kind": "vector", "layer": "9", "idField": "cadid" } ]
+    },
+    {
+     "id": "boundaries", "title": "NSW Administrative Boundaries", "type": "arcgis-query",
+     "endpoint": "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Administrative_Boundaries/MapServer",
+     "crs": "EPSG:3857", "pageSize": 1000,
+     "evidence": "ArcGIS REST directory: Layer: Suburb (ID: 0), LocalGovernmentArea (ID: 1)",
+     "layers": [
+      { "id": "suburbs", "title": "Suburbs and localities", "kind": "vector", "layer": "0" },
+      { "id": "lga", "title": "Local government areas", "kind": "vector", "layer": "1" }
+     ]
+    },
+    {
+     "id": "places", "title": "NSW Features of Interest", "type": "arcgis-query",
+     "endpoint": "https://portal.spatial.nsw.gov.au/server/rest/services/NSW_Features_of_Interest_Category_multiCRS/FeatureServer",
+     "pageSize": 1000,
+     "evidence": "ArcGIS REST directory: Layer: PlacePoint (ID: 1), display field generalname",
+     "layers": [ { "id": "places", "title": "Place names (points of interest)", "kind": "vector", "layer": "1" } ]
+    },
+    {
+     "id": "roads", "title": "NSW Roads", "type": "arcgis-query",
+     "endpoint": "https://portal.spatial.nsw.gov.au/server/rest/services/NSW_Transport_Theme/MapServer",
+     "pageSize": 2000,
+     "evidence": "ArcGIS REST directory: Name: RoadSegment (layer 5), polyline, maxRecordCount 2000",
+     "layers": [ { "id": "roads", "title": "Roads", "kind": "vector", "layer": "5" } ]
+    },
+    {
+     "id": "elevation", "title": "NSW 5 m Elevation", "type": "arcgis-exportimage",
+     "endpoint": "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_5M_Elevation/ImageServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 4000, "resolution": 5,
+     "evidence": "ArcGIS REST directory public/NSW_5M_Elevation (ImageServer), statewide 5 m DEM",
+     "layers": [ { "id": "dem5m", "title": "Elevation 5 m DEM", "kind": "elevation" } ]
+    }
+   ]
+  },
+  {
+   "id": "qld-spatial",
+   "title": "Queensland Spatial",
+   "group": "Australia/QLD",
+   "homepage": "https://www.qld.gov.au/environment/land/title/maps/qldglobe",
+   "licence": "CC BY 4.0",
+   "attribution": "© State of Queensland",
+   "coverage": [137.99, -29.18, 153.55, -9.14],
+   "services": [
+    {
+     "id": "imagery", "title": "Queensland Latest State Imagery", "type": "xyz",
+     "endpoint": "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Basemaps/LatestStateProgram_AllUsers/ImageServer/tile/{z}/{y}/{x}",
+     "crs": "EPSG:3857", "maxZoom": 20, "maxTiles": 400,
+     "evidence": "ArcGIS REST directory Basemaps/LatestStateProgram_AllUsers (ImageServer), cached to level 20",
+     "layers": [ { "id": "imagery", "title": "Latest state imagery", "kind": "imagery" } ]
+    },
+    {
+     "id": "cadastre", "title": "Land Parcel Property Framework", "type": "arcgis-query",
+     "endpoint": "https://spatial-gis.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer",
+     "pageSize": 1000,
+     "evidence": "ArcGIS REST directory: Layer: Cadastral parcels (ID: 4)",
+     "layers": [ { "id": "parcels", "title": "Cadastral parcels", "kind": "vector", "layer": "4" } ]
+    }
+   ]
+  },
+  {
+   "id": "vic-vicmap",
+   "title": "Vicmap open data (Victoria)",
+   "group": "Australia/VIC",
+   "homepage": "https://www.land.vic.gov.au/maps-and-spatial",
+   "licence": "CC BY 4.0",
+   "attribution": "© State of Victoria (Department of Transport and Planning)",
+   "coverage": [140.96, -39.2, 150.0, -33.98],
+   "services": [
+    {
+     "id": "wfs", "title": "Vicmap open data WFS", "type": "wfs",
+     "endpoint": "https://opendata.maps.vic.gov.au/geoserver/ows", "version": "2.0.0",
+     "crs": "EPSG:4326", "pageSize": 1000,
+     "evidence": "Victorian GeoServer migration FAQ: opendata.maps.vic.gov.au/geoserver/ows replaces the legacy dv_geoserver; the parcel type name follows the Vicmap Property product name",
+     "layers": [ { "id": "parcels", "title": "Vicmap Property - parcels", "kind": "vector", "layer": "open-data-platform:vmprop_parcel_mp" } ]
+    }
+   ]
+  },
+  {
+   "id": "sa-location",
+   "title": "Location SA",
+   "group": "Australia/SA",
+   "homepage": "https://location.sa.gov.au/",
+   "licence": "CC BY 4.0",
+   "attribution": "© Government of South Australia (Location SA)",
+   "coverage": [128.99, -38.07, 141.01, -25.99],
+   "services": [
+    {
+     "id": "topo", "title": "SA Topographic base map", "type": "arcgis-export",
+     "endpoint": "https://location.sa.gov.au/arcgis/rest/services/BaseMaps/Topographic_wmas/MapServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "evidence": "ArcGIS REST directory BaseMaps/Topographic_wmas (MapServer)",
+     "layers": [ { "id": "topo", "title": "Topographic base map", "kind": "imagery" } ]
+    },
+    {
+     "id": "streets", "title": "SA Street map", "type": "arcgis-export",
+     "endpoint": "https://location.sa.gov.au/arcgis/rest/services/BaseMaps/StreetMap_wmas/MapServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "evidence": "ArcGIS REST directory BaseMaps/StreetMap_wmas (MapServer)",
+     "layers": [ { "id": "streets", "title": "Street map", "kind": "imagery" } ]
+    }
+   ]
+  },
+  {
+   "id": "tas-thelist",
+   "title": "Land Tasmania (theLIST)",
+   "group": "Australia/TAS",
+   "homepage": "https://www.thelist.tas.gov.au/",
+   "licence": "CC BY 3.0 AU",
+   "attribution": "© State of Tasmania (Land Tasmania, theLIST)",
+   "coverage": [143.5, -43.9, 148.7, -39.2],
+   "services": [
+    {
+     "id": "cadastre", "title": "Cadastral Parcels", "type": "arcgis-query",
+     "endpoint": "https://services.thelist.tas.gov.au/arcgis/rest/services/Public/CadastreParcels/MapServer",
+     "pageSize": 1000,
+     "evidence": "ArcGIS REST directory: Public/CadastreParcels Layer 0 Cadastral Parcels",
+     "layers": [ { "id": "parcels", "title": "Cadastral parcels", "kind": "vector", "layer": "0" } ]
+    },
+    {
+     "id": "orthophoto", "title": "Orthophoto", "type": "arcgis-export",
+     "endpoint": "https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps/Orthophoto/MapServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "evidence": "ArcGIS REST directory Basemaps/Orthophoto (MapServer)",
+     "layers": [ { "id": "orthophoto", "title": "Orthophoto", "kind": "imagery" } ]
+    },
+    {
+     "id": "topographic", "title": "Topographic base map", "type": "arcgis-export",
+     "endpoint": "https://services.thelist.tas.gov.au/arcgis/rest/services/Basemaps/Topographic/MapServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "evidence": "ArcGIS REST directory Basemaps/Topographic (MapServer), CC BY 3.0 AU",
+     "layers": [ { "id": "topographic", "title": "Topographic base map", "kind": "imagery" } ]
+    }
+   ]
+  },
+  {
+   "id": "act-actmapi",
+   "title": "ACTmapi",
+   "group": "Australia/ACT",
+   "homepage": "https://www.actmapi.act.gov.au/",
+   "licence": "CC BY 4.0",
+   "attribution": "© Australian Capital Territory (ACTmapi)",
+   "coverage": [148.76, -35.93, 149.4, -35.12],
+   "services": [
+    {
+     "id": "imagery", "title": "ACT imagery (GDA2020 MGA 55)", "type": "arcgis-export",
+     "endpoint": "https://data4.actmapi.act.gov.au/arcgis/rest/services/ACT_IMAGERY/imagery2016mga2020/MapServer",
+     "crs": "EPSG:7855", "maxRequestPixels": 2048,
+     "evidence": "ArcGIS REST directory ACT_IMAGERY/imagery2016mga2020 (MapServer), wkid 7855",
+     "layers": [ { "id": "imagery2016", "title": "Imagery 2016", "kind": "imagery" } ]
+    }
+   ]
+  },
+  {
+   "id": "ga",
+   "title": "Geoscience Australia",
+   "group": "Australia/National",
+   "homepage": "https://www.ga.gov.au/",
+   "licence": "CC BY 4.0",
+   "attribution": "© Commonwealth of Australia (Geoscience Australia)",
+   "coverage": [112.0, -44.5, 154.5, -9.0],
+   "services": [
+    {
+     "id": "dem", "title": "1 second SRTM DEM-H (hydrologically enforced)", "type": "wcs",
+     "endpoint": "https://services.ga.gov.au/gis/services/DEM_SRTM_1Second_Hydro_Enforced_2024/MapServer/WCSServer",
+     "version": "1.0.0", "crs": "EPSG:4326", "maxRequestPixels": 4000, "resolution": 30,
+     "evidence": "GA eCat record: WCS for DEM_SRTM_1Second_Hydro_Enforced_2024 (the name without _2024 was decommissioned 2025-03-03); ArcGIS WCS coverages are numbered from 1",
+     "layers": [ { "id": "dem-h", "title": "Elevation 1 second DEM-H (about 30 m)", "kind": "elevation", "layer": "1" } ]
+    },
+    {
+     "id": "topo", "title": "Topographic base map", "type": "arcgis-export",
+     "endpoint": "https://services.ga.gov.au/gis/rest/services/Topographic_Base_Map/MapServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "evidence": "ArcGIS REST directory Topographic_Base_Map (MapServer)",
+     "layers": [ { "id": "topo", "title": "Topographic base map", "kind": "imagery" } ]
+    },
+    {
+     "id": "national", "title": "National base map", "type": "arcgis-export",
+     "endpoint": "https://services.ga.gov.au/gis/rest/services/NationalBaseMap/MapServer",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "attribution": "© Commonwealth of Australia (Geoscience Australia); © OpenStreetMap contributors",
+     "evidence": "ArcGIS REST directory NationalBaseMap (MapServer); includes OpenStreetMap data",
+     "layers": [ { "id": "national", "title": "National base map", "kind": "imagery" } ]
+    }
+   ]
+  },
+  {
+   "id": "dea",
+   "title": "Digital Earth Australia",
+   "group": "Australia/National",
+   "homepage": "https://www.dea.ga.gov.au/",
+   "licence": "CC BY 4.0",
+   "attribution": "© Commonwealth of Australia (Geoscience Australia), Digital Earth Australia",
+   "coverage": [112.0, -44.5, 154.5, -9.0],
+   "services": [
+    {
+     "id": "ows", "title": "DEA OWS (WMS)", "type": "wms",
+     "endpoint": "https://ows.dea.ga.gov.au/", "version": "1.3.0",
+     "crs": "EPSG:3857", "maxRequestPixels": 2048,
+     "evidence": "ows.dea.ga.gov.au WMS/WMTS/WCS; layer names from the DEA product pages",
+     "layers": [
+      { "id": "geomad", "title": "Landsat 8/9 annual geomedian (true colour)", "kind": "imagery", "layer": "ga_ls8cls9c_gm_cyear_3" },
+      { "id": "fractional-cover", "title": "Fractional cover (Landsat)", "kind": "imagery", "layer": "ga_ls_fc_3" },
+      { "id": "intertidal", "title": "Intertidal elevation (annual)", "kind": "imagery", "layer": "ga_s2ls_intertidal_cyear_3" }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "data-gov-au",
+   "title": "data.gov.au catalogue",
+   "group": "Australia/National",
+   "homepage": "https://data.gov.au/",
+   "licence": "CC BY 4.0 (catalogue records; each dataset carries its own licence)",
+   "attribution": "data.gov.au",
+   "coverage": [112.0, -44.5, 154.5, -9.0],
+   "services": [
+    {
+     "id": "ckan", "title": "Search for WMS, WFS and ArcGIS services", "type": "ckan",
+     "endpoint": "https://data.gov.au/data/api/3/action/package_search",
+     "evidence": "CKAN action API package_search with fq=res_format:WMS; no key",
+     "layers": [ { "id": "search", "title": "Search data.gov.au for web services (ONLINE LAYERS data-gov-au <words>)", "kind": "catalogue" } ]
+    }
+   ]
+  },
+  {
+   "id": "osm",
+   "title": "OpenStreetMap",
+   "group": "Global",
+   "homepage": "https://www.openstreetmap.org/copyright",
+   "licence": "ODbL 1.0",
+   "attribution": "© OpenStreetMap contributors",
+   "coverage": [-180.0, -85.05, 180.0, 85.05],
+   "services": [
+    {
+     "id": "overpass", "title": "Overpass API (features by tag)", "type": "overpass",
+     "endpoint": "https://overpass-api.de/api/interpreter",
+     "timeout": 90, "maxArea": 25.0,
+     "evidence": "Overpass API commons policy: under about 10 000 requests and 1 GB a day, an identifying User-Agent, 429 when limited",
+     "layers": [
+      { "id": "buildings", "title": "Buildings", "kind": "vector", "layer": "building" },
+      { "id": "roads", "title": "Roads and paths", "kind": "vector", "layer": "highway" },
+      { "id": "water", "title": "Waterways", "kind": "vector", "layer": "waterway" },
+      { "id": "landuse", "title": "Land use", "kind": "vector", "layer": "landuse" },
+      { "id": "features", "title": "Features by tag (tag=key or key=value)", "kind": "vector", "layer": "" }
+     ]
+    },
+    {
+     "id": "tiles", "title": "OpenStreetMap standard tiles", "type": "xyz",
+     "endpoint": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+     "crs": "EPSG:3857", "maxZoom": 19, "maxTiles": 64, "cacheDays": 7,
+     "evidence": "OSMF tile usage policy: identifying User-Agent, cache at least 7 days, no bulk or offline download, visible attribution",
+     "layers": [ { "id": "standard", "title": "Standard map (small areas only)", "kind": "imagery" } ]
+    }
+   ]
+  },
+  {
+   "id": "copernicus",
+   "title": "Copernicus DEM (AWS open data)",
+   "group": "Global",
+   "homepage": "https://registry.opendata.aws/copernicus-dem/",
+   "licence": "Copernicus DEM licence (free, worldwide)",
+   "attribution": "Produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+   "coverage": [-180.0, -90.0, 180.0, 90.0],
+   "services": [
+    {
+     "id": "glo30", "title": "Copernicus DEM GLO-30", "type": "cog",
+     "endpoint": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_{lat}_00_{lon}_00_DEM/Copernicus_DSM_COG_10_{lat}_00_{lon}_00_DEM.tif",
+     "crs": "EPSG:4326", "resolution": 30, "tiling": "degree",
+     "verified": "2026-09-25",
+     "layers": [ { "id": "dem", "title": "Elevation GLO-30 (30 m)", "kind": "elevation" } ]
+    }
+   ]
+  },
+  {
+   "id": "sentinel2",
+   "title": "Sentinel-2 L2A (Earth Search STAC)",
+   "group": "Global",
+   "homepage": "https://element84.com/earth-search/",
+   "licence": "Copernicus Sentinel data terms (free, full and open)",
+   "attribution": "Contains modified Copernicus Sentinel data",
+   "coverage": [-180.0, -90.0, 180.0, 90.0],
+   "services": [
+    {
+     "id": "l2a", "title": "Sentinel-2 L2A cloud-optimised GeoTIFFs", "type": "stac",
+     "endpoint": "https://earth-search.aws.element84.com/v1/search",
+     "resolution": 10, "maxCloud": 20, "days": 90,
+     "evidence": "Earth Search v1: collection sentinel-2-l2a, assets visual, red, green, blue; COGs in us-west-2",
+     "layers": [
+      { "id": "truecolour", "title": "True colour (the TCI 'visual' asset)", "kind": "imagery", "layer": "sentinel-2-l2a", "asset": "visual" },
+      { "id": "composite", "title": "True colour composed from red, green and blue reflectance", "kind": "imagery", "layer": "sentinel-2-l2a", "asset": "red,green,blue" }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "nasa-gibs",
+   "title": "NASA GIBS",
+   "group": "Global",
+   "homepage": "https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api",
+   "licence": "NASA open data (no restrictions; acknowledgement requested)",
+   "attribution": "Imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS)",
+   "coverage": [-180.0, -85.05, 180.0, 85.05],
+   "services": [
+    {
+     "id": "wmts", "title": "GIBS WMTS (Web Mercator)", "type": "wmts",
+     "endpoint": "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{layer}/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg",
+     "crs": "EPSG:3857", "maxZoom": 9, "maxTiles": 256, "time": "default",
+     "evidence": "GIBS access basics: epsg3857 REST template, GoogleMapsCompatible_Level9",
+     "layers": [
+      { "id": "modis-terra", "title": "MODIS Terra corrected reflectance (true colour)", "kind": "imagery", "layer": "MODIS_Terra_CorrectedReflectance_TrueColor" },
+      { "id": "viirs-snpp", "title": "VIIRS SNPP corrected reflectance (true colour)", "kind": "imagery", "layer": "VIIRS_SNPP_CorrectedReflectance_TrueColor" }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "natural-earth",
+   "title": "Natural Earth",
+   "group": "Global",
+   "homepage": "https://www.naturalearthdata.com/",
+   "licence": "Public domain",
+   "attribution": "Made with Natural Earth",
+   "coverage": [-180.0, -90.0, 180.0, 90.0],
+   "services": [
+    {
+     "id": "vectors", "title": "Natural Earth 1:10m vectors", "type": "file",
+     "endpoint": "https://naturalearth.s3.amazonaws.com/10m_{layer}.zip",
+     "crs": "EPSG:4326", "verified": "2026-09-25",
+     "evidence": "naturalearth.s3.amazonaws.com mirror of naciscdn.org/naturalearth",
+     "layers": [
+      { "id": "countries", "title": "Countries", "kind": "vector", "layer": "cultural/ne_10m_admin_0_countries" },
+      { "id": "states", "title": "States and provinces", "kind": "vector", "layer": "cultural/ne_10m_admin_1_states_provinces" },
+      { "id": "places", "title": "Populated places", "kind": "vector", "layer": "cultural/ne_10m_populated_places" },
+      { "id": "coastline", "title": "Coastline", "kind": "vector", "layer": "physical/ne_10m_coastline" },
+      { "id": "rivers", "title": "Rivers and lake centrelines", "kind": "vector", "layer": "physical/ne_10m_rivers_lake_centerlines" }
+     ]
+    }
+   ]
+  }
+ ]
+}
