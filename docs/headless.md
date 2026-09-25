@@ -17,6 +17,7 @@ someone - or a model - who cannot watch a screen. The window itself is
 ```
 katana_cli                                interactive
 katana_cli script.kcs                     run a script, '#' comments
+katana --script script.kcs                the same script in the window, headless
 katana_cli -c "RECT 0,0 30,20" -c LIST
 katana_cli --help                         every verb it knows
 ```
@@ -143,6 +144,7 @@ imported (anything else), in order, before any step runs.
 | `--attributes [ID]` | open the attribute manager (Edit > Attributes, still modal in a person's session) on entity ID and grab it |
 | `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it |
 | `--check-shortcuts` | fail the run when a key reaches more than one thing (`desktop.md`, "Every key reaches one thing") |
+| `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
 | the steps | below |
 
 ## The steps: driving dialogs, docks and the command line
@@ -193,6 +195,7 @@ Its variables:
 | `-DTOGGLE_LAYER`, `-DSTYLE_MANAGER=ON`, `-DLAYER_MANAGER=ON`, `-DATTRIBUTES=<id>`, `-DDATASET_INFO`, `-DIMPORT_OPTIONS`, `-DSELECT_ALL=ON`, `-DCHECK_SHORTCUTS=ON` | the switches of the same names |
 | `-DACTIONS=a,b` | `--action` for each, commas because a CMake list does not survive `cmake -D` |
 | `-DDIALOG=NAME` (or `-DSURVEY_DIALOG`) with `-DFILL=f=t\|f=t` and `-DPRESS=a,b` | one dialog, filled and pressed |
+| `-DSCRIPT=<file.kcs>` | `--script`, before the `-DDRIVE` steps, so they can list what it made |
 | `-DDRIVE=<step>\|<step>...` | the steps, by sigil, `\|` between them |
 | `-DEXPECT=<regex>` | what the run printed must match |
 | `-DFORBID=<regex>` | what the run printed must match NOTHING, after the run's own paths are replaced by `<path>` |
@@ -234,6 +237,9 @@ A modal box in a headless run is a hang until the test's timeout. So
   answered: a scripted `QUIT` with unapplied code edits, or `NEW` after an
   edit, fails, and the script can Apply or Revert, `SAVE` or `UNDO` first
   (`desktop.md`, "Failure modes");
+- File > Run Script's Browse opens no file dialog and says to fill
+  `scriptPath` instead; a script's run shows no progress dialog, and the
+  person's Recent Scripts list is left alone;
 - GIS > Convert Point Cloud to COPC opens no file dialog and names the verb
   that asks nothing, `COPC <source> <destination.copc.laz>`
   (`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`);
