@@ -448,4 +448,14 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
     set_tests_properties(cli.import_local_of_a_quoted_path_moves_the_data_to_the_origin PROPERTIES
         PASS_REGULAR_EXPRESSION "imported [0-9]+ entities from parcels\\.geojson.*extent 0,0 to 185,165"
         FAIL_REGULAR_EXPRESSION "error")
+    # ALONGSIDE puts the parcels' corner (180, 0) on the rectangle's
+    # (1000, 2000); OFFSET moves it by exactly 10,-20.5. Each says its move.
+    add_test(NAME cli.import_alongside_and_offset_place_the_data_and_say_the_move
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "RECT 1000,2000 1010,2005"
+                -c "IMPORT \"${_gis}/parcels.geojson\" ALONGSIDE" -c UNDO
+                -c "IMPORT ${_gis}/parcels.geojson OFFSET=10,-20.5")
+    set_tests_properties(cli.import_alongside_and_offset_place_the_data_and_say_the_move PROPERTIES
+        PASS_REGULAR_EXPRESSION "ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*extent 1000,2000 to 1185,2165.*OFFSET: moved as one piece by 10\\.000,-20\\.500.*extent 190,-20\\.5 to 375,144\\.5"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()

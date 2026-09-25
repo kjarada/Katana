@@ -296,6 +296,26 @@ TEST_F(McpServer, TheImportToolSaysWhatLocalDoes)
         (*tool)["inputSchema"]["properties"]["local"]["description"].get<std::string>();
     EXPECT_NE(local.find("lower-left corner sits at 0,0"), std::string::npos) << local;
     EXPECT_EQ((*tool)["description"].get<std::string>().find("reprojecting"), std::string::npos);
+    const Json placement = (*tool)["inputSchema"]["properties"]["placement"];
+    EXPECT_EQ(placement["enum"], (Json{"keep", "local", "alongside", "offset"}));
+}
+
+TEST_F(McpServer, TheImportToolRefusesAPlacementItCannotSay)
+{
+    initialize();
+    const auto refused = [&](const Json& arguments) {
+        const Json result = call("katana_import", arguments);
+        EXPECT_TRUE(result["isError"].get<bool>()) << arguments.dump();
+        return textOf(result);
+    };
+    EXPECT_NE(refused(Json{{"path", "a.dxf"}, {"placement", "beside"}}).find("keep, local"),
+              std::string::npos);
+    EXPECT_NE(refused(Json{{"path", "a.dxf"}, {"placement", "offset"}, {"offset_east", 1}})
+                  .find("offset_north"),
+              std::string::npos);
+    EXPECT_NE(refused(Json{{"path", "a.dxf"}, {"placement", "alongside"}, {"local", true}})
+                  .find("say different things"),
+              std::string::npos);
 }
 
 #if defined(KATANA_TEST_WITH_INTEROP)
@@ -325,6 +345,16 @@ TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
     const Json kept = call("katana_import", Json{{"path", copy}});
     EXPECT_FALSE(kept["isError"].get<bool>()) << textOf(kept);
     EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.x, 180.0);
+
+    // placement offset: moved by exactly what is given, (180, 0) to (190, -20.5).
+    (void)call("katana_new_project", Json{{"discard_unsaved_changes", true}});
+    const Json moved = call("katana_import", Json{{"path", copy},
+                                                  {"placement", "offset"},
+                                                  {"offset_east", 10},
+                                                  {"offset_north", -20.5}});
+    EXPECT_FALSE(moved["isError"].get<bool>()) << textOf(moved);
+    EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.x, 190.0);
+    EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.y, -20.5);
 }
 #endif
 

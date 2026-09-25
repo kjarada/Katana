@@ -59,6 +59,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     project_crs_dialog.hpp
     gis_dialogs.cpp
     gis_dialogs.hpp
+    import_placement.cpp
+    import_placement.hpp
     gis_online.cpp
     gis_online.hpp
     gis_online_dialog.cpp

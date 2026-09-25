@@ -27,6 +27,7 @@
 
 #include "katana/cad/code_table.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/import_placement.hpp"
 #include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/core/error.hpp"
 
@@ -73,16 +74,19 @@ class CommandInterpreter {
 
     // The rest of a front end's IMPORT line, after the verb: the path, one
     // layer of surrounding quotes removed so that a path may hold blanks, and
-    // whether the line ended in the word LOCAL - a word of its own, in any
-    // case, never inside the quotes, so a quoted "site LOCAL" is a file. The
-    // window and the session both read the line with it: the session once
-    // took LOCAL off and left the quotes on, so every quoted IMPORT ... LOCAL
-    // - what katana_import sends - looked for a file named with its quotes.
+    // where the data is to land (import_placement.hpp), from the line's last
+    // word when that is LOCAL, ALONGSIDE or OFFSET=dE,dN - a word of its own,
+    // in any case, never inside the quotes, so a quoted "site LOCAL" is a
+    // file, and never the only word, so a file called LOCAL can be imported.
+    // The window and the session both read the line with it: the session
+    // once took LOCAL off and left the quotes on, so every quoted IMPORT ...
+    // LOCAL - what katana_import sends - looked for a file named with its
+    // quotes. InvalidArgument for an OFFSET= that is not two numbers.
     struct ImportArgument {
         std::string path{};
-        bool local = false;
+        ImportPlacement placement{};
     };
-    [[nodiscard]] static ImportArgument importArgument(std::string_view rest);
+    [[nodiscard]] static katana::core::Result<ImportArgument> importArgument(std::string_view rest);
 
     // Whether `word` names an entity as INFO takes one: a positive whole
     // number, or one written #n as an anchored point names its entity. For a

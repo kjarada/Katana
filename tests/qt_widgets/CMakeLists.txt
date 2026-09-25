@@ -83,6 +83,11 @@ add_executable(katana_qt_widget_tests
     # File > Project Coordinate System (test_project_crs_dialog).
     ${_qt_src}/project_crs_dialog.cpp
     test_project_crs_dialog.cpp
+    # Where an import lands: the Placement group, File > Import's step and
+    # GIS > Import Vector Data's dialog (test_import_placement).
+    ${_qt_src}/import_placement.cpp
+    ${_qt_src}/gis_dialogs.cpp
+    test_import_placement.cpp
     # The plan view's shortcut menu and Edit > Select by ID
     # (test_plan_context_menu).
     ${_qt_src}/plan_context_menu.cpp

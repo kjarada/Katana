@@ -840,7 +840,9 @@ Each now reaches the same code on every front end
   so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
   cloud refuses it by name. The path and the `LOCAL` are read by
   `CommandInterpreter::importArgument`, as the session reads them; `LOCAL` was
-  once taken for part of the path. The import dialogs do not offer it yet.
+  once taken for part of the path. `ALONGSIDE` and `OFFSET=dE,dN` work the
+  same way, and the import dialogs offer all of them (`docs/interop.md`,
+  "Placing an import").
 
 ## GIS > Online Data: a workbench of its own
 

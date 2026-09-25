@@ -2213,17 +2213,22 @@ void MainWindow::dispatchLine(const QString& line)
         runInterpreterLine(line, verb);
         return;
     }
-    // IMPORT <file> [LOCAL], the path and the LOCAL read as the session reads
-    // them (CommandInterpreter::importArgument): LOCAL was once taken for part
-    // of the path, and "site.dxf LOCAL" had no importer.
+    // IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN], the path and the
+    // placement read as the session reads them
+    // (CommandInterpreter::importArgument): LOCAL was once taken for part of
+    // the path, and "site.dxf LOCAL" had no importer.
     if (verb == "IMPORT") {
         const auto typed =
             cad::CommandInterpreter::importArgument(line.mid(words.front().size()).toStdString());
-        if (typed.path.empty()) {
-            logMessage("usage: IMPORT <file> [LOCAL]", true);
+        if (!typed) {
+            logMessage(QString::fromStdString(typed.error().describe()), true);
             return;
         }
-        importPath(QString::fromStdString(typed.path), typed.local);
+        if (typed->path.empty()) {
+            logMessage("usage: IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]", true);
+            return;
+        }
+        importPath(QString::fromStdString(typed->path), typed->placement);
         return;
     }
     // The interoperability verbs, as katana_cli has them. They live in the
@@ -2589,25 +2594,30 @@ QString importFilter()
 
 } // namespace
 
-void MainWindow::importPath(const QString& path, bool local)
+void MainWindow::importPath(const QString& path, const cad::ImportPlacement& placement)
 {
     const std::filesystem::path file = toPath(path);
     if (katana::dxf::isDxfPath(file)) {
-        importDxfFile(file, local);
+        importDxfFile(file, placement);
         return;
     }
     const interop::SourceKind kind = interop::kindForPath(file);
     // Refused by name, in katana_cli's words, rather than dropped: a raster
     // or a cloud has no shift to take.
-    if (local && (kind == interop::SourceKind::Raster || kind == interop::SourceKind::PointCloud)) {
-        logMessage("InvalidArgument: LOCAL is not supported for rasters and point clouds, which "
-                   "are reference data drawn at their own coordinates",
+    if (placement.mode != cad::ImportPlacementMode::Keep &&
+        (kind == interop::SourceKind::Raster || kind == interop::SourceKind::PointCloud)) {
+        const std::string word = placement.mode == cad::ImportPlacementMode::Offset
+                                     ? std::string("OFFSET")
+                                     : cad::placementWord(placement);
+        logMessage("InvalidArgument: " + QString::fromStdString(word) +
+                       " is not supported for rasters and point clouds, which are reference "
+                       "data drawn at their own coordinates",
                    true);
         return;
     }
     switch (kind) {
     case interop::SourceKind::Vector:
-        importVectorFile(file, {}, local);
+        importVectorFile(file, {}, placement);
         return;
     case interop::SourceKind::Raster:
         importRasterFile(file);
@@ -2616,12 +2626,32 @@ void MainWindow::importPath(const QString& path, bool local)
         importPointCloudFile(file);
         return;
     case interop::SourceKind::Archive12d:
-        importArchive12dFile(file, local);
+        importArchive12dFile(file, placement);
         return;
     case interop::SourceKind::Unknown:
         break;
     }
     logMessage("No importer for " + path, true);
+}
+
+PlacementDecision MainWindow::placeImport(const cad::ImportPlacement& placement,
+                                          const katana::geometry::Box2& incoming)
+{
+    return decideImportPlacement(this, headless_, placement, document_.model().entities.bounds(),
+                                 incoming,
+                                 [this](const QString& text, bool isError) {
+                                     logMessage(text, isError);
+                                 });
+}
+
+void MainWindow::importWithPlacement(const QString& path)
+{
+    ImportPlacementDialog dialog(path, document_.model().entities.bounds(), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        logMessage("Import cancelled.");
+        return;
+    }
+    (void)runVerbLine(dialog.line()); // echoed, logged and undone as if typed
 }
 
 namespace {
@@ -2910,31 +2940,32 @@ void MainWindow::reportCustomisationCoverage()
 
 void MainWindow::importFile()
 {
+    // A file dialog nobody could close: a headless session is pointed at the
+    // verb that asks nothing instead.
+    if (headless_) {
+        logMessage("A headless session opens no file dialog: type IMPORT <file> [LOCAL | "
+                   "ALONGSIDE | OFFSET=dE,dN] instead.",
+                   true);
+        return;
+    }
     const QString selected =
         QFileDialog::getOpenFileName(this, "Import", QString(), importFilter());
     if (selected.isEmpty()) {
         return;
     }
+    // The IMPORT line a person would type, run through the one executor. A
+    // DXF or a .12da has one choice, where it lands, asked first; everything
+    // else keeps the quick path, the GIS menu's imports being the considered
+    // one (docs/interop.md, "Placing an import").
     const std::filesystem::path path = toPath(selected);
-    if (katana::dxf::isDxfPath(path)) {
-        importDxfFile(path);
+    const interop::SourceKind kind = interop::kindForPath(path);
+    if (katana::dxf::isDxfPath(path) || kind == interop::SourceKind::Archive12d) {
+        importWithPlacement(selected);
         return;
     }
-    switch (interop::kindForPath(path)) {
-    case interop::SourceKind::Vector:
-        importVectorFile(path);
+    if (kind != interop::SourceKind::Unknown) {
+        (void)runVerbLine(importLine(selected, {}));
         return;
-    case interop::SourceKind::Raster:
-        importRasterFile(path);
-        return;
-    case interop::SourceKind::PointCloud:
-        importPointCloudFile(path);
-        return;
-    case interop::SourceKind::Archive12d:
-        importArchive12dFile(path);
-        return;
-    case interop::SourceKind::Unknown:
-        break;
     }
     warnUser( "Import",
                          "Katana does not recognise the extension of\n" + selected +
@@ -2945,80 +2976,37 @@ void MainWindow::importFile()
 }
 
 void MainWindow::importVectorFile(const std::filesystem::path& path,
-                                  interop::VectorImportOptions options, bool local)
+                                  interop::VectorImportOptions options,
+                                  const cad::ImportPlacement& placement)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = interop::importVector(path, options);
-    // LOCAL: read again with the shift rather than moved afterwards, so the
-    // one reader applies the one shift to everything, as katana_cli does.
-    if (imported.ok() && local && !imported->bounds.empty()) {
-        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
-        imported = interop::importVector(path, options);
-    }
     QApplication::restoreOverrideCursor();
-
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
         warnUser( "Import failed",
                              QString::fromStdString(imported.error().describe()));
         return;
     }
-    if (local && options.originShift) {
-        logLocalShift(*options.originShift);
+
+    // Where it lands, chosen or asked BEFORE anything is added. A move is
+    // read again with the shift rather than made afterwards - the same
+    // choices, the layers, the target, the attributes, with the shift added -
+    // so the one reader applies the one shift to everything, as katana_cli
+    // does.
+    const PlacementDecision placed = placeImport(placement, imported->bounds);
+    if (placed.cancelled) {
+        logMessage("Import cancelled.");
+        return;
     }
-
-    // Survey data in a projected CRS carries coordinates like (255440, 7410850)
-    // while a drawing started from scratch sits near the origin. Merging them
-    // succeeds and leaves the existing drawing a dot smaller than a pixel, so
-    // the choice is put to the user BEFORE anything is added rather than left
-    // to be discovered by zooming to extents.
-    // With LOCAL the place is chosen already: nothing to ask.
-    const auto advice =
-        interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    const bool ask = advice.farApart && !local;
-    if (ask && headless_) {
-        logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (ask) {
-        QMessageBox box(this);
-        box.setIcon(QMessageBox::Question);
-        box.setWindowTitle("Far from the current drawing");
-        box.setText(QString::fromStdString(advice.message) + ".");
-        box.setInformativeText(
-            QString("The file covers %1,%2 to %3,%4.\n\n"
-                    "Shifting moves the imported data as one piece so it sits beside the "
-                    "drawing; its shape and internal dimensions are unchanged.")
-                .arg(imported->bounds.min.x, 0, 'f', 2)
-                .arg(imported->bounds.min.y, 0, 'f', 2)
-                .arg(imported->bounds.max.x, 0, 'f', 2)
-                .arg(imported->bounds.max.y, 0, 'f', 2));
-        QPushButton* shift = box.addButton("Shift Alongside", QMessageBox::AcceptRole);
-        QPushButton* keep = box.addButton("Keep Survey Coordinates", QMessageBox::DestructiveRole);
-        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(shift);
-        box.exec();
-
-        if (box.clickedButton() == cancel) {
-            logMessage("Import cancelled.");
+    if (placed.shift) {
+        options.originShift = placed.shift;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        imported = interop::importVector(path, options);
+        QApplication::restoreOverrideCursor();
+        if (!imported.ok()) {
+            logMessage(QString::fromStdString(imported.error().describe()), true);
             return;
-        }
-        if (box.clickedButton() == shift) {
-            // The same choices again - the layers, the target, the
-            // attributes - with the shift added; only where it lands changes.
-            options.originShift = advice.suggestedShift;
-            QApplication::setOverrideCursor(Qt::WaitCursor);
-            auto shifted = interop::importVector(path, options);
-            QApplication::restoreOverrideCursor();
-            if (!shifted.ok()) {
-                logMessage(QString::fromStdString(shifted.error().describe()), true);
-                return;
-            }
-            imported = std::move(shifted);
-            logMessage(QString("Shifted the imported data by %1,%2 to sit beside the drawing.")
-                           .arg(advice.suggestedShift.x, 0, 'f', 3)
-                           .arg(advice.suggestedShift.y, 0, 'f', 3));
-        } else {
-            (void)keep;
-            logMessage(QString::fromStdString(advice.message) + ".", true);
         }
     }
 
@@ -3069,19 +3057,11 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
     views_->zoomExtentsAll();
 }
 
-void MainWindow::importArchive12dFile(const std::filesystem::path& path, bool local)
+void MainWindow::importArchive12dFile(const std::filesystem::path& path,
+                                      const cad::ImportPlacement& placement)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = interop::importArchive12d(path);
-    // LOCAL: read again with the shift, which the importer applies to
-    // everything - entities, surfaces and clouds alike.
-    std::optional<katana::geometry::Vec2> localShift;
-    if (imported.ok() && local && !imported->bounds.empty()) {
-        interop::Archive12dImportOptions options;
-        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
-        localShift = options.originShift;
-        imported = interop::importArchive12d(path, options);
-    }
     QApplication::restoreOverrideCursor();
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
@@ -3089,52 +3069,25 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path, bool lo
                              QString::fromStdString(imported.error().describe()));
         return;
     }
-    if (localShift) {
-        logLocalShift(*localShift);
-    }
 
-    // The same question a vector import asks, for the same reason: a 12da is
-    // survey data at survey coordinates. Surfaces and clouds are shifted with
-    // the entities - the shift is applied inside the importer, to everything.
-    // With LOCAL the place is chosen already.
-    const auto advice =
-        interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    const bool ask = advice.farApart && !local;
-    if (ask && headless_) {
-        logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (ask) {
-        QMessageBox box(this);
-        box.setIcon(QMessageBox::Question);
-        box.setWindowTitle("Far from the current drawing");
-        box.setText(QString::fromStdString(advice.message) + ".");
-        box.setInformativeText(
-            "Shifting moves everything in the file as one piece so it sits beside the drawing; "
-            "its shape and internal dimensions are unchanged.");
-        QPushButton* shift = box.addButton("Shift Alongside", QMessageBox::AcceptRole);
-        box.addButton("Keep Survey Coordinates", QMessageBox::DestructiveRole);
-        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(shift);
-        box.exec();
-        if (box.clickedButton() == cancel) {
-            logMessage("Import cancelled.");
+    // Where it lands, as a vector import decides it and for the same reason:
+    // a 12da is survey data at survey coordinates. A move is read again with
+    // the shift, which the importer applies to everything - entities,
+    // surfaces and clouds alike.
+    const PlacementDecision placed = placeImport(placement, imported->bounds);
+    if (placed.cancelled) {
+        logMessage("Import cancelled.");
+        return;
+    }
+    if (placed.shift) {
+        interop::Archive12dImportOptions options;
+        options.originShift = placed.shift;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        imported = interop::importArchive12d(path, options);
+        QApplication::restoreOverrideCursor();
+        if (!imported.ok()) {
+            logMessage(QString::fromStdString(imported.error().describe()), true);
             return;
-        }
-        if (box.clickedButton() == shift) {
-            interop::Archive12dImportOptions options;
-            options.originShift = advice.suggestedShift;
-            QApplication::setOverrideCursor(Qt::WaitCursor);
-            auto shifted = interop::importArchive12d(path, options);
-            QApplication::restoreOverrideCursor();
-            if (!shifted.ok()) {
-                logMessage(QString::fromStdString(shifted.error().describe()), true);
-                return;
-            }
-            imported = std::move(shifted);
-            logMessage(QString("Shifted the imported data by %1,%2 to sit beside the drawing.")
-                           .arg(advice.suggestedShift.x, 0, 'f', 3)
-                           .arg(advice.suggestedShift.y, 0, 'f', 3));
-        } else {
-            logMessage(QString::fromStdString(advice.message) + ".", true);
         }
     }
 
@@ -3679,6 +3632,13 @@ std::unique_ptr<DatasetInfoDialog> MainWindow::makeDatasetInfo(const QString& pa
 
 std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
 {
+    // A DXF or a .12da has one option, where it lands; GDAL is not asked.
+    const std::filesystem::path file = toPath(path);
+    if (katana::dxf::isDxfPath(file) ||
+        interop::kindForPath(file) == interop::SourceKind::Archive12d) {
+        return std::make_unique<ImportPlacementDialog>(path, document_.model().entities.bounds(),
+                                                       this);
+    }
     auto description = interop::describeSource(toPath(path));
     if (!description) {
         logMessage(QString::fromStdString(description.error().describe()), true);
@@ -3687,7 +3647,8 @@ std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
     }
     switch (description->kind) {
     case interop::SourceKind::Vector:
-        return std::make_unique<VectorImportDialog>(*description, this);
+        return std::make_unique<VectorImportDialog>(*description,
+                                                    document_.model().entities.bounds(), this);
     case interop::SourceKind::Raster:
         return std::make_unique<RasterImportDialog>(*description, this);
     case interop::SourceKind::PointCloud:
@@ -3702,8 +3663,11 @@ std::unique_ptr<QDialog> MainWindow::makeImportOptions(const QString& path)
 
 void MainWindow::importWithOptions(const QString& path)
 {
-    if (katana::dxf::isDxfPath(toPath(path))) {
-        importDxfFile(toPath(path)); // none of GDAL's options apply to it
+    // None of GDAL's options apply to a DXF or a .12da: only where it lands.
+    const std::filesystem::path file = toPath(path);
+    if (katana::dxf::isDxfPath(file) ||
+        interop::kindForPath(file) == interop::SourceKind::Archive12d) {
+        importWithPlacement(path);
         return;
     }
     auto dialog = makeImportOptions(path);
@@ -3716,10 +3680,11 @@ void MainWindow::importWithOptions(const QString& path)
     }
     // Routed by the dialog the file got, which was routed by what the file
     // IS - a .las chosen through Import Vector's "All files" still arrives
-    // as a point cloud.
-    const std::filesystem::path file = toPath(path);
+    // as a point cloud. The vector dialog's layer and attribute choices have
+    // no IMPORT word yet, so it imports itself; the move it makes is logged.
     if (const auto* vector = dynamic_cast<const VectorImportDialog*>(dialog.get())) {
-        importVectorFile(file, vector->options());
+        vector->placementBox().remember();
+        importVectorFile(file, vector->options(), vector->placementBox().placement());
     } else if (const auto* raster = dynamic_cast<const RasterImportDialog*>(dialog.get())) {
         importRasterFile(file, raster->options());
     } else if (const auto* cloud = dynamic_cast<const PointCloudImportDialog*>(dialog.get())) {
@@ -3873,14 +3838,6 @@ void MainWindow::exportSurfaceAsDem()
     // Said, because a DEM with no coordinate system is placed by whatever
     // reads it: a Katana surface does not record the one it was built in.
     logMessage("  the DEM declares no coordinate system; its coordinates are the drawing's");
-}
-
-void MainWindow::logLocalShift(const katana::geometry::Vec2& shift)
-{
-    // 0.0 - rather than a unary minus, which makes a shift of 0 "-0.000".
-    logMessage(QString("LOCAL: moved as one piece by %1,%2, so its lower-left corner sits at 0,0.")
-                   .arg(0.0 - shift.x, 0, 'f', 3)
-                   .arg(0.0 - shift.y, 0, 'f', 3));
 }
 
 void MainWindow::convertPointCloudToCopc()
