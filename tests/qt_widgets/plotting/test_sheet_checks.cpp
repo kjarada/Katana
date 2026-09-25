@@ -455,6 +455,34 @@ TEST(SheetChecks, ABurstOfEditsIsCheckedOnceWhenItStops)
     EXPECT_TRUE(withCode(dock.findings(), "viewport.outside").empty());
 }
 
+TEST(SheetChecks, AClosedEditorChecksAgainOnlyWhenItIsShown)
+{
+    Document document;
+    ASSERT_TRUE(plotting::addSheet(document, sheetOf("s1", "NOTES", {notesAt("vp1", kInside)})).ok());
+    Shown shown(document);
+    SheetChecksDock& dock = shown.checks();
+    dock.setDelay(30);
+    (void)dock.checkNow();
+    const int before = dock.runs();
+
+    // Closed, an edit schedules nothing: the findings are only out of date.
+    shown.editor.hide();
+    ASSERT_TRUE(plotting::editViewport(document, "vp1", [](plotting::Viewport& viewport) {
+                    viewport.rect.min.y = 20.0;
+                    return katana::core::Status{};
+                }).ok());
+    EXPECT_FALSE(dock.pending());
+    katana::qt::test::processEvents();
+    EXPECT_EQ(dock.runs(), before);
+
+    // Shown again, it checks once, and finds what the edit did.
+    shown.editor.show();
+    katana::qt::test::processEvents();
+    waitFor([&dock] { return !dock.pending(); });
+    EXPECT_EQ(dock.runs(), before + 1);
+    EXPECT_EQ(withCode(dock.findings(), "viewport.outside").size(), 1u);
+}
+
 TEST(SheetChecks, APlotWithErrorsWarnsAndStillPlots)
 {
     Document document;
