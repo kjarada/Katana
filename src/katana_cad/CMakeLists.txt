@@ -54,6 +54,10 @@ target_sources(katana_cad PRIVATE ${_cad_survey_job_sources})
 # written at the same time without each editing this list.
 file(GLOB _cad_annotation_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
 target_sources(katana_cad PRIVATE ${_cad_annotation_sources})
+# The AS 5488 subsurface utility verbs and the drawing they make
+# (include/katana/cad/utilities/, docs/subsurface_utilities.md): here, over
+# katana_survey's grading, so the window, katana_cli and katana_mcp share them.
+target_sources(katana_cad PRIVATE utilities/utility_drawing.cpp utilities/utility_verbs.cpp)
 katana_target_defaults(katana_cad)
 # The scene build's kernels (docs/performance.md, "SIMD: kernels chosen at run
 # time"): lighting, colour and edge fades of dense TINs and meshes.
