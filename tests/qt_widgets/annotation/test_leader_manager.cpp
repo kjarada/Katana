@@ -430,6 +430,30 @@ TEST(LeaderManager, AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt)
     EXPECT_EQ(d.leader(leader).tipRef.parameter, 0.75);
     EXPECT_EQ(d.leader(leader).vertices.front(), Point2(30, 0));
     EXPECT_EQ(d.leader(leader).vertices.back(), Point2(20, 10)) << "the note hangs where it did";
+
+    // Along is one leader's: changed, then another leader selected with it,
+    // Apply refuses rather than move both tips to one place.
+    const EntityId other = d.run("LEADER 50,0 55,5 text=Y");
+    const std::size_t made = d.steps();
+    d.run("SELECT " + std::to_string(leader));
+    processEvents();
+    along->setValue(50.0);
+    d.run("SELECT " + std::to_string(leader) + " " + std::to_string(other));
+    processEvents();
+    ASSERT_EQ(dialog.targets(), (std::vector<EntityId>{leader, other}));
+    EXPECT_FALSE(dialog.apply());
+    EXPECT_TRUE(dialog.problem().startsWith(QStringLiteral("Along moves one leader's tip")))
+        << dialog.problem().toStdString();
+    EXPECT_EQ(d.steps(), made);
+    EXPECT_EQ(d.leader(other).vertices.front(), Point2(50, 0));
+    EXPECT_FALSE(d.leader(other).tipRef.associated());
+    // Set back, the rest of the form applies to both.
+    EXPECT_TRUE(along->isEnabled());
+    along->setValue(75.0);
+    chooseData(child<QComboBox>(dialog, "leaderCallout"), kBox);
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    EXPECT_EQ(d.leader(other).callout, katana::entity::CalloutShape::Box);
+    EXPECT_EQ(d.leader(leader).tipRef.parameter, 0.75);
 }
 
 TEST(LeaderManager, AnAttributeIsSetOnTheEntityThroughItsLeader)
