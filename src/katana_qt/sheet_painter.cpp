@@ -19,12 +19,14 @@
 #include <QPolygonF>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plotting/legend.hpp"
 #include "katana/cad/plotting/tables.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/framebuffer.hpp"
 #include "katana/render/rasterizer.hpp"
+#include "plotting/legend_painter.hpp"
 #include "plotting/sheet_tables.hpp"
 
 namespace katana::qt {
@@ -1370,69 +1372,48 @@ void SheetPainter::paintLegend(const Viewport& viewport, TextSetter& text, const
     if (model == nullptr) {
         return;
     }
-    // The layers something is drawn on, shown in the document, and not
-    // hidden in every plan of this sheet.
-    std::set<std::string> used;
-    model->entities.forEach([&used](const katana::entity::Entity& entity) {
-        used.insert(entity.layer);
-    });
-    const plotting::Sheet& sheet = set_.sheets[index_];
-    std::vector<const Viewport*> plans;
-    for (const Viewport& other : sheet.viewports) {
-        if (other.kind == ViewportKind::Plan) {
-            plans.push_back(&other);
-        }
+    // What the plans show (cad/plotting/legend.hpp), each automatic plan at
+    // the window this painter draws it at, so the legend lists what the plan
+    // beside it drew.
+    const auto legend = gatherLegend(set_, index_, viewport, source_);
+    if (!legend) {
+        problem(viewport, legend.error().describe());
+        return;
     }
-    std::vector<katana::entity::Layer> rows;
-    for (const std::string& name : used) {
-        const auto resolved = model->layers.resolve(name);
-        if (resolved.layer == nullptr || !resolved.shown) {
-            continue;
-        }
-        const bool everywhereHidden =
-            !plans.empty() && std::all_of(plans.begin(), plans.end(), [&](const Viewport* plan) {
-                return plan->hiddenLayers.hides(name);
-            });
-        if (!everywhereHidden) {
-            rows.push_back(*resolved.layer);
-        }
+    if (legend->entries.empty() && options_.slotHints) {
+        paintMessage(text, r, QStringLiteral("Nothing to list: the plans show nothing"));
     }
+    // Labels in capitals, as the frame letters; columns as wide as the
+    // widest needs, flowed to fit (plotting::layoutLegend).
     TextStyle label;
     label.capMm = 1.8;
     label.xFactor = 0.9;
     label.vertical = VerticalJustify::Middle;
-    const double pitch = 4.5;
-    const double columnW = 55.0;
-    double x = r.min.x + 2.5;
-    double y = r.max.y - 10.5;
-    std::size_t shown = 0;
-    for (const katana::entity::Layer& layer : rows) {
-        if (y < r.min.y + 2.5) {
-            x += columnW;
-            y = r.max.y - 10.5;
-        }
-        if (x + 20.0 > r.max.x) {
-            break;
-        }
-        const QColor ink = qColour(katana::cad::paperColour(layer.color, options_.plot));
-        painter_.setPen(paperPen(paper, ink, std::max(layer.lineWeight, 0.13)));
-        painter_.drawLine(paper.at(Point2(x, y)), paper.at(Point2(x + 10.0, y)));
-        const double room = std::min(columnW - 14.0, r.max.x - x - 13.0);
-        const QString name = QString::fromStdString(layer.name).toUpper();
-        double squeeze = 1.0;
-        if (const double w = text.widthMm(name, label); w > room && room > 0.0) {
-            squeeze = std::max(room / w, 0.5);
-        }
-        text.draw(Point2(x + 12.0, y), name, label, squeeze);
-        y -= pitch;
-        ++shown;
+    std::vector<QString> names;
+    std::vector<double> widths;
+    for (const plotting::LegendEntry& entry : legend->entries) {
+        names.push_back(QString::fromStdString(entry.label).toUpper());
+        widths.push_back(text.widthMm(names.back(), label));
     }
-    if (shown < rows.size()) {
+    const plotting::LegendLayout layout = plotting::layoutLegend(r, widths);
+    LegendSampleContext samples;
+    samples.model = model;
+    samples.library = source_.plan.library;
+    samples.plot = &options_.plot;
+    samples.pixelsPerMillimetre = paper.ppmm();
+    samples.scale = legend->scale > 0.0 ? legend->scale : viewport.scale;
+    for (const plotting::LegendCell& cell : layout.cells) {
+        paintLegendSample(painter_, legend->entries[cell.entry], paper.at(cell.sample), samples);
+        double squeeze = 1.0;
+        if (const double w = widths[cell.entry]; w > cell.labelRoom && cell.labelRoom > 0.0) {
+            squeeze = std::max(cell.labelRoom / w, 0.5);
+        }
+        text.draw(cell.label, names[cell.entry], label, squeeze);
+    }
+    if (layout.moreAt) {
         TextStyle more = label;
         more.colour = kFaint;
-        more.horizontal = HorizontalJustify::Right;
-        text.draw(Point2(r.max.x - 2.0, r.min.y + 2.5),
-                  QString("+%1 more").arg(rows.size() - shown), more);
+        text.draw(*layout.moreAt, QString("+%1 more").arg(layout.more), more);
     }
 }
 

@@ -51,8 +51,9 @@
 #include "katana/cad/plotting/tables.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
-#include "plotting/sheet_checks.hpp"
+#include "plotting/legend_properties.hpp"
 #include "plotting/sheet_arrange.hpp"
+#include "plotting/sheet_checks.hpp"
 
 namespace katana::qt {
 
@@ -1263,6 +1264,10 @@ void SheetEditor::rebuildProperties()
                 edit([t = file->text().toStdString()](Viewport& e) { e.text = t; });
             });
             form->addRow(QStringLiteral("Image"), file);
+        }
+        if (v.kind == ViewportKind::Legend) {
+            addLegendProperties(*form, document_, set, index, v, source(),
+                                [this](const QString& text, bool error) { report(text, error); });
         }
         auto* locked = new QCheckBox(QStringLiteral("Locked (tiling and dragging leave it)"), box);
         locked->setChecked(v.locked);
