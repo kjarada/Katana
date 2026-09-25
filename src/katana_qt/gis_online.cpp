@@ -110,6 +110,7 @@ OnlineDataDialog& OnlineDataWorkbench::dialog()
         };
         context.run = [this](const interop::OnlineCommand& command) { return run(command); };
         context.addCustom = [this](const std::string& url) { return startDiscovery(url); };
+        context.chooseProjectCrs = services_.chooseProjectCrs;
         dialog_ = new OnlineDataDialog(std::move(context), &window_);
     }
     return *dialog_;
@@ -497,7 +498,9 @@ Status OnlineDataWorkbench::startImport(const interop::OnlineCommand& command)
     if (crs.empty()) {
         return makeError(ErrorCode::InvalidCRS,
                          "the project has no coordinate system, so web data has nowhere to go; "
-                         "add crs=EPSG:<code> (for Sydney in GDA2020, crs=EPSG:7856)");
+                         "set one with File > Project Coordinate System or CRS SET EPSG:<code> "
+                         "(CRS SUGGEST lon,lat names the zone; Sydney in GDA2020 is EPSG:7856), "
+                         "or add crs=EPSG:<code> to this import");
     }
     auto area = areaOf(command);
     if (!area) {
