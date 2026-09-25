@@ -184,20 +184,42 @@ Status editSheetSet(Document& document, const std::function<Status(SheetSet&)>& 
 
 Result<std::string> importLogo(Document& document, const std::filesystem::path& image)
 {
+    auto name = importImageAsset(document, image);
+    if (!name) {
+        return name.error();
+    }
+    const Status status = editSheetSet(
+        document,
+        [&name](SheetSet& set) -> Status {
+            set.defaults.logoAsset = *name;
+            return {};
+        },
+        "SET_LOGO");
+    if (!status) {
+        return status.error();
+    }
+    return *name;
+}
+
+Result<std::string> importImageAsset(const Document& document, const std::filesystem::path& image,
+                                     std::uintmax_t maximumBytes, std::string_view what)
+{
     const auto project = document.projectDirectory();
     if (!project) {
         return makeError(ErrorCode::InvalidState,
-                         "save the drawing as a project first: the logo is kept in the project's "
-                         "assets folder");
+                         std::format("save the drawing as a project first: the {} is kept in the "
+                                     "project's assets folder",
+                                     what));
     }
     std::error_code error;
     const auto size = std::filesystem::file_size(image, error);
     if (error) {
         return makeError(ErrorCode::NotFound, "the image cannot be found", image.string());
     }
-    if (size > kMaximumLogoBytes) {
+    if (size > maximumBytes) {
         return makeError(ErrorCode::InvalidArgument,
-                         "the image is too large for a logo (at most 4 MB)",
+                         std::format("the image is too large for a {} (at most {} MB)", what,
+                                     maximumBytes / (1024u * 1024u)),
                          image.string() + ": " + std::to_string(size) + " bytes");
     }
     auto bytes = readAll(image);
@@ -206,7 +228,10 @@ Result<std::string> importLogo(Document& document, const std::filesystem::path& 
     }
     const auto extension = imageExtension(*bytes);
     if (!extension) {
-        return makeError(ErrorCode::Unsupported, "a logo must be a PNG, JPEG, GIF or BMP image",
+        const bool vowel = !what.empty() && std::string_view("aeiou").contains(what.front());
+        return makeError(ErrorCode::Unsupported,
+                         std::format("{} {} must be a PNG, JPEG, GIF or BMP image",
+                                     vowel ? "an" : "a", what),
                          image.string());
     }
     const std::filesystem::path assets = *project / "assets";
@@ -229,8 +254,8 @@ Result<std::string> importLogo(Document& document, const std::filesystem::path& 
             out.write(bytes->data(), static_cast<std::streamsize>(bytes->size()));
             out.close();
             if (!out) {
-                return makeError(ErrorCode::FileExportFailure, "the logo cannot be written",
-                                 target.string());
+                return makeError(ErrorCode::FileExportFailure,
+                                 std::format("the {} cannot be written", what), target.string());
             }
             break;
         }
@@ -238,16 +263,6 @@ Result<std::string> importLogo(Document& document, const std::filesystem::path& 
         if (existing && *existing == *bytes) {
             break;
         }
-    }
-    const Status status = editSheetSet(
-        document,
-        [&name](SheetSet& set) -> Status {
-            set.defaults.logoAsset = name;
-            return {};
-        },
-        "SET_LOGO");
-    if (!status) {
-        return status.error();
     }
     return name;
 }

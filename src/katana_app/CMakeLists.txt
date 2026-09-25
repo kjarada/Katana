@@ -196,6 +196,34 @@ if(KATANA_BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "12d (customisation|linestyle|symbol|mapfile|librar)")
 endif()
 
+# The sheet verbs with no window (docs/plotting.md, "Sheets on the command
+# line"): a drawing laid out on a sheet, renamed, the title block filled and
+# the set listed, one fact per line; a refused verb stops the script.
+if(KATANA_BUILD_TESTS)
+    add_test(NAME cli.sheet_verbs_lay_out_edit_and_list_the_sheets
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "LINE 0,0 300,100" -c "GENERATE fit"
+                -c "SHEET RENAME 1 SITE PLAN" -c "TITLEBLOCK organisation \"Example Surveys\""
+                -c "SHEETS")
+    add_test(NAME cli.a_refused_sheet_verb_stops_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2"
+                -c "SHEET NEW NEVER REACHED")
+    set(_eol "[\r\n]+")
+    set_tests_properties(cli.sheet_verbs_lay_out_edit_and_list_the_sheets PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "generated 1 sheet: 1.*renamed sheet 1 id=s1 name=\"SITE PLAN\".*organisation=\"Example Surveys\"${_eol}1 sheet${_eol}sheet 1 id=s1 name=\"SITE PLAN\" paper=A3 orientation=landscape frame=a3_landscape legendblock=on views=1${_eol}  view id=vp1 kind=plan scale=1000 rect=")
+    set_tests_properties(cli.a_refused_sheet_verb_stops_the_script PROPERTIES
+        PASS_REGULAR_EXPRESSION "no sheet 2: the set has 1 sheet"
+        FAIL_REGULAR_EXPRESSION "NEVER REACHED")
+    # A pass expression makes ctest ignore the exit code, so the exit code of
+    # the same refusal is a test of its own: the script must fail.
+    add_test(NAME cli.a_refused_sheet_verb_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
+    set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+endif()
+
 # A .dxf through the command line both ways, natively - no GDAL, so it runs
 # in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
 # area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;
