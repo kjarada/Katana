@@ -138,3 +138,30 @@ TEST(SheetSectionEditor, ChoosingAutoForASectionIsOneStep)
     ASSERT_TRUE(document.undo().ok());
     EXPECT_FALSE(onlyViewport(document).autoScale);
 }
+
+TEST(SheetSectionEditor, AFixedScaleChosenFromAutoKeepsTheExaggerationAutoChose)
+{
+    // Stored at two times before Auto chose H 1:750 V 1:75: picking 1:750
+    // keeps the ten times it is drawn at, not the two stored.
+    Document document;
+    road(document);
+    sheetWithLongSection(document, true);
+    ASSERT_TRUE(plotting::editViewport(document, "vp1",
+                                       [](plotting::Viewport& v) -> katana::core::Status {
+                                           v.verticalExaggeration = 2.0;
+                                           return {};
+                                       })
+                    .ok());
+    Shown shown(document);
+    QComboBox* scale = shown.scale();
+    ASSERT_NE(scale, nullptr);
+    ASSERT_EQ(scale->toolTip(), QStringLiteral("Automatic: now H 1:750 V 1:75"));
+    const QString fixed = QStringLiteral("1:750");
+    ASSERT_GE(scale->findText(fixed), 0);
+    scale->setCurrentIndex(scale->findText(fixed));
+    emit scale->textActivated(fixed);
+    katana::qt::test::processEvents();
+    EXPECT_FALSE(onlyViewport(document).autoScale);
+    EXPECT_EQ(onlyViewport(document).scale, 750.0);
+    EXPECT_EQ(onlyViewport(document).verticalExaggeration, 10.0);
+}

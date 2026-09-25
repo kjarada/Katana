@@ -1039,6 +1039,10 @@ void SheetEditor::rebuildProperties()
         if (plan || section) {
             auto* scale = scaleBox(box, true);
             scale->setObjectName(QStringLiteral("sheetViewportScale"));
+            // An automatic section's exaggeration as it is drawn now: a fixed
+            // scale chosen from Auto keeps it, rather than the one stored
+            // before Auto chose its own.
+            std::optional<double> chosenExaggeration;
             if (plan && v.autoScale) {
                 scale->setCurrentIndex(0);
                 const ResolvedViewport resolved = resolvePlanViewport(v, source());
@@ -1047,20 +1051,26 @@ void SheetEditor::rebuildProperties()
                 // A section fits both its scale and its exaggeration.
                 scale->setCurrentIndex(0);
                 Viewport fitted = v;
-                const plotting::SectionFit fit = resolveSectionViewport(v, source(), sectionCuts_);
+                const plotting::SectionFit fit =
+                    resolveSectionViewport(v, source(), canvas_->paintCache());
                 fitted.scale = fit.scale;
                 fitted.verticalExaggeration = fit.exaggeration;
+                chosenExaggeration = fit.exaggeration;
                 scale->setToolTip(
                     QString("Automatic: now %1").arg(QString::fromStdString(plotting::scaleText(fitted))));
             } else {
                 scale->setCurrentText(scaleLabel(v.scale));
             }
-            connect(scale, &QComboBox::textActivated, this, [edit, scale](const QString& text) {
+            connect(scale, &QComboBox::textActivated, this,
+                    [edit, scale, chosenExaggeration](const QString& text) {
                 if (text == QStringLiteral("Auto")) {
                     edit([](Viewport& e) { e.autoScale = true; });
                 } else if (auto value = parseScale(text)) {
-                    edit([value](Viewport& e) {
+                    edit([value, chosenExaggeration](Viewport& e) {
                         e.scale = *value;
+                        if (e.autoScale && chosenExaggeration) {
+                            e.verticalExaggeration = *chosenExaggeration;
+                        }
                         e.autoScale = false;
                     });
                 } else {
