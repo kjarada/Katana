@@ -140,10 +140,13 @@ enum class Icon {
     // its vertex. Symbol Library: a grid of plan symbols, the accent one the
     // symbol chosen. Survey Code Manager: a field code's tag and the accent
     // linework it becomes. Purge Unused: a broom, sweeping the accent away.
+    // Global Modify: a point, a line and an area gathered by the accent
+    // bracket, and the accent arrow into the one look they are all given.
     FormatStyles,
     FormatSymbols,
     FormatSurveyCodes,
     Purge,
+    GlobalModify,
 };
 
 // Every value of Icon, in declaration order, for the contact sheet and for

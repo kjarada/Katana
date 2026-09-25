@@ -13,12 +13,14 @@
 #include "customisation/code_manager.hpp"
 #include "customisation/customisation_context.hpp"
 #include "customisation/definition_thumbnails.hpp"
+#include "customisation/global_modify_dialog.hpp"
 #include "customisation/symbol_library.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "style_manager.hpp"
 #include "view_workspace.hpp"
+#include "viewport_widget.hpp"
 
 namespace katana::qt {
 
@@ -30,6 +32,7 @@ namespace {
 constexpr const char* kStyleManagerName = "styleManagerDialog";
 constexpr const char* kSymbolLibraryName = "symbolLibraryDialog";
 constexpr const char* kCodeManagerName = "surveyCodeManagerDialog";
+constexpr const char* kGlobalModifyName = "globalModifyDialog";
 
 QString counted(std::size_t count, const char* one, const char* many)
 {
@@ -82,6 +85,12 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
              "The survey code library (the loaded survey code files): test a code, edit its "
              "rules, see the drawing's codes and their issues, apply the codes, run linework",
              "formatSurveyCodes", kCodeManagerName);
+    globalModifyAction_ =
+        make(Icon::GlobalModify, "&Global Modify...",
+             "Change the selection, what a view shows, whole layers or the drawing at once: "
+             "layer, colour, style, symbol, properties, and their layers' and styles' "
+             "settings, as one undo step",
+             "formatGlobalModify", kGlobalModifyName);
     purgeAction_ = make(Icon::Purge, "&Purge Unused...",
                         "Delete the styles, linetypes and hatch patterns nothing uses, as one "
                         "undo step",
@@ -92,6 +101,8 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
                      [this] { showSymbolLibrary(); });
     QObject::connect(codesAction_, &QAction::triggered, &window_, [this] { showCodeManager(); });
     QObject::connect(purgeAction_, &QAction::triggered, &window_, [this] { purgeUnused(); });
+    QObject::connect(globalModifyAction_, &QAction::triggered, &window_,
+                     [this] { showGlobalModify(); });
 
     if (services_.layers != nullptr) {
         menu.addAction(services_.layers);
@@ -106,9 +117,10 @@ CustomisationWorkbench::CustomisationWorkbench(QWidget& window, CustomisationSer
         }
     }
     menu.addSeparator();
+    menu.addAction(globalModifyAction_);
     menu.addAction(purgeAction_);
 
-    toolBar.addActions({stylesAction_, symbolsAction_, codesAction_});
+    toolBar.addActions({stylesAction_, symbolsAction_, codesAction_, globalModifyAction_});
 }
 
 CustomisationWorkbench::~CustomisationWorkbench()
@@ -116,6 +128,7 @@ CustomisationWorkbench::~CustomisationWorkbench()
     // Here, not left to the window's children: the dialogs paint from the
     // cache and read the linework codes this object owns, which go as soon
     // as this body ends - and the Document goes after that.
+    delete globalModify_.data();
     delete codes_.data();
     delete symbols_.data();
     delete styles_.data();
@@ -124,6 +137,10 @@ CustomisationWorkbench::~CustomisationWorkbench()
 StyleManagerDialog* CustomisationWorkbench::styleManager() const { return styles_.data(); }
 SymbolLibraryDialog* CustomisationWorkbench::symbolLibrary() const { return symbols_.data(); }
 SurveyCodeManagerDialog* CustomisationWorkbench::codeManager() const { return codes_.data(); }
+GlobalModifyDialog* CustomisationWorkbench::globalModify() const
+{
+    return globalModify_.data();
+}
 
 bool CustomisationWorkbench::headless() const
 {
@@ -226,6 +243,38 @@ SurveyCodeManagerDialog& CustomisationWorkbench::showCodeManager()
     codes_->setInteractive(!headless());
     raise(*codes_);
     return *codes_;
+}
+
+GlobalModifyDialog& CustomisationWorkbench::showGlobalModify()
+{
+    if (globalModify_.isNull()) {
+        globalModify_ = new GlobalModifyDialog(context(), &window_);
+        globalModify_->setObjectName(QString::fromLatin1(kGlobalModifyName));
+        globalModify_->setModal(false);
+        if (services_.views != nullptr) {
+            // Read afresh each time: a view closed since has no state to
+            // point at, and a plan view's area moves with every pan.
+            ViewWorkspace* views = services_.views;
+            globalModify_->views = [views] {
+                std::vector<GlobalModifyView> open;
+                for (katana::cad::ViewState* state : views->viewSet().views()) {
+                    GlobalModifyView view;
+                    view.id = state->id;
+                    view.title = QString::fromStdString(katana::cad::ViewSet::title(*state));
+                    view.hidden = &state->layers;
+                    if (state->kind == katana::cad::ViewKind::Plan) {
+                        view.onScreen = state->plan.visibleWorldBounds();
+                    }
+                    open.push_back(std::move(view));
+                }
+                return open;
+            };
+        }
+    }
+    globalModify_->reload();
+    raise(*globalModify_);
+    globalModify_->preview();
+    return *globalModify_;
 }
 
 bool CustomisationWorkbench::confirmClose()
