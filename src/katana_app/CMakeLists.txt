@@ -5,6 +5,7 @@
 add_library(katana_app STATIC
     session.cpp session.hpp
     dxf_verbs.cpp dxf_verbs.hpp
+    utility_verbs.cpp utility_verbs.hpp
     mcp_server.cpp mcp_server.hpp
 )
 katana_target_defaults(katana_app)
@@ -243,6 +244,65 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
     set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+endif()
+
+# UTILITY on the sample investigation (samples/utilities, worked by hand in
+# docs/subsurface_utilities.md). E1-3 is a radar pick at 350 mm claimed as
+# QL-B: the report must say so. The pothole W1-X1 checks the detection W1-3:
+# hypot(0.080, 0.060) = 0.100 in plan; top 19.155 against the detection's
+# centre 19.180 + 0.075 = 19.255, so -0.100. The stormwater design crosses
+# W1's W1-2 -> W1-3, a QL-B stretch, clear by 0.372 m vertically at the
+# drawn levels but not across QL-B's 500 mm - within tolerance, not clear.
+if(KATANA_BUILD_TESTS)
+    set(_utilities "${PROJECT_SOURCE_DIR}/samples/utilities")
+    add_test(NAME cli.utility_report_grades_the_sample_and_names_the_over_claim
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVER 0.6")
+    add_test(NAME cli.utility_verify_compares_the_pothole_with_its_detection
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY VERIFY \"${_utilities}/schedule.csv\"")
+    add_test(NAME cli.utility_clearance_shows_the_crossing_within_tolerance
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY CLEARANCE \"${_utilities}/schedule.csv\" \"${_utilities}/design.csv\" WIDTH 0.375")
+    add_test(NAME cli.utility_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVR 0.6")
+    set_tests_properties(cli.utility_report_grades_the_sample_and_names_the_over_claim PROPERTIES
+        PASS_REGULAR_EXPRESSION "4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    set_tests_properties(cli.utility_verify_compares_the_pothole_with_its_detection PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 +W1-3 +W1-X1 +0\\.100 +ok +-0\\.100 +ok")
+    set_tests_properties(cli.utility_clearance_shows_the_crossing_within_tolerance PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 W1-2 -> W1-3 +QL-B +within tolerance +-0\\.263 +0\\.300 +0\\.372")
+    set_tests_properties(cli.utility_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY CHECK against the real TfNSW Utility Schema, when this checkout
+    # has the owner's copy (it is theirs to keep, not the repository's - see
+    # .gitignore). tools/utility_schema_domains.py makes the schema file, then
+    # the TfNSW-shaped sample is checked; its comments list the mistakes left
+    # in it on purpose, and each must be found. PASS_REGULAR_EXPRESSION
+    # ignores the exit status, which is 1 because there are errors.
+    set(_tfnsw_workbook
+        "${PROJECT_SOURCE_DIR}/docs/TfNSW Reference Files/Utility-Schema-and-Specification-v1.2.xlsx")
+    if(EXISTS "${_tfnsw_workbook}" AND Python3_Interpreter_FOUND)
+        set(_tfnsw_schema "${CMAKE_CURRENT_BINARY_DIR}/tfnsw-utility-schema.csv")
+        add_test(NAME cli.utility_check_schema_from_the_workbook
+            COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/utility_schema_domains.py"
+                    "${_tfnsw_workbook}" "${_tfnsw_schema}")
+        add_test(NAME cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    $<TARGET_FILE:katana_cli>
+                    -c "UTILITY CHECK \"${_utilities}/schedule_tfnsw.csv\" SCHEMA \"${_tfnsw_schema}\"")
+        set_tests_properties(cli.utility_check_schema_from_the_workbook PROPERTIES
+            FIXTURES_SETUP cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "43 fields, 25 domains, 1084 values \\(schema version 1\\.2\\)")
+        set_tests_properties(cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong PROPERTIES
+            FIXTURES_REQUIRED cli_tfnsw_schema
+            PASS_REGULAR_EXPRESSION "7 rows, 3 assets \\(AssetIdentifier\\): 7 errors, 2 warnings.*TfNSW_ContractOrgCode is mandatory and has no column.*DateInfoObtained \"2026-09-20\" is not a date.*Depth is empty \\(2 rows.*UtilityInstallDate is empty \\(2 rows.*AssetStatus \"In service\" is listed as \"In Service\"")
+    endif()
 endif()
 
 # A .dxf through the command line both ways, natively - no GDAL, so it runs

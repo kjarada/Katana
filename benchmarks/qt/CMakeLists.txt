@@ -29,7 +29,6 @@ add_executable(katana_qt_benchmarks
     ${_qt_src}/style_manager.cpp
     ${_qt_src}/layer_manager.cpp
     ${_qt_src}/plan_painter.cpp
-    # The plan painter draws imagery through the plot style (plotImage).
     ${_qt_src}/plotting/plot_style.cpp
     ${_qt_customisation_sources}
     ${_qt_tool_sources}

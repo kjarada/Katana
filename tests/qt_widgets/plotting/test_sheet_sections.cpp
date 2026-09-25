@@ -645,7 +645,9 @@ TEST(SheetSections, AxisValuesStepOutUntilTheyClearEachOther)
     const QImage paper = painted(sheetWith({viewport}), road.source());
 
     // The columns with ink along the labels' strip, and the runs of them:
-    // glyphs of one label are under 0.6 mm apart, labels much more.
+    // glyphs of one label are under 1 mm apart, labels at least 2 mm. The
+    // widest gap in a label is its decimal point's, which sits on the
+    // baseline under the strip: 0.75 mm in Windows' Arial.
     const QRect strip = pixelsOf(box(24.0, 159.8, 409.0, 161.1));
     std::vector<int> inked;
     for (int x = strip.left(); x <= strip.right(); ++x) {
@@ -660,7 +662,7 @@ TEST(SheetSections, AxisValuesStepOutUntilTheyClearEachOther)
     ASSERT_FALSE(inked.empty());
     std::vector<std::pair<int, int>> labels{{inked.front(), inked.front()}};
     for (const int x : inked) {
-        if (x - labels.back().second > static_cast<int>(0.6 * kPpmm)) {
+        if (x - labels.back().second > static_cast<int>(1.0 * kPpmm)) {
             labels.emplace_back(x, x);
         } else {
             labels.back().second = x;

@@ -1,0 +1,18 @@
+# A subsurface utility investigation along a 40 m road frontage, MGA zone 56 / AHD.
+# One row per located vertex; rows with the same line id form one service, in order.
+# Columns are read by name (docs/subsurface_utilities.md lists them and their aliases).
+line,point,easting,northing,method,level,level_ref,surface,h_unc,v_unc,ql,path,verifies,type,owner,material,diameter_mm,status,config,description
+W1,W1-1,334000.000,6250000.000,EML,,,,0.10,,QL-B,,,water,WaterCo,DICL,150,live,,trunk main
+W1,W1-2,334008.000,6250000.150,EML,19.20,centre,20.25,0.10,0.35,QL-B,,,,,,,,,
+W1,W1-3,334016.000,6250000.250,EML,19.18,centre,20.22,0.12,0.40,QL-B,,,,,,,,,
+W1,W1-X1,334016.080,6250000.310,pothole,19.155,top,20.22,0.02,0.02,QL-A,exposed,W1-3,,,,,,,
+W1,W1-4,334017.500,6250000.300,pothole,19.150,top,20.21,0.02,0.02,QL-A,,,,,,,,,
+W1,W1-5,334030.000,6250000.500,EML,,,,0.10,,QL-B,,,,,,,,,
+E1,E1-1,334000.000,6250003.000,GPR,19.60,top,20.40,0.25,0.45,QL-B,,,electricity,PowerCo,PVC conduits,400,live,4 x 100 mm conduits,11 kV
+E1,E1-2,334009.000,6250003.100,GPR,19.55,top,20.35,0.25,0.45,QL-B,,,,,,,,,
+E1,E1-3,334018.000,6250003.100,GPR,19.40,top,20.30,0.35,0.60,QL-B,,,,,,,,,
+E1,E1-4,334027.000,6250003.000,GPR,19.50,top,20.28,0.25,0.45,QL-B,,,,,,,,,
+T1,T1-P1,334002.000,6250005.500,surface,,,,,,QL-C,assumed,,telecommunications,TelcoCo,,,live,pit to pit,
+T1,T1-P2,334035.000,6250005.600,surface,,,,,,QL-C,,,,,,,,,
+G1,G1-1,334000.000,6250007.000,records,,,,,,QL-D,assumed,,gas,GasCo,PE,,live,,from 1998 as-constructed plan
+G1,G1-2,334040.000,6250007.200,records,,,,,,QL-D,,,,,,,,,
