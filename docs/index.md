@@ -22,6 +22,7 @@ done. There is no user guide yet.
 | [performance.md](performance.md) | the measurements and what moved | anything measured (`benchmarks/`) |
 | [interop.md](interop.md) | GIS, rasters, point clouds, the `.12da` archive, import and export | `katana_io`, `katana_interop`, `katana_archive12d` (the archive) |
 | [survey.md](survey.md) | the survey model and calculations, instrument and field-file import, the Survey menu | `katana_survey`, `katana_surveyio`, `src/katana_qt/survey/` |
+| [subsurface_utilities.md](subsurface_utilities.md) | AS 5488 quality levels, grading located services, depth of cover, clearance of proposed works, verifying detections by exposure, the utility schedule format, `UTILITY` | `include/katana/survey/subsurface/`, `src/katana_survey/subsurface_*.cpp`, `src/katana_app/utility_verbs.*` |
 | [survey_coding.md](survey_coding.md) | style libraries, survey code files, coding a survey, the built-in customisation | `katana_archive12d` (customisation), `src/katana_cad/customisation/`, the Survey Code Manager |
 | [cad.md](cad.md) | the engine both front ends drive: document, selection, snapping, the command interpreter, the spatial index, alignments, corridors, parcels, grading, plotting arithmetic, style and symbol resolution | `katana_cad` (outside `tools/`) |
 | [desktop.md](desktop.md) | the window: theme, icons, toolbars, the workspace and docks, panels, the managers, the rules a dialog follows | `src/katana_qt` (outside `tools/` and `survey/`) |

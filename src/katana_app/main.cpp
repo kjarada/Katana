@@ -31,6 +31,7 @@
 #include "katana/cad/survey_coding.hpp"
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
+#include "utility_verbs.hpp"
 
 #if defined(KATANA_WITH_INTEROP)
 #include "katana/commands/entity_commands.hpp"
@@ -890,6 +891,13 @@ bool runLine(Session& session, const std::string& line)
         return runCustomise(session.document, session.customisation,
                             session.customisationMissingAtOpen, paths, replace);
     }
+    // The AS 5488 subsurface utility tools read schedules and report; they
+    // never touch the drawing (utility_verbs.hpp).
+    if (upperVerb(line) == "UTILITY") {
+        const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
+        return katana::app::runUtilityVerb(
+            space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space));
+    }
     // A .dxf is read and written natively, with or without GDAL (dxf_verbs.hpp).
     if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
         const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
@@ -988,6 +996,7 @@ int main(int argc, char* argv[])
                          "          CUSTOMISE [REPLACE] <file> [<file>...]  load style\n"
                          "          libraries (.4d) and survey code files (.mapfile), merged\n"
                          "          into what is loaded; CUSTOMISE alone reports what is loaded\n";
+            std::cout << katana::app::utilityHelpText();
 #if defined(KATANA_WITH_INTEROP)
             std::cout << "Interop   IMPORT <file> [LOCAL] | EXPORT <file> | REFS\n"
                       << "          vector -> entities; raster and point cloud -> "
