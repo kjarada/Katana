@@ -1,6 +1,8 @@
 #include "annotation/annotation_workbench.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 
 #include <QAction>
 #include <QComboBox>
@@ -10,9 +12,11 @@
 #include <QWidget>
 
 #include "annotation/annotation_managers.hpp"
+#include "annotation/leader_manager.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/core/text.hpp"
+#include "tools/tool_menus.hpp"
 
 namespace katana::qt {
 
@@ -103,6 +107,7 @@ AnnotationWorkbench::~AnnotationWorkbench()
     // Here, not left to the window's children: the dialogs hold the
     // Document, which goes when the window's members do - before Qt deletes
     // its children (CustomisationWorkbench's destructor says the same).
+    delete leaders_.data();
     delete labelStyles_.data();
     delete textStyles_.data();
 }
@@ -138,6 +143,63 @@ LabelStyleManagerDialog& AnnotationWorkbench::showLabelStyles()
     }
     raise(*labelStyles_);
     return *labelStyles_;
+}
+
+LeaderManagerDialog& AnnotationWorkbench::showLeaders(int tab)
+{
+    if (leaders_.isNull()) {
+        leaders_ = new LeaderManagerDialog(document_, &window_);
+        leaders_->setModal(false);
+    }
+    leaders_->showTab(static_cast<LeaderManagerDialog::Tab>(std::clamp(tab, 0, 2)));
+    raise(*leaders_);
+    return *leaders_;
+}
+
+void AnnotationWorkbench::addLeaderActions(QMenu& annotateMenu)
+{
+    // The letters the menu's tools have taken already (tools/tool_menus.cpp
+    // gives them theirs), so each of these gets one of its own
+    // (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
+    std::string taken;
+    for (const QAction* item : annotateMenu.actions()) {
+        if (!item->isSeparator()) {
+            (void)tools::withMnemonic(item->text().toStdString(), taken);
+        }
+    }
+    struct Entry {
+        const char* name;
+        const char* text;
+        const char* tip;
+        int tab;
+    };
+    const Entry entries[] = {
+        {"annotateLeaders", "Leaders...",
+         "The drawing's leaders: a note read off the entity a leader points at - its "
+         "attributes, level, length, chainage - the values to put in it, its look, and an "
+         "attribute of that entity set through it (LEADER SET, LEADER PROP)",
+         0},
+        {"annotateLeadersForSelection", "Leaders for Selection...",
+         "A leader, or a numbered balloon, to each selected entity, its note read off it "
+         "(LEADER FOR, BALLOON FOR)",
+         1},
+        {"annotateArrangeLeaders", "Arrange Leaders and Balloons...",
+         "Line the selected leaders' notes up in a column, and number the balloons again "
+         "(LEADER ALIGN, BALLOON RENUMBER)",
+         2},
+    };
+    annotateMenu.addSeparator();
+    for (const Entry& entry : entries) {
+        auto* action =
+            new QAction(QString::fromStdString(tools::withMnemonic(entry.text, taken)), &window_);
+        action->setObjectName(QString::fromLatin1(entry.name));
+        action->setToolTip(QString::fromLatin1(entry.tip));
+        action->setStatusTip(action->toolTip());
+        action->setData(QStringLiteral("leaderManagerDialog"));
+        const int tab = entry.tab;
+        QObject::connect(action, &QAction::triggered, &window_, [this, tab] { showLeaders(tab); });
+        annotateMenu.addAction(action);
+    }
 }
 
 } // namespace katana::qt

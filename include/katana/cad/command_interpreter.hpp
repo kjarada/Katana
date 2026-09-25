@@ -70,6 +70,14 @@ class CommandInterpreter {
     // "@10,10" after File > New silently measures from the discarded drawing.
     void resetPointState();
 
+    // A property value as PROP SET reads one: of the stated `type` (text,
+    // integer, real, boolean) when there is one, else guessed from the text -
+    // "true" and "false" are booleans, a whole number an integer, another
+    // number a real, anything else text. LEADER PROP and the window's
+    // Leaders manager read a value the same way.
+    [[nodiscard]] static katana::core::Result<katana::entity::PropertyValue>
+    propertyValue(const std::string& text, const std::string* type);
+
   private:
     using Tokens = std::vector<std::string>;
     using Reply = katana::core::Result<std::string>;
@@ -121,9 +129,10 @@ class CommandInterpreter {
     [[nodiscard]] Reply dimension(const Tokens& args);
     [[nodiscard]] Reply leader(const std::string& verb, const Tokens& args);
     // A point that may name another entity's point - "#12", "#12.end",
-    // "#12.v3", "#12.s2", "#12.mid", "#12.centre" - or any point parsePoint
-    // takes. A named point carries its reference, so what is made from it
-    // follows the entity (annotation/associative.hpp).
+    // "#12.v3", "#12.s2", "#12.mid", "#12.centre", "#12.inside" - or the
+    // point of it nearest a point, "#12@x,y" (on it, Along) - or any point
+    // parsePoint takes. A named point carries its reference, so what is made
+    // from it follows the entity (annotation/associative.hpp).
     [[nodiscard]] katana::core::Result<annotation::AnchoredPoint>
     parseAnchoredPoint(const std::string& text);
 

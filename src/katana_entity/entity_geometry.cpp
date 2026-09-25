@@ -7,6 +7,7 @@
 #include <string>
 
 #include "katana/core/text.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/text_block.hpp"
 
 namespace katana::entity {
@@ -261,6 +262,10 @@ std::string_view toString(AnchorPoint point)
         return "vertex";
     case AnchorPoint::SegmentMid:
         return "segment-mid";
+    case AnchorPoint::Along:
+        return "along";
+    case AnchorPoint::Inside:
+        return "inside";
     }
     return "position";
 }
@@ -269,7 +274,8 @@ Result<AnchorPoint> anchorPointFromString(std::string_view name)
 {
     for (const AnchorPoint point :
          {AnchorPoint::Position, AnchorPoint::Start, AnchorPoint::End, AnchorPoint::Mid,
-          AnchorPoint::Centre, AnchorPoint::Vertex, AnchorPoint::SegmentMid}) {
+          AnchorPoint::Centre, AnchorPoint::Vertex, AnchorPoint::SegmentMid, AnchorPoint::Along,
+          AnchorPoint::Inside}) {
         if (sameName(toString(point), name)) {
             return point;
         }
@@ -462,6 +468,29 @@ Status requirePositive(double value, const char* what)
     return {};
 }
 
+// A reference's point is one there is, and only Along has a parameter: a
+// fraction of the way along, finite and in [0, 1]. Every other point is
+// exactly 0 there, so an anchor that needs no parameter is written as it
+// always was (geometry_blob.cpp).
+Status validateAnchor(const AnchorRef& ref)
+{
+    if (static_cast<int>(ref.point) > static_cast<int>(kLastAnchorPoint)) {
+        return makeError(ErrorCode::InvalidGeometry, "unknown anchor point");
+    }
+    if (ref.point == AnchorPoint::Along) {
+        if (!(std::isfinite(ref.parameter) && ref.parameter >= 0.0 && ref.parameter <= 1.0)) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "an anchor along an entity is a fraction from 0 to 1",
+                             std::to_string(ref.parameter));
+        }
+    } else if (ref.parameter != 0.0) {
+        return makeError(ErrorCode::InvalidGeometry,
+                         "only an anchor along an entity has a fraction",
+                         std::string(toString(ref.point)));
+    }
+    return {};
+}
+
 struct Validator {
     Status operator()(const PointGeometry& point) const
     {
@@ -566,8 +595,8 @@ struct Validator {
             return makeError(ErrorCode::InvalidGeometry, "unknown dimension kind");
         }
         for (const AnchorRef* ref : {&dimension.startRef, &dimension.endRef, &dimension.vertexRef}) {
-            if (static_cast<int>(ref->point) > static_cast<int>(AnchorPoint::SegmentMid)) {
-                return makeError(ErrorCode::InvalidGeometry, "unknown anchor point");
+            if (auto status = validateAnchor(*ref); !status) {
+                return status;
             }
         }
         switch (dimension.kind) {
@@ -639,7 +668,8 @@ struct Validator {
         if (!(Polyline2{leader.vertices, false}.length() > tol::kGeometric)) {
             return makeError(ErrorCode::InvalidGeometry, "leader has zero length");
         }
-        if (!isValidUtf8(leader.text) || !isValidUtf8(leader.style)) {
+        if (!isValidUtf8(leader.text) || !isValidUtf8(leader.style) ||
+            !isValidUtf8(leader.labelStyle)) {
             return makeError(ErrorCode::InvalidGeometry, "leader text is not valid UTF-8");
         }
         for (const double size : {leader.paperHeight, leader.arrowSize, leader.landing}) {
@@ -649,9 +679,38 @@ struct Validator {
             }
         }
         if (static_cast<int>(leader.arrow) > static_cast<int>(ArrowHead::Dot) ||
-            static_cast<int>(leader.callout) > static_cast<int>(CalloutShape::Circle) ||
-            static_cast<int>(leader.tipRef.point) > static_cast<int>(AnchorPoint::SegmentMid)) {
-            return makeError(ErrorCode::InvalidGeometry, "a leader's arrow, callout or anchor is unknown");
+            static_cast<int>(leader.callout) > static_cast<int>(CalloutShape::Circle)) {
+            return makeError(ErrorCode::InvalidGeometry, "a leader's arrow or callout is unknown");
+        }
+        if (auto status = validateAnchor(leader.tipRef); !status) {
+            return status;
+        }
+        // A smart leader (docs/annotation.md, "Smart leaders"): its note is
+        // read off the entity its tip names, from ONE template - its own or
+        // its label style's.
+        if (leader.fields && !leader.labelStyle.empty()) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "a leader's note is its own template or its label style's, not both");
+        }
+        if (!leader.labelStyle.empty() && !leader.text.empty()) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "a leader in a label style takes its note from the style; it has no "
+                             "text of its own",
+                             leader.labelStyle);
+        }
+        if ((leader.fields || !leader.labelStyle.empty()) && !leader.tipRef.associated()) {
+            return makeError(
+                ErrorCode::InvalidGeometry,
+                "a smart leader reads the entity its tip is on, and its tip names none");
+        }
+        if (leader.fields) {
+            if (leader.text.empty()) {
+                return makeError(ErrorCode::InvalidGeometry, "a smart leader's template is empty");
+            }
+            if (auto status = checkLeaderTemplate(leader.text); !status) {
+                return makeError(ErrorCode::InvalidGeometry, status.error().message,
+                                 status.error().context);
+            }
         }
         return {};
     }

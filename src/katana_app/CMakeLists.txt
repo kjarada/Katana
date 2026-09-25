@@ -249,6 +249,55 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
 endif()
 
+# Smart leaders with no window (docs/annotation.md, "Smart leaders"): a
+# leader reading a point's attribute is saved; a second process opens it,
+# changes the attribute and lists the leader, whose note is read afresh off
+# the point (9.5 to two places is "9.50"). An exact place along - the end of
+# a square's closing side, 4 x 100 = 400 along - and balloons numbered again
+# from 10 across the sheet. A leader that would say nothing stops the script
+# and fails it.
+if(KATANA_BUILD_TESTS)
+    set(_leaders "${CMAKE_CURRENT_BINARY_DIR}/cli-leaders.katana")
+    add_test(NAME cli.leaders_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf "${_leaders}")
+    add_test(NAME cli.a_smart_leader_is_saved_with_the_point_it_reads
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0" -c "SELECT 1" -c "PROP SET invert 10.25"
+                -c "LEADER #1 5,5 template=\"IL {prop.invert:.2f}\"" -c "SAVE \"${_leaders}\"")
+    add_test(NAME cli.a_reopened_smart_leader_reads_its_note_off_the_point_afresh
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "OPEN \"${_leaders}\"" -c "SELECT 1"
+                -c "PROP SET invert 9.5" -c "LEADER LIST")
+    add_test(NAME cli.a_leader_is_put_exactly_along_and_balloons_are_numbered_again
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 100,0 100,100 0,100 C"
+                -c "LEADER #1.along3:1 -20,-20 template=\"CH {chainage:.0f}\""
+                -c "BALLOON 30,0 35,5" -c "BALLOON 10,20 15,25"
+                -c "BALLOON RENUMBER start=10 order=x")
+    add_test(NAME cli.a_leader_that_would_say_nothing_stops_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0"
+                -c "LEADER #1 5,5 template=\"IL {prop.invert:.2f}\""
+                -c "LEADER 0,0 1,1 text=NEVER_REACHED")
+    add_test(NAME cli.a_leader_that_would_say_nothing_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "POINT 0,0"
+                -c "LEADER #1 5,5 template=\"IL {prop.invert:.2f}\"")
+    set_tests_properties(cli.leaders_cleanup PROPERTIES FIXTURES_SETUP cli_leaders)
+    set_tests_properties(cli.a_smart_leader_is_saved_with_the_point_it_reads PROPERTIES
+        FIXTURES_REQUIRED cli_leaders FIXTURES_SETUP cli_leaders_saved
+        PASS_REGULAR_EXPRESSION "created leader id=2 text=\"IL 10.25\" associative=yes target=1")
+    set_tests_properties(cli.a_reopened_smart_leader_reads_its_note_off_the_point_afresh PROPERTIES
+        FIXTURES_REQUIRED cli_leaders_saved
+        PASS_REGULAR_EXPRESSION "id=2 .*target=1 anchor=position smart=yes .*text=\"IL 9.50\"")
+    set_tests_properties(cli.a_leader_is_put_exactly_along_and_balloons_are_numbered_again PROPERTIES
+        PASS_REGULAR_EXPRESSION "created leader id=2 text=\"CH 400\" associative=yes target=1 anchor=\"along 3 1\".*balloons=2 renumbered=2")
+    set_tests_properties(cli.a_leader_that_would_say_nothing_stops_the_script PROPERTIES
+        PASS_REGULAR_EXPRESSION "would say nothing"
+        FAIL_REGULAR_EXPRESSION "NEVER_REACHED")
+    set_tests_properties(cli.a_leader_that_would_say_nothing_fails_the_script PROPERTIES
+        WILL_FAIL TRUE)
+endif()
+
 # UTILITY on the sample investigation (samples/utilities, worked by hand in
 # docs/subsurface_utilities.md). E1-3 is a radar pick at 350 mm claimed as
 # QL-B: the report must say so. The pothole W1-X1 checks the detection W1-3:

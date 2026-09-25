@@ -13,6 +13,12 @@
 // its height; a Circle callout (a numbered balloon) centres the note in a
 // circle that clears it by the same margin, and the landing ends on the
 // circle. Every size is paper millimetres at 1 : scale.
+//
+// The note is entity::leaderNote's: a plain leader's text, or a smart
+// leader's template filled from the entity its tip is on as the model is now
+// (docs/annotation.md, "Smart leaders"), with the survey code looked for
+// where survey coding looks (codePropertyCandidates). A smart leader with
+// nothing to say is drawn as a bare leader.
 
 #include "katana/cad/annotation/drawing.hpp"
 #include "katana/entity/entity.hpp"
