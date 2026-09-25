@@ -61,6 +61,14 @@ struct TextAppearance {
 [[nodiscard]] bool isPaperSized(const katana::entity::Model& model,
                                 const katana::entity::TextGeometry& text);
 
+// A text as it is made or edited at 1 : `scale`: a paper-sized one is given
+// the model height it has at that scale (TextGeometry::height - what its box,
+// picking and the spatial index go by); any other keeps its own. The one rule
+// TEXT, MTEXT and TEXTEDIT and the Text and Multiline Text tools make a text
+// by, so a typed text and a drawn one of the same style are the same size.
+void fitModelHeight(const katana::entity::Model& model, double scale,
+                    katana::entity::TextGeometry& text);
+
 // A rotation that reads upside down - pointing from just past straight up to
 // straight down, (90, 270] degrees - turned half a turn, and the
 // justification mirrored so the block still covers the same place. The

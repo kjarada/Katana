@@ -866,6 +866,9 @@ void MainWindow::buildActions()
     // Before Survey, whose Survey Coding section shows the code manager's
     // action too.
     buildFormatActions(*formatMenu, layersAction, customiseAction, replaceCustomisationAction);
+    // Annotate > Edit Text...: the annotation workbench's, which exists only
+    // from here, after the tools filled the menu.
+    annotation_->addEditTextAction(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
     buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);
