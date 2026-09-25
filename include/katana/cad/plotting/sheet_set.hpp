@@ -79,6 +79,15 @@ struct WorldMark {
     friend bool operator==(const WorldMark&, const WorldMark&) = default;
 };
 
+// What a Legend viewport lists (legend.hpp): what the plans of its own sheet
+// show, what the plans of every sheet show, or everything drawn. Stored by
+// name ("this_sheet", "whole_set", "whole_drawing"), never renamed.
+enum class LegendScope {
+    ThisSheet,
+    WholeSet,
+    WholeDrawing,
+};
+
 struct Viewport {
     std::string id; // unique within the sheet set; "vp1", "vp2" ...
     ViewportKind kind = ViewportKind::Plan;
@@ -107,6 +116,7 @@ struct Viewport {
     std::vector<WorldMark> marks;
     // Revisions: only the newest so many; 0 shows every revision.
     std::size_t revisionLimit = 0;
+    LegendScope legendScope = LegendScope::ThisSheet; // Legend only
 
     friend bool operator==(const Viewport&, const Viewport&) = default;
 };

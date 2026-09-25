@@ -19,7 +19,8 @@
 //   LongSection    ground and design along an alignment, a grid, level and
 //   CrossSections  chainage labels and a data band; cut once and cached.
 //   Model3D        the 3D view's renderer, as a raster capped in resolution.
-//   Legend         the layers the sheet draws, a sample line each.
+//   Legend         what the sheet's plans show (cad/plotting/legend.hpp), a
+//                  sample each as it prints (plotting/legend_painter.hpp).
 //   Notes, Image   text wrapped to the rectangle; a project image fitted.
 //
 // North arrows, scale bars and titles are sized in paper millimetres.
@@ -66,7 +67,8 @@ namespace katana::qt {
 // member left empty leaves out only what it provides.
 struct SheetSource {
     PlanSource plan;
-    // For the 3D snapshot, whose scene builder reads the document.
+    // For the 3D snapshot, whose scene builder reads the document, and the
+    // survey code descriptions a legend is labelled with.
     const katana::cad::Document* document = nullptr;
     // Surfaces the sections are cut from and the 3D snapshot shows; hidden
     // ones are left out, as the section view leaves them out.

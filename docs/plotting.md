@@ -655,6 +655,11 @@ editor shows exactly what plots. It reads no widget and keeps its caches
   imagery is capped by.
 - **Legend, notes, image.** A sample line per layer in use (in its paper
   colour and weight); wrapped notes; a project image fitted.
+
+  200 dpi and 8 megapixels.
+- **Legend, notes, image.** What the sheet's plans show, a sample each as
+  it prints ("The smart legend", below); wrapped notes; a project image
+  fitted.
 - **Furniture.** North arrow (pointing where world +Y is on the paper),
   scale bar (1, 2 or 5 times a power of ten, at most 50 mm), and the view's
   title underlined in its bottom-left corner.
@@ -1400,6 +1405,143 @@ least 0 is refused rather than read as some other count.
 The tests are `tests/cad/plotting/test_tables.cpp`,
 `tests/qt_widgets/plotting/test_sheet_tables_painter.cpp` and
 `tests/qt_widgets/plotting/test_sheet_register_editor.cpp`.
+
+## The smart legend
+
+A legend that lists every layer of the drawing tells the reader about things
+that are not on the sheet. A set strung along a road then names the whole
+survey on every page. So a Legend viewport lists what the sheet's plans
+actually SHOW, each entry with a sample drawn exactly as the plan prints it.
+
+The logic is headless, in `include/katana/cad/plotting/legend.hpp`:
+`computeLegend(model, set, sheetIndex, scope, options)` is a pure function of
+the model, the set and the options. The painter, the editor, a test and an
+agent all get the same list from it.
+
+**What is shown.** An entity is listed when all of these hold:
+- it is visible, and on a layer the document shows;
+- the plan does not hide its layer (`hiddenLayers`, children with their
+  parent);
+- its SHAPE meets the plan's window on the ground. The window is the
+  viewport's rectangle at its scale about its centre, turned by its
+  rotation. A turned viewport shows its rotated rectangle, not the box
+  around it.
+
+Example: a strip 100 x 10 mm at 1:1000, turned 45 degrees about the origin,
+is 100 m along the diagonal and 10 m across it. The point (40, 0) lies inside
+the box around the strip, but 28 m from the strip's middle line, so it is not
+listed. A line from (30, 0) to (38, 0) is not listed either: its own box lies
+inside the strip's box, but the line never meets the strip.
+
+The finer rules:
+- A symbol reaches half its size past its point. That is the size its
+  style gives it on the ground; a symbol sized on paper (a style with no
+  size) is judged by its point alone, so one whose point lies just outside
+  the window is not listed although a sliver of it prints at the edge.
+- A hatched area that covers the whole window is shown, although none of its
+  edges is in the window.
+- Dimensions are not listed.
+- Key plans are not counted: they show the drawing faded, as a map of the
+  sheets.
+- An entity that two plans show is counted once.
+
+**Grouped by what prints.**
+- An entity drawn in a style of the drawing (a library linestyle or symbol,
+  or the style a survey code gave it) is grouped with that style's other
+  entities, whatever their layers.
+- Any other entity is grouped by its layer. A style name the drawing has no
+  style for counts as no style.
+- Within a group, each kind of mark is an entry of its own: a symbol, a plain
+  point, a line (lines, arcs, polylines and circles), a filled or hatched
+  area (a closed polyline) and a text. A point and a line of one layer print
+  differently.
+
+**Labels.** An entry's label is the description the survey code library
+gives the code its entities carry, when every coded entity of the entry
+agrees on it. Otherwise it is the style's or the layer's name. A point's
+field code is looked up by its string name, so `SP1 ST` finds the rule
+`SP*`. A style's own description is not used: in practice it holds a colour
+name or the import's provenance, not words for a reader. The survey code
+library is optional: without one, every label is a name.
+
+**Look.** An entry is drawn with the look most of its entities resolve to
+(`resolveDisplay`: colour, weight, linetype, symbol and its size, hatch). A
+tie goes to the look of the entity with the lowest id.
+
+**Order.** Symbols, then points, lines, areas and texts, each sorted by label
+with letter case folded. The same input always gives the same list.
+
+**Scope** (`Viewport::legendScope`, a new member at the end of `Viewport`):
+
+| `LegendScope` | Stored as | Lists what is shown by |
+|---|---|---|
+| `ThisSheet` (the default) | left out | the plans of the legend's own sheet |
+| `WholeSet` | `"legend_scope": "whole_set"` | every plan of the set |
+| `WholeDrawing` | `"legend_scope": "whole_drawing"` | the whole drawing, every entity shown in the document |
+
+A sheet with no plan lists what the set's plans show, and a set with no plan
+lists the whole drawing. `Legend::scope` says where the fall-back led. An
+unplaced plan (one with an empty rectangle) shows nothing. An unknown
+`legend_scope` is refused when the set is read.
+
+**Automatic plans.** A plan on automatic scale or centre shows the window the
+painter chose. The painter passes its own rule (`resolvePlanViewport`), so
+the legend lists what the plan beside it drew. Without it, `fittedPlanWindow`
+applies the same rule to the model. It does not count imagery and meshes,
+which the model does not hold.
+
+**On the paper** (`src/katana_qt/plotting/legend_painter.hpp`):
+- The heading reads LEGEND.
+- Each entry has a sample cell of 10 x 3.6 mm and its label in capitals
+  beside it, 1.8 mm high.
+- `layoutLegend` flows the entries down columns and then across. Each column
+  is as wide as its widest label needs, and the rows are shared evenly
+  between as few columns as hold every entry.
+- A label wider than its column is squeezed to it.
+- When the entries do not all fit, the last place says how many are left
+  out, in grey. Example: a panel 40 x 60 mm holds one column of ten rows, so
+  thirty layers print nine samples and "+21 more".
+
+Each sample goes through the same resolution the plan painter uses, so a
+legend cannot show a mark the plan does not print. Colours go through the
+paper colour rule (`paperColour`), so white prints black.
+
+| Kind | Sample |
+|---|---|
+| Line | a library linestyle's own strokes through the shared style painter (`src/katana_qt/customisation/style_painter.hpp`), else a model linetype's dashes, else a plain line, in the entry's weight; a style's symbol at each end, as the plan puts one at every vertex |
+| Symbol | the symbol at its plotted size: a size on the ground at the legend's scale, the library definition's own, or the plain mark's for a built-in shape. It is shrunk only when it would not fit its cell |
+| Point | the plain point mark, 2 mm across, as on the plan |
+| Area | a swatch filled or hatched with the entry's pattern, outlined as a line of the entry is |
+| Text | "Abc" in the entry's colour |
+
+A size on the ground (a symbol in metres, a world linestyle, a hatch's
+spacing) is drawn at `Legend::scale`. That is the scale of the first plan on
+the legend's sheet, else of the first plan the entries came from, else the
+legend viewport's own.
+
+**In the editor.** A Legend viewport's properties have a **Lists** choice
+(objectName `sheetLegendScope`): what this sheet's plans show, what every
+sheet's plans show, or everything in the drawing. A change is one undo step.
+Under the choice, a line (`sheetLegendSummary`) says what the legend lists
+now and where a fall-back led, for example "3 entries from 2 plans of the
+set - this sheet has no plan".
+
+**For an agent.** Every step is a function with parameters:
+
+| Function | Does |
+|---|---|
+| `legendFor(document, viewportId)` | the legend a Legend viewport lists, at its own scope, with the document's spatial index and survey code library. `NotFound` for no such viewport; `InvalidArgument` for one that is not a legend |
+| `setLegendScope(document, viewportId, scope)` | sets the scope as one undoable step (`LEGEND_SCOPE`). An unchanged scope records no step |
+| `computeLegend(model, set, sheetIndex, scope, options)` | any sheet at any scope, headless |
+| `legendJson(legend)` | the entries as JSON: kind, label, style, layer, code, colour, weight, linetype, symbol and its size, hatch and count, every member written |
+| `toString` / `legendScopeFrom` | `this_sheet`, `whole_set`, `whole_drawing` |
+
+The tests are `tests/cad/plotting/test_legend.cpp` (visibility by rectangle
+and rotation, hidden layers, grouping, labels, order, scopes, storage, the
+flow into columns), `tests/qt_widgets/plotting/test_legend_painter.cpp` (each
+kind of sample, a symbol inked in its cell at its plotted size, the panel on
+a sheet, "+N more") and `tests/qt_widgets/plotting/test_legend_properties.cpp`
+(the scope choice in the editor).
 
 ## Not yet
 
