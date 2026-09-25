@@ -138,6 +138,12 @@ TEST(LabelLayout, WithNoRoomALabelIsSuppressedAndCounted)
     EXPECT_EQ(layout.considered, 5u);
     EXPECT_EQ(layout.placed.size(), 1u);
     EXPECT_EQ(layout.suppressed, 4u);
+    // Which: the labels are 2, 4, 6, 8 and 10, placed in id order, so the
+    // first is placed and the rest are named, one piece each.
+    EXPECT_EQ(layout.placed.front().label, scene.labels[0]);
+    EXPECT_EQ(layout.suppressedPieces,
+              (std::vector<LabelPieceRef>{{scene.labels[1], 0}, {scene.labels[2], 0},
+                                          {scene.labels[3], 0}, {scene.labels[4], 0}}));
 }
 
 TEST(LabelLayout, ADisplacedLabelGetsALeaderBack)

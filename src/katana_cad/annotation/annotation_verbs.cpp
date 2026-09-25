@@ -496,28 +496,6 @@ std::string describeRule(const katana::entity::LabelRule& rule)
     return out.str();
 }
 
-// The text a label shows now, its pieces' texts joined by " | ".
-std::string labelTexts(const katana::entity::Model& model, const katana::entity::LabelGeometry& label)
-{
-    const auto* style = model.labelStyles.find(label.style);
-    if (style == nullptr) {
-        return {};
-    }
-    std::string joined;
-    for (const auto& piece : ann::labelPiecesOf(model, label, *style)) {
-        if (piece.tickOnly) {
-            continue;
-        }
-        const std::string text = ann::labelText(label, *style, piece);
-        if (text.empty()) {
-            continue;
-        }
-        joined += joined.empty() ? "" : " | ";
-        joined += text;
-    }
-    return joined;
-}
-
 // Runs a command built elsewhere; nullptr is "nothing to do", said.
 Result<std::string> runBuilt(Document& document, Result<cmd::CommandPtr> built,
                              const std::string& done, const std::string& nothing)
@@ -597,7 +575,8 @@ LabelStyle LABELSTYLE LIST | NEW name kind=point|segment|arc|area|chainage [text
           ch .Nf upper lower; a line with a value the target lacks is dropped
 Label     LABEL id [id...] style= [part=N] [layer=] [at=x,y] [text=]  (SELECTION for the
           selection) | LABEL ALIGN name style= [layer=] | LIST [id...] | SET id [style=
-          at=x,y|none text=|none] | DELETE id... | LAYOUT [scale=N] [collisions=on|off]
+          at=x,y|none text=|none layer=] | DELETE id... | LAYOUT [scale=N] [collisions=on|off]
+          (LAYOUT adds a label= piece= suppressed=yes line for each piece with no room)
 AutoLabel AUTOLABEL RULE ADD name style= [layer=glob code=glob type= labellayer= enabled=]
           AUTOLABEL RULE SET name opts | RULE DELETE name | RULE LIST
           AUTOLABEL RUN [rule...] | PREVIEW [rule...] | CLEAR [rule...]
@@ -1066,7 +1045,7 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
             if (label->position) {
                 line << " at=" << real(label->position->x) << "," << real(label->position->y);
             }
-            line << " text=" << field(labelTexts(model, *label));
+            line << " text=" << field(ann::shownLabelText(model, *label));
             out += out.empty() ? "" : "\n";
             out += line.str();
         });
@@ -1141,6 +1120,11 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
             out << "\nlabel=" << placed.label << " piece=" << placed.piece << " x=" << real(centre.x)
                 << " y=" << real(centre.y) << " candidate=" << placed.candidate
                 << " displaced=" << (placed.displaced ? "yes" : "no") << " text=" << field(text);
+        }
+        // Then each piece that found no room, so it can be selected and
+        // given some.
+        for (const ann::LabelPieceRef& piece : layout.suppressedPieces) {
+            out << "\nlabel=" << piece.label << " piece=" << piece.piece << " suppressed=yes";
         }
         return out.str();
     }
@@ -1252,19 +1236,13 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
             requests.push_back(request);
         }
     }
-    // Every label as one step: one UNDO takes back the lot.
-    auto transaction = std::make_unique<cmd::Transaction>("CREATE_LABEL");
-    for (const ann::LabelRequest& one : requests) {
-        auto built = ann::createLabel(model, one);
-        if (!built) {
-            return makeError(built.error().code, built.error().message,
-                             (one.target != 0 ? "id=" + std::to_string(one.target)
-                                              : "alignment=" + one.alignment) +
-                                 " " + built.error().context);
-        }
-        transaction->add(std::move(*built));
+    // Every label as one step: one UNDO takes back the lot. The Label
+    // Objects tool makes its labels through the same door.
+    auto built = ann::createLabels(model, requests);
+    if (!built) {
+        return built.error();
     }
-    if (auto status = document_.execute(std::move(transaction)); !status) {
+    if (auto status = document_.execute(std::move(*built)); !status) {
         return status.error();
     }
     const auto created = document_.lastCreatedEntities();

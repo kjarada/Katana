@@ -1,6 +1,6 @@
 // Text and dimensions (see families.hpp). The tools themselves are in
-// annotate_text.cpp, annotate_dimension.cpp, annotate_dimension_kinds.cpp and
-// annotate_leader.cpp; this file
+// annotate_text.cpp, annotate_dimension.cpp, annotate_dimension_kinds.cpp,
+// annotate_leader.cpp and annotate_label.cpp; this file
 // lists them, so the one call toolCatalog() makes keeps every one of them in
 // the link.
 //
@@ -118,6 +118,22 @@ void addAnnotateTools(ToolCatalog& catalog, const Report& report)
         .tip = "Draws an arrow to a feature with a note at its end: pick the tip and the bends, "
                "press Enter, then type the note.",
         .make = annotate::makeLeaderTool,
+    }));
+    // A bare LABEL starts it, as a bare LEADER starts the Leader tool; with
+    // arguments LABEL is the interpreter's verb, which makes the same labels
+    // (annotate_label.cpp).
+    report(catalog.add(ToolInfo{
+        .id = "annotate.label",
+        .name = "Label Objects",
+        .category = "Annotate",
+        .group = "Labels",
+        .order = 1,
+        .aliases = {"LABELOBJECTS", "LBL", "LABEL"},
+        .shortcut = {},
+        .tip = "Labels the objects chosen in a label style - a point's number, a line's bearing "
+               "and distance, a lot's area: pick them, press Enter, then click where the text "
+               "goes or press Enter to let it find room.",
+        .make = annotate::makeLabelTool,
     }));
 }
 

@@ -87,6 +87,13 @@ command failed, so the model sees the failure and the reason.
 The help (`katana://help`) and the status (`katana://status`) are also
 resources, for a client that attaches context rather than calling tools.
 
+Annotation needs no tool of its own: its verbs reply in `key=value` records
+(`docs/annotation.md`, "The verbs"), which come back in each command's
+`output`. `LABEL LAYOUT` names every label piece that found no room on a
+line of its own (`label=4 piece=0 suppressed=yes`), so an agent can select it
+or pin it elsewhere with `LABEL SET id at=x,y`, as the window's Label Layout
+Report does (`McpServer.LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem`).
+
 ## What the server adds to the command line
 
 Three rules that a typed command does not have, because a model is not a person

@@ -306,7 +306,7 @@ every reply is `key=value` records an agent can read without guessing:
 | `TEXTSTYLE LIST \| NEW \| SET \| DELETE \| INFO` | `created text style name=Notes font="" paper=3.5 width=1 ... spacing=1` |
 | `TEXT p [height] "text" style= paper= justify= rotation=`, `MTEXT`, `TEXTEDIT id` | `created text id=7 style=Standard paper=3.5 justify=MC height=0.7` |
 | `LABELSTYLE LIST \| NEW \| SET \| DELETE \| INFO \| DEFAULTS \| VALUES kind \| CHECK kind template` | `added=7 styles=...`, `kind=point values=id,layer,...` |
-| `LABEL id... style=`, `LABEL SELECTION`, `LABEL ALIGN name`, `LIST`, `SET`, `DELETE`, `LAYOUT [scale= collisions=]` | `scale=600 considered=5 placed=5 displaced=0 suppressed=0 orphaned=0` and a `label=... x= y= candidate= text=` line each |
+| `LABEL id... style=`, `LABEL SELECTION`, `LABEL ALIGN name`, `LIST`, `SET`, `DELETE`, `LAYOUT [scale= collisions=]` | `scale=600 considered=5 placed=4 displaced=0 suppressed=1 orphaned=0`, a `label=... x= y= candidate= text=` line for each piece placed and a `label=... piece=... suppressed=yes` line for each that found no room |
 | `AUTOLABEL RULE ADD \| SET \| DELETE \| LIST`, `RUN`, `PREVIEW`, `CLEAR` | `autolabel created=2 kept=0 removed=0 skipped=0` and `rule=... labels=N` |
 | `DIM LINEAR \| HORIZONTAL \| VERTICAL \| ALIGNED \| ANGULAR \| RADIUS \| DIAMETER \| ORDINATE \| BASELINE \| CONTINUE` | `created dimension id=5 kind=diameter measures=10 text=Ø10.000 associative=yes`, `created dimensions=2 ids=7,8` |
 | `LEADER p p... text= arrow= callout= style= paper= arrowsize= landing=`, `BALLOON` | `created leader id=26 text="PIT 12\nIL 10.50" associative=no` |
@@ -340,6 +340,54 @@ with Run and Clear, which report what `AUTOLABEL` replies. The dialogs keep
 no copy of the tables: an undo or a verb typed while one is open shows at
 once. The Annotate menu's tools are in `docs/tools.md`; the painting is in
 `docs/plan_view.md`, "Annotation".
+
+**Labels by hand** (2026-09-26). Until then a label could come only from an
+auto-label rule or a typed `LABEL`; nothing in the window made, edited or
+reported one. Now:
+
+* **Annotate > Label Objects** (`annotate.label`; `LABELOBJECTS`, `LBL`, and
+  a bare `LABEL`, as a bare `LEADER` starts the Leader tool) labels what is
+  selected, or what is picked then Enter, with Style, Part and Text options,
+  then a click for the text's place or Enter to leave it to the placer. It
+  makes its labels through `annotation::createLabels`, the door the `LABEL`
+  verb now goes through too, so the tool and `LABEL id... style= part= at=
+  text=` make the same entities as one undo step (`test_annotate_label_tool.cpp`
+  compares the two). The style offered is the one the drawing's newest
+  hand-placed label wears when it fits, else the first by name that can
+  label the object: remembered by the drawing, as the Text tool's height is,
+  not by the program. Several objects share no one place, so with more than
+  one only Enter places them. The selection is cleared once they are made, so
+  the tool, starting again, asks for the next objects instead of labelling
+  the same ones twice.
+* **Annotate > Edit Label...** (`annotateEditLabel`, the dialog
+  `labelEditDialog`; `src/katana_qt/annotation/label_edit_dialog.hpp` lists
+  every field) opens on the selected label: its style, its own text (ticked,
+  or `text=none`), where its text is pinned (ticked, or `at=none` for the
+  placer) and its layer. OK and Apply build the `LABEL SET` line naming only
+  what changed - shown as it will run - and run it through the window's one
+  executor (`docs/desktop.md`), so it is echoed, kept and one undo step. With
+  no label selected it says so and runs nothing; it asks nothing in a box.
+  A text the command line cannot write (a double quote, or the bare word
+  `none`, which `LABEL SET` reads as "no own text") is refused in the dialog,
+  naming the field.
+* **The Properties panel** shows a label's resolved **Text** and its
+  **Position** (`pinned at E, N` or `automatic`) beside its style, target,
+  part and rule. The text is `annotation::shownLabelText`, which `LABEL LIST`
+  now replies with too, so the panel and the verb cannot disagree.
+* **Annotate > Label Layout Report...** (`annotateLabelLayout`,
+  `labelLayoutDialog`; `label_layout_report.hpp`) runs `LABEL LAYOUT` - with
+  `collisions=off` when its box is unticked - through the same executor when
+  it opens and on Run, and shows the placed, displaced, suppressed and
+  orphaned counts read back from the reply. **Select Suppressed** runs
+  `SELECT id...` for the labels with a piece that found no room. For that
+  the verb now names each such piece in a record of its own,
+  `label=7 piece=0 suppressed=yes`, after the placed ones
+  (`LabelLayout::suppressedPieces`, `LabelLayoutNamesEachPieceThatFoundNoRoom`).
+  The dialog works nothing out itself: an agent reads the same records.
+
+Opening Edit Label by double-clicking a label is left to the plan view's
+double-click work, which reaches the dialog through the action's name,
+`annotateEditLabel`.
 
 ## Stored with the project
 
@@ -403,6 +451,10 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/cad/annotation/test_annotation_verbs.cpp` | every verb and its reply, undo as one step |
 | `tests/cad/annotation/test_export_annotation.cpp` | what a file is handed |
 | `tests/cad/tools/test_annotate.cpp` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
+| `tests/cad/tools/test_annotate_label_tool.cpp` | the Label Objects tool against the `LABEL` line, its style offered, options, undo and refusals |
+| `tests/qt_widgets/annotation/test_label_edit_dialog.cpp` | the `LABEL SET` line Edit Label writes, the dialog and the Label Layout Report driven by object name, each line run as the window runs it |
+| `qt_labels_are_made_edited_and_reported_in_the_window_headless` | the window end to end: `LBL` answered on the command line, the Properties rows, Edit Label's line through the one executor, the layout report, the Annotate menu |
+| `cli.label_layout_names_the_label_that_found_no_room` | `katana_cli`: the suppressed record, and a pinned label placed |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
 
@@ -423,8 +475,8 @@ it skipped dimensions, and so does the archive exporter.
   justify=`, `TEXTEDIT`). The Linear Dimension tool stores the aligned
   projection (`docs/tools.md`).
 * **Labels are not picked by their text**: a label is selected at its
-  anchor, and moved off its placed position with `LABEL SET id at=x,y`
-  rather than by dragging.
+  anchor, and moved off its placed position with Annotate > Edit Label
+  (`LABEL SET id at=x,y`) rather than by dragging its text.
 * **PURGE** does not purge unused text or label styles.
 * **DXF**: no MTEXT, masks, width factors or slants on export, and nothing
   on import becomes a label, a leader or a dimension kind.
