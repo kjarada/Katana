@@ -1277,3 +1277,117 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# File > Run Script, the SCRIPT verb and --script (docs/desktop.md, "Run
+# Script"): a katana_cli script run in the window, each line through the one
+# executor. good.kcs holds three commands among comments and blank lines, on
+# its lines 4, 6 and 8; bad.kcs's second command, on line 5, is a circle of
+# radius -1, which the interpreter refuses. A headless run prints what each
+# line logged (not its echo), and the run ends with its record.
+if(TARGET katana)
+    set(_scripts "${CMAKE_CURRENT_SOURCE_DIR}/qt_widgets/data/scripts")
+    # --script as a step, then LIST: every command ran, in order.
+    add_test(NAME qt_script_switch_runs_every_line_of_a_script_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSCRIPT=${_scripts}/good.kcs"
+            "-DDRIVE=>LIST"
+            "-DEXPECT=rectangle created[\r\n]+circle created[\r\n]+line created[\r\n]+script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities"
+            "-DFORBID=unknown command|a line that was refused"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_switch_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A refused line stops the run there and fails it: the third command is
+    # never run (ran=2).
+    add_test(NAME qt_script_switch_stops_at_the_first_refused_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DSCRIPT=${_scripts}/bad.kcs"
+            "-DREFUSED=rectangle created[\r\n]+[^!]*! InvalidGeometry: circle radius must be positive \\[-1\\][\r\n]+script=\"[^\"]*/bad\\.kcs\" lines=3 ran=2 failed=1 stopped_at=5[\r\n]+! bad\\.kcs stopped at line 5, which was refused: CIRCLE 0,0 -1[\r\n]+--script [^\r\n]*bad\\.kcs stopped at a line that was refused"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_switch_refused_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Typed, with CONTINUE: every line runs and the refused one is counted,
+    # leaving the rectangle and the line. A typed '#' line is a note that
+    # runs nothing (the interpreter would have called it an unknown command);
+    # SCRIPT alone is its usage, and a missing file is NotFound by its path.
+    add_test(NAME qt_typed_script_continue_runs_every_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SCRIPT \"${_scripts}/bad.kcs\" continue|># a note, not a command|>LIST|>SCRIPT|>SCRIPT \"${_scripts}/no_such_script.kcs\""
+            "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+line created[\r\n]+script=\"[^\"]*/bad\\.kcs\" lines=3 ran=3 failed=1[\r\n]+! bad\\.kcs: 1 of the 3 lines run were refused\\.[\r\n]+2 entities.*! InvalidArgument: usage: SCRIPT <file\\.kcs> \\[CONTINUE\\][\r\n]+! NotFound: no such script \\[[^\r\n]*no_such_script\\.kcs\\]"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/typed_script_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A script whose second line runs the script itself: refused as already
+    # running, so the run stops there rather than recursing for ever, and
+    # its third line never runs.
+    set(_runs_itself "${CMAKE_CURRENT_BINARY_DIR}/qt_scripts/runs_itself.kcs")
+    file(WRITE "${_runs_itself}" "RECT 0,0 1,1\nSCRIPT \"${_runs_itself}\"\nLINE 0,0 1,0\n")
+    add_test(NAME qt_a_script_may_not_run_itself_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SCRIPT \"${_runs_itself}\"|>LIST"
+            "-DEXPECT=rectangle created[\r\n]+! SCRIPT: runs_itself\\.kcs is already running; a script may not run itself\\.[\r\n]+script=\"[^\"]*/runs_itself\\.kcs\" lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! runs_itself\\.kcs stopped at line 2, which was refused: SCRIPT [^\r\n]*[\r\n]+1 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_runs_itself_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # File > Run Script, driven as a person drives it: the dialog shows the
+    # file's commands with their line numbers and the SCRIPT line it will
+    # run; Browse, headless, says what to do instead; Run runs the line
+    # through the one executor and says how it ended.
+    add_test(NAME qt_run_script_dialog_runs_the_line_it_shows_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileRunScript|scriptPath=${_scripts}/good.kcs|scriptContinueOnError=on|?scriptPreview|?scriptCommand|!scriptBrowse|?scriptStatus|!scriptRun|?scriptStatus|>LIST"
+            "-DEXPECT=opened fileRunScriptDialog \"Run Script\"[\r\n]+scriptPreview: 4 RECT 0,0 10,5 6 CIRCLE 5,5 2 8 LINE 0,0 10,0[\r\n]+scriptCommand: SCRIPT \"[^\"]*/good\\.kcs\" CONTINUE[\r\n]+scriptStatus: A headless session opens no file dialog: fill scriptPath with the path instead\\.[\r\n]+rectangle created[\r\n]+circle created[\r\n]+line created[\r\n]+script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+scriptStatus: Done: script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/run_script_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A dialog that runs a SCRIPT line gets back what every line of the script
+    # logged, not only the record: a line run inside another line's run adds
+    # to both captures. A script that stops is not ok, with its refusal.
+    add_test(NAME qt_a_dialogs_script_line_gets_back_what_every_line_said_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=<SCRIPT \"${_scripts}/good.kcs\"|<SCRIPT \"${_scripts}/bad.kcs\""
+            "-DEXPECT=--run-line SCRIPT \"[^\"]*/good\\.kcs\": ok=yes[\r\n]+  reply: rectangle created[\r\n]+  reply: circle created[\r\n]+  reply: line created[\r\n]+  reply: script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+.*--run-line SCRIPT \"[^\"]*/bad\\.kcs\": ok=no[\r\n]+  reply: rectangle created[\r\n]+  reply: script=[^\r\n]*stopped_at=5[\r\n]+  error: InvalidGeometry: circle radius must be positive \\[-1\\][\r\n]+  error: bad\\.kcs stopped at line 5, which was refused: CIRCLE 0,0 -1"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_run_line_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Several lines at once on the command line - what a paste puts there -
+    # run as a script that stops at the first refused: the circle of radius
+    # -1 stops it, and the LINE after it is never run.
+    add_test(NAME qt_several_lines_on_the_command_line_run_as_a_script_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 0,0 10,5\nCIRCLE 0,0 -1\nLINE 0,0 10,0|>LIST"
+            "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+script=pasted lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! The pasted lines stopped at line 2, which was refused: CIRCLE 0,0 -1[\r\n]+1 entities"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pasted_lines_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Without --screenshot, --script is a batch run as katana_cli's is: never
+    # shown, over when its steps are, 0 when every line ran and 1 at the first
+    # refused.
+    add_test(NAME qt_script_batch_run_exits_when_the_script_is_done_headless
+        COMMAND katana --script "${_scripts}/good.kcs" --command LIST)
+    set_tests_properties(qt_script_batch_run_exits_when_the_script_is_done_headless PROPERTIES
+        PASS_REGULAR_EXPRESSION "script=\"[^\"]*/good\\.kcs\" lines=3 ran=3 failed=0[\r\n]+3 entities")
+    add_test(NAME qt_script_batch_run_fails_at_a_refused_line_headless
+        COMMAND katana --script "${_scripts}/bad.kcs")
+    set_tests_properties(qt_script_batch_run_fails_at_a_refused_line_headless PROPERTIES
+        WILL_FAIL TRUE)
+    set_tests_properties(qt_script_switch_runs_every_line_of_a_script_headless
+        qt_script_switch_stops_at_the_first_refused_line_headless
+        qt_typed_script_continue_runs_every_line_headless
+        qt_a_script_may_not_run_itself_headless
+        qt_run_script_dialog_runs_the_line_it_shows_headless
+        qt_a_dialogs_script_line_gets_back_what_every_line_said_headless
+        qt_several_lines_on_the_command_line_run_as_a_script_headless
+        qt_script_batch_run_exits_when_the_script_is_done_headless
+        qt_script_batch_run_fails_at_a_refused_line_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
