@@ -661,14 +661,16 @@ fitted to the drawing without adding it to the project.
 File > Sheets (Ctrl+Shift+P) opens `src/katana_qt/sheet_editor.hpp`, a window
 beside the drawing:
 
-- **Sheets** on the left: add, duplicate, remove, reorder, rename
-  (double-click).
+- **Sheets** on the left, each with a picture of itself: add, duplicate,
+  remove, reorder (drag), rename (double-click).
 - **The canvas**: the painter's output, cached and painted again only when
   the document, the zoom or the pan changes. Click to select a viewport;
   drag to move it and the handles to resize it, snapping to the drawing area
   and the other viewports (Alt: no snap); Shift-drag pans the drawing inside
   a plan; arrows nudge (Shift: 10 mm); Delete removes; the wheel zooms and a
-  middle or empty-paper drag pans; double-click the desk to fit the page.
+  middle or Space drag pans; an empty-paper drag is a rubber band;
+  double-click the desk to fit the page. Several viewports at once, the
+  clipboard, the paper grid and the rulers are in "Editing on the canvas".
   A drag is ONE command, committed on release.
 - **Properties** on the right: a viewport's title, scale (or Auto),
   rotation, centre, exaggeration, alignment and chainages, north arrow,
@@ -684,6 +686,187 @@ beside the drawing:
 
 The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
 `test_sheet_editor.cpp`.
+
+## Editing on the canvas
+
+What makes the sheet editor a layout tool: several viewports picked and
+moved at once, a clipboard, a paper grid, rulers, the world under the cursor,
+and a list of sheets that shows each one. What an edit does is decided in
+`include/katana/cad/plotting/viewport_edits.hpp`, with no Qt, so an agent
+makes the same edits without the canvas and a test checks each without a
+mouse. The editor's pieces are in `src/katana_qt/plotting/`: the rulers and
+grid (`sheet_rulers.hpp`), the cursor readout (`sheet_readout.hpp`), the
+pictures of the sheets (`sheet_thumbnails.hpp`), the list
+(`sheet_list_widget.hpp`), the clipboard (`viewport_clipboard.hpp`), and the
+Edit and View menus (`sheet_editor_editing.cpp`).
+
+Nothing new is stored. The selection, the grid and the rulers belong to the
+editor; each edit stores the set through `Document::setSheetSet`, as every
+edit in `sheet_commands.hpp` does, as ONE undoable step.
+
+### Several viewports at once
+
+- **Picking.** A click selects one viewport. Ctrl-click or Shift-click adds
+  one or takes it out. (Shift-drag on a plan still pans its drawing; a
+  Shift-click on it without a drag adds it or takes it out.) The last one
+  picked is the
+  **primary**: it has the handles and the properties. `SheetCanvas::selected`
+  returns it, and `SheetCanvas::selectedIds` returns all of them in the
+  sheet's order, for anything that acts on several.
+- **The rubber band.** A drag on empty paper draws a band. Dragged left to
+  right it is a window and takes what it encloses (solid, blue); right to
+  left it is a crossing and takes what it touches (dashed, green), as CAD
+  programs pick (`viewportsInBand`). With Ctrl or Shift it adds to the
+  selection. The paper is panned with the middle button, or with Space held
+  and the left.
+- **A group drag.** Dragging any selected viewport moves them all. Their
+  bounds snap, and each moves by the same distance: ONE step
+  (`moveViewports`). A locked viewport stays where it is. A click on one of
+  a group without a drag selects it alone, and Escape abandons a drag.
+- **The keys.** The arrows move every selected viewport by 1 mm (Shift:
+  10 mm), one step a press. Delete or Backspace removes them all, locked or
+  not, in one step (`removeViewports`). Tab and Shift+Tab step the selection
+  through the placed viewports in the sheet's order and wrap round
+  (`cycleViewport`); on a sheet with none, Tab moves the focus on.
+
+### Copy, paste and duplicate
+
+Ctrl+C puts copies of the selected viewports on the system clipboard as the
+sheet set's own JSON, one sheet holding them, under the MIME type
+`application/x-katana-viewports`. So they paste onto another sheet, into
+another project, or into another Katana running beside this one. A copy
+records nothing.
+
+Ctrl+V pastes them onto the current sheet as one step (`pasteViewports`),
+with new ids (`newViewportIds`) in their order, and selects them. Where they
+land is `pasteOffset`: the first of 0, 5, 10 ... mm right and down at which
+no pasted rectangle lies exactly on a rectangle already on the sheet. So a
+paste onto another sheet lands where the copies were, a paste onto their own
+sheet lands 5 mm from them, and the next paste 5 mm further. Ctrl+X copies and
+removes (one step); after it, a paste lands where the copies were. Ctrl+D
+duplicates, copying and pasting on the same sheet as one step, without
+touching the clipboard (`duplicateViewports`).
+
+Example: `vp1` at 100..200 x 100..180 on the first sheet, in a set whose
+highest id is `vp4`. Copied and pasted onto the second sheet, it becomes
+`vp5` at 100..200 x 100..180. Pasted there again, it is `vp6` at
+105..205 x 95..175.
+
+### The paper grid
+
+View > Snap to Grid (F9) turns on a 5 mm grid (`kPaperGridMm`) through the
+paper's bottom-left corner, the corner the rulers count from. It is drawn
+faintly, every tenth line a little stronger, and zoomed out only every
+second, fifth or tenth line is drawn, so the lines are never closer than
+4 pixels.
+
+A drag snaps as before first: an edge or centre line of the moving
+rectangle to one of the drawing area or another viewport within 8 pixels,
+with a guide drawn. Then, on an axis where nothing was in reach, it takes
+the smaller move that puts its left or right edge (its bottom or top edge)
+on a grid line (`snapMovingRect`). A panel next to another lines up with it
+before it lines up with the grid. A handle's edge snaps the same way
+(`snapEdge`). Alt turns all snapping off. Example: a panel 103 mm wide
+dragged to 107.3..210.3 lands at 107..210, because its right edge is 0.3 mm
+from a line and its left edge 2.3 mm.
+
+### Rulers and the cursor
+
+View > Rulers (Ctrl+R) shows rulers along the canvas's top and left. They
+are in paper millimetres from the paper's bottom-left corner, Y up, and
+follow the zoom and the pan. The numbers are at the smallest of 1, 2, 5, 10,
+20, 50 ... mm that stands 50 pixels apart (`rulerSteps`). At 2 pixels a
+millimetre they are every 50 mm, with ticks every 5. On the rulers the
+paper's span is white, the selection's is shaded, and the cursor is marked
+in red on both.
+
+The right end of the status bar reads the cursor. It gives the paper
+position, the viewport under the cursor with its kind and scale, and, over
+a plan or key plan, the world point drawn there. That point is the
+painter's mapping turned round (`planPaperToWorld`), at the scale and centre
+the plan is drawn at, with "auto" decided and kept until the next change.
+Example: a plan at 1:500 in 100..300 x 100..250, centred on (1000, 2000) and
+turned 30 degrees, reads
+`X 222.3  Y 173.7 mm   vp1 Plan 1:500   E 1010.000  N 2005.000`. An agent asks
+`SheetCanvas::readoutAt` for the same values.
+
+### What a drag shows
+
+While viewports are dragged, each one's own paint goes with its rectangle,
+taken from the last paint of the sheet, and where it was is faded. A
+resized viewport keeps what it showed centred. A plate under it gives its
+position and size. Nothing is painted afresh, and nothing is recorded, until
+the button is let go.
+
+Double-clicking a viewport selects it and fills the window with it. View >
+Zoom to Selection (Shift+Home) fills the window with the selection. A
+double-click on empty paper or the desk, or Home, fits the page.
+
+### The list of sheets
+
+Each sheet in the list has a picture of itself (`SheetThumbnails`), painted
+by `paintSheet`, the function that plots it, at 112 x 80 pixels. A picture
+is kept until something it shows changes: the sheet, its position, the order
+of the sheets (its number and the numbers its marks print), the title-block
+values the sheets share, the project's field values, and, only for a sheet
+that shows the drawing (a plan, section, 3D snapshot, legend or key plan),
+the drawing's revision. So an edit to one sheet of a hundred paints one
+picture, and a line drawn in the model does not paint a sheet of notes.
+Stale pictures are painted one at a time while the editor is idle and shown,
+the old picture standing in until then.
+
+A sheet dragged up or down the list is moved with `moveSheet` as one step,
+and the list is built again from the document, so it never shows an order
+the set does not have (`SheetListWidget::dropAt`). PgUp and PgDn show the
+previous and the next sheet.
+
+### The actions
+
+Each is a QAction of the editor window with an object name, and each calls
+a public function that an agent calls directly:
+
+| Action | Key | Calls |
+|---|---|---|
+| `sheetCut` | Ctrl+X | `SheetEditor::cutSelection` |
+| `sheetCopy` | Ctrl+C | `SheetEditor::copySelection` |
+| `sheetPaste` | Ctrl+V | `SheetEditor::paste` |
+| `sheetDuplicateViews` | Ctrl+D | `SheetEditor::duplicateSelection` |
+| `sheetDeleteViews` | Delete | `SheetEditor::removeSelectedViewport` |
+| `sheetSelectAll` | Ctrl+A | `SheetCanvas::selectAll` |
+| `sheetSelectNextView`, `sheetSelectPreviousView` | Tab, Shift+Tab on the canvas | `SheetCanvas::cycleSelection` |
+| `sheetZoomSelection` | Shift+Home | `SheetCanvas::zoomToSelection` |
+| `sheetFitPage` | Home | `SheetCanvas::fitPage` |
+| `sheetSnapGrid` | F9 | `SheetCanvas::setSnapToGrid` |
+| `sheetShowRulers` | Ctrl+R | `SheetCanvas::setRulersShown` |
+| `sheetPreviousSheet`, `sheetNextSheet` | PgUp, PgDn | `SheetEditor::setCurrentSheet` |
+
+The arrows call `SheetEditor::nudgeSelection`, and a drop in the list
+`SheetEditor::moveSheetTo`. Cut, Copy, Duplicate, Delete and Zoom to
+Selection are enabled only while something is selected, and Paste only while
+the clipboard holds viewports. A disabled action leaves its key to the text
+box that has the focus.
+
+The edits themselves, in `viewport_edits.hpp`, take the sheet by its
+position and the viewports by id:
+
+| Function | |
+|---|---|
+| `moveViewports(document, sheet, ids, delta)` | the unlocked, placed ones moved by `delta` mm |
+| `removeViewports(document, sheet, ids)` | all of them, locked or not |
+| `copyViewports(set, sheet, ids)` | copies in the sheet's order, ids and all: a clipboard |
+| `pasteViewports(document, sheet, viewports, offset)` | onto the front of the sheet with new ids, moved by `offset` (`pasteOffset` when not given); returns the new ids |
+| `duplicateViewports(document, sheet, ids)` | copies pasted on the same sheet; returns their ids |
+| `viewportsInBand`, `viewportBounds`, `cycleViewport` | picking, the selection's bounds, Tab's order |
+| `snapToGrid`, `snapMovingRect`, `snapEdge` | the grid and a drag's snapping |
+| `planPaperToWorld`, `planWorldToPaper` | a plan's paper and its world |
+
+An id that is not on the sheet is refused with `NotFound`, naming it; an
+empty list is refused with `InvalidArgument`; a repeated id counts once. A
+refused edit changes nothing, and an edit that would change nothing adds no
+step.
+
+The tests are `tests/cad/plotting/test_viewport_edits.cpp` and
+`tests/qt_widgets/plotting/test_sheet_editor_editing.cpp`.
 
 ## Not yet
 
