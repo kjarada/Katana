@@ -613,6 +613,7 @@ rows, filters and bulk edit are tested below Qt:
 |---|---|---|
 | Styles | `cad::styleRows`: each style, how many entities wear it, and whether its linetype or symbol is missing; the chips All / Used / Unused / Missing and a search | a form (linetype and symbol through `NamePicker`, weight, colour or ByLayer, hatch, symbol size, description) with Save and Revert; New, Duplicate, Rename, Merge Into, Delete, Purge; Apply to Selection, Select Users, Make Current |
 | Linetypes | `cad::linetypeRows`: the drawing's linetypes and the library's linestyles, by group, a name both hold marked (D2) | a pattern grid that edits a drawing linetype's dashes, gaps and dots in place; New, Duplicate, Rename, Merge Into, Delete, Purge; New Style Using This; Select Users |
+| Hatch Patterns | `cad::hatchPatternRows`: each hatch pattern, solid or how many families, and who uses it (`entity::tableUsage`) | a family grid (angle in degrees, spacing in model units) or Solid, with a swatch drawn by `cad::hatchSegments`, Save and Revert; New, New Solid, Duplicate, Delete, Purge; New Style Using This; Select Users |
 | Diagnostics | `cad::styleDiagnostics`: `cad::missingNames`, then the D2 collisions, each with who uses it and what is drawn meanwhile | Select Users |
 
 A `StylePreview` beside each form draws the style, or the linestyle, at a
@@ -668,6 +669,24 @@ Two decisions from the first version still hold:
   Linetypes can be renamed too: a rename onto a library name is how a drawing
   linetype ends a D2 collision, since a model linetype cannot be MERGED into
   a library linestyle (`commands` cannot see the library).
+
+**The Hatch Patterns tab** (`HatchPatternsTab`,
+`src/katana_qt/customisation/hatch_patterns_tab.hpp`) is where the window got
+the `HATCH` verb, which it had only offered by name in pick lists. Unlike the
+two tabs before it, it runs nothing itself: every button writes the line -
+`HATCH NEW`, `SOLID`, `SET`, `DELETE`, `PURGE HATCHES`, `STYLE NEW name HATCH
+pattern` - and hands it to the window's executor (`CustomisationContext::run`),
+so it is echoed and one undo step, and an agent types the same. The family
+grid is a buffer saved by one `HATCH SET`; its swatch draws the grid as it
+stands, with the offsets Save keeps, through the hatcher the plan view uses.
+Angles show to twelve significant digits (`cad::hatchAngleDegrees`), the
+degrees that were typed: radians cannot hold 30 degrees exactly, and the
+exact reading, 29.999999999999996, would be written back by every Save.
+`none` - what an unhatched layer resolves to - is neither edited nor deleted.
+The window's title and the Format menu item keep their names ("Styles and
+Linetypes"); the menu item's tip names the hatch patterns. Renaming them
+would have changed a menu item, this heading and a test other work reads,
+for a word the tab already says.
 
 Not done: the Linetypes tab's preview draws the STORED linetype, and only the
 pattern strip shows unsaved grid edits; the Styles table has a Preview
@@ -1174,6 +1193,15 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
   ByLayer - is said in the summary, in red, and nothing runs.
 
 Tested in `tests/qt_widgets/customisation/test_global_modify_dialog.cpp`.
+
+## Terrain > Alignment Manager
+
+The alignments, their PIs, design profiles and setting-out tables, in a
+non-modal dialog the window keeps (`MainWindow::showAlignmentManager`,
+`src/katana_qt/alignment_manager.hpp`): every edit an `ALIGN` line through
+`runVerbLine`, the PI and PVI grids buffers applied by one line each. The
+decisions are in `docs/cad.md`, "The Alignment Manager". The Terrain menu
+opens with it, in an Alignments section, and the toolbar with its button.
 
 ## The rules a dialog or panel follows
 

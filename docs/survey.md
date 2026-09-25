@@ -191,10 +191,11 @@ dispatch will go when they land.
 The owner asked on 2026-09-23 for "survey menus and toolbars" with the
 functionality wired. The menu (`src/katana_qt/survey/survey_workbench.*`)
 has four sections - Survey Points (Import, Export, Point Manager, Point
-Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, the
-Angle and Bearing Calculator), Traverse and Levelling (Traverse, Level Book)
-and Coordinates (the Coordinate Converter) - plus a Survey Coding section that
-shows actions the window and the Format workbench own: the Survey Code Manager,
+Report), Coordinate Geometry (Inverse, Forward Point, Area of Selection, Parcel
+Report, the Angle and Bearing Calculator), Traverse and Levelling (Traverse,
+Level Book) and Coordinates (the Coordinate Converter) - plus a Survey Coding
+section that shows actions the window and the Format workbench own: the
+Survey Code Manager,
 Load Customisation, Replace Loaded Customisation and Apply Survey Codes
 (`docs/survey_coding.md`). The first three are the same `QAction` objects as
 on the Format menu (`SurveyServices::codeManager`, `loadCustomisation`,
@@ -229,6 +230,24 @@ quadrant bearing `N 36d52m11.63s E` - and there is deliberately no DDD.MMSS
 notation, since `36.5211` would then mean two angles depending on who typed
 it. In a line of several fields (a traverse leg) blanks separate the fields,
 so an angle there has none inside it.
+
+**Parcel Report** (`src/katana_qt/survey/survey_parcel_dialog.hpp`) is the
+window's way to `PARCEL`, which had none: a closed polyline's courses (from
+corner, quadrant bearing to whole seconds, distance) in a table, its area,
+perimeter, centroid and the direction it was drawn, the legal description
+with the name typed, and Label Courses. The numbers and the words are
+`cad::parcelReport`, `cad::formatParcelReport` and `cad::legalDescription` -
+the pane shows exactly what `PARCEL id` prints and the Legal Description tab
+what `PARCEL id LEGAL name` does. Label Courses is the line `PARCEL <id> LABEL
+<height>` through the window's executor (`SurveyServices::run`), one undo
+step, and its reply names the layer the labels went on. Copy and Save CSV
+(`cad::parcelCoursesCsv`, RFC 4180, a negative coordinate's sign kept) and the
+legal text's Save open no file dialog in a headless run (`SurveyServices::headless`).
+Its menu item has no mnemonic: every letter of "Parcel Report" is another
+item's in that menu. Tested by `tests/qt_widgets/survey/test_parcel_dialog.cpp`
+and, through the window, `qt_parcel_report_headless`. Not done: the report
+is of the parcel as it was at Compute, as every survey tool's is, and is not
+recomputed when the boundary is edited.
 
 **The points in the drawing** (`include/katana/cad/survey_points.hpp`). A
 SURVEY POINT is a point entity carrying the point-number property the import

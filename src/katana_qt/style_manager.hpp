@@ -28,6 +28,7 @@
 // session and a test drive every action by objectName.
 //
 // objectNames: tabs "managerTabs" with pages "stylesPage", "linetypesPage",
+// "hatchPatternsPage" (customisation/hatch_patterns_tab.hpp names its own) and
 // "diagnosticsPage"; see style_manager.cpp for each field and button.
 
 #include <memory>

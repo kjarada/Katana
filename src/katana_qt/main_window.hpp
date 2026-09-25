@@ -15,6 +15,7 @@
 #include <span>
 #include <vector>
 
+#include "alignment_manager.hpp"
 #include "annotation/annotation_workbench.hpp"
 #include "command_reference_dialog.hpp"
 #include "command_runner.hpp"
@@ -272,6 +273,8 @@ class MainWindow final : public QMainWindow {
     // 3D with its footprint in plan.
     void addMesh(std::string name, katana::geometry::TriangleMesh mesh,
                  katana::render::Rgba color, std::vector<katana::render::Rgba> faceColors);
+    // Terrain > Alignment Manager: built on first use and kept, non-modal.
+    void showAlignmentManager();
     void cutSectionAlongSelection();
     void cutSectionAlongAlignment();
     void corridorQuantities();
@@ -511,6 +514,9 @@ class MainWindow final : public QMainWindow {
     std::unique_ptr<SheetEditor> sheets_;
     // Edit > Select by ID, kept between uses for the reason layers_ is.
     std::unique_ptr<SelectByIdDialog> selectById_;
+    // Terrain > Alignment Manager, kept between uses and owned here for the
+    // reason layers_ is.
+    std::unique_ptr<AlignmentManagerDialog> alignments_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for
