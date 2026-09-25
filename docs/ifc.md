@@ -537,6 +537,20 @@ mistake in the writer and the same mistake in the reader cannot agree:
 
 ## Not done
 
+- **Scope and filter as Global Modify's** (the project's rule that every tool
+  acts on the selection, a view, layers, the drawing or an area, and on the
+  entities that match). EXPORT takes the selection (`SELECTED`) or the whole
+  drawing, and leaves out entities, alignments or surfaces; it does not yet
+  take `VIEW`, `AREA`, `LAYERS a,b [ONLY]` or `WHERE k=v`, nor does the
+  export dialog carry the "Apply to" and "Only those that match" controls.
+  The rule asks for one shared scope parser in katana_cad and one shared
+  "Apply to" widget in the window, neither of which exists yet (2026-09-26):
+  the scope and filter words are read inside
+  `CommandInterpreter::modify`, and a second reading of them here is what the
+  rule forbids. When the shared parser exists, both front ends resolve the
+  scope with `cad::matchEntities` and pass the entities as
+  `ExportOptions::entities`, which the writer already takes, and the reply
+  says what the scope took.
 - **Solids** are not read beyond swept disks and triangulated surfaces:
   Katana has no solid entity, so an extruded wall or a B-rep comes in as a
   point at its placement with its properties.
