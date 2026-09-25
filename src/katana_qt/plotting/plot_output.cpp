@@ -479,6 +479,21 @@ Result<PlotReport> plotSheets(const plotting::SheetSet& set, const PlotRequest& 
         return makeError(ErrorCode::FileExportFailure, "could not make the folder",
                          request.destination.toStdString());
     }
+    // A file that cannot be written stops the plot; the error says which
+    // files before it were written and kept, since the report that would
+    // have listed them is not returned.
+    const auto failed = [&report](katana::core::Error error) {
+        if (!report.files.empty()) {
+            error.message += std::format("; {} file{} written before it {} kept:",
+                                         report.files.size(), report.files.size() == 1 ? "" : "s",
+                                         report.files.size() == 1 ? "was" : "were");
+            for (const QString& file : report.files) {
+                error.message += " " + QDir::toNativeSeparators(file).toStdString() +
+                                 (&file == &report.files.back() ? "" : ",");
+            }
+        }
+        return error;
+    };
     for (std::size_t n = 0; n < selection.size(); ++n) {
         const std::size_t index = selection[n];
         const QString& path = (*files)[n];
@@ -491,7 +506,7 @@ Result<PlotReport> plotSheets(const plotting::SheetSet& set, const PlotRequest& 
             if (Status status = writePdf(path, title, set, {index}, request, source, cache,
                                          steps, report);
                 !status) {
-                return status.error();
+                return failed(status.error());
             }
             if (report.cancelled) {
                 break;
@@ -503,7 +518,7 @@ Result<PlotReport> plotSheets(const plotting::SheetSet& set, const PlotRequest& 
         }
         if (Status status = writeRaster(path, set, index, request, source(), cache, report);
             !status) {
-            return status.error();
+            return failed(status.error());
         }
         report.sheets.push_back(index);
         report.files.push_back(path);

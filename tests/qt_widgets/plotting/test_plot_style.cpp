@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include "katana/cad/plotting/frame.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/entity/model.hpp"
+#include "katana/entity/tables.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "plotting/plot_style.hpp"
 #include "sheet_painter.hpp"
@@ -376,6 +378,56 @@ TEST(PlotStyle, APlanOnASheetFollowsTheStyle)
     const QRgb black = darkestNear(
         paintedRegion(set, source, styled(PlotColourMode::Monochrome), region, kPpmm), onLine, region, kPpmm, 0.5);
     EXPECT_LE(std::max({qRed(black), qGreen(black), qBlue(black)}), 20);
+}
+
+TEST(PlotStyle, APlansSolidFillIsGreyedOnceAndInMonochromeALightOneDropsOut)
+{
+    // Two 40 m squares hatched solid, a light yellow one left of the centre
+    // and a dark blue one right of it: at 1 : 1000 their middles are paper
+    // (160, 175) and (240, 175).
+    Model model;
+    katana::entity::HatchPattern solid;
+    solid.name = "fill";
+    solid.solid = true;
+    ASSERT_TRUE(model.hatchPatterns.add(solid));
+    const Color light{255, 230, 0, 255}; // luminance 211
+    const Color dark{0, 0, 200, 255};    // luminance 23
+    for (const auto& [name, colour, x0] :
+         {std::tuple{"light", light, -60.0}, std::tuple{"dark", dark, 20.0}}) {
+        katana::entity::Layer layer;
+        layer.name = name;
+        layer.color = colour;
+        layer.hatchPattern = "fill";
+        ASSERT_TRUE(model.layers.add(layer));
+        Entity square;
+        square.geometry = katana::geometry::Polyline2{
+            {Point2(x0, -20.0), Point2(x0 + 40.0, -20.0), Point2(x0 + 40.0, 20.0), Point2(x0, 20.0)},
+            true};
+        square.layer = name;
+        ASSERT_TRUE(model.entities.add(std::move(square)).ok());
+    }
+    const plotting::SheetSet set = planSheet();
+    SheetSource source;
+    source.plan.model = &model;
+    const Box2 region = box(130.0, 150.0, 270.0, 200.0);
+    constexpr double kPpmm = 10.0; // the outline's 0.25 mm is 2.5 pixels
+    const auto middleOf = [&](const QImage& image, double x) {
+        return image.pixel(pixelOf(Point2(x, 175.0), region, kPpmm));
+    };
+
+    // Greyscale: each fill the grey of its own luminance - not darkened by a
+    // second pass.
+    const QImage grey = paintedRegion(set, source, styled(PlotColourMode::Greyscale), region, kPpmm);
+    EXPECT_EQ(middleOf(grey, 160.0), qRgb(211, 211, 211));
+    EXPECT_EQ(middleOf(grey, 240.0), qRgb(23, 23, 23));
+
+    // Monochrome: the light fill drops out to the paper's white, leaving its
+    // black outline; the dark one prints solid black.
+    const QImage mono = paintedRegion(set, source, styled(PlotColourMode::Monochrome), region, kPpmm);
+    EXPECT_EQ(middleOf(mono, 160.0), qRgb(255, 255, 255));
+    EXPECT_EQ(middleOf(mono, 240.0), qRgb(0, 0, 0));
+    const QRgb edge = darkestNear(mono, Point2(140.0, 175.0), region, kPpmm, 0.5);
+    EXPECT_LE(std::max({qRed(edge), qGreen(edge), qBlue(edge)}), 40);
 }
 
 TEST(PlotStyle, TheLogoPrintsGreyInGreyscaleAndMonochrome)
