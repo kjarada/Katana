@@ -17,6 +17,7 @@
 #include "katana/cad/interactive_tool.hpp"
 #include "katana/commands/command.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/entity/tables.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -49,6 +50,13 @@ namespace katana::cad::tools::annotate {
 // Undo - which is how a CAD command line accepts an option's capital letters.
 [[nodiscard]] bool isOption(std::string_view typed, std::string_view keyword,
                             std::size_t shortest = 1);
+
+// The text style `typed` names in `document`, as it is stored: by its name,
+// else ignoring case, as a CAD command line takes one. NotFound saying where
+// the styles are listed, or with no drawing to look in. Shared by the tools
+// that offer a note's Style (Leader, Balloon), so both find the same one.
+[[nodiscard]] katana::core::Result<std::string> textStyleNamed(const Document* document,
+                                                               std::string_view typed);
 
 // A typed height, angle, offset or distance. Through core/text.hpp, so "2.5"
 // means two and a half on every machine and "2,5" is not a number.

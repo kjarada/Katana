@@ -117,9 +117,17 @@ clicked is one more dimension, Enter makes them all as one command through
 Enter again ends the tool; Esc keeps those placed. Baseline's Spacing
 overrides a text height and a half of the base's style. Balloon
 (`annotate_balloon.cpp`) is BALLOON by hand, numbered by
-`annotation::nextBalloonNumber` unless Number says otherwise. The Leader's
-first prompt takes Arrow, Callout, Style and Paper - LEADER's `arrow=`,
-`callout=`, `style=` and `paper=` - for the leader being drawn. What a tool
+`annotation::nextBalloonNumber` unless Number says otherwise, with Style and
+Paper - BALLOON's `style=` and `paper=` - at every prompt, for the balloon
+being drawn. The Leader's first prompt takes Arrow, Callout, Style, Paper,
+SIze and Landing - LEADER's `arrow=`, `callout=`, `style=`, `paper=`,
+`arrowsize=` and `landing=` - for the leader being drawn; SIze is two
+letters because S is Style's, and Landing's `Auto` gives back the rule of one
+arrowhead where the line slopes. Until 2026-09-26 the tools offered only
+some of their verbs' options, so a leader's own arrowhead size and landing,
+and a balloon's style and height, could be given only by typing the verb.
+The text style is found by `textStyleNamed` (`annotate_common.hpp`), by its
+name or ignoring case, the same for both. What a tool
 starting again should remember is read from the drawing, not kept by the
 program: the newest dimension to go on from, the newest ordinate's datum,
 the highest balloon, the newest hand-placed label's style. Each of these

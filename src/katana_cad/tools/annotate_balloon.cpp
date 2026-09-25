@@ -1,26 +1,33 @@
 // Balloon: a numbered circle callout at the end of a leader, as the BALLOON
 // verb makes one - the item numbers of a schedule or a detail's parts.
 //
-//   Specify the balloon's arrow point or [Number]          the tip
-//   Specify next point or [Number/Undo]                    a bend, or where the
-//                                                          circle sits
-//   Specify next point or [Number/Undo] <done>             more bends, or Enter
+//   Specify the balloon's arrow point or [Number/Style/Paper]     the tip
+//   Specify next point or [Number/Style/Paper/Undo]               a bend, or
+//                                                                 where the
+//                                                                 circle sits
+//   Specify next point or [Number/Style/Paper/Undo] <done>        more bends,
+//                                                                 or Enter
 //
 // The number is one more than the highest balloon's in the drawing
 // (annotation::nextBalloonNumber, the verb's own rule), or what Number was
-// told. The balloon is ONE leader entity with a circle callout and the
-// verb's sizes - `BALLOON p p [p...] n=` typed and this tool given the same
-// points make the same entity - and a tip snapped to an entity's end,
-// middle, centre or vertex follows it, as BALLOON #id.end does.
+// told; Style and Paper are its text style and height on paper, BALLOON's
+// style= and paper=, which the tool once had no way to give. The balloon is
+// ONE leader entity with a circle callout and the verb's sizes -
+// `BALLOON p p [p...] n= style= paper=` typed and this tool given the same
+// points and options make the same entity - and a tip snapped to an
+// entity's end, middle, centre or vertex follows it, as BALLOON #id.end
+// does. The options are for the balloon being drawn, as the Leader's are.
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "annotate_common.hpp"
 #include "katana/cad/annotation/leader_build.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
 
 namespace katana::cad::tools::annotate {
@@ -40,19 +47,29 @@ class BalloonTool final : public InteractiveTool {
 
     [[nodiscard]] std::string prompt() const override
     {
-        if (numbering_) {
+        switch (asking_) {
+        case Asking::Number:
             return "Enter the balloon's number <" + number() + ">";
+        case Asking::Style:
+            return "Enter text style name <" +
+                   style_.value_or(std::string(katana::entity::kDefaultTextStyleName)) + ">";
+        case Asking::Paper:
+            // Unset, the leader's 0: its text style's height, as the verb's.
+            return "Enter the number's height on paper, mm <" +
+                   (paper_ ? formatNumber(*paper_) : std::string("the style's")) + ">";
+        case Asking::Nothing:
+            break;
         }
         if (vertices_.empty()) {
-            return "Specify the balloon's arrow point or [Number]";
+            return "Specify the balloon's arrow point or [Number/Style/Paper]";
         }
-        return vertices_.size() < 2 ? "Specify next point or [Number/Undo]"
-                                    : "Specify next point or [Number/Undo] <done>";
+        return vertices_.size() < 2 ? "Specify next point or [Number/Style/Paper/Undo]"
+                                    : "Specify next point or [Number/Style/Paper/Undo] <done>";
     }
 
     [[nodiscard]] ToolInput expects() const override
     {
-        return numbering_ ? ToolInput::Value : ToolInput::Point;
+        return asking_ != Asking::Nothing ? ToolInput::Value : ToolInput::Point;
     }
 
     ToolStep point(const Point2& at) override { return place(at, {}); }
@@ -64,8 +81,9 @@ class BalloonTool final : public InteractiveTool {
 
     ToolStep value(std::string_view typed) override
     {
-        if (numbering_) {
-            const std::string_view text = katana::core::trimmed(typed);
+        const std::string_view text = katana::core::trimmed(typed);
+        switch (asking_) {
+        case Asking::Number:
             if (text.empty()) {
                 return enter();
             }
@@ -73,26 +91,62 @@ class BalloonTool final : public InteractiveTool {
                 return ToolStep::rejected("the number is not valid UTF-8");
             }
             number_ = std::string(text);
-            numbering_ = false;
+            asking_ = Asking::Nothing;
             return ToolStep::next();
+        case Asking::Style: {
+            if (text.empty()) {
+                return enter();
+            }
+            auto found = textStyleNamed(document_, text);
+            if (!found) {
+                return ToolStep::rejected(found.error().message);
+            }
+            style_ = std::move(*found);
+            asking_ = Asking::Nothing;
+            return ToolStep::next();
+        }
+        case Asking::Paper: {
+            if (text.empty()) {
+                return enter();
+            }
+            const auto height = typedNumber(text);
+            if (!height || !(*height > 0.0)) {
+                return ToolStep::rejected("the number's height on paper is millimetres greater "
+                                          "than 0");
+            }
+            paper_ = *height;
+            asking_ = Asking::Nothing;
+            return ToolStep::next();
+        }
+        case Asking::Nothing:
+            break;
         }
         if (!vertices_.empty() && isOption(typed, "Undo")) {
             return undo();
         }
         if (isOption(typed, "Number")) {
-            numbering_ = true;
+            asking_ = Asking::Number;
+            return ToolStep::next();
+        }
+        if (isOption(typed, "Style")) {
+            asking_ = Asking::Style;
+            return ToolStep::next();
+        }
+        if (isOption(typed, "Paper")) {
+            asking_ = Asking::Paper;
             return ToolStep::next();
         }
         return ToolStep::rejected(vertices_.empty()
-                                      ? "click the point the arrow touches, or type N for the number"
-                                      : "click the next point, type N for the number, or press "
-                                        "Enter to finish");
+                                      ? "click the point the arrow touches, or type N, S or P for "
+                                        "the number, its style or its height on paper"
+                                      : "click the next point, type N, S or P for the number, its "
+                                        "style or its height on paper, or press Enter to finish");
     }
 
     ToolStep enter() override
     {
-        if (numbering_) {
-            numbering_ = false; // keeps the number shown
+        if (asking_ != Asking::Nothing) {
+            asking_ = Asking::Nothing; // keeps what the prompt showed
             return ToolStep::next();
         }
         if (vertices_.empty()) {
@@ -110,8 +164,8 @@ class BalloonTool final : public InteractiveTool {
 
     ToolStep undo() override
     {
-        if (numbering_) {
-            numbering_ = false;
+        if (asking_ != Asking::Nothing) {
+            asking_ = Asking::Nothing;
             return ToolStep::next();
         }
         if (vertices_.empty()) {
@@ -149,9 +203,9 @@ class BalloonTool final : public InteractiveTool {
   private:
     ToolStep place(const Point2& at, const AnchorRef& anchor)
     {
-        if (numbering_) {
-            return ToolStep::rejected("type the balloon's number, or press Enter to keep " +
-                                      number());
+        if (asking_ != Asking::Nothing) {
+            return ToolStep::rejected("type what the prompt asks, or press Enter to keep what it "
+                                      "shows");
         }
         if (!vertices_.empty() && coincident(vertices_.back(), at)) {
             return ToolStep::rejected(
@@ -175,7 +229,8 @@ class BalloonTool final : public InteractiveTool {
     }
 
     // The verb's balloon: a leader with the entity's default sizes, a circle
-    // callout and the number as its note.
+    // callout and the number as its note, in the style and at the height on
+    // paper the options gave.
     [[nodiscard]] LeaderGeometry balloonThrough(std::vector<Point2> vertices) const
     {
         LeaderGeometry balloon;
@@ -183,15 +238,22 @@ class BalloonTool final : public InteractiveTool {
         balloon.tipRef = tipRef_;
         balloon.callout = katana::entity::CalloutShape::Circle;
         balloon.text = number();
+        balloon.style = style_.value_or(std::string());
+        balloon.paperHeight = paper_.value_or(LeaderGeometry{}.paperHeight);
         return balloon;
     }
+
+    // What the typed line is for, when it is not a point.
+    enum class Asking { Nothing, Number, Style, Paper };
 
     const Document* document_ = nullptr;
     katana::commands::EntityAttributes attributes_;
     std::vector<Point2> vertices_;
     AnchorRef tipRef_{};
     std::optional<std::string> number_;
-    bool numbering_ = false;
+    std::optional<std::string> style_;
+    std::optional<double> paper_; // mm
+    Asking asking_ = Asking::Nothing;
 };
 
 } // namespace
