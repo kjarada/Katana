@@ -121,6 +121,16 @@ struct Viewport {
     friend bool operator==(const Viewport&, const Viewport&) = default;
 };
 
+// The scale and centre a plan viewport is drawn at once "auto" is decided:
+// what the legend reads its window from (legend.hpp) and what preflight
+// checks (preflight.hpp), both resolved by the painter's rule.
+struct PlanWindow {
+    double scale = 500.0;
+    geometry::Point2 centre{};
+
+    friend bool operator==(const PlanWindow&, const PlanWindow&) = default;
+};
+
 struct Sheet {
     // Stable for the sheet's life - "s1", "s2" ... - so a match line or key
     // plan can refer to it however the sheets are reordered or renamed; and

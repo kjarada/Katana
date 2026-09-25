@@ -85,14 +85,6 @@ struct CheckDescription {
 // Every check, in the order a viewport's findings come in.
 [[nodiscard]] std::span<const CheckDescription> preflightChecks();
 
-// The scale and centre a plan viewport is drawn at once "auto" is decided.
-struct PlanWindow {
-    double scale = 500.0;
-    geometry::Point2 centre{};
-
-    friend bool operator==(const PlanWindow&, const PlanWindow&) = default;
-};
-
 struct PreflightOptions {
     // The sheets to check, by index; every sheet when empty. The set's own
     // checks (the title block's blanks, the logo) count only these sheets.
