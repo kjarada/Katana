@@ -1,0 +1,102 @@
+{
+ "type": "Feature",
+ "stac_version": "1.0.0",
+ "id": "S2B_56HLH_20260103_0_L2A",
+ "collection": "sentinel-2-l2a",
+ "bbox": [
+  150.82399,
+  -34.421331,
+  151.965937,
+  -33.420387
+ ],
+ "geometry": {
+  "type": "Polygon",
+  "coordinates": [
+   [
+    [
+     150.84898673442035,
+     -33.42038715452384
+    ],
+    [
+     150.82398985331253,
+     -34.40905085054777
+    ],
+    [
+     151.7008960521144,
+     -34.42133109872842
+    ],
+    [
+     151.9659365500862,
+     -33.43473180600806
+    ],
+    [
+     150.84898673442035,
+     -33.42038715452384
+    ]
+   ]
+  ]
+ },
+ "properties": {
+  "datetime": "2026-01-03T00:06:06.974000Z",
+  "eo:cloud_cover": 93.501586,
+  "platform": "sentinel-2b"
+ },
+ "assets": {
+  "visual": {
+   "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/TCI.tif",
+   "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+   "title": "True color image",
+   "gsd": 10,
+   "proj:shape": [
+    10980,
+    10980
+   ]
+  },
+  "red": {
+   "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/B04.tif",
+   "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+   "title": "Red - 10m",
+   "gsd": 10,
+   "proj:shape": [
+    10980,
+    10980
+   ]
+  },
+  "green": {
+   "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/B03.tif",
+   "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+   "title": "Green - 10m",
+   "gsd": 10,
+   "proj:shape": [
+    10980,
+    10980
+   ]
+  },
+  "blue": {
+   "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/B02.tif",
+   "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+   "title": "Blue - 10m",
+   "gsd": 10,
+   "proj:shape": [
+    10980,
+    10980
+   ]
+  },
+  "thumbnail": {
+   "href": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/preview.jpg",
+   "type": "image/jpeg",
+   "title": "Thumbnail of preview image"
+  }
+ },
+ "links": [
+  {
+   "rel": "self",
+   "href": "s3://sentinel-cogs/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/S2B_56HLH_20260103_0_L2A.json",
+   "type": "application/json"
+  },
+  {
+   "rel": "license",
+   "href": "https://sentinel.esa.int/documents/247904/690755/Sentinel_Data_Legal_Notice"
+  }
+ ]
+}
