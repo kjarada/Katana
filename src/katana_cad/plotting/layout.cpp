@@ -138,8 +138,14 @@ int tilingRank(ViewportKind kind)
         return 6;
     case ViewportKind::Notes:
         return 7;
+    // A register sheet's tables: the register takes the big cell, the
+    // revisions the panel beside it (registerSheet, tables.hpp).
+    case ViewportKind::SheetIndex:
+        return 8;
+    case ViewportKind::Revisions:
+        return 9;
     }
-    return 8;
+    return 10;
 }
 
 bool isTileable(ViewportKind kind)
@@ -166,6 +172,12 @@ SizeMm minimumSize(ViewportKind kind)
     case ViewportKind::Legend:
     case ViewportKind::Notes:
         return {16.0, 8.0};
+    // Kinds the app did not have: room for the columns and a few rows of
+    // the smallest text a table is set in (tables.hpp).
+    case ViewportKind::SheetIndex:
+        return {70.0, 30.0};
+    case ViewportKind::Revisions:
+        return {50.0, 20.0};
     }
     return {8.0, 8.0};
 }

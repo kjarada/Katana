@@ -19,11 +19,13 @@
 #include <QPolygonF>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plotting/tables.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/framebuffer.hpp"
 #include "katana/render/rasterizer.hpp"
+#include "plotting/sheet_tables.hpp"
 
 namespace katana::qt {
 
@@ -649,6 +651,31 @@ void paintMessage(TextSetter& text, const Box2& rect, const QString& message)
     text.draw(rect.center(), message, style);
 }
 
+// A table laid out by cad/plotting/tables.hpp - the register, the revisions -
+// drawn exactly where the layout put each rule and text: shading, then
+// rules, then text.
+void paintTable(QPainter& painter, const Paper& paper, TextSetter& text,
+                const plotting::TableLayout& table)
+{
+    const QColor shade(232, 232, 232);
+    for (const Box2& box : table.shaded) {
+        painter.fillRect(paper.at(box), shade);
+    }
+    for (const plotting::TableRule& rule : table.rules) {
+        painter.setPen(paperPen(paper, kInk, rule.weightMm));
+        painter.drawLine(paper.at(rule.from), paper.at(rule.to));
+    }
+    for (const plotting::TableText& item : table.texts) {
+        TextStyle style;
+        style.capMm = item.capMm;
+        style.xFactor = item.xFactor;
+        style.horizontal = item.horizontal;
+        style.bold = item.bold;
+        style.colour = item.muted ? kFaint : kInk;
+        text.draw(item.anchor, QString::fromStdString(item.text), style, item.squeeze);
+    }
+}
+
 // ---- sections ----------------------------------------------------------------------
 
 // The level of `surface` at `station`, interpolated; nothing in a gap.
@@ -970,6 +997,7 @@ class SheetPainter {
     void paintLegend(const Viewport& viewport, TextSetter& text, const Paper& paper);
     void paintNotes(const Viewport& viewport, TextSetter& text, const Paper& paper);
     bool paintImage(const Viewport& viewport, const Paper& paper);
+    void paintTableViewport(const Viewport& viewport, TextSetter& text, const Paper& paper);
     void paintMarks(const Viewport& viewport, const ResolvedViewport& at, TextSetter& text,
                     const Paper& paper);
     void problem(const Viewport& viewport, std::string what)
@@ -1455,6 +1483,46 @@ bool SheetPainter::paintImage(const Viewport& viewport, const Paper& paper)
     return true;
 }
 
+void SheetPainter::paintTableViewport(const Viewport& viewport, TextSetter& text,
+                                      const Paper& paper)
+{
+    // Laid out with this painter's own font, so what the layout measured is
+    // what is drawn.
+    const plotting::TextWidth measure = [&text](std::string_view line, double capMm, bool bold) {
+        TextStyle style;
+        style.capMm = capMm;
+        style.bold = bold;
+        return text.widthMm(QString::fromUtf8(line.data(), static_cast<qsizetype>(line.size())),
+                            style);
+    };
+    // The register reports each sheet's scale as its title block does, an
+    // automatic one decided first.
+    const plotting::TableLayout table =
+        viewport.kind == ViewportKind::SheetIndex
+            ? plotting::layoutViewportTable(resolvedSheetSet(set_, source_), index_, viewport,
+                                            measure)
+            : plotting::layoutViewportTable(set_, index_, viewport, measure);
+    paintTable(painter_, paper, text, table);
+    if (table.rowsHidden > 0) {
+        problem(viewport, std::format("{} of {} rows do not fit; make the view larger",
+                                      table.rowsHidden, table.rowsShown + table.rowsHidden));
+    }
+    if (options_.slotHints && viewport.kind == ViewportKind::Revisions && table.rowsShown == 0 &&
+        table.rowsHidden == 0) {
+        // On screen only: where the rows of an empty table come from.
+        const QString hint = QStringLiteral("No revisions yet: add them under Title Block");
+        TextStyle style;
+        style.capMm = 2.0;
+        style.horizontal = HorizontalJustify::Centre;
+        style.vertical = VerticalJustify::Middle;
+        style.colour = kFaint;
+        const double half = text.widthMm(hint, style) / 2.0 + 1.0;
+        const Point2 at = viewport.rect.center();
+        knockOut(painter_, paper, Box2(Point2(at.x - half, at.y - 2.0), Point2(at.x + half, at.y + 2.0)));
+        text.draw(at, hint, style);
+    }
+}
+
 void SheetPainter::paintViewport(const Viewport& viewport, TextSetter& text, const Paper& paper)
 {
     const QRectF device = paper.at(viewport.rect);
@@ -1487,6 +1555,11 @@ void SheetPainter::paintViewport(const Viewport& viewport, TextSetter& text, con
     case ViewportKind::Image:
         drawn = paintImage(viewport, paper);
         break;
+    case ViewportKind::SheetIndex:
+    case ViewportKind::Revisions:
+        paintTableViewport(viewport, text, paper);
+        drawn = true;
+        break;
     }
     if (!drawn && options_.slotHints && !stats_.problems.empty()) {
         const std::string& last = stats_.problems.back();
@@ -1502,8 +1575,10 @@ void SheetPainter::paintViewport(const Viewport& viewport, TextSetter& text, con
     if (drawn && planLike && viewport.scaleBar) {
         paintScaleBar(painter_, paper, text, viewport.rect, scale);
     }
+    // A table's title is its heading, drawn by the table.
     if (viewport.kind != ViewportKind::Legend && viewport.kind != ViewportKind::Notes &&
-        viewport.kind != ViewportKind::Image) {
+        viewport.kind != ViewportKind::Image && viewport.kind != ViewportKind::SheetIndex &&
+        viewport.kind != ViewportKind::Revisions) {
         Viewport titled = viewport;
         titled.scale = scale;
         paintTitle(painter_, paper, text, viewport.rect,
