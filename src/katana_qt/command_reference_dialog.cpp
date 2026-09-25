@@ -149,6 +149,12 @@ Customise CUSTOMISE [REPLACE] <file> [<file>...]   load style libraries (.4d) an
           which files, and what it covers in this drawing
 PlotSheet PLOTSHEETS [path] [format=pdf|pdfs|png|tiff] [style=colour|grey|mono] [sheets=1,3-5]
           [dpi=n] [lineweight=f] [folder=path] [pattern=text]   plot the sheets (HELP SHEETS)
+Plot      PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N] [dpi=N]
+          [style=colour|grey|mono] [lineweight=F] [margin=MM]   the drawing on one sheet, as
+          the plan view shows it (File > Plot to PDF)
+Snapshot  SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N] [scale=F]
+          [bg=theme|white|none] [view=plan|3d]   a picture of a view (File > Export View
+          as Image, Edit > Copy View as Image)
 View      ZOOM (Z)   the drawing's extents | GRID [ON|OFF] | SNAP [ON|OFF] (OSNAP)
 Online    ONLINE PROVIDERS | LAYERS | INFO | IMPORT | CUSTOM | KEY   online data (GIS >
           Online Data); the usage of each is under Online data

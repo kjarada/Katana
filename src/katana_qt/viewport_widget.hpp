@@ -76,6 +76,17 @@ class ViewportWidget final : public QWidget {
     // with whatever cad::fitScale refuses.
     [[nodiscard]] katana::core::Result<katana::cad::PlotSettings>
     fittedPlot(katana::cad::PlotSettings settings) const;
+    // The drawing as this view shows it, painted by the same plan painter
+    // into an image of `size` pixels on `background` (transparent for none):
+    // the view's centre, at the scale that fits what the view shows into the
+    // image, paper-sized marks scaled alike - so twice the view's size is the
+    // view at twice the resolution. The view's furniture (the grid, a tool's
+    // preview, the snap marker, the prompt) is left out. `asPlotted` draws
+    // it as a plot does, for a white ground: white pens black (D7) and line
+    // weights in millimetres of the image. Read-only: the view and its kept
+    // drawing are untouched. For SNAPSHOT (plotting/view_image_export.hpp).
+    [[nodiscard]] QImage renderToImage(const QSize& size, const QColor& background,
+                                       bool asPlotted = false) const;
 
     // `state` belongs to the workspace's ViewSet and outlives this widget: it
     // is what survives when the view changes kind or its dock floats, so the

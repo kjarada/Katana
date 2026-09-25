@@ -75,8 +75,10 @@ size comes out. It protects construction, not appearance: LOOK at the PNG.
 **`--plot out.pdf`** plots the drawing and exits (`docs/cad.md`, "Plotting to
 PDF"). `--fit` (the default) picks the first standard scale at which the
 drawing fits; `--scale N` plots at 1:N; `--paper` is A0 to A4; `--dpi` sets
-the resolution. The dialog and the switch share `plotDrawingToPdf`, so the
-`qt_plot_headless` test exercises the code the menu does.
+the resolution. The dialog, the window's `PLOT` verb and the switch share
+`plotDrawingToPdf`, so the `qt_plot_headless` test exercises the code the menu
+does; it also runs a `PLOT` script in each plot style and weight and checks
+the inks each prints (`docs/desktop.md`, "Plot to PDF and view images").
 
 **`--plot-sheets out.pdf`** plots the project's sheets and exits
 (`docs/plotting.md`, "Plot styles and output"); a project with no sheets
@@ -196,6 +198,7 @@ Its variables:
 | `-DACTIONS=a,b` | `--action` for each, commas because a CMake list does not survive `cmake -D` |
 | `-DDIALOG=NAME` (or `-DSURVEY_DIALOG`) with `-DFILL=f=t\|f=t` and `-DPRESS=a,b` | one dialog, filled and pressed |
 | `-DSCRIPT=<file.kcs>` | `--script`, before the `-DDRIVE` steps, so they can list what it made |
+| `-DIMAGE_SIZE=<file>\|<width>\|<height>` | the run must write a PNG of exactly that size (a `SNAPSHOT`'s), read from its header; the file is removed first |
 | `-DDRIVE=<step>\|<step>...` | the steps, by sigil, `\|` between them |
 | `-DEXPECT=<regex>` | what the run printed must match |
 | `-DFORBID=<regex>` | what the run printed must match NOTHING, after the run's own paths are replaced by `<path>` |

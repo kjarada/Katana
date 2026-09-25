@@ -145,3 +145,117 @@ ${err}")
     endif()
     message(STATUS "plot_headless: the 1 : 50 plot stops at its margin (${width} x ${height} at 10 dpi)")
 endif()
+
+# The window's PLOT verb (plotting/plot_drawing_dialog.hpp), run by a script
+# (--script, a batch run) as File > Plot to PDF runs it: the same fitted
+# sheet in colour, greyscale and monochrome, and with every line weight
+# times 4 and times 0.25. Rendered at 20 dpi in colour, what each prints is
+# held to what its style means, compared plot with plot rather than with
+# counts from an earlier run:
+#   - the colour plot has pixels whose channels differ; the greyscale and
+#     monochrome plots have none (a grey is R = G = B);
+#   - the monochrome plot has fewer mid greys than the greyscale one: its
+#     fills are black or paper, and what grey is left is the edges'
+#     anti-aliasing;
+#   - heavier line weights put down more ink, lighter ones less.
+if(PDFTOPPM)
+    set(script "${work}/plot_verb.kcs")
+    file(WRITE "${script}" "")
+    foreach(style colour grey mono)
+        file(APPEND "${script}" "PLOT \"${work}/plot_verb_${style}.pdf\" paper=A3 style=${style}\n")
+    endforeach()
+    file(APPEND "${script}" "PLOT \"${work}/plot_verb_heavy.pdf\" paper=A3 lineweight=4\n")
+    file(APPEND "${script}" "PLOT \"${work}/plot_verb_light.pdf\" paper=A3 lineweight=0.25\n")
+    execute_process(
+        COMMAND "${APP}" "${copy}" --script "${script}"
+        RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 120)
+    if(NOT rc EQUAL 0)
+        message(FATAL_ERROR "the PLOT script exited with ${rc}\n${out}\n${err}")
+    endif()
+    foreach(said "style=greyscale lineweight=1" "style=monochrome lineweight=1"
+                 "style=colour lineweight=4" "style=colour lineweight=0.25")
+        if(NOT "${out}${err}" MATCHES "${said}")
+            message(FATAL_ERROR "no PLOT record said ${said}:\n${out}\n${err}")
+        endif()
+    endforeach()
+
+    # Every grey a pixel can be, as the six hex digits of R = G = B, and the
+    # middle half of them.
+    set(greys)
+    set(middle)
+    foreach(level RANGE 0 255)
+        math(EXPR hex "${level}" OUTPUT_FORMAT HEXADECIMAL)
+        string(SUBSTRING "${hex}" 2 -1 hex)
+        string(TOLOWER "${hex}" hex)
+        string(LENGTH "${hex}" digits)
+        if(digits EQUAL 1)
+            set(hex "0${hex}")
+        endif()
+        list(APPEND greys "${hex}${hex}${hex}")
+        if(level GREATER_EQUAL 64 AND level LESS_EQUAL 191)
+            list(APPEND middle "${hex}${hex}${hex}")
+        endif()
+    endforeach()
+    list(JOIN greys "|" grey_pattern)
+    list(JOIN middle "|" middle_pattern)
+
+    # The pixels of a plot rendered at 20 dpi, a six-digit hex triple each.
+    function(plot_pixels style result)
+        set(pdf "${work}/plot_verb_${style}.pdf")
+        execute_process(COMMAND "${PDFTOPPM}" -r 20 -singlefile "${pdf}" "${work}/plot_verb_${style}"
+                        RESULT_VARIABLE rc)
+        set(ppm "${work}/plot_verb_${style}.ppm")
+        if(NOT rc EQUAL 0 OR NOT EXISTS "${ppm}")
+            message(FATAL_ERROR "pdftoppm could not render ${pdf}")
+        endif()
+        # A binary PPM: "P6", width, height, 255, one whitespace, then three
+        # bytes a pixel.
+        file(READ "${ppm}" header LIMIT 20)
+        if(NOT header MATCHES "^(P6[ \n]+[0-9]+[ \n]+[0-9]+[ \n]+255[ \n])")
+            message(FATAL_ERROR "not a PPM: ${ppm}")
+        endif()
+        string(LENGTH "${CMAKE_MATCH_1}" offset)
+        file(READ "${ppm}" hex OFFSET ${offset} HEX)
+        string(REGEX MATCHALL "[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]" pixels "${hex}")
+        set(${result} "${pixels}" PARENT_SCOPE)
+    endfunction()
+    # How many of `pixels` are coloured, mid grey, and ink (a channel below
+    # 250 - lighter than that is paper to the eye).
+    function(count_pixels pixels coloured mid ink)
+        set(list ${pixels})
+        list(LENGTH list all)
+        set(grey_list ${list})
+        list(FILTER grey_list INCLUDE REGEX "^(${grey_pattern})$")
+        list(LENGTH grey_list grey)
+        math(EXPR c "${all} - ${grey}")
+        set(${coloured} ${c} PARENT_SCOPE)
+        set(mid_list ${grey_list})
+        list(FILTER mid_list INCLUDE REGEX "^(${middle_pattern})$")
+        list(LENGTH mid_list m)
+        set(${mid} ${m} PARENT_SCOPE)
+        set(paper_list ${list})
+        list(FILTER paper_list INCLUDE REGEX "^f[a-f]f[a-f]f[a-f]$")
+        list(LENGTH paper_list paper)
+        math(EXPR i "${all} - ${paper}")
+        set(${ink} ${i} PARENT_SCOPE)
+    endfunction()
+
+    foreach(style colour grey mono heavy light)
+        plot_pixels(${style} pixels)
+        count_pixels("${pixels}" coloured_${style} mid_${style} ink_${style})
+        message(STATUS "plot_headless: PLOT ${style}: ${coloured_${style}} coloured, "
+                       "${mid_${style}} mid grey, ${ink_${style}} inked pixels at 20 dpi")
+    endforeach()
+    if(coloured_colour EQUAL 0)
+        message(FATAL_ERROR "the colour plot printed no colour")
+    endif()
+    if(NOT coloured_grey EQUAL 0 OR NOT coloured_mono EQUAL 0)
+        message(FATAL_ERROR "a greyscale or monochrome plot printed colour (${coloured_grey}, ${coloured_mono} pixels)")
+    endif()
+    if(NOT mid_mono LESS mid_grey)
+        message(FATAL_ERROR "the monochrome plot has as many mid greys as the greyscale one (${mid_mono}, ${mid_grey})")
+    endif()
+    if(NOT ink_heavy GREATER ink_colour OR NOT ink_light LESS ink_colour)
+        message(FATAL_ERROR "line weights times 4 and times 0.25 did not print more and less ink (${ink_heavy}, ${ink_colour}, ${ink_light})")
+    endif()
+endif()

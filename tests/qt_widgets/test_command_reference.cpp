@@ -159,7 +159,7 @@ TEST(CommandReference, TheWindowSectionNamesEveryVerbTheWindowRunsItself)
     // interpreter: the list the typed HELP adds to the interpreter's.
     const QString help = katana::qt::windowHelpText();
     for (const char* verb : {"SCRIPT", "IMPORT", "EXPORT", "INFO <file>", "REFS", "COPC",
-                             "CUSTOMISE", "PLOTSHEETS", "ZOOM", "GRID", "SNAP", "ONLINE", "UTILITY",
+                             "CUSTOMISE", "PLOTSHEETS", "PLOT <file.pdf>", "SNAPSHOT", "ZOOM", "GRID", "SNAP", "ONLINE", "UTILITY",
                              "QUIT", "LABELSTYLE"}) {
         EXPECT_TRUE(help.contains(verb)) << verb;
     }
