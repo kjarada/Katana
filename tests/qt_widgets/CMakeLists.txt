@@ -57,6 +57,9 @@ add_executable(katana_qt_widget_tests
     # The background job runner (test_jobs).
     test_jobs.cpp
     ${_qt_src}/jobs.cpp
+    # GIS > Online Data's dialog (test_gis_online).
+    test_gis_online.cpp
+    ${_qt_src}/gis_online_dialog.cpp
     ${_qt_src}/viewport_widget.cpp
     ${_qt_src}/plan_painter.cpp
     ${_qt_src}/sheet_painter.cpp

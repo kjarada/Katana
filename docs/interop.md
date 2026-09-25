@@ -157,6 +157,9 @@ result" describes the intent, not the code.
   to it will be read back as degrees, so exporting without a CRS warns.
 * **No reprojection.** A file's declared CRS is read and reported, never applied.
   Mixing coordinate systems is the user's responsibility and the UI says so.
+  The one exception is data fetched from a web service, whose CRS nobody chose:
+  GIS > Online Data moves it into the project's CRS through
+  `VectorImportOptions::targetCrs` and a GDAL warp (`docs/gis_online.md`).
 
 ## Scale
 
@@ -332,6 +335,7 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 | | Export Point Cloud... | `exportPointCloud` - LAS or LAZ |
 | | Convert Point Cloud to COPC... | `PointCloudEngine::convertToCopc` - every point, then an offer to import it |
 | | Dataset Information... | `describeSource` + `formatDescription`, the gdalinfo / pdal info a person needs first |
+| Online - Web Services | Online Data... | `interop::fetchOnlineLayer`: imagery, elevation and features from public web services, warped or reprojected into the project's CRS and taken in through `importRaster` and `importVector`; the `ONLINE` verbs do the same (`docs/gis_online.md`) |
 
 Decisions, and what was rejected:
 

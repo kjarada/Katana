@@ -1,0 +1,260 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2A_WEST_20260103",
+   "collection": "sentinel-2-l2a",
+   "bbox": [
+    150.9,
+    -34.1,
+    151.2,
+    -33.5
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       150.9,
+       -34.1
+      ],
+      [
+       151.2,
+       -34.1
+      ],
+      [
+       151.2,
+       -33.5
+      ],
+      [
+       150.9,
+       -33.5
+      ],
+      [
+       150.9,
+       -34.1
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2026-01-03T00:06:06Z",
+    "eo:cloud_cover": 12.0
+   },
+   "assets": {
+    "visual": {
+     "href": "https://example.invalid/S2A_WEST_20260103/visual.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2A_EAST_20260103",
+   "collection": "sentinel-2-l2a",
+   "bbox": [
+    151.2,
+    -34.1,
+    151.5,
+    -33.5
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.2,
+       -34.1
+      ],
+      [
+       151.5,
+       -34.1
+      ],
+      [
+       151.5,
+       -33.5
+      ],
+      [
+       151.2,
+       -33.5
+      ],
+      [
+       151.2,
+       -34.1
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2026-01-03T00:06:06Z",
+    "eo:cloud_cover": 8.0
+   },
+   "assets": {
+    "visual": {
+     "href": "https://example.invalid/S2A_EAST_20260103/visual.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2B_FULL_20260108",
+   "collection": "sentinel-2-l2a",
+   "bbox": [
+    150.8,
+    -34.2,
+    151.6,
+    -33.4
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       150.8,
+       -34.2
+      ],
+      [
+       151.6,
+       -34.2
+      ],
+      [
+       151.6,
+       -33.4
+      ],
+      [
+       150.8,
+       -33.4
+      ],
+      [
+       150.8,
+       -34.2
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2026-01-08T00:06:06Z",
+    "eo:cloud_cover": 5.0
+   },
+   "assets": {
+    "visual": {
+     "href": "https://example.invalid/S2B_FULL_20260108/visual.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2A_PART_20260113",
+   "collection": "sentinel-2-l2a",
+   "bbox": [
+    151.3,
+    -34.2,
+    151.6,
+    -33.4
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       151.3,
+       -34.2
+      ],
+      [
+       151.6,
+       -34.2
+      ],
+      [
+       151.6,
+       -33.4
+      ],
+      [
+       151.3,
+       -33.4
+      ],
+      [
+       151.3,
+       -34.2
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2026-01-13T00:06:06Z",
+    "eo:cloud_cover": 1.0
+   },
+   "assets": {
+    "visual": {
+     "href": "https://example.invalid/S2A_PART_20260113/visual.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "stac_version": "1.0.0",
+   "id": "S2A_FAR_20260120",
+   "collection": "sentinel-2-l2a",
+   "bbox": [
+    140.0,
+    -20.0,
+    141.0,
+    -19.0
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       140.0,
+       -20.0
+      ],
+      [
+       141.0,
+       -20.0
+      ],
+      [
+       141.0,
+       -19.0
+      ],
+      [
+       140.0,
+       -19.0
+      ],
+      [
+       140.0,
+       -20.0
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "datetime": "2026-01-20T00:06:06Z",
+    "eo:cloud_cover": 0.0
+   },
+   "assets": {
+    "visual": {
+     "href": "https://example.invalid/S2A_FAR_20260120/visual.tif",
+     "type": "image/tiff; application=geotiff; profile=cloud-optimized"
+    }
+   }
+  }
+ ],
+ "links": [
+  {
+   "rel": "next",
+   "href": "https://earth-search.aws.element84.com/v1/search?page=2",
+   "method": "POST"
+  }
+ ],
+ "context": {
+  "returned": 5
+ }
+}
