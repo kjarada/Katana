@@ -2026,27 +2026,17 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
             chain->add(cmd::createText(std::move(label), attributes));
         }
         const std::size_t count = labels->size();
+        // The layer by name: "the current layer" does not say which, and a
+        // person who asked from a dialog has not been looking at it.
         return finish(document_.execute(std::move(chain)),
-                      std::to_string(count) + " labels created on the current layer");
+                      std::to_string(count) + " labels created on layer " +
+                          attributes.layer + ", the current layer");
     }
     if (action != "REPORT") {
         return usage(kUsage);
     }
-
-    std::ostringstream out;
-    out << std::fixed;
-    out.precision(3);
-    out << "  course  from                      bearing           distance\n";
-    std::size_t index = 1;
-    for (const ParcelCourse& course : report->courses) {
-        out << "  " << std::setw(4) << index++ << "    " << std::setw(10) << course.from.x << ","
-            << std::setw(10) << course.from.y << "   " << course.bearing << "   " << std::setw(10)
-            << course.distance << "\n";
-    }
-    out << "  area " << report->area << " m2 (" << report->area / 10000.0 << " ha), perimeter "
-        << report->perimeter << " m, centroid " << report->centroid.x << "," << report->centroid.y
-        << ", drawn " << (report->clockwise ? "clockwise" : "counter-clockwise");
-    return out.str();
+    // What Survey > Parcel Report shows, from the same formatter.
+    return formatParcelReport(*report);
 }
 
 // ---- survey tools ---------------------------------------------------------------------------

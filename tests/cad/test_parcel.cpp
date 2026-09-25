@@ -176,3 +176,55 @@ TEST(Parcel, RefusesWhatIsNotAParcelAndDropsRepeatedCorners)
     EXPECT_EQ(report->courses.size(), 4u);
     EXPECT_NEAR(report->area, 5000.0, 1e-9);
 }
+
+// ---- the report's text: what PARCEL id prints and the dialog shows ------------------------
+
+TEST(Parcel, TheReportIsARowPerCourseThenTheSummary)
+{
+    const auto report = parcelReport(rectangle());
+    ASSERT_TRUE(report.ok());
+    // 5000 m2 is 0.5 ha; the perimeter 300; the centroid the middle.
+    EXPECT_EQ(formatParcelSummary(*report),
+              "area 5000.000 m2 (0.500 ha), perimeter 300.000 m, centroid 50.000,25.000, "
+              "drawn counter-clockwise");
+    const std::string text = formatParcelReport(*report);
+    std::vector<std::string> lines;
+    for (std::size_t start = 0;;) {
+        const std::size_t end = text.find('\n', start);
+        lines.push_back(text.substr(start, end == std::string::npos ? end : end - start));
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    ASSERT_EQ(lines.size(), 6u) << text; // a header, four courses, the summary
+    EXPECT_EQ(lines.back(), "  " + formatParcelSummary(*report));
+    EXPECT_NE(lines[1].find("   1 "), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find(report->courses[0].bearing), std::string::npos) << lines[1];
+    EXPECT_NE(lines[1].find("100.000"), std::string::npos) << lines[1];
+    EXPECT_NE(lines[4].find(report->courses[3].bearing), std::string::npos) << lines[4];
+}
+
+TEST(Parcel, TheCoursesCsvQuotesTheBearingAndKeepsANegativeCoordinatesSign)
+{
+    // The rectangle moved to straddle the origin: its first corner is at
+    // (-10, -20).
+    const auto report = parcelReport(
+        closed({Point2(-10, -20), Point2(90, -20), Point2(90, 30), Point2(-10, 30)}));
+    ASSERT_TRUE(report.ok());
+    const std::string csv = parcelCoursesCsv(*report);
+    EXPECT_EQ(csv.substr(0, csv.find("\r\n")),
+              "Course,From easting,From northing,To easting,To northing,Azimuth (deg),Bearing,"
+              "Distance");
+    // Due east is azimuth 90, N 90 E; the bearing holds a double quote, so
+    // the field is quoted and the quote doubled (RFC 4180).
+    ASSERT_EQ(report->courses[0].bearing, "N 90\u00b000'00\" E");
+    const std::string first =
+        "1,-10.000,-20.000,90.000,-20.000,90.000000,\"N 90\u00b000'00\"\" E\",100.000\r\n";
+    EXPECT_NE(csv.find(first), std::string::npos) << csv;
+    std::size_t records = 0;
+    for (std::size_t at = csv.find("\r\n"); at != std::string::npos; at = csv.find("\r\n", at + 2)) {
+        ++records;
+    }
+    EXPECT_EQ(records, 5u); // the header and four courses
+}

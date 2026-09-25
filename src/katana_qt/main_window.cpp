@@ -993,6 +993,7 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     services.applySurveyCodes = codeAction;
     services.codeManager = format_->codeManagerAction();
     services.run = commandRunner();
+    services.headless = [this] { return headless_; };
     // A second row: the drawing's own toolbars (File to Format) fill the
     // first, and in one row the Survey, Terrain and GIS bars were squeezed
     // to a button each behind their overflow arrows.

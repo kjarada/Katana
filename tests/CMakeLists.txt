@@ -256,8 +256,23 @@ if(TARGET katana)
             "-DEXPECT=Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW.*No alignment has a design profile[.] Define one in Terrain > Alignment Manager [(]Vertical[)].*No alignment has a design profile.*Select exactly one line or polyline to cut along.*terrainMenu: Terrain: Alignment Manager[.][.][.] [[]Define and edit alignments"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/terrain_commands_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Survey > Parcel Report through the real window, on the 100 by 50
+    # rectangle drawn counter-clockwise from the origin: by hand, 5000 m2 is
+    # 0.5 ha, the perimeter 300 and the centroid (50,25); the first course
+    # runs due east (N 90 E) 100, the second due north (N 0 E) 50. Label
+    # Courses is PARCEL 1 LABEL 2 run by the window's executor - four course
+    # labels and the area - and a headless Save opens no file dialog.
+    add_test(NAME qt_parcel_report_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>PLINE 0,0 100,0 100,50 0,50 CLOSE|>SELECT ALL|@surveyParcelReport|!useSelection|!compute|?parcelSummary|?parcelCourses|labelHeight=2|!label|?message|parcelName=Lot 7|?parcelLegalText|!parcelCsv|?message|?commandLog"
+            "-DEXPECT=--dialog surveyParcelReport opened surveyParcelReportDialog \"Parcel Report\".*parcelSummary: area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m, centroid 50[.]000,25[.]000, drawn counter-clockwise.*parcelCourses: 1 [|] 0[.]000 [|] 0[.]000 [|] N 90[^|]+ E [|] 100[.]000 ; 2 [|] 100[.]000 [|] 0[.]000 [|] N 0[^|]+ E [|] 50[.]000.*message: 5 labels created on layer 0, the current layer.*parcelLegalText: Lot 7: Beginning at E 0[.]000 N 0[.]000; thence N 90[^;]+, 100[.]000 m;.*Containing 5000[.]000 m[^ ]+ [(]0[.]5000 ha[)][.].*message: a headless session opens no file dialog.*commandLog: .*> PARCEL 1 LABEL 2 5 labels created on layer 0"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/parcel_report_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_alignment_manager_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
+        qt_parcel_report_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

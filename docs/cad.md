@@ -653,7 +653,12 @@ lines of dialog.
 polyline into its courses as bearings and distances, its area, perimeter and
 centroid; `legalDescription` writes the deed wording; `parcelLabels` makes
 the text entities. `PARCEL id`, `PARCEL id LEGAL [name]` and
-`PARCEL id LABEL [height]` drive them.
+`PARCEL id LABEL [height]` drive them, and so does Survey > Parcel Report
+(`docs/survey.md`): `formatParcelReport` is the report both print and
+`formatParcelSummary` its last line, so the dialog and the verb cannot come
+to differ. `PARCEL id LABEL` says which layer the labels went on - "5 labels
+created on layer 0, the current layer" - since a person labelling from a
+dialog has not been looking at the layer control.
 
 **Nothing is stored.** A parcel is computed from its boundary on demand, so
 the report can never disagree with the drawing and there is no second table
