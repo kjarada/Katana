@@ -715,6 +715,43 @@ workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
 progress and Cancel in the status bar; the entities arrive as one command.
 
+## Survey > Subsurface Utilities (AS 5488): the same pattern, one verb
+
+The AS 5488 tools (`docs/subsurface_utilities.md`) are `UtilityWorkbench`
+(`src/katana_qt/survey/utility_workbench.hpp`), built as the Online Data
+workbench is: `MainWindow::buildSurveyActions` makes it after the Survey
+workbench and hands it the Survey menu, which it ends with the section
+"Subsurface Utilities (AS 5488)" - Draw Utility Schedule, Utility
+Investigation Report, Verify Detections Against Exposures, Clearance of
+Proposed Works, Check Against a Delivery Schema (`utilityDraw`,
+`utilityReport`, `utilityVerify`, `utilityClearance`, `utilityCheck`).
+`MainWindow::runCommandLine` hands it any line that starts with `UTILITY`,
+before a running tool can take the line for an answer.
+
+The verb is the `CommandInterpreter`'s, shared with `katana_cli`; the
+workbench runs it through the window's interpreter and adds the one thing
+only a window has: after a `UTILITY DRAW` that worked, every plan view is
+framed on the reply's `bounds=` box (`UtilityWorkbench::drawnBounds`,
+`ViewWorkspace::zoomTo`). A schedule in a real coordinate system lands far
+from whatever the view was showing, and without the framing a draw that
+worked looked like one that did nothing - the lesson Online Data learnt.
+
+All five items open ONE non-modal dialog (`UtilityToolsDialog`,
+`src/katana_qt/survey/utility_dialog.hpp`, object name `utilityDialog`), each
+on its own tab; the header lists every control's object name. The dialog
+never calls the AS 5488 library. `utilityCommandLine` - a pure function of
+the fields, tested without a window - writes the `UTILITY` line (a path with
+blanks quoted, a blank option left out, a missing file or a number that does
+not read refused with the field named, and nothing run); `utilityCommand`
+shows that line as it is edited; Run hands it to the window's own command line
+(`UtilityServices::runCommand`), so it is echoed, kept in the history and
+undone exactly as a typed line, and the reply the workbench got for it comes
+back into `utilityOutput`, with Copy and Save As beside it. A headless session
+opens no file dialog: Browse and Save As say so, and a script fills the path
+fields instead. Tested in `tests/qt_widgets/survey/test_utility_dialog.cpp`
+and, through the real window, by `qt_utility_dialog_writes_the_line_headless`
+and `qt_utility_dialog_headless`.
+
 ## Global Modify
 
 Format > Global Modify... (`GlobalModifyDialog`,
