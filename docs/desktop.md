@@ -731,15 +731,22 @@ before a running tool can take the line for an answer.
 The verb is the `CommandInterpreter`'s, shared with `katana_cli`; the
 workbench runs it through the window's interpreter and adds the one thing
 only a window has: after a `UTILITY DRAW` that worked, every plan view is
-framed on the reply's `bounds=` box (`UtilityWorkbench::drawnBounds`,
+framed on the reply's `bounds=` box (`utilities::drawReplyBounds`,
 `ViewWorkspace::zoomTo`). A schedule in a real coordinate system lands far
 from whatever the view was showing, and without the framing a draw that
-worked looked like one that did nothing - the lesson Online Data learnt.
+worked looked like one that did nothing - the lesson Online Data learnt. The
+box is read by the verb's own function, not a second parser in the window,
+so the record's format has one reader to keep in step with its writer
+(`utilities::formatUtilityDrawing`); the two branches that built this each
+had one, and the window's was dropped when they were merged.
 
 All five items open ONE non-modal dialog (`UtilityToolsDialog`,
 `src/katana_qt/survey/utility_dialog.hpp`, object name `utilityDialog`), each
-on its own tab; the header lists every control's object name. The dialog
-never calls the AS 5488 library. `utilityCommandLine` - a pure function of
+on its own tab; the header lists every control's object name. The detected
+spacing and the minimum cover sit under the schedule, shared by Draw and
+Report and live on those tabs only, because the verb reads `SPACING` and
+`MINCOVER` for both: a drawing and a report of one schedule are graded and
+flagged alike. The dialog never calls the AS 5488 library. `utilityCommandLine` - a pure function of
 the fields, tested without a window - writes the `UTILITY` line (a path with
 blanks quoted, a blank option left out, a missing file or a number that does
 not read refused with the field named, and nothing run); `utilityCommand`
@@ -749,8 +756,10 @@ undone exactly as a typed line, and the reply the workbench got for it comes
 back into `utilityOutput`, with Copy and Save As beside it. A headless session
 opens no file dialog: Browse and Save As say so, and a script fills the path
 fields instead. Tested in `tests/qt_widgets/survey/test_utility_dialog.cpp`
-and, through the real window, by `qt_utility_dialog_writes_the_line_headless`
-and `qt_utility_dialog_headless`.
+and, through the real window, by `qt_utility_dialog_writes_the_line_headless`,
+`qt_utility_dialog_headless` (Run on Draw) and
+`qt_utility_draw_typed_frames_the_views_headless` (the same draw typed, as an
+agent types it, framed the same).
 
 ## Global Modify
 

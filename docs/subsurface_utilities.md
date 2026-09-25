@@ -341,7 +341,9 @@ Survey > Subsurface Utilities (AS 5488) has an item for each tool: Draw
 Utility Schedule, Utility Investigation Report, Verify Detections Against
 Exposures, Clearance of Proposed Works and Check Against a Delivery Schema.
 Each opens the same dialog on its own tab. The dialog has one field for each
-option the verb takes, shows the exact `UTILITY` line it will run, and runs
+option the verb takes - the detected spacing and minimum cover shared by Draw
+and Report, as `SPACING` and `MINCOVER` are - shows the exact `UTILITY` line
+it will run, and runs
 that line through the window's command line. The line is logged and undoable
 like a typed one, and the reply appears in the dialog, where it can be copied
 or saved. Typing the same line on the command line does the same, which is how
