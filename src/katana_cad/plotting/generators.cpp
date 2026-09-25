@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "katana/cad/plotting/layout.hpp"
+#include "katana/cad/plotting/section_fit.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::cad::plotting {
@@ -20,8 +21,6 @@ namespace tol = katana::math::tolerance;
 
 namespace {
 
-// Vertical exaggerations a drafter labels a section with (the owner's app's).
-constexpr std::array<double, 7> kExaggerations{1.0, 2.0, 2.5, 4.0, 5.0, 8.0, 10.0};
 // A long section's usual exaggeration when nothing says otherwise: H 1:500
 // V 1:50, the convention road and pipe long sections are drawn at.
 constexpr double kLongSectionExaggeration = 10.0;
@@ -535,13 +534,10 @@ Result<std::vector<Sheet>> crossSectionSheets(const geometry::SolvedAlignment& a
                 deepest = std::max(deepest, *cut.high - *cut.low);
             }
         }
-        // Nothing sampled has no depth to exaggerate: true scale, 1.
-        exaggeration = 1.0;
-        for (const double candidate : kExaggerations) {
-            if (deepest > 0.0 && deepest * 1000.0 * candidate / scale <= cellH * kSectionFill) {
-                exaggeration = candidate;
-            }
-        }
+        // The painter's ladder (section_fit.hpp), so a generated section and
+        // one fitted automatically agree. Nothing sampled has no depth to
+        // exaggerate: true scale, 1.
+        exaggeration = fitExaggeration(deepest, scale, cellH * kSectionFill);
     }
 
     const std::size_t perSheet = request.rows * request.columns;
