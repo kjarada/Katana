@@ -171,7 +171,14 @@ every action, field, button and tab gets one. In a test they are one
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 
 What the target is at the end is what `--screenshot` grabs; steps that were
-all commands leave the window. A step that cannot be taken - an unknown
+all commands leave the window. A dialog that deletes itself when a step
+closes it (Generate Sheets and Page Setup in the Sheets editor, opened with
+`open()`) leaves the window the target: the run says `<NAME> has closed: the
+window is grabbed`, and a later `--fill` or `--press` meant for it is refused
+naming it (`qt_a_dialog_that_deletes_itself_on_close_leaves_the_window_the_target_headless`,
+`qt_a_step_for_a_dialog_that_has_closed_is_refused_headless`). The target was
+once a raw pointer, and such a run crashed at the grab after every step had
+passed. A step that cannot be taken - an unknown
 dialog or widget, a fill of a choice the dialog does not offer, a press of a
 disabled button - ends the run with exit 1 and a sentence on stderr, never a
 crash and never a silent no-op. The names a dialog's fields carry are listed
