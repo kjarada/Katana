@@ -434,3 +434,22 @@ TEST_F(McpServer, AnAgentReportsDescribesAndLabelsAParcel)
     const Json undone = call("katana_undo");
     EXPECT_EQ(undone["structuredContent"]["status"]["entities"], 1);
 }
+
+// What the Hatch Patterns tab does, as an agent does it: a pattern edited in
+// one step, and a style made hatching with it in another.
+TEST_F(McpServer, AnAgentEditsAHatchPatternAndMakesAStyleThatUsesIt)
+{
+    initialize();
+    const Json result =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"HATCH NEW brick 45 0.25", "HATCH SET brick 45 0.5 135 0.5",
+                    "STYLE NEW paving HATCH brick"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 3U);
+    EXPECT_EQ(lines[1]["output"].get<std::string>(), "hatch pattern brick updated (2 families)");
+    EXPECT_EQ(lines[2]["output"].get<std::string>(), "style paving created");
+    const Json refused = call("katana_run_commands", Json{{"commands", {"HATCH DELETE brick"}}});
+    EXPECT_TRUE(refused["isError"].get<bool>()) << "a style still hatches with it";
+}

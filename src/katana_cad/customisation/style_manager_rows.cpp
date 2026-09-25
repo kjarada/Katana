@@ -361,7 +361,8 @@ std::vector<katana::entity::EntityId> entitiesUsing(const katana::entity::Model&
         katana::entity::tableUsage(model, katana::entity::UsageOptions{.entityIds = true});
     const katana::entity::UsageMap& map = table == UsageTable::Style      ? usage.styles
                                           : table == UsageTable::Linetype ? usage.linetypes
-                                                                          : usage.symbols;
+                                          : table == UsageTable::Symbol   ? usage.symbols
+                                                                          : usage.hatchPatterns;
     std::vector<katana::entity::EntityId> ids;
     for (const std::string& name : names) {
         const auto& users = TableUsage::of(map, name);
