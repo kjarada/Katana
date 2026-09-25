@@ -96,6 +96,7 @@ failed at link time with no explanation.
 |---|---|---|
 | `katana` | yes | the desktop application (`src/katana_qt`) |
 | `katana_cli` | yes | the command-line front end (`src/katana_app`) |
+| `katana_mcp` | yes | the same session served to Claude over the Model Context Protocol (`docs/mcp.md`) |
 | `katana_<module>_tests` | yes | one test executable per module (`katana_add_test_suite`, `docs/testing.md`) |
 | `katana_qt_widget_tests` | yes | the widget tests, run offscreen |
 | `katana_benchmarks` | yes | every `benchmarks/bench_*.cpp`, globbed |

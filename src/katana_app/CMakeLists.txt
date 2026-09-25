@@ -1,14 +1,35 @@
-# Headless command-line front end. Proves the engine is complete without a GUI.
-add_executable(katana_cli main.cpp dxf_verbs.cpp dxf_verbs.hpp)
-katana_target_defaults(katana_cli)
-target_link_libraries(katana_cli PRIVATE katana_cad katana_archive12d katana_dxf)
+# The headless front ends. katana_app is the session they share - a Document,
+# its CommandInterpreter and the verbs above katana_cad (session.hpp) - and the
+# MCP server over it (mcp_server.hpp), so that a line sent by Claude and a line
+# typed at katana_cli run the same code.
+add_library(katana_app STATIC
+    session.cpp session.hpp
+    dxf_verbs.cpp dxf_verbs.hpp
+    mcp_server.cpp mcp_server.hpp
+)
+katana_target_defaults(katana_app)
+target_include_directories(katana_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf)
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(katana_app PRIVATE nlohmann_json::nlohmann_json)
 
 # Interoperability is optional: with -DKATANA_BUILD_IO=OFF the CLI still builds
 # and simply has no IMPORT/EXPORT verbs, which is what the sanitizer job needs.
 if(TARGET katana_interop)
-    target_link_libraries(katana_cli PRIVATE katana_interop)
-    target_compile_definitions(katana_cli PRIVATE KATANA_WITH_INTEROP=1)
+    target_link_libraries(katana_app PRIVATE katana_interop)
+    target_compile_definitions(katana_app PRIVATE KATANA_WITH_INTEROP=1)
 endif()
+
+# Headless command-line front end. Proves the engine is complete without a GUI.
+add_executable(katana_cli main.cpp)
+katana_target_defaults(katana_cli)
+target_link_libraries(katana_cli PRIVATE katana_app)
+
+# The same session served to Claude over the Model Context Protocol (docs/mcp.md).
+add_executable(katana_mcp mcp_main.cpp)
+katana_target_defaults(katana_mcp)
+target_link_libraries(katana_mcp PRIVATE katana_app)
+target_compile_definitions(katana_mcp PRIVATE KATANA_VERSION="${PROJECT_VERSION}")
 
 if(KATANA_BUILD_TESTS)
     # End-to-end: draw, save, reopen in a second process, and query.
