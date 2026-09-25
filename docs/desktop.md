@@ -716,8 +716,8 @@ never reaches into the window for it.
   the workbenches' verbs (`runWorkbenchLine`: `ONLINE`, `UTILITY`), then to a
   running tool (`ViewWorkspace::typeIntoTool`), and hands whatever is left to
   `dispatchLine` - the view verbs, the window's own (`SCRIPT`, `CUSTOMISE`,
-  `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`), a tool's
-  alias, and the interpreter. `runVerbLine` echoes the line and runs the same
+  `IMPORT`, `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`, `PLOT`,
+  `SNAPSHOT`), a tool's alias, and the interpreter. `runVerbLine` echoes the line and runs the same
   `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
   line is kept in the interpreter's history and undone exactly as a typed one.
 - **Never a running tool's answer.** That step is the only one `runVerbLine`
@@ -918,6 +918,61 @@ and, typed and through the menu, by
 `qt_drawing_summary_and_status_json_describe_the_drawing_headless`, which
 leaves a style's linestyle undefined by replacing the library that defined it
 and follows the name into the style manager.
+
+## Plot to PDF and view images
+
+File > Plot to PDF was a modal box that never set the plot's colour mode or
+line weight scale - `--plot` took both - and nothing an agent driving the
+window could run plotted the drawing; nothing saved or copied a picture of a
+view at all but `--screenshot`, which grabs the whole window. Both are verbs
+now, and the menu items write their lines:
+
+- **`PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N]
+  [dpi=N] [style=colour|grey|mono] [lineweight=F] [margin=MM]`**
+  (`src/katana_qt/plotting/plot_drawing_dialog.hpp`): the drawing on one
+  sheet as the active plan view shows it, through the `plotDrawingToPdf`
+  that `--plot` uses; what is not given is `PlotSettings`' default. It logs
+  the sentence it always did and a record, `file="..." paper= orientation=
+  scale= dpi= style= lineweight=`, with the scale a fitted plot chose. File >
+  Plot to PDF (`filePlot`) opens `plotDrawingDialog`, non-modal and kept:
+  every field has an object name, the colour mode
+  (`plotDrawingColourMode`, Colour / Greyscale / Monochrome) and the line
+  weight scale (`plotDrawingLineWeightScale`, 0.10 to 5.00) among them;
+  `plotDrawingCommand` shows the line and Plot runs it through the one
+  executor. The file is a field, so a headless run fills it; Browse opens a
+  file dialog, except headless.
+- **`SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N]
+  [scale=F] [bg=theme|white|none] [view=plan|3d]`**
+  (`src/katana_qt/plotting/view_image_export.hpp`): a picture of the plan or
+  3D view. The plan view is painted afresh at the size asked by the plan
+  painter (`ViewportWidget::renderToImage`, read-only: the view's own kept
+  drawing is untouched), at the scale that fits what the view shows, without
+  the grid, the snap marker or a tool's preview. On `bg=white` it is drawn
+  as a plot draws it - white pens black, line weights in millimetres - since
+  the screen's white pens would vanish into the ground; `bg=none` is
+  transparent, a PNG's or the clipboard's only (a JPEG has no alpha, and the
+  TIFF the plot's writer makes is RGB). A 3D view is grabbed as drawn and
+  scaled. A side is 1 to 10 000 pixels (an A0 sheet at 300 dpi is 9933).
+  File > Export View as Image (`fileExportViewImage`, `viewImageDialog`)
+  writes the line; Edit > Copy View as Image (`editCopyViewImage`) runs
+  `SNAPSHOT CLIPBOARD`. The record is `file="..."` or `clipboard=yes`, then
+  `view= width= height=`.
+
+Both are the window's verbs, beside `PLOTSHEETS`: the painter is Qt's, which
+`katana_cli` and `katana_mcp` do not have. A headless run has `--plot` with
+the same settings, and an agent driving the window types the lines (the
+Command Reference's Window section lists them).
+
+Tested in `tests/qt_widgets/plotting/test_plot_drawing_dialog.cpp` and
+`tests/qt_widgets/plotting/test_view_image_export.cpp` (the grammars, the
+dialogs' lines, the sizes, each file format, and the plan painted into an
+image), by `qt_plot_and_view_image_dialogs_run_their_verbs_headless` (both
+dialogs driven by object name, Copy View as Image, a typed transparent PNG,
+the 3D view grabbed; the dialog's image size read from the PNG's header), and
+by `qt_plot_headless`, whose `PLOT` script prints the same sheet in each
+style: the colour plot has coloured pixels and the greyscale and monochrome
+ones none, the monochrome one fewer mid greys than the greyscale one, and
+line weights times 4 and times 0.25 more and less ink than times 1.
 
 ## GIS > Online Data: a workbench of its own
 

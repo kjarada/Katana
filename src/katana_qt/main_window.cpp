@@ -15,10 +15,13 @@
 #include "jobs.hpp"
 #include "layer_manager.hpp"
 #include "plotting/plot_dialog.hpp"
+#include "plotting/plot_drawing_dialog.hpp"
+#include "plotting/view_image_export.hpp"
 #include "plotting/sheet_arrange.hpp"
 #include "plotting/sheet_checks.hpp"
 #include "plotting/sheet_tables.hpp"
 #include "project_crs_dialog.hpp"
+#include "render_view_widget.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
@@ -505,6 +508,15 @@ void MainWindow::buildActions()
     QAction* plotAction = makeAction(Icon::Plot, "&Plot to PDF...",
                                      "Plot the drawing to a sheet at a standard scale",
                                      QKeySequence::Print, "filePlot");
+    plotAction->setData("plotDrawingDialog");
+    // A picture of a view, and the same on the clipboard from Edit
+    // (plotting/view_image_export.hpp): both are the SNAPSHOT verb.
+    QAction* exportImageAction =
+        makeAction(Icon::Export, "Export View as I&mage...",
+                   "Save the plan or 3D view as a PNG, JPEG or TIFF, at the view's size or larger",
+                   QKeySequence(), "fileExportViewImage");
+    exportImageAction->setData("viewImageDialog");
+    connect(exportImageAction, &QAction::triggered, this, [this] { showViewImageExport(); });
     // A katana_cli script run in the window, a line at a time through the
     // one executor (script_runner.hpp); the dialog shows what the file holds
     // and runs the SCRIPT line.
@@ -597,7 +609,7 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({saveAction, saveAsAction});
     fileMenu->addSeparator();
-    fileMenu->addActions({importAction, exportAction});
+    fileMenu->addActions({importAction, exportAction, exportImageAction});
     fileMenu->addSeparator();
     fileMenu->addAction(runScriptAction);
     recentScriptsMenu_ = fileMenu->addMenu("Rec&ent Scripts");
@@ -669,6 +681,11 @@ void MainWindow::buildActions()
                                                   [this] { views_->cancel(); });
     deselectAction->setObjectName("editDeselect");
     editMenu->addAction(eraseAction);
+    QAction* copyImageAction = editMenu->addAction(
+        "Copy &View as Image", this, [this] { (void)runVerbLine("SNAPSHOT CLIPBOARD"); });
+    copyImageAction->setObjectName("editCopyViewImage");
+    copyImageAction->setStatusTip(
+        "Copy the plan view, as it is on screen, to the clipboard as an image (SNAPSHOT CLIPBOARD)");
     editMenu->addSeparator();
     QAction* attributesAction =
         editMenu->addAction("A&ttributes...", QKeySequence(Qt::CTRL | Qt::Key_1), this, [this] {
@@ -2449,6 +2466,33 @@ void MainWindow::dispatchLine(const QString& line)
             logMessage(QString("file=\"%1\"").arg(QDir::toNativeSeparators(file)));
         }
         errorsLogged_ = errorsBefore;
+        return;
+    }
+    // PLOT <file.pdf> [paper=] [landscape|portrait] [fit|scale=] [dpi=]
+    // [style=] [lineweight=] [margin=]: the drawing on one sheet, as File >
+    // Plot to PDF and --plot plot it (plotting/plot_drawing_dialog.hpp). The
+    // window's, as PLOTSHEETS is: the painter is Qt.
+    if (verb == "PLOT") {
+        const auto request = parsePlotDrawing(line);
+        if (!request) {
+            logMessage(QString::fromStdString(request.error().describe()), true);
+            return;
+        }
+        if (const auto status = plotDrawingToPdf(request->path, request->settings, request->fit);
+            !status) {
+            logMessage(QString::fromStdString(status.error().describe()), true);
+        }
+        return;
+    }
+    // SNAPSHOT <file> | CLIPBOARD [width=] [height=] [scale=] [bg=] [view=]:
+    // a picture of the plan or 3D view (plotting/view_image_export.hpp).
+    if (verb == "SNAPSHOT") {
+        const auto request = parseSnapshot(line);
+        if (!request) {
+            logMessage(QString::fromStdString(request.error().describe()), true);
+            return;
+        }
+        snapshotView(*request);
         return;
     }
     // HELP (or ?) alone: the interpreter's commands, then the verbs this
@@ -5055,72 +5099,84 @@ void MainWindow::corridorSurface()
 
 void MainWindow::plotToPdf()
 {
-    ViewportWidget* view = views_->activePlanView();
-    if (view == nullptr) {
-        logMessage("Open a plan viewport to plot from.", true);
+    // The dialog writes the PLOT line and runs it through the one executor;
+    // it asks nothing modally, so a headless run can drive it too.
+    if (plotDialog_ == nullptr) {
+        PlotDrawingDialogContext context;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        context.suggestedPath = suggestedPlotFile(document_);
+        plotDialog_ = new PlotDrawingDialog(std::move(context), this);
+    }
+    plotDialog_->show();
+    plotDialog_->raise();
+    plotDialog_->activateWindow();
+}
+
+void MainWindow::showViewImageExport()
+{
+    if (imageDialog_ == nullptr) {
+        ViewImageDialogContext context;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        QString suggested = suggestedPlotFile(document_);
+        suggested = suggested.isEmpty() ? QString("view.png")
+                                        : QFileInfo(suggested).path() + "/" +
+                                              QFileInfo(suggested).completeBaseName() + ".png";
+        context.suggestedPath = QDir::toNativeSeparators(suggested);
+        imageDialog_ = new ViewImageDialog(std::move(context), this);
+    }
+    imageDialog_->show();
+    imageDialog_->raise();
+    imageDialog_->activateWindow();
+}
+
+void MainWindow::snapshotView(const SnapshotRequest& request)
+{
+    QImage image;
+    QString viewName;
+    if (request.view == SnapshotRequest::View::Plan) {
+        ViewportWidget* view = views_->activePlanView();
+        if (view == nullptr) {
+            logMessage("SNAPSHOT: no plan view is open; open one, or ask for view=3d.", true);
+            return;
+        }
+        const QColor background = request.background == SnapshotRequest::Background::Theme
+                                      ? theme::viewport()
+                                  : request.background == SnapshotRequest::Background::White
+                                      ? QColor(Qt::white)
+                                      : QColor(Qt::transparent);
+        // On white it is drawn as a plot draws it: the screen's white pens
+        // would vanish into the ground.
+        image = view->renderToImage(snapshotSize(request, view->size()), background,
+                                    request.background == SnapshotRequest::Background::White);
+        viewName = "plan";
+    } else {
+        RenderViewWidget* view = views_->activeRenderView();
+        if (view == nullptr) {
+            logMessage("SNAPSHOT: no 3D view is open; open one, or ask for view=plan.", true);
+            return;
+        }
+        // Grabbed as drawn - the renderer's own frame - and scaled.
+        const QSize size = snapshotSize(request, view->size());
+        image = view->grab().toImage();
+        if (image.size() != size) {
+            image = image.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+        viewName = "3d";
+    }
+    const QString record =
+        QString("view=%1 width=%2 height=%3").arg(viewName).arg(image.width()).arg(image.height());
+    if (request.clipboard) {
+        QApplication::clipboard()->setImage(image);
+        logMessage("clipboard=yes " + record);
         return;
     }
-
-    QDialog dialog(this);
-    dialog.setWindowTitle("Plot to PDF");
-    auto* form = new QFormLayout(&dialog);
-    auto* paperBox = new QComboBox(&dialog);
-    paperBox->addItems({"A4", "A3", "A2", "A1", "A0"});
-    paperBox->setCurrentIndex(1);
-    auto* orientationBox = new QComboBox(&dialog);
-    orientationBox->addItems({"Landscape", "Portrait"});
-    // Fitting is the default because it is what a first plot of any drawing
-    // wants, and it picks a scale a scale rule carries.
-    auto* fit = new QCheckBox("Fit the drawing to the sheet at a standard scale", &dialog);
-    fit->setChecked(true);
-    auto* scale = new QDoubleSpinBox(&dialog);
-    scale->setRange(1.0, 1000000.0);
-    scale->setDecimals(0);
-    scale->setValue(1000.0);
-    scale->setPrefix("1 : ");
-    auto* dpi = new QDoubleSpinBox(&dialog);
-    dpi->setRange(72.0, 1200.0);
-    dpi->setDecimals(0);
-    dpi->setValue(300.0);
-    auto* margin = new QDoubleSpinBox(&dialog);
-    margin->setRange(0.0, 50.0);
-    margin->setDecimals(1);
-    margin->setValue(10.0);
-    margin->setSuffix(" mm");
-    form->addRow("Paper", paperBox);
-    form->addRow("Orientation", orientationBox);
-    form->addRow(fit);
-    form->addRow("Scale, when not fitting", scale);
-    form->addRow("Resolution (dpi)", dpi);
-    form->addRow("Margin", margin);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    form->addRow(buttons);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    cad::PlotSettings settings;
-    const std::array<cad::PaperSize, 5> sizes{cad::PaperSize::A4, cad::PaperSize::A3,
-                                              cad::PaperSize::A2, cad::PaperSize::A1,
-                                              cad::PaperSize::A0};
-    settings.paper = sizes[static_cast<std::size_t>(paperBox->currentIndex())];
-    settings.landscape = orientationBox->currentIndex() == 0;
-    settings.dpi = dpi->value();
-    settings.marginMm = margin->value();
-    settings.scaleDenominator = scale->value();
-
-    QString path = QFileDialog::getSaveFileName(this, "Plot to PDF", QString(), "PDF (*.pdf)");
-    if (path.isEmpty()) {
-        return;
-    }
-    if (!path.endsWith(".pdf", Qt::CaseInsensitive)) {
-        path += ".pdf";
-    }
-    if (const auto status = plotDrawingToPdf(path, settings, fit->isChecked()); !status) {
+    if (const auto status = writeSnapshot(image, request.path); !status) {
         logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
     }
+    logMessage(QString("file=\"%1\" ").arg(QDir::toNativeSeparators(request.path)) + record);
 }
 
 namespace {
@@ -5174,6 +5230,16 @@ katana::core::Status MainWindow::plotDrawingToPdf(const QString& path, cad::Plot
                    .arg(path, paperName(settings.paper), settings.landscape ? "landscape" : "portrait")
                    .arg(settings.scaleDenominator, 0, 'f', 0)
                    .arg(settings.dpi, 0, 'f', 0));
+    // The same as a record, for a script or an agent to read: what PLOT and
+    // --plot made, with the scale a fitted plot chose.
+    const std::string_view style = cad::toString(settings.colourMode);
+    logMessage(QString("file=\"%1\" paper=%2 orientation=%3 scale=%4 dpi=%5 style=%6 lineweight=%7")
+                   .arg(QDir::toNativeSeparators(path), paperName(settings.paper),
+                        settings.landscape ? "landscape" : "portrait")
+                   .arg(settings.scaleDenominator, 0, 'g', 10)
+                   .arg(settings.dpi, 0, 'g', 10)
+                   .arg(QString::fromUtf8(style.data(), static_cast<qsizetype>(style.size())))
+                   .arg(settings.lineWeightScale, 0, 'g', 10));
     return {};
 }
 

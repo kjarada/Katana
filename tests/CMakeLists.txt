@@ -1436,3 +1436,29 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# File > Plot to PDF, File > Export View as Image and Edit > Copy View as
+# Image, driven as a person drives them, and the PLOT and SNAPSHOT verbs they
+# run (docs/desktop.md, "Plot to PDF and view images"). The plot dialog's
+# colours and line weights reach the line, and the line's record says the
+# plot was made with them; the image dialog's custom size is the PNG's size,
+# read from its header; the 3D view is grabbed once the active view shows 3D.
+# The inks each plot style prints are checked by qt_plot_headless
+# (tools/check_plot.cmake).
+if(TARGET katana)
+    set(_out "${CMAKE_CURRENT_BINARY_DIR}/qt_output")
+    file(MAKE_DIRECTORY "${_out}")
+    add_test(NAME qt_plot_and_view_image_dialogs_run_their_verbs_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DDRIVE=@filePlot|plotDrawingPath=${_out}/dialog_plot.pdf|plotDrawingPaper=A4|plotDrawingOrientation=Portrait|plotDrawingFit=off|plotDrawingScale=250|plotDrawingDpi=150|plotDrawingColourMode=Greyscale|plotDrawingLineWeightScale=0.7|plotDrawingMargin=5|?plotDrawingCommand|!plotDrawingPlot|?plotDrawingStatus|@fileExportViewImage|viewImagePath=${_out}/dialog_view.png|viewImageSize=Custom size|viewImageWidth=300|viewImageHeight=150|viewImageBackground=White|?viewImageCommand|!viewImageExport|?viewImageStatus|*editCopyViewImage|>SNAPSHOT \"${_out}/typed_view.png\" width=320 height=200 bg=none|>SNAPSHOT \"${_out}/view.bmp\"|>PLOT|*viewShows3D|>SNAPSHOT \"${_out}/view_3d.png\" view=3d width=200 height=100"
+            "-DEXPECT=opened plotDrawingDialog \"Plot to PDF\"[\r\n]+plotDrawingCommand: PLOT \"[^\"]*/dialog_plot\\.pdf\" paper=A4 portrait scale=250 dpi=150 style=greyscale lineweight=0\\.7 margin=5[\r\n]+Plotted to [^\r\n]*dialog_plot\\.pdf: A4 portrait at 1 : 250, 150 dpi[^\r\n]*[\r\n]+file=\"[^\"]*dialog_plot\\.pdf\" paper=A4 orientation=portrait scale=250 dpi=150 style=greyscale lineweight=0\\.7[\r\n]+plotDrawingStatus: Plotted: file=[^\r\n]*dialog_plot\\.pdf[^\r\n]*[\r\n]+[^\r\n]*opened viewImageDialog \"Export View as Image\"[\r\n]+viewImageCommand: SNAPSHOT \"[^\"]*/dialog_view\\.png\" width=300 height=150 bg=white[\r\n]+file=\"[^\"]*dialog_view\\.png\" view=plan width=300 height=150[\r\n]+viewImageStatus: Exported: file=[^\r\n]*dialog_view\\.png[^\r\n]*[\r\n]+clipboard=yes view=plan width=[1-9][0-9]* height=[1-9][0-9]*[\r\n]+file=\"[^\"]*typed_view\\.png\" view=plan width=320 height=200[\r\n]+! InvalidArgument: the file's extension names its format[^\r\n]*[\r\n]+! InvalidArgument: usage: PLOT <file\\.pdf>.*file=\"[^\"]*view_3d\\.png\" view=3d width=200 height=100"
+            "-DIMAGE_SIZE=${_out}/dialog_view.png|300|150"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_and_view_image_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_plot_and_view_image_dialogs_run_their_verbs_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

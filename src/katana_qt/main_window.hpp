@@ -40,7 +40,9 @@
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
+#include "plotting/plot_drawing_dialog.hpp"
 #include "plotting/plot_output.hpp"
+#include "plotting/view_image_export.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -256,7 +258,15 @@ class MainWindow final : public QMainWindow {
     void cutSectionAlongAlignment();
     void corridorQuantities();
     void corridorSurface();
+    // File > Plot to PDF: the dialog, made the first time and kept, which
+    // runs the PLOT line.
     void plotToPdf();
+    // File > Export View as Image, kept likewise; it runs SNAPSHOT.
+    void showViewImageExport();
+    // SNAPSHOT: the active plan view painted afresh at the size asked, or the
+    // 3D view grabbed and scaled; written, or put on the clipboard, and a
+    // record logged (plotting/view_image_export.hpp).
+    void snapshotView(const SnapshotRequest& request);
 
     // What both corridor commands ask for: an alignment with a design
     // profile, a ground surface, the assembly and the interval, from one
@@ -556,6 +566,9 @@ class MainWindow final : public QMainWindow {
     // File > Drawing Summary, a child of the window. It holds the Document
     // through a DocumentWatcher, which is safe when the Document goes first.
     DrawingSummaryDialog* summaryDialog_ = nullptr;
+    // File > Plot to PDF and Export View as Image, children of the window.
+    PlotDrawingDialog* plotDialog_ = nullptr;
+    ViewImageDialog* imageDialog_ = nullptr;
 };
 
 } // namespace katana::qt
