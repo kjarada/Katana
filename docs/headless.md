@@ -29,7 +29,11 @@ process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
 code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
 "Sheets on the command line") are the interpreter's, so they run here too
 (`cli.sheet_verbs_lay_out_edit_and_list_the_sheets`); only `PLOTSHEETS`,
-which paints, needs the window.
+which paints, needs the window. `UTILITY REPORT | VERIFY | CLEARANCE |
+CHECK` grades subsurface utility schedules by AS 5488 quality level and
+checks them against a delivery schema
+(`docs/subsurface_utilities.md`); the `cli.utility_*` tests run it on
+`samples/utilities/`.
 
 The same session is served to Claude over the Model Context Protocol by
 `katana_mcp` (`docs/mcp.md`).
