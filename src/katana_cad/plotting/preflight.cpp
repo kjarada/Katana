@@ -150,7 +150,7 @@ struct FieldRule {
 constexpr std::string_view kProjectTab = "Fill it in on Title Block > Project";
 constexpr std::string_view kSignOffTab = "Fill it in on Title Block > Sign-offs";
 
-constexpr std::array<FieldRule, 22> kFieldRules{{
+constexpr std::array<FieldRule, 27> kFieldRules{{
     {"organisation", "Organisation", Severity::Warning, kProjectTab},
     {"project_line_1", "Project line 1", Severity::Warning,
      "Fill it in on Title Block > Project, or give the project a name"},
@@ -169,6 +169,13 @@ constexpr std::array<FieldRule, 22> kFieldRules{{
     {"compiler_name", "Compiled by", Severity::Warning, kSignOffTab},
     {"reviewer_name", "Reviewed by", Severity::Warning, kSignOffTab},
     {"approver_name", "Approved by", Severity::Warning, kSignOffTab},
+    // A sign-off with no date of its own prints the plot date, so these are
+    // blank only when that is, and plot_date says so once.
+    {"locator_date", "Utilities located on", std::nullopt, kSignOffTab},
+    {"surveyor_date", "Surveyed on", std::nullopt, kSignOffTab},
+    {"compiler_date", "Compiled on", std::nullopt, kSignOffTab},
+    {"reviewer_date", "Reviewed on", std::nullopt, kSignOffTab},
+    {"approver_date", "Approved on", std::nullopt, kSignOffTab},
     {"notes", "Notes", std::nullopt, "Fill it in on Title Block > Notes"},
     {"file_name", "File name", Severity::Warning,
      "Save the drawing as a project, or give it a name: the file name is the project folder's"},
@@ -616,6 +623,19 @@ PlanContent planContent(const Viewport& viewport, const Window& window, double s
         content.shown = std::any_of(options.otherContent.begin(), options.otherContent.end(),
                                     [&](const Box2& box) { return boxMeets(window, box); });
     }
+    // A key plan's sheet outlines and a plan's match lines are drawn too.
+    if (!content.shown) {
+        content.shown = std::any_of(viewport.marks.begin(), viewport.marks.end(),
+                                    [&](const WorldMark& mark) {
+                                        // Its lines only: an outline is not filled.
+                                        geometry::Polyline2 line{mark.points, false};
+                                        if (mark.kind == WorldMark::Kind::SheetOutline &&
+                                            line.vertices.size() > 2) {
+                                            line.vertices.push_back(line.vertices.front());
+                                        }
+                                        return !line.vertices.empty() && polylineMeets(window, line);
+                                    });
+    }
     return content;
 }
 
@@ -638,7 +658,18 @@ void checkPlan(const Viewport& viewport, std::size_t index, const Sheet& sheet,
         options.resolvePlan ? options.resolvePlan(viewport) : planWindow(viewport, model, options.otherContent);
     if (!(at.scale > 0.0) || !std::isfinite(at.scale) || !std::isfinite(at.centre.x) ||
         !std::isfinite(at.centre.y)) {
-        return; // scale.invalid has said so
+        // A fixed scale that cannot be used has had scale.invalid. An
+        // automatic one falls back to the stored scale and centre when there
+        // is nothing to fit, and those cannot be used either: say so here,
+        // since scale.invalid looks only at fixed scales.
+        if (viewport.autoScale) {
+            add(Severity::Error, "scale.invalid", {},
+                std::format("{} has nothing to fit its automatic scale to, and its stored scale ({}) "
+                            "cannot be used",
+                            label, at.scale),
+                "Give it a scale, or draw something for it to show");
+        }
+        return;
     }
     const Window window = windowOf(viewport, at);
     const PlanContent content = planContent(viewport, window, at.scale, model, options);
@@ -651,7 +682,9 @@ void checkPlan(const Viewport& viewport, std::size_t index, const Sheet& sheet,
             "Pan the drawing into it (Shift-drag), set its scale and centre to Auto, or show the layers "
             "it hides");
     }
-    if (content.smallTexts > 0) {
+    // A key plan is a small-scale map of where the sheets are: its drawing
+    // is faded and its own text is not meant to be read.
+    if (content.smallTexts > 0 && viewport.kind != ViewportKind::KeyPlan) {
         const double smallestMm = content.smallestModel * 1000.0 / at.scale;
         // The largest standard scale at which the smallest text reaches the
         // minimum, and the text height that reads at this one.
@@ -900,6 +933,7 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
 
     switch (viewport.kind) {
     case ViewportKind::Plan:
+    case ViewportKind::KeyPlan: // drawn as a plan is, so checked as one
         checkPlan(viewport, index, sheet, model, options, report);
         break;
     case ViewportKind::LongSection:
@@ -929,7 +963,6 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
         break;
     case ViewportKind::Model3D:
     case ViewportKind::Legend:
-    case ViewportKind::KeyPlan:
         break;
     }
 
