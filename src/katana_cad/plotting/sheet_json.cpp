@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/plotting/legend.hpp"
+
 namespace katana::cad::plotting {
 
 using katana::core::ErrorCode;
@@ -235,6 +237,9 @@ Json viewportJson(const Viewport& viewport)
         marks.push_back(markJson(mark));
     }
     putList(json, "marks", std::move(marks));
+    if (viewport.legendScope != d.legendScope) {
+        json["legend_scope"] = toString(viewport.legendScope);
+    }
     return json;
 }
 
@@ -282,6 +287,12 @@ Viewport viewportFrom(const Json& json)
     for (const Json& mark : json.value("marks", Json::array())) {
         viewport.marks.push_back(markFrom(mark));
     }
+    const std::string scope = json.value("legend_scope", std::string(toString(d.legendScope)));
+    const auto parsedScope = legendScopeFrom(scope);
+    if (!parsedScope) {
+        throw BadValue{"unknown legend scope \"" + scope + "\""};
+    }
+    viewport.legendScope = *parsedScope;
     return viewport;
 }
 
