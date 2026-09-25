@@ -1,0 +1,342 @@
+# IFC 4.3 exchange
+
+`katana_ifc` writes the drawing, its alignments, its surfaces and an AS 5488
+subsurface utility investigation as an IFC 4.3 file (IFC4X3_ADD2), and reads
+IFC2X3, IFC4 and IFC4X3 files back into the drawing. It needs no third-party
+library, like `katana_dxf` and `katana_archive12d`: IFC is ISO 10303-21 text,
+and what matters is the mapping, not a model library
+(`include/katana/ifc/export.hpp`, "Why a writer of our own"). It sits beside
+the other exchange modules in the layering (`tools/check_layering.cmake`): it
+may see `core`, `math`, `geometry`, `terrain`, `entity`, `commands` and
+`survey`, and `katana_app` and `katana_qt` may see it.
+
+The one decision the export exists to get right is **which IFC class each
+thing becomes**. A file whose every object is an `IfcBuildingElementProxy`
+says nothing a DXF did not: a consumer cannot ask it for the water mains, the
+kerbs or the pits. So nothing here falls back to a proxy - what is known to be
+an element becomes the element class the schema has for it, and what is only
+known to be a line someone surveyed or drew becomes an `IfcAnnotation`, which
+IFC 4.3 made for survey elements and which claims no more than is known.
+
+## Using it
+
+From `katana_cli` (the window has no menu entry yet - "Not done"):
+
+```
+EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>] [SPACING <m>] [NODRAWING]
+IMPORT <file.ifc> [LOCAL]
+```
+
+```sh
+katana_cli samples/ifc/scenario.txt -c "EXPORT site.ifc UTILITIES samples/utilities/schedule.csv"
+katana_cli -c "EXPORT services.ifc UTILITIES samples/utilities/schedule_tfnsw.csv SCHEMA tests/ifc/data/delivery_schema.csv NODRAWING"
+katana_cli -c "IMPORT site.ifc" -c "ALIGN LIST"
+```
+
+EXPORT writes the drawing's entities and alignments, georeferenced by the
+project's coordinate system (`CRS SET`). UTILITIES adds an investigation in
+the schedule format of `docs/subsurface_utilities.md`; SCHEMA names the
+delivery schema it was written to (`UTILITY CHECK`'s schema file); SPACING is
+the longest detected spacing that keeps QL-B (10 m by default); NODRAWING
+leaves the drawing out. The report counts what was written by class, and
+every warning.
+
+IMPORT brings a file's alignments, elements and annotations in as one
+undoable step; LOCAL moves them to sit at the origin, as the other importers'
+LOCAL does. The command line holds no surfaces, so a terrain in the file is
+counted and not kept; `ifc::readIfc` returns it for a caller that can.
+`src/katana_app/ifc_verbs.cpp` is the whole of the command-line side.
+
+## Export: what goes where
+
+### The project, its units and its georeferencing
+
+One `IfcProject` (units metre, square and cubic metre, radian) with one 3D
+model context and the subcontexts `Axis`, `Body`, `FootPrint` and
+`Annotation`; one `IfcSite` holding every element and annotation; the
+alignments aggregated into the project beside the site. The header names the
+view the file keeps to: `ViewDefinition [Alignment-basedView]`, IFC 4.3's
+view for alignments and what is positioned along them.
+
+When the project's coordinate system has an EPSG code, it is written as an
+`IfcProjectedCRS` named by that code with an `IfcMapConversion`, and the
+coordinates are written relative to a **local origin**: the south-west corner
+of everything exported, rounded down to 100 m in plan, at height 0. On the
+scenario MC01's first PI is furthest west and south, so the origin is
+333900, 6249900 (`IfcExport.IsGeoreferencedByAMapConversionFromALocalOriginNearTheWork`).
+The file is then both georeferenced and drawable: a viewer holding MGA
+coordinates in single precision would resolve them to about a metre.
+
+Without an EPSG code the file is not georeferenced, its coordinates are the
+project's own, and the report says so. A name that is not an EPSG code (a
+WKT definition, a local grid) is not written at all: IFC4X3_ADD2 names a
+system by its code and has no attribute for a definition, and a name no
+reader can resolve is georeferencing in appearance only. A local origin
+given without a system to record it in is refused.
+
+### Alignments
+
+Each alignment is an `IfcAlignment` with its **business logic** - an
+`IfcAlignmentHorizontal` and, with a profile, an `IfcAlignmentVertical`, each
+nesting one `IfcAlignmentSegment` per element with the design parameters a
+designer states - and its **geometry**: an `IfcCompositeCurve` of
+`IfcCurveSegment` (the `FootPrint`, or the `Axis` without a profile) and over
+it an `IfcGradientCurve` (the `Axis`). Katana holds PIs and PVIs; both
+descriptions are written from the solved elements, one segment per element,
+so they agree with each other and with what Katana draws.
+
+| Katana element | Business logic | Geometry |
+|---|---|---|
+| tangent | `LINE` | `IfcLine` along +x, from 0 for L |
+| circular curve | `CIRCULARARC`, radius signed by the turn (negative: right) | `IfcCircle` of \|R\|, from 0 for L signed by the turn |
+| transition | `CLOTHOID`, start and end radius (0 on the tangent side) | `IfcClothoid`, A = sign(Δk)·√(L/\|Δk\|), from k0·L/Δk |
+| grade | `CONSTANTGRADIENT` | `IfcLine` |
+| vertical curve | `PARABOLICARC`, radius L/(g2 − g1) | `IfcPolynomialCurve` h + g1·x + (g2 − g1)/2L·x² |
+
+The encodings are IfcOpenShell's (`ifcopenshell.api.alignment`, 0.8), the
+implementation buildingSMART's validation service evaluates geometry with.
+Each layout and each curve ends with a zero-length segment, as the schema's
+rules require. Stations are `IfcReferent` STATION with `Pset_Stationing`, at
+the start, at every key station (TS, SC, CS, ST, PC, PT, the PVCs and PVTs)
+and at the end, named "SC 1093.218" and so on; `Katana_Alignment` carries the
+start and end stations and the PI and PVI counts. A profile that runs beyond
+its alignment is not written, with a warning: the gradient curve cannot
+extend past the curve it rests on.
+
+On MC01 of `samples/ifc/scenario.txt` - R 80 with 20 m transitions turning
+right, R 60 turning left - the tests work each parameter out from the PIs by
+hand: the tangent bearings are atan2(70, 100) and −atan2(30, 100), the
+deflection 0.9021827588 rad, the first arc 80 × (0.9021827588 − 40/160) =
+52.1746 m, the second 60 × 0.9021827588 = 54.1310 m
+(`tests/ifc/test_export.cpp`).
+
+### Subsurface utilities (AS 5488, the TfNSW Utility Schema)
+
+Each **service** of the schedule is an `IfcDistributionSystem`, and each of
+its **graded segments** - the standard grades segments, not services - one
+element, grouped by the system. Every **located point** is an `IfcAnnotation`
+SURVEY carrying its evidence. The class comes from the service's type and the
+words of its feature, subtype, configuration, material and description
+(`ifc::classifyUtilityRun`, `include/katana/ifc/classification.hpp`):
+
+| The service | Segment class | System |
+|---|---|---|
+| water, recycled water, fire service, sewer, stormwater, gas, fuel | `IfcPipeSegment` RIGIDSEGMENT | WATERSUPPLY, USERDEFINED "RECYCLEDWATER", FIREPROTECTION, SEWAGE, STORMWATER, GAS, FUEL |
+| electricity, communications, ITS | `IfcCableSegment` CABLESEGMENT | ELECTRICAL, COMMUNICATION, CONTROL |
+| ... said to be a culvert | `IfcPipeSegment` CULVERT | the type's |
+| ... a conduit or duct (not a fluid service) | `IfcCableCarrierSegment` CONDUITSEGMENT | the type's |
+| ... a trough or trunking | `IfcCableCarrierSegment` CABLETRUNKINGSEGMENT | the type's |
+| ... optical fibre | `IfcCableSegment` OPTICALCABLESEGMENT | the type's |
+| unknown, unless its words say pipe or main | `IfcDistributionFlowElement` "UNKNOWN SERVICE" | NOTDEFINED |
+
+What a service is laid in decides before what it carries: the sample's E1 is
+"4 x 100 mm conduits", and its segments are cable carriers. A service
+recorded at a single point is the feature its words name
+(`ifc::classifyUtilityPoint`): a manhole, valve or meter pit, sump, chamber or
+pit (`IfcDistributionChamberElement`), a hydrant (`IfcFireSuppressionTerminal`
+FIREHYDRANT), a valve (`IfcValve`: STOPCOCK, AIRRELEASE, FLUSHING, ISOLATING), a
+marker post (`IfcSign` MARKER), a pillar or cabinet (`IfcJunctionBox`); a point
+whose words name none is the survey record it is and no more.
+
+What each object carries:
+
+| Property set | On | Holds |
+|---|---|---|
+| `AS5488_QualityLevel` | each segment | the graded level, the level claimed, whether the claim holds, what limits it, the path evidence, the plan length, the level references and centre levels at each end, whether it is drawn in 3D |
+| `AS5488_LocatedPoint` | each point | the method, attained and claimed levels, why it is below its method's ceiling, levels, depth and cover |
+| `AS5488_Service` | the system and its elements | type, owner, material, size, configuration, status, the length at each level |
+| `Pset_Uncertainty` | segments and points | IFC's own statement of positional uncertainty: MEASUREMENT for QL-A and QL-B, INTERPRETATION for QL-C, ESTIMATE for QL-D, with the tolerance or the assessed uncertainty |
+| `Pset_<class>TypeCommon`, `Pset_PipeSegmentOccurrence`, `Pset_ConstructionOccurence`, `Pset_DistributionSystemCommon` | as the schema defines them | the asset identifier as Reference, status, diameters, length, gradient and invert where known, installation date |
+| `TfNSW_UtilitySchema` (or the schema's own title) | the system, its elements and points | the delivery schema's attributes **exactly as the schedule wrote them** |
+
+and each segment and point is classified by an `IfcClassificationReference`
+"QL-A" .. "QL-D" in AS 5488.1-2019; a TfNSW schedule's services by their asset
+type code in the schema.
+
+**The delivery property set carries the schedule's values, not Katana's
+reading of them.** Reading a schedule turns "In service" into a status; a
+deliverable written back must say "In service", or it would quietly correct
+what `UTILITY CHECK` reports as wrong. So the schedule reader keeps each
+interpreted cell as written, under its header (`UtilityAttributes::written`,
+`UtilityVertex::written`), and that is what is written. With the schema
+file, the set lists the schema's attributes in its order, each described by
+the schema's label; a value from one of its lists is an
+`IfcPropertyEnumeratedValue` referring to an `IfcPropertyEnumeration` of that
+list, a number a number, and a value the list does not hold - E-0001's "In
+service" - plain text, since an enumerated value outside its enumeration is a
+schema error and the value must not be lost
+(`IfcExportUtilities.TheDeliverySchemasAttributesAreWrittenAsTheScheduleWroteThem`).
+
+**Geometry is never guessed.** A segment has an `Axis` in 3D - and a `Body`,
+a swept disk of its size - only when both of its ends give the level of the
+service's centre: a level recorded on the centre, or on the top or invert
+with a size to bring it there. Otherwise it has a 2D `FootPrint` and nothing
+else: a pipe drawn at a depth nobody measured would be taken for one
+somebody had. On the sample schedule that is 6 of 10 segments - W1-2 to W1-4
+and all of E1 (`IfcExportUtilities.EveryGradedSegmentIsOneElementAndOnlyThoseWithLevelsAreIn3d`).
+
+### Drawing entities
+
+An entity becomes the class of the first rule whose words its layer path,
+survey code or 12d string name holds - whole words, any case, a trailing `*`
+a prefix - among the rules that apply to its kind (`ifc::classifyEntity`,
+`ifc::defaultClassificationRules`):
+
+| Words (examples) | Kinds | Class |
+|---|---|---|
+| CULVERT | runs | `IfcPipeSegment` CULVERT |
+| CONDUIT, DUCT | runs | `IfcCableCarrierSegment` CONDUITSEGMENT |
+| STORMWATER, SW, SEWER, WATER, GAS, FUEL ... | runs | `IfcPipeSegment` RIGIDSEGMENT, in the system the words name |
+| OPTIC, FIBRE | runs | `IfcCableSegment` OPTICALCABLESEGMENT |
+| ELEC, POWER, HV, COMMS, TELSTRA, NBN, CABLE ... | runs | `IfcCableSegment` CABLESEGMENT |
+| MANHOLE, MH; SUMP; CHAMBER; PIT, SIP, KIP, GULLY | points, circles | `IfcDistributionChamberElement` MANHOLE, SUMP, INSPECTIONCHAMBER, INSPECTIONPIT |
+| HYDRANT, FH; VALVE, SV, WV, GV; MARKER | points | `IfcFireSuppressionTerminal` FIREHYDRANT; `IfcValve` ISOLATING; `IfcSign` MARKER |
+| KERB, KB, LIP OF KERB ... | runs | `IfcKerb` |
+| GUARDRAIL, BARRIER, W BEAM; HANDRAIL; FENCE | runs | `IfcRailing` GUARDRAIL, HANDRAIL, FENCE |
+| RETAINING WALL; WALL | runs | `IfcWall` RETAININGWALL; NOTDEFINED |
+| TREE, SHRUB, VEGETATION | any | `IfcGeographicElement` VEGETATION |
+| BOREHOLE, BH, TEST PIT | points | `IfcBorehole` |
+| SIGN | points | `IfcSign` |
+| CONTOUR | runs | `IfcAnnotation` CONTOURLINE, with `Pset_AnnotationContourLine` |
+
+Services come first - linework on a service's layer is the service - and a
+pit on a "STORMWATER PITS" layer is in STORMWATER without a rule per service
+(`ifc::serviceSystemFor`). What no rule names is an `IfcAnnotation` of its
+kind: SURVEY for a point, or a line with heights or a survey code; TEXT,
+DIMENSION, LEADER; NOTDEFINED for other linework. The rules are data
+(`ExportOptions::rules`): a project whose layers are named otherwise passes
+its own, which replace the defaults, and a rule naming a class the export does
+not write, or USERDEFINED without saying what, is refused.
+`IfcBuildingElementProxy` is written only when such a rule asks for it.
+
+The geometry is what the class expects: a run's `Axis` in 3D where every
+vertex has a height, else its `FootPrint`; a point feature's `FootPrint` point
+(and circle); an annotation's `Annotation` point, curve or text. Arcs are
+`IfcIndexedPolyCurve` arcs through three points of the true arc and circles
+`IfcCircle`, never chords. Text is `IfcTextLiteralWithExtent` (plain
+`IfcTextLiteral` is deprecated in 4.3). Each entity keeps its layer as an
+`IfcPresentationLayerAssignment`, its colour as a curve style, its properties
+(`Katana_Attributes`) and its provenance (`Katana_Provenance`). Labels are not
+written: what a label says and where it stands are the placer's, which this
+layer cannot see; they are counted in the report.
+
+**12d drainage** is taken as the network it is: pipe i of a drainage string
+(its `pipe.<i>.*` properties) an `IfcPipeSegment` from vertex i to i + 1, its
+centre at its inverts plus half its diameter where the upstream end is known -
+from the string's own vertex levels, or a `flow_direction` of 1 - and in plan
+where it is not; each pit an `IfcDistributionChamberElement` by its type (a
+headwall USERDEFINED "HEADWALL"), from its lowest connected invert to its top;
+a house connection an `IfcPipeFitting` JUNCTION; all in one
+`IfcDistributionSystem` per string, STORMWATER unless its words say otherwise.
+
+### Surfaces
+
+Each surface passed in is an `IfcGeographicElement` TERRAIN whose `Body` is an
+`IfcTriangulatedFaceSet`, with `Katana_Surface`.
+
+### GlobalIds, and the same file every time
+
+Every GlobalId is made from a key that names the object - "entity/41",
+"alignment/MC01/horizontal/3" - within a namespace that names the project
+(`ExportOptions::guidNamespace`; the command line passes the project's name and
+creation time), by two 64-bit FNV-1a hashes mixed and encoded in IFC's base
+64 (`ifc::guidFor`). The same project exported twice gives each object the
+same GlobalId, so a consumer can track an object across issues; two projects
+give different ones. The writer reads no clock and no random source: the same
+input is the same file, byte for byte (Rule 7,
+`IfcExport.TheSameInputIsTheSameFileAndGlobalIdsBelongToTheProject`); the
+timestamp in the header is the caller's.
+
+## Import: what comes in, and as what
+
+`ifc::readIfc` parses any ISO 10303-21 file whose schema is an IFC one
+(`src/katana_ifc/step_reader.cpp`: complex instances are counted and passed
+over, lists deeper than 64 are refused, an error names its line), and
+`ifc::importCommand` makes the result one undoable step. The product classes
+of IFC2X3, IFC4 and IFC4X3_ADD2, and which are drawn, spatial or positioning,
+are generated from IfcOpenShell's schemas (`tools/ifc_product_classes.py`,
+`src/katana_ifc/product_classes.inc`).
+
+| In the file | In the drawing |
+|---|---|
+| `IfcAlignment` | a named alignment, its PIs and PVIs **reconstructed** from the business logic and **checked** (below); else a 3D polyline of its exact geometry on "IFC/Alignments", and a warning saying why |
+| an element or annotation | its shape - the `Axis`, else `FootPrint`, else `Annotation`, else a swept disk's directrix - as points, lines, arcs, circles, polylines and texts, heights kept and absent where the file has none; a shape Katana cannot draw (a solid) a point at its placement, counted |
+| a terrain (`IfcGeographicElement` TERRAIN, a TIN) | a surface, for a caller that keeps surfaces |
+| property sets and quantities | properties "Set/Property", lengths, areas, volumes and angles in Katana's units |
+| classifications, the system served | "Classification/<system>", "System" |
+| class, GlobalId, name, tag, predefined type, container | metadata `ifc.class`, `ifc.globalId` ... |
+| presentation layer and colour | layer and colour; without a layer, "IFC/<container>/<class>" |
+| `Katana_Attributes`, `Katana_Provenance` | where they came from, so an export read back is the drawing it was |
+
+Lengths come in as metres from the file's unit (SI prefixes and
+conversion-based units), angles as radians. A file with an `IfcMapConversion`
+(or `IfcMapConversionScaled`) is read into its projected system - eastings,
+northings, height, rotation and scale applied - and its EPSG code is reported
+for `CRS SET`; an `IfcRigidOperation` in lengths is a shift, one in degrees
+places the file in a geographic system, which only a projection could turn
+into grid coordinates, so the file is read in its own coordinates and that is
+said. Local, linear (`IfcLinearPlacement` along an alignment) and grid
+placements are followed.
+
+**Alignments are reconstructed, then checked.** Each run of [CLOTHOID]
+CIRCULARARC [CLOTHOID] between two LINEs is one PI at the intersection of
+those lines, with the arc's radius and the transitions' lengths; each
+PARABOLICARC one PVI at the intersection of its grades. Katana then solves
+the reconstruction, and every segment the file states must start within
+`ifc::kAlignmentTolerance` (10 mm, the 12d archive import's tolerance) of
+where the solution puts it. Where the check fails, or the geometry has no PI
+form - it starts or ends on a curve, compounds two arcs, or uses a transition
+other than the clothoid (Katana has the clothoid) - the alignment comes in as
+a 3D polyline of its exact geometry, chorded to `ImportOptions::curveTolerance`
+(transitions integrated from their curvature, which is what defines them),
+and the warning says why. A vertical of circular arcs is not a Katana design
+profile: its levels come in on a polyline beside the alignment. Cant is not
+read; Katana's alignments have none. Stations are taken from the
+`Pset_Stationing` referents.
+
+## Validation
+
+The files are judged by implementations that are not Katana's, so that a
+mistake in the writer and the same mistake in the reader cannot agree:
+
+- **IfcOpenShell 0.8.5** (`tools/check_ifc.py`, the `cli.ifc_the_scenario_export_is_valid_to_ifcopenshell`
+  and `cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell` tests, registered
+  where the configuring Python can import ifcopenshell): the schema - types,
+  cardinalities, enumerations, inverses - and its EXPRESS rules: **0 findings**
+  on the scenario with the sample services (1097 instances) and on the TfNSW
+  export (461 instances). The same tool evaluates each alignment's geometry
+  with IfcOpenShell's own kernel and compares it with the business logic,
+  segment by segment: on MC01 they agree to under 1 µm. Checked the other way,
+  a clothoid's start direction moved by 0.01 rad and a vertical curve's
+  start height by 62.5 mm are both reported.
+- **buildingSMART's validation rules** (`ifc-gherkin-rules` at 893f827,
+  2026-07-29, 95 rules evaluated, run by hand): no errors on either file. The
+  scenario draws warnings from IFC431, "entities in scope for the
+  Alignment-based view": its text is an `IfcTextLiteralWithExtent` with an
+  `IfcPlanarExtent`, which that view does not list. The text is kept - a lot
+  number is worth more than a clean report - and the TfNSW export, services
+  alone, draws none. GRP001 raises an exception of its own on any
+  `IfcDistributionSystem` (it looks up the relationship by the exact name
+  `IfcGroup`, not its subtypes); that is the rule's defect, not the file's.
+- **Import**: all 46 files of buildingSMART's IFC 4.3 sample models
+  (`IFC4.3.x-sample-models` at 50e6c5c) import without error by hand; the
+  railway sample's alignment is reconstructed to 4 PIs, and the UTM and
+  Gauss-Krüger georeferencing samples land where IfcOpenShell's own
+  conversion puts them.
+
+## Not done
+
+- **The desktop application** has no File > Import/Export entry for IFC
+  yet; the command line (`katana_cli`, and so `katana_mcp`) has both verbs.
+- **Solids** are not read beyond swept disks and triangulated surfaces:
+  Katana has no solid entity, so an extruded wall or a B-rep comes in as a
+  point at its placement with its properties.
+- **Export of 3D solids** other than swept disks (a pit as a box, a culvert as
+  its section) is not attempted; a pit is its footprint and, from 12d, a
+  cylinder from invert to top.
+- **Cant**, IFC4X1-form alignments, and transitions other than the clothoid
+  have no Katana equivalent, so they come in as exact polylines.
+- **Labels** are not exported (above), and the delivery schema's conditional
+  attributes are not evaluated here any more than by `UTILITY CHECK`.
+- **Attribute quality levels** (AS 5488's grading of the type or owner
+  separately from the position) are not modelled, so none are written.

@@ -31,14 +31,16 @@ void exportSurfaces(Builder& builder, const std::vector<SurfaceInput>& surfaces)
         std::vector<std::string> triangles;
         triangles.reserve(surface->triangleCount());
         for (const auto& triangle : surface->triangles()) {
-            triangles.push_back(listOf({std::to_string(triangle[0] + 1),
-                                        std::to_string(triangle[1] + 1),
-                                        std::to_string(triangle[2] + 1)}));
+            triangles.push_back(
+                listOf({std::to_string(triangle[0] + 1), std::to_string(triangle[1] + 1),
+                        std::to_string(triangle[2] + 1)}));
         }
         StepFile& file = builder.file();
-        const Id points = file.add("IfcCartesianPointList3D", Args().raw(listOf(coordinates)).null());
-        const Id faces = file.add("IfcTriangulatedFaceSet",
-                                  Args().ref(points).null().boolean(false).raw(listOf(triangles)).null());
+        const Id points =
+            file.add("IfcCartesianPointList3D", Args().raw(listOf(coordinates)).null());
+        const Id faces =
+            file.add("IfcTriangulatedFaceSet",
+                     Args().ref(points).null().boolean(false).raw(listOf(triangles)).null());
         const Id representation =
             builder.shape(builder.bodyContext(), "Body", "Tessellation", {faces});
         builder.layer("Surfaces/" + input.name, representation);

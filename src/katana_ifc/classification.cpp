@@ -56,14 +56,16 @@ struct ServiceWords {
 constexpr std::array<ServiceWords, 9> kServices{{
     {"USERDEFINED", "RECYCLEDWATER", {"RECYCLED WATER", "RECYCLED", "REUSE", "PURPLE PIPE"}},
     {"FIREPROTECTION", "", {"FIRE SERVICE", "FIRE MAIN", "HYDRANT", "HYDRANTS"}},
-    {"STORMWATER", "",
+    {"STORMWATER",
+     "",
      {"STORMWATER", "STORM", "DRAINAGE", "DRAIN", "DRAINS", "SW", "CULVERT", "CULVERTS"}},
     {"SEWAGE", "", {"SEWER", "SEWERAGE", "SEWAGE", "SEWERS", "WASTEWATER"}},
     {"WATERSUPPLY", "", {"WATER", "POTABLE", "WATERMAIN", "WATERMAINS"}},
     {"GAS", "", {"GAS"}},
     {"FUEL", "", {"FUEL", "PETROLEUM"}},
     {"ELECTRICAL", "", {"ELEC*", "POWER", "HV", "LV", "STREETLIGHT*"}},
-    {"COMMUNICATION", "",
+    {"COMMUNICATION",
+     "",
      {"COMMS", "TELECOM*", "TELSTRA", "NBN", "OPTIC*", "FIBRE", "COMMUNICATION*", "TELCO"}},
 }};
 
@@ -149,8 +151,7 @@ std::string reasonFor(const sub::UtilityAttributes& service, std::string_view wo
 
 bool carriesCable(sub::UtilityType type)
 {
-    return type == sub::UtilityType::Electricity ||
-           type == sub::UtilityType::Telecommunications ||
+    return type == sub::UtilityType::Electricity || type == sub::UtilityType::Telecommunications ||
            type == sub::UtilityType::IntelligentTransport;
 }
 
@@ -237,7 +238,8 @@ UtilityClass classifyUtilityRun(const sub::UtilityAttributes& service)
         }
         if (hasAny(text, {"OPTIC*", "FIBRE*", "FIBER*"})) {
             set("IfcCableSegment", "OPTICALCABLESEGMENT",
-                hasWord(text, "OPTIC*") ? "OPTIC*" : (hasWord(text, "FIBRE*") ? "FIBRE*" : "FIBER*"));
+                hasWord(text, "OPTIC*") ? "OPTIC*"
+                                        : (hasWord(text, "FIBRE*") ? "FIBRE*" : "FIBER*"));
             return result;
         }
         if (hasWord(text, "CABLE*")) {
@@ -411,7 +413,8 @@ const std::vector<ClassificationRule>& defaultClassificationRules()
         rule("marker", {"MARKER*"}, kPoints, {"IfcSign", "MARKER", {}}),
 
         // Road furniture and the ground.
-        rule("kerb", {"KERB*", "KB", "EDGE OF KERB", "LIP OF KERB", "BACK OF KERB", "KERB AND GUTTER"},
+        rule("kerb",
+             {"KERB*", "KB", "EDGE OF KERB", "LIP OF KERB", "BACK OF KERB", "KERB AND GUTTER"},
              kRuns, {"IfcKerb", "NOTDEFINED", {}}),
         rule("guardrail", {"GUARDRAIL*", "GUARD RAIL", "BARRIER*", "W BEAM", "WBEAM", "THRIE BEAM"},
              kRuns, {"IfcRailing", "GUARDRAIL", {}}),
@@ -470,9 +473,8 @@ EntityClass classifyEntity(const entity::Entity& entity,
     const EntityType kind = entity.type();
     const std::string text = classificationText(entity);
     for (const ClassificationRule& candidate : rules) {
-        if (!candidate.kinds.empty() &&
-            std::find(candidate.kinds.begin(), candidate.kinds.end(), kind) ==
-                candidate.kinds.end()) {
+        if (!candidate.kinds.empty() && std::find(candidate.kinds.begin(), candidate.kinds.end(),
+                                                  kind) == candidate.kinds.end()) {
             continue;
         }
         const bool matches =

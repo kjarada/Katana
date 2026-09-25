@@ -263,15 +263,15 @@ class AlignmentWriter {
         if (profile) {
             std::vector<Id> gradientSegments;
             writeProfile(horizontal, *profile, gradientSegments, verticalSegments);
-            gradient = file.add("IfcGradientCurve",
-                                Args().refs(gradientSegments).boolean(false).ref(composite_).null());
+            gradient =
+                file.add("IfcGradientCurve",
+                         Args().refs(gradientSegments).boolean(false).ref(composite_).null());
         }
 
         // ---- the alignment ---------------------------------------------------------
         std::vector<Id> representations;
         if (gradient == 0) {
-            representations.push_back(
-                b_.shape(b_.axisContext(), "Axis", "Curve2D", {composite_}));
+            representations.push_back(b_.shape(b_.axisContext(), "Axis", "Curve2D", {composite_}));
         } else {
             representations.push_back(
                 b_.shape(b_.axisContext(), "FootPrint", "Curve2D", {composite_}));
@@ -288,14 +288,9 @@ class AlignmentWriter {
                                                              .ref(shape)
                                                              .null());
         ++b_.report().classes["IfcAlignment"];
-        const Id layoutH = file.add("IfcAlignmentHorizontal", Args()
-                                                                  .string(b_.guid(key_ + "/horizontal"))
-                                                                  .null()
-                                                                  .null()
-                                                                  .null()
-                                                                  .null()
-                                                                  .null()
-                                                                  .null());
+        const Id layoutH = file.add(
+            "IfcAlignmentHorizontal",
+            Args().string(b_.guid(key_ + "/horizontal")).null().null().null().null().null().null());
         std::vector<Id> layouts{layoutH};
         Id layoutV = 0;
         if (gradient != 0) {
@@ -333,9 +328,8 @@ class AlignmentWriter {
             break;
         case AlignmentElementKind::Arc: {
             const double radius = 1.0 / std::abs(piece.startCurvature);
-            parent = file.add("IfcCircle", Args()
-                                               .ref(b_.placement2(b_.origin2(), 0.0))
-                                               .real(radius));
+            parent =
+                file.add("IfcCircle", Args().ref(b_.placement2(b_.origin2(), 0.0)).real(radius));
             length = piece.startCurvature >= 0.0 ? piece.length : -piece.length;
             break;
         }
@@ -343,9 +337,8 @@ class AlignmentWriter {
             const double change = piece.endCurvature - piece.startCurvature;
             const double constant =
                 std::copysign(std::sqrt(piece.length / std::abs(change)), change);
-            parent = file.add("IfcClothoid", Args()
-                                                 .ref(b_.placement2(b_.origin2(), 0.0))
-                                                 .real(constant));
+            parent = file.add("IfcClothoid",
+                              Args().ref(b_.placement2(b_.origin2(), 0.0)).real(constant));
             start = piece.startCurvature * piece.length / change;
             break;
         }
@@ -363,18 +356,20 @@ class AlignmentWriter {
                          Id curveSegment, std::string_view name, std::size_t index)
     {
         StepFile& file = b_.file();
-        const auto radius = [](double curvature) { return curvature == 0.0 ? 0.0 : 1.0 / curvature; };
-        const Id design = file.add("IfcAlignmentHorizontalSegment",
-                                   Args()
-                                       .string(startTag)
-                                       .string(endTag)
-                                       .ref(b_.localPoint(b_.local(piece.start)))
-                                       .real(piece.direction)
-                                       .real(radius(piece.startCurvature))
-                                       .real(radius(piece.endCurvature))
-                                       .real(piece.length)
-                                       .null()
-                                       .enumeration(horizontalType(piece.kind)));
+        const auto radius = [](double curvature) {
+            return curvature == 0.0 ? 0.0 : 1.0 / curvature;
+        };
+        const Id design =
+            file.add("IfcAlignmentHorizontalSegment", Args()
+                                                          .string(startTag)
+                                                          .string(endTag)
+                                                          .ref(b_.localPoint(b_.local(piece.start)))
+                                                          .real(piece.direction)
+                                                          .real(radius(piece.startCurvature))
+                                                          .real(radius(piece.endCurvature))
+                                                          .real(piece.length)
+                                                          .null()
+                                                          .enumeration(horizontalType(piece.kind)));
         return alignmentSegment(key_ + "/horizontal/" + std::to_string(index), name, curveSegment,
                                 design);
     }
@@ -383,8 +378,8 @@ class AlignmentWriter {
     {
         // Its own representation, the one curve segment it is (ALS004),
         // placed as the alignment is.
-        const Id shape = b_.productShape(
-            {b_.shape(b_.axisContext(), "Axis", "Segment", {curveSegment})});
+        const Id shape =
+            b_.productShape({b_.shape(b_.axisContext(), "Axis", "Segment", {curveSegment})});
         return b_.file().add("IfcAlignmentSegment", Args()
                                                         .string(b_.guid(key))
                                                         .null()
@@ -407,15 +402,15 @@ class AlignmentWriter {
             const bool curve = element.kind == geometry::ProfileElementKind::Curve;
             const double along = element.startStation - horizontal.startStation();
             const double height = element.startElevation + originHeight;
-            const double rate = curve ? (element.endGrade - element.startGrade) / element.length : 0.0;
+            const double rate =
+                curve ? (element.endGrade - element.startGrade) / element.length : 0.0;
 
             std::string code = "DISCONTINUOUS";
             if (i + 1 < elements.size()) {
                 const auto& next = elements[i + 1];
-                const double nextRate =
-                    next.kind == geometry::ProfileElementKind::Curve
-                        ? (next.endGrade - next.startGrade) / next.length
-                        : 0.0;
+                const double nextRate = next.kind == geometry::ProfileElementKind::Curve
+                                            ? (next.endGrade - next.startGrade) / next.length
+                                            : 0.0;
                 code = transition(std::atan(element.endGrade),
                                   profileCurvature(element.endGrade, 2.0 * rate / 2.0),
                                   std::atan(next.startGrade),
@@ -425,19 +420,23 @@ class AlignmentWriter {
                                   profileCurvature(element.endGrade, rate),
                                   std::atan(element.endGrade), 0.0);
             }
-            const Id gradientSegment =
-                verticalCurveSegment(along, height, element.startGrade, element.endGrade,
-                                     element.length, curve, code);
+            const Id gradientSegment = verticalCurveSegment(
+                along, height, element.startGrade, element.endGrade, element.length, curve, code);
             gradientSegments.push_back(gradientSegment);
 
             const std::string startTag =
-                i == 0 ? "Start" : (curve ? "PVC" : (elements[i - 1].kind == geometry::ProfileElementKind::Curve ? "PVT" : "PVI"));
+                i == 0 ? "Start"
+                       : (curve ? "PVC"
+                                : (elements[i - 1].kind == geometry::ProfileElementKind::Curve
+                                       ? "PVT"
+                                       : "PVI"));
             const std::string endTag =
                 i + 1 == elements.size()
                     ? "End"
-                    : (curve ? "PVT"
-                             : (elements[i + 1].kind == geometry::ProfileElementKind::Curve ? "PVC"
-                                                                                            : "PVI"));
+                    : (curve
+                           ? "PVT"
+                           : (elements[i + 1].kind == geometry::ProfileElementKind::Curve ? "PVC"
+                                                                                          : "PVI"));
             Args design;
             design.string(startTag)
                 .string(endTag)
@@ -454,28 +453,30 @@ class AlignmentWriter {
                 design.null().enumeration("CONSTANTGRADIENT");
             }
             const Id parameters = b_.file().add("IfcAlignmentVerticalSegment", design);
-            segments.push_back(alignmentSegment(key_ + "/vertical/" + std::to_string(i),
-                                                curve ? "Vertical curve at PVI " + std::to_string(element.pvi)
-                                                      : "Grade to PVI " + std::to_string(element.pvi),
-                                                gradientSegment, parameters));
+            segments.push_back(
+                alignmentSegment(key_ + "/vertical/" + std::to_string(i),
+                                 curve ? "Vertical curve at PVI " + std::to_string(element.pvi)
+                                       : "Grade to PVI " + std::to_string(element.pvi),
+                                 gradientSegment, parameters));
         }
         // The closing zero-length segment, at the profile's end on its last grade.
         const geometry::ProfileElement& last = elements.back();
         const double along = last.startStation + last.length - horizontal.startStation();
         const double height = last.endElevation() + originHeight;
-        const Id gradientSegment =
-            verticalCurveSegment(along, height, last.endGrade, last.endGrade, 0.0, false, "DISCONTINUOUS");
+        const Id gradientSegment = verticalCurveSegment(along, height, last.endGrade, last.endGrade,
+                                                        0.0, false, "DISCONTINUOUS");
         gradientSegments.push_back(gradientSegment);
-        const Id parameters = b_.file().add("IfcAlignmentVerticalSegment", Args()
-                                                                               .string("End")
-                                                                               .string("End")
-                                                                               .real(along)
-                                                                               .real(0.0)
-                                                                               .real(height)
-                                                                               .real(last.endGrade)
-                                                                               .real(last.endGrade)
-                                                                               .null()
-                                                                               .enumeration("CONSTANTGRADIENT"));
+        const Id parameters =
+            b_.file().add("IfcAlignmentVerticalSegment", Args()
+                                                             .string("End")
+                                                             .string("End")
+                                                             .real(along)
+                                                             .real(0.0)
+                                                             .real(height)
+                                                             .real(last.endGrade)
+                                                             .real(last.endGrade)
+                                                             .null()
+                                                             .enumeration("CONSTANTGRADIENT"));
         segments.push_back(alignmentSegment(key_ + "/vertical/" + std::to_string(elements.size()),
                                             "End", gradientSegment, parameters));
     }
@@ -512,13 +513,9 @@ class AlignmentWriter {
 
     void nest(const std::string& key, Id parent, const std::vector<Id>& children)
     {
-        b_.file().add("IfcRelNests", Args()
-                                         .string(b_.guid("nests/" + key))
-                                         .null()
-                                         .null()
-                                         .null()
-                                         .ref(parent)
-                                         .refs(children));
+        b_.file().add(
+            "IfcRelNests",
+            Args().string(b_.guid("nests/" + key)).null().null().null().ref(parent).refs(children));
     }
 
     // A station referent at the start, at every key station of the
@@ -586,25 +583,25 @@ class AlignmentWriter {
             const Vec2 local = b_.local(at);
             const Id cartesianPoint = file.add(
                 "IfcCartesianPoint", Args().reals({local.x, local.y, level.value_or(0.0)}));
-            const Id cartesian = file.add("IfcAxis2Placement3D",
-                                          Args()
-                                              .ref(cartesianPoint)
-                                              .ref(b_.direction(0.0, 0.0, 1.0))
-                                              .ref(b_.direction(std::cos(direction),
-                                                                std::sin(direction), 0.0)));
+            const Id cartesian =
+                file.add("IfcAxis2Placement3D",
+                         Args()
+                             .ref(cartesianPoint)
+                             .ref(b_.direction(0.0, 0.0, 1.0))
+                             .ref(b_.direction(std::cos(direction), std::sin(direction), 0.0)));
             const Id placement =
                 file.add("IfcLinearPlacement", Args().null().ref(relative).ref(cartesian));
             const std::string name = tag + " " + stationText(station);
-            const Id referent = file.add("IfcReferent",
-                                         Args()
-                                             .string(b_.guid(key_ + "/station/" + stationText(station)))
-                                             .null()
-                                             .string(name)
-                                             .null()
-                                             .null()
-                                             .ref(placement)
-                                             .null()
-                                             .enumeration("STATION"));
+            const Id referent = file.add(
+                "IfcReferent", Args()
+                                   .string(b_.guid(key_ + "/station/" + stationText(station)))
+                                   .null()
+                                   .string(name)
+                                   .null()
+                                   .null()
+                                   .ref(placement)
+                                   .null()
+                                   .enumeration("STATION"));
             ++b_.report().classes["IfcReferent"];
             PropertyList stationing;
             stationing.length("Station", station);
@@ -647,8 +644,8 @@ void exportAlignments(Builder& builder, const entity::Model& model)
     model.alignments.forEach([&](const entity::Alignment& alignment) {
         auto horizontal = geometry::solveAlignment(alignment.horizontal);
         if (!horizontal) {
-            builder.warn("alignment \"" + alignment.name + "\" not written: " +
-                         horizontal.error().describe());
+            builder.warn("alignment \"" + alignment.name +
+                         "\" not written: " + horizontal.error().describe());
             return;
         }
         std::optional<geometry::SolvedProfile> profile;
@@ -657,14 +654,15 @@ void exportAlignments(Builder& builder, const entity::Model& model)
             if (!solved) {
                 builder.warn("the profile of alignment \"" + alignment.name +
                              "\" is not written: " + solved.error().describe());
-            } else if (solved->startStation() < horizontal->startStation() - math::tolerance::kCoordinate ||
-                       solved->endStation() > horizontal->endStation() + math::tolerance::kCoordinate) {
+            } else if (solved->startStation() <
+                           horizontal->startStation() - math::tolerance::kCoordinate ||
+                       solved->endStation() >
+                           horizontal->endStation() + math::tolerance::kCoordinate) {
                 // IFC measures a profile along its alignment; a part beyond
                 // the alignment has nowhere to be.
                 builder.warn("the profile of alignment \"" + alignment.name + "\" (" +
                              stationText(solved->startStation()) + " to " +
-                             stationText(solved->endStation()) +
-                             ") runs beyond the alignment (" +
+                             stationText(solved->endStation()) + ") runs beyond the alignment (" +
                              stationText(horizontal->startStation()) + " to " +
                              stationText(horizontal->endStation()) + ") and is not written");
             } else {

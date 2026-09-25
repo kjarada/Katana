@@ -1,0 +1,31 @@
+# A road centreline and the survey beside it, for EXPORT <file.ifc> (docs/ifc.md).
+# Run: katana_cli samples/ifc/scenario.txt -c "EXPORT site.ifc UTILITIES samples/utilities/schedule.csv"
+#
+# MC01: four PIs in MGA zone 56, a curve of radius 80 with 20 m transitions at
+# the first, turning right, and a simple curve of radius 60 at the second,
+# turning left; stationed from 1000, with two vertical curves in its profile.
+CRS SET EPSG:7856
+ALIGN NEW MC01 333900,6249950 334000,6250020 334100,6249990 334200,6250060
+ALIGN SET MC01 1 80 20 20
+ALIGN SET MC01 2 60 0 0
+ALIGN START MC01 1000
+ALIGN DESIGN MC01 1000,21.5 1080,23.0,60 1180,20.0,80 1330.5,21.0
+# A kerb with its levels (an IfcKerb), a fence (an IfcRailing FENCE), a
+# stormwater pit (an IfcDistributionChamberElement in STORMWATER), a surveyed
+# point and a lot number (IfcAnnotation SURVEY and TEXT).
+LAYER NEW Survey/Kerb
+LAYER SET Survey/Kerb
+PL 333990,6250000 334010,6250004 334030,6250008
+SELECT ALL
+PROP SET elevations "20.10 20.05 20.00"
+SELECT NONE
+LAYER NEW Survey/Fence
+LAYER SET Survey/Fence
+PL 333990,6250012 334030,6250015
+LAYER NEW Stormwater/Pits
+LAYER SET Stormwater/Pits
+POINT 334015,6249995
+LAYER NEW Survey/Points
+LAYER SET Survey/Points
+POINT 334005,6250002
+TEXT 334000,6250020 2.5 "LOT 42"

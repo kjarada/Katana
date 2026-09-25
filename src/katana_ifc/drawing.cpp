@@ -107,17 +107,57 @@ bool allHeights(const std::vector<std::optional<double>>& heights)
 // written USERDEFINED with that name as its object type.
 bool isSystemEnumeration(std::string_view value)
 {
-    static const std::set<std::string_view> kValues{
-        "AIRCONDITIONING", "AUDIOVISUAL", "CATENARY_SYSTEM", "CHEMICAL", "CHILLEDWATER",
-        "COMMUNICATION", "COMPRESSEDAIR", "CONDENSERWATER", "CONTROL", "CONVEYING", "DATA",
-        "DISPOSAL", "DOMESTICCOLDWATER", "DOMESTICHOTWATER", "DRAINAGE", "EARTHING",
-        "ELECTRICAL", "ELECTROACOUSTIC", "EXHAUST", "FIREPROTECTION",
-        "FIXEDTRANSMISSIONNETWORK", "FUEL", "GAS", "HAZARDOUS", "HEATING", "LIGHTING",
-        "LIGHTNINGPROTECTION", "MOBILENETWORK", "MONITORINGSYSTEM", "MUNICIPALSOLIDWASTE",
-        "OIL", "OPERATIONAL", "OPERATIONALTELEPHONYSYSTEM", "OVERHEAD_CONTACTLINE_SYSTEM",
-        "POWERGENERATION", "RAINWATER", "REFRIGERATION", "RETURN_CIRCUIT", "SECURITY",
-        "SEWAGE", "SIGNAL", "STORMWATER", "TELEPHONE", "TV", "VACUUM", "VENT", "VENTILATION",
-        "WASTEWATER", "WATERSUPPLY", "USERDEFINED", "NOTDEFINED"};
+    static const std::set<std::string_view> kValues{"AIRCONDITIONING",
+                                                    "AUDIOVISUAL",
+                                                    "CATENARY_SYSTEM",
+                                                    "CHEMICAL",
+                                                    "CHILLEDWATER",
+                                                    "COMMUNICATION",
+                                                    "COMPRESSEDAIR",
+                                                    "CONDENSERWATER",
+                                                    "CONTROL",
+                                                    "CONVEYING",
+                                                    "DATA",
+                                                    "DISPOSAL",
+                                                    "DOMESTICCOLDWATER",
+                                                    "DOMESTICHOTWATER",
+                                                    "DRAINAGE",
+                                                    "EARTHING",
+                                                    "ELECTRICAL",
+                                                    "ELECTROACOUSTIC",
+                                                    "EXHAUST",
+                                                    "FIREPROTECTION",
+                                                    "FIXEDTRANSMISSIONNETWORK",
+                                                    "FUEL",
+                                                    "GAS",
+                                                    "HAZARDOUS",
+                                                    "HEATING",
+                                                    "LIGHTING",
+                                                    "LIGHTNINGPROTECTION",
+                                                    "MOBILENETWORK",
+                                                    "MONITORINGSYSTEM",
+                                                    "MUNICIPALSOLIDWASTE",
+                                                    "OIL",
+                                                    "OPERATIONAL",
+                                                    "OPERATIONALTELEPHONYSYSTEM",
+                                                    "OVERHEAD_CONTACTLINE_SYSTEM",
+                                                    "POWERGENERATION",
+                                                    "RAINWATER",
+                                                    "REFRIGERATION",
+                                                    "RETURN_CIRCUIT",
+                                                    "SECURITY",
+                                                    "SEWAGE",
+                                                    "SIGNAL",
+                                                    "STORMWATER",
+                                                    "TELEPHONE",
+                                                    "TV",
+                                                    "VACUUM",
+                                                    "VENT",
+                                                    "VENTILATION",
+                                                    "WASTEWATER",
+                                                    "WATERSUPPLY",
+                                                    "USERDEFINED",
+                                                    "NOTDEFINED"};
     return kValues.contains(value);
 }
 
@@ -191,14 +231,12 @@ class DrawingWriter {
     [[nodiscard]] bool selected(const Entity& entity) const
     {
         const ExportOptions& options = b_.options();
-        if (!options.entities.empty() &&
-            std::find(options.entities.begin(), options.entities.end(), entity.id) ==
-                options.entities.end()) {
+        if (!options.entities.empty() && std::find(options.entities.begin(), options.entities.end(),
+                                                   entity.id) == options.entities.end()) {
             return false;
         }
-        if (!options.layers.empty() &&
-            std::find(options.layers.begin(), options.layers.end(), entity.layer) ==
-                options.layers.end()) {
+        if (!options.layers.empty() && std::find(options.layers.begin(), options.layers.end(),
+                                                 entity.layer) == options.layers.end()) {
             return false;
         }
         return true;
@@ -291,8 +329,9 @@ class DrawingWriter {
             const Id centre = b_.point(Vec3(shape.center.x, shape.center.y, *height));
             placement = b_.file().add("IfcAxis2Placement3D", Args().ref(centre).null().null());
         } else {
-            placement = b_.file().add("IfcAxis2Placement2D",
-                                      Args().ref(b_.point(Vec2(shape.center.x, shape.center.y))).null());
+            placement =
+                b_.file().add("IfcAxis2Placement2D",
+                              Args().ref(b_.point(Vec2(shape.center.x, shape.center.y))).null());
         }
         return b_.file().add("IfcCircle", Args().ref(placement).real(shape.radius));
     }
@@ -326,9 +365,10 @@ class DrawingWriter {
                 .ref(b_.point(Vec2(shape.position.x, shape.position.y)))
                 .ref(b_.direction(std::cos(shape.rotation), std::sin(shape.rotation))));
         const Id extent = b_.file().add(
-            "IfcPlanarExtent", Args()
-                                   .real(0.6 * shape.height * static_cast<double>(std::max<std::size_t>(widest, 1)))
-                                   .real(shape.height * static_cast<double>(lines)));
+            "IfcPlanarExtent",
+            Args()
+                .real(0.6 * shape.height * static_cast<double>(std::max<std::size_t>(widest, 1)))
+                .real(shape.height * static_cast<double>(lines)));
         return b_.file().add("IfcTextLiteralWithExtent", Args()
                                                              .string(shape.text)
                                                              .ref(placement)
@@ -394,8 +434,9 @@ class DrawingWriter {
                     const auto heights = entity::heightsOf(entity.properties, 1);
                     drawn.in3d = heights.front().has_value();
                     drawn.items.push_back(
-                        drawn.in3d ? b_.point(Vec3(shape.position.x, shape.position.y, *heights.front()))
-                                   : b_.point(Vec2(shape.position.x, shape.position.y)));
+                        drawn.in3d
+                            ? b_.point(Vec3(shape.position.x, shape.position.y, *heights.front()))
+                            : b_.point(Vec2(shape.position.x, shape.position.y)));
                     drawn.type = "Point";
                 } else if constexpr (std::is_same_v<T, geometry::Segment2>) {
                     const auto heights = entity::heightsOf(entity.properties, 2);
@@ -404,7 +445,8 @@ class DrawingWriter {
                         drawn.items.push_back(id);
                     }
                 } else if constexpr (std::is_same_v<T, geometry::Polyline2>) {
-                    const auto heights = entity::heightsOf(entity.properties, shape.vertices.size());
+                    const auto heights =
+                        entity::heightsOf(entity.properties, shape.vertices.size());
                     drawn.in3d = allHeights(heights);
                     if (const Id id = curve(shape.vertices, heights, shape.closed, drawn.in3d)) {
                         drawn.items.push_back(id);
@@ -445,11 +487,11 @@ class DrawingWriter {
     void drawDimension(const entity::DimensionGeometry& shape, Drawn& drawn)
     {
         const double measured = shape.measurement();
-        const std::string words =
-            shape.textOverride.empty()
-                ? (shape.kind == entity::DimensionKind::Angular ? formatNumber(measured * math::kRadToDeg) + "\xC2\xB0"
-                                                                : formatNumber(measured))
-                : shape.textOverride;
+        const std::string words = shape.textOverride.empty()
+                                      ? (shape.kind == entity::DimensionKind::Angular
+                                             ? formatNumber(measured * math::kRadToDeg) + "\xC2\xB0"
+                                             : formatNumber(measured))
+                                      : shape.textOverride;
         if (shape.kind == entity::DimensionKind::Aligned) {
             const Vec2 along = shape.end - shape.start;
             const double length = along.length();
@@ -457,9 +499,9 @@ class DrawingWriter {
                 const Vec2 left = Vec2(-along.y, along.x) * (shape.offset / length);
                 const Point2 a = shape.start + left;
                 const Point2 b = shape.end + left;
-                for (const auto& line : {std::vector<Point2>{shape.start, a},
-                                         std::vector<Point2>{shape.end, b},
-                                         std::vector<Point2>{a, b}}) {
+                for (const auto& line :
+                     {std::vector<Point2>{shape.start, a}, std::vector<Point2>{shape.end, b},
+                      std::vector<Point2>{a, b}}) {
                     if (const Id id = curve(line, {}, false, false)) {
                         drawn.items.push_back(id);
                     }
@@ -501,7 +543,8 @@ class DrawingWriter {
 
         Id representation = 0;
         if (annotation) {
-            representation = b_.shape(b_.annotationContext(), "Annotation", drawn.type, drawn.items);
+            representation =
+                b_.shape(b_.annotationContext(), "Annotation", drawn.type, drawn.items);
         } else if (drawn.type == "Point" || entity.type() == EntityType::Circle) {
             // An element at a point, or outlined by a circle: its footprint.
             std::vector<Id> items = drawn.items;
@@ -512,7 +555,8 @@ class DrawingWriter {
                 items = {circle(std::get<geometry::Circle2>(entity.geometry), std::nullopt)};
             }
             const Id set = b_.file().add("IfcGeometricCurveSet", Args().refs(items));
-            representation = b_.shape(b_.footPrintContext(), "FootPrint", "GeometricCurveSet", {set});
+            representation =
+                b_.shape(b_.footPrintContext(), "FootPrint", "GeometricCurveSet", {set});
         } else if (drawn.in3d) {
             representation = b_.shape(b_.axisContext(), "Axis", "Curve3D", drawn.items);
         } else {
@@ -528,8 +572,7 @@ class DrawingWriter {
 
         const std::string key = "entity/" + std::to_string(entity.id);
         const Id product = b_.product(classified.ifcClass, key, nameOf(entity), classified.rule,
-                                      b_.productShape({representation}),
-                                      std::to_string(entity.id));
+                                      b_.productShape({representation}), std::to_string(entity.id));
         ++b_.report().entitiesWritten;
 
         if (!classified.system.empty()) {
@@ -543,14 +586,15 @@ class DrawingWriter {
     {
         PropertyList attributes;
         addEntityProperties(attributes, entity.properties);
-        b_.defines(key + "/attributes", b_.propertySet(key + "/attributes", "Katana_Attributes", attributes),
-                   {product});
+        b_.defines(key + "/attributes",
+                   b_.propertySet(key + "/attributes", "Katana_Attributes", attributes), {product});
 
         PropertyList provenance;
         provenance.integer("EntityId", static_cast<long long>(entity.id));
         provenance.label("Layer", entity.layer);
         provenance.label("Style", entity.style);
-        provenance.label("ClassifiedBy", classified.rule.empty() ? "kind" : "rule " + classified.rule);
+        provenance.label("ClassifiedBy",
+                         classified.rule.empty() ? "kind" : "rule " + classified.rule);
         for (const auto& [name, value] : entity.metadata) {
             // What 12d knew and Katana keeps only to write back (12d.x.*,
             // symbols, text formatting) is not the entity's provenance.
@@ -560,8 +604,8 @@ class DrawingWriter {
             }
             provenance.label(name, entity::toString(value));
         }
-        b_.defines(key + "/provenance", b_.propertySet(key + "/provenance", "Katana_Provenance", provenance),
-                   {product});
+        b_.defines(key + "/provenance",
+                   b_.propertySet(key + "/provenance", "Katana_Provenance", provenance), {product});
 
         if (classified.ifcClass.predefinedType == "CONTOURLINE") {
             PropertyList contour;
@@ -571,7 +615,8 @@ class DrawingWriter {
                                std::holds_alternative<geometry::Polyline2>(entity.geometry)
                                    ? std::get<geometry::Polyline2>(entity.geometry).vertices.size()
                                    : 2)));
-            b_.defines(key + "/contour", b_.propertySet(key + "/contour", "Pset_AnnotationContourLine", contour),
+            b_.defines(key + "/contour",
+                       b_.propertySet(key + "/contour", "Pset_AnnotationContourLine", contour),
                        {product});
         }
     }
@@ -584,14 +629,15 @@ class DrawingWriter {
             const auto& [layer, system] = where;
             const bool listed = isSystemEnumeration(system);
             const std::string key = "system/" + layer + "/" + system;
-            const Id id = b_.file().add("IfcDistributionSystem", Args()
-                                                                     .string(b_.guid(key))
-                                                                     .null()
-                                                                     .string(layer)
-                                                                     .null()
-                                                                     .stringOrNull(listed ? "" : system)
-                                                                     .null()
-                                                                     .enumeration(listed ? system : "USERDEFINED"));
+            const Id id = b_.file().add("IfcDistributionSystem",
+                                        Args()
+                                            .string(b_.guid(key))
+                                            .null()
+                                            .string(layer)
+                                            .null()
+                                            .stringOrNull(listed ? "" : system)
+                                            .null()
+                                            .enumeration(listed ? system : "USERDEFINED"));
             ++b_.report().classes["IfcDistributionSystem"];
             b_.referenceInSite(id);
             b_.group(id, key, members);
@@ -648,8 +694,9 @@ class DrawingWriter {
             const Drawn drawn = draw(line);
             if (!drawn.items.empty()) {
                 const Id representation =
-                    drawn.in3d ? b_.shape(b_.axisContext(), "Axis", "Curve3D", drawn.items)
-                               : b_.shape(b_.footPrintContext(), "FootPrint", "Curve2D", drawn.items);
+                    drawn.in3d
+                        ? b_.shape(b_.axisContext(), "Axis", "Curve3D", drawn.items)
+                        : b_.shape(b_.footPrintContext(), "FootPrint", "Curve2D", drawn.items);
                 b_.layer(line.layer, representation);
                 members.push_back(b_.product({"IfcPipeSegment", "RIGIDSEGMENT", {}}, key + "/line",
                                              name, "12d drainage string",
@@ -674,14 +721,15 @@ class DrawingWriter {
             ++b_.report().entitiesWritten;
         }
         const bool listed = isSystemEnumeration(system);
-        const Id id = b_.file().add("IfcDistributionSystem", Args()
-                                                                 .string(b_.guid(key))
-                                                                 .null()
-                                                                 .string(name)
-                                                                 .string("12d drainage string")
-                                                                 .stringOrNull(listed ? "" : system)
-                                                                 .null()
-                                                                 .enumeration(listed ? system : "USERDEFINED"));
+        const Id id = b_.file().add("IfcDistributionSystem",
+                                    Args()
+                                        .string(b_.guid(key))
+                                        .null()
+                                        .string(name)
+                                        .string("12d drainage string")
+                                        .stringOrNull(listed ? "" : system)
+                                        .null()
+                                        .enumeration(listed ? system : "USERDEFINED"));
         ++b_.report().classes["IfcDistributionSystem"];
         b_.referenceInSite(id);
         b_.group(id, key, members);
@@ -721,9 +769,11 @@ class DrawingWriter {
             }
         }
         if (inverts) {
-            invertAt[index] = invertAt[index] ? std::min(*invertAt[index], inverts->first) : inverts->first;
-            invertAt[index + 1] =
-                invertAt[index + 1] ? std::min(*invertAt[index + 1], inverts->second) : inverts->second;
+            invertAt[index] =
+                invertAt[index] ? std::min(*invertAt[index], inverts->first) : inverts->first;
+            invertAt[index + 1] = invertAt[index + 1]
+                                      ? std::min(*invertAt[index + 1], inverts->second)
+                                      : inverts->second;
         }
 
         std::vector<Id> representations;
@@ -733,11 +783,14 @@ class DrawingWriter {
                                                           Vec3(b.x, b.y, inverts->second + r)},
                                         false);
             representations.push_back(b_.shape(b_.axisContext(), "Axis", "Curve3D", {axis}));
-            const Id body = b_.file().add("IfcSweptDiskSolid", Args().ref(axis).real(r).null().null().null());
-            representations.push_back(b_.shape(b_.bodyContext(), "Body", "AdvancedSweptSolid", {body}));
+            const Id body =
+                b_.file().add("IfcSweptDiskSolid", Args().ref(axis).real(r).null().null().null());
+            representations.push_back(
+                b_.shape(b_.bodyContext(), "Body", "AdvancedSweptSolid", {body}));
         } else {
             const Id footprint = b_.polyline(std::vector<Vec2>{a, b}, false);
-            representations.push_back(b_.shape(b_.footPrintContext(), "FootPrint", "Curve2D", {footprint}));
+            representations.push_back(
+                b_.shape(b_.footPrintContext(), "FootPrint", "Curve2D", {footprint}));
         }
         for (const Id representation : representations) {
             b_.layer(line.layer, representation);
@@ -749,27 +802,30 @@ class DrawingWriter {
             pipeClass.predefinedType = "CULVERT";
         }
         const std::string pipeKey = key + "/pipe/" + std::to_string(index + 1);
-        const Id pipe = b_.product(pipeClass, pipeKey,
-                                   pipeName.empty() ? nameOf(line) + " pipe " + std::to_string(index + 1)
-                                                    : pipeName,
-                                   type, b_.productShape(representations), pipeName);
+        const Id pipe = b_.product(
+            pipeClass, pipeKey,
+            pipeName.empty() ? nameOf(line) + " pipe " + std::to_string(index + 1) : pipeName, type,
+            b_.productShape(representations), pipeName);
 
         PropertyList common;
         common.identifier("Reference", pipeName);
         common.positiveLength("NominalDiameter", diameter);
         common.positiveLength("Length", (b - a).length());
-        b_.defines(pipeKey + "/common", b_.propertySet(pipeKey + "/common", "Pset_PipeSegmentTypeCommon", common),
+        b_.defines(pipeKey + "/common",
+                   b_.propertySet(pipeKey + "/common", "Pset_PipeSegmentTypeCommon", common),
                    {pipe});
         if (inverts) {
             PropertyList occurrence;
             occurrence.length("InvertElevation", std::max(inverts->first, inverts->second));
             const double run = (b - a).length();
             if (run > 0.0) {
-                occurrence.positiveRatio("Gradient", std::abs(inverts->first - inverts->second) / run);
+                occurrence.positiveRatio("Gradient",
+                                         std::abs(inverts->first - inverts->second) / run);
             }
-            b_.defines(pipeKey + "/occurrence",
-                       b_.propertySet(pipeKey + "/occurrence", "Pset_PipeSegmentOccurrence", occurrence),
-                       {pipe});
+            b_.defines(
+                pipeKey + "/occurrence",
+                b_.propertySet(pipeKey + "/occurrence", "Pset_PipeSegmentOccurrence", occurrence),
+                {pipe});
         }
         PropertyList drainage;
         entity::PropertyMap own;
@@ -780,8 +836,8 @@ class DrawingWriter {
         }
         addEntityProperties(drainage, own);
         drainage.label("LevelsFrom", how);
-        b_.defines(pipeKey + "/drainage", b_.propertySet(pipeKey + "/drainage", "Katana_DrainagePipe", drainage),
-                   {pipe});
+        b_.defines(pipeKey + "/drainage",
+                   b_.propertySet(pipeKey + "/drainage", "Katana_DrainagePipe", drainage), {pipe});
         return pipe;
     }
 
@@ -803,18 +859,23 @@ class DrawingWriter {
         }
         std::vector<Id> representations;
         if (pit && top && invert && diameter && *diameter > 0.0 && *top > *invert) {
-            const Id axis = b_.polyline(std::vector<Vec3>{Vec3(at.x, at.y, *invert), Vec3(at.x, at.y, *top)}, false);
-            const Id body = b_.file().add("IfcSweptDiskSolid",
-                                          Args().ref(axis).real(*diameter / 2.0).null().null().null());
-            representations.push_back(b_.shape(b_.bodyContext(), "Body", "AdvancedSweptSolid", {body}));
+            const Id axis = b_.polyline(
+                std::vector<Vec3>{Vec3(at.x, at.y, *invert), Vec3(at.x, at.y, *top)}, false);
+            const Id body = b_.file().add(
+                "IfcSweptDiskSolid", Args().ref(axis).real(*diameter / 2.0).null().null().null());
+            representations.push_back(
+                b_.shape(b_.bodyContext(), "Body", "AdvancedSweptSolid", {body}));
         }
         std::vector<Id> items{b_.point(at)};
         if (diameter && *diameter > 0.0) {
-            const Id placement = b_.file().add("IfcAxis2Placement2D", Args().ref(b_.point(at)).null());
-            items.push_back(b_.file().add("IfcCircle", Args().ref(placement).real(*diameter / 2.0)));
+            const Id placement =
+                b_.file().add("IfcAxis2Placement2D", Args().ref(b_.point(at)).null());
+            items.push_back(
+                b_.file().add("IfcCircle", Args().ref(placement).real(*diameter / 2.0)));
         }
         const Id set = b_.file().add("IfcGeometricCurveSet", Args().refs(items));
-        representations.push_back(b_.shape(b_.footPrintContext(), "FootPrint", "GeometricCurveSet", {set}));
+        representations.push_back(
+            b_.shape(b_.footPrintContext(), "FootPrint", "GeometricCurveSet", {set}));
         for (const Id representation : representations) {
             b_.layer(part.layer, representation);
         }
@@ -827,15 +888,17 @@ class DrawingWriter {
         if (pit) {
             PropertyList common;
             common.identifier("Reference", name);
-            b_.defines(key + "/common",
-                       b_.propertySet(key + "/common", "Pset_DistributionChamberElementCommon", common),
-                       {product});
+            b_.defines(
+                key + "/common",
+                b_.propertySet(key + "/common", "Pset_DistributionChamberElementCommon", common),
+                {product});
             PropertyList size;
             size.positiveLength("NominalLength", diameter).positiveLength("NominalWidth", diameter);
             if (top && invert && *top > *invert) {
                 size.positiveLength("NominalHeight", *top - *invert);
             }
-            b_.defines(key + "/size", b_.propertySet(key + "/size", "Pset_ElementSize", size), {product});
+            b_.defines(key + "/size", b_.propertySet(key + "/size", "Pset_ElementSize", size),
+                       {product});
         }
         PropertyList drainage;
         entity::PropertyMap own;
@@ -845,7 +908,8 @@ class DrawingWriter {
         addEntityProperties(drainage, own);
         drainage.length("InvertLevel", invert);
         b_.defines(key + "/drainage",
-                   b_.propertySet(key + "/drainage", pit ? "Katana_DrainagePit" : "Katana_DrainageConnection",
+                   b_.propertySet(key + "/drainage",
+                                  pit ? "Katana_DrainagePit" : "Katana_DrainageConnection",
                                   drainage),
                    {product});
         return product;

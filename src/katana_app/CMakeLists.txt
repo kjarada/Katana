@@ -309,6 +309,58 @@ if(KATANA_BUILD_TESTS)
     endif()
 endif()
 
+# A .ifc through the command line both ways (docs/ifc.md). samples/ifc/
+# scenario.txt draws MC01 and a kerb, a fence, a pit, a point and a text;
+# with the sample schedule, the export holds the alignment, 4 services of 10
+# graded segments - 6 of them in 3D, as tests/ifc/test_export.cpp works out -
+# 14 located points and the 5 entities, and read back into a new drawing it
+# is the 29 objects and MC01's 4 PIs again. The TfNSW-shaped schedule, with
+# the delivery schema of tests/ifc: W-0001's 3 points, E-0001's 2 and
+# G-0001's 2 make 4 segments, in 3D where a depth is recorded at both ends -
+# all but G-0001's, which is from the records.
+if(KATANA_BUILD_TESTS)
+    set(_ifc "${CMAKE_CURRENT_BINARY_DIR}/cli site.ifc")
+    set(_ifc_tfnsw "${CMAKE_CURRENT_BINARY_DIR}/cli tfnsw.ifc")
+    add_test(NAME cli.ifc_the_scenario_and_the_sample_services_exported_and_imported_back
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> "${PROJECT_SOURCE_DIR}/samples/ifc/scenario.txt"
+                -c "EXPORT \"${_ifc}\" UTILITIES \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule.csv\""
+                -c "NEW" -c "IMPORT \"${_ifc}\"" -c "ALIGN LIST")
+    set_tests_properties(cli.ifc_the_scenario_and_the_sample_services_exported_and_imported_back
+        PROPERTIES FIXTURES_SETUP cli_ifc_file PASS_REGULAR_EXPRESSION
+        "exported cli site\\.ifc \\(IFC4X3_ADD2.*1 alignments, 4 services \\(10 segments, 6 in 3D, 14 located points\\), 5 entities written, 0 skipped.*imported 29 entities, 1 alignments and 0 surfaces from cli site\\.ifc.*MC01  4 PIs  1000\\.000 to 1339\\.016")
+    add_test(NAME cli.ifc_a_tfnsw_schedule_exported_with_its_delivery_schema
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "EXPORT \"${_ifc_tfnsw}\" UTILITIES \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule_tfnsw.csv\" SCHEMA \"${PROJECT_SOURCE_DIR}/tests/ifc/data/delivery_schema.csv\" NODRAWING")
+    set_tests_properties(cli.ifc_a_tfnsw_schedule_exported_with_its_delivery_schema
+        PROPERTIES FIXTURES_SETUP cli_ifc_tfnsw_file PASS_REGULAR_EXPRESSION
+        "0 alignments, 3 services \\(4 segments, 3 in 3D, 7 located points\\), 0 entities written")
+    add_test(NAME cli.ifc_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "EXPORT \"${_ifc}\" UTILITIS x.csv")
+    set_tests_properties(cli.ifc_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+
+    # Both files judged by IfcOpenShell (tools/check_ifc.py): the schema, its
+    # EXPRESS rules, no proxy, and the alignment's geometry against its
+    # business logic. Only where the Python that configured the build can
+    # import ifcopenshell - a check of the output, never a build requirement.
+    if(Python3_Interpreter_FOUND)
+        execute_process(COMMAND "${KATANA_PYTHON}" -c "import ifcopenshell"
+            RESULT_VARIABLE _ifcopenshell_missing OUTPUT_QUIET ERROR_QUIET)
+        if(_ifcopenshell_missing EQUAL 0)
+            add_test(NAME cli.ifc_the_scenario_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc}")
+            set_tests_properties(cli.ifc_the_scenario_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_file)
+            add_test(NAME cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_tfnsw}")
+            set_tests_properties(cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_tfnsw_file)
+        endif()
+    endif()
+endif()
+
 # A .dxf through the command line both ways, natively - no GDAL, so it runs
 # in a build without it. Drawn by hand: a 30 x 20 rectangle (perimeter 100,
 # area 600), a circle of radius 5 at (15,10) and a text, on a nested layer;

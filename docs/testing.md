@@ -114,6 +114,13 @@ fails the process; fixtures (`FIXTURES_SETUP`, `FIXTURES_REQUIRED`) order the
 steps and clean up. The survey-code cases write their own small code file
 rather than depend on the git-ignored customisation.
 
+A file written for another program is also handed to an implementation that
+is not Katana's: `cli.ifc_the_scenario_export_is_valid_to_ifcopenshell` runs
+`tools/check_ifc.py` over the IFC export. Such a test is registered only
+where the Python that configured the build can import the judge - an
+optional check of the output, never a build requirement (`docs/ifc.md`,
+"Validation").
+
 ## Data
 
 **Copy before opening.** A test never changes data checked into the
