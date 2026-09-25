@@ -7,6 +7,7 @@
 #include <string>
 
 #include "katana/core/text.hpp"
+#include "katana/entity/text_block.hpp"
 
 namespace katana::entity {
 
@@ -141,8 +142,234 @@ std::string_view toString(EntityType type)
         return "Text";
     case EntityType::Dimension:
         return "Dimension";
+    case EntityType::Label:
+        return "Label";
+    case EntityType::Leader:
+        return "Leader";
     }
     return "Unknown";
+}
+
+// ---- the annotation enumerations -------------------------------------------------------
+
+namespace {
+
+// Case-insensitive ASCII comparison, ignoring '-', '_' and spaces, so that
+// "middle-centre", "MiddleCentre" and "middle centre" are one name.
+bool sameName(std::string_view a, std::string_view b)
+{
+    const auto next = [](std::string_view s, std::size_t& i) -> int {
+        while (i < s.size() && (s[i] == '-' || s[i] == '_' || s[i] == ' ')) {
+            ++i;
+        }
+        if (i == s.size()) {
+            return -1;
+        }
+        char c = s[i++];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        return static_cast<unsigned char>(c);
+    };
+    std::size_t i = 0;
+    std::size_t j = 0;
+    while (true) {
+        const int x = next(a, i);
+        const int y = next(b, j);
+        if (x != y) {
+            return false;
+        }
+        if (x < 0) {
+            return true;
+        }
+    }
+}
+
+} // namespace
+
+std::string_view toString(TextJustify justify)
+{
+    switch (justify) {
+    case TextJustify::BottomLeft:
+        return "BL";
+    case TextJustify::BottomCentre:
+        return "BC";
+    case TextJustify::BottomRight:
+        return "BR";
+    case TextJustify::MiddleLeft:
+        return "ML";
+    case TextJustify::MiddleCentre:
+        return "MC";
+    case TextJustify::MiddleRight:
+        return "MR";
+    case TextJustify::TopLeft:
+        return "TL";
+    case TextJustify::TopCentre:
+        return "TC";
+    case TextJustify::TopRight:
+        return "TR";
+    }
+    return "BL";
+}
+
+Result<TextJustify> textJustifyFromString(std::string_view name)
+{
+    struct Name {
+        std::string_view text;
+        TextJustify justify;
+    };
+    // The short names, the long ones in both spellings of centre, and the
+    // baseline row's one-letter forms.
+    static constexpr Name kNames[] = {
+        {"BL", TextJustify::BottomLeft},      {"BC", TextJustify::BottomCentre},
+        {"BR", TextJustify::BottomRight},     {"ML", TextJustify::MiddleLeft},
+        {"MC", TextJustify::MiddleCentre},    {"MR", TextJustify::MiddleRight},
+        {"TL", TextJustify::TopLeft},         {"TC", TextJustify::TopCentre},
+        {"TR", TextJustify::TopRight},        {"L", TextJustify::BottomLeft},
+        {"C", TextJustify::BottomCentre},     {"R", TextJustify::BottomRight},
+        {"M", TextJustify::MiddleCentre},     {"BottomLeft", TextJustify::BottomLeft},
+        {"BottomCentre", TextJustify::BottomCentre}, {"BottomCenter", TextJustify::BottomCentre},
+        {"BottomRight", TextJustify::BottomRight},   {"MiddleLeft", TextJustify::MiddleLeft},
+        {"MiddleCentre", TextJustify::MiddleCentre}, {"MiddleCenter", TextJustify::MiddleCentre},
+        {"MiddleRight", TextJustify::MiddleRight},   {"TopLeft", TextJustify::TopLeft},
+        {"TopCentre", TextJustify::TopCentre},       {"TopCenter", TextJustify::TopCentre},
+        {"TopRight", TextJustify::TopRight},
+    };
+    for (const Name& candidate : kNames) {
+        if (sameName(candidate.text, name)) {
+            return candidate.justify;
+        }
+    }
+    return makeError(ErrorCode::ParseFailure,
+                     "unknown justification (TL TC TR ML MC MR BL BC BR)", std::string(name));
+}
+
+std::string_view toString(AnchorPoint point)
+{
+    switch (point) {
+    case AnchorPoint::Position:
+        return "position";
+    case AnchorPoint::Start:
+        return "start";
+    case AnchorPoint::End:
+        return "end";
+    case AnchorPoint::Mid:
+        return "mid";
+    case AnchorPoint::Centre:
+        return "centre";
+    case AnchorPoint::Vertex:
+        return "vertex";
+    case AnchorPoint::SegmentMid:
+        return "segment-mid";
+    }
+    return "position";
+}
+
+Result<AnchorPoint> anchorPointFromString(std::string_view name)
+{
+    for (const AnchorPoint point :
+         {AnchorPoint::Position, AnchorPoint::Start, AnchorPoint::End, AnchorPoint::Mid,
+          AnchorPoint::Centre, AnchorPoint::Vertex, AnchorPoint::SegmentMid}) {
+        if (sameName(toString(point), name)) {
+            return point;
+        }
+    }
+    if (sameName(name, "center")) {
+        return AnchorPoint::Centre;
+    }
+    return makeError(ErrorCode::ParseFailure, "unknown anchor point", std::string(name));
+}
+
+std::string_view toString(DimensionKind kind)
+{
+    switch (kind) {
+    case DimensionKind::Aligned:
+        return "aligned";
+    case DimensionKind::Linear:
+        return "linear";
+    case DimensionKind::Angular:
+        return "angular";
+    case DimensionKind::Radius:
+        return "radius";
+    case DimensionKind::Diameter:
+        return "diameter";
+    case DimensionKind::OrdinateX:
+        return "ordinate-x";
+    case DimensionKind::OrdinateY:
+        return "ordinate-y";
+    }
+    return "aligned";
+}
+
+Result<DimensionKind> dimensionKindFromString(std::string_view name)
+{
+    for (const DimensionKind kind :
+         {DimensionKind::Aligned, DimensionKind::Linear, DimensionKind::Angular,
+          DimensionKind::Radius, DimensionKind::Diameter, DimensionKind::OrdinateX,
+          DimensionKind::OrdinateY}) {
+        if (sameName(toString(kind), name)) {
+            return kind;
+        }
+    }
+    return makeError(ErrorCode::ParseFailure, "unknown dimension kind", std::string(name));
+}
+
+std::string_view toString(CalloutShape shape)
+{
+    switch (shape) {
+    case CalloutShape::None:
+        return "none";
+    case CalloutShape::Box:
+        return "box";
+    case CalloutShape::Circle:
+        return "circle";
+    }
+    return "none";
+}
+
+Result<CalloutShape> calloutShapeFromString(std::string_view name)
+{
+    for (const CalloutShape shape : {CalloutShape::None, CalloutShape::Box, CalloutShape::Circle}) {
+        if (sameName(toString(shape), name)) {
+            return shape;
+        }
+    }
+    if (sameName(name, "balloon")) {
+        return CalloutShape::Circle;
+    }
+    return makeError(ErrorCode::ParseFailure, "unknown callout shape (none box circle)",
+                     std::string(name));
+}
+
+// ---- DimensionGeometry --------------------------------------------------------------------
+
+double DimensionGeometry::measurement() const
+{
+    const Vec2 along(std::cos(angle), std::sin(angle));
+    switch (kind) {
+    case DimensionKind::Aligned:
+        return start.distanceTo(end);
+    case DimensionKind::Linear:
+        return std::abs((end - start).dot(along));
+    case DimensionKind::Angular: {
+        const Vec2 first = start - vertex;
+        const Vec2 second = end - vertex;
+        double swept = std::atan2(first.cross(second), first.dot(second));
+        if (swept < 0.0) {
+            swept += katana::math::kTwoPi;
+        }
+        return swept;
+    }
+    case DimensionKind::Radius:
+        return start.distanceTo(vertex);
+    case DimensionKind::Diameter:
+        return 2.0 * start.distanceTo(vertex);
+    case DimensionKind::OrdinateX:
+        return (start - vertex).dot(along);
+    case DimensionKind::OrdinateY:
+        return (start - vertex).dot(along.perpendicular());
+    }
+    return start.distanceTo(end);
 }
 
 Result<EntityType> entityTypeFromString(std::string_view name)
@@ -308,6 +535,17 @@ struct Validator {
         if (text.text.empty()) {
             return makeError(ErrorCode::InvalidGeometry, "text is empty");
         }
+        if (!isValidUtf8(text.style)) {
+            return makeError(ErrorCode::InvalidGeometry, "text style name is not valid UTF-8");
+        }
+        if (!(std::isfinite(text.paperHeight) && text.paperHeight >= 0.0)) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "text paper height must be zero or positive",
+                             std::to_string(text.paperHeight));
+        }
+        if (static_cast<int>(text.justify) > static_cast<int>(TextJustify::TopRight)) {
+            return makeError(ErrorCode::InvalidGeometry, "text justification is not one of the nine");
+        }
         return requirePositive(text.height, "text height");
     }
     Status operator()(const DimensionGeometry& dimension) const
@@ -318,30 +556,154 @@ struct Validator {
         if (auto status = requireFinite(dimension.end, "dimension end"); !status) {
             return status;
         }
-        if (!std::isfinite(dimension.offset)) {
-            return makeError(ErrorCode::InvalidGeometry, "dimension offset is not finite");
+        if (auto status = requireFinite(dimension.vertex, "dimension vertex"); !status) {
+            return status;
         }
-        if (!(dimension.measurement() > tol::kGeometric)) {
-            return makeError(ErrorCode::InvalidGeometry, "dimension measures zero length");
+        if (!std::isfinite(dimension.offset) || !std::isfinite(dimension.angle)) {
+            return makeError(ErrorCode::InvalidGeometry, "dimension offset or angle is not finite");
+        }
+        if (static_cast<int>(dimension.kind) > static_cast<int>(DimensionKind::OrdinateY)) {
+            return makeError(ErrorCode::InvalidGeometry, "unknown dimension kind");
+        }
+        for (const AnchorRef* ref : {&dimension.startRef, &dimension.endRef, &dimension.vertexRef}) {
+            if (static_cast<int>(ref->point) > static_cast<int>(AnchorPoint::SegmentMid)) {
+                return makeError(ErrorCode::InvalidGeometry, "unknown anchor point");
+            }
+        }
+        switch (dimension.kind) {
+        case DimensionKind::Aligned:
+        case DimensionKind::Linear:
+        case DimensionKind::Radius:
+        case DimensionKind::Diameter:
+            if (!(dimension.measurement() > tol::kGeometric)) {
+                return makeError(ErrorCode::InvalidGeometry, "dimension measures zero length");
+            }
+            break;
+        case DimensionKind::Angular:
+            if (!(dimension.start.distanceTo(dimension.vertex) > tol::kGeometric) ||
+                !(dimension.end.distanceTo(dimension.vertex) > tol::kGeometric)) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "an angular dimension's rays need a length");
+            }
+            if (!(dimension.measurement() > tol::kAngular)) {
+                return makeError(ErrorCode::InvalidGeometry, "dimension measures zero angle");
+            }
+            break;
+        case DimensionKind::OrdinateX:
+        case DimensionKind::OrdinateY:
+            // A feature ON the datum measures 0, which is a value like any
+            // other; what an ordinate needs is a leader to put the value at.
+            if (!(dimension.start.distanceTo(dimension.end) > tol::kGeometric)) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "an ordinate dimension's leader has zero length");
+            }
+            break;
+        }
+        return {};
+    }
+    Status operator()(const LabelGeometry& label) const
+    {
+        if (label.style.empty() || !isValidUtf8(label.style)) {
+            return makeError(ErrorCode::InvalidGeometry, "a label needs a label style");
+        }
+        if ((label.target == 0) == label.alignment.empty()) {
+            return makeError(ErrorCode::InvalidGeometry,
+                             "a label labels exactly one entity or one alignment");
+        }
+        if (!isValidUtf8(label.alignment) || !isValidUtf8(label.textOverride) ||
+            !isValidUtf8(label.rule)) {
+            return makeError(ErrorCode::InvalidGeometry, "label text is not valid UTF-8");
+        }
+        if (label.part < -1) {
+            return makeError(ErrorCode::InvalidGeometry, "a label's part is -1 or a piece index",
+                             std::to_string(label.part));
+        }
+        if (auto status = requireFinite(label.anchor, "label anchor"); !status) {
+            return status;
+        }
+        if (label.position) {
+            return requireFinite(*label.position, "label position");
+        }
+        return {};
+    }
+    Status operator()(const LeaderGeometry& leader) const
+    {
+        if (leader.vertices.size() < 2) {
+            return makeError(ErrorCode::InvalidGeometry, "a leader needs at least two vertices");
+        }
+        for (const Point2& vertex : leader.vertices) {
+            if (auto status = requireFinite(vertex, "leader vertex"); !status) {
+                return status;
+            }
+        }
+        if (!(Polyline2{leader.vertices, false}.length() > tol::kGeometric)) {
+            return makeError(ErrorCode::InvalidGeometry, "leader has zero length");
+        }
+        if (!isValidUtf8(leader.text) || !isValidUtf8(leader.style)) {
+            return makeError(ErrorCode::InvalidGeometry, "leader text is not valid UTF-8");
+        }
+        for (const double size : {leader.paperHeight, leader.arrowSize, leader.landing}) {
+            if (!(std::isfinite(size) && size >= 0.0)) {
+                return makeError(ErrorCode::InvalidGeometry,
+                                 "a leader's sizes must be zero or positive", std::to_string(size));
+            }
+        }
+        if (static_cast<int>(leader.arrow) > static_cast<int>(ArrowHead::Dot) ||
+            static_cast<int>(leader.callout) > static_cast<int>(CalloutShape::Circle) ||
+            static_cast<int>(leader.tipRef.point) > static_cast<int>(AnchorPoint::SegmentMid)) {
+            return makeError(ErrorCode::InvalidGeometry, "a leader's arrow, callout or anchor is unknown");
         }
         return {};
     }
 };
 
-// Character cell width as a fraction of the text height (no font metrics here).
-constexpr double kApproximateGlyphAspect = 0.6;
-
-Segment2 textBaseline(const TextGeometry& text)
+// The lines a dimension draws its measurement along, for its box and for
+// picking: the dimension line (the arc of an angular one, chorded), the
+// radial line, or an ordinate's leader. Not what cad/dimension_draw.hpp
+// draws - no extension lines, arrows or text - which is why boundingBox
+// documents a dimension's box as its measured points and this.
+std::vector<Segment2> dimensionLines(const DimensionGeometry& dimension)
 {
-    const double width = kApproximateGlyphAspect * text.height * static_cast<double>(text.text.size());
-    return Segment2{text.position, text.position + Vec2(width, 0.0).rotated(text.rotation)};
-}
-
-Segment2 dimensionLine(const DimensionGeometry& dimension)
-{
-    const Vec2 shift =
-        (dimension.end - dimension.start).normalized().perpendicular() * dimension.offset;
-    return Segment2{dimension.start + shift, dimension.end + shift};
+    const Vec2 along(std::cos(dimension.angle), std::sin(dimension.angle));
+    switch (dimension.kind) {
+    case DimensionKind::Aligned: {
+        const Vec2 shift =
+            (dimension.end - dimension.start).normalized().perpendicular() * dimension.offset;
+        return {Segment2{dimension.start + shift, dimension.end + shift}};
+    }
+    case DimensionKind::Linear: {
+        const Point2 first = dimension.start + along.perpendicular() * dimension.offset;
+        return {Segment2{first, first + along * (dimension.end - dimension.start).dot(along)}};
+    }
+    case DimensionKind::Angular: {
+        const double radius = dimension.offset > tol::kGeometric
+                                  ? dimension.offset
+                                  : std::min(dimension.start.distanceTo(dimension.vertex),
+                                             dimension.end.distanceTo(dimension.vertex));
+        const double from = (dimension.start - dimension.vertex).angle();
+        const Arc2 arc{dimension.vertex, radius, from, dimension.measurement()};
+        constexpr int kChords = 32;
+        std::vector<Segment2> lines;
+        lines.reserve(kChords);
+        for (int i = 0; i < kChords; ++i) {
+            lines.push_back(Segment2{arc.pointAt(static_cast<double>(i) / kChords),
+                                     arc.pointAt(static_cast<double>(i + 1) / kChords)});
+        }
+        return lines;
+    }
+    case DimensionKind::Radius:
+    case DimensionKind::Diameter: {
+        const Vec2 out = (dimension.start - dimension.vertex).normalized();
+        const Point2 from = dimension.kind == DimensionKind::Diameter
+                                ? dimension.vertex - (dimension.start - dimension.vertex)
+                                : dimension.vertex;
+        return {Segment2{from, dimension.start + out * std::max(dimension.offset, 0.0)}};
+    }
+    case DimensionKind::OrdinateX:
+    case DimensionKind::OrdinateY:
+        return {Segment2{dimension.start, dimension.end}};
+    }
+    return {};
 }
 
 } // namespace
@@ -368,19 +730,43 @@ Box2 boundingBox(const Geometry& geometry)
         Box2 operator()(const Circle2& circle) const { return circle.boundingBox(); }
         Box2 operator()(const TextGeometry& text) const
         {
-            const Segment2 baseline = textBaseline(text);
-            const Vec2 up = Vec2(0.0, text.height).rotated(text.rotation);
-            Box2 box = baseline.boundingBox();
-            box.expand(baseline.start + up);
-            box.expand(baseline.end + up);
+            Box2 box;
+            for (const Point2& corner : estimatedTextCorners(text)) {
+                box.expand(corner);
+            }
             return box;
         }
         Box2 operator()(const DimensionGeometry& dimension) const
         {
-            Box2 box = dimensionLine(dimension).boundingBox();
+            Box2 box;
+            for (const Segment2& line : dimensionLines(dimension)) {
+                box.expand(line.start);
+                box.expand(line.end);
+            }
             box.expand(dimension.start);
             box.expand(dimension.end);
+            if (dimension.usesVertex()) {
+                box.expand(dimension.vertex);
+            }
             return box;
+        }
+        // Only the anchor and a dragged position: the text is worked out
+        // where it is drawn (LabelGeometry says why), and the painters cull
+        // labels by their targets, not by this.
+        Box2 operator()(const LabelGeometry& label) const
+        {
+            Box2 box;
+            box.expand(label.anchor);
+            if (label.position) {
+                box.expand(*label.position);
+            }
+            return box;
+        }
+        // The line only: the note's size is in paper millimetres, so the
+        // model box it covers depends on the scale it is looked at.
+        Box2 operator()(const LeaderGeometry& leader) const
+        {
+            return Polyline2{leader.vertices, false}.boundingBox();
         }
     };
     return std::visit(Visitor{}, geometry);
@@ -398,10 +784,33 @@ double distanceTo(const Geometry& geometry, const Point2& p)
             return polyline.distanceTo(p).value_or(std::numeric_limits<double>::infinity());
         }
         double operator()(const Circle2& circle) const { return circle.distanceTo(p); }
-        double operator()(const TextGeometry& text) const { return textBaseline(text).distanceTo(p); }
+        // To the block's bottom edge - for one line justified BottomLeft,
+        // the baseline, which is what a text was always picked by.
+        double operator()(const TextGeometry& text) const
+        {
+            const auto corners = estimatedTextCorners(text);
+            return Segment2{corners[0], corners[1]}.distanceTo(p);
+        }
         double operator()(const DimensionGeometry& dimension) const
         {
-            return dimensionLine(dimension).distanceTo(p);
+            double nearest = std::numeric_limits<double>::infinity();
+            for (const Segment2& line : dimensionLines(dimension)) {
+                nearest = std::min(nearest, line.distanceTo(p));
+            }
+            return nearest;
+        }
+        double operator()(const LabelGeometry& label) const
+        {
+            double nearest = label.anchor.distanceTo(p);
+            if (label.position) {
+                nearest = std::min(nearest, label.position->distanceTo(p));
+            }
+            return nearest;
+        }
+        double operator()(const LeaderGeometry& leader) const
+        {
+            return Polyline2{leader.vertices, false}.distanceTo(p).value_or(
+                std::numeric_limits<double>::infinity());
         }
     };
     return std::visit(Visitor{p}, geometry);
@@ -492,7 +901,49 @@ Result<Geometry> transformed(const Geometry& geometry, const Mat3& transform)
             DimensionGeometry result = dimension;
             result.start = s.point(dimension.start);
             result.end = s.point(dimension.end);
-            result.offset = dimension.offset * s.scale * (s.mirrored ? -1.0 : 1.0);
+            result.vertex = s.point(dimension.vertex);
+            result.angle = s.angle(dimension.angle);
+            switch (dimension.kind) {
+            case DimensionKind::Aligned:
+            case DimensionKind::Linear:
+                // The dimension line is on the other side of its direction
+                // once mirrored, so its signed offset changes sign.
+                result.offset = dimension.offset * s.scale * (s.mirrored ? -1.0 : 1.0);
+                break;
+            case DimensionKind::Angular:
+                result.offset = dimension.offset * s.scale;
+                // A mirror turns the counter-clockwise sweep from start to end
+                // clockwise: swapping the rays measures the same angle again.
+                if (s.mirrored) {
+                    std::swap(result.start, result.end);
+                    std::swap(result.startRef, result.endRef);
+                }
+                break;
+            case DimensionKind::Radius:
+            case DimensionKind::Diameter:
+            case DimensionKind::OrdinateX:
+            case DimensionKind::OrdinateY:
+                result.offset = dimension.offset * s.scale;
+                break;
+            }
+            return result;
+        }
+        Geometry operator()(const LabelGeometry& label) const
+        {
+            LabelGeometry result = label;
+            result.anchor = s.point(label.anchor);
+            if (label.position) {
+                result.position = s.point(*label.position);
+            }
+            return result;
+        }
+        // The sizes are paper millimetres and stay as they are at any scale.
+        Geometry operator()(const LeaderGeometry& leader) const
+        {
+            LeaderGeometry result = leader;
+            for (Point2& vertex : result.vertices) {
+                vertex = s.point(vertex);
+            }
             return result;
         }
     };

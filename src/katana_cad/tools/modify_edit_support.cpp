@@ -86,6 +86,10 @@ std::string kindName(const Geometry& geometry)
         return "text";
     case katana::entity::EntityType::Dimension:
         return "dimension";
+    case katana::entity::EntityType::Label:
+        return "label";
+    case katana::entity::EntityType::Leader:
+        return "leader";
     }
     return "object";
 }
