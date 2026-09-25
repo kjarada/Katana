@@ -548,3 +548,123 @@ TEST(SheetSections, AutomaticCrossSectionsShareOneScaleThatFitsTheirWidth)
     EXPECT_EQ(own.scale, 100.0);
     EXPECT_EQ(own.exaggeration, 1.0);
 }
+
+// ---- nothing outside, nothing over another ---------------------------------------------
+
+TEST(SheetSections, NothingOfASectionIsDrawnOutsideItsViewport)
+{
+    // A long section with a range and cross sections full of services, on a
+    // sheet with no frame: every pixel off the two rectangles (and their
+    // 0.25 mm outlines) is still the paper's white.
+    Road road;
+    road.service("WATER", 55.0, 22.0);
+    road.service("GAS", 53.3, 22.5);
+    road.service("POWER", 45.0, 30.0);
+    road.service("KERB", 47.0, std::nullopt);
+    auto along = longSection(box(40.0, 170.0, 300.0, 260.0), 500.0, 10.0, Point2(90.0, 25.0));
+    along.source.chainageFrom = 20.0;
+    along.source.chainageTo = 160.0;
+    along.autoScale = true;
+    along.autoCentre = true;
+    auto across = crossSection(box(60.0, 40.0, 200.0, 150.0), 60.0, 100.0, Point2(0.0, 24.0));
+    across.id = "vp2";
+    across.source.stations = {40.0, 90.0, 140.0};
+    across.autoScale = true;
+    across.autoCentre = true;
+    auto set = sheetWith({along, across});
+    set.sheets.front().frame.clear();
+    SheetPaintStats stats;
+    const QImage paper = painted(set, road.source(), &stats);
+    ASSERT_TRUE(stats.problems.empty()) << stats.problems.front();
+    EXPECT_EQ(stats.viewportsDrawn, 2u);
+
+    const auto inside = [](Point2 p, const Box2& r) {
+        return p.x > r.min.x - 0.6 && p.x < r.max.x + 0.6 && p.y > r.min.y - 0.6 && p.y < r.max.y + 0.6;
+    };
+    int outside = 0;
+    for (int y = 0; y < paper.height(); ++y) {
+        for (int x = 0; x < paper.width(); ++x) {
+            const Point2 at((x + 0.5) / kPpmm, 297.0 - (y + 0.5) / kPpmm);
+            if (!inside(at, along.rect) && !inside(at, across.rect) && paper.pixel(x, y) != kWhite) {
+                ++outside;
+            }
+        }
+    }
+    EXPECT_EQ(outside, 0);
+    // And something is drawn in each.
+    EXPECT_GT(textIn(paper, along.rect), 500);
+    EXPECT_GT(textIn(paper, across.rect), 500);
+}
+
+TEST(SheetSections, AxisValuesStepOutUntilTheyClearEachOther)
+{
+    // A road from CH 100000 drawn at 1 : 5 in a viewport too low for its
+    // band (40 mm: the plot is 26 mm with the band's 32 under it), so its
+    // chainages are written under the plot, at y 159.7..161.2. At 200 mm a
+    // metre the 10 mm grid would be 0.05 m, and "100090.05" is wider than
+    // 10 mm less the 2 mm between labels: the step goes to 0.1 m, 20 mm.
+    const Road road(true, 100000.0);
+    auto viewport = longSection(box(23.0, 150.0, 410.0, 190.0), 5.0, 1.0, Point2());
+    viewport.autoCentre = true;
+    const QImage paper = painted(sheetWith({viewport}), road.source());
+
+    // The columns with ink along the labels' strip, and the runs of them:
+    // glyphs of one label are under 0.6 mm apart, labels much more.
+    const QRect strip = pixelsOf(box(24.0, 159.8, 409.0, 161.1));
+    std::vector<int> inked;
+    for (int x = strip.left(); x <= strip.right(); ++x) {
+        for (int y = strip.top(); y <= strip.bottom(); ++y) {
+            if (textIn(paper, box(x / kPpmm, 297.0 - (y + 1) / kPpmm, (x + 1) / kPpmm,
+                                  297.0 - y / kPpmm)) > 0) {
+                inked.push_back(x);
+                break;
+            }
+        }
+    }
+    ASSERT_FALSE(inked.empty());
+    std::vector<std::pair<int, int>> labels{{inked.front(), inked.front()}};
+    for (const int x : inked) {
+        if (x - labels.back().second > static_cast<int>(0.6 * kPpmm)) {
+            labels.emplace_back(x, x);
+        } else {
+            labels.back().second = x;
+        }
+    }
+    ASSERT_GE(labels.size(), 10u);
+    for (std::size_t i = 1; i < labels.size(); ++i) {
+        // Each at least 2 mm clear of the one before, and the grid 20 mm.
+        EXPECT_GE(labels[i].first - labels[i - 1].second, static_cast<int>(2.0 * kPpmm) - 1) << i;
+        const double pitch = ((labels[i].first + labels[i].second) -
+                              (labels[i - 1].first + labels[i - 1].second)) /
+                             (2.0 * kPpmm);
+        EXPECT_NEAR(pitch, 20.0, 1.0) << i;
+    }
+}
+
+// ---- a sheet to look at -----------------------------------------------------------------
+
+TEST(SheetSections, ASheetOfALongSectionAndServiceCrossSections)
+{
+    // What a drafter would plot: the road's long section from CH 20 to 160
+    // across the top, and three cross sections through its services below,
+    // all automatic. Written to KATANA_SHEET_PNG to be looked at.
+    Road road;
+    road.service("WATER", 55.0, 22.0);
+    road.service("GAS", 53.3, 22.5);
+    road.service("POWER", 42.0, 30.0);
+    road.service("KERB", 46.0, std::nullopt);
+    auto along = longSection(box(24.0, 160.0, 409.0, 286.0), 500.0, 10.0, Point2());
+    along.source.chainageFrom = 20.0;
+    along.source.chainageTo = 160.0;
+    along.autoScale = true;
+    along.autoCentre = true;
+    auto across = crossSection(box(24.0, 36.0, 409.0, 157.0), 60.0, 100.0, Point2());
+    across.source.stations = {40.0, 140.0};
+    across.autoScale = true;
+    across.autoCentre = true;
+    SheetPaintStats stats;
+    painted(sheetWith({along, across}), road.source(), &stats);
+    EXPECT_TRUE(stats.problems.empty());
+    EXPECT_EQ(stats.viewportsDrawn, 2u);
+    EXPECT_EQ(stats.sectionNotesDropped, 0u);
+}

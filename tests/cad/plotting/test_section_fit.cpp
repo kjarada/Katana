@@ -137,6 +137,12 @@ TEST(SectionFit, TheExaggerationIsTheLargestOfTheLadderThatFits)
     // No depth: the flat value asked for.
     EXPECT_EQ(fitExaggeration(0.0, 500.0, 100.0), 1.0);
     EXPECT_EQ(fitExaggeration(0.0, 500.0, 100.0, 10.0), 10.0);
+    // 12 m at 1 : 750 in 70 mm allows 4.375: not 4, which would print
+    // V 1:187.5, but 2.5, V 1:300. At 1 : 500, 4 is V 1:125 and is taken.
+    EXPECT_EQ(fitExaggeration(12.0, 750.0, 70.0), 2.5);
+    EXPECT_EQ(fitExaggeration(12.0, 500.0, 100.0), 4.0);
+    // A scale off the ladder has no whole vertical: the largest that fits.
+    EXPECT_EQ(fitExaggeration(1.0, 1234.5, 100.0), 20.0);
     ASSERT_EQ(kSectionExaggerations.size(), 8u);
     EXPECT_EQ(kSectionExaggerations.back(), 20.0);
 }
@@ -289,4 +295,57 @@ TEST(SectionLayout, AnAreaTooSmallForAPlotHasNone)
     EXPECT_TRUE(sectionPlotLayout(r).plot.empty());
     r.area = Box2();
     EXPECT_TRUE(sectionPlotLayout(r).plot.empty());
+}
+
+// ---- a section viewport ----------------------------------------------------------------
+
+TEST(SectionViewport, ItsSectionsAreDrawnAboveTheTitlesStrip)
+{
+    expectBox(sectionDrawingArea(Box2(Point2(23.0, 35.0), Point2(210.0, 145.0))), 23.0, 42.0, 210.0,
+              145.0);
+    // A rectangle lower than the strip keeps none of itself for sections.
+    EXPECT_EQ(sectionDrawingArea(Box2(Point2(0.0, 0.0), Point2(50.0, 5.0))).height(), 0.0);
+    EXPECT_TRUE(sectionDrawingArea(Box2()).empty());
+}
+
+TEST(SectionViewport, CrossSectionsAreCutAtTheStationsElseEveryIntervalToTheEnd)
+{
+    ViewportSource source;
+    source.stations = {60.0, 20.0};
+    EXPECT_EQ(viewportStations(source), (std::vector<double>{60.0, 20.0}));
+
+    // Every 0.1 m from 0 to 0.3 lands on 0.3 itself: counted in whole
+    // intervals, not added up (0.1 + 0.1 + 0.1 is 0.30000000000000004).
+    source.stations.clear();
+    source.chainageFrom = 0.0;
+    source.chainageTo = 0.3;
+    source.sectionInterval = 0.1;
+    const std::vector<double> tenths = viewportStations(source);
+    ASSERT_EQ(tenths.size(), 4u);
+    EXPECT_EQ(tenths.back(), 3.0 * 0.1);
+
+    // Every 20 m from 100 to 150: 100, 120, 140 - not past the end.
+    source.chainageFrom = 100.0;
+    source.chainageTo = 150.0;
+    source.sectionInterval = 20.0;
+    EXPECT_EQ(viewportStations(source), (std::vector<double>{100.0, 120.0, 140.0}));
+
+    // At most kMaximumSectionRows, and none without an interval or a range.
+    source.chainageTo = 1.0e6;
+    source.sectionInterval = 1.0;
+    EXPECT_EQ(viewportStations(source).size(), kMaximumSectionRows);
+    source.sectionInterval = 0.0;
+    EXPECT_TRUE(viewportStations(source).empty());
+}
+
+TEST(SectionViewport, AHalfWidthNotGivenIsTheDefault)
+{
+    ViewportSource source;
+    EXPECT_EQ(viewportHalfWidth(source), kDefaultSectionHalfWidth);
+    source.sectionHalfWidth = -5.0;
+    EXPECT_EQ(viewportHalfWidth(source), kDefaultSectionHalfWidth);
+    source.sectionHalfWidth = std::numeric_limits<double>::infinity();
+    EXPECT_EQ(viewportHalfWidth(source), kDefaultSectionHalfWidth);
+    source.sectionHalfWidth = 12.5;
+    EXPECT_EQ(viewportHalfWidth(source), 12.5);
 }
