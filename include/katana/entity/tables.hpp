@@ -179,8 +179,8 @@ class LayerDatabase {
 
 inline constexpr std::string_view kDefaultDimensionStyleName = "Standard";
 
-// How the arrow at each end of a dimension line is drawn.
-enum class ArrowHead { None, Tick, ClosedFilled, Open, Dot };
+// How the arrow at each end of a dimension line is drawn: ArrowHead, declared
+// in entity.hpp because a leader carries one too.
 
 [[nodiscard]] std::string_view toString(ArrowHead head);
 [[nodiscard]] katana::core::Result<ArrowHead> arrowHeadFromString(std::string_view name);
@@ -220,6 +220,15 @@ struct DimensionStyle {
     // rounding finer than the geometric tolerance is rounding to noise.
     double roundTo = 0.0;
     bool suppressTrailingZeros = false; // DIMZIN
+
+    // Paper-sized (2026-09-25, docs/annotation.md): the text height, gap,
+    // extension offset and overshoot and the arrow size above are then
+    // MILLIMETRES ON PAPER, drawn at size x scale / 1000 model units for the
+    // scale of the view or sheet viewport showing the dimension - AutoCAD's
+    // annotative dimension style - so one dimension reads 2.5 mm tall on a
+    // 1:200 sheet and on a 1:2000 one. Off, as every style was before, they
+    // are model units and the dimension plots at its size on the ground.
+    bool paperSized = false;
 
     friend bool operator==(const DimensionStyle&, const DimensionStyle&) = default;
 };

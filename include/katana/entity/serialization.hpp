@@ -22,6 +22,7 @@
 #include <string_view>
 
 #include "katana/core/error.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/entity.hpp"
 
 namespace katana::entity {
@@ -42,5 +43,17 @@ namespace katana::entity {
 //  "geometry":{...},"properties":{...},"metadata":{...}}
 [[nodiscard]] katana::core::Result<std::string> entityToJson(const Entity& entity);
 [[nodiscard]] katana::core::Result<Entity> entityFromJson(std::string_view json);
+
+// A label style's definition (everything but its name and kind, which the
+// project store keeps as columns) as versioned JSON: {"version": 1, ...},
+// each member written only when it differs from LabelStyle's default, and
+// a member left out read as that default - so a member added later needs no
+// schema migration, and a style written by this build reads the same in the
+// next. A version newer than this build's is refused (Unsupported) rather
+// than read wrongly.
+[[nodiscard]] katana::core::Result<std::string> labelStyleDefinitionToJson(const LabelStyle& style);
+// Fills everything but `name` and `kind` of `style` from `json`.
+[[nodiscard]] katana::core::Status labelStyleDefinitionFromJson(std::string_view json,
+                                                                LabelStyle& style);
 
 } // namespace katana::entity

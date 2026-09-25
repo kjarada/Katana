@@ -206,6 +206,21 @@ struct TableItems {
 // ---- alignments ------------------------------------------------------------------
 // Create and update validate the definition by solving it, so an alignment
 // that cannot be built is refused naming its PI rather than stored.
+// The annotation tables (entity/annotation.hpp): text styles, label styles
+// and auto-label rules, through the same create / update / delete as the
+// tables above. Deleting a text style a text, leader or label style still
+// names, or a label style a label or rule still names, is refused naming the
+// holder; "Standard" text cannot be deleted.
+[[nodiscard]] CommandPtr createTextStyle(katana::entity::TextStyle style);
+[[nodiscard]] CommandPtr updateTextStyle(katana::entity::TextStyle style);
+[[nodiscard]] CommandPtr deleteTextStyle(std::string name);
+[[nodiscard]] CommandPtr createLabelStyle(katana::entity::LabelStyle style);
+[[nodiscard]] CommandPtr updateLabelStyle(katana::entity::LabelStyle style);
+[[nodiscard]] CommandPtr deleteLabelStyle(std::string name);
+[[nodiscard]] CommandPtr createLabelRule(katana::entity::LabelRule rule);
+[[nodiscard]] CommandPtr updateLabelRule(katana::entity::LabelRule rule);
+[[nodiscard]] CommandPtr deleteLabelRule(std::string name);
+
 [[nodiscard]] CommandPtr createAlignment(katana::entity::Alignment alignment);
 [[nodiscard]] CommandPtr updateAlignment(katana::entity::Alignment alignment);
 [[nodiscard]] CommandPtr deleteAlignment(std::string name);

@@ -50,6 +50,31 @@ Other entry points in the same header:
 * `plotPlanToPdf(path, settings, source, layers, hiddenReferences, cache,
   title)` - one page, titled, `Katana` as its creator.
 
+### Annotation
+
+Paper-sized annotation - styled or multi-line text, labels, leaders and the
+dimensions of a paper-sized style (`docs/annotation.md`) - is drawn at its
+size on paper for ONE scale, `PlanPaintOptions::annotationScale`: the plan
+view passes the document's (`Document::annotationScale`, the Format
+toolbar's box and `ANNOSCALE`), a plot of the drawing its own scale, and a
+sheet viewport its viewport's. The painter never reads it from a widget.
+Such text is laid out by `katana_cad` (`cad/annotation/text_layout.hpp`,
+`leader_draw.hpp`) into a `Drawing` of strokes, fills, masks and text runs,
+which `src/katana_qt/annotation/annotation_painter.*` paints; plain
+bottom-left text with no style or paper height is drawn exactly as before.
+
+Labels are drawn LAST, together (`drawLabels`): the placer
+(`cad/annotation/label_layout.hpp`) lays out every label whose anchor is in
+view for the annotation scale, keeping each off the labels placed before it
+and off the lines and the notes', leaders' and dimensions' text drawn this
+paint (gathered as they are drawn, at most 200 000 segments), unless
+`avoidLabelCollisions` is off. `labels` off leaves them out.
+`PlanPaintStats` counts what the placer did: `labelsPlaced`,
+`labelsDisplaced` and `labelsSuppressed`. A mask is painted in the paper on
+paper and in `screenBackground` on screen, so "white prints black" still
+holds for everything drawn over one. How long placement takes is measured in
+`docs/annotation.md`.
+
 ### Reentrant, and off the GUI thread
 
 `paintPlan` reads its arguments and writes nothing but the painter and the
