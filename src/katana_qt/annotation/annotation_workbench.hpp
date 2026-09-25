@@ -5,11 +5,11 @@
 // the plan view's annotation scale on the Format toolbar, and Annotate >
 // Edit Text....
 //
-// Every one of them is a thin front end over katana_cad and katana_commands:
-// a text style is changed by updateTextStyle, a rule run by
-// annotation::autoLabel, the scale by Document::setAnnotationScale - each ONE
-// undoable step, exactly what the command line's TEXTSTYLE, AUTOLABEL and
-// ANNOSCALE make - so nothing here decides anything a script or an agent
+// No dialog here changes the drawing itself: each builds the line a person
+// would type - TEXTSTYLE, LABELSTYLE, AUTOLABEL, DIMSTYLE, TEXTEDIT - and
+// runs it through the window's one executor (commandRunner), and the scale
+// box sets the scale as ANNOSCALE does, by Document::setAnnotationScale - each
+// ONE undoable step, so nothing here decides anything a script or an agent
 // could not do the same way. Stable object names throughout, for the
 // headless driver and the tests.
 

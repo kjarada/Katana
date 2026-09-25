@@ -1,21 +1,27 @@
 // The annotation front end (src/katana_qt/annotation/, docs/annotation.md
 // "In the window"): the painter's paper sizes and marks, the text and label
 // style managers, and the annotation scale box - each a thin front end over
-// the commands, so each edit is checked as one undo step.
+// the verbs, so each edit is checked as the line it runs and one undo step.
+// The managers' runner is the interpreter itself, so a line is checked by what
+// the verb makes of it.
 
 #include <gtest/gtest.h>
 
+#include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QImage>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QMenu>
 #include <QPainter>
+#include <QTableWidget>
 #include <QToolBar>
 
 #include "annotation/annotation_managers.hpp"
 #include "annotation/annotation_workbench.hpp"
+#include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -114,6 +120,32 @@ int inkPixels(const QImage& image)
     }
     return count;
 }
+
+// Runs each line through an interpreter over the document, as the window's
+// executor runs it through the same interpreter, and keeps the lines.
+struct Runner {
+    explicit Runner(Document& document) : interpreter(document) {}
+    katana::cad::CommandInterpreter interpreter;
+    QStringList lines;
+
+    katana::qt::CommandRunner runner()
+    {
+        return [this](const QString& line) {
+            lines << line;
+            const auto reply = interpreter.run(line.toStdString());
+            if (!reply) {
+                return katana::qt::VerbOutcome{false, {},
+                                               QString::fromStdString(reply.error().describe())};
+            }
+            return katana::qt::VerbOutcome{true, QString::fromStdString(*reply), {}};
+        };
+    }
+    void ok(const std::string& line)
+    {
+        const auto reply = interpreter.run(line);
+        ASSERT_TRUE(reply.ok()) << line << ": " << reply.error().describe();
+    }
+};
 
 Model modelWithStyledText(const char* text, double paperHeight)
 {
@@ -220,7 +252,8 @@ TEST(AnnotationPaint, LabelsArePlacedAndCountedByThePainter)
 TEST(AnnotationManagers, TheTextStyleManagerAppliesAsOneStep)
 {
     Document document;
-    katana::qt::TextStyleManagerDialog dialog(document);
+    Runner run(document);
+    katana::qt::TextStyleManagerDialog dialog(document, run.runner());
     dialog.select(QStringLiteral("Standard"));
     auto* paper = dialog.findChild<QDoubleSpinBox*>(QStringLiteral("textStylePaperHeight"));
     ASSERT_NE(paper, nullptr);
@@ -246,7 +279,8 @@ TEST(AnnotationManagers, TheTextStyleManagerAppliesAsOneStep)
 TEST(AnnotationManagers, TheLabelStyleManagerChecksTemplatesAndRunsRules)
 {
     Document document;
-    katana::qt::LabelStyleManagerDialog dialog(document);
+    Runner run(document);
+    katana::qt::LabelStyleManagerDialog dialog(document, run.runner());
     ASSERT_TRUE(dialog.addDefaults());
     EXPECT_EQ(document.model().labelStyles.size(), 7u);
     EXPECT_EQ(document.history().undoCount(), 1u);
@@ -271,10 +305,178 @@ TEST(AnnotationManagers, TheLabelStyleManagerChecksTemplatesAndRunsRules)
     styleBox->setCurrentIndex(styleBox->findText(QStringLiteral("Lot Area")));
     ASSERT_TRUE(dialog.addRule()) << dialog.problem().toStdString();
     ASSERT_TRUE(dialog.runRules()) << dialog.problem().toStdString();
-    EXPECT_TRUE(dialog.runReport().startsWith(QStringLiteral("created=1")))
+    EXPECT_TRUE(dialog.runReport().startsWith(QStringLiteral("autolabel created=1")))
         << dialog.runReport().toStdString();
     ASSERT_TRUE(dialog.clearRules());
     EXPECT_EQ(dialog.runReport(), QStringLiteral("removed=1"));
+}
+
+TEST(AnnotationManagers, NewTakesTheNameTypedAndApplySendsOnlyWhatChanged)
+{
+    Document document;
+    Runner run(document);
+    katana::qt::TextStyleManagerDialog dialog(document, run.runner());
+    auto* name = dialog.findChild<QLineEdit*>(QStringLiteral("textStyleNewName"));
+    ASSERT_NE(name, nullptr);
+    EXPECT_EQ(name->placeholderText(), QStringLiteral("Text Style"));
+    name->setText(QStringLiteral("Road Names"));
+    ASSERT_TRUE(dialog.addStyle()) << dialog.problem().toStdString();
+    EXPECT_EQ(run.lines.back(), QStringLiteral("TEXTSTYLE NEW \"Road Names\""));
+    EXPECT_TRUE(document.model().textStyles.contains("Road Names"));
+    EXPECT_TRUE(name->text().isEmpty());
+
+    dialog.findChild<QDoubleSpinBox*>(QStringLiteral("textStylePaperHeight"))->setValue(3.5);
+    dialog.findChild<QCheckBox*>(QStringLiteral("textStyleBold"))->setChecked(true);
+    ASSERT_TRUE(dialog.apply()) << dialog.problem().toStdString();
+    EXPECT_EQ(run.lines.back(), QStringLiteral("TEXTSTYLE SET \"Road Names\" paper=3.5 bold=on"));
+    EXPECT_DOUBLE_EQ(document.model().textStyles.find("Road Names")->paperHeight, 3.5);
+
+    // A name a line cannot carry is refused before anything runs.
+    const auto lines = run.lines.size();
+    name->setText(QStringLiteral("say \"hi\""));
+    EXPECT_FALSE(dialog.addStyle());
+    EXPECT_EQ(run.lines.size(), lines);
+    EXPECT_TRUE(dialog.problem().contains(QStringLiteral("double quote")));
+}
+
+TEST(AnnotationManagers, ANewLabelStyleHasTheNameAndKindChosen)
+{
+    Document document;
+    Runner run(document);
+    katana::qt::LabelStyleManagerDialog dialog(document, run.runner());
+    dialog.findChild<QLineEdit*>(QStringLiteral("labelStyleNewName"))
+        ->setText(QStringLiteral("Lot areas"));
+    auto* kind = dialog.findChild<QComboBox*>(QStringLiteral("labelStyleNewKind"));
+    kind->setCurrentIndex(kind->findText(QStringLiteral("area")));
+    ASSERT_TRUE(dialog.addStyle()) << dialog.problem().toStdString();
+    EXPECT_EQ(run.lines.back(), QStringLiteral("LABELSTYLE NEW \"Lot areas\" kind=area"));
+    const auto* made = document.model().labelStyles.find("Lot areas");
+    ASSERT_NE(made, nullptr);
+    EXPECT_EQ(made->kind, katana::entity::LabelKind::Area);
+    // LABELSTYLE NEW's own start for an area: at the centroid.
+    EXPECT_EQ(made->placement, katana::entity::LabelPlacement::Centroid);
+    EXPECT_EQ(dialog.findChild<QComboBox*>(QStringLiteral("labelStyleKind"))->currentText(),
+              QStringLiteral("area"))
+        << "the new style is the one shown";
+}
+
+TEST(AnnotationManagers, TheInsertValueMenuOffersWhatTheKindTakesWithItsSteps)
+{
+    Document document;
+    Runner run(document);
+    katana::qt::LabelStyleManagerDialog dialog(document, run.runner());
+    ASSERT_TRUE(dialog.addDefaults());
+    dialog.select(QStringLiteral("Bearing Distance"));
+    const auto action = [&](const char* name) {
+        return dialog.findChild<QAction*>(QString::fromLatin1(name));
+    };
+    // A segment's bearing in DMS and its distance to three places; a
+    // segment has no area, and a bearing no square metres.
+    EXPECT_NE(action("labelValue:bearing:dms"), nullptr);
+    EXPECT_NE(action("labelValue:distance:.3f"), nullptr);
+    EXPECT_NE(action("labelValue:layer:upper"), nullptr);
+    EXPECT_EQ(action("labelValue:area"), nullptr);
+    EXPECT_EQ(action("labelValue:bearing:m2"), nullptr);
+
+    auto* templateEdit = dialog.findChild<QLineEdit*>(QStringLiteral("labelStyleTemplate"));
+    templateEdit->clear();
+    action("labelValue:bearing:dms")->trigger();
+    templateEdit->insert(QStringLiteral(" "));
+    dialog.insertValue(QStringLiteral("distance:.2f"));
+    EXPECT_EQ(templateEdit->text(), QStringLiteral("{bearing:dms} {distance:.2f}"));
+    dialog.insertValue(QStringLiteral("prop.NAME"));
+    EXPECT_EQ(templateEdit->selectedText(), QStringLiteral("NAME")) << "left to type over";
+    templateEdit->insert(QStringLiteral("owner"));
+    EXPECT_EQ(templateEdit->text(), QStringLiteral("{bearing:dms} {distance:.2f}{prop.owner}"));
+
+    // Another kind, other values: a point's level.
+    dialog.select(QStringLiteral("Spot Level"));
+    EXPECT_NE(action("labelValue:z:.3f"), nullptr);
+    EXPECT_EQ(action("labelValue:bearing"), nullptr);
+}
+
+TEST(AnnotationManagers, RulesAreAddedWithTheirTypeEditedAndSwitchedByLines)
+{
+    Document document;
+    Runner run(document);
+    katana::qt::LabelStyleManagerDialog dialog(document, run.runner());
+    ASSERT_TRUE(dialog.addDefaults());
+    dialog.findChild<QLineEdit*>(QStringLiteral("labelRuleName"))->setText(QStringLiteral("lots"));
+    auto* style = dialog.findChild<QComboBox*>(QStringLiteral("labelRuleStyle"));
+    style->setCurrentIndex(style->findText(QStringLiteral("Lot Area")));
+    auto* type = dialog.findChild<QComboBox*>(QStringLiteral("labelRuleType"));
+    ASSERT_NE(type, nullptr);
+    type->setCurrentIndex(type->findText(QStringLiteral("Polyline")));
+    ASSERT_TRUE(dialog.addRule()) << dialog.problem().toStdString();
+    EXPECT_EQ(run.lines.back(),
+              QStringLiteral("AUTOLABEL RULE ADD lots style=\"Lot Area\" type=Polyline enabled=on"));
+    EXPECT_EQ(document.model().labelRules.find("lots")->entityType, "Polyline");
+
+    // Chosen in the table, the rule fills the form; Update stores it whole.
+    auto* table = dialog.findChild<QTableWidget*>(QStringLiteral("labelRuleTable"));
+    ASSERT_EQ(table->rowCount(), 1);
+    dialog.findChild<QLineEdit*>(QStringLiteral("labelRuleName"))->clear();
+    table->setCurrentCell(0, 1);
+    EXPECT_EQ(dialog.findChild<QLineEdit*>(QStringLiteral("labelRuleName"))->text(),
+              QStringLiteral("lots"));
+    dialog.findChild<QLineEdit*>(QStringLiteral("labelRuleLayer"))->setText(QStringLiteral("BDY*"));
+    ASSERT_TRUE(dialog.updateRule()) << dialog.problem().toStdString();
+    EXPECT_EQ(run.lines.back(),
+              QStringLiteral("AUTOLABEL RULE SET lots style=\"Lot Area\" layer=BDY* code=\"\" "
+                             "type=Polyline labellayer=\"\" enabled=on"));
+    EXPECT_EQ(document.model().labelRules.find("lots")->layer, "BDY*");
+
+    // The table's Enabled box switches the rule with a line of its own.
+    const std::size_t before = document.history().undoCount();
+    table->item(0, 6)->setCheckState(Qt::Unchecked);
+    QCoreApplication::processEvents(); // run once the box's signal has returned
+    EXPECT_EQ(run.lines.back(), QStringLiteral("AUTOLABEL RULE SET lots enabled=off"));
+    EXPECT_FALSE(document.model().labelRules.find("lots")->enabled);
+    EXPECT_EQ(document.history().undoCount(), before + 1);
+    EXPECT_EQ(table->item(0, 6)->checkState(), Qt::Unchecked) << "the table shows it";
+}
+
+TEST(AnnotationManagers, RunPreviewAndClearActOnTheChosenRulesAndCountTheirLabels)
+{
+    Document document;
+    Runner run(document);
+    katana::qt::LabelStyleManagerDialog dialog(document, run.runner());
+    ASSERT_TRUE(dialog.addDefaults());
+    run.ok("RECT 0,0 20,20");
+    run.ok("AUTOLABEL RULE ADD lots style=\"Lot Area\"");
+    run.ok("AUTOLABEL RULE ADD sides style=\"Bearing Distance\"");
+    auto* table = dialog.findChild<QTableWidget*>(QStringLiteral("labelRuleTable"));
+    ASSERT_EQ(table->rowCount(), 2);
+    // Rules are listed by name: lots, then sides.
+    table->selectRow(0);
+    EXPECT_EQ(dialog.chosenRules(), QStringList{QStringLiteral("lots")});
+
+    // One label entity a target a rule matches (auto_label.hpp): the
+    // rectangle once for its area.
+    const std::size_t entities = document.model().entities.size();
+    ASSERT_TRUE(dialog.previewRules()) << dialog.problem().toStdString();
+    EXPECT_EQ(run.lines.back(), QStringLiteral("AUTOLABEL PREVIEW lots"));
+    EXPECT_EQ(dialog.runReport(), QStringLiteral("preview created=1 kept=0 removed=0 skipped=0"));
+    EXPECT_EQ(document.model().entities.size(), entities) << "a preview makes nothing";
+    EXPECT_EQ(table->item(0, 7)->text(), QStringLiteral("1")) << "the Labels column";
+
+    ASSERT_TRUE(dialog.runRules());
+    EXPECT_EQ(run.lines.back(), QStringLiteral("AUTOLABEL RUN lots"));
+    EXPECT_EQ(document.model().entities.size(), entities + 1) << "only the chosen rule ran";
+
+    // None chosen: every enabled rule. The area label is kept, the sides'
+    // made - one label for the rectangle's four segments.
+    table->clearSelection();
+    ASSERT_TRUE(dialog.runRules());
+    EXPECT_EQ(run.lines.back(), QStringLiteral("AUTOLABEL RUN"));
+    EXPECT_EQ(dialog.runReport(), QStringLiteral("autolabel created=1 kept=1 removed=0 skipped=0"));
+    EXPECT_EQ(table->item(1, 7)->text(), QStringLiteral("1"));
+
+    table->selectRow(1);
+    ASSERT_TRUE(dialog.clearRules());
+    EXPECT_EQ(run.lines.back(), QStringLiteral("AUTOLABEL CLEAR sides"));
+    EXPECT_EQ(dialog.runReport(), QStringLiteral("removed=1"));
+    EXPECT_EQ(document.model().entities.size(), entities + 1);
 }
 
 TEST(AnnotationManagers, TheScaleBoxSetsAndFollowsTheAnnotationScale)

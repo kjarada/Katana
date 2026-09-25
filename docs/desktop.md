@@ -466,7 +466,15 @@ Format
   ---
   Global Modify...                   formatGlobalModify  -> globalModifyDialog
   Purge Unused...                    formatPurge
+  ---
+  Text Styles...                     formatTextStyles    -> textStyleManagerDialog
+  Label Styles and Rules...          formatLabelStyles   -> labelStyleManagerDialog
+  Dimension Styles...                formatDimensionStyles -> dimensionStyleManagerDialog
 ```
+
+The last three are the annotation workbench's (`docs/annotation.md`, "In
+the window"), and like every dialog that changes the drawing they run the
+verb lines they build through the one executor below.
 
 The Format toolbar carries Layers, the three managers and Global Modify. Survey > Survey
 Coding shows the same code manager, Load and Replace actions - the same
