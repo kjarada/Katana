@@ -36,8 +36,8 @@ class Args {
     Args& integer(long long value);
     Args& enumeration(std::string_view value); // .VALUE.
     Args& enumerationOrNull(std::string_view value);
-    Args& boolean(bool value);                 // .T. / .F.
-    Args& refs(const std::vector<Id>& ids);    // (#1,#2)
+    Args& boolean(bool value);              // .T. / .F.
+    Args& refs(const std::vector<Id>& ids); // (#1,#2)
     Args& reals(std::initializer_list<double> values);
     Args& reals(const std::vector<double>& values);
     // A typed value of a SELECT: IFCLENGTHMEASURE(1.5)

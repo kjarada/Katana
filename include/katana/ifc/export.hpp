@@ -58,10 +58,11 @@
 // representation, never zero.
 //
 // WHY A WRITER OF OUR OWN. IFC is text (ISO 10303-21), and what the export
-// needs is the mapping, not a model library: the one IFC toolkit that writes
-// 4.3 alignments is IfcOpenShell, whose C++ core is a large dependency to
-// take for the writing of a text file, and which would be a second model of
-// the drawing beside Katana's own. So, like the DXF and 12d writers, this
+// needs is the mapping, not a model library: the open toolkit that writes 4.3
+// alignments, and that buildingSMART's validation service is built on, is
+// IfcOpenShell, whose C++ core is a large dependency to take for the writing
+// of a text file, and which would be a second model of the drawing beside
+// Katana's own. So, like the DXF and 12d writers, this
 // module needs nothing above the domain model and builds with
 // -DKATANA_BUILD_IO=OFF. IfcOpenShell is used instead where it is worth most -
 // as the independent judge of what is written (tools/check_ifc.py, the
@@ -165,19 +166,19 @@ struct ExportOptions {
 };
 
 struct IfcExport {
-    std::string text;              // the file (writeIfc); empty from writeIfcFile
+    std::string text; // the file (writeIfc); empty from writeIfcFile
     std::size_t bytesWritten = 0;
-    std::size_t instances = 0;     // STEP entity instances
+    std::size_t instances = 0; // STEP entity instances
     // How many of each rooted class were written, by the schema's name:
     // "IfcPipeSegment" -> 12. What the report prints, and what a test
     // asserts "no proxies" with.
     std::map<std::string, std::size_t> classes;
     std::size_t alignments = 0;
-    std::size_t services = 0;          // distribution systems from the schedule
-    std::size_t serviceSegments = 0;   // graded segments written as elements
-    std::size_t segmentsIn3d = 0;      // of which drawn with an Axis in 3D
-    std::size_t locatedPoints = 0;     // IfcAnnotation SURVEY of the schedule
-    std::size_t entitiesWritten = 0;   // drawing entities written
+    std::size_t services = 0;        // distribution systems from the schedule
+    std::size_t serviceSegments = 0; // graded segments written as elements
+    std::size_t segmentsIn3d = 0;    // of which drawn with an Axis in 3D
+    std::size_t locatedPoints = 0;   // IfcAnnotation SURVEY of the schedule
+    std::size_t entitiesWritten = 0; // drawing entities written
     std::size_t entitiesSkipped = 0;
     std::size_t surfaces = 0;
     std::vector<std::string> warnings;

@@ -192,8 +192,7 @@ Vec2 Builder::local(Vec2 world) const
 
 Vec3 Builder::local(Vec3 world) const
 {
-    return Vec3(world.x - frame_.origin.x, world.y - frame_.origin.y,
-                world.z - frame_.origin.z);
+    return Vec3(world.x - frame_.origin.x, world.y - frame_.origin.y, world.z - frame_.origin.z);
 }
 
 Id Builder::point(Vec2 world)
@@ -286,8 +285,7 @@ void Builder::writeProjectFrame()
     // and angle in Katana already is, so nothing is scaled on the way out.
     // IfcSIUnit's Dimensions is derived from the unit type.
     const auto unit = [&](std::string_view type, std::string_view name) {
-        return file_.add("IfcSIUnit",
-                         Args().derived().enumeration(type).null().enumeration(name));
+        return file_.add("IfcSIUnit", Args().derived().enumeration(type).null().enumeration(name));
     };
     metre_ = unit("LENGTHUNIT", "METRE");
     const Id squareMetre = unit("AREAUNIT", "SQUARE_METRE");
@@ -298,29 +296,25 @@ void Builder::writeProjectFrame()
 
     // One 3D model context; true north is left to its default, grid north
     // (+y), which is what a projected coordinate system's y axis is.
-    const Id context = file_.add("IfcGeometricRepresentationContext", Args()
-                                                                        .null()
-                                                                        .string("Model")
-                                                                        .integer(3)
-                                                                        .real(kContextPrecision)
-                                                                        .ref(identity3())
-                                                                        .null());
+    const Id context = file_.add(
+        "IfcGeometricRepresentationContext",
+        Args().null().string("Model").integer(3).real(kContextPrecision).ref(identity3()).null());
     // The subcontexts the representations name. A subcontext's dimension,
     // precision, coordinate system and true north are its parent's
     // (derived, *). Axis is a GRAPH_VIEW, as the IFC 4.3 alignment
     // examples have it.
     const auto subContext = [&](std::string_view identifier, std::string_view view) {
         return file_.add("IfcGeometricRepresentationSubContext", Args()
-                                                                      .string(identifier)
-                                                                      .string("Model")
-                                                                      .derived()
-                                                                      .derived()
-                                                                      .derived()
-                                                                      .derived()
-                                                                      .ref(context)
-                                                                      .null()
-                                                                      .enumeration(view)
-                                                                      .null());
+                                                                     .string(identifier)
+                                                                     .string("Model")
+                                                                     .derived()
+                                                                     .derived()
+                                                                     .derived()
+                                                                     .derived()
+                                                                     .ref(context)
+                                                                     .null()
+                                                                     .enumeration(view)
+                                                                     .null());
     };
     axisContext_ = subContext("Axis", "GRAPH_VIEW");
     bodyContext_ = subContext("Body", "MODEL_VIEW");
@@ -417,8 +411,7 @@ Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_
     return id;
 }
 
-Id Builder::propertySet(std::string_view key, std::string_view name,
-                        const PropertyList& properties)
+Id Builder::propertySet(std::string_view key, std::string_view name, const PropertyList& properties)
 {
     if (properties.empty()) {
         return 0;
@@ -442,11 +435,11 @@ Id Builder::propertySet(std::string_view key, std::string_view name,
         }
     }
     return file_.add("IfcPropertySet", Args()
-                                            .string(guid(std::string("pset/") + std::string(key)))
-                                            .null()
-                                            .string(name)
-                                            .null()
-                                            .refs(ids));
+                                           .string(guid(std::string("pset/") + std::string(key)))
+                                           .null()
+                                           .string(name)
+                                           .null()
+                                           .refs(ids));
 }
 
 void Builder::defines(std::string_view key, Id set, const std::vector<Id>& objects)
@@ -455,12 +448,12 @@ void Builder::defines(std::string_view key, Id set, const std::vector<Id>& objec
         return;
     }
     file_.add("IfcRelDefinesByProperties", Args()
-                                                .string(guid("defines/" + std::string(key)))
-                                                .null()
-                                                .null()
-                                                .null()
-                                                .refs(objects)
-                                                .ref(set));
+                                               .string(guid("defines/" + std::string(key)))
+                                               .null()
+                                               .null()
+                                               .null()
+                                               .refs(objects)
+                                               .ref(set));
 }
 
 Id Builder::enumeration(std::string_view name, const std::vector<std::string>& encodedValues)
@@ -492,9 +485,8 @@ void Builder::layer(std::string_view name, Id representation)
     }
 }
 
-Id Builder::classification(std::string_view key, std::string_view source,
-                           std::string_view edition, std::string_view name,
-                           std::string_view description)
+Id Builder::classification(std::string_view key, std::string_view source, std::string_view edition,
+                           std::string_view name, std::string_view description)
 {
     const auto found = classifications_.find(std::string(key));
     if (found != classifications_.end()) {
@@ -521,15 +513,12 @@ Id Builder::classificationReference(Id classification, std::string_view identifi
     if (found != references_.end()) {
         return found->second;
     }
-    const Id id = file_.add("IfcClassificationReference", Args()
-                                                              .null()
-                                                              .string(identification)
-                                                              .stringOrNull(name)
-                                                              .ref(classification)
-                                                              .null()
-                                                              .null());
+    const Id id = file_.add(
+        "IfcClassificationReference",
+        Args().null().string(identification).stringOrNull(name).ref(classification).null().null());
     references_.emplace(key, id);
-    referenceKeys_.emplace(id, classificationKeys_[classification] + "/" + std::string(identification));
+    referenceKeys_.emplace(id,
+                           classificationKeys_[classification] + "/" + std::string(identification));
     return id;
 }
 
@@ -560,13 +549,11 @@ void Builder::colourCurve(Id item, const entity::Color& colour)
     const std::string key = colourKey(colour);
     auto found = curveStyles_.find(key);
     if (found == curveStyles_.end()) {
-        const Id rgb = file_.add("IfcColourRgb", Args()
-                                                     .null()
-                                                     .real(colour.r / 255.0)
-                                                     .real(colour.g / 255.0)
-                                                     .real(colour.b / 255.0));
-        const Id style = file_.add("IfcCurveStyle",
-                                   Args().string(key).null().null().ref(rgb).boolean(true));
+        const Id rgb = file_.add(
+            "IfcColourRgb",
+            Args().null().real(colour.r / 255.0).real(colour.g / 255.0).real(colour.b / 255.0));
+        const Id style =
+            file_.add("IfcCurveStyle", Args().string(key).null().null().ref(rgb).boolean(true));
         found = curveStyles_.emplace(key, style).first;
     }
     file_.add("IfcStyledItem", Args().ref(item).refs({found->second}).null());
@@ -577,14 +564,12 @@ void Builder::colourSurface(Id item, const entity::Color& colour)
     const std::string key = colourKey(colour);
     auto found = surfaceStyles_.find(key);
     if (found == surfaceStyles_.end()) {
-        const Id rgb = file_.add("IfcColourRgb", Args()
-                                                     .null()
-                                                     .real(colour.r / 255.0)
-                                                     .real(colour.g / 255.0)
-                                                     .real(colour.b / 255.0));
+        const Id rgb = file_.add(
+            "IfcColourRgb",
+            Args().null().real(colour.r / 255.0).real(colour.g / 255.0).real(colour.b / 255.0));
         const Id shading = file_.add("IfcSurfaceStyleShading", Args().ref(rgb).null());
-        const Id style = file_.add("IfcSurfaceStyle",
-                                   Args().string(key).enumeration("BOTH").refs({shading}));
+        const Id style =
+            file_.add("IfcSurfaceStyle", Args().string(key).enumeration("BOTH").refs({shading}));
         found = surfaceStyles_.emplace(key, style).first;
     }
     file_.add("IfcStyledItem", Args().ref(item).refs({found->second}).null());
@@ -597,21 +582,13 @@ void Builder::finish()
     // SPS007).
     std::vector<Id> parts{site_};
     parts.insert(parts.end(), aggregatedInProject_.begin(), aggregatedInProject_.end());
-    file_.add("IfcRelAggregates", Args()
-                                      .string(guid("aggregates/project"))
-                                      .null()
-                                      .null()
-                                      .null()
-                                      .ref(project_)
-                                      .refs(parts));
+    file_.add(
+        "IfcRelAggregates",
+        Args().string(guid("aggregates/project")).null().null().null().ref(project_).refs(parts));
     if (!contained_.empty()) {
-        file_.add("IfcRelContainedInSpatialStructure", Args()
-                                                           .string(guid("contained/site"))
-                                                           .null()
-                                                           .null()
-                                                           .null()
-                                                           .refs(contained_)
-                                                           .ref(site_));
+        file_.add(
+            "IfcRelContainedInSpatialStructure",
+            Args().string(guid("contained/site")).null().null().null().refs(contained_).ref(site_));
     }
     if (!referenced_.empty()) {
         file_.add("IfcRelReferencedInSpatialStructure", Args()

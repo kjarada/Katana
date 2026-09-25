@@ -1,12 +1,18 @@
 #pragma once
 
-// EXPORT of a .ifc, natively (katana_ifc, docs/ifc.md). Here and not in
+// IMPORT and EXPORT of a .ifc, natively (katana_ifc, docs/ifc.md). Here and not in
 // main.cpp so that the command line's one hook is a line, as for
 // dxf_verbs.hpp, and outside the interoperability guard because writing IFC
 // needs no third-party library.
 //
+//   IMPORT <file.ifc> [LOCAL]
 //   EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]
 //                     [SPACING <m>] [NODRAWING]
+//
+// IMPORT brings the file's alignments, elements and annotations into the
+// drawing as ONE undoable step (ifc/import.hpp); LOCAL moves them to sit at
+// the origin, as the other importers' LOCAL does. The command line holds no
+// surfaces, so a terrain the file carries is counted and not kept.
 //
 // The drawing's entities and alignments are written, with the project's
 // coordinate system as the georeferencing; UTILITIES adds an AS 5488
@@ -24,11 +30,12 @@
 
 namespace katana::app {
 
-// `verb` is EXPORT, upper case; `argument` the rest of the line. nullopt when
-// the path is not a .ifc, so the caller carries on to its other exporters;
-// otherwise whether it worked, which has been reported on stdout or stderr.
-[[nodiscard]] std::optional<bool> runIfcVerb(const katana::cad::Document& document,
-                                             std::string_view verb, std::string_view argument);
+// `verb` is IMPORT or EXPORT, upper case; `argument` the rest of the line.
+// nullopt when the path is not a .ifc, so the caller carries on to its other
+// importers and exporters; otherwise whether it worked, which has been
+// reported on stdout or stderr.
+[[nodiscard]] std::optional<bool> runIfcVerb(katana::cad::Document& document, std::string_view verb,
+                                             std::string_view argument);
 
 // The lines --help prints for it.
 [[nodiscard]] const char* ifcHelpText();

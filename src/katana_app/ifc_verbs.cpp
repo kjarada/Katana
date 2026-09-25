@@ -11,6 +11,7 @@
 #include "katana/cad/project_crs.hpp"
 #include "katana/core/text.hpp"
 #include "katana/ifc/export.hpp"
+#include "katana/ifc/import.hpp"
 #include "katana/survey/subsurface/delivery_schema.hpp"
 #include "katana/survey/subsurface/utility_csv.hpp"
 
@@ -180,16 +181,17 @@ bool exportIfc(const katana::cad::Document& document, const std::filesystem::pat
     options.applicationVersion = KATANA_VERSION;
     // The export's clock is the caller's, so that the writer stays a
     // function of what it is given.
-    options.timestamp = std::format(
-        "{:%Y-%m-%dT%H:%M:%S}",
-        std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+    options.timestamp =
+        std::format("{:%Y-%m-%dT%H:%M:%S}",
+                    std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
     // A project is the same project across sessions by its name and when it
     // was created, so its objects keep their GlobalIds from one export to
     // the next.
     options.guidNamespace = metadata.name + "/" + metadata.createdUtc;
     options.georeference.name = metadata.coordinateSystem;
     if (!metadata.coordinateSystem.empty()) {
-        if (const auto described = katana::cad::describeCoordinateSystem(metadata.coordinateSystem)) {
+        if (const auto described =
+                katana::cad::describeCoordinateSystem(metadata.coordinateSystem)) {
             options.georeference.description = described->name;
         }
     }
@@ -201,10 +203,10 @@ bool exportIfc(const katana::cad::Document& document, const std::filesystem::pat
     std::cout << "exported " << path.filename().string() << " (IFC4X3_ADD2, " << written->instances
               << " instances, " << written->bytesWritten << " bytes)\n";
     std::cout << "  " << written->alignments << " alignments, " << written->services
-              << " services (" << written->serviceSegments << " segments, "
-              << written->segmentsIn3d << " in 3D, " << written->locatedPoints
-              << " located points), " << written->entitiesWritten << " entities written, "
-              << written->entitiesSkipped << " skipped, " << written->surfaces << " surfaces\n";
+              << " services (" << written->serviceSegments << " segments, " << written->segmentsIn3d
+              << " in 3D, " << written->locatedPoints << " located points), "
+              << written->entitiesWritten << " entities written, " << written->entitiesSkipped
+              << " skipped, " << written->surfaces << " surfaces\n";
     std::cout << "  classes:";
     for (const auto& [name, count] : written->classes) {
         std::cout << ' ' << name << ' ' << count << ';';
@@ -216,24 +218,93 @@ bool exportIfc(const katana::cad::Document& document, const std::filesystem::pat
     return true;
 }
 
+bool importIfc(katana::cad::Document& document, const std::filesystem::path& path,
+               std::string_view rest)
+{
+    const auto keywords = words(rest);
+    if (!keywords) {
+        return fail("InvalidArgument: a quoted path is never closed");
+    }
+    bool local = false;
+    for (const std::string& keyword : *keywords) {
+        if (upper(keyword) == "LOCAL") {
+            local = true;
+        } else {
+            return fail("InvalidArgument: \"" + keyword +
+                        "\" is not an option of IMPORT <file.ifc>: LOCAL");
+        }
+    }
+    katana::ifc::ImportOptions options;
+    auto imported = katana::ifc::readIfcFile(path, options);
+    if (imported && local && !imported->bounds.empty()) {
+        // Read again with the shift, so that the one reader applies it to
+        // every kind of geometry, alignments included.
+        options.originShift = imported->bounds.min;
+        imported = katana::ifc::readIfcFile(path, options);
+    }
+    if (!imported) {
+        return fail(imported.error().describe());
+    }
+    const std::size_t entities = imported->entities.size();
+    const std::size_t alignments = imported->alignments.size();
+    if (auto command = katana::ifc::importCommand(*imported, document.model())) {
+        if (const auto status = document.execute(std::move(command)); !status) {
+            return fail(status.error().describe());
+        }
+    }
+    std::cout << "imported " << entities << " entities, " << alignments << " alignments and "
+              << imported->surfaces.size() << " surfaces from " << path.filename().string() << " ("
+              << imported->schema << ")\n";
+    std::cout << "  " << imported->products << " objects read: " << imported->productsImported
+              << " drawn, " << imported->productsAsPoints << " as a point at their placement; "
+              << imported->alignmentsAsPolylines << " alignments as polylines\n";
+    if (!imported->classes.empty()) {
+        std::cout << "  classes:";
+        for (const auto& [name, count] : imported->classes) {
+            std::cout << ' ' << name << ' ' << count << ';';
+        }
+        std::cout << '\n';
+    }
+    if (!imported->surfaces.empty()) {
+        std::cout << "  the command line holds no surfaces: the file's are counted, not kept\n";
+    }
+    const std::string& project = document.metadata().coordinateSystem;
+    if (!imported->coordinateSystem.empty() && project.empty() && !local) {
+        std::cout << "  the file is in " << imported->coordinateSystem
+                  << " and the project has no coordinate system: CRS SET "
+                  << imported->coordinateSystem << " sets it\n";
+    } else if (!imported->coordinateSystem.empty() && !project.empty() &&
+               project != imported->coordinateSystem) {
+        std::cout << "  WARNING: the file is in " << imported->coordinateSystem
+                  << " and the project in " << project << "; nothing was reprojected\n";
+    }
+    for (const std::string& warning : imported->warnings) {
+        std::cout << "  " << warning << '\n';
+    }
+    return true;
+}
+
 } // namespace
 
-std::optional<bool> runIfcVerb(const katana::cad::Document& document, std::string_view verb,
+std::optional<bool> runIfcVerb(katana::cad::Document& document, std::string_view verb,
                                std::string_view argument)
 {
-    if (verb != "EXPORT") {
+    if (verb != "EXPORT" && verb != "IMPORT") {
         return std::nullopt;
     }
     const auto split = splitPath(argument);
     if (!split) {
         return std::nullopt;
     }
-    return exportIfc(document, split->first, split->second);
+    return verb == "EXPORT" ? exportIfc(document, split->first, split->second)
+                            : importIfc(document, split->first, split->second);
 }
 
 const char* ifcHelpText()
 {
-    return "IFC       EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]\n"
+    return "IFC       IMPORT <file.ifc> [LOCAL]  alignments to PIs and PVIs, elements and\n"
+           "          annotations with their property sets, as one undo step\n"
+           "          EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]\n"
            "          [SPACING <m>] [NODRAWING]  IFC 4.3: alignments, the drawing by class,\n"
            "          an AS 5488 investigation graded, typed and with its delivery schema\n";
 }

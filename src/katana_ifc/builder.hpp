@@ -99,16 +99,16 @@ class Builder {
     // ---- geometry, in the file's local coordinates --------------------------
     [[nodiscard]] Vec2 local(Vec2 world) const;
     [[nodiscard]] Vec3 local(Vec3 world) const;
-    Id point(Vec2 world);          // IfcCartesianPoint, 2D
-    Id point(Vec3 world);          // IfcCartesianPoint, 3D
-    Id localPoint(Vec2 local);     // already local
+    Id point(Vec2 world);      // IfcCartesianPoint, 2D
+    Id point(Vec3 world);      // IfcCartesianPoint, 3D
+    Id localPoint(Vec2 local); // already local
     Id direction(double x, double y);
     Id direction(double x, double y, double z);
-    Id origin2();                  // (0, 0), shared
+    Id origin2();                             // (0, 0), shared
     Id placement2(Id location, double angle); // IfcAxis2Placement2D
-    Id identity3();                // IfcAxis2Placement3D at (0, 0, 0), shared
-    Id unitLine();                 // IfcLine through (0, 0) along +x, shared: every
-                                   // straight IfcCurveSegment's parent
+    Id identity3();                           // IfcAxis2Placement3D at (0, 0, 0), shared
+    Id unitLine();                            // IfcLine through (0, 0) along +x, shared: every
+                                              // straight IfcCurveSegment's parent
     Id polyline(const std::vector<Vec2>& world, bool closed);
     Id polyline(const std::vector<Vec3>& world, bool closed);
 
