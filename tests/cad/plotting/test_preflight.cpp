@@ -744,6 +744,12 @@ TEST(SheetPreflight, ASheetWithNoViewsIsEmpty)
     ASSERT_EQ(found.size(), 1u);
     EXPECT_EQ(found[0].sheetId, "s2");
     EXPECT_NE(found[0].message.find("empty frame"), std::string::npos);
+    // A sheet with a view not yet placed has a view: it is unplaced, not
+    // empty.
+    set.sheets[1].viewports.push_back(planAt("vp9", Box2{}, 500.0, Point2(50.0, 0.0)));
+    const auto findings = check(set, model);
+    EXPECT_TRUE(withCode(findings, "sheet.empty").empty()) << codesOf(findings);
+    EXPECT_EQ(withCode(findings, "viewport.unplaced").size(), 1u);
 }
 
 TEST(SheetPreflight, AnUnknownFrameIsAnError)
