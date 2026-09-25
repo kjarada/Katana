@@ -392,8 +392,17 @@ Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id | HELP
+Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS: every option)
+          SHEET NEW|REMOVE|MOVE|COPY|RENAME|SET|FIELD | VIEW ADD|SET|REMOVE|LIST | TILE n preset
+          GENERATE fit|grid|strips|profile|sections|frames | TITLEBLOCK [LIST] | field value
+          TITLEBLOCK REVISION ADD|REMOVE | LOGO path | PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE ?  LE MT TS LS
 )" + annotationHelpText();
+}
+
+Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
+{
+    return katana::cad::tokenize(line);
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -570,10 +579,16 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     const Tokens args(tokens->begin() + 1, tokens->end());
 
     if (verb == "HELP") {
+        if (!args.empty() && plotting::isSheetVerb(args.front())) {
+            return plotting::sheetVerbHelp();
+        }
         return helpText();
     }
     if (isAnnotationVerb(verb, args)) {
         return annotation(verb, args);
+    }
+    if (plotting::isSheetVerb(verb)) {
+        return plotting::runSheetVerb(document_, *tokens, sheetContext_);
     }
     for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {

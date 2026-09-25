@@ -22,6 +22,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 #include "katana/cad/view_transform.hpp"
 #include "katana/core/error.hpp"
@@ -47,6 +49,21 @@ struct PaperDimensions {
 inline constexpr std::array<double, 12> kStandardScales{
     100.0, 200.0, 250.0, 500.0, 1000.0, 2000.0, 2500.0, 5000.0, 10000.0, 20000.0, 25000.0, 50000.0};
 
+// How a plot's colours print: the plot style's colour mode (docs/plotting.md,
+// "Plot styles and output"). Stored by name ("colour", "greyscale",
+// "monochrome"), never by number; a new mode goes at the end, and a name is
+// never changed.
+enum class PlotColourMode {
+    Colour,     // as drawn, white printing black (whiteToBlack)
+    Greyscale,  // every colour as its luminance: a grey as light as it was
+    Monochrome, // every line and letter black; a fill black or white by its lightness
+};
+
+[[nodiscard]] std::string_view toString(PlotColourMode mode);
+// The name toString gives, or a common other spelling: "color", "grey",
+// "gray", "grayscale", "mono", "black". Case is ignored.
+[[nodiscard]] std::optional<PlotColourMode> plotColourModeFrom(std::string_view name);
+
 struct PlotSettings {
     PaperSize paper = PaperSize::A3;
     bool landscape = true;
@@ -63,6 +80,13 @@ struct PlotSettings {
     // for; on white paper every one of those features would vanish. Off only
     // for a plot onto a dark sheet or a deliberate white-on-colour print.
     bool whiteToBlack = true;
+    // The plot style. The colour mode is applied by paperColour and
+    // paperFillColour, which every paper colour passes through, so a plan, a
+    // section and the frame all follow it. The line weight scale multiplies
+    // every pen width on paper - a check plot at 0.7, a bold one at 1.4 -
+    // and leaves text, dash lengths and symbol sizes as they are.
+    PlotColourMode colourMode = PlotColourMode::Colour;
+    double lineWeightScale = 1.0;
 };
 
 // The lowest a channel may be for a colour to count as white on paper. 230 of
@@ -72,10 +96,30 @@ struct PlotSettings {
 // paper they are faint but they are there, and they are what was asked for.
 inline constexpr std::uint8_t kNearWhiteChannel = 230;
 
-// The colour a pen prints in: black for white and near-white when
-// `settings.whiteToBlack`, and `colour` unchanged otherwise. Alpha is kept, so
-// a faded pen stays faded.
+// A colour's lightness, 0 (black) to 255 (white): the Rec. 601 luma,
+// (299 R + 587 G + 114 B) / 1000, rounded - the weights greyscale printing
+// and image tools use for a colour's grey. In integers, so the same colour
+// gives the same grey on every machine; a grey is its own luminance.
+[[nodiscard]] std::uint8_t luminance(entity::Color colour);
+
+// A monochrome plot's fill is black when its luminance is below this, and
+// white paper otherwise: the darker half of the colours print solid and the
+// lighter half drop out, as they would on a one-ink plotter, leaving their
+// outline (a pen, so black) to show the area.
+inline constexpr std::uint8_t kMonochromeFillThreshold = 128;
+
+// The colour a pen prints in. First the white rule: black for white and
+// near-white when `settings.whiteToBlack`. Then the colour mode: Colour keeps
+// the colour, Greyscale makes it the grey of its luminance, Monochrome makes
+// it black. Alpha is kept, so a faded pen stays faded.
 [[nodiscard]] entity::Color paperColour(entity::Color colour, const PlotSettings& settings);
+
+// The colour an area fill prints in. Colour and Greyscale print a fill as a
+// pen of its colour would (paperColour), so it keeps its lightness as a grey;
+// Monochrome prints it black or white by kMonochromeFillThreshold. The white
+// of the paper itself is never passed through this: it stays white in every
+// mode.
+[[nodiscard]] entity::Color paperFillColour(entity::Color colour, const PlotSettings& settings);
 
 // The sheet as a view transform: pixels here are device pixels of the plot
 // at `dpi`, so `view.scale` is device pixels per model unit and the width and

@@ -26,7 +26,10 @@ tool composes with shell pipelines. The `cli.*` tests
 (`src/katana_app/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
 process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
-code file the tests write themselves.
+code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
+"Sheets on the command line") are the interpreter's, so they run here too
+(`cli.sheet_verbs_lay_out_edit_and_list_the_sheets`); only `PLOTSHEETS`,
+which paints, needs the window.
 
 ## katana with --screenshot and --plot
 
@@ -35,6 +38,9 @@ QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
     <copy-of-project> [files to import] --screenshot out.png [steps...]
 QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
     <copy-of-project> --plot out.pdf [--fit | --scale N] [--paper A3] [--landscape | --portrait] [--dpi N]
+QT_QPA_PLATFORM=offscreen timeout 120 ./build/release/bin/katana.exe \
+    <copy-of-project> --plot-sheets out.pdf|folder [--sheets 1,3-5] [--format pdf|pdfs|png|tiff] \
+    [--plot-style colour|grey|mono] [--dpi N] [--line-weight-scale F]
 ```
 
 Either switch makes the run HEADLESS (`MainWindow::setHeadless`): the window
@@ -61,6 +67,44 @@ drawing fits; `--scale N` plots at 1:N; `--paper` is A0 to A4; `--dpi` sets
 the resolution. The dialog and the switch share `plotDrawingToPdf`, so the
 `qt_plot_headless` test exercises the code the menu does.
 
+**`--plot-sheets out.pdf`** plots the project's sheets and exits
+(`docs/plotting.md`, "Plot styles and output"); a project with no sheets
+plots one fitted to the drawing, and what the sheet checks find on the
+sheets plotted is logged to stderr first. Each switch not given comes from
+the sheet set's page setup, except the format, which is one PDF unless
+`--format` says otherwise. `--sheets` chooses the sheets (`1,3-5`, sheet
+ids; all by default); `--format pdfs`, `png` or `tiff` writes a file a sheet
+into the FOLDER given to `--plot-sheets`, named by the page setup's
+file-name pattern; `--plot-style` prints in `colour`, `grey` or `mono`;
+`--dpi` is the resolution of a raster and of a PDF's 3D snapshot (300 by
+default); `--line-weight-scale` multiplies every line weight (0.1 to 5).
+Every file written is printed on stdout, a path a line. The File menu's Plot
+dialog and the switch share `plotSheets` in
+`src/katana_qt/plotting/plot_output.hpp`. `--plot` takes `--plot-style` and
+`--line-weight-scale` too.
+
+**`--sheets-json out.json`** writes the
+project's sheets as the JSON the project stores them in, and exits; `-`
+writes it to stdout. Given together, the JSON is written first. Without
+`--screenshot`, the `--command` lines run BEFORE either is written, and when
+one of those two is asked for, a line that is refused fails the run (exit 1,
+naming it) and nothing is written. A line that plots with problems (an image
+missing, a section with nothing to cut) still counts as carried out.
+`--sheets-json` is not written by a `--screenshot` run. So one run can lay the
+sheets out with the sheet verbs, keep them, report them and plot them - the
+way an agent drives the sheets (`docs/plotting.md`, "Sheets on the command
+line"):
+
+```sh
+QT_QPA_PLATFORM=offscreen ./build/release/bin/katana.exe <copy-of-project> \
+    --command "GENERATE grid scale=500 keyplan=on" --command SAVE \
+    --sheets-json sheets.json --plot-sheets sheets.pdf
+```
+
+The `qt_sheets_headless` test runs that (`tools/check_sheets_headless.cmake`),
+plots one sheet with the window's `PLOTSHEETS` verb, reads the saved copy back
+with `--sheets-json -`, and checks that a refused line fails the run.
+
 Offscreen Qt has no monospace font, so a screenshot's command log and any
 fixed-pitch text differ from a real display; judge fonts on a real screen.
 
@@ -74,7 +118,12 @@ imported (anything else), in order, before any step runs.
 |---|---|
 | `--screenshot PNG` | grab the target at the end - the window, or the dialog, dock or panel the steps made the target |
 | `--plot PDF` with `--fit`, `--scale N`, `--paper A0..A4`, `--landscape`, `--portrait`, `--dpi N` | plot the drawing to a PDF and exit |
-| `--plot-sheets PDF` | plot every sheet of the project to one PDF, a page a sheet, and exit; a project with no sheets plots one fitted to the drawing (`MainWindow::plotSheetsToPdf`) |
+| `--plot-sheets PDF` | plot every sheet of the project to one PDF, a page a sheet, and exit; a project with no sheets plots one fitted to the drawing (`MainWindow::plotSheetsToPdf`). What the sheet checks find is logged to stderr first (`docs/plotting.md`, "The sheet painter", "Preflight checks") |
+| `--plot-sheets` with `--sheets 1,3-5` | plot only those sheets (positions from 1, ranges, sheet ids), in that order |
+| `--plot-sheets` with `--format pdf\|pdfs\|png\|tiff` | one PDF (the default), or a PDF, PNG or TIFF a sheet in the FOLDER given to `--plot-sheets`, named by the page setup's pattern; each file written is printed on stdout |
+| `--plot-style colour\|grey\|mono`, `--line-weight-scale F` | with `--plot-sheets` or `--plot`: print in colour, greyscale or monochrome, every line weight times F (0.1 to 5) |
+| `--dpi N` with `--plot-sheets` | the resolution of a PNG or TIFF and of a PDF's 3D snapshot (the page setup's, 300 by default) |
+| `--sheets-json FILE` | write the project's sheets as JSON (`-`: to stdout) and exit; before `--plot-sheets` when both are given |
 | `--customise FILE...` | load style libraries and survey code files - every path until the next switch - merged into the built-in customisation before anything is drawn |
 | `--action NAME` | trigger the menu item with that object name after the imports, as a click does; repeatable, in order, before the steps |
 | `--select-all` | select every entity on an unlocked layer before the actions run |
@@ -101,7 +150,7 @@ every action, field, button and tab gets one. In a test they are one
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
 | `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
-| `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts |
+| `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
@@ -120,8 +169,8 @@ what a command REPORTED.
 ## check_screenshot.cmake: the test side
 
 Every `qt_*_headless` test in `tests/CMakeLists.txt` runs
-`tools/check_screenshot.cmake` (or `tools/check_plot.cmake` for the plot)
-with `cmake -P`. The script COPIES the project it is given before opening it,
+`tools/check_screenshot.cmake` (or `tools/check_plot.cmake` for the plot,
+`tools/check_sheets_headless.cmake` for the sheets) with `cmake -P`. The script COPIES the project it is given before opening it,
 runs `katana` with the switches its variables ask for, and checks the result.
 Its variables:
 

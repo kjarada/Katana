@@ -28,12 +28,15 @@ PlanPaintStats paintPlan(QPainter& painter, const PlanSource& source,
 |---|---|
 | `PlanSource` | What is drawn: the model, the style library and its generation, the spatial index, the selection, the window's reference data and meshes. `planSourceOf(document)` fills the document's part. Every pointer but the model may be null; each null leaves out only what it provides. |
 | `PlanFrame` | How it is looked at: the `ViewTransform` sized to the viewport, a `rotation` (counter-clockwise, radians, about the viewport's centre), the viewport's `origin` on the device, whether to `clip` to it, and the view's hidden layers (`LayerOverrides`) and hidden reference layers. |
-| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); and the screen-only speed switches (`thinLines`, `symbolSprites`, `clipLines`). |
+| `PlanPaintOptions` | The medium: `Screen` or `Paper`, pixels per millimetre, the plot settings on paper; what is drawn besides the entities (grid, rasters, point clouds, mesh footprints, alignments); the resolution imagery is embedded at on paper (`rasterDpiCap`, `rasterPixelCap`); and the screen-only speed switches (`thinLines`, `symbolSprites`, `clipLines`). |
 | `PlanPaintCache` | What is kept between paints, owned by the CALLER (below). |
 
 It returns `PlanPaintStats`: entities drawn, symbol stamps and how many came
-from a sprite, displays resolved, lines clipped - for a view's statistics and
-for the tests that cannot look at pixels.
+from a sprite, displays resolved, lines clipped, cloud points in view and
+drawn, rasters drawn and - on paper - the pixels of the images embedded for
+them and for the clouds, and how many raster crops were resampled rather
+than taken from the cache - for a view's statistics and for the tests that
+cannot look at pixels.
 
 Other entry points in the same header:
 
@@ -93,6 +96,7 @@ work on a snapshot or hold edits off.
 | Flattened library definitions | the library generation | thousands of coded points would otherwise flatten their symbol every frame |
 | Fonts | on screen one per whole pixel size; on paper one font, scaled | making a `QFont` by family name per label was a measurable part of a frame |
 | Raster images, point-cloud colours | the reference layer's id (and colour mode) | converting tens of megabytes of RGBA per repaint |
+| Raster crops on paper | the layer's id, the part of the image cropped and the size it was resampled to; the eight most recently used, and no more than 32 megapixels between them | the sheet editor paints paper, and a pan of the editor or a second viewport over the same photo asks for the same crop again (below) |
 | Symbol sprites | symbol, pen, size, quarter-pixel phase; all dropped when the scale, paper scale, device ratio or library generation changes | see below |
 
 Per paint, not kept (the tables they read can change between paints):
@@ -146,7 +150,10 @@ place, the painter:
 | Hatch lines | cosmetic hairline | 0.13 mm |
 | Solid hatch | alpha 90, so the drawing under it shows | opaque |
 | Text | a font per whole pixel size, hinted for the screen | one font scaled to the exact fractional height |
-| Grid, rasters, point clouds, mesh footprints | drawn | not drawn (imagery at plot resolution needs a resolution cap first: an A1 page at 300 dpi is 70 megapixels) |
+| Grid | drawn | not drawn |
+| Rasters | the whole image, through one transform | cropped to the viewport and averaged down to at most 200 dpi and 16 megapixels, through the same transform (below) |
+| Point clouds | splatted into an image the size of the view | splatted into an image of the part of the viewport the cloud covers, at the same capped resolution and no finer than 0.25 mm a pixel |
+| Mesh footprints | a 1 px dashed pen | 0.13 mm, dashed 2 mm on and 1 mm off; white prints black |
 | Clipping lines to the view, symbol sprites | on | never: a plot stays vector |
 
 Before 2026-09-24 the marks were device pixels on paper too, so their size on
@@ -160,8 +167,10 @@ the painter. Culling uses `visibleBox`, the box around the turned rectangle
 (for a 200 x 100 frame at 30 degrees, +-111.6 x +-93.3 where the unturned
 frame shows +-100 x +-50), grown by the furthest symbol reach, so an entity
 in a corner of a twisted viewport is drawn. Symbol sprites are not used under
-a turn (a stamp would not land on its pixel grid); the point-cloud splat and
-the grid are screen furniture and are not turned yet.
+a turn (a stamp would not land on its pixel grid). On screen the point-cloud
+splat and the grid are not turned yet; on paper a cloud's image covers the
+box around the turned viewport, so its corners are filled, and a raster is
+cropped to the turned rectangle's own corners.
 
 ## The plot
 
@@ -187,6 +196,77 @@ the grid are screen furniture and are not turned yet.
 with the drawing in it: one page, the title and creator (`pdfinfo`), and a
 1 : 50 plot of the sample rendered at 10 dpi with no ink in the outer two
 pixels all round (`pdftoppm`) - a check the build before the clip fails.
+
+## Imagery on paper
+
+Until 2026-09-25 rasters, point clouds and mesh footprints were screen only:
+an imported aerial photo showed in the plan view and nowhere on a sheet - not
+in the sheet editor, not in a sheet PDF, not in File > Plot to PDF. Drawn as
+the screen draws it, a raster would have gone into every page that showed a
+corner of it, whole and at its own resolution: every pixel of a
+400-megapixel orthophoto, when an A1 page at 300 dpi is 70 megapixels and at
+reading distance nobody sees past 200 dpi. On paper the painter now embeds
+only what a viewport shows, only as finely as it can be seen.
+
+**A raster** (`PlanPainter::drawRasterOnPaper`):
+
+1. The viewport's four corners - the turned rectangle's own, not the box
+   around them - go through the inverse of the raster's geotransform (the
+   whole affine, rotation terms and all) into its pixels. The box of those,
+   a whole pixel of margin added and clamped to the image, is the crop.
+2. A step along an image row moves (g1, g4) in the model and one down a
+   column (g2, g5), so an image pixel reaches |(g1, g4)| s and |(g2, g5)| s
+   device pixels at view scale s. The capped resolution is
+   min(pixelsPerMillimetre, `rasterDpiCap` / 25.4) px/mm, 200 dpi by
+   default; where an image pixel is finer than a capped pixel the crop is
+   averaged down until it is not, and where it is coarser it is kept -
+   never enlarged, since a PDF viewer magnifies an embedded image itself.
+   Then, if the result is over `rasterPixelCap` (16 megapixels: A1 at
+   140 dpi, A0 at 100), both sides shrink evenly to fit.
+3. The crop is averaged down by a box filter (`areaResample` in
+   `src/katana_qt/plan_painter.cpp`): each output pixel the mean of the
+   source area it covers, a pixel its edge cuts counted by the part inside,
+   premultiplied first so a transparent pixel's colour does not bleed. It
+   reads the raster's own bytes in place, a row at a time, across the task
+   pool - `QImage::scaled` would first convert the crop to premultiplied
+   ARGB, a second 1.6 GB for the whole of that orthophoto. A one-pixel
+   checkerboard averaged four to one prints mid grey, not a moire.
+4. It is drawn through the whole image's transform with the crop's offset
+   and the resampling folded in, smoothed, at the raster's opacity, beneath
+   everything else. Measured against the screen, which draws the whole image
+   through the one transform, both edges of a test image fall within a
+   device pixel of the screen's - straight, with the image turned by its
+   geotransform, with the frame turned, and with both, averaged down by
+   two and not averaged at all.
+5. The crop is kept in the `PlanPaintCache`, keyed on the layer's id, the
+   rectangle and the size, so the sheet editor does not resample on every
+   repaint; `invalidateReferences` drops it with the rest of the imagery.
+
+A raster hidden in the Reference Data panel or in the view prints nothing;
+one outside the viewport embeds nothing.
+
+**A point cloud** is splatted, through the same display copy and point budget
+as the screen's, into an image of the part of the viewport the cloud covers
+(the box around a turned viewport, so its corners are filled) at the capped
+resolution, under the same pixel cap, and laid on the page over the rasters
+and under the linework. An image pixel is also never finer than
+`kCloudPointPaperMillimetres`, 0.25 mm: the splat draws a point as whole
+pixels, so a size-1 point was 0.13 mm at the 200 dpi cap (0.04 mm on an
+uncapped 600 dpi plot), and a cloud that reads as a surface on screen printed
+as a faint stipple. At 0.25 mm a size-1 point is a screen pixel's size at
+every resolution.
+
+**A mesh footprint** is outlined with a 0.13 mm pen dashed 2 mm on and 1 mm
+off (`kMeshOutlinePaperMillimetres`, `kMeshDashPaperMillimetres`,
+`kMeshGapPaperMillimetres`) - Qt counts a dash in pen widths, so the screen's
+`DashLine` at 0.13 mm would be dots - and a white mesh prints black.
+
+The sheet painter passes its own `SheetPaintOptions::rasterDpiCap` through,
+the cap its 3D snapshot has: 200 dpi in a PDF, 110 in the sheet editor. In
+`ASheetPdfOverALargePhotoEmbedsOnlyTheViewportAtTheCappedResolution` a
+40 mm viewport filled by a 2000 x 2000 photo of noise plotted at 600 dpi is
+a 1 443 523-byte PDF with the cap lifted to the plot's resolution and
+123 573 bytes at 200 dpi (123 616 through `plotSheetsToPdf`).
 
 ## Speed
 
@@ -332,7 +412,18 @@ drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
   per display, thin and hairline widths, sprites on screen and vector on
   paper, a linetype edited between two paints through one cache, and the
   kept drawing (a mouse move keeps it; a command, a zoom, a hidden layer and
-  a silent selection change repaint it).
+  a silent selection change repaint it). Imagery on paper: a raster's edges
+  within a device pixel of the screen's, turned and not; its crop's size
+  with no cap, the dpi cap and the pixel cap; a checkerboard averaged to
+  grey; hidden and out-of-view rasters embedding nothing; a crop reused from
+  the cache and the cache's bound; a point cloud filling a turned viewport,
+  the same image at two resolutions, and the pixel cap; a mesh outline's
+  ink at two resolutions; and File > Plot to PDF embedding the image, and
+  not a hidden one.
+* `tests/qt_widgets/test_sheet_painter.cpp` - a photo filling a plan
+  viewport and nowhere else, hidden and not; a turned photo with
+  transparent pixels in a turned viewport, where its geotransform puts it;
+  and a sheet PDF over a large photo, with the cap and without.
 * `tests/geometry/test_polygon.cpp` `PolygonClipPolyline.*` - the clipper, in
   both modes, by hand and as a property over random lines.
 * `tests/cad/test_plot.cpp` `Plot.ALineWithNoHeightFitsOnItsLengthAlone`.
@@ -345,9 +436,12 @@ drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
   extent about its centre the frame is 5 ms. Clipping dashed lines (a dash
   offset per run) is not done; if that case was dashed strings, it is where
   the time went.
-* The point-cloud splat and the grid under a turned frame; rasters, clouds and
-  mesh footprints on paper (a resolution cap, and footprints in paper
-  millimetres).
+* The point-cloud splat and the grid under a turned frame on screen (on
+  paper the cloud's image covers the turned viewport).
+* A raster's paper crop is resampled on the GUI thread's paint, in parallel
+  rows but not in the background; a whole 400-megapixel orthophoto in view
+  is read once per new crop. A pyramid of reduced copies, built once per
+  layer, would make an overview sheet's crop cost what its output costs.
 * Sheets: several viewports on one page (`paintPlan` per viewport with its
   own `origin`, `clip` and `rotation`), a frame and title block, multi-page
   output, plotting on a worker thread with its own cache.

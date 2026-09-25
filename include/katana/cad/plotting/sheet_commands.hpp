@@ -65,6 +65,16 @@ inline constexpr std::uintmax_t kMaximumLogoBytes = 4u * 1024u * 1024u;
 [[nodiscard]] core::Result<std::string> importLogo(Document& document,
                                                    const std::filesystem::path& image);
 
+// The copy importLogo makes, for any image a sheet shows (an Image view's
+// file): `image` checked as above against `maximumBytes` and copied into the
+// project's assets/ directory under a name of its own, the same image found
+// and reused; returns that name. `what` names the image in the errors ("a
+// logo must be..."). Not an edit: nothing refers to the file until the caller
+// stores its name, as one undoable step.
+[[nodiscard]] core::Result<std::string>
+importImageAsset(const Document& document, const std::filesystem::path& image,
+                 std::uintmax_t maximumBytes = kMaximumLogoBytes, std::string_view what = "logo");
+
 // Where the set's logo is on disk, when it has one and the project is saved.
 [[nodiscard]] std::optional<std::filesystem::path> logoPath(const Document& document);
 

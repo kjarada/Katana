@@ -12,6 +12,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "annotation/annotation_workbench.hpp"
@@ -34,6 +35,7 @@
 #include "gis_online.hpp"
 #include "survey/survey_workbench.hpp"
 #include "tools/tool_menus.hpp"
+#include "plotting/plot_output.hpp"
 #include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
@@ -117,10 +119,21 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
-    // Every sheet of the project to one PDF (docs/plotting.md). A project
-    // with no sheets plots one sheet fitted to the drawing, laid out for this
-    // plot only and not added to the project. Public for --plot-sheets.
+    // Every sheet of the project to one PDF (docs/plotting.md) in the set's
+    // page setup. A project with no sheets plots one sheet fitted to the
+    // drawing, laid out for this plot only and not added to the project.
     [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path);
+    // What File > Plot Sheets and --plot-sheets plot: the project's sheets,
+    // or, when it has none, one sheet fitted to the drawing, laid out for
+    // this plot only and not added to the project (logged).
+    [[nodiscard]] katana::core::Result<katana::cad::plotting::SheetSet> sheetsToPlot();
+    // Plots `set` as `request` asks (plotting/plot_output.hpp) from this
+    // window's source, logging each problem and the summary. Public for
+    // --plot-sheets, whose switches make the request.
+    [[nodiscard]] katana::core::Result<PlotReport>
+    plotSheets(const katana::cad::plotting::SheetSet& set, const PlotRequest& request);
+    // The drawing, read only: for --sheets-json, which writes its sheets.
+    [[nodiscard]] const katana::cad::Document& document() const { return document_; }
     // What sheets are drawn from: the drawing, this window's surfaces, meshes
     // and reference layers, the set's logo and the project's fields.
     [[nodiscard]] SheetSource sheetSource() const;
@@ -157,8 +170,9 @@ class MainWindow final : public QMainWindow {
     // For the headless --command switch, so a test can set up a drawing -
     // styles, entities, a selection - through the verbs a person types. An
     // empty line is Enter on an empty command line: the running tool's
-    // Enter, or the last tool again.
-    void runCommand(const QString& line);
+    // Enter, or the last tool again. False when the line logged an error, so
+    // a headless run can stop at a command that was refused.
+    bool runCommand(const QString& line);
 
     // Every key sequence the window's actions and menus answer to that two
     // of them share, one line each ("Ctrl+L: formatLayers, Line"); empty
@@ -441,6 +455,7 @@ class MainWindow final : public QMainWindow {
     bool refreshPending_ = false;       // a refreshAll() is queued on the event loop
     bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history
+    int errorsLogged_ = 0;          // logMessage's errors so far, for runCommand
 };
 
 } // namespace katana::qt

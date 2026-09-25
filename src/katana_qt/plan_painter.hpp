@@ -38,6 +38,13 @@
 // them, each distinct layer/style/colour is resolved to its pens once a
 // frame instead of once an entity, and library symbols are stamped from
 // images rasterised once per symbol, pen and size. A plot stays vector.
+//
+// Imagery is the exception, and on paper it is embedded only as far as the
+// viewport shows it and only as finely as the plot can use: a raster is
+// cropped to the viewport and averaged down to at most
+// PlanPaintOptions::rasterDpiCap, and a point cloud is splatted into an image
+// of the viewport at that resolution, so a sheet over a 400-megapixel
+// orthophoto embeds the few megapixels it shows.
 
 #include <cstddef>
 #include <cstdint>
@@ -53,7 +60,9 @@
 #include <QImage>
 #include <QPixmap>
 #include <QPointF>
+#include <QRect>
 #include <QRgb>
+#include <QSize>
 #include <QString>
 
 #include "katana/cad/layer_overrides.hpp"
@@ -132,15 +141,32 @@ struct PlanPaintOptions {
     // On paper, the plot's settings, for the paper colour rule (D7). Required
     // on paper; ignored on screen.
     const katana::cad::PlotSettings* plot = nullptr;
-    // What is drawn besides the entities. The grid is screen furniture.
-    // Rasters, point clouds and mesh footprints are screen only for now:
-    // imagery at plot resolution needs a resolution cap first (an A1 page at
-    // 300 dpi is 70 megapixels), and a footprint's pens are screen pixels.
+    // What is drawn besides the entities. The grid is screen furniture; the
+    // rest is drawn on both media, beneath the linework: rasters, then point
+    // clouds, then mesh footprints. On paper a footprint's outline is
+    // kMeshOutlinePaperMillimetres wide, dashed in paper millimetres.
     bool grid = false;
     bool rasters = true;
     bool pointClouds = true;
     bool meshFootprints = true;
     bool alignments = true;
+    // Paper only. The finest imagery is embedded at, in dots per inch of
+    // paper, and the most pixels one image may have. Imagery at the plot's
+    // own resolution would be enormous and no sharper to the eye: an A1 page
+    // at 300 dpi is 70 megapixels, 280 MB of RGBA before compression. So a
+    // raster is cropped to what the viewport shows (with a pixel of margin)
+    // and averaged down until one of its pixels is no finer than
+    // min(pixelsPerMillimetre, rasterDpiCap / 25.4) device pixels a
+    // millimetre - never enlarged, so imagery coarser than that is embedded
+    // at its own resolution - and then, if it is still above
+    // rasterPixelCap, shrunk evenly to fit it. A point cloud is splatted
+    // into an image of the part of the viewport it covers at the same
+    // resolution - and no finer than kCloudPointPaperMillimetres a pixel,
+    // a point's size - under the same pixel cap. 200 dpi is past what the eye
+    // resolves in a photograph at reading distance; 16 megapixels is A1 at
+    // 140 dpi and A0 at 100. Zero or less leaves the resolution uncapped.
+    double rasterDpiCap = 200.0;
+    std::size_t rasterPixelCap = 16'000'000;
     // Screen only. Every line a cosmetic one-pixel pen instead of the 1.5 px
     // hairline: measured 5-8x cheaper to stroke, because Qt's fast path for
     // antialiased lines needs a width of at most one pixel. Plots keep their
@@ -157,10 +183,11 @@ struct PlanPaintOptions {
     // QPainter, so a string crossing the whole site costs what its visible
     // part costs. Off draws every vertex, which tests compare against.
     bool clipLines = true;
-    // Screen only. At most this many cloud points projected a frame; above
-    // it every part of the view draws the same share of its points, coarsest
-    // first (geometry/point_splat.hpp), so a twenty-million-point cloud pans
-    // as a four-million-point one does.
+    // At most this many cloud points projected a frame; above it every part
+    // of the view draws the same share of its points, coarsest first
+    // (geometry/point_splat.hpp), so a twenty-million-point cloud pans as a
+    // four-million-point one does. The same on paper, where the sheet
+    // editor repaints a cloud as the screen does.
     std::size_t cloudPointBudget = katana::geometry::kSplatPointBudget;
     // The face plain text (TextGeometry, dimension labels, the overlay) is
     // drawn in. A library text names its own.
@@ -200,6 +227,16 @@ struct PlanPaintStats {
     std::size_t labelsPlaced = 0;
     std::size_t labelsDisplaced = 0;
     std::size_t labelsSuppressed = 0;
+    // Rasters drawn - visible, not hidden in this view and, on paper, with a
+    // part in the viewport - and on paper the pixels of the images put on the
+    // page for them: the crops as resampled, which is what a PDF embeds.
+    // Of those crops, how many were resampled this paint rather than taken
+    // from the cache.
+    std::size_t rastersDrawn = 0;
+    std::size_t rasterPixelsEmbedded = 0;
+    std::size_t rasterCropsMade = 0;
+    // On paper, the pixels of the images the point clouds were splatted into.
+    std::size_t cloudPixelsEmbedded = 0;
 };
 
 // Sizes of the marks the painter draws that are not the drawing's own: on
@@ -216,19 +253,39 @@ inline constexpr double kAlignmentLinePaperMillimetres = 0.5;
 inline constexpr double kAlignmentTickPenPaperMillimetres = 0.25;
 inline constexpr double kAlignmentTickPaperMillimetres = 1.5;
 inline constexpr double kAlignmentTextPaperMillimetres = 2.5;
+// A mesh footprint's outline: on screen a one-pixel dashed pen, on paper the
+// finest ISO pen dashed 2 mm on, 1 mm off - the screen's 4 : 2 dash in
+// millimetres, since a dash counted in pen widths of 0.13 mm would be a dot.
+inline constexpr double kMeshOutlinePaperMillimetres = 0.13;
+inline constexpr double kMeshDashPaperMillimetres = 2.0;
+inline constexpr double kMeshGapPaperMillimetres = 1.0;
+// A point-cloud point of size 1 on paper: the size of a screen's pixel. The
+// splat draws a point as whole pixels of its image, so on paper that image
+// is no finer than this a pixel. Finer, a point was 0.13 mm at the 200 dpi
+// cap and 0.04 mm on an uncapped 600 dpi plot, and a cloud that reads as a
+// surface on screen printed as a faint stipple.
+inline constexpr double kCloudPointPaperMillimetres = 0.25;
 
 // What the painter keeps between frames. Owned by the caller - one per view,
 // one per plotting thread - and never shared between threads. Everything in
 // it is keyed so that a stale entry is not used: flattened definitions on the
 // library generation, raster images and cloud colours on the reference
-// layer's id and mode, symbol sprites on the symbol, pen and size.
+// layer's id and mode, a raster's paper crops on its id, the part of it
+// cropped and the size it was resampled to, symbol sprites on the symbol, pen
+// and size.
 class PlanPaintCache {
   public:
-    // Drops the imagery and point-cloud colours, which are keyed on a layer's
-    // id and not its contents: call after a reference layer is added,
-    // removed, or has its display settings changed.
+    // Drops the imagery, its paper crops and the point-cloud colours, which
+    // are keyed on a layer's id and not its contents: call after a reference
+    // layer is added, removed, or has its display settings changed.
     void invalidateReferences();
     void clear();
+
+    // The paper crops kept: at most kMaximumRasterCrops, and no more than
+    // kMaximumRasterCropPixels between them but for the one last made.
+    [[nodiscard]] std::size_t rasterCropCount() const { return rasterCrops_.size(); }
+    static constexpr std::size_t kMaximumRasterCrops = 8;
+    static constexpr std::size_t kMaximumRasterCropPixels = 32'000'000;
 
     // How many distinct fonts plain text has been set in since the last
     // clear, reused rather than a QFont made per text: on screen one per
@@ -263,6 +320,18 @@ class PlanPaintCache {
         katana::geometry::SplatCloud splat;
     };
     std::vector<RasterImage> rasters_;
+    // A raster as a page shows it: the part of the image a viewport covers,
+    // averaged down to the capped resolution. Kept so that the sheet editor,
+    // which paints paper, does not resample it on every repaint - a pan of
+    // the editor, or a second viewport over the same image, asks for the same
+    // crop again. Least recently used first; bounded as rasterCropCount says.
+    struct RasterCrop {
+        katana::interop::ReferenceId id = 0;
+        QRect source; // in the raster's pixels
+        QSize size;   // the resampled image's
+        QImage image; // premultiplied ARGB
+    };
+    std::vector<RasterCrop> rasterCrops_;
     std::vector<CloudDisplay> clouds_;
     // The image every cloud is splatted into, kept between frames and
     // reallocated only when the view's size changes: allocating and filling a

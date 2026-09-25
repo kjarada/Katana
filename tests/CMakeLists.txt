@@ -185,6 +185,33 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 
+    # The sheets driven as an agent drives them: --command lines with the
+    # sheet verbs and PLOTSHEETS, then --sheets-json and --plot-sheets.
+    add_test(NAME qt_sheets_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/sheets_headless.json"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_sheets_headless.cmake")
+    set_tests_properties(qt_sheets_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 400)
+
+    # Every sheet feature driven as an agent drives it: a legend, a grid, a
+    # key plan, the drawing register, the page setup, ARRANGE, SHEETS CHECK
+    # and PLOTSHEETS to PNGs, then --plot-sheets, in one headless run.
+    add_test(NAME qt_sheets_agent_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${PROJECT_SOURCE_DIR}/samples/site_plan"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/sheets_agent.pdf"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_sheets_agent_headless.cmake")
+    set_tests_properties(qt_sheets_agent_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 400)
+
     # The whole main window, built and painted headlessly: theme, toolbars, every
     # icon, the viewport with the sample in it. See tools/check_screenshot.cmake.
     add_test(NAME qt_screenshot_headless
