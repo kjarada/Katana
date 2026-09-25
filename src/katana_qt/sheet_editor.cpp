@@ -1046,9 +1046,8 @@ void SheetEditor::rebuildProperties()
             } else if (v.autoScale) {
                 // A section fits both its scale and its exaggeration.
                 scale->setCurrentIndex(0);
-                SheetPaintCache cuts;
                 Viewport fitted = v;
-                const plotting::SectionFit fit = resolveSectionViewport(v, source(), cuts);
+                const plotting::SectionFit fit = resolveSectionViewport(v, source(), sectionCuts_);
                 fitted.scale = fit.scale;
                 fitted.verticalExaggeration = fit.exaggeration;
                 scale->setToolTip(
