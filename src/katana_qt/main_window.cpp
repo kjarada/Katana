@@ -970,6 +970,29 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     QToolBar* surveyBar = makeToolBar("Survey", Qt::TopToolBarArea);
     survey_ = std::make_unique<SurveyWorkbench>(*this, std::move(services), surveyMenu,
                                                 *surveyBar);
+    // Subsurface Utilities (AS 5488): its own section after Survey Coding,
+    // filled by its workbench. The verb is the interpreter's; the dialog's
+    // Run comes back through this window's command line.
+    UtilityServices utilities;
+    utilities.views = views_;
+    utilities.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                                  const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    utilities.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    utilities.headless = [this] { return headless_; };
+    utilities.interpret = [this](const std::string& line) {
+        auto reply = interpreter_.run(line);
+        historyCursor_ = static_cast<int>(interpreter_.history().size());
+        return reply;
+    };
+    utilities.runCommand = [this](const QString& line) {
+        // What was being typed on the command line survives the dialog's run.
+        const QString typed = commandInput_->text();
+        runCommand(line);
+        commandInput_->setText(typed);
+    };
+    utilities_ = std::make_unique<UtilityWorkbench>(*this, std::move(utilities), surveyMenu);
 }
 
 void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
@@ -1932,6 +1955,12 @@ void MainWindow::runCommandLine()
     // workbench's, as the interoperability verbs below are the window's - and
     // before a running tool, which would take the line for an answer.
     if (online_ != nullptr && online_->runLine(line)) {
+        return;
+    }
+    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
+    // through the utilities workbench, which frames what a DRAW added - and
+    // before a running tool, for ONLINE's reason.
+    if (utilities_ != nullptr && utilities_->runLine(line)) {
         return;
     }
     // While a tool runs, what is typed is its answer - a point, a distance,
