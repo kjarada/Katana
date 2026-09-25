@@ -155,9 +155,10 @@ TEST(UtilityDialog, EachTabWritesTheLineTheVerbReads)
 {
     UtilityForm draw = formFor(UtilityTool::Draw);
     draw.spacing = "8";
+    draw.minCover = "0.6";
     draw.layerPrefix = "services/existing";
     EXPECT_EQ(utilityCommandLine(draw).valueOr({}),
-              "UTILITY DRAW C:/survey/schedule.csv SPACING 8 LAYER services/existing");
+              "UTILITY DRAW C:/survey/schedule.csv SPACING 8 MINCOVER 0.6 LAYER services/existing");
 
     UtilityForm report = formFor(UtilityTool::Report);
     report.minCover = "0.6";
@@ -254,6 +255,14 @@ TEST(UtilityDialog, AMissingFileOrANumberThatDoesNotReadWritesNoLine)
     ASSERT_FALSE(line.ok());
     EXPECT_NE(line.error().message.find("detected spacing"), std::string::npos);
 
+    UtilityForm shallow = formFor(UtilityTool::Draw);
+    shallow.minCover = "0.6 m";
+    line = utilityCommandLine(shallow);
+    ASSERT_FALSE(line.ok());
+    EXPECT_NE(line.error().message.find("minimum cover must be a number of metres, not '0.6 m'"),
+              std::string::npos)
+        << line.error().message;
+
     UtilityForm quote = formFor(UtilityTool::Draw);
     quote.layerPrefix = "say \"when\"";
     line = utilityCommandLine(quote);
@@ -278,12 +287,17 @@ TEST(UtilityDialog, TheCommandFieldShowsTheLineAsItWillRun)
     // The tab is part of the line: the same schedule, another tool.
     dialog.showTool(UtilityTool::Verify);
     EXPECT_EQ(command->text(), "UTILITY VERIFY C:/survey/schedule.csv");
-    // The detected spacing grades, so it is live only where something is graded.
+    // The detected spacing and the minimum cover grade, so they are live only
+    // where something is graded.
     EXPECT_FALSE(child<QLineEdit>(dialog, "utilitySpacing")->isEnabled());
+    EXPECT_FALSE(child<QLineEdit>(dialog, "utilityMinCover")->isEnabled());
     dialog.showTool(UtilityTool::Draw);
     EXPECT_TRUE(child<QLineEdit>(dialog, "utilitySpacing")->isEnabled());
+    EXPECT_TRUE(child<QLineEdit>(dialog, "utilityMinCover")->isEnabled());
+    // The minimum cover given for the report is the draw's too: the verb
+    // flags each drawn point against it.
     fill(dialog, "utilityLayerPrefix", "services");
-    EXPECT_EQ(command->text(), "UTILITY DRAW C:/survey/schedule.csv LAYER services");
+    EXPECT_EQ(command->text(), "UTILITY DRAW C:/survey/schedule.csv MINCOVER 0.6 LAYER services");
 }
 
 TEST(UtilityDialog, BadInputRunsNothingAndSaysWhy)
@@ -539,22 +553,17 @@ TEST(UtilityWorkbench, ALineTheCommandLineDidNotRunIsAnError)
     EXPECT_EQ(reply.error().code, ErrorCode::InvalidState);
 }
 
-TEST(UtilityWorkbench, TheBoundsAreReadFromTheDrawRecordAlone)
+// How the bounds= record is read is the verb's (utilities::drawReplyBounds,
+// UtilityVerbs.TheDrawRepliesWithItsRecordsBoundsFirst); what is the
+// workbench's is that a reply which carries no box moves no view, even from a
+// DRAW that worked.
+TEST(UtilityWorkbench, ADrawReplyWithoutABoxLeavesTheViewsWhereTheyWere)
 {
-    const auto box = UtilityWorkbench::drawnBounds(kDrawReply);
-    ASSERT_TRUE(box.has_value());
-    EXPECT_DOUBLE_EQ(box->min.x, 334000.0);
-    EXPECT_DOUBLE_EQ(box->min.y, 6250000.0);
-    EXPECT_DOUBLE_EQ(box->max.x, 334040.0);
-    EXPECT_DOUBLE_EQ(box->max.y, 6250007.2);
-    // Numbers written as few digits as they need read as well.
-    EXPECT_TRUE(UtilityWorkbench::drawnBounds("utilities drawn lines=1 bounds=1,2,3,4\r\n"));
-    // Anything else frames nothing.
-    for (const char* reply :
-         {"AS 5488 subsurface utility investigation: 4 lines, 14 vertices\nbounds=1,2,3,4",
-          "utilities drawn lines=1 bounds=1,2,3", "utilities drawn lines=1 bounds=1,2,3,4,5",
-          "utilities drawn lines=1 bounds=1,2,x,4", "utilities drawn lines=1 bounds=5,2,3,4",
-          "utilities drawn lines=1", "line id=W1 bounds=1,2,3,4"}) {
-        EXPECT_FALSE(UtilityWorkbench::drawnBounds(reply).has_value()) << reply;
-    }
+    Bench bench;
+    const auto before = bench.views->activePlanView()->viewTransform().center;
+    bench.reply = std::string("utilities drawn lines=1 bounds=5,2,3,4\n");
+    ASSERT_TRUE(bench.workbench->runLine("UTILITY DRAW C:/survey/schedule.csv"));
+    EXPECT_EQ(bench.views->activePlanView()->viewTransform().center, before);
+    ASSERT_FALSE(bench.log.empty());
+    EXPECT_FALSE(bench.log.back().second);
 }

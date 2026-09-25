@@ -45,8 +45,10 @@ runUtilityVerb(Document& document, const std::vector<std::string>& tokens);
 
 // The bounds= box of a UTILITY DRAW reply's first record, for a front end to
 // frame what arrived: survey data in a real coordinate system usually lands
-// far from the view. nullopt for any other reply, or a box that is not four
-// finite numbers, min before max.
+// far from the view. The window's command line uses it for typed lines and the
+// utilities dialog alike, so there is one reading of the record. nullopt for
+// any other reply, or a box that is not four finite numbers, min before max;
+// a CR LF line end reads as LF.
 [[nodiscard]] std::optional<katana::geometry::Box2> drawReplyBounds(std::string_view reply);
 
 } // namespace katana::cad::utilities

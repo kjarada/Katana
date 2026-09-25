@@ -244,10 +244,23 @@ TEST(UtilityVerbs, TheDrawRepliesWithItsRecordsBoundsFirst)
     EXPECT_DOUBLE_EQ(bounds->min.y, 6250000.0);
     EXPECT_DOUBLE_EQ(bounds->max.x, 334040.0);
     EXPECT_DOUBLE_EQ(bounds->max.y, 6250007.2);
+    // Numbers written with as few digits as they need, and a record read back
+    // with a Windows line end, read as well.
+    const auto terse = drawReplyBounds("utilities drawn lines=1 bounds=1,2,3,4\r\n");
+    ASSERT_TRUE(terse.has_value());
+    EXPECT_DOUBLE_EQ(terse->min.x, 1.0);
+    EXPECT_DOUBLE_EQ(terse->max.y, 4.0);
+    // Anything else frames nothing: another verb's reply, a bounds= that is
+    // not the draw record's, or a box that is not four numbers, min first.
     EXPECT_FALSE(drawReplyBounds(session.ok("UTILITY VERIFY " + kSchedule)).has_value());
-    EXPECT_FALSE(drawReplyBounds("utilities drawn lines=1 bounds=1,2,3").has_value());
-    EXPECT_FALSE(drawReplyBounds("utilities drawn lines=1 bounds=3,2,1,4").has_value());
-    EXPECT_FALSE(drawReplyBounds("line id=W1 bounds=1,2,3,4").has_value());
+    for (const char* other :
+         {"AS 5488 subsurface utility investigation: 4 lines, 14 vertices\nbounds=1,2,3,4",
+          "utilities drawn lines=1 bounds=1,2,3", "utilities drawn lines=1 bounds=1,2,3,4,5",
+          "utilities drawn lines=1 bounds=1,2,x,4", "utilities drawn lines=1 bounds=3,2,1,4",
+          "utilities drawn lines=1 bounds=1,4,3,2", "utilities drawn lines=1",
+          "line id=W1 bounds=1,2,3,4", ""}) {
+        EXPECT_FALSE(drawReplyBounds(other).has_value()) << other;
+    }
 }
 
 TEST(UtilityVerbs, ADrawnScheduleIsOneUndoStep)

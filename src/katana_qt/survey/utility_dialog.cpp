@@ -135,6 +135,7 @@ Result<QString> utilityCommandLine(const UtilityForm& form)
     switch (form.tool) {
     case UtilityTool::Draw:
         parts.push_back(option("SPACING", form.spacing, "The detected spacing"));
+        parts.push_back(option("MINCOVER", form.minCover, "The minimum cover"));
         if (const QString prefix = form.layerPrefix.trimmed(); !prefix.isEmpty()) {
             parts.push_back(prefixed(" LAYER ", word(prefix, "The layer prefix")));
         }
@@ -211,9 +212,15 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
                      "SPACING: the longest segment a detected path may span and stay QL-B; a "
                      "longer one was interpolated, not traced, and grades QL-C. The project "
                      "specification's figure, not the standard's");
+    // Shared by Draw and Report, as the verb's SPACING and MINCOVER are, so a
+    // drawing and a report of one schedule are graded and flagged alike.
+    minCover_ = field("utilityMinCover", "none - cover is given, not tested",
+                      "MINCOVER: flag every vertex whose cover is less than this - in the "
+                      "report's findings, and on each drawn point (utility.cover_below_minimum)");
     auto* common = new QFormLayout;
     common->addRow("Schedule:", row({schedule_, scheduleBrowse}));
     common->addRow("Detected spacing (m):", spacing_);
+    common->addRow("Minimum cover (m):", minCover_);
 
     // One tab per form of the verb, in the order of the menu.
     tabs_ = new QTabWidget(this);
@@ -227,8 +234,8 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
         "Grades the schedule and adds it to the drawing as one undo step: a layer for each "
         "type of service and quality level, with a linetype for each level (QL-A continuous, "
         "QL-B dashed, QL-C dash-dot, QL-D dotted), one polyline for each run at one level, and "
-        "a point at every located vertex carrying its evidence. A line that cannot be graded "
-        "refuses the whole draw.",
+        "a point at every located vertex carrying its evidence - and, with a minimum cover, "
+        "whether its cover is below it. A line that cannot be graded refuses the whole draw.",
         drawPage));
     layerPrefix_ = field("utilityLayerPrefix", "default utilities",
                          "LAYER: the layer the drawn services nest under, as "
@@ -243,9 +250,6 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
         "the length of each service at each level, depth of cover, and what the schedule "
         "claims better than its evidence supports. Nothing is added to the drawing.",
         reportPage));
-    minCover_ = field("utilityMinCover", "none - cover is reported, not tested",
-                      "MINCOVER: flag every vertex whose cover is less than this");
-    reportLayout->addRow("Minimum cover (m):", minCover_);
     tabs_->addTab(reportPage, "Report");
 
     auto* verifyPage = new QWidget(tabs_);
@@ -407,8 +411,11 @@ Result<QString> UtilityToolsDialog::command() const
 
 void UtilityToolsDialog::refreshCommand()
 {
-    // The detected spacing grades; only Draw and Report grade.
-    spacing_->setEnabled(tool() == UtilityTool::Draw || tool() == UtilityTool::Report);
+    // The detected spacing grades and the minimum cover flags what was
+    // graded; only Draw and Report grade.
+    const bool grades = tool() == UtilityTool::Draw || tool() == UtilityTool::Report;
+    spacing_->setEnabled(grades);
+    minCover_->setEnabled(grades);
     const auto line = command();
     command_->setText(line ? *line : QString());
     command_->setPlaceholderText(line ? QString() : "nothing to run yet: " + qs(line.error().message));

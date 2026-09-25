@@ -12,9 +12,10 @@
 //     utilityVerify, utilityClearance, utilityCheck), each opening the one
 //     dialog (utility_dialog.hpp) on its own tab;
 //   - after a UTILITY DRAW that worked - typed, or run from the dialog - every
-//     plan view framed on the reply's bounds= box. Survey data in a real
-//     coordinate system usually lands far from what the view was showing, and
-//     left unframed a successful draw looked like one that did nothing.
+//     plan view framed on the reply's bounds= box, read by the verb's own
+//     utilities::drawReplyBounds. Survey data in a real coordinate system
+//     usually lands far from what the view was showing, and left unframed a
+//     successful draw looked like one that did nothing.
 // The dialog's Run goes back through the window's own command line
 // (UtilityServices::runCommand), so a line from the dialog is echoed, kept in
 // the history and undone exactly as a typed one; it reaches runLine like any
@@ -27,11 +28,9 @@
 #include <functional>
 #include <optional>
 #include <string>
-#include <string_view>
 
 #include "icons.hpp"
 #include "katana/core/error.hpp"
-#include "katana/geometry/primitives2d.hpp"
 #include "survey/utility_dialog.hpp"
 
 class QAction;
@@ -87,11 +86,6 @@ class UtilityWorkbench {
     UtilityToolsDialog& dialog();
     // Shows the dialog on `tool`'s tab.
     void open(UtilityTool tool);
-
-    // The bounds= box of a UTILITY DRAW reply - its first record,
-    // "utilities drawn ... bounds=<minx>,<miny>,<maxx>,<maxy>". nullopt for any
-    // other reply, or a box that does not read.
-    [[nodiscard]] static std::optional<katana::geometry::Box2> drawnBounds(std::string_view reply);
 
   private:
     QMainWindow& window_;

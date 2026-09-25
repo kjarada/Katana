@@ -318,7 +318,12 @@ std::optional<katana::geometry::Box2> drawReplyBounds(std::string_view reply)
 {
     constexpr std::string_view kRecord = "utilities drawn ";
     constexpr std::string_view kKey = " bounds=";
-    const std::string_view first = reply.substr(0, reply.find('\n'));
+    std::string_view first = reply.substr(0, reply.find('\n'));
+    // A reply read back from a file or a pipe on Windows ends its lines in
+    // CR LF; the record is the same.
+    if (first.ends_with('\r')) {
+        first.remove_suffix(1);
+    }
     const std::size_t at = first.find(kKey);
     if (!first.starts_with(kRecord) || at == std::string_view::npos) {
         return std::nullopt;

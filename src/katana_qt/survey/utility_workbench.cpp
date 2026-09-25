@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <utility>
 
-#include "katana/core/text.hpp"
+#include "katana/cad/utilities/utility_verbs.hpp"
 #include "view_workspace.hpp"
 
 namespace katana::qt {
@@ -129,7 +129,7 @@ bool UtilityWorkbench::runLine(const QString& line)
         services_.log(text, false);
         if (words.section(' ', 1, 1).compare("DRAW", Qt::CaseInsensitive) == 0 &&
             services_.views != nullptr) {
-            if (const auto box = drawnBounds(*reply)) {
+            if (const auto box = katana::cad::utilities::drawReplyBounds(*reply)) {
                 services_.views->zoomTo(*box);
             }
         }
@@ -149,41 +149,6 @@ Result<std::string> UtilityWorkbench::execute(const QString& line)
                          "the command line did not run this as a UTILITY line", line.toStdString());
     }
     return *lastReply_;
-}
-
-std::optional<katana::geometry::Box2> UtilityWorkbench::drawnBounds(std::string_view reply)
-{
-    std::string_view first = reply.substr(0, reply.find('\n'));
-    if (!first.empty() && first.back() == '\r') {
-        first.remove_suffix(1);
-    }
-    if (!first.starts_with("utilities drawn ")) {
-        return std::nullopt;
-    }
-    const std::size_t at = first.find(" bounds=");
-    if (at == std::string_view::npos) {
-        return std::nullopt;
-    }
-    std::string_view value = first.substr(at + 8);
-    value = value.substr(0, value.find(' '));
-    std::array<double, 4> numbers{};
-    for (std::size_t i = 0; i < numbers.size(); ++i) {
-        const std::size_t comma = value.find(',');
-        // Exactly four: the last has no comma after it, the others do.
-        if ((comma == std::string_view::npos) != (i + 1 == numbers.size())) {
-            return std::nullopt;
-        }
-        const auto number = katana::core::parseFiniteDouble(value.substr(0, comma));
-        if (!number) {
-            return std::nullopt;
-        }
-        numbers[i] = *number;
-        value = comma == std::string_view::npos ? std::string_view{} : value.substr(comma + 1);
-    }
-    if (numbers[0] > numbers[2] || numbers[1] > numbers[3]) {
-        return std::nullopt;
-    }
-    return katana::geometry::Box2({numbers[0], numbers[1]}, {numbers[2], numbers[3]});
 }
 
 } // namespace katana::qt

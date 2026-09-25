@@ -29,8 +29,9 @@
 //   utilityScheduleBrowse  choose it with a file dialog
 //   utilitySpacing         the longest detected segment that keeps QL-B,
 //                          metres (SPACING; Draw and Report)
+//   utilityMinCover        the minimum cover to flag, metres (MINCOVER; Draw
+//                          and Report)
 //   utilityLayerPrefix     the top of the layers a Draw makes (LAYER)
-//   utilityMinCover        the minimum cover to flag, metres (MINCOVER; Report)
 //   utilityDesign          the proposed works (.csv) for Clearance
 //   utilityDesignBrowse    choose it with a file dialog
 //   utilityWidth           the works' width, metres (WIDTH)
@@ -92,7 +93,7 @@ struct UtilityForm {
 };
 
 // The UTILITY line `form` describes, exactly as it would be typed:
-//   UTILITY DRAW <schedule> [SPACING <m>] [LAYER <prefix>]
+//   UTILITY DRAW <schedule> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
 //   UTILITY REPORT <schedule> [MINCOVER <m>] [SPACING <m>]
 //   UTILITY VERIFY <schedule>
 //   UTILITY CLEARANCE <schedule> <design> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
