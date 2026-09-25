@@ -1,13 +1,12 @@
 #include "katana/entity/anchor.hpp"
 
 #include <algorithm>
-#include <array>
-#include <charconv>
 #include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
 
+#include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
 
 namespace katana::entity {
@@ -18,22 +17,12 @@ using katana::geometry::Point2;
 using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
 using katana::geometry::Vec2;
-namespace tol = katana::math::tolerance;
 
 namespace {
 
 double clampedParameter(const AnchorRef& ref)
 {
     return std::isfinite(ref.parameter) ? std::clamp(ref.parameter, 0.0, 1.0) : 0.0;
-}
-
-// The shortest text that reads back as the same double: what describe()
-// prints for Along's fraction.
-std::string shortest(double value)
-{
-    std::array<char, 32> buffer{};
-    const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-    return error == std::errc{} ? std::string(buffer.data(), end) : std::string("?");
 }
 
 } // namespace
@@ -126,7 +115,7 @@ std::optional<Point2> resolveAnchor(const Entity& entity, const AnchorRef& ref)
             if (v.empty()) {
                 return std::nullopt;
             }
-            const std::size_t segments = polyline.closed ? v.size() : v.size() - 1;
+            const std::size_t segments = polyline.segmentCount();
             switch (ref.point) {
             case AnchorPoint::Start:
                 return v.front();
@@ -139,10 +128,8 @@ std::optional<Point2> resolveAnchor(const Entity& entity, const AnchorRef& ref)
                 if (ref.index >= segments) {
                     return std::nullopt;
                 }
-                const Point2& a = v[ref.index];
-                const Point2& b = v[(ref.index + 1) % v.size()];
                 const double t = ref.point == AnchorPoint::SegmentMid ? 0.5 : clampedParameter(ref);
-                return a + (b - a) * t;
+                return polyline.segment(ref.index).pointAt(t);
             }
             case AnchorPoint::Inside:
                 if (!polyline.closed || v.size() < 3) {
@@ -203,16 +190,11 @@ std::optional<AnchorRef> nearestAnchor(const Entity& entity, const Point2& near)
         return ref;
     }
     if (const auto* polyline = std::get_if<Polyline2>(&entity.geometry)) {
-        const auto& v = polyline->vertices;
-        if (v.size() < 2) {
-            return std::nullopt;
-        }
-        const std::size_t segments = polyline->closed ? v.size() : v.size() - 1;
         double best = std::numeric_limits<double>::infinity();
         bool found = false;
-        for (std::size_t i = 0; i < segments; ++i) {
-            const Segment2 segment{v[i], v[(i + 1) % v.size()]};
-            if (!(segment.length() > tol::kGeometric)) {
+        for (std::size_t i = 0; i < polyline->segmentCount(); ++i) {
+            const Segment2 segment = polyline->segment(i);
+            if (segment.isDegenerate()) {
                 continue; // a repeated vertex has no "along"
             }
             const double distance = segment.distanceTo(near);
@@ -234,7 +216,9 @@ std::string describe(const AnchorRef& ref)
     if (ref.point == AnchorPoint::Vertex || ref.point == AnchorPoint::SegmentMid) {
         text += " " + std::to_string(ref.index);
     } else if (ref.point == AnchorPoint::Along) {
-        text += " " + std::to_string(ref.index) + " " + shortest(ref.parameter);
+        // Exact, so what LIST prints reads back as the same place.
+        text +=
+            " " + std::to_string(ref.index) + " " + katana::core::formatExactReal(ref.parameter);
     }
     return text;
 }

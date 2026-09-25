@@ -146,7 +146,13 @@ setLeaderTargetProperty(const katana::entity::Model& model, katana::entity::Enti
 // balloon numbered for want of a note with a callout that is not a circle.
 struct LeadersForOptions {
     LeaderChange change{};
-    double angle = 0.25 * katana::math::kPi; // 45 degrees: up and to the right
+    // Chosen, not a standard's. Up and to the right at 45 degrees: off the
+    // horizontal and vertical most drawn lines follow, so a leader crosses
+    // neither along its length.
+    double angle = 0.25 * katana::math::kPi;
+    // Paper millimetres: four of a leader's default 2.5 mm text heights
+    // (LeaderGeometry::paperHeight's fallback), so the note sits clear of the
+    // tip and of a point's symbol there.
     double length = 10.0;
     bool balloon = false;
 };
@@ -167,6 +173,13 @@ leadersFor(const katana::entity::Model& model, std::vector<katana::entity::Entit
 // leader). What the window previews a leader for the selection from.
 [[nodiscard]] std::optional<AnchoredPoint> leaderPlaceOn(const katana::entity::Entity& entity,
                                                          double angle);
+
+// Where a tip at `tip` goes when put on `entity` (the window's Attach to
+// Selected): Inside a closed outline or a circle the tip is inside - pointing
+// into a lot, as LEADER FOR does for one - else the place of `entity` nearest
+// the tip (entity::nearestAnchor). nullopt for an entity that offers no place.
+[[nodiscard]] std::optional<AnchoredPoint> tipPlaceOn(const katana::entity::Entity& entity,
+                                                      const katana::geometry::Point2& tip);
 
 // The notes of `ids` in a column ("ALIGN_LEADERS"): top down by where each
 // hangs (its last vertex), each moved to `x` (the topmost's when unset) and,
@@ -192,11 +205,15 @@ struct BalloonRenumbering {
     std::size_t balloons = 0;
     std::size_t renumbered = 0;
 };
-[[nodiscard]] BalloonRenumbering renumberBalloons(const katana::entity::Model& model,
-                                                  long long start, BalloonOrder order);
+// `start` is an int, as start= and the window's box are, so the numbers
+// counted on from it cannot pass what a long long holds.
+[[nodiscard]] BalloonRenumbering renumberBalloons(const katana::entity::Model& model, int start,
+                                                  BalloonOrder order);
 
-// One more than the highest numbered balloon.
-[[nodiscard]] long long nextBalloonNumber(const katana::entity::Model& model);
+// One more than the highest numbered balloon; refused when the highest is
+// the largest number there is (n= can give one), which has no next - the
+// balloons want numbering again first.
+[[nodiscard]] katana::core::Result<long long> nextBalloonNumber(const katana::entity::Model& model);
 
 // A leader's or a place's values as rows of name and text, each in its own
 // format: leaderValueNames() order, then the properties in name order. What

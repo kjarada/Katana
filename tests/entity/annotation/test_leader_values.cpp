@@ -9,6 +9,7 @@
 
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <string>
 
 #include "katana/entity/anchor.hpp"
@@ -116,7 +117,24 @@ TEST(SmartAnchors, InsideIsWhereAnAreaLabelGoes)
     const Polyline2 ell{
         {Point2(0, 0), Point2(10, 0), Point2(10, 2), Point2(2, 2), Point2(2, 10), Point2(0, 10)},
         true};
-    EXPECT_TRUE(ell.contains(insidePoint(ell)));
+    ASSERT_FALSE(ell.contains(*ell.centroid())) << "the premise: the centroid is in the notch";
+    // The horizontal y = 29/9 crosses the L only at x = 0 and x = 2: one run
+    // inside, whose middle is x = 1.
+    const Point2 inside = insidePoint(ell);
+    EXPECT_TRUE(ell.contains(inside));
+    EXPECT_EQ(inside.x, 1.0);
+    EXPECT_NEAR(inside.y, 29.0 / 9.0, 1e-12);
+    EXPECT_EQ(*resolveAnchor(entityOf(6, ell), AnchorRef{6, AnchorPoint::Inside}), inside);
+    // Two vertices closed are no figure; three in a row have no area, and
+    // their inside point is still one on them, the same each time.
+    EXPECT_FALSE(resolveAnchor(entityOf(7, Polyline2{{Point2(0, 0), Point2(10, 0)}, true}),
+                               AnchorRef{7, AnchorPoint::Inside}));
+    const Polyline2 flat{{Point2(0, 0), Point2(5, 0), Point2(10, 0)}, true};
+    const Point2 onFlat = insidePoint(flat);
+    EXPECT_EQ(onFlat.y, 0.0);
+    EXPECT_GE(onFlat.x, 0.0);
+    EXPECT_LE(onFlat.x, 10.0);
+    EXPECT_EQ(insidePoint(flat), onFlat);
     EXPECT_EQ(
         *resolveAnchor(entityOf(2, Circle2{Point2(3, 4), 2.0}), AnchorRef{2, AnchorPoint::Inside}),
         Point2(3, 4));
@@ -157,14 +175,83 @@ TEST(SmartAnchors, TheNearestPlaceIsNamedSoItFollows)
     const auto east = nearestAnchor(entityOf(3, Circle2{Point2(0, 0), 5.0}), Point2(9, -1e-300));
     EXPECT_LT(east->parameter, 1.0);
 
+    // At a circle's centre every direction is as near: atan2(+0, +0) is +0
+    // (IEEE 754, C Annex F), the turn's start.
+    EXPECT_EQ(nearestAnchor(entityOf(3, Circle2{Point2(2, 3), 5.0}), Point2(2, 3))->parameter, 0.0);
+
     EXPECT_EQ(nearestAnchor(entityOf(8, PointGeometry{Point2(1, 1)}), Point2(9, 9))->point,
               AnchorPoint::Position);
+    // A polyline with no piece of any length, one of one vertex, a label and
+    // a leader offer no place.
+    EXPECT_FALSE(nearestAnchor(
+        entityOf(10, Polyline2{{Point2(1, 1), Point2(1, 1), Point2(1, 1)}, true}), Point2(0, 0)));
+    EXPECT_FALSE(nearestAnchor(entityOf(11, Polyline2{{Point2(1, 1)}, false}), Point2(0, 0)));
+    EXPECT_FALSE(nearestAnchor(entityOf(12, LabelGeometry{}), Point2(0, 0)));
+    EXPECT_FALSE(nearestAnchor(
+        entityOf(13, LeaderGeometry{.vertices = {Point2(0, 0), Point2(5, 5)}}), Point2(0, 0)));
     EXPECT_FALSE(nearestAnchor(entityOf(9, DimensionGeometry{Point2(0, 0), Point2(10, 0), 2.0, ""}),
                                Point2(1, 1)));
     EXPECT_EQ(describe(along(1, 0.25, 3)), "along 3 0.25");
     EXPECT_EQ(describe(AnchorRef{1, AnchorPoint::Inside}), "inside");
     EXPECT_EQ(*anchorPointFromString("Along"), AnchorPoint::Along);
     EXPECT_EQ(*anchorPointFromString("inside"), AnchorPoint::Inside);
+}
+
+TEST(SmartAnchors, AFractionThatIsNoNumberReadsAsTheStart)
+{
+    // A stored reference is never refused for its fraction: one that is not
+    // a number, or infinite either way, is 0, the start (anchor.hpp).
+    const Entity line = entityOf(1, Segment2{Point2(2, 3), Point2(42, 3)});
+    for (const double bad : {std::nan(""), std::numeric_limits<double>::infinity(),
+                             -std::numeric_limits<double>::infinity()}) {
+        EXPECT_EQ(*resolveAnchor(line, along(1, bad)), Point2(2, 3)) << bad;
+    }
+    EXPECT_EQ(*resolveAnchor(line, along(1, 7.0)), Point2(42, 3)) << "a finite one is clamped";
+}
+
+TEST(SmartAnchors, PlacesFarFromTheOriginAreTheSameAsNearIt)
+{
+    // At a national grid's magnitudes (an easting of 334 km, a northing of
+    // 6250 km) every coordinate here is an integer, exact in a double, and
+    // so are the answers: a quarter of 40 is 10, the square's middle 5 in.
+    const Entity line = entityOf(1, Segment2{Point2(334000, 6250000), Point2(334040, 6250000)});
+    EXPECT_EQ(*resolveAnchor(line, along(1, 0.25)), Point2(334010, 6250000));
+    EXPECT_EQ(nearestAnchor(line, Point2(334010, 6250003))->parameter, 0.25);
+    const Entity lot = entityOf(2, Polyline2{{Point2(334000, 6250000), Point2(334010, 6250000),
+                                              Point2(334010, 6250010), Point2(334000, 6250010)},
+                                             true});
+    EXPECT_EQ(*resolveAnchor(lot, AnchorRef{2, AnchorPoint::Inside}), Point2(334005, 6250005));
+    const LabelValues values = anchorValues(line, along(1, 0.25), Point2(334010, 6250000));
+    EXPECT_EQ(said(values, "chainage"), "10.000");
+}
+
+TEST(LeaderValues, ATipOnARepeatedVertexHasNoBearingOrGradeButKeepsItsChainage)
+{
+    // (0,0) -> (30,0) -> (30,0) -> (30,40) at RL 100, 103, 103, 111. Vertex 1
+    // starts segment 2, which has no length: no direction, so no bearing and
+    // no grade (absent is not zero); distance 0, dz 103 - 103 = 0, chainage
+    // 30, RL 103; the whole line 30 + 0 + 40 = 70.
+    Entity pipe =
+        entityOf(4, Polyline2{{Point2(0, 0), Point2(30, 0), Point2(30, 0), Point2(30, 40)}, false});
+    setHeights(pipe.properties, {100.0, 103.0, 103.0, 111.0});
+    const LabelValues values =
+        anchorValues(pipe, AnchorRef{4, AnchorPoint::Vertex, 1}, Point2(30, 0));
+    EXPECT_EQ(said(values, "segment"), "2");
+    EXPECT_EQ(said(values, "bearing"), "absent");
+    EXPECT_EQ(said(values, "grade"), "absent");
+    EXPECT_EQ(said(values, "distance"), "0.000");
+    EXPECT_EQ(said(values, "dz"), "0.000");
+    EXPECT_EQ(said(values, "chainage"), "30.000");
+    EXPECT_EQ(said(values, "z"), "103.000");
+    EXPECT_EQ(said(values, "length"), "70.000");
+
+    // A fraction that is not a number is its segment's start: segment 3
+    // from (30,0), due north, chainage 30 + 0 = 30.
+    const LabelValues nan = anchorValues(pipe, along(4, std::nan(""), 2), Point2(30, 0));
+    EXPECT_EQ(said(nan, "segment"), "3");
+    EXPECT_EQ(said(nan, "chainage"), "30.000");
+    EXPECT_EQ(said(nan, "x"), "30.000");
+    EXPECT_EQ(said(nan, "bearing"), "0°00'00\"");
 }
 
 TEST(SmartAnchors, OnlyAlongHasAFractionAndItIsFromZeroToOne)

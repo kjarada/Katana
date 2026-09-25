@@ -62,6 +62,13 @@ struct EntityAttributes {
 [[nodiscard]] CommandPtr mirrorEntities(std::vector<EntityId> ids, const Point2& a,
                                         const Point2& b, bool keepOriginal = false);
 [[nodiscard]] CommandPtr copyEntities(std::vector<EntityId> ids, const Vec2& delta);
+// Copies of `ids`, one set per transform, as ONE command named `name`: what
+// COPY, MIRROR (keeping the original) and ARRAY make, and the window's Copy,
+// Rotate and Scale with Copy, and polar Array tools. An annotation copied
+// with the entity it refers to refers to that entity's copy
+// (docs/annotation.md, "Associativity"). Refused with no ids or no transform.
+[[nodiscard]] CommandPtr duplicateEntities(std::string name, std::vector<EntityId> ids,
+                                           std::vector<katana::math::Mat3> transforms);
 // Rectangular array: rows x columns copies spaced by `spacing` (the originals
 // occupy cell 0,0 and are kept).
 [[nodiscard]] CommandPtr arrayEntities(std::vector<EntityId> ids, int rows, int columns,
