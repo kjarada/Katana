@@ -685,6 +685,128 @@ beside the drawing:
 The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
 `test_sheet_editor.cpp`.
 
+## Section smarts
+
+A long section or a cross section viewport now fits itself to what it
+shows, keeps its labels off one another, shades its cut and fill, and says
+what each service it crosses is and how deep. Every decision made with
+numbers is headless, in `katana_cad`:
+`include/katana/cad/plotting/section_fit.hpp` (the scale, the exaggeration,
+the label steps, the plot's layout) and `section_annotation.hpp` (design and
+ground, cut and fill, crossing notes, label placement). The painter
+(`paintSection` in `src/katana_qt/sheet_painter.cpp`) measures its text and
+draws what they decide. The tests are `tests/cad/plotting/test_section_fit.cpp`
+and `test_section_annotation.cpp` without pixels, and
+`tests/qt_widgets/plotting/test_sheet_sections.cpp` on paper.
+
+### The automatic section scale
+
+A section viewport with `autoScale` is drawn at a scale and an exaggeration
+chosen for it (`fitSection`):
+- **What must fit across.** A long section's chainage range
+  (`source.chainageFrom` to `chainageTo`), or the whole alignment when the
+  range is empty. A cross section's two half widths.
+- **What must fit up.** The levels shown: every series' samples over that
+  range, the levels of the crossings drawn (hidden layers left out), and at
+  a cross section the design profile's level at the centreline
+  (`levelRange`). All the cross sections of one viewport share one scale and
+  one exaggeration, the deepest setting it.
+- **The plot** is what the viewport leaves once its title strip, its level
+  labels and its data band or axis values are taken out
+  (`sectionPlotLayout`). The section fills 90% of it each way
+  (`kSectionFitFill`).
+- **The scale** is the largest of `kSheetScales` at which the span fits the
+  plot's width, and at which the depth would still fit its height at true
+  scale: a deep, narrow section is drawn smaller rather than out of its plot.
+- **The exaggeration** is then the largest of `kSectionExaggerations` (1, 2,
+  2.5, 4, 5, 8, 10, 20) at which the depth fits the height
+  (`fitExaggeration`). A section with no depth (flat, or nothing sampled)
+  takes the flat value: 10 for a long section (H 1:500 V 1:50, as long
+  sections are drawn), 1 for a cross section. The cross-section generator
+  uses the same ladder, so a generated section and a fitted one agree.
+
+The painter decides it once per paint, in the same step that decides an
+automatic plan's scale, so the viewport's title (`H 1:750 V 1:75`) and the
+title block's scale cell report the scale drawn. `resolveSectionViewport`
+(`src/katana_qt/sheet_painter.hpp`) gives the same answer without painting;
+the editor shows it as the tooltip of the scale box.
+
+Example: a 180 m road whose levels span 9 m, in a long section filling the
+A3 drawing area. The band leaves a 363 x 210 mm plot. 180 m in 90% of
+363 mm needs 1:551, so the scale is 1:750. At 1:750, 90% of 210 mm holds 9 m
+up to 15.75 times, so the exaggeration is 10: `H 1:750 V 1:75`.
+
+### Labels that do not collide
+
+- **Steps from measured widths.** The step along the section is the
+  smallest round step (1, 2 or 5 times a power of ten) at which its widest
+  label, as the painter measures it, still clears its neighbours by 2 mm
+  (`labelStep`). A data band's values are turned across their row, so there
+  their height is what must clear. The level step up the side is at least
+  7 mm on the paper.
+- **The plot is laid out around its labels.** The column left of the plot is
+  as wide as the widest level label (or the band's row names), so no level
+  is drawn outside the viewport.
+- **Placing.** Every label inside the plot (the datum, the key of series,
+  the centreline's levels, each crossing's note and offset) is placed by
+  `placeLabels`: in priority order, each takes the first of its candidate
+  places that lies inside the plot and clear of every label placed before.
+  The labels nearest the middle go first. A label with no free place is
+  dropped, never drawn over another, and counted in
+  `SheetPaintStats::sectionNotesDropped`.
+- **Nothing outside the viewport.** Lines, shades and labels are clipped to
+  the viewport, and a long section with a chainage range is cut to exactly
+  that range.
+
+### Cut and fill
+
+`earthworkRegions(design, ground)` gives the regions between the design and
+the ground. The design is the first series whose name starts with "design"
+(the alignment's grade line, `design ROAD`, or a design surface); the ground
+is the first other series (`designSeries`, `groundSeries`). Where the ground
+is above the design the region is CUT, shaded light red; where it is below,
+FILL, shaded light green. Regions split where the two lines cross and at a
+gap in either. They are drawn under the grid and the lines.
+
+A long section's data band gains a **CUT/FILL** row when it has both: the
+design less the ground at each column, signed to three decimals (`+2.500`
+fill, `-2.500` cut, `0.000`; `cutFillText`). A cross section writes the
+design and ground levels at its centreline beside it, and the cut or fill
+between them (`DESIGN RL 25.000`, `GROUND RL 23.500`, `FILL 1.500`), with a
+tick across the centreline at each level. Its design level is the design
+series', else the alignment's profile's.
+
+### Services crossed
+
+Each line the section crosses that has a level is marked with a ring at it
+and noted (`crossingNote`):
+- **the level** is the entity's own (its vertex heights, straight between
+  the two either side of the crossing; `ownLevel`), else the level the
+  section found under it;
+- **the depth** is the ground less its own level at the crossing: `WATER RL
+  22.00 D 1.70`. Above the ground (an overhead line) it is a height:
+  `POWER RL 36.00 H 6.00`. A line draped on the ground has no depth.
+- The note is stood up beside its line, above or below its marker, on the
+  side that is clear of the other crossings' lines; when the whole does not
+  fit, the layer alone is written. Its offset (cross section) or chainage
+  (long section) is written under the marker.
+- A crossing on a layer the viewport hides is neither drawn nor noted.
+
+### A chainage range
+
+A long section whose source has a range shows exactly that range: the plot
+ends at its two chainages, drawn heavier, and nothing of the section is
+drawn past them. Each end is written in full just inside it, in the
+chainage row with its levels above. Without a range the range is the whole
+alignment, ends labelled the same way.
+
+### In the editor
+
+A section's scale box offers Auto, as a plan's does. With Auto the
+exaggeration box is disabled, since it is chosen with the scale. New long
+sections and cross sections are added with Auto on. Setting it is the usual
+one-step `editViewport` (`viewport.autoScale = true`).
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners
