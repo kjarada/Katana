@@ -26,7 +26,10 @@ tool composes with shell pipelines. The `cli.*` tests
 (`src/katana_app/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
 process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a
-code file the tests write themselves.
+code file the tests write themselves. `UTILITY REPORT | VERIFY | CLEARANCE`
+grades subsurface utility schedules by AS 5488 quality level
+(`docs/subsurface_utilities.md`); the `cli.utility_*` tests run it on
+`samples/utilities/`.
 
 ## katana with --screenshot and --plot
 
