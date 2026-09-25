@@ -279,6 +279,19 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION
         "name=site text=3\\.5 [^\r\n]*head=Tick [^\r\n]*paper=on layers=0 reads=10\\.000[\r\n]+.*name=site text=2\\.5 [^\r\n]*head=ClosedFilled [^\r\n]*paper=off layers=0"
         FAIL_REGULAR_EXPRESSION "error")
+    # The line Annotate > Edit Text sends, typed: the words over two lines, a
+    # style and a justification in ONE TEXTEDIT, which one UNDO takes back.
+    # Notes is 3.5 mm on paper, 3.5 m at the default 1:1000.
+    add_test(NAME cli.textedit_changes_several_keys_of_a_text_in_one_step
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "TEXTSTYLE NEW Notes paper=3.5"
+                -c "TEXT 10,20 2.5 old"
+                -c "TEXTEDIT 1 text=\"PIT 12\\nIL 10.50\" style=Notes justify=MC"
+                -c "INFO 1" -c "UNDO" -c "INFO 1")
+    set_tests_properties(cli.textedit_changes_several_keys_of_a_text_in_one_step PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "1  Text  layer=0  \"PIT 12.nIL 10\\.50\"  height=3\\.5  style=Notes  justify=MC.*1  Text  layer=0  \"old\"  height=2\\.5[\r\n]"
+        FAIL_REGULAR_EXPRESSION "error")
 endif()
 
 # UTILITY on the sample investigation (samples/utilities, worked by hand in
