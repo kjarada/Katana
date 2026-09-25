@@ -877,6 +877,7 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
                                                        *formatBar);
+    annotation_ = std::make_unique<AnnotationWorkbench>(*this, document_, formatMenu, *formatBar);
 }
 
 void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu)
