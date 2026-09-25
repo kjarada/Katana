@@ -1616,6 +1616,11 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/file_items_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_file_items_name_their_verbs_in_a_headless_run_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # Edit > Select by ID and the Edit and View actions' object names
 # (docs/desktop.md, "The plan view's shortcut menu"). Three points; Select All
 # by its action; the dialog, non-modal, selects #2 and 3 through the executor
@@ -1632,6 +1637,11 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/select_by_id_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_select_by_id_selects_and_frames_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # The text and dimension styles in the real window (docs/annotation.md, "In
 # the window"): each dialog builds the verb line and runs it through the
 # window's one executor, so its reply is logged as a typed line's is and one
@@ -1675,6 +1685,11 @@ if(TARGET katana)
     set_tests_properties(qt_the_dimension_styles_manager_runs_its_lines_headless
         qt_multiline_text_and_edit_text_run_in_the_window_headless
         qt_the_label_style_manager_runs_chosen_rules_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # Labels made, edited and reported in the window (docs/annotation.md, "In the
 # window"). By hand: a 30 x 40 lot (1), 1200 m2, is labelled by the bare LBL
 # tool on the selection, its Style option naming Lot Area, and the label (2)
