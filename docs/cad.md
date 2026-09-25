@@ -320,9 +320,21 @@ it, and the sheets print it in the title block, so it is set in one place:
   better answer to "which zone is this project in". Until 2026-09-26 the
   suggestions came only from Online Data, and File > Project Coordinate
   System could not suggest anything.
+- The dialog is non-modal (`MainWindow::showProjectCrs`, object name
+  `projectCrsDialog`, the File item's data), made afresh each time it is
+  opened from closed. Until 2026-09-26 the File item and the status bar button
+  ran it with `exec()`, so `--dialog fileProjectCrs` hung a headless run. That
+  was the hidden modality section 1 of the contributors' rules forbids. GIS >
+  Online Data's Set Project CRS still waits for it in a person's session,
+  because it imports into the system chosen. A headless session gets the
+  non-modal dialog there too, and Online Data reads the system again when it
+  refreshes. Set calls `Document::setCoordinateSystem` rather than running a
+  `CRS SET` line: a WKT holds double quotes, which no command line can carry
+  (`docs/desktop.md`, "One rule for a word on the line").
 
-The tests are `tests/cad/test_project_crs.cpp` and
-`tests/qt_widgets/test_project_crs_dialog.cpp`.
+The tests are `tests/cad/test_project_crs.cpp`,
+`tests/qt_widgets/test_project_crs_dialog.cpp` and, through the real
+window, `qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless`.
 
 ## Threading and ownership
 
