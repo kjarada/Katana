@@ -4,11 +4,12 @@
 // command line"): the verbs a person, a script, the headless katana_cli and
 // an AI agent type to lay out, edit and inspect a project's sheets.
 //
-//   SHEETS [LIST] | JSON [path] | SAVE path | LOAD path
-//   SHEET NEW | REMOVE | MOVE | COPY | RENAME | SET | FIELD
-//   VIEW ADD | SET | REMOVE | LIST
+//   SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | CHECK | PAGESETUP
+//   SHEET NEW | REMOVE | MOVE | COPY | RENAME | SET | FIELD | SUGGESTPAPER
+//   VIEW ADD | SET | REMOVE | LIST | FIT | BESTROTATE
 //   TILE n preset
-//   GENERATE fit | grid | strips | profile | sections | frames
+//   ARRANGE n | ALIGN | DISTRIBUTE | MATCHSCALE
+//   GENERATE fit | grid | strips | profile | sections | frames | register
 //   TITLEBLOCK [LIST] | field value | REVISION ADD | REVISION REMOVE | LOGO path
 //
 // Sheets are named by their number in the set (1, 2 ...) or by their id (s1,
@@ -19,18 +20,21 @@
 // option SHEETS LIST prints can be typed back. Stored sheets that cannot be
 // read refuse every verb but SHEETS LOAD, rather than be overwritten.
 //
-// Plotting to PDF needs Qt, so PLOTSHEETS is the desktop window's verb; it
-// parses its line with parsePlotSheets below.
+// Plotting needs Qt, so PLOTSHEETS is the desktop window's verb; it parses
+// its line with parsePlotSheets below, in the words the others use.
 
 #include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plot.hpp"
+#include "katana/cad/plotting/preflight.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/cad/section.hpp"
 #include "katana/core/error.hpp"
@@ -50,13 +54,23 @@ struct SheetVerbContext {
     // the sheet editor's Generate Sheets covers. Not given: the drawing's
     // entities (drawnExtent).
     std::optional<Box2> drawingExtent;
+    // What SHEETS CHECK runs on the sheets at the indices given (every sheet
+    // when empty): in the window, the checks with what the painter knows -
+    // its imagery and meshes, its rule for an automatic plan
+    // (checkSheetsFor). Not given: checkDocumentSheets.
+    std::function<std::vector<Finding>(std::span<const std::size_t>)> check;
+    // What a viewport shows, as world points, for ARRANGE MATCHSCALE, VIEW
+    // FIT, VIEW BESTROTATE and SHEET SUGGESTPAPER: in the window with its
+    // reference layers and meshes, and a key plan's outlines placed as the
+    // painter places them. Not given: viewportContent over the drawing.
+    std::function<std::vector<Point2>(const Viewport&)> content;
 };
 // Called only by the verbs that need it (GENERATE), so a front end may build
 // the context lazily.
 using SheetVerbContextProvider = std::function<SheetVerbContext()>;
 
-// True for SHEETS, SHEET, VIEW (and VIEWPORT), TILE, GENERATE and TITLEBLOCK,
-// in any case.
+// True for SHEETS, SHEET, VIEW (and VIEWPORT), TILE, ARRANGE, GENERATE and
+// TITLEBLOCK, in any case.
 [[nodiscard]] bool isSheetVerb(std::string_view verb);
 
 // Runs one sheet verb: `tokens` is the whole line split into words with the
@@ -75,21 +89,34 @@ runSheetVerb(Document& document, const std::vector<std::string>& tokens,
 // a number or id the set does not have; ParseFailure for anything else.
 [[nodiscard]] core::Result<std::size_t> sheetIndexFrom(const SheetSet& set, std::string_view text);
 
-// Sheets as a list: "3", "1,3-5", "s2,s4", "all". Zero-based indices in the
-// order given, each once.
-[[nodiscard]] core::Result<std::vector<std::size_t>> parseSheetSelection(const SheetSet& set,
-                                                                         std::string_view text);
-
-// PLOTSHEETS path [sheets=1,3-5] [dpi=300]: the words after the verb. With
-// no sheets= every sheet is plotted (an empty list). The dpi is what the 3D
-// snapshots and images are rasterised at, 72 to 1200.
+// PLOTSHEETS [path] [format=pdf|pdfs|png|tiff] [style=colour|grey|mono]
+// [sheets=1,3-5] [dpi=n] [lineweight=f] [folder=path] [pattern=text]: the
+// words after the verb. What is not given comes from the set's page setup,
+// as the Plot dialog and --plot-sheets take it; the format is one PDF unless
+// format= says otherwise, or unless only folder= is given, which is a PDF a
+// sheet. The path is the PDF of the one-PDF format, or the folder of a file
+// a sheet (folder= says the same). The sheets are the selection
+// parseSheetSelection (page_setup.hpp) reads, as every plot takes it.
 struct PlotSheetsRequest {
     std::filesystem::path path;
-    std::vector<std::size_t> sheets;
-    double dpi = 300.0;
+    std::string sheets;
+    // "pdf", "pdfs", "png" or "tiff"; nothing: "pdf", or "pdfs" for folder=.
+    std::optional<std::string> format;
+    std::optional<PlotColourMode> colourMode;
+    std::optional<double> dpi;
+    std::optional<double> lineWeightScale;
+    std::optional<std::string> fileNamePattern;
 };
 [[nodiscard]] core::Result<PlotSheetsRequest> parsePlotSheets(const SheetSet& set,
                                                               const std::vector<std::string>& args);
+
+// A finding as SHEETS CHECK prints it, one line: its severity, its code, the
+// sheet's number (- for the set), the view's id (- for none), then
+// message="..." and, when there is one, fix="..." and subject="..." - the
+// words quoted as every reply quotes them, so a line splits on spaces:
+//   warning plan.empty 2 vp3 message="PLAN 1:500 (vp3) shows nothing ..." fix="..."
+// (preflight.hpp's findingLine is the sentence a log shows.)
+[[nodiscard]] std::string checkReplyLine(const Finding& finding);
 
 // One viewport option, `key` = `value`, as VIEW ADD and VIEW SET take it
 // (sheetVerbHelp lists them). `model` checks an alignment= name. The

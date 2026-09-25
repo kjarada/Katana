@@ -737,17 +737,27 @@ Only plotting needs the window, because it paints.
 | `SHEETS JSON [path]` | the set's JSON (`sheet_json.hpp`), printed, or written to a file | |
 | `SHEETS SAVE path` | the JSON written to a file | |
 | `SHEETS LOAD path` | the whole set replaced from a JSON file | `LOAD_SHEETS` |
+| `SHEETS CHECK [sheets=1,3-5] [json]` | the preflight checks ("Preflight checks"): `checked 2 sheets: 1 error, 3 warnings`, then a finding a line, `severity code sheet view message="..." fix="..." subject="..."` (`checkReplyLine`; `-` for the set or no view); `json` gives `findingsToJson` instead. In the window, with what the painter knows (`SheetVerbContext::check`) | |
+| `SHEETS PAGESETUP [style=colour\|grey\|mono] [lineweight=f] [dpi=n] [pattern=text] [filepersheet=on\|off]` | the set's page setup ("Plot styles and output"), printed as `pagesetup style=... lineweight=... dpi=... pattern="..." filepersheet=...`, or changed; refused whole by `validatePageSetup` | `PAGE_SETUP` |
 | `SHEET NEW [name] [paper=A1] [portrait] [frame=off] [legendblock=off] [at=n]` | a blank sheet, at the end or at position n; no name numbers it | `ADD_SHEET` |
 | `SHEET REMOVE n` / `MOVE n to` / `COPY n` | `removeSheet`, `moveSheet`, `duplicateSheet` | `REMOVE_SHEET`, `MOVE_SHEET`, `DUPLICATE_SHEET` |
 | `SHEET RENAME n name` | | `RENAME_SHEET` |
 | `SHEET SET n [paper=] [orientation=] [frame=on\|off] [legendblock=on\|off] [name=]` | the sheet's paper and frame | `EDIT_SHEET` |
 | `SHEET FIELD n field [value]` | the sheet's own value for a field its frame prints (`sheet_number`, `scale`...); `""` clears it; no value prints it, marked `automatic` when the sheet has none | `SET_SHEET_FIELD` |
+| `SHEET SUGGESTPAPER n [scale=n\|auto] [apply=on]` | the smallest paper that holds what the sheet's main plan (`mainPlanOf`) shows at its drawn scale or `scale=` (`fitPaperToViewport`): `sheet 1 view=vp1 scale=500 paper=A0 orientation=landscape frame=a3_landscape fill=0.761`; `apply=on` puts the sheet on it (`choosePaperForScale`) | `CHOOSE_PAPER` with `apply=on` |
 | `VIEW ADD n kind [option=value...]` | a view placed as the editor's Add View places one, then given the options | `ADD_VIEWPORT` |
 | `VIEW SET id option=value...` | | `EDIT_VIEWPORT` |
 | `VIEW REMOVE id` | | `REMOVE_VIEWPORT` |
 | `VIEW LIST [n]` | every view, with every option it has | |
+| `VIEW FIT id` | a plan's or key plan's rectangle fitted to what it shows (`fitViewportToContent`) | `FIT_VIEWPORT_TO_CONTENT` |
+| `VIEW BESTROTATE id` | a plan turned to the rotation that shows most of it, and scaled to fit (`rotateToBestFit`): `rotated vp1 rotation=deg scale=n` | `ROTATE_TO_BEST_FIT` |
 | `TILE n preset` | `tileViewports`, by the preset's id (`sectionR`) or its menu name (`Main and panel right`, no quotes needed) | `TILE_VIEWPORTS` |
+| `ARRANGE n` | `autoArrange`: no two views overlapping, the main view first; `arranged sheet n moved=... overlapping=... unplaced=... mainshrunk=on\|off` and the sheet | `AUTO_ARRANGE` |
+| `ARRANGE ALIGN left\|right\|top\|bottom\|hcentre\|vcentre id id ...` | `alignViewports` on the views' sheet (one sheet at a time) | `ALIGN_VIEWPORTS` |
+| `ARRANGE DISTRIBUTE across\|up id id id ...` | `distributeViewports`: equal gaps, the first and last staying | `DISTRIBUTE_VIEWPORTS` |
+| `ARRANGE MATCHSCALE from id id ...` | `matchScale`: the views take the scale `from` is drawn at (an automatic plan's as the painter resolves it) | `MATCH_SCALE` |
 | `GENERATE kind [option=value...] [replace=on]` | a generator's sheets, appended, or in place of every sheet | `GENERATE_SHEETS` |
+| `GENERATE register [paper=] [portrait] [frame=]` | the drawing register and the revision table on a cover put first (`addRegisterSheet`); refused when the set has one, and with `replace=on` | `ADD_REGISTER_SHEET` |
 | `TITLEBLOCK [LIST]` | every shared title-block value, the logo and the revisions | |
 | `TITLEBLOCK field [value]` | reads or sets one value | `EDIT_TITLE_BLOCK` |
 | `TITLEBLOCK REVISION [LIST]` | the revisions, one a line | |
@@ -755,11 +765,12 @@ Only plotting needs the window, because it paints.
 | `TITLEBLOCK REVISION REMOVE code` | | `REMOVE_REVISION` |
 | `TITLEBLOCK LOGO path` | `importLogo`; `""` removes the logo | `SET_LOGO` |
 | `HELP SHEETS` | every verb and option (`sheetVerbHelp`) | |
-| `PLOTSHEETS path [sheets=1,3-5] [dpi=300]` | the window only: the sheets, or those chosen, to one PDF | |
+| `PLOTSHEETS [path] [format=pdf\|pdfs\|png\|tiff] [style=colour\|grey\|mono] [sheets=1,3-5] [dpi=n] [lineweight=f] [folder=path] [pattern=text]` | the window only: the sheets plotted as the Plot dialog and `--plot-sheets` plot them (`parsePlotSheets`, `plotRequestFor`), the page setup giving what is not said; one PDF unless `format=` says otherwise (`folder=` alone is a PDF a sheet); the summary, then `file="path"` a line for each file written | |
 
 **The view kinds** are the stored names (`plan`, `key_plan`, `long_section`,
-`cross_sections`, `model_3d`, `legend`, `notes`, `image`), plus some common
-words: `profile`, `xs`, `sections`, `3d`, `key`. A new view is set up as Add
+`cross_sections`, `model_3d`, `legend`, `notes`, `image`, `sheet_index`,
+`revisions`), plus some common words: `profile`, `xs`, `sections`, `3d`,
+`key`, `register`, `drawing_register`, `revision_table`. A new view is set up as Add
 View sets one up (`defaultViewport`):
 - On an empty sheet it fills the tiling area. Otherwise it gets its kind's
   own size, centred.
@@ -777,13 +788,16 @@ View sets one up (`defaultViewport`):
 | View option | Views | |
 |---|---|---|
 | `rect=x0,y0,x1,y1` | all | refused when it misses the paper |
-| `scale=500\|1:500\|auto`, `centre=x,y\|auto` | plan, key plan, sections | `auto` sets `autoScale` / `autoCentre` |
+| `scale=500\|1:500\|auto`, `centre=x,y\|auto` | plan, key plan, sections | `auto` sets `autoScale` / `autoCentre`; a section's automatic scale is `fitSection`'s ("The automatic section scale") |
 | `rotation=deg` | plan, key plan, 3D | the world direction across the paper, counter-clockwise |
 | `alignment=`, `from=`, `to=` | plan, key plan, sections | the alignment must exist |
 | `stations=a,b,c`, `interval=`, `halfwidth=` | cross sections | |
 | `ve=` | sections | vertical exaggeration |
 | `tilt=deg` | 3D | 1 to 89 |
 | `north=on\|off`, `scalebar=on\|off` | plan, key plan | |
+| `grid=none\|ticks\|crosses\|lines`, `gridinterval=m\|auto` | plan, key plan | the coordinate grid ("The coordinate grid") |
+| `legend=this_sheet\|whole_set\|whole_drawing` (or `scope=`) | legend | what the legend lists ("The smart legend") |
+| `revisions=n\|all` | revisions | the newest n revisions, or every one |
 | `locked=on\|off`, `title=text` | all | an empty title is the automatic one |
 | `text=text` | notes, image | |
 | `hide=layer`, `show=layer`, `hidden=a,b` | all | the view's hidden layers |
@@ -804,6 +818,7 @@ is fixed: remove it and add another.
 | `profile` | `smartLayout`, plan and profile | `alignment=`, `scale=`, `interval=`, `halfwidth=`, `model3d=`, `legend=` |
 | `sections` | `crossSectionSheets` | `alignment=`, `interval=` or `stations=`, `halfwidth=`, `rows=`, `columns=`, `scale=`, `ve=auto\|n` |
 | `frames` | `sheetsFromPlotFrames`, and the frames skipped, with the reason | `frame=on\|off` |
+| `register` | `addRegisterSheet`: a cover first in the set, the drawing register beside the revision table | `paper=`, `portrait`, `frame=` |
 
 All kinds but `frames` also take `paper=`, `portrait` or `landscape`, and
 `frame=`. `alignment=` may be left out when the drawing has only one. An
@@ -815,7 +830,27 @@ the imagery a plan draws, so the front end supplies them
   `grid` cover, and its visible surfaces for `sections`.
 - Headless, the extent is the drawing's entities, and each section is
   centred when drawn at an exaggeration of 1.
+- The window also gives `SHEETS CHECK` its checker (`checkSheetsFor`: the
+  imagery and meshes, the painter's rule for an automatic plan), and
+  `ARRANGE MATCHSCALE`, `VIEW FIT`, `VIEW BESTROTATE` and
+  `SHEET SUGGESTPAPER` what each view shows with its reference layers
+  (`viewportContent` in `plotting/sheet_arrange.hpp`). Headless they check
+  the document (`checkDocumentSheets`) and measure the drawing.
 - The context is asked for only by the verbs that need it.
+
+**A whole round trip, headless.** The `--command` lines run before
+`--sheets-json` and `--plot-sheets`, so an agent can lay a set out, check it
+and plot it in one run, reading each reply on stderr:
+
+```sh
+katana <copy-of-project> --command "GENERATE fit legend=on" \
+    --command "VIEW SET vp1 grid=ticks" --command "GENERATE register" \
+    --command "SHEETS CHECK" --plot-sheets out.pdf
+```
+
+The `qt_sheets_agent_headless` test (`tools/check_sheets_agent_headless.cmake`)
+runs such a line with every verb above, and the verbs themselves are tested
+in `tests/cad/plotting/test_sheet_agent_verbs.cpp`.
 
 **Title-block fields** are the set's shared values (`titleBlockValue`,
 `setTitleBlockValue`):

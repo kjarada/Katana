@@ -11,10 +11,16 @@
 #include <iterator>
 #include <utility>
 
+#include "katana/cad/plotting/arrange.hpp"
+#include "katana/cad/plotting/arrange_commands.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/layout.hpp"
+#include "katana/cad/plotting/legend.hpp"
+#include "katana/cad/plotting/page_setup.hpp"
+#include "katana/cad/plotting/plan_grid.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/cad/plotting/sheet_json.hpp"
+#include "katana/cad/plotting/tables.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
@@ -34,10 +40,6 @@ namespace {
 // a logo; still not so much that every PDF of the set carries a raw camera
 // file.
 constexpr std::uintmax_t kMaximumImageBytes = 32u * 1024u * 1024u;
-// What PLOTSHEETS rasterises a 3D snapshot or an image at: below 72 dpi it
-// is no longer legible on paper, above 1200 it is only bigger.
-constexpr double kMinimumDpi = 72.0;
-constexpr double kMaximumDpi = 1200.0;
 
 // ---- words ---------------------------------------------------------------------------
 
@@ -429,7 +431,7 @@ Result<ViewportKind> kindFrom(std::string_view text)
     if (const auto stored = viewportKindFrom(text)) {
         return *stored;
     }
-    static constexpr std::array<std::pair<std::string_view, ViewportKind>, 16> kWords{{
+    static constexpr std::array<std::pair<std::string_view, ViewportKind>, 23> kWords{{
         {"plan", ViewportKind::Plan},
         {"longsection", ViewportKind::LongSection},
         {"profile", ViewportKind::LongSection},
@@ -446,6 +448,13 @@ Result<ViewportKind> kindFrom(std::string_view text)
         {"image", ViewportKind::Image},
         {"keyplan", ViewportKind::KeyPlan},
         {"key", ViewportKind::KeyPlan},
+        {"sheetindex", ViewportKind::SheetIndex},
+        {"register", ViewportKind::SheetIndex},
+        {"drawingregister", ViewportKind::SheetIndex},
+        {"index", ViewportKind::SheetIndex},
+        {"revisions", ViewportKind::Revisions},
+        {"revisiontable", ViewportKind::Revisions},
+        {"revision", ViewportKind::Revisions},
     }};
     const std::string word = folded(text);
     for (const auto& [name, kind] : kWords) {
@@ -455,7 +464,7 @@ Result<ViewportKind> kindFrom(std::string_view text)
     }
     return makeError(ErrorCode::InvalidArgument,
                      "a view is plan, key_plan, long_section, cross_sections, model_3d, legend, "
-                     "notes or image",
+                     "notes, image, sheet_index (the drawing register) or revisions",
                      std::string(text));
 }
 
@@ -775,9 +784,133 @@ std::string revisionLine(const Revision& revision)
 
 // ---- SHEETS --------------------------------------------------------------------------
 
-Result<std::string> sheetsVerb(Document& document, const Words& args)
+// The page setup as SHEETS PAGESETUP prints it, in the words it takes.
+std::string pageSetupLine(const PageSetup& setup)
 {
-    constexpr std::string_view kUsage = "SHEETS [LIST] | JSON [path] | SAVE path | LOAD path";
+    return std::format("pagesetup style={} lineweight={} dpi={} pattern={} filepersheet={}",
+                       toString(setup.colourMode), decimal(setup.lineWeightScale),
+                       decimal(setup.dpi), inQuotes(setup.fileNamePattern),
+                       onOffText(setup.filePerSheet));
+}
+
+// The plot style by its stored name or a common other one (plotColourModeFrom).
+Result<PlotColourMode> styleFrom(std::string_view text)
+{
+    if (const auto mode = plotColourModeFrom(text)) {
+        return *mode;
+    }
+    return makeError(ErrorCode::InvalidArgument, "style= is colour, grey or mono", std::string(text));
+}
+
+// SHEETS PAGESETUP [style=] [lineweight=] [dpi=] [pattern=] [filepersheet=]:
+// the page setup kept with the set, printed, or changed as one step.
+Result<std::string> pageSetupVerb(Document& document, const Words& args)
+{
+    constexpr std::string_view kUsage =
+        "SHEETS PAGESETUP [style=colour|grey|mono] [lineweight=f] [dpi=n] [pattern=text] "
+        "[filepersheet=on|off]";
+    auto options = optionsFrom(args, 1, kUsage);
+    if (!options) {
+        return options.error();
+    }
+    PageSetup setup = document.sheetSet().pageSetup;
+    if (options->empty()) {
+        return pageSetupLine(setup);
+    }
+    for (const Option& option : *options) {
+        const std::string& key = option.key;
+        if (key == "style" || key == "colour" || key == "color" || key == "mode") {
+            auto mode = styleFrom(option.value);
+            if (!mode) {
+                return mode.error();
+            }
+            setup.colourMode = *mode;
+        } else if (key == "lineweight" || key == "lineweightscale") {
+            auto factor = number(option.value, "lineweight=");
+            if (!factor) {
+                return factor.error();
+            }
+            setup.lineWeightScale = *factor;
+        } else if (key == "dpi") {
+            auto dpi = number(option.value, "dpi=");
+            if (!dpi) {
+                return dpi.error();
+            }
+            setup.dpi = *dpi;
+        } else if (key == "pattern" || key == "names") {
+            setup.fileNamePattern = unescaped(option.value);
+        } else if (key == "filepersheet") {
+            auto on = onOff(option.value, key);
+            if (!on) {
+                return on.error();
+            }
+            setup.filePerSheet = *on;
+        } else {
+            return unknownOption(option, "a page setup",
+                                 "style=, lineweight=, dpi=, pattern= and filepersheet=");
+        }
+    }
+    // Checked before the step, so a refused value says which it was.
+    if (const Status valid = validatePageSetup(setup); !valid) {
+        return valid.error();
+    }
+    if (const Status status = setPageSetup(document, setup); !status) {
+        return status.error();
+    }
+    return pageSetupLine(document.sheetSet().pageSetup);
+}
+
+// SHEETS CHECK [sheets=1,3-5] [json]: the preflight checks, a summary line
+// and then a finding a line (checkReplyLine), or the findings as JSON.
+Result<std::string> checkVerb(Document& document, const Words& args,
+                              const SheetVerbContextProvider& context)
+{
+    constexpr std::string_view kUsage = "SHEETS CHECK [sheets=1,3-5] [json]";
+    const SheetSet& set = document.sheetSet();
+    std::vector<std::size_t> indices;
+    bool json = false;
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (folded(args[i]) == "json") {
+            json = true;
+            continue;
+        }
+        const auto option = optionFrom(args[i]);
+        if (!option || (option->key != "sheets" && option->key != "sheet")) {
+            return usage(kUsage);
+        }
+        auto chosen = parseSheetSelection(option->value, set);
+        if (!chosen) {
+            return chosen.error();
+        }
+        indices = std::move(*chosen);
+    }
+    const SheetVerbContext given = context ? context() : SheetVerbContext{};
+    std::vector<Finding> findings;
+    if (given.check) {
+        findings = given.check(indices);
+    } else {
+        PreflightOptions options;
+        options.sheets = indices;
+        findings = checkDocumentSheets(document, std::move(options));
+    }
+    if (json) {
+        return findingsToJson(findings);
+    }
+    const std::size_t checked = indices.empty() ? set.sheets.size() : indices.size();
+    std::string reply = std::format("checked {}: {}", countOf(checked, "sheet", "sheets"),
+                                    summaryText(summarize(findings)));
+    for (const Finding& finding : findings) {
+        reply += "\n" + checkReplyLine(finding);
+    }
+    return reply;
+}
+
+Result<std::string> sheetsVerb(Document& document, const Words& args,
+                               const SheetVerbContextProvider& context)
+{
+    constexpr std::string_view kUsage =
+        "SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | CHECK [sheets=] [json] | "
+        "PAGESETUP [option=value ...]";
     const std::string action = args.empty() ? "LIST" : upper(args[0]);
     if (action == "LIST") {
         if (args.size() > 1) {
@@ -809,6 +942,12 @@ Result<std::string> sheetsVerb(Document& document, const Words& args)
         }
         return std::format("wrote {} to {}", countOf((*set)->sheets.size(), "sheet", "sheets"),
                            "\"" + args[1] + "\"");
+    }
+    if (action == "CHECK" || action == "PREFLIGHT") {
+        return checkVerb(document, args, context);
+    }
+    if (action == "PAGESETUP" || action == "SETUP") {
+        return pageSetupVerb(document, args);
     }
     if (action == "LOAD") {
         if (args.size() != 2) {
@@ -982,11 +1121,97 @@ Result<std::string> sheetField(Document& document, std::size_t index, const Word
     return std::format("sheet {} field {}={}", index + 1, field, inQuotes(value));
 }
 
-Result<std::string> sheetVerb(Document& document, const Words& args)
+// What `viewport` shows, as world points: the front end's (with its
+// imagery, and a key plan's outlines where the painter puts each plan),
+// else the drawing's (viewportContent with the set, so a key plan's are its
+// live outlines).
+std::vector<Point2> contentOf(const Document& document, const SheetVerbContext& given,
+                              const Viewport& viewport)
+{
+    if (given.content) {
+        return given.content(viewport);
+    }
+    return viewportContent(document.model(), document.sheetSet(), viewport);
+}
+
+std::string paperAdviceLine(const PaperAdvice& advice)
+{
+    return std::format("paper={} orientation={} frame={} fill={}", paperName(advice.paper),
+                       advice.landscape ? "landscape" : "portrait",
+                       advice.frame.empty() ? std::string("off") : advice.frame,
+                       decimal(std::round(advice.fill * 1000.0) / 1000.0));
+}
+
+// SHEET SUGGESTPAPER n [scale=n] [apply=on]: the smallest paper that holds
+// what the sheet's main plan shows at a scale (its own, or scale=), as the
+// editor's Arrange > Choose Paper for This Scale works it out; apply=on puts
+// the sheet on it as one step.
+Result<std::string> suggestPaperVerb(Document& document, std::size_t index, const Words& args,
+                                     const SheetVerbContextProvider& context)
+{
+    constexpr std::string_view kUsage = "SHEET SUGGESTPAPER n [scale=n] [apply=on|off]";
+    auto options = optionsFrom(args, 2, kUsage);
+    if (!options) {
+        return options.error();
+    }
+    std::optional<double> scale;
+    bool apply = false;
+    for (const Option& option : *options) {
+        if (option.key == "scale") {
+            auto parsed = scaleFrom(option.value);
+            if (!parsed) {
+                return parsed.error();
+            }
+            scale = *parsed; // auto: the scale it is drawn at
+        } else if (option.key == "apply") {
+            auto on = onOff(option.value, option.key);
+            if (!on) {
+                return on.error();
+            }
+            apply = *on;
+        } else {
+            return unknownOption(option, "SHEET SUGGESTPAPER", "scale= and apply=");
+        }
+    }
+    const SheetSet& set = document.sheetSet();
+    const std::string id = mainPlanOf(set, index);
+    if (id.empty()) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "the sheet has no plan or key plan to choose paper for",
+                         std::to_string(index + 1));
+    }
+    const auto at = findViewport(set, id);
+    const Viewport& plan = set.sheets[at->first].viewports[at->second];
+    const SheetVerbContext given = context ? context() : SheetVerbContext{};
+    const std::vector<Point2> content = contentOf(document, given, plan);
+    if (content.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the plan shows nothing to choose paper for", id);
+    }
+    const double scaleUsed = scale.value_or(drawnScale(plan, content));
+    if (apply) {
+        auto change = choosePaperForScale(document, id, content, scaleUsed);
+        if (!change) {
+            return change.error();
+        }
+        return std::format("sheet {} view={} scale={} {}\n{}", index + 1, id, decimal(scaleUsed),
+                           paperAdviceLine(change->advice), describeSheet(document.sheetSet(), index));
+    }
+    // Worked out on a copy of the sheet: the same answer apply=on gives.
+    Sheet trial = set.sheets[index];
+    auto change = fitPaperToViewport(trial, id, content, scaleUsed);
+    if (!change) {
+        return change.error();
+    }
+    return std::format("sheet {} view={} scale={} {}", index + 1, id, decimal(scaleUsed),
+                       paperAdviceLine(change->advice));
+}
+
+Result<std::string> sheetVerb(Document& document, const Words& args,
+                              const SheetVerbContextProvider& context)
 {
     constexpr std::string_view kUsage =
         "SHEET NEW [name] [option=value ...] | REMOVE n | MOVE n to | COPY n | RENAME n name | "
-        "SET n option=value ... | FIELD n field [value]";
+        "SET n option=value ... | FIELD n field [value] | SUGGESTPAPER n [scale=n] [apply=on]";
     if (args.empty()) {
         return usage(kUsage);
     }
@@ -1097,6 +1322,9 @@ Result<std::string> sheetVerb(Document& document, const Words& args)
     }
     if (action == "FIELD") {
         return sheetField(document, index, args);
+    }
+    if (action == "SUGGESTPAPER" || action == "PAPER") {
+        return suggestPaperVerb(document, index, args, context);
     }
     return usage(kUsage);
 }
@@ -1251,10 +1479,55 @@ Result<std::string> viewSet(Document& document, const Words& args)
     return describeViewport(document.sheetSet().sheets[sheetAt].viewports[viewAt]);
 }
 
-Result<std::string> viewVerb(Document& document, const Words& args)
+// VIEW FIT id and VIEW BESTROTATE id: a plan's rectangle fitted to what it
+// shows, or the plan turned to the rotation it shows most of at, each one
+// step (arrange_commands.hpp).
+Result<std::string> viewFitVerb(Document& document, const Words& args,
+                                const SheetVerbContextProvider& context, bool rotate)
+{
+    if (args.size() != 2) {
+        return usage(rotate ? "VIEW BESTROTATE id" : "VIEW FIT id");
+    }
+    const auto at = findViewport(document.sheetSet(), args[1]);
+    if (!at) {
+        return noViewport(args[1]);
+    }
+    const Viewport viewport = document.sheetSet().sheets[at->first].viewports[at->second];
+    if (!isPlanLike(viewport.kind)) {
+        return makeError(ErrorCode::InvalidArgument,
+                         std::format("{} is for plans and key plans, not {}",
+                                     rotate ? "VIEW BESTROTATE" : "VIEW FIT", toString(viewport.kind)),
+                         viewport.id);
+    }
+    const SheetVerbContext given = context ? context() : SheetVerbContext{};
+    const std::vector<Point2> content = contentOf(document, given, viewport);
+    if (content.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "the view shows nothing to fit to", viewport.id);
+    }
+    const auto described = [&] {
+        return describeViewport(document.sheetSet().sheets[at->first].viewports[at->second]);
+    };
+    if (rotate) {
+        auto fit = rotateToBestFit(document, viewport.id, content);
+        if (!fit) {
+            return fit.error();
+        }
+        return std::format("rotated {} rotation={} scale={}\n{}", viewport.id,
+                           decimal(fit->rotation * math::kRadToDeg), decimal(fit->standardScale),
+                           described());
+    }
+    if (Status status = fitViewportToContent(document, viewport.id, content); !status) {
+        return status.error();
+    }
+    return "fitted " + viewport.id + "\n" + described();
+}
+
+Result<std::string> viewVerb(Document& document, const Words& args,
+                             const SheetVerbContextProvider& context)
 {
     constexpr std::string_view kUsage =
-        "VIEW ADD n kind [option=value ...] | SET id option=value ... | REMOVE id | LIST [n]";
+        "VIEW ADD n kind [option=value ...] | SET id option=value ... | REMOVE id | LIST [n] | "
+        "FIT id | BESTROTATE id";
     if (args.empty()) {
         return usage(kUsage);
     }
@@ -1264,6 +1537,12 @@ Result<std::string> viewVerb(Document& document, const Words& args)
     }
     if (action == "SET") {
         return viewSet(document, args);
+    }
+    if (action == "FIT") {
+        return viewFitVerb(document, args, context, false);
+    }
+    if (action == "BESTROTATE" || action == "ROTATE") {
+        return viewFitVerb(document, args, context, true);
     }
     if (action == "REMOVE" || action == "DELETE") {
         if (args.size() != 2) {
@@ -1361,6 +1640,155 @@ Result<std::string> tileVerb(Document& document, const Words& args)
     return reply;
 }
 
+// ---- ARRANGE -------------------------------------------------------------------------
+
+// Views by their ids, all on one sheet: that sheet, and the ids as stored.
+Result<std::pair<std::size_t, Words>> viewsOnOneSheet(const SheetSet& set, const Words& args,
+                                                      std::size_t from)
+{
+    std::optional<std::size_t> sheet;
+    Words ids;
+    for (std::size_t i = from; i < args.size(); ++i) {
+        const auto at = findViewport(set, args[i]);
+        if (!at) {
+            return noViewport(args[i]);
+        }
+        if (sheet && *sheet != at->first) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::format("the views are on sheets {} and {}: they are arranged a "
+                                         "sheet at a time",
+                                         *sheet + 1, at->first + 1),
+                             args[i]);
+        }
+        sheet = at->first;
+        ids.push_back(set.sheets[at->first].viewports[at->second].id);
+    }
+    if (!sheet) {
+        return makeError(ErrorCode::InvalidArgument, "name the views by their ids (vp1 vp2 ...)");
+    }
+    return std::pair{*sheet, std::move(ids)};
+}
+
+std::string idList(const Words& ids)
+{
+    return joined(ids, 0, ",");
+}
+
+// ARRANGE n | ALIGN edge id ... | DISTRIBUTE across|up id ... | MATCHSCALE
+// from id ...: the editor's Arrange menu, each one step
+// (arrange_commands.hpp).
+Result<std::string> arrangeVerb(Document& document, const Words& args,
+                                const SheetVerbContextProvider& context)
+{
+    constexpr std::string_view kUsage =
+        "ARRANGE n | ALIGN left|right|top|bottom|hcentre|vcentre id id ... | "
+        "DISTRIBUTE across|up id id id ... | MATCHSCALE from id id ...";
+    if (args.empty()) {
+        return usage(kUsage);
+    }
+    const SheetSet& set = document.sheetSet();
+    const std::string action = upper(args[0]);
+    if (action == "ALIGN") {
+        if (args.size() < 3) {
+            return usage("ARRANGE ALIGN left|right|top|bottom|hcentre|vcentre id id ...");
+        }
+        std::optional<AlignEdge> edge = alignEdgeFrom(folded(args[1]));
+        const std::string word = folded(args[1]);
+        if (!edge && (word == "centre" || word == "center")) {
+            edge = AlignEdge::HorizontalCentre;
+        } else if (!edge && word == "middle") {
+            edge = AlignEdge::VerticalCentre;
+        }
+        if (!edge) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "an edge is left, right, top, bottom, hcentre or vcentre", args[1]);
+        }
+        auto views = viewsOnOneSheet(set, args, 2);
+        if (!views) {
+            return views.error();
+        }
+        auto moved = alignViewports(document, views->first, views->second, *edge);
+        if (!moved) {
+            return moved.error();
+        }
+        return std::format("aligned {} on sheet {} edge={} moved={}", idList(views->second),
+                           views->first + 1, toString(*edge), idList(*moved));
+    }
+    if (action == "DISTRIBUTE") {
+        if (args.size() < 3) {
+            return usage("ARRANGE DISTRIBUTE across|up id id id ...");
+        }
+        const std::string word = folded(args[1]);
+        std::optional<DistributeAxis> axis = distributeAxisFrom(word);
+        if (!axis && (word == "across" || word == "x")) {
+            axis = DistributeAxis::Horizontal;
+        } else if (!axis && (word == "up" || word == "y")) {
+            axis = DistributeAxis::Vertical;
+        }
+        if (!axis) {
+            return makeError(ErrorCode::InvalidArgument, "distribute across or up", args[1]);
+        }
+        auto views = viewsOnOneSheet(set, args, 2);
+        if (!views) {
+            return views.error();
+        }
+        auto moved = distributeViewports(document, views->first, views->second, *axis);
+        if (!moved) {
+            return moved.error();
+        }
+        return std::format("distributed {} on sheet {} axis={} moved={}", idList(views->second),
+                           views->first + 1, toString(*axis), idList(*moved));
+    }
+    if (action == "MATCHSCALE" || action == "MATCH") {
+        if (args.size() < 3) {
+            return usage("ARRANGE MATCHSCALE from id id ...   (from: the view whose scale the "
+                         "others take)");
+        }
+        const auto from = findViewport(set, args[1]);
+        if (!from) {
+            return noViewport(args[1]);
+        }
+        const Viewport& source = set.sheets[from->first].viewports[from->second];
+        Words ids;
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            const auto at = findViewport(set, args[i]);
+            if (!at) {
+                return noViewport(args[i]);
+            }
+            ids.push_back(set.sheets[at->first].viewports[at->second].id);
+        }
+        // An automatic plan is matched at the scale it is drawn at, with what
+        // the front end's plan shows.
+        std::optional<double> scale;
+        if (source.autoScale && isPlanLike(source.kind)) {
+            const SheetVerbContext given = context ? context() : SheetVerbContext{};
+            scale = drawnScale(source, contentOf(document, given, source));
+        }
+        const std::string fromId = source.id;
+        auto changed = matchScale(document, ids, fromId, scale);
+        if (!changed) {
+            return changed.error();
+        }
+        return std::format("matched {} to {} scale={} changed={}", idList(ids), fromId,
+                           decimal(scale.value_or(source.scale)), idList(*changed));
+    }
+    if (args.size() != 1) {
+        return usage(kUsage);
+    }
+    const auto found = sheetIndexFrom(set, args[0]);
+    if (!found) {
+        return found.error();
+    }
+    auto arranged = autoArrangeSheet(document, *found);
+    if (!arranged) {
+        return arranged.error();
+    }
+    return std::format("arranged sheet {} moved={} overlapping={} unplaced={} mainshrunk={}\n{}",
+                       *found + 1, idList(arranged->moved), idList(arranged->overlapping),
+                       idList(arranged->unplaced), onOffText(arranged->mainShrunk),
+                       describeSheet(document.sheetSet(), *found));
+}
+
 // ---- GENERATE ------------------------------------------------------------------------
 
 // What GENERATE was asked, parsed; nullopt is "not given".
@@ -1404,6 +1832,9 @@ std::string_view generateKeys(std::string_view kind)
     }
     if (kind == "frames") {
         return "frame";
+    }
+    if (kind == "register") {
+        return "paper orientation frame";
     }
     return {};
 }
@@ -1706,14 +2137,35 @@ Result<std::string> generateVerb(Document& document, const Words& args,
         kind = "profile";
     } else if (kind == "plotframes") {
         kind = "frames";
+    } else if (kind == "drawingregister" || kind == "sheetindex" || kind == "index") {
+        kind = "register";
     }
     if (generateKeys(kind).empty()) {
         return makeError(ErrorCode::InvalidArgument,
-                         "GENERATE makes fit, grid, strips, profile, sections or frames", args[0]);
+                         "GENERATE makes fit, grid, strips, profile, sections, frames or register",
+                         args[0]);
     }
     auto options = generateOptions(kind, args);
     if (!options) {
         return options.error();
+    }
+    if (kind == "register") {
+        // A cover sheet, first in the set: the drawing register and the
+        // revision table (tables.hpp). It adds to the set; replacing every
+        // sheet with a register of none would list nothing.
+        if (options->replace) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "GENERATE register puts a cover first; it replaces no sheets",
+                             "replace=on");
+        }
+        auto id = addRegisterSheet(document, options->paper);
+        if (!id) {
+            return id.error();
+        }
+        const SheetSet& now = document.sheetSet();
+        const auto at = sheetIndex(now, *id);
+        return std::format("generated 1 sheet: {} (the drawing register)\n{}",
+                           at.value_or(0) + 1, describeSheet(now, at.value_or(0)));
     }
     std::vector<std::string> skipped;
     auto sheets = generateSheets(kind, *options, document.model(), context, skipped);
@@ -1910,7 +2362,7 @@ bool isSheetVerb(std::string_view verb)
 {
     const std::string word = upper(verb);
     return word == "SHEETS" || word == "SHEET" || word == "VIEW" || word == "VIEWPORT" ||
-           word == "TILE" || word == "GENERATE" || word == "TITLEBLOCK";
+           word == "TILE" || word == "ARRANGE" || word == "GENERATE" || word == "TITLEBLOCK";
 }
 
 Result<std::string> runSheetVerb(Document& document, const std::vector<std::string>& tokens,
@@ -1933,16 +2385,19 @@ Result<std::string> runSheetVerb(Document& document, const std::vector<std::stri
         }
     }
     if (verb == "SHEETS") {
-        return sheetsVerb(document, args);
+        return sheetsVerb(document, args, context);
     }
     if (verb == "SHEET") {
-        return sheetVerb(document, args);
+        return sheetVerb(document, args, context);
     }
     if (verb == "VIEW" || verb == "VIEWPORT") {
-        return viewVerb(document, args);
+        return viewVerb(document, args, context);
     }
     if (verb == "TILE") {
         return tileVerb(document, args);
+    }
+    if (verb == "ARRANGE") {
+        return arrangeVerb(document, args, context);
     }
     if (verb == "GENERATE") {
         return generateVerb(document, args, context);
@@ -1960,22 +2415,36 @@ options take.
 SHEETS [LIST]                   every sheet and its views
 SHEETS JSON [path]              the set as JSON, printed or written to a file
 SHEETS SAVE path | LOAD path    write the set to a JSON file | replace the set from one
+SHEETS CHECK [sheets=1,3-5] [json]   the preflight checks: a summary, then a finding a line,
+                                "severity code sheet view message=... fix=..." (- for none)
+SHEETS PAGESETUP [style=colour|grey|mono] [lineweight=f] [dpi=n] [pattern=text]
+                 [filepersheet=on|off]   how the set plots; no option prints it
 SHEET NEW [name] [paper=A3] [portrait|landscape] [frame=on|off] [legendblock=on|off] [at=n]
 SHEET REMOVE n | MOVE n to | COPY n | RENAME n name
 SHEET SET n [paper=A0..A4] [orientation=landscape|portrait] [frame=on|off] [legendblock=on|off]
           [name=text]
 SHEET FIELD n field [value]     the sheet's own value for a field its frame prints, such as
                                 sheet_number or scale; "" clears it, no value prints it
+SHEET SUGGESTPAPER n [scale=n|auto] [apply=on]   the smallest paper for the sheet's main plan
+                                at a scale; apply=on puts the sheet on it
 VIEW ADD n kind [option=value ...]   kinds: plan key_plan long_section cross_sections model_3d
-                                     legend notes image
+                                     legend notes image sheet_index (register) revisions
 VIEW SET id option=value ... | VIEW REMOVE id | VIEW LIST [n]
-  options  rect=x0,y0,x1,y1 (paper mm)  scale=500|1:500|auto  centre=x,y|auto  rotation=deg
-           alignment=name  from=ch  to=ch  stations=a,b,c  interval=m  halfwidth=m  ve=n
-           tilt=deg  north=on|off  scalebar=on|off  locked=on|off  title=text  text=text
-           hide=layer  show=layer  hidden=layer,layer  file=path (an image view's picture,
-           copied into the project's assets)
+VIEW FIT id                     a plan's rectangle fitted to what it shows
+VIEW BESTROTATE id              a plan turned to show most, and scaled to fit
+  options  rect=x0,y0,x1,y1 (paper mm)  scale=500|1:500|auto (plans and sections)
+           centre=x,y|auto  rotation=deg  alignment=name  from=ch  to=ch  stations=a,b,c
+           interval=m  halfwidth=m  ve=n  tilt=deg  north=on|off  scalebar=on|off
+           grid=none|ticks|crosses|lines  gridinterval=m|auto (plans and key plans)
+           legend=this_sheet|whole_set|whole_drawing (legends)  revisions=n|all (revision
+           tables)  locked=on|off  title=text  text=text  hide=layer  show=layer
+           hidden=layer,layer  file=path (an image view's picture, copied into the project)
 TILE n preset                   full cols2 rows2 quad sectionR sectionB sectionBR sectionMap3d,
                                 or the menu's name (Main and panel right)
+ARRANGE n                       no two views overlapping, the main view first and largest
+ARRANGE ALIGN left|right|top|bottom|hcentre|vcentre id id ...
+ARRANGE DISTRIBUTE across|up id id id ...   equal gaps, the first and last staying
+ARRANGE MATCHSCALE from id id ...   the views take the scale view `from` is drawn at
 GENERATE kind [option=value ...] [replace=on]   adds the sheets, or replaces every sheet
   fit       the drawing, area=x0,y0,x1,y1 or alignment=name on as few sheets as it takes:
             scale=auto|n model3d=on legend=on interval=m halfwidth=m
@@ -1986,6 +2455,7 @@ GENERATE kind [option=value ...] [replace=on]   adds the sheets, or replaces eve
   sections  cross sections of alignment=: interval=20|stations=a,b,c halfwidth=20 rows=4
             columns=2 scale=auto|n ve=auto|n
   frames    a sheet per imported plot frame: frame=on|off
+  register  a cover sheet put first: the drawing register and the revision table
   and, but for frames, paper=A0..A4 portrait|landscape frame=on|off; alignment= may be left
   out when the drawing has one alignment
 TITLEBLOCK [LIST]               the shared title-block values, the logo and the revisions
@@ -1995,8 +2465,25 @@ TITLEBLOCK field [value]        organisation project1..project4 client setnumber
 TITLEBLOCK REVISION [LIST]      the revisions
 TITLEBLOCK REVISION ADD code date "description" [by] | TITLEBLOCK REVISION REMOVE code
 TITLEBLOCK LOGO path            the logo, copied into the project ("" removes it)
-PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]   plots to PDF in the desktop application;
-                                headless: katana project --plot-sheets out.pdf)";
+PLOTSHEETS [path] [format=pdf|pdfs|png|tiff] [style=colour|grey|mono] [sheets=1,3-5] [dpi=n]
+           [lineweight=f] [folder=path] [pattern=text]   plots in the desktop application, the
+                                page setup filling in what is not given; a file a line after.
+                                Headless: katana project --plot-sheets out.pdf)";
+}
+
+std::string checkReplyLine(const Finding& finding)
+{
+    std::string line = std::format(
+        "{} {} {} {} message={}", toString(finding.severity), finding.code,
+        finding.sheetIndex ? std::to_string(*finding.sheetIndex + 1) : std::string("-"),
+        finding.viewportId.empty() ? std::string("-") : finding.viewportId, inQuotes(finding.message));
+    if (!finding.fix.empty()) {
+        line += " fix=" + inQuotes(finding.fix);
+    }
+    if (!finding.subject.empty()) {
+        line += " subject=" + inQuotes(finding.subject);
+    }
+    return line;
 }
 
 Result<std::size_t> sheetIndexFrom(const SheetSet& set, std::string_view text)
@@ -2037,99 +2524,101 @@ Result<std::size_t> sheetIndexFrom(const SheetSet& set, std::string_view text)
                      "a sheet is its number (1, 2 ...) or its id (s1, s2 ...)", std::string(text));
 }
 
-Result<std::vector<std::size_t>> parseSheetSelection(const SheetSet& set, std::string_view text)
-{
-    std::vector<std::size_t> chosen;
-    const auto add = [&chosen](std::size_t index) {
-        if (std::ranges::find(chosen, index) == chosen.end()) {
-            chosen.push_back(index);
-        }
-    };
-    if (upper(text) == "ALL") {
-        for (std::size_t i = 0; i < set.sheets.size(); ++i) {
-            add(i);
-        }
-        if (chosen.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "the set has no sheets");
-        }
-        return chosen;
-    }
-    std::size_t start = 0;
-    while (true) {
-        const std::size_t comma = text.find(',', start);
-        const std::string_view item =
-            text.substr(start, comma == std::string_view::npos ? std::string_view::npos
-                                                               : comma - start);
-        if (item.empty()) {
-            return makeError(ErrorCode::ParseFailure,
-                             "sheets are numbers, ids or ranges separated by commas: 1,3-5",
-                             std::string(text));
-        }
-        if (const std::size_t dash = item.find('-'); dash != std::string_view::npos) {
-            const auto low = sheetIndexFrom(set, item.substr(0, dash));
-            if (!low) {
-                return low.error();
-            }
-            const auto high = sheetIndexFrom(set, item.substr(dash + 1));
-            if (!high) {
-                return high.error();
-            }
-            if (*low > *high) {
-                return makeError(ErrorCode::InvalidArgument,
-                                 "a range runs from the lower sheet to the higher",
-                                 std::string(item));
-            }
-            for (std::size_t i = *low; i <= *high; ++i) {
-                add(i);
-            }
-        } else {
-            const auto one = sheetIndexFrom(set, item);
-            if (!one) {
-                return one.error();
-            }
-            add(*one);
-        }
-        if (comma == std::string_view::npos) {
-            return chosen;
-        }
-        start = comma + 1;
-    }
-}
-
 Result<PlotSheetsRequest> parsePlotSheets(const SheetSet& set, const std::vector<std::string>& args)
 {
-    constexpr std::string_view kUsage = "PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]";
-    if (args.empty() || args.front().empty()) {
-        return usage(kUsage);
-    }
+    constexpr std::string_view kUsage =
+        "PLOTSHEETS [path] [format=pdf|pdfs|png|tiff] [style=colour|grey|mono] [sheets=1,3-5] "
+        "[dpi=n] [lineweight=f] [folder=path] [pattern=text]";
     PlotSheetsRequest request;
-    request.path = pathFrom(args.front());
-    for (std::size_t i = 1; i < args.size(); ++i) {
+    std::optional<std::filesystem::path> folder;
+    for (std::size_t i = 0; i < args.size(); ++i) {
         const auto option = optionFrom(args[i]);
         if (!option) {
-            return makeError(ErrorCode::InvalidArgument,
-                             std::format("expected option=value; usage: {}", kUsage), args[i]);
-        }
-        if (option->key == "sheets" || option->key == "sheet") {
-            auto sheets = parseSheetSelection(set, option->value);
-            if (!sheets) {
-                return sheets.error();
+            if (i != 0 || args[i].empty()) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 std::format("expected option=value; usage: {}", kUsage), args[i]);
             }
-            request.sheets = std::move(*sheets);
-        } else if (option->key == "dpi") {
+            request.path = pathFrom(args[i]);
+            continue;
+        }
+        const std::string& key = option->key;
+        if (key == "sheets" || key == "sheet") {
+            // Read as every plot reads it, so a refusal says what it says there.
+            if (auto chosen = parseSheetSelection(option->value, set); !chosen) {
+                return chosen.error();
+            }
+            request.sheets = option->value;
+        } else if (key == "format") {
+            const std::string format = folded(option->value);
+            if (format != "pdf" && format != "pdfs" && format != "png" && format != "tiff" &&
+                format != "tif") {
+                return makeError(ErrorCode::InvalidArgument, "format= is pdf, pdfs, png or tiff",
+                                 option->word);
+            }
+            request.format = format == "tif" ? std::string("tiff") : format;
+        } else if (key == "style" || key == "colour" || key == "color" || key == "mode") {
+            auto mode = styleFrom(option->value);
+            if (!mode) {
+                return mode.error();
+            }
+            request.colourMode = *mode;
+        } else if (key == "dpi") {
             auto dpi = number(option->value, "dpi=");
             if (!dpi) {
                 return dpi.error();
             }
-            if (*dpi < kMinimumDpi || *dpi > kMaximumDpi) {
+            if (*dpi < kMinimumPlotDpi || *dpi > kMaximumPlotDpi) {
                 return makeError(ErrorCode::InvalidArgument,
-                                 std::format("dpi= is {} to {}", kMinimumDpi, kMaximumDpi),
+                                 std::format("dpi= is {} to {}", kMinimumPlotDpi, kMaximumPlotDpi),
                                  option->word);
             }
             request.dpi = *dpi;
+        } else if (key == "lineweight" || key == "lineweightscale") {
+            auto factor = number(option->value, "lineweight=");
+            if (!factor) {
+                return factor.error();
+            }
+            if (*factor < kMinimumLineWeightScale || *factor > kMaximumLineWeightScale) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 std::format("lineweight= is {} to {}", kMinimumLineWeightScale,
+                                             kMaximumLineWeightScale),
+                                 option->word);
+            }
+            request.lineWeightScale = *factor;
+        } else if (key == "folder") {
+            if (option->value.empty()) {
+                return makeError(ErrorCode::InvalidArgument, "folder= names a folder", option->word);
+            }
+            folder = pathFrom(option->value);
+        } else if (key == "pattern" || key == "names") {
+            const std::string pattern = unescaped(option->value);
+            if (Status valid = validateFileNamePattern(pattern); !valid) {
+                return valid.error();
+            }
+            request.fileNamePattern = pattern;
         } else {
-            return unknownOption(*option, "PLOTSHEETS", "sheets= and dpi=");
+            return unknownOption(*option, "PLOTSHEETS",
+                                 "format=, style=, sheets=, dpi=, lineweight=, folder= and pattern=");
         }
+    }
+    if (folder) {
+        if (!request.path.empty()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "give the PDF's path or folder=, not both: folder= is where a file a "
+                             "sheet goes",
+                             pathText(request.path));
+        }
+        if (request.format == "pdf") {
+            return makeError(ErrorCode::InvalidArgument,
+                             "format=pdf is one file: give its path rather than folder=");
+        }
+        request.path = *folder;
+        if (!request.format) {
+            request.format = "pdfs";
+        }
+    }
+    if (request.path.empty()) {
+        return usage(kUsage);
     }
     return request;
 }
@@ -2320,6 +2809,69 @@ Status setViewportOption(Viewport& viewport, std::string_view key, std::string_v
             }
             start = comma + 1;
         }
+    } else if (name == "legend" || name == "scope") {
+        if (Status s = onlyFor(viewport, option, viewport.kind == ViewportKind::Legend, "legend");
+            !s) {
+            return s;
+        }
+        // The stored names, and the words a person reaches for.
+        std::optional<LegendScope> scope = legendScopeFrom(value);
+        const std::string word = folded(value);
+        if (!scope && (word == "thissheet" || word == "sheet")) {
+            scope = LegendScope::ThisSheet;
+        } else if (!scope && (word == "wholeset" || word == "set")) {
+            scope = LegendScope::WholeSet;
+        } else if (!scope && (word == "wholedrawing" || word == "drawing" || word == "all")) {
+            scope = LegendScope::WholeDrawing;
+        }
+        if (!scope) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "legend= is this_sheet, whole_set or whole_drawing", option.word);
+        }
+        edited.legendScope = *scope;
+    } else if (name == "grid") {
+        if (Status s = onlyFor(viewport, option, isPlanLike(viewport.kind), "plan and key_plan");
+            !s) {
+            return s;
+        }
+        std::optional<GridStyle> style = gridStyleFrom(folded(value));
+        if (!style && folded(value) == "off") {
+            style = GridStyle::None;
+        }
+        if (!style) {
+            return makeError(ErrorCode::InvalidArgument, "grid= is none, ticks, crosses or lines",
+                             option.word);
+        }
+        edited.gridStyle = *style;
+    } else if (name == "gridinterval") {
+        if (Status s = onlyFor(viewport, option, isPlanLike(viewport.kind), "plan and key_plan");
+            !s) {
+            return s;
+        }
+        if (folded(value) == "auto") {
+            edited.gridInterval = 0.0;
+        } else {
+            auto interval = positive(value, "gridinterval=");
+            if (!interval) {
+                return fail(interval.error());
+            }
+            edited.gridInterval = *interval;
+        }
+    } else if (name == "revisions" || name == "limit") {
+        if (Status s = onlyFor(viewport, option, viewport.kind == ViewportKind::Revisions,
+                               "revisions");
+            !s) {
+            return s;
+        }
+        if (folded(value) == "all") {
+            edited.revisionLimit = 0;
+        } else {
+            auto limit = counting(value, "revisions=");
+            if (!limit) {
+                return fail(limit.error());
+            }
+            edited.revisionLimit = *limit;
+        }
     } else if (name == "kind") {
         return makeError(ErrorCode::InvalidArgument,
                          "a view's kind is fixed: VIEW REMOVE it and VIEW ADD another",
@@ -2328,7 +2880,8 @@ Status setViewportOption(Viewport& viewport, std::string_view key, std::string_v
         return makeError(ErrorCode::InvalidArgument,
                          "no view option of that name; it is rect, scale, centre, rotation, "
                          "alignment, from, to, stations, interval, halfwidth, ve, tilt, north, "
-                         "scalebar, locked, title, text, hide, show, hidden or file",
+                         "scalebar, grid, gridinterval, legend, revisions, locked, title, text, "
+                         "hide, show, hidden or file",
                          option.word);
     }
     viewport = std::move(edited);
@@ -2386,6 +2939,12 @@ Viewport defaultViewport(const SheetSet& set, std::size_t sheetIndexIn, Viewport
     } else if (kind == ViewportKind::Notes) {
         viewport.rect = place(90.0, 80.0);
         viewport.text = "1. ALL DIMENSIONS ARE IN METRES UNLESS NOTED OTHERWISE.";
+    } else if (kind == ViewportKind::SheetIndex) {
+        // Room for its five columns and a dozen rows at the table's largest
+        // text; a longer set continues in a second block, then shrinks.
+        viewport.rect = place(200.0, 120.0);
+    } else if (kind == ViewportKind::Revisions) {
+        viewport.rect = place(150.0, 50.0);
     } else {
         viewport.rect = place(100.0, 80.0);
     }
@@ -2535,8 +3094,18 @@ std::string describeViewport(const Viewport& viewport)
         line += " tilt=" + decimal(viewport.tiltDegrees);
     }
     if (isPlanLike(kind)) {
-        line += std::format(" north={} scalebar={}", onOffText(viewport.northArrow),
-                            onOffText(viewport.scaleBar));
+        line += std::format(" north={} scalebar={} grid={} gridinterval={}",
+                            onOffText(viewport.northArrow), onOffText(viewport.scaleBar),
+                            toString(viewport.gridStyle),
+                            viewport.gridInterval > 0.0 ? decimal(viewport.gridInterval)
+                                                        : std::string("auto"));
+    }
+    if (kind == ViewportKind::Legend) {
+        line += std::format(" legend={}", toString(viewport.legendScope));
+    }
+    if (kind == ViewportKind::Revisions) {
+        line += " revisions=" + (viewport.revisionLimit == 0 ? std::string("all")
+                                                             : std::to_string(viewport.revisionLimit));
     }
     line += std::format(" locked={}", onOffText(viewport.locked));
     if (!viewport.hiddenLayers.empty()) {

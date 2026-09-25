@@ -344,6 +344,26 @@ PlotRequest plotRequestFor(const plotting::PageSetup& setup, QString destination
     return request;
 }
 
+PlotRequest plotRequestFor(const plotting::PageSetup& setup, const plotting::PlotSheetsRequest& words)
+{
+    PlotRequest request =
+        plotRequestFor(setup, QString::fromStdWString(words.path.wstring()), words.sheets);
+    request.format = plotFormatFrom(words.format.value_or("pdf")).value_or(PlotFormat::Pdf);
+    if (words.colourMode) {
+        request.colourMode = *words.colourMode;
+    }
+    if (words.dpi) {
+        request.dpi = *words.dpi;
+    }
+    if (words.lineWeightScale) {
+        request.lineWeightScale = *words.lineWeightScale;
+    }
+    if (words.fileNamePattern) {
+        request.fileNamePattern = *words.fileNamePattern;
+    }
+    return request;
+}
+
 plotting::PageSetup pageSetupFor(const PlotRequest& request, const plotting::PageSetup& base)
 {
     plotting::PageSetup setup = base;

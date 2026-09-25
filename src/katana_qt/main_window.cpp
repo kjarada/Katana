@@ -9,6 +9,7 @@
 #include "jobs.hpp"
 #include "layer_manager.hpp"
 #include "plotting/plot_dialog.hpp"
+#include "plotting/sheet_arrange.hpp"
 #include "plotting/sheet_checks.hpp"
 #include "style_manager.hpp"
 
@@ -279,6 +280,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                 context.surfaces.push_back({surface.name, surface.surface});
             }
         }
+        // SHEETS CHECK with what the painter knows, as the Checks dock runs
+        // them; and what a view shows for ARRANGE, VIEW FIT and the rest, as
+        // the editor's Arrange menu measures it.
+        context.check = [this](std::span<const std::size_t> sheets) {
+            return checkSheetsFor(document_.sheetSet(), sheetSource(), sheets);
+        };
+        context.content = [this](const cad::plotting::Viewport& viewport) {
+            return viewportContent(viewport, sheetSource(), document_.sheetSet());
+        };
         return context;
     });
 
@@ -1900,9 +1910,13 @@ void MainWindow::runCommandLine()
         }
         return;
     }
-    // PLOTSHEETS path [sheets=1,3-5] [dpi=300]: the sheets to PDF. Here and
-    // not in the interpreter because the painter is Qt; the line is read by
-    // the interpreter's own rules (sheet_verbs.hpp, parsePlotSheets).
+    // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
+    // [folder=] [pattern=]: the sheets plotted as the Plot dialog and
+    // --plot-sheets plot them, the set's page setup filling in what is not
+    // given. Here and not in the interpreter because the painter is Qt; the
+    // line is read by the interpreter's own rules (sheet_verbs.hpp,
+    // parsePlotSheets). Each file written is logged on a line of its own,
+    // file="path", after the summary, for a script to pick up.
     if (verb == "PLOTSHEETS") {
         const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
         if (!tokens) {
@@ -1922,19 +1936,19 @@ void MainWindow::runCommandLine()
             logMessage(QString::fromStdString(parsed.error().describe()), true);
             return;
         }
-        PlotRequest request = plotRequestFor(set->pageSetup,
-                                             QString::fromStdWString(parsed->path.wstring()),
-                                             cad::plotting::formatSheetSelection(parsed->sheets));
-        request.format = PlotFormat::Pdf;
-        request.dpi = parsed->dpi;
+        const PlotRequest request = plotRequestFor(set->pageSetup, *parsed);
         // What cannot be drawn on a sheet is logged as a problem, and the
-        // PDF is still written: the line was carried out, not refused, so
+        // files are still written: the line was carried out, not refused, so
         // those do not count against it (runCommand), as they do not fail
         // --plot-sheets.
         const int errorsBefore = errorsLogged_;
-        if (const auto result = plotSheets(*set, request); !result) {
+        const auto result = plotSheets(*set, request);
+        if (!result) {
             logMessage(QString::fromStdString(result.error().describe()), true);
             return;
+        }
+        for (const QString& file : result->files) {
+            logMessage(QString("file=\"%1\"").arg(QDir::toNativeSeparators(file)));
         }
         errorsLogged_ = errorsBefore;
         return;

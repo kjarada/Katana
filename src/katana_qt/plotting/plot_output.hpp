@@ -44,6 +44,7 @@
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/page_setup.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
+#include "katana/cad/plotting/sheet_verbs.hpp"
 #include "katana/core/error.hpp"
 #include "sheet_painter.hpp"
 
@@ -94,6 +95,11 @@ struct PlotRequest {
 // naming and (filePerSheet) format, to `destination`, for `sheets`.
 [[nodiscard]] PlotRequest plotRequestFor(const katana::cad::plotting::PageSetup& setup,
                                          QString destination, std::string sheets = {});
+// The request the PLOTSHEETS verb's words make (sheet_verbs.hpp,
+// parsePlotSheets): the page setup's, with what the words give in its place.
+// The format is one PDF unless the words name one, as --plot-sheets has it.
+[[nodiscard]] PlotRequest plotRequestFor(const katana::cad::plotting::PageSetup& setup,
+                                         const katana::cad::plotting::PlotSheetsRequest& words);
 // The page setup a request amounts to: `base` with the request's style,
 // resolution, naming and whether it is a PDF a sheet. The format of a raster
 // plot is not a page setup's to keep, so a PNG or TIFF request keeps `base`'s
