@@ -63,7 +63,7 @@ Quick Select and Global Modify (`select.similar`, `select.quick`,
 `formatGlobalModify`); Edit Text and Edit Label (`annotateEditText`,
 `annotateEditLabel`) for a text or a label in the selection; and Deselect
 (`editDeselect`). An action the window does not have is left out, not faked,
-which is how Edit Text appears once the text tools add it. With nothing
+as in a test's window of a few actions; the desktop window has them all. With nothing
 selected it offers Repeat and the last tool's name (`planContextRepeat`, the
 tool's own action), Select All, Select by ID, Quick Select and Zoom Extents.
 
@@ -850,6 +850,29 @@ its `SHEETS SAVE`, `LOAD`, `APPEND`, `JSON` and `PAGESETUP` lines ("The Sheet
 Set menu and Page Setup"). The window's command line
 and the editor's lines get the same sheet-verb context,
 `sheetVerbContextFor`, which replaced the window's own copy of it.
+
+**One rule for a word on the line.** A name a dialog writes into its line is
+written by `cad::annotation::commandWord`
+(`include/katana/cad/annotation/command_words.hpp`): bare when it can be,
+double-quoted when it is empty or holds a blank. A name with a double quote or
+a line break in it cannot be carried, because the tokenizer has no escape, so it
+is refused. Otherwise the line would run on the name cut short at the quote.
+An annotation text uses `annotationTextWord`, which also writes a line break
+as `\n`. `src/katana_qt/command_word.hpp` hands a QString to the same rule and
+names the field in the refusal. The Alignment Manager, the Hatch Patterns tab,
+Edit Label and the plan view's shortcut menu write their names with it. The
+menu lists a layer or style whose name holds a quote (a DXF can bring one)
+disabled, with the reason as its tip. The parallel lanes of the 2026-09-26
+UI work first wrote four copies of this rule, and the integration folded them
+into this one.
+
+Not done: the Sheets editor still quotes every name and path it writes
+(`sheet_editor.cpp` `quoted`, `plotting/sheet_set_menu.cpp` `quotedPath`),
+and File > Import builds its `IMPORT "<file>"` line itself
+(`import_placement.cpp`). A path cannot hold a double quote on Windows, and
+the Sheets dialogs offer none. Still, each is a second spelling of the rule
+and should move onto `commandWord`. Doing so changes the lines those dialogs'
+tests pin.
 
 ### The session's verbs on the window's command line
 

@@ -161,6 +161,13 @@ TEST(LabelEditLine, FieldsThatMakeNoLineAreRefusedNamingTheField)
     refused(form, "the word none");
     form.text = "6\" pipe";
     refused(form, "a double quote");
+    // A backslash and an n typed as they are: LABEL SET would read them back
+    // as a line break the text does not have.
+    form.text = "C:\\new";
+    refused(form, "Own text: a backslash before an n");
+    form = current;
+    form.layer = "kerb\nline";
+    refused(form, "Layer: a line break");
     form = current;
     form.pinned = true;
     form.easting = "12,5";
