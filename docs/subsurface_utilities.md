@@ -165,8 +165,10 @@ UTILITY SCHEDULE  <out.csv> <scope> [SCHEMA <schema.csv>]
 
 `<scope>` is what every verb on drawing data takes, read by the one shared
 parser (`docs/cad.md`, "Scope and filter"): `SELECTION`, `DRAWING`, `VIEW
-[id]`, `AREA x0,y0,x1,y1` or `LAYERS a,b [ONLY]`, then `[WHERE key=value
-...]`. A first word that is one of those, or `WHERE`, takes the services
+[id] [EXTENTS]`, `AREA x0,y0,x1,y1` or `LAYERS a,b [ONLY]`, then `[WHERE
+key=value ...]`. `VIEW` is the window's plan view as it is on screen,
+`EXTENTS` its layers anywhere; `katana_cli` and `katana_mcp` have no view and
+take `AREA` instead. A first word that is one of those, or `WHERE`, takes the services
 drawn in the document ("Drawing data", below); anything else is the path of
 a schedule, as before - a file named like a scope word is given with its
 directory (`./drawing`).
@@ -501,26 +503,37 @@ Two things found in v1.2 while writing the extraction:
 
 Survey > Subsurface Utilities (AS 5488) has an item for each tool: Draw
 Utility Schedule, Utility Investigation Report, Verify Detections Against
-Exposures, Clearance of Proposed Works and Check Against a Delivery Schema.
-Each opens the same dialog on its own tab. The dialog has one field for each
-option the verb takes - the detected spacing and minimum cover shared by Draw
-and Report, as `SPACING` and `MINCOVER` are - shows the exact `UTILITY` line
-it will run, and runs
-that line through the window's command line. The line is logged and undoable
-like a typed one, and the reply appears in the dialog, where it can be copied
-or saved. Typing the same line on the command line does the same, which is how
-an agent drives it. After a draw, typed or from the dialog, every plan view is
-framed on what was drawn. `docs/desktop.md` ("Survey > Subsurface Utilities")
-describes how it is built.
+Exposures, Clearance of Proposed Works, Check Against a Delivery Schema,
+Regrade Drawn Utilities and Export Drawn Utilities as a Schedule. Each opens
+the same dialog on its own tab. The dialog has one field for each option the
+verb takes - the detected spacing and minimum cover shared by Draw, Report and
+Regrade, as `SPACING` and `MINCOVER` are - shows the exact `UTILITY` line it
+will run, and runs that line through the window's command line. The line is
+logged and undoable like a typed one, and the reply appears in the dialog,
+where it can be copied or saved. Typing the same line on the command line
+does the same, which is how an agent drives it. After a draw or a regrade,
+typed or from the dialog, every plan view is framed on what was drawn.
+
+Above the tabs, **Services from** chooses a schedule file or what is drawn.
+What is drawn is taken by the same "Apply to" and "Only those that match"
+controls as Format > Global Modify - the selection, what a view shows (only
+what is on screen, or its layers anywhere), the checked layers with or
+without their sublayers, or the whole drawing; then types, layer and style
+patterns, colour, a property and its value, text, drawn only - and they write
+the scope words into the line: `UTILITY REPORT VIEW 3 WHERE
+PROP=utility.type:water`. Report, Verify, Clearance and Check read either
+source; Draw reads its file; Regrade and Schedule read the drawing. Clearance's
+works are a design file, a line or polyline in the drawing (its `#id`, or Use
+Selected, at a level or its own heights) or one of the drawing's alignments.
+`VIEW` typed in the window works too, since the window answers it; a script
+run by `katana_cli` gives `AREA` instead. `docs/desktop.md` ("Survey >
+Subsurface Utilities") describes how it is built.
 
 ## Not done
 
-- The utilities dialog takes files only: its Drawing source, the scope and
-  filter controls, the design from an entity or an alignment, and the
-  Regrade and Schedule tabs are the window's half, not yet built. Until
-  then the window's command line runs every verb above, except that `VIEW`
-  is refused there as it is headless, because the window does not yet
-  supply the interpreter's scope context (`CommandInterpreter::setScopeContext`).
+- The dialog's Clearance design from an entity takes the id typed or the
+  one entity selected; picking the works in the drawing while the dialog
+  waits is not offered.
 - `REGRADE` leaves a quality-level layer it has emptied (a line no longer
   QL-C anywhere) in the layer table, and draws new runs ByLayer, not in a
   style or colour a person gave the old ones: the runs are derived output,
