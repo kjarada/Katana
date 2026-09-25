@@ -695,7 +695,7 @@ ruled tables:
 | Kind (stored as) | Columns | Rows |
 |---|---|---|
 | `SheetIndex` (`sheet_index`), the drawing register | SHEET No. \| TITLE \| SCALE \| PAPER \| REV | a row per sheet, in the set's order; the sheet it is drawn on shaded light grey |
-| `Revisions` (`revisions`), the revision table | REV \| DATE \| DESCRIPTION \| BY | `SheetSet::revisions`, newest at the top; with `revisionLimit` N only the newest N (0: every one) |
+| `Revisions` (`revisions`), the revision table | REV \| DATE \| DESCRIPTION \| BY | `SheetSet::revisions`, newest at the top - the newest is the last in the list, the order they were issued in, not the latest date or code; with `revisionLimit` N only the newest N (0: every one) |
 
 The heading across the top is the viewport's title, else `DRAWING REGISTER`
 or `REVISIONS` (`automaticTitle`). A table writes no title in the corner as
@@ -714,7 +714,8 @@ sheets:
   plan scale is decided first, as the painter decides it for the title block
   (`resolvedSheetSet` in `src/katana_qt/plotting/sheet_tables.hpp`), so a
   plan drawn at 1:2000 is not listed at the 1:500 it was stored with;
-- the revision is the one typed on the sheet, else the set's latest.
+- the revision is the one typed on the sheet (its `revision` field), else
+  the set's latest - the last in `SheetSet::revisions`.
 
 **The layout is headless.** `include/katana/cad/plotting/tables.hpp` lays a
 table out: every rule, every text and its anchor in paper millimetres, the
