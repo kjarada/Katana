@@ -12,6 +12,7 @@
 
 #include "katana/cad/utilities/utility_drawing.hpp"
 #include "katana/core/text.hpp"
+#include "katana/core/text_encoding.hpp"
 #include "katana/survey/subsurface/clearance.hpp"
 #include "katana/survey/subsurface/delivery_schema.hpp"
 #include "katana/survey/subsurface/utility_csv.hpp"
@@ -35,7 +36,8 @@ Error usage(std::string_view text)
 }
 
 // A path typed on the command line is UTF-8 text; on Windows a narrow string
-// would be read in the ANSI code page instead.
+// would be read in the ANSI code page instead. Only for bytes that ARE UTF-8:
+// converting any others throws, and nothing up the call chain catches it.
 std::filesystem::path pathFrom(std::string_view utf8)
 {
     std::u8string text;
@@ -46,9 +48,22 @@ std::filesystem::path pathFrom(std::string_view utf8)
     return std::filesystem::path(text);
 }
 
+// The window's lines are always UTF-8. katana_cli's arguments, its console and
+// a script saved from an ANSI editor on Windows arrive in the ANSI code page,
+// where "café" is not UTF-8; those bytes are opened as the narrow name they
+// are, which the C runtime reads in that code page - as the verbs did before
+// they moved into the interpreter.
+std::ifstream openFile(const std::string& path)
+{
+    if (core::isValidUtf8(path)) {
+        return std::ifstream(pathFrom(path), std::ios::binary);
+    }
+    return std::ifstream(path, std::ios::binary);
+}
+
 Result<std::string> readFile(const std::string& path)
 {
-    std::ifstream file(pathFrom(path), std::ios::binary);
+    std::ifstream file = openFile(path);
     if (!file) {
         return makeError(ErrorCode::NotFound, "cannot read " + path);
     }
