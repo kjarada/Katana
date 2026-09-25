@@ -159,9 +159,23 @@ double drawnScale(const Viewport& viewport, std::span<const Point2> content)
     if (!viewport.autoScale || !isPlanKind(viewport.kind) || viewport.rect.empty()) {
         return viewport.scale;
     }
-    // The painter's rule: the content measured about the point it is drawn
-    // round - its own middle with an automatic centre, else the view's centre
-    // - turned as the view turns it, with kAutoScaleSpare to spare.
+    // The painter's rule (resolvePlanViewport): the content measured about
+    // the point it is drawn round - its own middle with an automatic centre,
+    // else the view's centre - turned as the view turns it, with
+    // kAutoScaleSpare to spare. The painter measures a stretch of alignment
+    // by its points but the drawing by the four corners of its box, which a
+    // turned view needs more room for than the drawing's own outline.
+    std::vector<Point2> corners;
+    if (viewport.source.alignment.empty()) {
+        Box2 box;
+        for (const Point2& point : content) {
+            box.expand(point);
+        }
+        if (!box.empty()) {
+            corners = {box.min, Point2(box.max.x, box.min.y), box.max, Point2(box.min.x, box.max.y)};
+            content = corners;
+        }
+    }
     double width = 0.0;
     double height = 0.0;
     if (viewport.autoCentre) {

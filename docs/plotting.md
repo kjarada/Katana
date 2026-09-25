@@ -691,8 +691,8 @@ Layout advice and tidying, headless first. `include/katana/cad/plotting/arrange.
 holds pure functions on world points and on `Sheet` and `SheetSet` values.
 `include/katana/cad/plotting/arrange_commands.hpp` makes each of them ONE
 undoable step on a document, through `editSheet`, `editViewport` or
-`editSheetSet`. The sheet editor's Arrange menu calls those steps, and so
-will a command-line verb.
+`editSheetSet`. The sheet editor's Arrange menu calls those steps, and an
+agent or a command-line verb calls the same ones.
 
 **Content** is a set of world points; only its convex hull matters.
 `drawnOutline(model, layers)` is everything a plan with those layers hidden
@@ -705,7 +705,9 @@ draws:
 
 `viewportContent(model, viewport)` is what a plan or key plan shows: its
 stretch of the alignment its source names (sampled every 0.5 m, with every
-element change), else the drawing; a key plan adds the outlines it marks. The
+element change), else the drawing; a key plan adds the outlines it marks. A
+chainage range wholly off the alignment shows none of it, and then, as the
+painter does, the drawing. The
 editor adds the window's reference layers and meshes
 (`src/katana_qt/plotting/sheet_arrange.hpp`, `drawingContent`).
 
@@ -798,8 +800,9 @@ the tiling area:
 - Locked views stay where they are, and the others keep clear of them.
 - The main view, the lowest tiling rank (ties in the sheet's order), keeps
   its place and size.
-- Every other view that overlaps nothing kept before it stays. One that has
-  strayed off the drawing area is brought back first.
+- Every other view that overlaps nothing kept before it, lies inside the
+  tiling area less half a gutter and is no larger than the main view stays.
+  One that has strayed outside that is brought back first.
 - The rest are packed in rank order into the free space, one gutter from
   everything. Each goes to the highest, then the left-most, place it fits,
   the order a sheet is read in.
@@ -810,6 +813,10 @@ the tiling area:
   their kind's minimum. Next, every view but the main one is packed again.
   Only then is the main view made smaller, from its top-left corner, in 10%
   steps. A view that gives way is never made larger than the main view.
+- A main view with no place yet, or in the way of a locked view, is packed
+  first, with the rest, and nothing packed after it is made larger than it.
+- A view with no room even at its minimum stays where it was, and the views
+  placed after it keep clear of it.
 
 It is deterministic, and a sheet arranged completely does not change when it
 is arranged again. What it could not place is reported
@@ -822,7 +829,7 @@ straight in:
 | Function | What it does |
 |---|---|
 | `alignViewports(sheet, ids, edge)` | lines the views up on the outermost of their `left`, `right`, `top` or `bottom` edges, or on the middle of the box round them (`hcentre`: one vertical line; `vcentre`: one horizontal line). One view alone aligns to the tiling area. A locked view counts where it is and does not move |
-| `distributeViewports(sheet, ids, axis)` | equal gaps `horizontal`ly or `vertical`ly: the first and last stay and the others move between them; needs three that can move |
+| `distributeViewports(sheet, ids, axis)` | equal gaps `horizontal`ly or `vertical`ly: the first and last stay and the others move between them; needs three that can move. When the views between are wider together than the room between the first and the last, equal gaps would lay them over each other: that is refused (`InvalidArgument`, saying both sizes) and nothing moves |
 | `matchScale(set, ids, fromId)` | the views, on any sheet, take `fromId`'s scale and lose their automatic scale; a section matched to a section takes its exaggeration too; views with no scale are left out |
 | `fitViewportToContent(viewport, content, area)` | the rectangle grows or shrinks about its centre until the content, with 5% round it, just fits at the view's scale (`kFitSpare`), never below the kind's minimum and kept inside the drawing area; the view is centred on its content. A section measures (chainage or offset, level) points, the level exaggerated |
 
@@ -849,7 +856,10 @@ caller gives no content, it is gathered from the document's drawing with
 An automatic view is measured at the scale it is drawn at. `drawnScale`
 applies the painter's rule to the content: the first standard scale that
 holds it with 4% to spare, measured about the content's middle for an
-automatic centre and about the view's own centre otherwise. The editor
+automatic centre and about the view's own centre otherwise. A view along an
+alignment is measured by the content's points, any other by the four
+corners of the content's box, as the painter measures the drawing's box; so
+a turned automatic plan is matched at the scale it prints at. The editor
 passes the painter's exact answer instead. `mainPlanOf(set, sheetIndex)` is
 the plan "Choose paper" acts on: the sheet's first placed plan, else its
 first placed key plan.
