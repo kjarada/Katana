@@ -29,6 +29,8 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QToolBar>
+#include <QWidgetAction>
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/layout.hpp"
@@ -596,6 +598,17 @@ TEST(SheetEditorEditing, TheGridIsDrawnFaintlyOnlyWhileItIsOn)
     ASSERT_NE(view, nullptr);
     emit view->aboutToShow();
     EXPECT_TRUE(shown.action("sheetSnapGrid").isChecked());
+
+    // The whole window as a hand sees it: the grid, a group selected, a
+    // crossing band mid-drag, the rulers, the pictures in the list.
+    if (const char* dir = std::getenv("KATANA_SHEET_PNG"); dir != nullptr) {
+        shown.editor.renderThumbnailsNow();
+        canvas.setSelection({"vp1", "vp2"});
+        drag(canvas, shown.at(390.0, 60.0), shown.at(300.0, 150.0), Qt::ControlModifier,
+             Qt::LeftButton, /*release=*/false);
+        (void)shown.editor.grab().save(QString("%1/SheetEditorEditing.png").arg(dir));
+        mouse(canvas, QEvent::MouseButtonRelease, shown.at(300.0, 150.0));
+    }
 }
 
 // ---- the rulers and the cursor -----------------------------------------------------
@@ -955,6 +968,18 @@ TEST(SheetEditorEditing, EveryEditingActionHasAStableName)
           "sheetSelectAll", "sheetSelectNextView", "sheetSelectPreviousView", "sheetZoomSelection",
           "sheetSnapGrid", "sheetShowRulers", "sheetPreviousSheet", "sheetNextSheet", "sheetFitPage"}) {
         EXPECT_NE(shown.editor.findChild<QAction*>(QString::fromLatin1(name)), nullptr) << name;
+    }
+    // And every action of the window and its toolbar has a name an agent can
+    // trigger it by: the separators and the toolbar's buttons aside.
+    auto* bar = shown.editor.findChild<QToolBar*>(QStringLiteral("sheetToolBar"));
+    ASSERT_NE(bar, nullptr);
+    QList<QAction*> actions = shown.editor.actions();
+    actions += bar->actions();
+    for (QAction* action : actions) {
+        if (action->isSeparator() || qobject_cast<QWidgetAction*>(action) != nullptr) {
+            continue;
+        }
+        EXPECT_FALSE(action->objectName().isEmpty()) << action->text().toStdString();
     }
     EXPECT_NE(shown.editor.findChild<QMenu*>(QStringLiteral("sheetEditMenu")), nullptr);
     EXPECT_NE(shown.editor.findChild<QLabel*>(QStringLiteral("sheetCursorStatus")), nullptr);

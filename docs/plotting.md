@@ -846,6 +846,28 @@ Selection are enabled only while something is selected, and Paste only while
 the clipboard holds viewports. A disabled action leaves its key to the text
 box that has the focus.
 
+The toolbar's and the context menu's actions have names too: `sheetUndo`,
+`sheetRedo`, `sheetGenerate`, `sheetNewSheet`, `sheetTitleBlock`,
+`sheetPlotSheet`, `sheetPlotAll`, `sheetAddView_<kind>` and `sheetTile_<n>`
+(the menus' `sheetMenuAddView_<kind>` and `sheetMenuTile_<n>`), and
+`sheetBringToFront`, `sheetSendToBack` and `sheetFillDrawingArea`.
+
+The mouse, all in one place:
+
+| On the canvas | Does |
+|---|---|
+| click a viewport | selects it alone (one of a group: that one alone, on release) |
+| Ctrl-click or Shift-click a viewport | adds it to the selection or takes it out |
+| drag a selected viewport | moves the whole selection, snapped; ONE step on release |
+| drag a handle (one viewport selected) | resizes it, snapped; ONE step |
+| Shift-drag inside a plan or key plan | pans its drawing (ONE step); without a drag it is the Shift-click above |
+| drag on empty paper | a rubber band: left to right a window, right to left a crossing; Ctrl or Shift adds |
+| middle drag, or Space held and a left drag | pans the paper |
+| Alt while dragging | no snapping, to edges or the grid |
+| double-click a viewport / empty paper | zooms to it / fits the page |
+| wheel | zooms about the cursor |
+| Escape | abandons a drag, else clears the selection |
+
 The edits themselves, in `viewport_edits.hpp`, take the sheet by its
 position and the viewports by id:
 
