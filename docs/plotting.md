@@ -714,7 +714,10 @@ listed. A line from (30, 0) to (38, 0) is not listed either: its own box lies
 inside the strip's box, but the line never meets the strip.
 
 The finer rules:
-- A symbol reaches half its size past its point.
+- A symbol reaches half its size past its point. That is the size its
+  style gives it on the ground; a symbol sized on paper (a style with no
+  size) is judged by its point alone, so one whose point lies just outside
+  the window is not listed although a sliver of it prints at the edge.
 - A hatched area that covers the whole window is shown, although none of its
   edges is in the window.
 - Dimensions are not listed.
