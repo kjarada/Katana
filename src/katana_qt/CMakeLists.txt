@@ -86,6 +86,12 @@ target_sources(katana PRIVATE ${_katana_customisation_ui})
 file(GLOB _katana_plotting_ui CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/plotting/*.hpp")
 target_sources(katana PRIVATE ${_katana_plotting_ui})
+# The annotation front end (docs/annotation.md): the painter of a laid-out
+# annotation and the text and label style managers, thin over katana_cad's
+# annotation code. Globbed, one directory, like the sheets.
+file(GLOB _katana_annotation_ui CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.hpp")
+target_sources(katana PRIVATE ${_katana_annotation_ui})
 # One place a version is written: project(Katana VERSION ...). The About box
 # reads it from here and the Windows resource below from the same variable.
 target_compile_definitions(katana PRIVATE KATANA_VERSION="${PROJECT_VERSION}")

@@ -912,6 +912,10 @@ PlanPaintOptions ViewportWidget::screenOptions() const
     options.grid = gridVisible_;
     options.thinLines = thinScreenLines();
     options.symbolSprites = true;
+    // Paper-sized annotation at the document's annotation scale (ANNOSCALE,
+    // docs/annotation.md); a change of it is a command, so the kept drawing
+    // is repainted by the model revision it moves.
+    options.annotationScale = document_.annotationScale();
     return options;
 }
 

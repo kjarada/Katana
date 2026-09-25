@@ -144,6 +144,7 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
     std::vector<katana::gis::VectorFeature> features;
     std::size_t textSkipped = 0;
     std::size_t dimensionSkipped = 0;
+    std::size_t annotationSkipped = 0;
     std::size_t incompleteHeights = 0;
     std::size_t slopingArcs = 0;
 
@@ -220,6 +221,11 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
                     // feature; the formats here have nowhere to put it.
                     supported = false;
                     ++dimensionSkipped;
+                } else if constexpr (std::is_same_v<Held, katana::entity::LabelGeometry> ||
+                                     std::is_same_v<Held, katana::entity::LeaderGeometry>) {
+                    // Labels and leaders are annotation too, drawn for a view.
+                    supported = false;
+                    ++annotationSkipped;
                 } else {
                     // This was a catch-all that counted anything unhandled as a
                     // skipped DIMENSION - so a geometry kind added later would
@@ -370,6 +376,11 @@ Result<VectorExportResult> exportVector(const katana::entity::Model& model,
         result.warnings.push_back(
             std::to_string(dimensionSkipped) +
             " dimension entities were skipped: this format has no dimension geometry");
+    }
+    if (annotationSkipped > 0) {
+        result.warnings.push_back(
+            std::to_string(annotationSkipped) +
+            " labels and leaders were skipped: this format has no annotation geometry");
     }
     if (inPlan) {
         result.warnings.push_back(

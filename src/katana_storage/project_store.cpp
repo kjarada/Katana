@@ -277,6 +277,53 @@ constexpr Migration kMigrations[] = {
             UNIQUE (job, position)
         );
     )sql"},
+    // The annotation tables (entity/annotation.hpp, docs/annotation.md): text
+    // styles, label styles and the auto-label rules, and a dimension style's
+    // paper sizing. Three new tables, empty in a project written before this,
+    // and a column whose default - model units - is what every dimension
+    // style was; the built-in "Standard" text style is seeded by the model,
+    // as the default dimension style is, not stored until it is changed. So a
+    // project from before this migration opens exactly as it was.
+    //
+    // A text style is columns, one per field: it is a fixed set a DXF STYLE
+    // row also has. A label style keeps its name and kind as columns and the
+    // rest - the template and a dozen placement options likely to grow - as
+    // versioned JSON (serialization.hpp, labelStyleDefinitionToJson), the way
+    // a survey job keeps its settings, so a later option needs no migration.
+    {11, R"sql(
+        CREATE TABLE text_styles (
+            name         TEXT PRIMARY KEY,
+            font_family  TEXT NOT NULL,
+            paper_height REAL NOT NULL,
+            width_factor REAL NOT NULL,
+            oblique      REAL NOT NULL,
+            bold         INTEGER NOT NULL,
+            italic       INTEGER NOT NULL,
+            color        TEXT NOT NULL,
+            mask         INTEGER NOT NULL,
+            mask_margin  REAL NOT NULL,
+            readable     INTEGER NOT NULL,
+            line_spacing REAL NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE label_styles (
+            name       TEXT PRIMARY KEY,
+            kind       TEXT NOT NULL,
+            definition TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE label_rules (
+            name        TEXT PRIMARY KEY,
+            label_style TEXT NOT NULL,
+            layer       TEXT NOT NULL,
+            code        TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            label_layer TEXT NOT NULL,
+            enabled     INTEGER NOT NULL
+        ) WITHOUT ROWID;
+
+        ALTER TABLE dimension_styles ADD COLUMN paper_sized INTEGER NOT NULL DEFAULT 0;
+    )sql"},
 };
 
 std::string toUtf8(const fs::path& path)
@@ -583,6 +630,9 @@ ProjectContents captureModel(const katana::entity::Model& model, ProjectMetadata
     contents.hatchPatterns = model.hatchPatterns.all();
     contents.alignments = model.alignments.all();
     contents.propertyDefinitions = model.properties.all();
+    contents.textStyles = model.textStyles.all();
+    contents.labelStyles = model.labelStyles.all();
+    contents.labelRules = model.labelRules.all();
     contents.entities.reserve(model.entities.size());
     model.entities.forEach([&](const Entity& entity) { contents.entities.push_back(entity); });
     contents.relationships = std::move(relationships);
@@ -680,6 +730,25 @@ template <typename Contents> Status applyContents(Contents&& contents, katana::e
     }
     for (auto& definition : contents.propertyDefinitions) {
         if (auto status = staged.properties.define(take(definition)); !status) {
+            return status;
+        }
+    }
+    for (auto& style : contents.textStyles) {
+        // "Standard" is built in, so a stored one updates rather than adds.
+        auto status = style.name == katana::entity::kDefaultTextStyleName
+                          ? staged.textStyles.update(style)
+                          : staged.textStyles.add(take(style));
+        if (!status) {
+            return status;
+        }
+    }
+    for (auto& style : contents.labelStyles) {
+        if (auto status = staged.labelStyles.add(take(style)); !status) {
+            return status;
+        }
+    }
+    for (auto& rule : contents.labelRules) {
+        if (auto status = staged.labelRules.add(take(rule)); !status) {
             return status;
         }
     }
@@ -1502,6 +1571,8 @@ Status ProjectStore::save(const ProjectContents& contents)
                                        "DELETE FROM property_definitions; DELETE FROM styles;"
                                        "DELETE FROM linetype_elements; DELETE FROM linetypes;"
                                        "DELETE FROM dimension_styles;"
+                                       "DELETE FROM text_styles; DELETE FROM label_styles;"
+                                       "DELETE FROM label_rules;"
                                        "DELETE FROM hatch_families; DELETE FROM hatch_patterns;"
                                        "DELETE FROM alignment_pvis; DELETE FROM alignment_pis; DELETE FROM alignments;"
                                        "DELETE FROM layers;");
@@ -1595,8 +1666,8 @@ Status ProjectStore::save(const ProjectContents& contents)
     auto insertDimensionStyle = database.prepare(
         "INSERT INTO dimension_styles (name, text_height, text_gap, extension_offset,"
         " extension_beyond, arrow_size, arrow_head, unit_scale, prefix, suffix, decimals,"
-        " round_to, suppress_zeros)"
-        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)");
+        " round_to, suppress_zeros, paper_sized)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)");
     if (!insertDimensionStyle) {
         return insertDimensionStyle.error();
     }
@@ -1608,11 +1679,72 @@ Status ProjectStore::save(const ProjectContents& contents)
                     7, katana::entity::toString(style.arrowHead))(8, style.unitScale)(
                     9, std::string_view(style.prefix))(10, std::string_view(style.suffix))(
                     11, static_cast<std::int64_t>(style.decimals))(12, style.roundTo)(
-                    13, style.suppressTrailingZeros)
+                    13, style.suppressTrailingZeros)(14, style.paperSized)
                     .run();
             !status) {
             return makeError(status.error().code, status.error().message,
                              "dimension style=" + style.name + " " + status.error().context);
+        }
+    }
+
+    auto insertTextStyle = database.prepare(
+        "INSERT INTO text_styles (name, font_family, paper_height, width_factor, oblique, bold,"
+        " italic, color, mask, mask_margin, readable, line_spacing)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)");
+    if (!insertTextStyle) {
+        return insertTextStyle.error();
+    }
+    for (const katana::entity::TextStyle& style : contents.textStyles) {
+        // An empty colour is ByLayer, the one way the column says "none".
+        const std::string colour = style.color ? style.color->toHex() : std::string();
+        if (auto status = Binder(*insertTextStyle)(1, std::string_view(style.name))(
+                              2, std::string_view(style.fontFamily))(3, style.paperHeight)(
+                              4, style.widthFactor)(5, style.oblique)(6, style.bold)(
+                              7, style.italic)(8, std::string_view(colour))(9, style.mask)(
+                              10, style.maskMargin)(11, style.readable)(12, style.lineSpacing)
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "text style=" + style.name + " " + status.error().context);
+        }
+    }
+
+    auto insertLabelStyle = database.prepare(
+        "INSERT INTO label_styles (name, kind, definition) VALUES (?1, ?2, ?3)");
+    if (!insertLabelStyle) {
+        return insertLabelStyle.error();
+    }
+    for (const katana::entity::LabelStyle& style : contents.labelStyles) {
+        auto definition = katana::entity::labelStyleDefinitionToJson(style);
+        if (!definition) {
+            return makeError(definition.error().code, definition.error().message,
+                             "label style=" + style.name);
+        }
+        if (auto status = Binder(*insertLabelStyle)(1, std::string_view(style.name))(
+                              2, katana::entity::toString(style.kind))(
+                              3, std::string_view(*definition))
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "label style=" + style.name + " " + status.error().context);
+        }
+    }
+
+    auto insertLabelRule = database.prepare(
+        "INSERT INTO label_rules (name, label_style, layer, code, entity_type, label_layer,"
+        " enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)");
+    if (!insertLabelRule) {
+        return insertLabelRule.error();
+    }
+    for (const katana::entity::LabelRule& rule : contents.labelRules) {
+        if (auto status = Binder(*insertLabelRule)(1, std::string_view(rule.name))(
+                              2, std::string_view(rule.labelStyle))(3, std::string_view(rule.layer))(
+                              4, std::string_view(rule.code))(5, std::string_view(rule.entityType))(
+                              6, std::string_view(rule.labelLayer))(7, rule.enabled)
+                              .run();
+            !status) {
+            return makeError(status.error().code, status.error().message,
+                             "label rule=" + rule.name + " " + status.error().context);
         }
     }
 
@@ -1904,8 +2036,8 @@ Result<ProjectContents> ProjectStore::load()
 
     status = forEachRow(
         "SELECT name, text_height, text_gap, extension_offset, extension_beyond, arrow_size,"
-        " arrow_head, unit_scale, prefix, suffix, decimals, round_to, suppress_zeros"
-        " FROM dimension_styles ORDER BY name",
+        " arrow_head, unit_scale, prefix, suffix, decimals, round_to, suppress_zeros,"
+        " paper_sized FROM dimension_styles ORDER BY name",
         [&](SqliteStatement& row) -> Status {
             katana::entity::DimensionStyle style;
             style.name = row.columnText(0);
@@ -1926,7 +2058,81 @@ Result<ProjectContents> ProjectStore::load()
             style.decimals = static_cast<int>(row.columnInt64(10));
             style.roundTo = row.columnDouble(11);
             style.suppressTrailingZeros = row.columnInt64(12) != 0;
+            style.paperSized = row.columnInt64(13) != 0;
             contents.dimensionStyles.push_back(std::move(style));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, font_family, paper_height, width_factor, oblique, bold, italic, color,"
+        " mask, mask_margin, readable, line_spacing FROM text_styles ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::TextStyle style;
+            style.name = row.columnText(0);
+            style.fontFamily = row.columnText(1);
+            style.paperHeight = row.columnDouble(2);
+            style.widthFactor = row.columnDouble(3);
+            style.oblique = row.columnDouble(4);
+            style.bold = row.columnInt64(5) != 0;
+            style.italic = row.columnInt64(6) != 0;
+            if (const std::string colour = row.columnText(7); !colour.empty()) {
+                const auto parsed = katana::entity::Color::fromHex(colour);
+                if (!parsed) {
+                    return makeError(parsed.error().code, parsed.error().message,
+                                     "text style=" + style.name);
+                }
+                style.color = *parsed;
+            }
+            style.mask = row.columnInt64(8) != 0;
+            style.maskMargin = row.columnDouble(9);
+            style.readable = row.columnInt64(10) != 0;
+            style.lineSpacing = row.columnDouble(11);
+            contents.textStyles.push_back(std::move(style));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, kind, definition FROM label_styles ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::LabelStyle style;
+            style.name = row.columnText(0);
+            const auto kind = katana::entity::labelKindFromString(row.columnText(1));
+            if (!kind) {
+                return makeError(kind.error().code, kind.error().message,
+                                 "label style=" + style.name);
+            }
+            style.kind = *kind;
+            if (auto read = katana::entity::labelStyleDefinitionFromJson(row.columnText(2), style);
+                !read) {
+                return makeError(read.error().code, read.error().message,
+                                 "label style=" + style.name + " " + read.error().context);
+            }
+            contents.labelStyles.push_back(std::move(style));
+            return {};
+        });
+    if (!status) {
+        return status.error();
+    }
+
+    status = forEachRow(
+        "SELECT name, label_style, layer, code, entity_type, label_layer, enabled"
+        " FROM label_rules ORDER BY name",
+        [&](SqliteStatement& row) -> Status {
+            katana::entity::LabelRule rule;
+            rule.name = row.columnText(0);
+            rule.labelStyle = row.columnText(1);
+            rule.layer = row.columnText(2);
+            rule.code = row.columnText(3);
+            rule.entityType = row.columnText(4);
+            rule.labelLayer = row.columnText(5);
+            rule.enabled = row.columnInt64(6) != 0;
+            contents.labelRules.push_back(std::move(rule));
             return {};
         });
     if (!status) {
