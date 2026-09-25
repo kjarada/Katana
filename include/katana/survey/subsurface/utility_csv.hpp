@@ -12,6 +12,11 @@
 //   optional  level, level_ref, surface, h_unc, v_unc, ql, path, verifies,
 //             type, owner, material, diameter_mm, status, config, description
 //
+// The TfNSW Utility Schema's attribute names are accepted too - AssetIdentifier
+// for line, AssetTypeCode for type, LocateMethod, DepthLocation, Depth, Size
+// (millimetres, inside, "W x H") - and the rest of its attributes are kept
+// by name, uninterpreted (docs/subsurface_utilities.md has the table).
+//
 // Each name has aliases (utilityCsvColumns() lists them), and a column whose
 // header matches none of them is an error rather than something skipped: a
 // misspelt "survace" column read past would leave every cover uncomputed with
@@ -40,10 +45,18 @@
 
 namespace katana::survey::subsurface {
 
+// Where a column that is kept but not interpreted is kept.
+enum class CarriedOn {
+    Interpreted, // read into the model's own fields
+    Line,        // UtilityAttributes::fields, one value per service
+    Vertex,      // UtilityVertex::fields
+};
+
 struct UtilityCsvColumn {
     std::string_view name;                 // the canonical name, as listed above
     std::vector<std::string_view> aliases; // also accepted, compared without case, blanks, '-', '_'
     bool required = false;
+    CarriedOn carried = CarriedOn::Interpreted;
 };
 
 // Every column the reader knows, in the order above.
