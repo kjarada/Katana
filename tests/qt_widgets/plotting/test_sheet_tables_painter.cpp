@@ -409,3 +409,55 @@ TEST(SheetTablePainter, ARealisticCoverIsLegible)
         }
     }
 }
+
+TEST(SheetTablePainter, ALongRegisterContinuesInASecondBlockAndLongRevisionsWrap)
+{
+    // A cover over 150 sheets and four revisions, one described at length:
+    // the register fills two blocks of the smallest text and counts the
+    // rest; the long description wraps inside its cell and its row is taller.
+    Model model;
+    SheetSource source;
+    source.plan.model = &model;
+    plotting::SheetSet set;
+    for (int i = 1; i <= 150; ++i) {
+        set.sheets.push_back(sheetNamed("s" + std::to_string(i + 1),
+                                        "PLAN AND LONGITUDINAL SECTION CH " + std::to_string(i * 100)));
+    }
+    set.revisions = {{"A", "01/02/26", "FIRST ISSUE", "JC"},
+                     {"B", "03/02/26", "KERBS ADDED", "RE"},
+                     {"C", "05/02/26",
+                      "LEVELS CHECKED AGAINST THE NEW CONTROL, DRAINAGE PITS RENUMBERED AND THE "
+                      "EASTERN BOUNDARY REDRAWN FROM THE LATEST TITLE SEARCH",
+                      "JC"},
+                     {"D", "09/02/26", "ISSUED FOR CONSTRUCTION", "RE"}};
+    auto cover = plotting::registerSheet(set);
+    ASSERT_TRUE(cover.ok());
+    set.sheets.insert(set.sheets.begin(), std::move(*cover));
+
+    SheetPaintStats stats;
+    const QImage paper = painted(set, source, &stats);
+    const plotting::Viewport& index = set.sheets[0].viewports[0];
+    const plotting::Viewport& revisions = set.sheets[0].viewports[1];
+    const plotting::TableLayout rows = plotting::layoutViewportTable(set, 0, index);
+    EXPECT_EQ(rows.blocks, 2u);
+    EXPECT_DOUBLE_EQ(rows.capMm, 1.8);
+    ASSERT_GT(rows.rowsHidden, 0u);
+    ASSERT_EQ(stats.problems.size(), 1u);
+    EXPECT_TRUE(stats.problems[0].starts_with(index.id + ": ")) << stats.problems[0];
+    // The last row shown is in the second block, and it is drawn.
+    const Box2 last = rows.rowBoxes.back();
+    EXPECT_NEAR(last.min.x, index.rect.center().x, 1e-9);
+    EXPECT_GT(inkIn(paper, box(last.min.x + 0.3, last.min.y + 0.3, last.min.x + 40.0, last.max.y - 0.3)), 20);
+
+    const plotting::TableLayout issued = plotting::layoutViewportTable(set, 0, revisions);
+    ASSERT_EQ(issued.rowsShown, 4u);
+    EXPECT_EQ(issued.rowsHidden, 0u);
+    // Newest first: D, then the long C, whose row holds several lines.
+    const Box2 longRow = issued.rowBoxes[1];
+    EXPECT_GT(longRow.height(), 2.0 * issued.rowHeightMm);
+    EXPECT_NEAR(issued.rowBoxes[0].height(), issued.rowHeightMm, 1e-9);
+    // Ink on the wrapped lines, low in the tall row as well as at its top.
+    EXPECT_GT(inkIn(paper, box(longRow.min.x + 20.0, longRow.min.y + 0.3, longRow.max.x - 10.0,
+                               longRow.min.y + issued.rowHeightMm)),
+              20);
+}
