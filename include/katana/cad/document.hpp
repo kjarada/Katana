@@ -19,6 +19,7 @@
 #include <string_view>
 #include <vector>
 
+#include "katana/cad/drawing/drafting.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -241,6 +242,12 @@ class Document {
     [[nodiscard]] const SelectionSet& selection() const { return selection_; }
     // Call after changing the selection so views refresh.
     void notifySelectionChanged();
+    // The drafting aids - ortho, polar, object snaps, angle convention,
+    // locks (drawing/drafting.hpp): session state shared by every view, the
+    // command line and the verbs an agent drives them with. Not part of the
+    // drawing, so not saved and not undone.
+    [[nodiscard]] DraftingSettings& drafting() { return drafting_; }
+    [[nodiscard]] const DraftingSettings& drafting() const { return drafting_; }
 
     [[nodiscard]] const std::string& currentLayer() const { return currentLayer_; }
     [[nodiscard]] katana::core::Status setCurrentLayer(const std::string& name);
@@ -386,6 +393,7 @@ class Document {
     std::unique_ptr<katana::storage::ProjectStore> store_;
     katana::storage::ProjectMetadata metadata_;
     SelectionSet selection_;
+    DraftingSettings drafting_;
     std::string currentLayer_{katana::entity::kDefaultLayerName};
     std::string currentStyle_{};
     std::shared_ptr<ListenerHandle::Registry> listeners_;

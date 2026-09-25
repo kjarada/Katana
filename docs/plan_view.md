@@ -328,3 +328,13 @@ drawing down. `lastFrameMilliseconds`, `lastDrawingMilliseconds` and
   output, plotting on a worker thread with its own cache.
 * A GPU linework layer under the QPainter overlay, for drawings where even
   the thin pen is too slow.
+
+## Grips and the drafting aids
+
+With a selection and no tool running the view draws the selection's grips
+and forwards its mouse and keys to `drawing::GripController`
+(`src/katana_qt/drawing/grip_controller.hpp`) before its own selection
+handling; a grip drag snaps from the grip's old position and, with no
+object snap, is constrained by the document's drafting settings (ortho,
+polar, locks), whose label is drawn beside the cursor. The gesture and the
+rules are `docs/drawing.md` ("Grips", "Precision input").
