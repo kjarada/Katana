@@ -221,6 +221,32 @@ TEST(UtilityVerbs, EachVerbRefusesWhatItCannotRun)
     EXPECT_EQ(session.entities(), 0u);
 }
 
+TEST(UtilityVerbs, APathThatIsNotUtf8IsOpenedAsTheNarrowNameItIs)
+{
+    // katana_cli on Windows gets its arguments, its console and a script saved
+    // from an ANSI editor in the ANSI code page, where the "é" of "café" is the
+    // one byte E9 - not UTF-8. Made into a UTF-8 path, that threw, and nothing
+    // caught it: the process ended. It is the narrow name it is, read by the C
+    // runtime as this system reads narrow names - so a file made under it is
+    // found by it, whatever the code page.
+    Session session;
+    const ScratchDirectory scratch("narrow");
+    const std::string narrow = scratch.path.generic_string() + "/caf\xE9.csv";
+    const katana::core::Error missing = session.refused("UTILITY VERIFY \"" + narrow + "\"");
+    EXPECT_EQ(missing.code, ErrorCode::NotFound) << missing.describe();
+
+    {
+        std::ifstream sample(kSamples + "/schedule.csv", std::ios::binary);
+        std::ofstream out(narrow, std::ios::binary);
+        if (!out) {
+            GTEST_SKIP() << "this system makes no file of that narrow name";
+        }
+        out << sample.rdbuf();
+    }
+    const std::string reply = session.ok("UTILITY DRAW \"" + narrow + "\"");
+    EXPECT_TRUE(contains(reply, "utilities drawn lines=4 vertices=14")) << reply;
+}
+
 TEST(UtilityVerbs, TheDrawRepliesWithItsRecordsBoundsFirst)
 {
     Session session;
