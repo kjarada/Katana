@@ -171,11 +171,23 @@ Result<std::vector<std::size_t>> parseSheetSelection(std::string_view text, cons
     if (count == 0) {
         return makeError(ErrorCode::InvalidArgument, "there are no sheets to plot");
     }
+    // Spaces are dropped only around the commas and the dash of a range, not
+    // inside a part: "1 3" is a mistake for "1,3" and is refused, rather than
+    // read as sheet 13.
     std::string compact;
-    for (const char c : text) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
         if (c != ' ' && c != '\t') {
             compact.push_back(c);
+            continue;
         }
+        const auto next = text.find_first_not_of(" \t", i);
+        const bool edge = compact.empty() || compact.back() == ',' || compact.back() == '-' ||
+                          next == std::string_view::npos || text[next] == ',' || text[next] == '-';
+        if (!edge) {
+            compact.push_back(' ');
+        }
+        i = next == std::string_view::npos ? text.size() : next - 1;
     }
     std::vector<std::size_t> chosen;
     if (compact.empty() || lowerAscii(compact) == "all") {

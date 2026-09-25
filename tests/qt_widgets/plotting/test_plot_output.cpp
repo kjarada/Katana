@@ -471,6 +471,31 @@ TEST(PlotOutput, ACancelledFilePerSheetPlotKeepsTheFilesItFinished)
     }
 }
 
+TEST(PlotOutput, AFileThatCannotBeWrittenStopsThePlotAndTheErrorNamesTheFilesKept)
+{
+    Fixture fixture;
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    for (const PlotFormat format : {PlotFormat::PdfPerSheet, PlotFormat::Png}) {
+        const QString folder = dir.filePath(QString::fromUtf8(katana::qt::toString(format)));
+        const QString extension = katana::qt::plotFormatExtension(format);
+        // A folder where the third sheet's file goes: no file can take its name.
+        ASSERT_TRUE(QDir().mkpath(QDir(folder).filePath("C03 THREE" + extension)));
+        PlotRequest asked = request(format, folder);
+        asked.dpi = 50.0;
+        const auto report = fixture.plot(asked);
+        ASSERT_FALSE(report.ok());
+        EXPECT_EQ(report.error().code, ErrorCode::FileExportFailure);
+        const std::string message = report.error().message;
+        EXPECT_NE(message.find("; 2 files written before it were kept: "), std::string::npos)
+            << message;
+        EXPECT_NE(message.find("C01 ONE" + extension.toStdString() + ","), std::string::npos)
+            << message;
+        EXPECT_NE(message.find("C02 TWO" + extension.toStdString()), std::string::npos) << message;
+        EXPECT_TRUE(QFileInfo(QDir(folder).filePath("C02 TWO" + extension)).isFile());
+    }
+}
+
 TEST(PlotOutput, ARequestIsCheckedBeforeAnythingIsWritten)
 {
     Fixture fixture;

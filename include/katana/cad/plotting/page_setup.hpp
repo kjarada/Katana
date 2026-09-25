@@ -80,8 +80,9 @@ struct PageSetup {
 
 // The sheets `text` names, as indices into `set.sheets`, in the order named
 // and each once: comma-separated sheet positions from 1 ("4"), ranges of them
-// ("3-5", low to high) and sheet ids ("s7"); spaces are ignored. Empty text or
-// "all" is every sheet in order. InvalidArgument, naming the part, for a
+// ("3-5", low to high) and sheet ids ("s7"); spaces around a comma or a
+// range's dash are ignored, and one inside a part ("1 3") is refused rather
+// than read as sheet 13. Empty text or "all" is every sheet in order. InvalidArgument, naming the part, for a
 // position past the last sheet or below 1, a backward range, or a word that
 // is no sheet's id; and for a set with no sheets.
 [[nodiscard]] core::Result<std::vector<std::size_t>> parseSheetSelection(std::string_view text,

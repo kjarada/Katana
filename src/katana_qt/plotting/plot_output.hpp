@@ -140,7 +140,9 @@ using SheetSourceProvider = std::function<SheetSource()>;
 
 // Plots the sheets of `set` that `request` selects, in the order selected.
 // validatePlotRequest's errors, and FileExportFailure (naming the file) when
-// a file cannot be written; files finished before a failure are kept.
+// a file cannot be written; files finished before a failure are kept, and
+// the error's message ends by listing them ("; 2 files written before it
+// were kept: ...").
 [[nodiscard]] katana::core::Result<PlotReport>
 plotSheets(const katana::cad::plotting::SheetSet& set, const PlotRequest& request,
            const SheetSourceProvider& source, SheetPaintCache& cache,
