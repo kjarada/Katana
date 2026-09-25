@@ -4,7 +4,7 @@
 // classification.hpp) grouping:
 //
 //   * one element per GRADED SEGMENT - an IfcPipeSegment, IfcCableSegment,
-//     IfcCableCarrierSegment or IfcFlowSegment - because AS 5488 grades a
+//     IfcCableCarrierSegment or IfcDistributionFlowElement - because AS 5488 grades a
 //     segment, not a service: a water main verified by a pothole is QL-A for
 //     a metre and QL-B either side, and a single element carrying one level
 //     would claim too much or too little along most of its length
@@ -68,8 +68,8 @@ namespace {
 // per service, and per point. The rest arrive already by their schema names
 // in UtilityAttributes::fields and UtilityVertex::fields.
 constexpr std::array<std::string_view, 7> kSchemaServiceColumns{
-    "AssetIdentifier", "AssetTypeCode", "AssetOwner", "AssetStatus",
-    "Size",            "Material",      "Configuration"};
+    "AssetIdentifier", "AssetTypeCode", "AssetOwner", "AssetStatus", "Size",
+    "Material",        "Configuration"};
 constexpr std::array<std::string_view, 4> kSchemaPointColumns{"LocateMethod", "DepthLocation",
                                                               "Depth", "QualityLevel"};
 
@@ -238,9 +238,10 @@ class UtilityWriter {
         if (input_.lines.empty()) {
             return;
         }
-        standard_ = b_.classification("as5488", "Standards Australia", "2019", std::string(kStandard),
-                                      "Classification of subsurface utility information: quality "
-                                      "levels A to D");
+        standard_ =
+            b_.classification("as5488", "Standards Australia", "2019", std::string(kStandard),
+                              "Classification of subsurface utility information: quality "
+                              "levels A to D");
         for (const sub::UtilityLine& line : input_.lines) {
             writeService(line);
         }
@@ -260,7 +261,8 @@ class UtilityWriter {
             const sub::DeliverySchema* schema = input_.schema;
             const bool tfnsw = schema == nullptr || schema->title.starts_with("TfNSW");
             schemaClassification_ = b_.classification(
-                "delivery", tfnsw ? "Transport for NSW" : "", schema ? schema->version : std::string(),
+                "delivery", tfnsw ? "Transport for NSW" : "",
+                schema ? schema->version : std::string(),
                 schema && !schema->title.empty() ? schema->title
                                                  : "TfNSW Utility Schema and Specification",
                 "Asset type codes (AS 5488.2 Table A.4) of the delivery schema");
@@ -299,15 +301,15 @@ class UtilityWriter {
         const UtilityClass run = classifyUtilityRun(service);
         const std::string systemName =
             run.system == "USERDEFINED" ? run.systemObjectType : run.system;
-        const Id system = b_.file().add("IfcDistributionSystem",
-                                        Args()
-                                            .string(b_.guid(key))
-                                            .null()
-                                            .string(line.id)
-                                            .stringOrNull(service.description)
-                                            .stringOrNull(run.systemObjectType)
-                                            .stringOrNull(longName(service))
-                                            .enumeration(run.system));
+        const Id system =
+            b_.file().add("IfcDistributionSystem", Args()
+                                                       .string(b_.guid(key))
+                                                       .null()
+                                                       .string(line.id)
+                                                       .stringOrNull(service.description)
+                                                       .stringOrNull(run.systemObjectType)
+                                                       .stringOrNull(longName(service))
+                                                       .enumeration(run.system));
         ++b_.report().classes["IfcDistributionSystem"];
         b_.referenceInSite(system);
         ++b_.report().services;
@@ -338,12 +340,14 @@ class UtilityWriter {
         // of its elements, so that whichever a person picks says it.
         std::vector<Id> described{system};
         described.insert(described.end(), elements.begin(), elements.end());
-        b_.defines(key + "/service", b_.propertySet(key + "/service", "AS5488_Service",
-                                                    serviceProperties(service, graded)),
-                   described);
+        b_.defines(
+            key + "/service",
+            b_.propertySet(key + "/service", "AS5488_Service", serviceProperties(service, graded)),
+            described);
         PropertyList reference;
         reference.identifier("Reference", line.id);
-        b_.defines(key + "/system", b_.propertySet(key + "/system", "Pset_DistributionSystemCommon", reference),
+        b_.defines(key + "/system",
+                   b_.propertySet(key + "/system", "Pset_DistributionSystemCommon", reference),
                    {system});
         PropertyList construction;
         construction.label("AssetIdentifier", line.id);
@@ -351,9 +355,10 @@ class UtilityWriter {
             installed != service.fields.end()) {
             construction.date("InstallationDate", isoDate(installed->second));
         }
-        b_.defines(key + "/construction",
-                   b_.propertySet(key + "/construction", "Pset_ConstructionOccurence", construction),
-                   elements);
+        b_.defines(
+            key + "/construction",
+            b_.propertySet(key + "/construction", "Pset_ConstructionOccurence", construction),
+            elements);
         if (deliverySchedule(line)) {
             b_.defines(key + "/delivery",
                        b_.propertySet(key + "/delivery", deliveryPropertySetName(input_.schema),
@@ -366,8 +371,8 @@ class UtilityWriter {
                                                         : std::string(assetTypeCode(service.type));
             }();
             if (!code.empty()) {
-                const Id typeReference = b_.classificationReference(
-                    schemaClassification(), code, sub::toString(service.type));
+                const Id typeReference = b_.classificationReference(schemaClassification(), code,
+                                                                    sub::toString(service.type));
                 for (const Id object : described) {
                     b_.associate(typeReference, object);
                 }
@@ -455,13 +460,13 @@ class UtilityWriter {
                     sub::serviceLevel(to) ? levelReferenceName(to.levelReference) : "");
         grade.length("StartCentreLevel", startCentre).length("EndCentreLevel", endCentre);
         if (sub::hasVerticalMeasurement(from) && sub::hasVerticalMeasurement(to)) {
-            grade.boolean("LevelsQualified", start.classification.levelQualified &&
-                                                 end.classification.levelQualified);
+            grade.boolean("LevelsQualified",
+                          start.classification.levelQualified && end.classification.levelQualified);
         }
         grade.boolean("DrawnIn3D", in3d);
         grade.label("Standard", kStandard);
-        b_.defines(segmentKey + "/grade", b_.propertySet(segmentKey + "/grade", "AS5488_QualityLevel", grade),
-                   {element});
+        b_.defines(segmentKey + "/grade",
+                   b_.propertySet(segmentKey + "/grade", "AS5488_QualityLevel", grade), {element});
 
         // ---- IFC's uncertainty: the tolerance the level certifies ---------------
         const sub::Tolerance& tolerance = input_.grading.tolerances.of(segment.level);
@@ -480,15 +485,18 @@ class UtilityWriter {
                    {element});
 
         // ---- the class's own common set -------------------------------------------
-        if (const std::string_view common = commonPropertySet(run.element.entity); !common.empty()) {
+        if (const std::string_view common = commonPropertySet(run.element.entity);
+            !common.empty()) {
             PropertyList list;
             list.identifier("Reference", line.id);
             list.enumerated("Status", elementStatus(service.status));
             if (run.element.entity == "IfcPipeSegment" && size > 0.0) {
-                list.positiveLength(service.diameterIsInside ? "InnerDiameter" : "OuterDiameter", size);
+                list.positiveLength(service.diameterIsInside ? "InnerDiameter" : "OuterDiameter",
+                                    size);
                 if (in3d) {
                     const double rise = *endCentre - *startCentre;
-                    list.positiveLength("Length", std::sqrt(segment.length * segment.length + rise * rise));
+                    list.positiveLength("Length",
+                                        std::sqrt(segment.length * segment.length + rise * rise));
                 }
             }
             b_.defines(segmentKey + "/common", b_.propertySet(segmentKey + "/common", common, list),
@@ -496,28 +504,31 @@ class UtilityWriter {
         }
         if (run.element.entity == "IfcPipeSegment" && in3d && segment.length > 0.0) {
             PropertyList occurrence;
-            occurrence.positiveRatio("Gradient", std::abs(*endCentre - *startCentre) / segment.length);
+            occurrence.positiveRatio("Gradient",
+                                     std::abs(*endCentre - *startCentre) / segment.length);
             if (service.diameterIsInside && size > 0.0) {
                 // The inside bottom of the bore, at the start: centre less
                 // half the inside size is exact for an inside size.
                 occurrence.length("InvertElevation", *startCentre - size / 2.0);
             }
             b_.defines(segmentKey + "/occurrence",
-                       b_.propertySet(segmentKey + "/occurrence", "Pset_PipeSegmentOccurrence", occurrence),
+                       b_.propertySet(segmentKey + "/occurrence", "Pset_PipeSegmentOccurrence",
+                                      occurrence),
                        {element});
         }
         b_.associate(qualityReference(segment.level), element);
         return element;
     }
 
-    Id writeFeature(const sub::UtilityLine& line, const UtilityClass& feature, const std::string& key)
+    Id writeFeature(const sub::UtilityLine& line, const UtilityClass& feature,
+                    const std::string& key)
     {
         const sub::UtilityVertex& vertex = line.vertices.front();
         std::vector<Id> items{b_.point(planOf(vertex))};
         if (line.attributes.diameter > 0.0) {
             const Id placement = b_.placement2(b_.point(planOf(vertex)), 0.0);
-            items.push_back(
-                b_.file().add("IfcCircle", Args().ref(placement).real(line.attributes.diameter / 2.0)));
+            items.push_back(b_.file().add(
+                "IfcCircle", Args().ref(placement).real(line.attributes.diameter / 2.0)));
         }
         const Id set = b_.file().add("IfcGeometricCurveSet", Args().refs(items));
         const Id representation =
@@ -526,15 +537,15 @@ class UtilityWriter {
         b_.layer(std::string("Utilities/") + sub::toString(line.attributes.type) + "/" +
                      sub::toString(classification.level),
                  representation);
-        const Id element =
-            b_.product(feature.element, key + "/feature", line.id, feature.reason,
-                       b_.productShape({representation}), line.id);
-        if (const std::string_view common = commonPropertySet(feature.element.entity); !common.empty()) {
+        const Id element = b_.product(feature.element, key + "/feature", line.id, feature.reason,
+                                      b_.productShape({representation}), line.id);
+        if (const std::string_view common = commonPropertySet(feature.element.entity);
+            !common.empty()) {
             PropertyList list;
             list.identifier("Reference", line.id);
             list.enumerated("Status", elementStatus(line.attributes.status));
-            b_.defines(key + "/feature/common", b_.propertySet(key + "/feature/common", common, list),
-                       {element});
+            b_.defines(key + "/feature/common",
+                       b_.propertySet(key + "/feature/common", common, list), {element});
         }
         b_.associate(qualityReference(classification.level), element);
         return element;
@@ -549,16 +560,17 @@ class UtilityWriter {
             graded ? graded->vertices[index].classification
                    : sub::classify(vertex.evidence, input_.grading.tolerances);
         const auto level = sub::serviceLevel(vertex);
-        const Id point = level ? b_.point(Vec3(vertex.position.easting, vertex.position.northing, *level))
-                               : b_.point(planOf(vertex));
+        const Id point =
+            level ? b_.point(Vec3(vertex.position.easting, vertex.position.northing, *level))
+                  : b_.point(planOf(vertex));
         const Id representation = b_.shape(b_.annotationContext(), "Annotation", "Point", {point});
         b_.layer(std::string("Utilities/") + sub::toString(line.attributes.type) + "/points",
                  representation);
         const std::string pointKey = key + "/point/" + vertex.id;
-        const Id annotation = b_.product(IfcClass{"IfcAnnotation", "SURVEY", {}}, pointKey, vertex.id,
-                                         std::string("Located by ") +
-                                             sub::toString(vertex.evidence.method),
-                                         b_.productShape({representation}));
+        const Id annotation =
+            b_.product(IfcClass{"IfcAnnotation", "SURVEY", {}}, pointKey, vertex.id,
+                       std::string("Located by ") + sub::toString(vertex.evidence.method),
+                       b_.productShape({representation}));
         ++b_.report().locatedPoints;
 
         PropertyList located;
@@ -587,24 +599,27 @@ class UtilityWriter {
         }
         located.identifier("Verifies", vertex.verifies);
         located.label("Standard", kStandard);
-        b_.defines(pointKey + "/located", b_.propertySet(pointKey + "/located", "AS5488_LocatedPoint", located),
+        b_.defines(pointKey + "/located",
+                   b_.propertySet(pointKey + "/located", "AS5488_LocatedPoint", located),
                    {annotation});
 
         PropertyList uncertainty;
         uncertainty.enumerated("UncertaintyBasis", uncertaintyBasis(classification.level));
         if (vertex.evidence.horizontalUncertainty || vertex.evidence.verticalUncertainty) {
-            uncertainty.text("UncertaintyDescription", "The assessed uncertainty of the located position");
+            uncertainty.text("UncertaintyDescription",
+                             "The assessed uncertainty of the located position");
         }
         uncertainty.positiveLength("HorizontalUncertainty", vertex.evidence.horizontalUncertainty);
         uncertainty.positiveLength("VerticalUncertainty", vertex.evidence.verticalUncertainty);
         b_.defines(pointKey + "/uncertainty",
-                   b_.propertySet(pointKey + "/uncertainty", "Pset_Uncertainty", uncertainty), {annotation});
+                   b_.propertySet(pointKey + "/uncertainty", "Pset_Uncertainty", uncertainty),
+                   {annotation});
 
         if (deliverySchedule(line)) {
             b_.defines(pointKey + "/delivery",
-                       b_.propertySet(pointKey + "/delivery", deliveryPropertySetName(input_.schema),
-                                      deliveryProperties(vertex.written, vertex.fields,
-                                                         kSchemaPointColumns)),
+                       b_.propertySet(
+                           pointKey + "/delivery", deliveryPropertySetName(input_.schema),
+                           deliveryProperties(vertex.written, vertex.fields, kSchemaPointColumns)),
                        {annotation});
         }
         b_.associate(qualityReference(classification.level), annotation);
@@ -623,12 +638,14 @@ class UtilityWriter {
             list.boolean("SizeIsInside", service.diameterIsInside);
         }
         list.label("Configuration", service.configuration);
-        list.label("Status", service.status == sub::UtilityStatus::Unknown ? "" : sub::toString(service.status));
+        list.label("Status", service.status == sub::UtilityStatus::Unknown
+                                 ? ""
+                                 : sub::toString(service.status));
         list.text("Description", service.description);
         if (graded) {
             list.length("PlanLength", graded->length());
-            for (const sub::QualityLevel level :
-                 {sub::QualityLevel::A, sub::QualityLevel::B, sub::QualityLevel::C, sub::QualityLevel::D}) {
+            for (const sub::QualityLevel level : {sub::QualityLevel::A, sub::QualityLevel::B,
+                                                  sub::QualityLevel::C, sub::QualityLevel::D}) {
                 const double length = graded->lengthAt[static_cast<int>(level)];
                 if (length > 0.0) {
                     list.length(std::string("LengthAtQL") + sub::toString(level)[3], length);
@@ -680,14 +697,15 @@ class UtilityWriter {
                     domain->second.values.begin(), domain->second.values.end(),
                     [&](const sub::SchemaValue& candidate) { return candidate.value == value; });
                 if (listed) {
-                    list.enumerated(field.attribute, value, enumerationOf(field.attribute, domain->second),
-                                    field.label);
+                    list.enumerated(field.attribute, value,
+                                    enumerationOf(field.attribute, domain->second), field.label);
                     continue;
                 }
             }
             if (field.type.starts_with("Real")) {
                 if (const auto number = core::parseFiniteDouble(value)) {
-                    list.add({field.attribute, typedValue("IfcReal", stepReal(*number)), field.label});
+                    list.add(
+                        {field.attribute, typedValue("IfcReal", stepReal(*number)), field.label});
                     continue;
                 }
             } else if (field.type.starts_with("Integer")) {

@@ -122,6 +122,13 @@ column with its unit in its name, because a diameter in a utility schedule is
 millimetres by habit and metres everywhere else in this program. An empty
 cell is "not recorded", never zero.
 
+What is interpreted is also kept as it was written, under the header it was
+written under (`UtilityAttributes::written`, `UtilityVertex::written`):
+"In service" is `UtilityStatus::InService` to the grading, and still "In
+service" to a deliverable written back out - the IFC export's delivery
+property set (`docs/ifc.md`) carries the schedule's own values, so it cannot
+quietly correct what `CHECK` reports as wrong.
+
 `samples/utilities/schedule.csv` and `samples/utilities/design.csv` are a
 worked example: a water main verified by a pothole, an electricity duct bank
 with one weak radar pick, a telecommunications run between pits and a gas
@@ -132,6 +139,13 @@ katana_cli -c "UTILITY REPORT samples/utilities/schedule.csv MINCOVER 0.6"
 katana_cli -c "UTILITY VERIFY samples/utilities/schedule.csv"
 katana_cli -c "UTILITY CLEARANCE samples/utilities/schedule.csv samples/utilities/design.csv WIDTH 0.375"
 ```
+
+An investigation is delivered as IFC 4.3 with `EXPORT <file.ifc> UTILITIES
+<schedule.csv> [SCHEMA <schema.csv>]`: each service an
+`IfcDistributionSystem`, each graded segment the pipe, cable or conduit
+element its type and feature make it, carrying its quality level, and each
+located point an `IfcAnnotation` carrying its evidence (`docs/ifc.md`,
+"Subsurface utilities").
 
 ## The TfNSW Utility Schema and Specification
 
@@ -212,8 +226,9 @@ Two things found in v1.2 while writing the extraction:
 
 ## Not done
 
-- The utilities are reported, not drawn: no layers, linetypes by quality
-  level, or symbols in the drawing yet, and no Survey menu entry.
+- The utilities are reported and exported to IFC, not drawn: no layers,
+  linetypes by quality level, or symbols in the drawing yet, and no Survey
+  menu entry.
 - Attribute quality levels (grading the type, owner or material of a service
   separately from its position) are not modelled.
 - `CHECK` does not evaluate the schema's conditional attributes (it cannot

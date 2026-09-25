@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <system_error>
 
 namespace katana::ifc {
@@ -194,6 +195,138 @@ std::string stepReal(double value)
         return mantissa;
     }
     return mantissa + "E" + std::string(text.substr(e + 1));
+}
+
+namespace {
+
+void appendUtf8(std::string& out, char32_t c)
+{
+    if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) {
+        c = 0xFFFD;
+    }
+    if (c < 0x80) {
+        out.push_back(static_cast<char>(c));
+    } else if (c < 0x800) {
+        out.push_back(static_cast<char>(0xC0 | (c >> 6)));
+        out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+    } else if (c < 0x10000) {
+        out.push_back(static_cast<char>(0xE0 | (c >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | (c >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+    }
+}
+
+std::optional<std::uint32_t> hexValue(std::string_view text)
+{
+    std::uint32_t value = 0;
+    for (const char c : text) {
+        value <<= 4;
+        if (c >= '0' && c <= '9') {
+            value |= static_cast<std::uint32_t>(c - '0');
+        } else if (c >= 'A' && c <= 'F') {
+            value |= static_cast<std::uint32_t>(c - 'A' + 10);
+        } else if (c >= 'a' && c <= 'f') {
+            value |= static_cast<std::uint32_t>(c - 'a' + 10);
+        } else {
+            return std::nullopt;
+        }
+    }
+    return value;
+}
+
+} // namespace
+
+std::string decodeStepString(std::string_view quoted)
+{
+    std::string out;
+    out.reserve(quoted.size());
+    std::size_t at = 0;
+    while (at < quoted.size()) {
+        const char c = quoted[at];
+        if (c == '\'') {
+            // '' is one quote; a lone one is the writer's mistake, kept.
+            out.push_back('\'');
+            at += (at + 1 < quoted.size() && quoted[at + 1] == '\'') ? 2 : 1;
+            continue;
+        }
+        if (c != '\\') {
+            if (static_cast<unsigned char>(c) < 0x80) {
+                out.push_back(c);
+                ++at;
+                continue;
+            }
+            // Raw bytes: UTF-8 when they are, ISO 8859-1 when they are not.
+            std::size_t probe = at;
+            const char32_t decoded = nextCodePoint(quoted, probe);
+            if (decoded == 0xFFFD && !(quoted.substr(at).starts_with("\xEF\xBF\xBD"))) {
+                appendUtf8(out, static_cast<unsigned char>(c));
+                ++at;
+            } else {
+                out.append(quoted.substr(at, probe - at));
+                at = probe;
+            }
+            continue;
+        }
+        const std::string_view rest = quoted.substr(at);
+        if (rest.starts_with("\\\\")) {
+            out.push_back('\\');
+            at += 2;
+        } else if (rest.starts_with("\\X2\\") || rest.starts_with("\\X4\\")) {
+            const std::size_t digits = rest[2] == '2' ? 4 : 8;
+            const std::size_t end = rest.find("\\X0\\", 4);
+            if (end == std::string_view::npos || (end - 4) % digits != 0) {
+                appendUtf8(out, 0xFFFD);
+                at += 4;
+                continue;
+            }
+            char32_t pendingHigh = 0;
+            for (std::size_t i = 4; i < end; i += digits) {
+                const auto unit = hexValue(rest.substr(i, digits));
+                if (!unit) {
+                    appendUtf8(out, 0xFFFD);
+                    continue;
+                }
+                if (digits == 4 && *unit >= 0xD800 && *unit <= 0xDBFF) {
+                    pendingHigh = *unit;
+                    continue;
+                }
+                if (digits == 4 && *unit >= 0xDC00 && *unit <= 0xDFFF && pendingHigh != 0) {
+                    appendUtf8(out, 0x10000 + ((pendingHigh - 0xD800) << 10) + (*unit - 0xDC00));
+                    pendingHigh = 0;
+                    continue;
+                }
+                if (pendingHigh != 0) {
+                    appendUtf8(out, 0xFFFD);
+                    pendingHigh = 0;
+                }
+                appendUtf8(out, *unit);
+            }
+            if (pendingHigh != 0) {
+                appendUtf8(out, 0xFFFD);
+            }
+            at += end + 4;
+        } else if (rest.starts_with("\\X\\") && rest.size() >= 5) {
+            const auto byte = hexValue(rest.substr(3, 2));
+            appendUtf8(out, byte ? *byte : 0xFFFD);
+            at += 5;
+        } else if (rest.starts_with("\\S\\") && rest.size() >= 4) {
+            // The upper half of the current alphabet, ISO 8859-1 unless a
+            // \P\ switched it; the switch is not followed.
+            appendUtf8(out, static_cast<unsigned char>(rest[3]) + 128U);
+            at += 4;
+        } else if (rest.size() >= 4 && rest[1] == 'P' && rest[3] == '\\') {
+            at += 4; // \PA\ .. \PI\: which ISO 8859 part \S\ means
+        } else {
+            out.push_back('\\');
+            ++at;
+        }
+    }
+    return out;
 }
 
 std::size_t characterCount(std::string_view utf8)

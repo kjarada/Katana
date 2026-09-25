@@ -15,8 +15,13 @@ add_library(katana_ifc STATIC
     drawing.cpp
     surfaces.cpp
     export.cpp
+    step_reader.cpp
+    import_alignment.cpp
+    import.cpp
 )
 katana_target_defaults(katana_ifc)
+# commands for one thing, the import as the single undoable step both front
+# ends execute (import.hpp), as katana_dxf has it; terrain for the surfaces an
+# import returns.
 target_link_libraries(katana_ifc
-    PUBLIC katana_core katana_geometry katana_entity katana_survey
-    PRIVATE katana_terrain)
+    PUBLIC katana_core katana_geometry katana_entity katana_survey katana_terrain katana_commands)

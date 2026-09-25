@@ -46,6 +46,14 @@ namespace katana::ifc {
 // for one before it gets here (see StepFile::real).
 [[nodiscard]] std::string stepReal(double value);
 
+// The inverse of stepString for the text between a literal's quotes: '' and
+// \\ undone, \X2\ (with surrogate pairs), \X4\, \X\hh and \S\c decoded to
+// UTF-8. Other writers put raw UTF-8 between the quotes, which is not the
+// standard's and is common: bytes that are valid UTF-8 are kept, and bytes
+// that are not are read as ISO 8859-1, the standard's default alphabet. A
+// malformed escape is U+FFFD.
+[[nodiscard]] std::string decodeStepString(std::string_view quoted);
+
 // How many characters `utf8` has, for the IfcLabel and IfcIdentifier limit
 // of 255 (the schema's STRING(255) counts characters, not bytes).
 [[nodiscard]] std::size_t characterCount(std::string_view utf8);

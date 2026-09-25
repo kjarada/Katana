@@ -75,7 +75,7 @@ Every `KATANA_*` cache variable, with its default:
 | `KATANA_BUILD_TESTS` | `ON` | the test suites, the headless checks and the `layering` and `docs` tests |
 | `KATANA_BUILD_BENCHMARKS` | `ON` | `katana_benchmarks` and `run-benchmarks` |
 | `KATANA_BUILD_QT_APP` | `ON` | the desktop application `katana` and `katana_qt_widget_tests` |
-| `KATANA_BUILD_IO` | `ON` | `katana_io` and `katana_interop`, the GDAL and PDAL modules; OFF also needs `KATANA_BUILD_QT_APP=OFF`, since the application links interop, and gives a `katana_cli` without IMPORT and EXPORT |
+| `KATANA_BUILD_IO` | `ON` | `katana_io` and `katana_interop`, the GDAL and PDAL modules; OFF also needs `KATANA_BUILD_QT_APP=OFF`, since the application links interop, and gives a `katana_cli` whose IMPORT and EXPORT take only the native formats, .dxf and .ifc |
 | `KATANA_WARNINGS_AS_ERRORS` | `ON` | `-Werror` |
 | `KATANA_ENABLE_SANITIZERS` | `OFF` | ASan and UBSan where the toolchain has them; on MinGW, which ships no libsanitizer, UBSan in trap mode, so undefined behaviour aborts the test that caused it |
 | `KATANA_ENABLE_CLANG_TIDY` | `OFF` | clang-tidy during compilation |
@@ -184,6 +184,7 @@ may not see GDAL, PDAL or the archive readers:
 |---|---|---|
 | the interpreter's verbs (`HELP`) | yes | yes |
 | `IMPORT`, `EXPORT`, `REFS`, `INFO <file>` (the interpreter's `INFO id` describes an entity) | yes (with `KATANA_BUILD_IO`) | yes |
+| `IMPORT <file.ifc>`, `EXPORT <file.ifc>` (`docs/ifc.md`) | yes, with or without `KATANA_BUILD_IO` | no: no menu entry yet |
 | `COPC` | yes | no |
 | `CUSTOMISE [REPLACE] <file>...` | yes | yes |
 | `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`, `MAPFILE CHECK` | yes | no: the Survey Code Manager's tabs |

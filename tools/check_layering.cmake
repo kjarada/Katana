@@ -42,9 +42,10 @@ set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
 set(KATANA_ALLOWED_dxf "core;math;geometry;entity;commands")
 # ifc: IFC 4.3 export, written natively beside dxf and for its reason: no
 # third-party library, so it builds with -DKATANA_BUILD_IO=OFF. It sees
-# survey for the AS 5488 grading of the services it writes (docs/ifc.md) and
-# terrain for the surfaces; nothing above the domain model.
-set(KATANA_ALLOWED_ifc "core;math;geometry;terrain;entity;survey")
+# survey for the AS 5488 grading of the services it writes (docs/ifc.md),
+# terrain for the surfaces, and commands for one thing - the import as the
+# single undoable step both front ends execute (ifc/import.hpp), as dxf does.
+set(KATANA_ALLOWED_ifc "core;math;geometry;terrain;entity;commands;survey")
 set(KATANA_ALLOWED_storage "core;math;geometry;entity;survey")
 # gis and pointcloud are both implemented by src/katana_io.
 set(KATANA_ALLOWED_gis "core;pointcloud")

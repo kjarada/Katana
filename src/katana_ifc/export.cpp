@@ -41,8 +41,8 @@ std::optional<math::Vec2> extentCorner(const ExportInput& input, const ExportOpt
         if (!std::isfinite(x) || !std::isfinite(y)) {
             return;
         }
-        corner = corner ? math::Vec2(std::min(corner->x, x), std::min(corner->y, y))
-                        : math::Vec2(x, y);
+        corner =
+            corner ? math::Vec2(std::min(corner->x, x), std::min(corner->y, y)) : math::Vec2(x, y);
     };
     if (input.model != nullptr) {
         if (options.exportEntities && !input.model->entities.empty()) {
@@ -121,8 +121,8 @@ Result<IfcExport> writeIfc(const ExportInput& input, const ExportOptions& option
     }
     if (options.localOrigin) {
         frame.origin = *options.localOrigin;
-        if (!frame.georeferenced && (frame.origin.x != 0.0 || frame.origin.y != 0.0 ||
-                                     frame.origin.z != 0.0)) {
+        if (!frame.georeferenced &&
+            (frame.origin.x != 0.0 || frame.origin.y != 0.0 || frame.origin.z != 0.0)) {
             // A shift that nothing in the file records would move the job.
             return makeError(ErrorCode::InvalidArgument,
                              "a local origin needs a coordinate system (an EPSG code) to be "
@@ -163,8 +163,8 @@ Result<IfcExport> writeIfc(const ExportInput& input, const ExportOptions& option
     text += "FILE_DESCRIPTION(('ViewDefinition [Alignment-basedView]'),'2;1');\n";
     const std::string application =
         options.applicationVersion.empty() ? "Katana" : "Katana " + options.applicationVersion;
-    text += "FILE_NAME(" + stepString(options.fileName) + "," + stepString(options.timestamp) + "," +
-            headerList(options.author) + "," + headerList(options.organisation) + "," +
+    text += "FILE_NAME(" + stepString(options.fileName) + "," + stepString(options.timestamp) +
+            "," + headerList(options.author) + "," + headerList(options.organisation) + "," +
             stepString(application) + "," + stepString(application) + ",'');\n";
     text += "FILE_SCHEMA(('IFC4X3_ADD2'));\nENDSEC;\nDATA;\n";
     text += builder.file().data();

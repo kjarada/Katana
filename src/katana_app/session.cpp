@@ -895,11 +895,11 @@ bool runLine(SessionState& session, const std::string& line)
         return katana::app::runUtilityVerb(
             space == std::string::npos ? std::string_view{} : std::string_view(line).substr(space));
     }
-    // A .ifc is written natively, with or without GDAL (ifc_verbs.hpp).
-    if (upperVerb(line) == "EXPORT") {
+    // A .ifc is read and written natively, with or without GDAL (ifc_verbs.hpp).
+    if (const std::string verb = upperVerb(line); verb == "IMPORT" || verb == "EXPORT") {
         const std::size_t space = line.find_first_of(" \t", line.find_first_not_of(" \t"));
         if (const std::optional<bool> handled = katana::app::runIfcVerb(
-                session.document, "EXPORT",
+                session.document, verb,
                 space == std::string::npos ? std::string_view{}
                                            : std::string_view(line).substr(space))) {
             return *handled;
