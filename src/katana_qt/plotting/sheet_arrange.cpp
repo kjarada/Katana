@@ -437,7 +437,7 @@ void fillArrangeMenu(QMenu& menu, katana::cad::Document& document, SheetEditor& 
         });
     menu.addSeparator();
 
-    QMenu* match = menu.addMenu(QStringLiteral("Match Scale To"));
+    QMenu* match = menu.addMenu(QStringLiteral("Match Scale To..."));
     match->setObjectName(QStringLiteral("sheetMatchScaleMenu"));
     match->setToolTip(QStringLiteral("Give the selected view - or every view on the sheet - another view's scale"));
     QObject::connect(match, &QMenu::aboutToShow, &editor,
@@ -479,7 +479,9 @@ void fillMatchScaleMenu(QMenu& menu, katana::cad::Document& document, SheetEdito
         }
     }
     if (menu.isEmpty()) {
-        menu.addAction(QStringLiteral("(no other view is drawn to a scale)"))->setEnabled(false);
+        QAction* none = menu.addAction(QStringLiteral("(no other view is drawn to a scale)"));
+        none->setObjectName(QStringLiteral("sheetMatchScaleNone"));
+        none->setEnabled(false);
     }
 }
 
