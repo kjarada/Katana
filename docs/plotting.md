@@ -1543,6 +1543,152 @@ kind of sample, a symbol inked in its cell at its plotted size, the panel on
 a sheet, "+N more") and `tests/qt_widgets/plotting/test_legend_properties.cpp`
 (the scope choice in the editor).
 
+## The coordinate grid and the live key plan
+
+Two things a plan viewport works out for itself. The geometry of both is in
+`katana_cad`, with no Qt: `include/katana/cad/plotting/plan_grid.hpp` and
+`include/katana/cad/plotting/key_plan.hpp`. The painter only strokes and sets
+what they return, so both are tested without pixels
+(`tests/cad/plotting/test_plan_grid.cpp`, `test_key_plan.cpp`) and then once
+more on paper (`tests/qt_widgets/plotting/test_plan_grid_painter.cpp`,
+`test_plan_grid_editor.cpp`).
+
+### The coordinate grid
+
+A plan or key plan viewport has two members for it, at the end of `Viewport`:
+
+| Member | JSON | |
+|---|---|---|
+| `gridStyle` | `grid_style`: `none`, `ticks`, `crosses`, `lines` | `GridStyle`; `None` by default |
+| `gridInterval` | `grid_interval` | metres between lines; 0, the default, is automatic |
+
+Both are written only when they are not the default, like every member, and
+an unknown style name fails the parse (`toString`, `gridStyleFrom`).
+
+**The interval.** An automatic grid (`automaticGridInterval`) is spaced at 1,
+2 or 5 times a power of ten metres: of those, the one whose lines fall
+nearest 50 mm apart on the paper, nearest by ratio. So 1:500 has 20 m (40 mm
+apart), 1:1000 has 50 m (50 mm), 1:2000 has 100 m, and 1:750 has 50 m
+(67 mm, which is nearer 50 than 27 mm is). Every step of `kSheetScales`
+lands between 40 and 67 mm. A grid closer than 2 mm on the paper
+(`kGridMinimumSpacingMm`) is refused rather than drawn as a grey smear: the
+plan is still drawn, and the painter reports why (`vp1: a 0.5 m grid at
+1:1000 is 0.5 mm apart on the paper; ...`).
+
+**The styles.**
+- `Lines`: light grid lines right across the viewport, 0.13 mm in grey.
+- `Crosses`: a 3 mm cross at every intersection, 0.18 mm in ink. Only a
+  whole cross is drawn; one the border would cut reads as a tick that is not
+  there.
+- `Ticks`: a 2.5 mm tick in from the border where each line meets it,
+  0.18 mm in ink, and nothing inside.
+
+**The ground's grid, not the paper's.** The lines are eastings and northings
+of the world, so on a rotated viewport they run askew across the paper. Each
+line is clipped to the viewport's rectangle, and its ends are on whichever
+edges it meets.
+
+**The labels.** One where each line meets an edge: `E 305 200`,
+`N 6 250 400`.
+- Thousands are grouped with a space (`groupedCoordinate`). Decimals appear
+  only when the interval needs them: none for whole metres, one for 0.5 or
+  2.5 m, two for 0.25 m (`gridDecimals`). Nothing prints as `-0`.
+- 1.8 mm capitals, set along their edge (reading up the sides), 0.8 mm in
+  from it, or past the tick for ticks.
+- Each is knocked out on white, 0.4 mm all round.
+- A label is kept only when it lies wholly inside the viewport, clear of the
+  view's title, scale bar and north arrow, and at least 1.5 mm clear of the
+  labels already kept (`PlanGridOptions::labelSpacingMm`): two closer than
+  that read as one label run on into the next. The painter passes the exact
+  boxes those three knock out (`PlanGridOptions::keepOut`), so a label never
+  sits over the title or the scale-bar corner, and never half-under either. Labels are taken bottom,
+  left, top, right, and along each edge in order, so the same grid always
+  keeps the same ones.
+
+`planGrid(viewport, placement, options)` gives all of it on the paper: the
+lines, what is stroked (`PlanGrid::strokes`), the crosses, and the labels
+with their anchor, angle, justification and knock-out box. The placement is
+the viewport's scale and centre once "auto" is decided: `storedPlacement`
+for a fixed viewport, or what the painter resolved. `planPaperToWorld`,
+`planWorldToPaper` and `planFootprint` are the viewport's mapping both ways,
+and the ground under its rectangle.
+
+`setPlanGrid(document, viewportId, style, interval)` sets both members as
+ONE undoable step. It refuses a viewport that is not a plan or a key plan
+(`InvalidArgument`), a missing one (`NotFound`), and an interval that is
+negative or not finite. Setting what the viewport already has records no
+step. In the editor a plan's properties have a Grid list (`sheetGridStyle`)
+and a Grid interval box (`sheetGridInterval`, which shows "Auto" at 0, and
+what that is now in its tooltip). They are a front end to `setPlanGrid`
+and make the edit once their signal has returned, since the edit rebuilds
+the panel they are on.
+
+### The live key plan
+
+A key plan used to draw the outlines stored in its marks when it was made.
+Those were a snapshot: pan a tile, rescale it, add, remove or reorder the
+sheets, and the key plan went on showing the old outlines. Now the outlines
+are worked out whenever the key plan is drawn.
+
+`keyPlanOutlines(set, sheetIndex, place)` gives one `KeyPlanOutline` for
+every placed plan viewport on every sheet. Key plans and sections are not
+outlined. Each outline has:
+- the ground under the plan's rectangle, from its rectangle, scale, centre
+  and rotation (`planFootprint`);
+- its sheet's id, index and viewport id;
+- `label`, the number the sheet prints now: its typed `sheet_number` if it
+  has one, else the set's numbering pattern (`printedSheetNumber`). So the
+  numbers follow a reorder at once;
+- `current`, set on the key plan's own sheet: "you are here";
+- `labelled`, false for a plan whose centre lies inside a larger plan of the
+  same sheet (an inset), whose number is written once already.
+
+`place` decides where an automatic plan's ground is. The painter passes
+`resolvePlanViewport`, so an outline is exactly where its sheet draws.
+`fitPlanPlacement` is the same fit, headless, and a test holds the two
+together.
+
+**Without a window.** The painter fits an automatic plan over everything the
+window shows, and that includes imagery, point clouds and meshes that only
+the application holds. `placePlan(model, viewport)` is the same rule over the
+model alone: the viewport's stretch of its alignment, else what the model
+draws less the viewport's hidden layers, with the alignments included. It
+also has a form that takes the set and the sheet index, which fits an
+automatic key plan to every outline. `modelPlacer(model)` is the `place` a
+command line hands `keyPlanOutlines`. For a drawing of entities and
+alignments they give what the painter gives, and a test holds them to it.
+So `planGrid(viewport, placePlan(model, set, sheet, viewport))` is the grid a
+sheet plots, worked out without drawing it.
+
+**On paper.**
+- The other sheets are outlined in red (0.35 mm) over a faint red fill.
+- The key plan's own sheet is drawn over them in blue (0.5 mm), with a
+  stronger blue fill.
+- The numbers go on last, so no fill covers one. Each is sized to its
+  outline (1.2 to 3 mm capitals), so a small sheet's number stays inside it.
+
+A key plan's stored `SheetOutline` marks are no longer drawn, since they are
+the stale copies. Its other marks, match lines, still are. The editor's Add
+View > Key Plan stores none. The tile and strip generators still store them,
+and they still reserve their sheets' ids (`newSheetIds`).
+
+**An automatic key plan** (`autoScale` or `autoCentre`) fits the union of
+the outlines (`fitKeyPlan`), and the drawing only when the set has no plan to
+outline. Before, it fitted the drawing alone, so a sheet over ground outside
+the drawing's extent fell off it, and a stray entity far away shrank every
+sheet to a speck. The painter and
+the editor resolve it through the four-argument `resolvePlanViewport(viewport,
+source, set, sheetIndex)`. For every other viewport that gives the same as
+the two-argument form.
+
+Example: a key-plan sheet and two plans 100 x 50 mm at 1:1000. Sheet 2 is over
+E 950..1050, sheet 3 over E 1050..1150, both over N 1975..2025. A key plan
+200 x 150 mm at 1:2000 over (1050, 2000) outlines sheet 2 at x 150..200 and
+sheet 3 at x 200..250, y 162.5..187.5 on the paper, numbered 2 and 3. Pan sheet
+3's plan 100 m north and its outline is 50 mm higher at the next paint. Move
+sheet 3 ahead of sheet 2 and the same outline reads 2. Put a key plan on
+sheet 2 and sheet 2's own outline is the blue one.
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners
