@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Install the Linux toolchain Katana builds with, into one prefix.
+
+The Windows build takes every tool and library from MSYS2 UCRT64. Linux
+distributions lag behind that - Ubuntu 24.04 ships GCC 14, CGAL 5.6 and PROJ
+9.4, and Katana needs GCC 15 or later (#embed, C++26 library additions),
+CGAL 6 (Constraint_id::index) and PROJ 9.5 - so the Linux build takes the same
+set from conda-forge instead, into a prefix of its own that touches nothing
+else on the machine (docs/building.md, "Linux").
+
+The environment is solved with py-rattler, from PyPI, rather than conda or
+mamba: it needs no installer of its own, and it reaches the channel over plain
+HTTPS - which is all a Claude Code cloud session's egress allows
+(conda.anaconda.org and pypi.org; github.com and api.anaconda.org are blocked).
+
+Reproducible: the solve is frozen at SNAPSHOT, so the same versions come back
+on every machine and in every session until SNAPSHOT or SPECS are changed
+here. Idempotent: a prefix whose stamp matches SNAPSHOT and SPECS is left
+alone, so running this again costs a second.
+
+    python3 tools/setup_linux_toolchain.py            # into $KATANA_TOOLCHAIN or /opt/katana-toolchain
+    python3 tools/setup_linux_toolchain.py --prefix ~/katana-toolchain
+    python3 tools/setup_linux_toolchain.py --check    # exit 1 if it would install
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import datetime
+import hashlib
+import importlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+DEFAULT_PREFIX = "/opt/katana-toolchain"
+
+# The channel as it stood on this date. Moving it is how the toolchain is
+# upgraded; the versions it resolved to are recorded in docs/building.md.
+SNAPSHOT = datetime.datetime(2026, 9, 26, tzinfo=datetime.timezone.utc)
+
+# The same versions MSYS2 gives the Windows build where the two can match
+# (GCC 16.2); the libraries at the newest release the snapshot has. Eigen is
+# held at 3.4 because the build asks for Eigen3.
+SPECS = [
+    "gxx_linux-64 16.2.*",
+    "gcc_linux-64 16.2.*",
+    "cmake >=3.31",
+    "ninja",
+    "clang-format",
+    "qt6-main >=6.9",
+    "cgal-cpp >=6",
+    "eigen >=3.4,<3.5",
+    "proj >=9.5",
+    "gdal",
+    "pdal",
+    "nlohmann_json",
+    "libsqlite",
+    "gmp",
+    "mpfr",
+    "libboost-headers",
+    "libgl-devel",
+    # Qt declares QVulkanInstance only where vulkan/vulkan.h is; the loader
+    # itself comes with the machine's graphics driver.
+    "libvulkan-headers",
+    "gtest",
+    "benchmark",
+]
+
+# py-rattler's API has changed between releases; this is the one the script
+# is written against.
+RATTLER = "py-rattler==0.26.0"
+
+STAMP = ".katana-toolchain.json"
+
+
+def stamp_text() -> str:
+    digest = hashlib.sha256("\n".join([SNAPSHOT.isoformat(), *SPECS]).encode()).hexdigest()
+    return json.dumps({"snapshot": SNAPSHOT.isoformat(), "specs": SPECS, "digest": digest}, indent=2)
+
+
+def is_current(prefix: Path) -> bool:
+    stamp = prefix / STAMP
+    compiler = prefix / "bin" / "x86_64-conda-linux-gnu-g++"
+    try:
+        return compiler.exists() and json.loads(stamp.read_text()) == json.loads(stamp_text())
+    except (OSError, ValueError):
+        return False
+
+
+def import_rattler():
+    try:
+        return importlib.import_module("rattler")
+    except ImportError:
+        pass
+    print(f"installing {RATTLER} from PyPI", file=sys.stderr)
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
+         "--root-user-action=ignore", RATTLER],
+        check=True,
+    )
+    importlib.invalidate_caches()
+    return importlib.import_module("rattler")
+
+
+async def install(prefix: Path) -> None:
+    rattler = import_rattler()
+    platforms = [rattler.Platform.current(), rattler.Platform("noarch")]
+    print(f"solving {len(SPECS)} specs against conda-forge as of {SNAPSHOT.date()}", file=sys.stderr)
+    records = await rattler.solve(
+        sources=["conda-forge"],
+        specs=SPECS,
+        platforms=platforms,
+        virtual_packages=rattler.VirtualPackage.detect(),
+        exclude_newer=SNAPSHOT,
+    )
+    print(f"installing {len(records)} packages into {prefix}", file=sys.stderr)
+    await rattler.install(records, target_prefix=str(prefix), show_progress=False)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--prefix", default=os.environ.get("KATANA_TOOLCHAIN") or DEFAULT_PREFIX,
+                        help=f"where to install (default: $KATANA_TOOLCHAIN or {DEFAULT_PREFIX})")
+    parser.add_argument("--check", action="store_true",
+                        help="report whether the prefix is current; install nothing")
+    args = parser.parse_args()
+    prefix = Path(args.prefix).expanduser().resolve()
+
+    if is_current(prefix):
+        print(f"toolchain at {prefix} is current", file=sys.stderr)
+        return 0
+    if args.check:
+        print(f"toolchain at {prefix} is missing or out of date", file=sys.stderr)
+        return 1
+
+    prefix.mkdir(parents=True, exist_ok=True)
+    (prefix / STAMP).unlink(missing_ok=True)  # an interrupted install must not look current
+    asyncio.run(install(prefix))
+    (prefix / STAMP).write_text(stamp_text() + "\n")
+    compiler = prefix / "bin" / "x86_64-conda-linux-gnu-g++"
+    version = subprocess.run([str(compiler), "-dumpfullversion"], check=True,
+                             capture_output=True, text=True).stdout.strip()
+    print(f"toolchain at {prefix} installed: GCC {version}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

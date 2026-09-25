@@ -47,6 +47,7 @@ add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
     test_render_view.cpp
+    test_render_view_gpu.cpp
     test_section_view.cpp
     test_plan_view.cpp
     test_plan_painter.cpp
@@ -101,6 +102,11 @@ target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
     KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data")
 katana_target_defaults(katana_qt_widget_tests)
+# The 3D view hosts the GPU renderer where it is built, so the widget tests
+# compile what the application does; offscreen, the rules choose software.
+if(TARGET katana_gpu)
+    target_link_libraries(katana_qt_widget_tests PRIVATE katana_gpu)
+endif()
 set_target_properties(katana_qt_widget_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
 
@@ -117,3 +123,25 @@ gtest_discover_tests(katana_qt_widget_tests
     PROPERTIES ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
 )
+# The 3D view drawn on the GPU (test_render_view_gpu.cpp) needs a platform a
+# QRhiWidget can be shown on: on Linux, xcb under Xvfb, with KATANA_RENDERER=gpu
+# so that lavapipe may draw it where there is no GPU. Each case in a process
+# of its own - a GPU failure is remembered for the session. Offscreen, above,
+# the same cases skip.
+if(NOT WIN32)
+    find_program(KATANA_XVFB_RUN xvfb-run
+        DOC "Runs the Vulkan GPU tests under a virtual X server (Debian/Ubuntu: xvfb)")
+endif()
+if(TARGET katana_gpu AND NOT WIN32 AND KATANA_XVFB_RUN)
+    foreach(_case IN ITEMS OnTheDesktopTheHostsLayersAreDrawnByItsGpuChild
+                           OnTheDesktopAnEditReachesTheGpuView
+                           OnTheDesktopAFailedGpuViewLeavesTheSessionToTheSoftwareRasteriser)
+        add_test(NAME qt_widgets_gpu.RenderViewGpu.${_case}
+            COMMAND "${KATANA_XVFB_RUN}" -a -s "-screen 0 1280x1024x24"
+                    $<TARGET_FILE:katana_qt_widget_tests> --gtest_filter=RenderViewGpu.${_case})
+        set_tests_properties(qt_widgets_gpu.RenderViewGpu.${_case} PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "QT_QPA_PLATFORM=set:offscreen;KATANA_WIDGET_TEST_PLATFORM=set:xcb;KATANA_RENDERER=set:gpu"
+            TIMEOUT 120)
+    endforeach()
+endif()

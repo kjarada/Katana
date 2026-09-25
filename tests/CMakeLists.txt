@@ -1064,6 +1064,15 @@ if(TARGET katana)
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
+    # The quitting check counts the built-in map's rules, which come from the
+    # third-party customisation (src/katana_archive12d/CMakeLists.txt). A
+    # checkout without it has no rule to duplicate, so the check is skipped
+    # there rather than failed, as the suites that read it skip
+    # (tests/archive12d/CMakeLists.txt): the suite stays green without it.
+    if(NOT EXISTS "${KATANA_CUSTOMISATION_DIR}/survey_codes.mapfile")
+        set_tests_properties(qt_quitting_with_unapplied_code_manager_edits_is_refused_and_said_headless
+            PROPERTIES DISABLED TRUE)
+    endif()
 
     set_tests_properties(qt_survey_inverse_headless qt_survey_area_headless
                          qt_survey_forward_headless qt_survey_angle_headless

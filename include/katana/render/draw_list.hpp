@@ -91,7 +91,20 @@ struct DrawList {
     // Axis-aligned box of every vertex that any primitive references. Vertices
     // added but never referenced are excluded, so a stale append cannot pull
     // the camera off to nowhere when the caller frames the scene.
+    //
+    // Each vertex is visited once, however many primitives use it: the
+    // primitives mark the vertices they use, and the marked ones are bounded
+    // in index order. On a TIN a vertex is a corner of about six triangles
+    // and an end of as many edges, and bounding it once per use was most of
+    // what packing a scene for the GPU cost. A box of the same values in
+    // another order is the same box, except for which zero an extreme is
+    // (-0 < +0 is false, so the first zero met is kept); so when an extreme
+    // is a zero the box is bounded again in primitive order, and the result
+    // is the same to the bit as that order's.
     [[nodiscard]] katana::math::AABB bounds() const;
+    // The same, with `used` as the marks' scratch - one byte a vertex, kept
+    // between calls by a caller that bounds large lists often.
+    [[nodiscard]] katana::math::AABB bounds(std::vector<std::uint8_t>& used) const;
 
     // True when every position is finite. The rasteriser assumes this and the
     // scene builders guarantee it; asserted by the tests rather than re-checked
