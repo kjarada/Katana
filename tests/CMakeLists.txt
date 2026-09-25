@@ -704,12 +704,14 @@ if(TARGET katana)
     # frames the reply, not the dialog. layers=11 by hand from the runs above:
     # water QL-A, QL-B, QL-C and points; electricity QL-B, QL-C and points;
     # telecommunications QL-C and points; gas QL-D and points. The grab is the
-    # window, so the PNG shows the four services where they were drawn.
+    # window, so the PNG shows the four services where they were drawn. The
+    # path is quoted as a person types one, so a checkout under a folder with
+    # a blank in its name is still one word.
     add_test(NAME qt_utility_draw_typed_frames_the_views_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>UTILITY DRAW ${_utility_samples}/schedule.csv MINCOVER 0.6|?FrameStatsLabel"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\" MINCOVER 0.6|?FrameStatsLabel"
             "-DEXPECT=utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200[\r\n]+line id=W1 type=water .*FrameStatsLabel: Plan +21 drawn"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_draw_typed_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
