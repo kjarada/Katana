@@ -348,8 +348,6 @@ class PlanPainter {
     // The model a text or leader is resolved against: the source's, or an
     // empty one for a preview drawn with no model.
     [[nodiscard]] const katana::entity::Model& annotationModel() const;
-    // The straight pieces of a line, polyline, arc or circle, into linework_.
-    void collectLinework(const katana::entity::Geometry& geometry);
 
     QPainter& painter_;
     const PlanSource& source_;
@@ -925,13 +923,15 @@ void PlanPainter::drawEntities()
                                                           annotationFonts_.measure());
             }
             Box2 drawn;
+            std::optional<cad::DimensionDrawing> dimensionDrawing;
             if (annotation) {
                 drawn = annotation->extent;
             } else if (dimension) {
-                drawn = cad::buildDimension(std::get<katana::entity::DimensionGeometry>(entity.geometry),
-                                            cad::resolveDimensionStyle(model, entity),
-                                            options_.annotationScale)
-                            .extent;
+                dimensionDrawing =
+                    cad::buildDimension(std::get<katana::entity::DimensionGeometry>(entity.geometry),
+                                        cad::resolveDimensionStyle(model, entity),
+                                        options_.annotationScale);
+                drawn = dimensionDrawing->extent;
                 if (drawn.empty()) {
                     drawn = katana::entity::boundingBox(entity.geometry);
                 }
@@ -971,7 +971,14 @@ void PlanPainter::drawEntities()
                 dimensionStyle_ = cad::resolveDimensionStyle(model, entity);
             }
             if (collectLinework_) {
-                collectLinework(entity.geometry);
+                // A note's, a callout's and a dimension's text is kept out
+                // of as well as the lines (label_layout.hpp, appendKeepOut).
+                cad::annotation::appendLinework(entity.geometry, linework_, kMaximumLinework);
+                if (annotation) {
+                    cad::annotation::appendKeepOut(*annotation, linework_, kMaximumLinework);
+                } else if (dimensionDrawing) {
+                    cad::annotation::appendKeepOut(*dimensionDrawing, linework_, kMaximumLinework);
+                }
             }
             if (annotation) {
                 drawAnnotation(*annotation);
@@ -1542,40 +1549,6 @@ AnnotationPaintTarget PlanPainter::annotationTarget(const QPen& pen) const
 void PlanPainter::drawAnnotation(const cad::annotation::Drawing& drawing)
 {
     paintAnnotationDrawing(painter_, drawing, annotationTarget(painter_.pen()), annotationFonts_);
-}
-
-void PlanPainter::collectLinework(const katana::entity::Geometry& geometry)
-{
-    if (linework_.size() >= kMaximumLinework) {
-        return;
-    }
-    const auto chord = [&](const Arc2& arc) {
-        // Sixteen chords a turn: the placer asks only whether a text box
-        // crosses the curve, and at a label's size that is the curve.
-        const int count = std::max(4, static_cast<int>(std::ceil(16.0 * std::abs(arc.sweep) /
-                                                                 katana::math::kTwoPi)));
-        Point2 previous = arc.pointAt(0.0);
-        for (int i = 1; i <= count; ++i) {
-            const Point2 next = arc.pointAt(static_cast<double>(i) / count);
-            linework_.push_back(Segment2{previous, next});
-            previous = next;
-        }
-    };
-    if (const auto* line = std::get_if<Segment2>(&geometry)) {
-        linework_.push_back(*line);
-    } else if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
-        const auto& v = polyline->vertices;
-        for (std::size_t i = 0; i + 1 < v.size(); ++i) {
-            linework_.push_back(Segment2{v[i], v[i + 1]});
-        }
-        if (polyline->closed && v.size() > 2) {
-            linework_.push_back(Segment2{v.back(), v.front()});
-        }
-    } else if (const auto* arc = std::get_if<Arc2>(&geometry)) {
-        chord(*arc);
-    } else if (const auto* circle = std::get_if<Circle2>(&geometry)) {
-        chord(Arc2{circle->center, circle->radius, 0.0, katana::math::kTwoPi});
-    }
 }
 
 void PlanPainter::drawLabels()
