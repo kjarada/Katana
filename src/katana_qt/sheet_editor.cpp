@@ -50,6 +50,7 @@
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
+#include "plotting/sheet_arrange.hpp"
 
 namespace katana::qt {
 
@@ -932,6 +933,7 @@ void SheetEditor::buildActions()
     tileButton->setPopupMode(QToolButton::InstantPopup);
     tileButton->setMenu(tileMenu);
     bar->addWidget(tileButton);
+    bar->addWidget(arrangeToolButton(bar, document_, *this));
 
     bar->addSeparator();
     QAction* titleBlock = bar->addAction(icon(Icon::Properties), QStringLiteral("Title Block..."));
@@ -1296,6 +1298,7 @@ void SheetEditor::rebuildProperties()
         connect(legend, &QCheckBox::toggled, this,
                 [editThis](bool on) { editThis([on](Sheet& s) { s.frameLegend = on; }); });
         form->addRow(QString(), legend);
+        form->addRow(QString(), choosePaperButton(box, document_, *this));
         layout->addWidget(box);
 
         // Title-block values: what each field prints, and what this sheet overrides.
@@ -1379,6 +1382,10 @@ void SheetEditor::rebuildProperties()
 void SheetEditor::showContextMenu(const QPointF& global, const std::string& viewportId)
 {
     QMenu menu(this);
+    QMenu* arrange = menu.addMenu(QStringLiteral("Arrange"));
+    arrange->setObjectName(QStringLiteral("sheetContextArrangeMenu"));
+    fillArrangeMenu(*arrange, document_, *this);
+    menu.addSeparator();
     if (!viewportId.empty()) {
         const std::size_t index = currentSheet();
         menu.addAction(QStringLiteral("Bring to Front"), this, [this, index, viewportId] {
@@ -1693,6 +1700,11 @@ void SheetEditor::generateSheets()
     legend->setChecked(true);
     form->addRow(QString(), snapshot);
     form->addRow(QString(), legend);
+    auto* rotate = new QCheckBox(QStringLiteral("Rotate the drawing to fill the sheet"), &dialog);
+    rotate->setObjectName(QStringLiteral("sheetGenerateRotate"));
+    rotate->setToolTip(QStringLiteral("Turn the plan when that shows the drawing at a larger scale, "
+                                      "or on fewer sheets, and no further than it needs"));
+    form->addRow(QString(), rotate);
     auto* replace = new QCheckBox(QStringLiteral("Replace the sheets there are now"), &dialog);
     form->addRow(QString(), replace);
 
@@ -1708,6 +1720,7 @@ void SheetEditor::generateSheets()
         columns->setEnabled(k == 4);
         snapshot->setEnabled(k == 0);
         legend->setEnabled(k == 0);
+        rotate->setEnabled(k == 0);
         scale->setEnabled(k != 5);
     };
     connect(kind, &QComboBox::currentIndexChanged, &dialog, enable);
@@ -1747,7 +1760,9 @@ void SheetEditor::generateSheets()
         request.model3d = snapshot->isChecked();
         request.legend = legend->isChecked();
         request.paper = paperTemplate;
-        sheets = plotting::smartLayout(model, request);
+        sheets = rotate->isChecked()
+                     ? plotting::smartLayoutRotated(model, request, drawingContent(src))
+                     : plotting::smartLayout(model, request);
     } else if (k == 1) {
         plotting::GridRequest request;
         request.area = extent;
