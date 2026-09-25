@@ -135,9 +135,18 @@ std::optional<PointCloudLayer> referencedCloud(const std::filesystem::path& arch
     if (reference.empty()) {
         return std::nullopt;
     }
+    // The name after the last separator of EITHER kind: the reference was
+    // written on Windows, and std::filesystem on any other system reads a
+    // backslash as part of the name, so "..\..\scans\site.las" would be one
+    // long file name that is never beside the archive.
+    const std::size_t lastSeparator = reference.find_last_of("/\\");
+    const std::string name =
+        lastSeparator == std::string::npos ? reference : reference.substr(lastSeparator + 1);
+    if (name.empty() || name == "." || name == "..") {
+        return std::nullopt;
+    }
     std::error_code ignored;
-    const std::filesystem::path beside =
-        archive.parent_path() / std::filesystem::path(reference).filename();
+    const std::filesystem::path beside = archive.parent_path() / std::filesystem::path(name);
     if (!std::filesystem::is_regular_file(beside, ignored)) {
         return std::nullopt;
     }
