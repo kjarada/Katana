@@ -21,6 +21,7 @@ done. There is no user guide yet.
 | [render.md](render.md) | camera, draw lists, the software rasteriser, the 3D and section views | `katana_render`, `render_view_widget.*`, `section_view_widget.*` |
 | [performance.md](performance.md) | the measurements and what moved | anything measured (`benchmarks/`) |
 | [interop.md](interop.md) | GIS, rasters, point clouds, the `.12da` archive, import and export | `katana_io`, `katana_interop`, `katana_archive12d` (the archive) |
+| [gis_online.md](gis_online.md) | GIS > Online Data: the provider catalogue, how each web service is asked, limits, the cache, licences and attribution, the dialog and the `ONLINE` verbs | `resources/online/`, `katana_interop`'s `online_*`, `gis/web_access.hpp`, `gis/reproject.hpp`, `src/katana_qt/gis_online*` |
 | [survey.md](survey.md) | the survey model and calculations, instrument and field-file import, the Survey menu | `katana_survey`, `katana_surveyio`, `src/katana_qt/survey/` |
 | [survey_coding.md](survey_coding.md) | style libraries, survey code files, coding a survey, the built-in customisation | `katana_archive12d` (customisation), `src/katana_cad/customisation/`, the Survey Code Manager |
 | [cad.md](cad.md) | the engine both front ends drive: document, selection, snapping, the command interpreter, the spatial index, alignments, corridors, parcels, grading, plotting arithmetic, style and symbol resolution | `katana_cad` (outside `tools/`) |
