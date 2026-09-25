@@ -26,6 +26,7 @@
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/entity/tables.hpp"
+#include "katana/interop/reference_data.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "plotting/plot_style.hpp"
 #include "sheet_painter.hpp"
@@ -290,6 +291,67 @@ TEST(PlotStyle, GreyscaleAndMonochromeLeaveNoColourAnywhereOnTheSheet)
     for (const PlotColourMode mode : {PlotColourMode::Greyscale, PlotColourMode::Monochrome}) {
         const QImage sheet = paintedSheet(set, source, styled(mode),
                                           mode == PlotColourMode::Greyscale ? "grey" : "mono");
+        const Colourfulness found = colourfulness(sheet, 2);
+        EXPECT_LE(found.most, 2) << katana::cad::toString(mode);
+        EXPECT_EQ(found.coloured, 0) << katana::cad::toString(mode);
+    }
+}
+
+// What the other sheet features draw follows the style too: an aerial photo
+// cropped under a plan, the plan's coordinate grid, a key plan's tinted
+// outlines, and a drawing register's highlighted row. None of it leaves a
+// coloured pixel in greyscale or monochrome.
+TEST(PlotStyle, ImageryGridsKeyPlansAndTablesFollowTheStyle)
+{
+    katana::interop::RasterOverlay photo;
+    photo.name = "ortho";
+    photo.width = 40;
+    photo.height = 40;
+    photo.rgba.resize(40 * 40 * 4);
+    for (std::size_t i = 0; i < photo.rgba.size(); i += 4) {
+        photo.rgba[i] = 40;      // a strong blue
+        photo.rgba[i + 1] = 110;
+        photo.rgba[i + 2] = 200;
+        photo.rgba[i + 3] = 255;
+    }
+    photo.geotransform = {-200.0, 10.0, 0.0, 200.0, 0.0, -10.0};
+    photo.hasGeotransform = true;
+    katana::interop::ReferenceData reference;
+    (void)reference.add(std::move(photo));
+    Model model;
+    addLine(model, Point2(-80.0, 0.0), Point2(80.0, 0.0), Color{255, 0, 0, 255});
+
+    plotting::SheetSet set = planSheet();
+    set.sheets[0].viewports[0].gridStyle = plotting::GridStyle::Lines;
+    plotting::Viewport key;
+    key.id = "vp2";
+    key.kind = plotting::ViewportKind::KeyPlan;
+    key.rect = box(305.0, 180.0, 405.0, 250.0);
+    key.autoScale = true;
+    key.autoCentre = true;
+    set.sheets[0].viewports.push_back(key);
+    plotting::Viewport index;
+    index.id = "vp3";
+    index.kind = plotting::ViewportKind::SheetIndex;
+    index.rect = box(305.0, 100.0, 405.0, 175.0);
+    set.sheets[0].viewports.push_back(index);
+    plotting::Sheet second = set.sheets[0];
+    second.id = "s2";
+    second.name = "NEXT";
+    second.viewports = {set.sheets[0].viewports[0]};
+    second.viewports[0].id = "vp4";
+    second.viewports[0].centre = Point2(150.0, 0.0);
+    set.sheets.push_back(second);
+
+    SheetSource source;
+    source.plan.model = &model;
+    source.plan.reference = &reference;
+    const QImage colour = paintedSheet(set, source, styled(PlotColourMode::Colour), "features");
+    EXPECT_GT(colourfulness(colour, 60).coloured, 5000);
+    for (const PlotColourMode mode : {PlotColourMode::Greyscale, PlotColourMode::Monochrome}) {
+        const QImage sheet = paintedSheet(set, source, styled(mode),
+                                          mode == PlotColourMode::Greyscale ? "features_grey"
+                                                                            : "features_mono");
         const Colourfulness found = colourfulness(sheet, 2);
         EXPECT_LE(found.most, 2) << katana::cad::toString(mode);
         EXPECT_EQ(found.coloured, 0) << katana::cad::toString(mode);

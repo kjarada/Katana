@@ -37,6 +37,7 @@
 #include "katana/geometry/alignment.hpp"
 #include "katana/geometry/chording.hpp"
 #include "katana/geometry/polygon.hpp"
+#include "plotting/plot_style.hpp"
 
 namespace katana::qt {
 
@@ -821,7 +822,14 @@ void PlanPainter::drawRasterOnPaper(const katana::interop::RasterOverlay& raster
     // Smoothed: a crop is at most the capped resolution, so it is usually
     // magnified onto the device, where nearest-neighbour would print blocks.
     painter_.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter_.drawImage(QPointF(0.0, 0.0), image);
+    // In the plot style: a greyscale or monochrome plot prints the photo grey
+    // (plotImage), as it prints every line and fill of the drawing over it.
+    // The crop is converted, never the cached whole image.
+    if (options_.plot != nullptr && options_.plot->colourMode != cad::PlotColourMode::Colour) {
+        painter_.drawImage(QPointF(0.0, 0.0), plotImage(image, *options_.plot));
+    } else {
+        painter_.drawImage(QPointF(0.0, 0.0), image);
+    }
     painter_.restore();
     ++stats_.rastersDrawn;
     stats_.rasterPixelsEmbedded += static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
@@ -1014,7 +1022,12 @@ void PlanPainter::splatOnPaper(const katana::interop::PointCloudLayer& cloud,
     painter_.setTransform(placed, true);
     // Not smoothed: a point is a crisp square, as on screen.
     painter_.setRenderHint(QPainter::SmoothPixmapTransform, false);
-    painter_.drawImage(band.topLeft(), image, band);
+    // The points in the plot style, as the crop of a raster is.
+    if (options_.plot != nullptr && options_.plot->colourMode != cad::PlotColourMode::Colour) {
+        painter_.drawImage(band.topLeft(), plotImage(image.copy(band), *options_.plot));
+    } else {
+        painter_.drawImage(band.topLeft(), image, band);
+    }
     painter_.restore();
     stats_.cloudPixelsEmbedded +=
         static_cast<std::size_t>(band.width()) * static_cast<std::size_t>(band.height());
