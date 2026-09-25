@@ -32,6 +32,7 @@
 #include "customisation/customisation_workbench.hpp"
 #include "survey/survey_workbench.hpp"
 #include "tools/tool_menus.hpp"
+#include "sheet_editor.hpp"
 #include "view_workspace.hpp"
 
 class QAction;
@@ -114,6 +115,15 @@ class MainWindow final : public QMainWindow {
     [[nodiscard]] katana::core::Status plotDrawingToPdf(const QString& path,
                                                         katana::cad::PlotSettings settings,
                                                         bool fitToDrawing);
+    // Every sheet of the project to one PDF (docs/plotting.md). A project
+    // with no sheets plots one sheet fitted to the drawing, laid out for this
+    // plot only and not added to the project. Public for --plot-sheets.
+    [[nodiscard]] katana::core::Status plotSheetsToPdf(const QString& path);
+    // What sheets are drawn from: the drawing, this window's surfaces, meshes
+    // and reference layers, the set's logo and the project's fields.
+    [[nodiscard]] SheetSource sheetSource() const;
+    // File > Sheets: the sheet editor, built on first use and kept.
+    void showSheets();
 
     // A styles and linetypes manager of its own, built but not shown, from
     // the Format menu's context (CustomisationWorkbench). For the headless
@@ -350,6 +360,8 @@ class MainWindow final : public QMainWindow {
     // destroyed before it - rather than left to Qt, which deletes a window's
     // children only after its members are gone.
     std::unique_ptr<LayerManagerDialog> layers_;
+    // File > Sheets, kept between uses and owned here for the reason layers_ is.
+    std::unique_ptr<SheetEditor> sheets_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for

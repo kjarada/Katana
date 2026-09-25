@@ -27,6 +27,10 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     viewport_widget.cpp
     plan_painter.cpp
     plan_painter.hpp
+    sheet_painter.cpp
+    sheet_painter.hpp
+    sheet_editor.cpp
+    sheet_editor.hpp
     viewport_widget.hpp
     view_workspace.cpp
     view_workspace.hpp

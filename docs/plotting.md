@@ -607,31 +607,91 @@ The smart layout is 1.3 to 1.5 times as fast. The other three run code the
 fixes did not touch, on the same set (125,652 bytes both times). Their ratios
 are at the edge of the A/A spread, and no claim is made for them either way.
 
+## The sheet painter
+
+`src/katana_qt/sheet_painter.hpp` draws one sheet onto any QPainter: the
+editor's canvas and every PDF page go through the same `paintSheet`, so the
+editor shows exactly what plots. It reads no widget and keeps its caches
+(frames, cut sections, 3D snapshots, images, the plan painter's) in a
+`SheetPaintCache` the caller owns.
+
+- **Order.** White paper, then the viewports back to front, then the frame
+  over them, as the owner's app drew it.
+- **The frame.** Lines at their measured weights, dashes in paper
+  millimetres (flat caps, so a 2.2 mm dash is 2.2 mm). Text in Arial set by
+  cap height at a 200 px reference size and scaled, with the 0.82 x factor
+  as a painter scale. Field values come from `resolveFields`; `centredIn`
+  values are centred in their cells. A single-line field wider than the room
+  to its cell's right edge is squeezed, as the app did. The notes slot wraps
+  to its cell. The 14 legend glyphs are the app's procedural glyphs, redrawn
+  in a -1..1 box at a 0.18 mm stroke. The logo is `fitImage` in the logo
+  slot. The construction guide and faint "YOUR LOGO" / "ORGANISATION" hints
+  are drawn only when the options ask (the editor).
+- **Plan and key plan.** `paintPlan` on paper through a `PlanFrame` sized to
+  the viewport, rotated by minus the viewport's rotation (the world
+  direction that runs across the paper), clipped. `autoScale` picks the
+  first of `kSheetScales` at which the drawing - or the viewport's stretch
+  of its alignment - fits with 4% to spare; the title block reports the
+  scale drawn. Match lines are dash-dot with their label along them; a key
+  plan fades the drawing and outlines the other sheets, numbered.
+- **Sections.** Cut once per drawing revision from the window's visible
+  surfaces along the named alignment, the design profile added when the
+  alignment has one. A long section gets a data band (design and ground
+  levels at each grid chainage, then the chainage); a cross section gets
+  its centreline and a "CH" caption. Crossings are dashed with their layer
+  name and a circle at their level. The datum is written inside the plot.
+- **3D snapshot.** The 3D view's renderer on a white background, capped at
+  200 dpi and 8 megapixels.
+- **Legend, notes, image.** A sample line per layer in use (in its paper
+  colour and weight); wrapped notes; a project image fitted.
+- **Furniture.** North arrow (pointing where world +Y is on the paper),
+  scale bar (1, 2 or 5 times a power of ten, at most 50 mm), and the view's
+  title underlined in its bottom-left corner.
+- **Problems.** A viewport that cannot be drawn - no such alignment, no
+  surface to cut - is outlined and left empty on paper, reported in
+  `SheetPaintStats::problems`, and explained inside it in the editor.
+
+`plotSheetsToPdf` writes the whole set, or chosen sheets, to one vector PDF,
+each page the size of its sheet's paper. File > Plot Sheets to PDF and
+`katana --plot-sheets out.pdf` use it; a project with no sheets plots one
+fitted to the drawing without adding it to the project.
+
+## The sheet editor
+
+File > Sheets (Ctrl+Shift+P) opens `src/katana_qt/sheet_editor.hpp`, a window
+beside the drawing:
+
+- **Sheets** on the left: add, duplicate, remove, reorder, rename
+  (double-click).
+- **The canvas**: the painter's output, cached and painted again only when
+  the document, the zoom or the pan changes. Click to select a viewport;
+  drag to move it and the handles to resize it, snapping to the drawing area
+  and the other viewports (Alt: no snap); Shift-drag pans the drawing inside
+  a plan; arrows nudge (Shift: 10 mm); Delete removes; the wheel zooms and a
+  middle or empty-paper drag pans; double-click the desk to fit the page.
+  A drag is ONE command, committed on release.
+- **Properties** on the right: a viewport's title, scale (or Auto),
+  rotation, centre, exaggeration, alignment and chainages, north arrow,
+  scale bar, hidden layers, text, lock; or, with nothing selected, the
+  sheet's paper, orientation, frame and legend block, and a table of every
+  field the frame prints with this sheet's overrides.
+- **Toolbar**: Generate Sheets (the drawing fitted, tiles with a key plan,
+  strips along an alignment, plan and profile, cross sections, one sheet per
+  imported plot frame; appended or replacing), New Sheet, Add View, Tile
+  (the eight presets), Title Block (organisation, project lines, client, set
+  number and numbering, coordinate system, datum, the five sign-offs, notes,
+  revisions and the logo), Fit Page, Plot Sheet, Plot All.
+
+The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
+`test_sheet_editor.cpp`.
+
 ## Not yet
 
-This wave built the model. Still to come:
-
-- **The sheet painter** (`katana_qt`):
-  - the frame, in Arial with the 0.82 x factor as a painter scale, sizes as
-    real numbers (never whole device pixels), and round caps and joins;
-  - the field values centred in `centredIn` cells and fitted to their rule;
-  - the logo, decoded once and reused on every page;
-  - each viewport clipped to its rectangle and rotated, with the culling box
-    grown to the rotated rectangle;
-  - section and long-section painting on a paper rectangle;
-  - the 3D snapshot as a capped-resolution raster;
-  - the legend from the styles in use;
-  - the north arrow, scale bar and match-line labels, all sized in paper
-    millimetres;
-  - one multi-page vector PDF for the whole set, and a command-line verb for
-    it.
-- **The sheet editor.** A paper-space view kind with sheet tabs: place,
-  resize and snap viewports, tile with the presets, edit title-block fields
-  in place, pan and zoom inside a viewport. A drag should commit one command
-  on release, because the command stack does not merge steps.
 - **Change notifications.** A sheet edit notifies the document's listeners
-  like any model change, so today it would rebuild the 3D view's scene. Typed
-  notifications are another agent's work.
-- **Frames and furniture.** More frames, such as the owner's plan-sheet frame
-  with a north-arrow zone, and a reader for title-block files. The revision
-  table is stored but not yet drawn by any frame.
+  like any model change, so it still rebuilds the 3D view's scene.
+- **Frames and furniture.** More frames, such as a plan-sheet frame with a
+  north-arrow zone, and a reader for title-block files. The revision table
+  is stored and edited but not yet drawn by any frame.
+- **Background plotting.** A large set is plotted on the GUI thread with a
+  wait cursor; the painter is reentrant, so moving it to a job is the next
+  step.
