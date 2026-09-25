@@ -685,6 +685,93 @@ beside the drawing:
 The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
 `test_sheet_editor.cpp`.
 
+## Plot styles and output
+
+A sheet set is plotted in a PLOT STYLE and to one of several OUTPUTS, all
+chosen by plain data, so the Plot dialog, `katana --plot-sheets` and an agent
+make the same call and get the same files.
+
+**The colour mode** is `cad::PlotColourMode` in
+`include/katana/cad/plot.hpp`, carried by `cad::PlotSettings::colourMode`
+with `PlotSettings::lineWeightScale` beside it. The rule lives in the model,
+in `cad::paperColour` (a pen or a letter) and `cad::paperFillColour` (an
+area), so the plan painter, the sheet painter and the frame agree:
+
+- **Colour** prints as drawn (white still prints black under
+  `whiteToBlack`).
+- **Greyscale** prints every colour as the grey of its `cad::luminance`, the
+  Rec. 601 luma in integers, so a colour keeps its lightness.
+- **Monochrome** prints every pen and letter black. A FILL is black when its
+  luminance is below `cad::kMonochromeFillThreshold` (128) and paper white
+  otherwise, as a one-ink plotter prints it: dark areas stay solid, light
+  tints drop out and leave their (black) outline. The paper's own white -
+  the page, a knock-out behind a label, the key plan's fade - is never a
+  colour of the drawing and stays white in every mode; a fill's alpha is
+  kept, so a faint tint stays faint.
+
+In the sheet painter the mode is applied in ONE place: `paperPen`,
+`dashedPen`, `TextSetter` and the `paperFill` helper call `plotInk` and
+`plotFill` (`src/katana_qt/plotting/plot_style.hpp`), and every image placed
+on a sheet - the logo, an image viewport, the 3D snapshot - passes through
+`plotImage`, which greys it (a photograph is printed grey, not thresholded,
+in monochrome). A plan viewport follows because the plan painter takes the
+same `PlotSettings`. **The line weight scale** multiplies every pen width on
+paper (0.1 to 5): a check plot at 0.7, a bold one at 1.4; text, dash lengths
+and symbol sizes are unchanged.
+
+**The page setup** is `plotting::PageSetup`
+(`include/katana/cad/plotting/page_setup.hpp`), kept at the end of
+`SheetSet` and in its JSON as `page_setup` (each member only when it is not
+the default): the colour mode (by name), line weight scale, resolution (50 to
+1200 dpi, 300 by default), the file-name pattern and whether a PDF plot is a
+file per sheet. `plotting::setPageSetup` changes it as one undoable step
+("PAGE_SETUP"). The pattern takes `formatSheetNumber`'s `{n}`, `{n:02}`,
+`{N}` and `{set}`, plus `{name}`, `{number}` and `{id}`; the default
+`{set}{n:02} {name}` names the third sheet of set C "C03 PLAN TILE 3".
+`plotting::sheetFileNames` expands it, sanitises the result for every file
+system (`plotting::sanitiseFileName`: forbidden characters to '-', device
+names prefixed, 120 bytes at most) and tells repeats apart with " (2)".
+
+**A selection** is text: `plotting::parseSheetSelection` reads "1,3-5"
+(positions from 1, in the order given, each once), sheet ids ("s7") and
+""/"all", and refuses a sheet that is not there or a backward range saying
+which; `plotting::formatSheetSelection` writes the short form back.
+
+**The outputs** are `src/katana_qt/plotting/plot_output.hpp`: a
+`PlotRequest` (sheets, `PlotFormat`, style, dpi, destination, pattern, title)
+given to `plotSheets` writes
+
+- `pdf`: one vector PDF, a page a sheet, each page the size of its paper;
+- `pdfs`: a PDF a sheet in the destination folder, named by the pattern;
+- `png`, `tiff`: a raster a sheet at the dpi, with the resolution recorded
+  in the file; one grey channel when the mode is not Colour. TIFF is written
+  by `src/katana_qt/plotting/tiff_writer.hpp` (baseline, Deflate), because
+  Qt's TIFF plugin is not everywhere;
+
+and `printSheets` prints on a `QPrinter`, a page a sheet on the sheet's
+paper, scaled down to fit (and reported) when the printer's paper is
+smaller. `validatePlotRequest` and `plannedFiles` check a request and list
+its files without writing anything; the `PlotReport` lists the files
+written, the sheets, every problem and whether it was cancelled. Every file
+goes through a `QSaveFile`, so a cancelled or failed single PDF leaves no
+half a set and an earlier file as it was.
+
+**Progress.** `plotSheets` calls a `PlotProgress` before each sheet;
+returning false cancels before the next one. The Plot dialog
+(`src/katana_qt/plotting/plot_dialog.hpp`, `PlotDialog`) only collects a
+request; `plotWithProgress` then runs it on the GUI thread behind an
+application-modal progress dialog (`plotProgress`) with Cancel, so the
+sheets cannot be edited while they are painted, and the plot paints from a
+copy of the set. The editor's Plot Sheet and Plot All and File > Plot
+Sheets to PDF open the dialog; its "Keep these settings" box stores the
+choice as the page setup. On the command line, `--plot-sheets` takes
+`--sheets`, `--format pdf|pdfs|png|tiff`, `--plot-style colour|grey|mono`,
+`--dpi` and `--line-weight-scale` (`docs/headless.md`).
+
+The tests are `tests/cad/plotting/test_page_setup.cpp`,
+`tests/qt_widgets/plotting/test_plot_style.cpp`, `test_plot_output.cpp` and
+`test_plot_dialog.cpp`.
+
 ## Not yet
 
 - **Change notifications.** A sheet edit notifies the document's listeners
@@ -692,6 +779,6 @@ The tests are `tests/qt_widgets/test_sheet_painter.cpp` and
 - **Frames and furniture.** More frames, such as a plan-sheet frame with a
   north-arrow zone, and a reader for title-block files. The revision table
   is stored and edited but not yet drawn by any frame.
-- **Background plotting.** A large set is plotted on the GUI thread with a
-  wait cursor; the painter is reentrant, so moving it to a job is the next
-  step.
+- **Background plotting.** A large set is plotted on the GUI thread, a
+  sheet at a time behind a progress dialog; the painter is reentrant, so
+  moving it to a job is the next step.

@@ -312,12 +312,13 @@ TEST(PlotOutput, RastersAreAFileASheetAtTheChosenResolution)
     EXPECT_EQ(image.size(), QSize(827, 585));
     EXPECT_EQ(image.dotsPerMeterX(), 1969); // 50 / 0.0254
     EXPECT_NE(image.format(), QImage::Format_Grayscale8);
-    // The red line is in it, red.
+    // The red line is in it, red: at 50 dpi a thin line is under a pixel
+    // wide and antialiased to a pink, so red is what stands out.
     int red = 0;
     for (int y = 0; y < image.height(); ++y) {
         for (int x = 0; x < image.width(); ++x) {
             const QRgb pixel = image.pixel(x, y);
-            red += qRed(pixel) > 200 && qGreen(pixel) < 80 ? 1 : 0;
+            red += qRed(pixel) - qGreen(pixel) > 60 && qGreen(pixel) == qBlue(pixel) ? 1 : 0;
         }
     }
     EXPECT_GT(red, 50);
@@ -502,7 +503,8 @@ TEST(PlotOutput, ARequestIsCheckedBeforeAnythingIsWritten)
 
     // A raster too large to hold is refused with the resolution that fits.
     fixture.set.sheets[1].paper = katana::cad::PaperSize::A0;
-    PlotRequest huge = request(PlotFormat::Tiff, dir.filePath("out"));
+    // Sheet 2 alone: the A3 sheets are too large at 1200 dpi as well.
+    PlotRequest huge = request(PlotFormat::Tiff, dir.filePath("out"), "2");
     huge.dpi = 1200.0;
     EXPECT_EQ(refused(huge), "sheet 2 (TWO) at 1200 dpi is 2232 megapixels, more than the 200 a "
                              "raster may be: plot it at 359 dpi or less");
