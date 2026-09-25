@@ -162,6 +162,7 @@ every action, field, button and tab gets one. In a test they are one
 | `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
+| `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |
 | `--report NAME` | `?NAME` | prints on stderr what the target's widget NAME shows - a label's text, a field's, a list's rows - or, for one of the window's actions, its text and whether it is checked (which tool the menus show running); for one of the window's menus (`formatMenu`), its title and every item with the status tip it shows, without opening it; failing all of those, any of the window's own widgets, so what a dialog did to the window is read with the dialog still the target (`?FrameStatsLabel` after the utilities dialog framed the views, `qt_utility_dialog_headless`) |
 | `--trigger NAME` | `*NAME` | triggers menu item NAME in its turn among the steps (`--action` runs before them all) |
 
@@ -233,6 +234,9 @@ A modal box in a headless run is a hang until the test's timeout. So
   answered: a scripted `QUIT` with unapplied code edits, or `NEW` after an
   edit, fails, and the script can Apply or Revert, `SAVE` or `UNDO` first
   (`desktop.md`, "Failure modes");
+- GIS > Convert Point Cloud to COPC opens no file dialog and names the verb
+  that asks nothing, `COPC <source> <destination.copc.laz>`
+  (`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`);
 - Edit > Attributes, still `exec()`'d, logs that it is modal and names the
   switch that grabs it (`--attributes`) instead of opening; Format > Layers
   is non-modal and opens as any manager does;

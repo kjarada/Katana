@@ -263,6 +263,71 @@ TEST_F(McpServer, QuitIsNotRunAndTheSessionCarriesOn)
     EXPECT_EQ(session.document().model().entities.size(), 1U);
 }
 
+TEST_F(McpServer, DescribeEntityDescribesTheEntityItNames)
+{
+    // The tool sends INFO <id>, which a session with the GIS module once took
+    // for INFO <file>: every call answered that the file did not exist. A
+    // 10 x 5 rectangle: perimeter 30, area 50.
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"RECT 0,0 10,5"}}});
+    const Json described = call("katana_describe_entity", Json{{"id", 1}});
+    EXPECT_FALSE(described["isError"].get<bool>()) << textOf(described);
+    EXPECT_NE(textOf(described).find(
+                  "> INFO 1\n1  Polyline  layer=0  vertices=4  closed  length=30  area=50"),
+              std::string::npos)
+        << textOf(described);
+
+    const Json missing = call("katana_describe_entity", Json{{"id", 2}});
+    EXPECT_TRUE(missing["isError"].get<bool>());
+    EXPECT_NE(textOf(missing).find("entity does not exist"), std::string::npos) << textOf(missing);
+}
+
+TEST_F(McpServer, TheImportToolSaysWhatLocalDoes)
+{
+    // It once said LOCAL imported "in the drawing's own coordinates rather
+    // than reprojecting": LOCAL moves the data, it does not keep it.
+    initialize();
+    const Json tools = request("tools/list")["result"]["tools"];
+    const auto tool = std::find_if(tools.begin(), tools.end(), [](const Json& each) {
+        return each["name"] == "katana_import";
+    });
+    ASSERT_NE(tool, tools.end());
+    const std::string local =
+        (*tool)["inputSchema"]["properties"]["local"]["description"].get<std::string>();
+    EXPECT_NE(local.find("lower-left corner sits at 0,0"), std::string::npos) << local;
+    EXPECT_EQ((*tool)["description"].get<std::string>().find("reprojecting"), std::string::npos);
+}
+
+#if defined(KATANA_TEST_WITH_INTEROP)
+TEST_F(McpServer, ImportLocalMovesAQuotedPathsDataToTheOrigin)
+{
+    // The tool quotes the path and adds LOCAL; the session once took LOCAL
+    // off and left the quotes on, so local: true failed for every GIS file.
+    // In a folder with a blank in its name, so the quotes matter.
+    // samples/gis/parcels.geojson spans (180, 0) to (365, 165): moved as one
+    // piece to put that lower-left corner at 0,0, it spans (0, 0) to
+    // (185, 165).
+    const TempDir dir("import local");
+    const std::string copy = dir.file("site parcels.geojson");
+    std::filesystem::copy_file(std::filesystem::path(KATANA_GIS_SAMPLES) / "parcels.geojson",
+                               std::filesystem::path(copy));
+    initialize();
+    const Json imported = call("katana_import", Json{{"path", copy}, {"local", true}});
+    EXPECT_FALSE(imported["isError"].get<bool>()) << textOf(imported);
+    const auto bounds = session.document().model().entities.bounds();
+    EXPECT_DOUBLE_EQ(bounds.min.x, 0.0);
+    EXPECT_DOUBLE_EQ(bounds.min.y, 0.0);
+    EXPECT_DOUBLE_EQ(bounds.max.x, 185.0);
+    EXPECT_DOUBLE_EQ(bounds.max.y, 165.0);
+
+    // Without LOCAL the same file keeps its own coordinates.
+    (void)call("katana_new_project", Json{{"discard_unsaved_changes", true}});
+    const Json kept = call("katana_import", Json{{"path", copy}});
+    EXPECT_FALSE(kept["isError"].get<bool>()) << textOf(kept);
+    EXPECT_DOUBLE_EQ(session.document().model().entities.bounds().min.x, 180.0);
+}
+#endif
+
 TEST_F(McpServer, UndoAndRedoStepThroughTheHistory)
 {
     initialize();

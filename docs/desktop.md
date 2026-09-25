@@ -700,6 +700,74 @@ modal box** - every question the window would ask becomes a line in the log
 or a refusal. `docs/headless.md` ("A headless session never opens a modal
 box") lists what each one does.
 
+## One executor: the command runner
+
+A dialog that changes the drawing does not do the work itself: it builds the
+verb line a person would type and hands it to the window's one executor,
+`MainWindow::runVerbLine`, as a `CommandRunner` (`src/katana_qt/command_runner.hpp`).
+The workbenches carry it to their dialogs - `SurveyServices::run`,
+`CustomisationServices::run` into every manager's `CustomisationContext::run`,
+`AnnotationWorkbench::setCommandRunner`, `UtilityServices::run` - so a dialog
+never reaches into the window for it.
+
+- **The same dispatcher as a typed line.** `runCommandLine` is Enter on the
+  command line: it reads and clears the field, echoes the line, offers it to
+  the workbenches' verbs (`runWorkbenchLine`: `ONLINE`, `UTILITY`), then to a
+  running tool (`ViewWorkspace::typeIntoTool`), and hands whatever is left to
+  `dispatchLine` - the view verbs, the window's own (`CUSTOMISE`, `IMPORT`,
+  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `PLOTSHEETS`), a tool's alias, and
+  the interpreter. `runVerbLine` echoes the line and runs the same
+  `runWorkbenchLine` and `dispatchLine`, so the two cannot come to differ; the
+  line is kept in the interpreter's history and undone exactly as a typed one.
+- **Never a running tool's answer.** That step is the only one `runVerbLine`
+  leaves out. A tool waiting for a point or a text takes any typed line for
+  one; a dialog's `CIRCLE 5,5 2` while Line waits for its first point is drawn,
+  and the tool still waits. What is being typed on the command line is left
+  alone.
+- **The reply comes back.** While the line runs, `logMessage` also collects
+  what it logs, and `warnUser` what it shows in a box, into a
+  `VerbOutcome`: `ok`, the `reply` lines and the `error` lines. `ok` is judged
+  by the errors counted, as `runCommand` judges a `--command` line, so a
+  `PLOTSHEETS` that plotted with a missing image is still ok. An empty line is
+  not ok: a dialog has no Enter to press.
+
+The Subsurface Utilities dialog was the first to run its line this way; before
+the runner it had an echo-and-run callback of its own in the window, a second
+executor, which is gone. GIS > Convert Point Cloud to COPC is the second: its two file
+dialogs choose the files, and the conversion is the `COPC "<source>"
+"<destination>"` line through `runVerbLine`. The headless driver's `--run-line`
+step (`docs/headless.md`) runs a line the same way and prints the outcome;
+`qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless` runs one while
+Line waits for its first point.
+
+### The session's verbs on the window's command line
+
+Until 2026-09-26 the window refused or misread several verbs `katana_cli` had.
+Each now reaches the same code on every front end
+(`qt_the_session_verbs_run_on_the_windows_command_line_headless`,
+`qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`,
+`qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless`):
+
+- `INFO 12` (or `INFO #12`) describes entity 12, unless a file of that name
+  exists: `CommandInterpreter::isEntityId`. The window, and the session under
+  `katana_cli` and `katana_mcp`, once took every `INFO` for `INFO <file>`, so
+  `katana_describe_entity` answered that the file did not exist.
+- `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
+  are the interpreter's (`include/katana/cad/survey_code_verbs.hpp`), given the
+  standard colour table by `CommandInterpreter::setColourLookup`.
+- `COPC <source> <destination.copc.laz>`, each path one word or quoted; it
+  logs the `IMPORT` line that reads the result. In a headless session the GIS
+  menu's item opens no file dialog and names this verb instead.
+- `CUSTOMISE` alone reports what is loaded, from which files, what the project
+  was drawn with that is not loaded, and what it covers in this drawing
+  (`cad::customisationReport`, the words `katana_cli` prints); it once
+  answered with its usage.
+- `IMPORT <file> LOCAL` moves a DXF, vector file or .12da archive as one piece
+  so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
+  cloud refuses it by name. The path and the `LOCAL` are read by
+  `CommandInterpreter::importArgument`, as the session reads them; `LOCAL` was
+  once taken for part of the path. The import dialogs do not offer it yet.
+
 ## GIS > Online Data: a workbench of its own
 
 The online import (`docs/gis_online.md`) is `OnlineDataWorkbench`
@@ -755,8 +823,8 @@ the fields, tested without a window - writes the `UTILITY` line (a path with
 blanks quoted, a blank option left out, a file field left empty or a number
 that does not read refused with the field named, and nothing run; a file that
 cannot be read is the verb's refusal, by its path, once the line has run); `utilityCommand`
-shows that line as it is edited; Run hands it back to the window
-(`UtilityServices::runCommand`), so it is echoed, kept in the history and
+shows that line as it is edited; Run hands it to the window's one executor
+(`UtilityServices::run`, "One executor: the command runner"), so it is echoed, kept in the history and
 undone exactly as a typed line - but never offered to a running tool first,
 since the dialog's line is never a text - and the reply the workbench got for it comes
 back into `utilityOutput`, with Copy and Save As beside it. The reply stays

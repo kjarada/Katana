@@ -141,9 +141,12 @@ bool UtilityWorkbench::runLine(const QString& line)
 Result<std::string> UtilityWorkbench::execute(const QString& line)
 {
     lastReply_.reset();
-    if (services_.runCommand) {
-        services_.runCommand(line);
+    if (services_.run) {
+        (void)services_.run(line);
     }
+    // The reply runLine kept, not the runner's outcome: the interpreter's
+    // Result keeps a refusal's code apart from its message, which the
+    // dialog's status shows alone.
     if (!lastReply_) {
         return makeError(ErrorCode::InvalidState,
                          "the command line did not run this as a UTILITY line", line.toStdString());

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <optional>
 #include <thread>
+#include <utility>
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
@@ -259,6 +260,26 @@ bool fillField(QWidget& dialog, const QString& assignment)
     return false;
 }
 
+// --run-line: `text` through the window's one executor, as a dialog runs a
+// line, and the outcome the dialog gets printed back on stderr - the ok, then
+// each line of the reply and of the errors - so a test reads what a dialog
+// would show. Whether it was ok.
+bool runLine(katana::qt::MainWindow& window, const QString& text)
+{
+    const katana::qt::VerbOutcome outcome = window.runVerbLine(text);
+    std::fprintf(stderr, "--run-line %s: ok=%s\n", qPrintable(text), outcome.ok ? "yes" : "no");
+    for (const auto& [label, lines] : {std::pair("reply", outcome.reply),
+                                       std::pair("error", outcome.error)}) {
+        if (lines.isEmpty()) {
+            continue;
+        }
+        for (const QString& line : lines.split('\n')) {
+            std::fprintf(stderr, "  %s: %s\n", label, qPrintable(line));
+        }
+    }
+    return outcome.ok;
+}
+
 } // namespace
 
 // Usage:
@@ -283,7 +304,8 @@ bool fillField(QWidget& dialog, const QString& assignment)
 //   katana [project-directory] [data-file...] [--select-all] [--action NAME...]
 //                 --dialog NAME [--fill FIELD=TEXT...] [--press BUTTON...]
 //                 [--report WIDGET...] [--dialog NAME ...] [--survey-dock ACTION ...]
-//                 [--command TEXT...] [--enter] [--trigger NAME...] --screenshot out.png
+//                 [--command TEXT...] [--run-line TEXT...] [--enter] [--trigger NAME...]
+//                 --screenshot out.png
 //   katana --check-shortcuts --screenshot out.png
 //
 // The first argument that names a directory is opened as a project; other
@@ -376,7 +398,11 @@ bool fillField(QWidget& dialog, const QString& assignment)
 // command line, wherever it comes among the steps, so a test can make the
 // styles, entities and selection a panel then acts on - or start a tool by
 // its alias and answer its prompts; --enter is Enter on an empty command
-// line. --report WIDGET prints what the target's WIDGET shows (reportWidget).
+// line. --run-line TEXT runs TEXT through the window's one executor, as a
+// dialog runs the line it built (MainWindow::runVerbLine): never a running
+// tool's answer, and what it logged is printed back as the dialog gets it -
+// "--run-line TEXT: ok=yes|no", then a "  reply: " or "  error: " line for each
+// line it logged. --report WIDGET prints what the target's WIDGET shows (reportWidget).
 // --trigger NAME is --action in its turn among these steps, for a menu
 // command that acts on what the steps before it made (formatPurge).
 //
@@ -441,8 +467,8 @@ int main(int argc, char* argv[])
     std::optional<QString> datasetInfo;
     std::optional<QString> importOptions;
     bool selectEverything = false;
-    // --dialog, --survey-dock, --fill, --press, --panel, --command, --enter
-    // and --report, in the order given.
+    // --dialog, --survey-dock, --fill, --press, --panel, --command,
+    // --run-line, --enter and --report, in the order given.
     std::vector<std::pair<QString, QString>> surveySteps;
     bool checkShortcuts = false;
     long long attributeEntity = 0;
@@ -519,7 +545,7 @@ int main(int argc, char* argv[])
             surveySteps.emplace_back("--dialog", value());
         } else if (argument == "--survey-dock" || argument == "--fill" || argument == "--press" ||
                    argument == "--panel" || argument == "--command" || argument == "--report" ||
-                   argument == "--trigger") {
+                   argument == "--trigger" || argument == "--run-line") {
             surveySteps.emplace_back(argument, value());
         } else if (argument == "--enter") {
             // Enter on an empty command line, a step of its own: an empty
@@ -608,14 +634,15 @@ int main(int argc, char* argv[])
     // run among its steps, below.)
     if (!screenshotPath) {
         for (const auto& [kind, text] : surveySteps) {
-            if (kind != "--command") {
+            if (kind != "--command" && kind != "--run-line") {
                 continue;
             }
-            const bool ran = window.runCommand(text);
+            const bool ran =
+                kind == "--command" ? window.runCommand(text) : runLine(window, text);
             QApplication::processEvents();
             QApplication::processEvents();
             if (!ran && writesOnly) {
-                std::fprintf(stderr, "--command %s was refused\n", qPrintable(text));
+                std::fprintf(stderr, "%s %s was refused\n", qPrintable(kind), qPrintable(text));
                 return 1;
             }
         }
@@ -677,6 +704,12 @@ int main(int argc, char* argv[])
                     window.runCommand(text);
                     // Twice: the document's listener defers the panels'
                     // refresh to the event loop, which the next step reads.
+                    QApplication::processEvents();
+                    QApplication::processEvents();
+                    continue;
+                }
+                if (kind == "--run-line") {
+                    (void)runLine(window, text);
                     QApplication::processEvents();
                     QApplication::processEvents();
                     continue;
