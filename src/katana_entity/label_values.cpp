@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cmath>
 
+#include "katana/entity/anchor.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
+#include "value_parts.hpp"
 
 namespace katana::entity {
 
@@ -16,9 +18,8 @@ using katana::geometry::Segment2;
 using katana::geometry::Vec2;
 namespace tol = katana::math::tolerance;
 
-namespace {
+namespace detail {
 
-// A whole-circle bearing: clockwise from grid north (+y), [0, 2 pi).
 double bearingOf(const Vec2& along)
 {
     return katana::math::normalizeAngle(std::atan2(along.x, along.y));
@@ -64,41 +65,61 @@ void addCommonValues(const Entity& entity, std::span<const std::string> codeProp
     }
 }
 
-// A point inside a closed figure to put its area label at: the centroid when
-// it is inside (every convex lot, most others), otherwise the middle of the
-// widest run inside the figure along the horizontal through the centroid - an
-// L-shaped lot's centroid can be in the notch. Deterministic, and the
-// figure's own coordinates relative to its first vertex, as every area
-// routine here works (docs/architecture.md, "Numerical policy").
-Point2 interiorPoint(const Polyline2& figure)
+void addSegmentValues(LabelValues& values, const Point2& from, const Point2& to, std::size_t index,
+                      std::optional<double> zFrom, std::optional<double> zTo)
 {
-    const std::optional<Point2> centroid = figure.centroid();
-    if (centroid && figure.contains(*centroid)) {
-        return *centroid;
+    const Vec2 along = to - from;
+    const double length = along.length();
+    // A piece of no length has no direction: its bearing is absent rather
+    // than the 0 atan2 would give it.
+    if (length > tol::kGeometric) {
+        values.insert_or_assign("bearing",
+                                LabelValue::of(LabelQuantity::Bearing, bearingOf(along)));
     }
-    const Point2 through = centroid.value_or(figure.vertices.front());
-    std::vector<double> crossings;
-    const std::size_t n = figure.vertices.size();
-    for (std::size_t i = 0; i < n; ++i) {
-        const Point2& a = figure.vertices[i];
-        const Point2& b = figure.vertices[(i + 1) % n];
-        if ((a.y > through.y) != (b.y > through.y)) {
-            const double t = (through.y - a.y) / (b.y - a.y);
-            crossings.push_back(a.x + t * (b.x - a.x));
+    values.insert_or_assign("distance", LabelValue::of(LabelQuantity::Length, length));
+    values.insert_or_assign("length", LabelValue::of(LabelQuantity::Length, length));
+    values.insert_or_assign("dx", LabelValue::of(LabelQuantity::Length, along.x));
+    values.insert_or_assign("dy", LabelValue::of(LabelQuantity::Length, along.y));
+    values.insert_or_assign("segment",
+                            LabelValue::of(LabelQuantity::Integer, static_cast<double>(index + 1)));
+    if (zFrom && zTo) {
+        const double dz = *zTo - *zFrom;
+        values.insert_or_assign("dz", LabelValue::of(LabelQuantity::Number, dz));
+        if (length > tol::kGeometric) {
+            // Per cent, as a road or a drain is graded.
+            values.insert_or_assign("grade",
+                                    LabelValue::of(LabelQuantity::Number, 100.0 * dz / length));
         }
     }
-    std::sort(crossings.begin(), crossings.end());
-    double bestWidth = -1.0;
-    Point2 best = through;
-    for (std::size_t i = 0; i + 1 < crossings.size(); i += 2) {
-        const double width = crossings[i + 1] - crossings[i];
-        if (width > bestWidth) {
-            bestWidth = width;
-            best = Point2(0.5 * (crossings[i] + crossings[i + 1]), through.y);
-        }
-    }
-    return best;
 }
+
+void addArcValues(LabelValues& values, const Arc2& arc)
+{
+    const double delta = std::abs(arc.sweep);
+    values.insert_or_assign("radius", LabelValue::of(LabelQuantity::Length, arc.radius));
+    values.insert_or_assign("length", LabelValue::of(LabelQuantity::Length, arc.length()));
+    values.insert_or_assign("delta", LabelValue::of(LabelQuantity::Angle, delta));
+    const bool fullTurn = delta >= katana::math::kTwoPi - tol::kAngular;
+    if (!fullTurn) {
+        const Vec2 chord = arc.pointAt(1.0) - arc.pointAt(0.0);
+        values.insert_or_assign("chord", LabelValue::of(LabelQuantity::Length, chord.length()));
+        values.insert_or_assign("bearing",
+                                LabelValue::of(LabelQuantity::Bearing, bearingOf(chord)));
+        // The tangent length R tan(delta / 2): from each end to where the
+        // tangents meet. Past half a turn they meet behind the curve and the
+        // figure is not what anyone calls a tangent length, so it is absent.
+        if (delta < katana::math::kPi - tol::kAngular) {
+            values.insert_or_assign("tangent", LabelValue::of(LabelQuantity::Length,
+                                                              arc.radius * std::tan(0.5 * delta)));
+        }
+    }
+}
+
+} // namespace detail
+
+namespace {
+
+using detail::addCommonValues;
 
 LabelPiece pointPiece(const Entity& entity, const Point2& position, std::span<const std::string> codes)
 {
@@ -131,23 +152,7 @@ LabelPiece segmentPiece(const Entity& entity, const Point2& from, const Point2& 
     piece.direction = along.angle();
     piece.length = along.length();
     addCommonValues(entity, codes, piece.values);
-    auto& values = piece.values;
-    values.insert_or_assign("bearing", LabelValue::of(LabelQuantity::Bearing, bearingOf(along)));
-    values.insert_or_assign("distance", LabelValue::of(LabelQuantity::Length, piece.length));
-    values.insert_or_assign("length", LabelValue::of(LabelQuantity::Length, piece.length));
-    values.insert_or_assign("dx", LabelValue::of(LabelQuantity::Length, along.x));
-    values.insert_or_assign("dy", LabelValue::of(LabelQuantity::Length, along.y));
-    values.insert_or_assign("segment",
-                            LabelValue::of(LabelQuantity::Integer, static_cast<double>(index + 1)));
-    if (zFrom && zTo) {
-        const double dz = *zTo - *zFrom;
-        values.insert_or_assign("dz", LabelValue::of(LabelQuantity::Number, dz));
-        if (piece.length > tol::kGeometric) {
-            // Per cent, as a road or a drain is graded.
-            values.insert_or_assign("grade",
-                                    LabelValue::of(LabelQuantity::Number, 100.0 * dz / piece.length));
-        }
-    }
+    detail::addSegmentValues(piece.values, from, to, index, zFrom, zTo);
     return piece;
 }
 
@@ -164,24 +169,7 @@ LabelPiece arcPiece(const Entity& entity, const Arc2& arc, std::span<const std::
     piece.from = arc.pointAt(0.0);
     piece.to = arc.pointAt(1.0);
     addCommonValues(entity, codes, piece.values);
-    auto& values = piece.values;
-    const double delta = std::abs(arc.sweep);
-    values.insert_or_assign("radius", LabelValue::of(LabelQuantity::Length, arc.radius));
-    values.insert_or_assign("length", LabelValue::of(LabelQuantity::Length, piece.length));
-    values.insert_or_assign("delta", LabelValue::of(LabelQuantity::Angle, delta));
-    const bool fullTurn = delta >= katana::math::kTwoPi - tol::kAngular;
-    if (!fullTurn) {
-        const Vec2 chord = piece.to - piece.from;
-        values.insert_or_assign("chord", LabelValue::of(LabelQuantity::Length, chord.length()));
-        values.insert_or_assign("bearing", LabelValue::of(LabelQuantity::Bearing, bearingOf(chord)));
-        // The tangent length R tan(delta / 2): from each end to where the
-        // tangents meet. Past half a turn they meet behind the curve and the
-        // figure is not what anyone calls a tangent length, so it is absent.
-        if (delta < katana::math::kPi - tol::kAngular) {
-            values.insert_or_assign("tangent", LabelValue::of(LabelQuantity::Length,
-                                                              arc.radius * std::tan(0.5 * delta)));
-        }
-    }
+    detail::addArcValues(piece.values, arc);
     return piece;
 }
 
@@ -317,7 +305,7 @@ std::vector<LabelPiece> labelPiecesFor(const Model& model, const Entity& target,
         break;
     case LabelKind::Area:
         if (const auto* polyline = std::get_if<Polyline2>(&target.geometry)) {
-            pieces.push_back(areaPiece(target, interiorPoint(*polyline), polyline->area(),
+            pieces.push_back(areaPiece(target, insidePoint(*polyline), polyline->area(),
                                        polyline->length(), codes));
         } else {
             const auto& circle = std::get<Circle2>(target.geometry);
@@ -391,7 +379,7 @@ std::optional<Point2> labelAnchor(const Model& model, const LabelGeometry& label
         }
     case LabelKind::Area:
         if (const auto* polyline = std::get_if<Polyline2>(&geometry)) {
-            return interiorPoint(*polyline);
+            return insidePoint(*polyline);
         }
         return std::get<Circle2>(geometry).center;
     case LabelKind::Chainage:
