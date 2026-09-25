@@ -333,3 +333,55 @@ complete and are unchanged.
 
 Tested in `tests/cad/tools/test_draw_professional.cpp` and
 `tests/cad/tools/test_draw_lines.cpp`.
+
+## The command line
+
+The drawing system's verbs (`src/katana_cad/drawing/drawing_verbs.cpp`,
+members of `CommandInterpreter` routed by `isDrawingVerb`) give an agent
+everything the grips, the tools and the panel give a person. They follow
+the annotation verbs' three rules: options are `key=value` in any order
+after the positional arguments, and an unknown key is refused naming the
+known ones; replies are records of `key=value` pairs, one per line, numbers
+exact; and every edit is ONE step through `Document::execute`, built by the
+same functions the grips and the tools use (`polyline_vertices.hpp`,
+`vertex_editing.hpp`, `vertex_table.hpp`, `draw_shapes.hpp`). HELP lists
+them after the annotation verbs.
+
+A target is an id (`12` or `#12`) or `SELECTION` (every selected
+polyline). Vertex indices count from 0. Points are those of precision
+input: `x,y[,z]`, `@dx,dy[,dz]`, `@distance<direction` with the direction
+in the ANGLES convention or as a quadrant bearing; a z is a vertex's height.
+
+| Verb | Arguments | Reply |
+|---|---|---|
+| `VERTEX LIST` | id | the polyline record (`id kind closed vertices arcs heights length`), then per vertex `index x y z bulge bearing distance` - bearing in whole-circle degrees, distance the chord, `none` where there is none |
+| `VERTEX INSERT` | id p `[after=N]` | the record and `inserted=` (the new index); without after, into the nearest segment |
+| `VERTEX DELETE` | id N `[N...]` | the record and `deleted=` |
+| `VERTEX MOVE` | id N p | the record and the vertex's; `@` is from the vertex, a relative dz changes its height |
+| `VERTEX SET` | id N `x= y= z=\|none bulge= bearing= distance=` | the record and the vertex's; the fields apply in turn, as typed into the Vertices panel |
+| `WEED` | target `tolerance= [keep=on\|off]` | a record per polyline with `before=`; keep (on by default) keeps survey-point vertices |
+| `DENSIFY` | target `interval= [chord=]` | a record per polyline |
+| `STRAIGHTEN` | id N N | the record |
+| `CLOSE`, `OPEN` | target (none: the selection) | a record per polyline; `OPEN` takes `#ids` or `SELECTION`, since `OPEN directory` opens a project |
+| `STARTVERTEX` | id N | the record |
+| `VERTEXZ` | id N z or none, target `INTERPOLATE`, or id `GRADE` N N | the record(s) |
+| `PLINE` (`PL`, `POLYLINE`) | p p `[ARC p...] [LINE p...] [CLOSE]` | the new polyline's record; in ARC each point ends a tangent arc, and CLOSE in ARC closes with one |
+| `PLINE3D` (`3DPOLY`) | p p `[p...] [CLOSE] [z=]` | the record; z= is the height of points given without one |
+| `SPLINE` (`SPL`) | p p `[p...] [control=on\|off] [degree=3]` | `id kind layer` |
+| `ELLIPSE` (`EL`) | centre axis-end `minor=\|ratio= [start=deg end=deg]` | `id kind layer`; start and end are eccentric anomalies |
+| `XLINE` (`XL`), `RAY` | base `p [p...]`, or `XLINE` base `angle=dir [angle=...]` | one `id kind layer` per line, on the construction layer (made in the same step when missing) |
+| `DLINE` (`DL`) | p p `[p...] width= [CLOSE]` | a record per side |
+| `ORTHO`, `TRACKING` | `[on\|off]` | the drafting record |
+| `POLAR` | `[on\|off] [increment=deg]` | the drafting record |
+| `ANGLES` | `[ccw\|bearing]` | the drafting record |
+| `LOCK` | `[angle=dir\|none] [length=d\|none]`, or `OFF` | the drafting record |
+| `SNAP` (`OSNAP`) | `[on\|off] [modes=a,b\|all\|none] [add=] [remove=]` | the drafting record |
+| `DRAFTING` | - | `ortho polar increment tracking angles anglelock lengthlock snap modes` |
+
+The drafting verbs set the document's drafting settings, which the views
+share, and notify `DocumentChange::Drafting`, so the drafting toolbar's
+buttons follow; they are settings, not drawing edits, so not undo steps.
+`PLINE` is the drawing system's in every form, the plain `PLINE p p
+[CLOSE]` included, so that every one replies with the id of what it made.
+
+Tested in `tests/cad/drawing/test_drawing_verbs.cpp`.
