@@ -71,7 +71,7 @@ furniture.
 | `Viewport` | |
 |---|---|
 | `id` | `vp1`, `vp2`...: unique across the set |
-| `kind` | `Plan`, `LongSection`, `CrossSections`, `Model3D` (a snapshot of the 3D view), `Legend`, `Notes`, `Image`, `KeyPlan` |
+| `kind` | `Plan`, `LongSection`, `CrossSections`, `Model3D` (a snapshot of the 3D view), `Legend`, `Notes`, `Image`, `KeyPlan`, `SheetIndex` (the drawing register), `Revisions` (the revision table) |
 | `rect` | the rectangle on the paper, mm; empty until the viewport is placed |
 | `scale`, `autoScale` | 1 : `scale`; with `autoScale` the painter chooses the largest standard scale at which the content fits |
 | `centre`, `autoCentre` | the world point at the rectangle's centre: for a plan (easting, northing); for a long section (chainage, level); for a cross section (offset, level), offset 0 being the centreline. `autoCentre` asks the painter to centre what it draws and keep the scale |
@@ -85,6 +85,7 @@ furniture.
 | `locked` | tiling and snapping leave the viewport alone |
 | `text` | a Notes panel's text; an Image panel's asset file name |
 | `marks` | world lines drawn over the view: match lines and a key plan's sheet outlines (`WorldMark`) |
+| `revisionLimit` | a Revisions table's newest so many revisions; 0 for every one |
 
 Everything is a plain value with `operator==`, so a test, an undo step and
 the JSON round trip can each compare whole sets.
@@ -297,10 +298,10 @@ exactly 3 mm after the first ends at 215.
 **Every kind has a rank**, and the lowest rank takes the first (largest)
 cell:
 
-| Kind | Plan | LongSection | CrossSections | Model3D | KeyPlan | Image | Legend | Notes |
-|---|---|---|---|---|---|---|---|---|
-| Rank | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-| Minimum (mm) | 35 x 30 | 70 x 45 | 70 x 45 | 30 x 24 | 30 x 26 | 8 x 8 | 16 x 8 | 16 x 8 |
+| Kind | Plan | LongSection | CrossSections | Model3D | KeyPlan | Image | Legend | Notes | SheetIndex | Revisions |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Rank | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+| Minimum (mm) | 35 x 30 | 70 x 45 | 70 x 45 | 30 x 24 | 30 x 26 | 8 x 8 | 16 x 8 | 16 x 8 | 70 x 30 | 50 x 20 |
 
 The app sorted its panels by a table with no entry for its map panels. The
 comparator then returned NaN, and a map could land in the big cell. That was
