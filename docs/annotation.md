@@ -376,7 +376,9 @@ the smallest circle clearing its note. `BALLOON` is a circled leader whose
 number counts on from the highest balloon in the drawing (or `n=`;
 `annotation::nextBalloonNumber`, which the Balloon tool numbers by too). The
 Leader tool makes the same entity (`docs/tools.md`), with `LEADER`'s arrow,
-callout, text style and paper height as options for the leader being drawn;
+callout, text style, paper height, arrowhead size and landing as options for
+the leader being drawn, and the Balloon tool `BALLOON`'s number, text style
+and paper height;
 it used to draw a polyline, an arrowhead and a text per line, which drifted
 apart when one was moved.
 
@@ -638,9 +640,9 @@ it skipped dimensions, and so does the archive exporter.
 * **Edit Text works on one text.** A selection of several texts is not
   edited together; `MODIFY` changes their layers and styles, and `TEXTEDIT`
   is one text a line.
-* **Leader options** are for the leader being drawn, and the tool always
-  takes the arrow size and the landing from the dimension style; `LEADER`'s
-  `arrowsize=` and `landing=` set them on the command line.
+* **Leader options** are for the leader being drawn. No dialog edits a
+  leader or a balloon already drawn: erase it and draw it again, or type
+  `LEADER`/`BALLOON` with its options.
 * **Labels are not picked by their text**: a label is selected at its
   anchor, and moved off its placed position with Annotate > Edit Label
   (`LABEL SET id at=x,y`) rather than by dragging its text.

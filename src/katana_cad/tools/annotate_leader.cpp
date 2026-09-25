@@ -1,7 +1,7 @@
 // Leader: an arrow line to a feature with a note at its end, as AutoCAD's
 // LEADER draws one.
 //
-//   Specify leader start point or [Arrow/Callout/Style/Paper]
+//   Specify leader start point or [Arrow/Callout/Style/Paper/SIze/Landing]
 //                                                       the arrow's tip, or an
 //                                                       option for this leader
 //   Specify next point or [Undo]                        the first bend or end
@@ -16,11 +16,14 @@
 // entity. (Before annotation had its own entities the tool drew a polyline,
 // an arrowhead and a text per line, which drifted apart when one was moved.)
 //
-// The options at the first prompt are LEADER's arrow=, callout=, style= and
-// paper=: the arrowhead (closed, open, tick, dot or none), a box or circle
-// round the note, the note's text style, and its height on paper. They are
-// for the leader being drawn, as AutoCAD's LEADER options are, so the next
-// takes the dimension style's again. A tip snapped to an entity's end,
+// The options at the first prompt are LEADER's arrow=, callout=, style=,
+// paper=, arrowsize= and landing=: the arrowhead (closed, open, tick, dot or
+// none), a box or circle round the note, the note's text style, its height on
+// paper, the arrowhead's size on paper (SIze - S is Style's) and the landing's
+// length on paper (0 for none; Auto for the rule below). They are for the
+// leader being drawn, as AutoCAD's LEADER options are, so the next takes the
+// dimension style's again. Until SIze and Landing, only the verb could give a
+// leader its own arrowhead or landing, and nothing could after it was drawn. A tip snapped to an entity's end,
 // middle, centre or vertex follows it (tipRef), as LEADER #id.end ... does.
 //
 // Sizes come from the dimension style the current layer resolves to, as an
@@ -42,6 +45,7 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "annotate_common.hpp"
@@ -72,7 +76,9 @@ struct Options {
     std::optional<ArrowHead> arrow;
     std::optional<CalloutShape> callout;
     std::optional<std::string> textStyle;
-    std::optional<double> paper; // mm
+    std::optional<double> paper;     // mm
+    std::optional<double> arrowSize; // mm
+    std::optional<double> landing;   // mm; 0 for none, unset for the rule
 };
 
 // The arrowheads and callouts by the words their options offer, in order.
@@ -125,9 +131,9 @@ LeaderGeometry leaderFor(std::vector<Point2> vertices, const std::vector<std::st
     leader.arrow = options.arrow.value_or(style.arrowHead);
     leader.callout = options.callout.value_or(CalloutShape::None);
     leader.style = options.textStyle.value_or(std::string());
-    leader.arrowSize = paper(style.arrowSize);
+    leader.arrowSize = options.arrowSize.value_or(paper(style.arrowSize));
     leader.paperHeight = options.paper.value_or(paper(style.textHeight));
-    leader.landing = !lines.empty() && steep ? leader.arrowSize : 0.0;
+    leader.landing = options.landing.value_or(!lines.empty() && steep ? leader.arrowSize : 0.0);
     leader.tipRef = tip;
     return leader;
 }
@@ -146,7 +152,8 @@ class LeaderTool final : public InteractiveTool {
     {
         switch (step_) {
         case Step::Tip:
-            return "Specify leader start point or [Arrow/Callout/Style/Paper]" + settings();
+            return "Specify leader start point or [Arrow/Callout/Style/Paper/SIze/Landing]" +
+                   settings();
         case Step::Vertices:
             return vertices_.size() < 2 ? "Specify next point or [Undo]"
                                         : "Specify next point or [Annotation/Undo] <Annotation>";
@@ -166,6 +173,12 @@ class LeaderTool final : public InteractiveTool {
                    ">";
         case Step::Paper:
             return "Enter the note's height on paper, mm <" + formatNumber(paperHeight()) + ">";
+        case Step::ArrowSize:
+            return "Enter the arrowhead's size on paper, mm <" + formatNumber(arrowSize()) + ">";
+        case Step::Landing:
+            return "Enter the landing's length on paper, mm, 0 for none, or Auto <" +
+                   (options_.landing ? formatNumber(*options_.landing) : std::string("Auto")) +
+                   ">";
         }
         return {};
     }
@@ -195,6 +208,8 @@ class LeaderTool final : public InteractiveTool {
         case Step::Callout:
         case Step::Style:
         case Step::Paper:
+        case Step::ArrowSize:
+        case Step::Landing:
             break;
         }
         return InteractiveTool::point(at);
@@ -226,11 +241,17 @@ class LeaderTool final : public InteractiveTool {
             if (isOption(text, "Paper")) {
                 return ask(Step::Paper);
             }
+            if (isOption(text, "Size", 2)) {
+                return ask(Step::ArrowSize);
+            }
+            if (isOption(text, "Landing")) {
+                return ask(Step::Landing);
+            }
             if (isOption(text, "Undo")) {
                 return undo();
             }
             return ToolStep::rejected("click the point the arrow touches or type it as x,y, or "
-                                      "type A, C, S or P for this leader's options");
+                                      "type A, C, S, P, SI or L for this leader's options");
         case Step::Vertices:
             if (isOption(text, "Undo")) {
                 return undo();
@@ -279,6 +300,31 @@ class LeaderTool final : public InteractiveTool {
             step_ = Step::Tip;
             return ToolStep::next();
         }
+        case Step::ArrowSize: {
+            const auto size = typedNumber(text);
+            if (!size || !(*size > 0.0)) {
+                return ToolStep::rejected("the arrowhead's size on paper is millimetres greater "
+                                          "than 0");
+            }
+            options_.arrowSize = *size;
+            step_ = Step::Tip;
+            return ToolStep::next();
+        }
+        case Step::Landing: {
+            if (isOption(text, "Auto")) {
+                options_.landing.reset();
+                step_ = Step::Tip;
+                return ToolStep::next();
+            }
+            const auto length = typedNumber(text);
+            if (!length || *length < 0.0) {
+                return ToolStep::rejected("the landing is millimetres on paper, 0 for none, or "
+                                          "Auto for one arrowhead where the line slopes");
+            }
+            options_.landing = *length;
+            step_ = Step::Tip;
+            return ToolStep::next();
+        }
         }
         return InteractiveTool::value(text);
     }
@@ -298,6 +344,8 @@ class LeaderTool final : public InteractiveTool {
         case Step::Callout:
         case Step::Style:
         case Step::Paper:
+        case Step::ArrowSize:
+        case Step::Landing:
             // What the option shows is kept.
             step_ = Step::Tip;
             return ToolStep::next();
@@ -338,6 +386,8 @@ class LeaderTool final : public InteractiveTool {
         case Step::Callout:
         case Step::Style:
         case Step::Paper:
+        case Step::ArrowSize:
+        case Step::Landing:
             step_ = Step::Tip;
             return ToolStep::next();
         }
@@ -353,6 +403,8 @@ class LeaderTool final : public InteractiveTool {
         case Step::Callout:
         case Step::Style:
         case Step::Paper:
+        case Step::ArrowSize:
+        case Step::Landing:
             break;
         case Step::Vertices: {
             // The leader as it would be with the cursor as its next point,
@@ -383,7 +435,7 @@ class LeaderTool final : public InteractiveTool {
     }
 
   private:
-    enum class Step { Tip, Vertices, Annotation, Arrow, Callout, Style, Paper };
+    enum class Step { Tip, Vertices, Annotation, Arrow, Callout, Style, Paper, ArrowSize, Landing };
 
     ToolStep ask(Step option)
     {
@@ -399,9 +451,18 @@ class LeaderTool final : public InteractiveTool {
 
     [[nodiscard]] double paperHeight() const
     {
-        return options_.paper.value_or(
-            style_.paperSized ? style_.textHeight
-                              : katana::entity::annotationPaperSize(style_.textHeight, scale_));
+        return options_.paper.value_or(onPaper(style_.textHeight));
+    }
+
+    [[nodiscard]] double arrowSize() const
+    {
+        return options_.arrowSize.value_or(onPaper(style_.arrowSize));
+    }
+
+    // A size of the dimension style on paper, as leaderFor takes it.
+    [[nodiscard]] double onPaper(double size) const
+    {
+        return style_.paperSized ? size : katana::entity::annotationPaperSize(size, scale_);
     }
 
     // The options given so far, after the first prompt: nothing else on
@@ -425,35 +486,25 @@ class LeaderTool final : public InteractiveTool {
         if (options_.paper) {
             add(formatNumber(*options_.paper) + " mm");
         }
+        if (options_.arrowSize) {
+            add("arrowhead " + formatNumber(*options_.arrowSize) + " mm");
+        }
+        if (options_.landing) {
+            add("landing " + formatNumber(*options_.landing) + " mm");
+        }
         return said.empty() ? said : said + ")";
     }
 
     ToolStep styleValue(std::string_view typed)
     {
-        const std::string_view text = katana::core::trimmed(typed);
-        if (text.empty()) {
+        if (katana::core::trimmed(typed).empty()) {
             return enter();
         }
-        if (document_ == nullptr) {
-            return ToolStep::rejected("there is no drawing to take the style from");
+        auto found = textStyleNamed(document_, typed);
+        if (!found) {
+            return ToolStep::rejected(found.error().message);
         }
-        const auto& styles = document_->model().textStyles;
-        std::string found;
-        if (styles.contains(text)) {
-            found = std::string(text);
-        } else {
-            for (const std::string& name : styles.names()) {
-                if (katana::core::equalsIgnoringCase(name, text)) {
-                    found = name;
-                    break;
-                }
-            }
-        }
-        if (found.empty()) {
-            return ToolStep::rejected("there is no text style \"" + std::string(text) +
-                                      "\"; Format > Text Styles lists them");
-        }
-        options_.textStyle = found;
+        options_.textStyle = std::move(*found);
         step_ = Step::Tip;
         return ToolStep::next();
     }

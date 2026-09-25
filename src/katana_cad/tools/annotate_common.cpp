@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "katana/cad/dimension_draw.hpp"
+#include "katana/cad/document.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
@@ -10,6 +11,27 @@
 namespace katana::cad::tools::annotate {
 
 using katana::core::Result;
+
+Result<std::string> textStyleNamed(const Document* document, std::string_view typed)
+{
+    const std::string_view text = katana::core::trimmed(typed);
+    if (document == nullptr) {
+        return katana::core::makeError(katana::core::ErrorCode::NotFound,
+                                       "there is no drawing to take the style from");
+    }
+    const auto& styles = document->model().textStyles;
+    if (styles.contains(text)) {
+        return std::string(text);
+    }
+    for (const std::string& name : styles.names()) {
+        if (katana::core::equalsIgnoringCase(name, text)) {
+            return name;
+        }
+    }
+    return katana::core::makeError(katana::core::ErrorCode::NotFound,
+                                   "there is no text style \"" + std::string(text) +
+                                       "\"; Format > Text Styles lists them");
+}
 
 bool isOption(std::string_view typed, std::string_view keyword, std::size_t shortest)
 {
