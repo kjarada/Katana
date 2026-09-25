@@ -22,7 +22,9 @@ add_executable(katana_gpu_tests
     test_gpu_layers.cpp
     test_gpu_scene_view.cpp
 )
-target_include_directories(katana_gpu_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+# tests/ too, as katana_add_test_suite gives every suite: simd_levels.hpp.
+target_include_directories(katana_gpu_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+                                                    "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(katana_gpu_tests PRIVATE katana_gpu katana_render GTest::gtest)
 katana_target_defaults(katana_gpu_tests)
 set_target_properties(katana_gpu_tests PROPERTIES

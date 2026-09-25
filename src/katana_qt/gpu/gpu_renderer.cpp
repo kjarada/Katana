@@ -362,13 +362,15 @@ void GpuRenderer::setDrawList(const katana::render::DrawList& list)
 void GpuRenderer::setLayers(std::span<const LayerSource> layers)
 {
     Resources& r = *resources_;
+    // Each layer bounded once: for the joint box, and then for its packing.
+    std::vector<katana::math::AABB> bounds(layers.size());
     katana::math::AABB box;
-    for (const LayerSource& source : layers) {
-        if (source.list != nullptr) {
-            const katana::math::AABB bounds = source.list->bounds();
-            if (!bounds.empty()) {
-                box.expand(bounds.min);
-                box.expand(bounds.max);
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (layers[i].list != nullptr) {
+            bounds[i] = layers[i].list->bounds();
+            if (!bounds[i].empty()) {
+                box.expand(bounds[i].min);
+                box.expand(bounds[i].max);
             }
         }
     }
@@ -379,7 +381,7 @@ void GpuRenderer::setLayers(std::span<const LayerSource> layers)
         GpuLayer& layer = r.layers[i];
         layer.depthWrite = layers[i].depthWrite;
         if (layers[i].list != nullptr) {
-            packDrawList(*layers[i].list, r.origin, layer.data);
+            packDrawList(*layers[i].list, r.origin, bounds[i], layer.data);
         } else {
             layer.data.clear();
             layer.data.origin = r.origin;
