@@ -544,7 +544,10 @@ dialog's problem line in the command's words.
   (`AnUntouchedFormIsNoStepAndWhatItsWidgetsCannotHoldIsKept`). With the
   shown leader one of several selected, Apply, Freeze and Detach change them
   all, in one step, and the form says so
-  (`SeveralSelectedLeadersAreChangedTogetherInOneStep`). Freeze, Detach and
+  (`SeveralSelectedLeadersAreChangedTogetherInOneStep`) - all but Along,
+  which is where the shown leader's tip is on its own entity: changed with
+  others selected, Apply refuses it rather than move every tip to that one
+  place. Freeze, Detach and
   Attach act on the leader as drawn, so while the form has changes not
   applied they are greyed, their tips say why, and they refuse
   (`TheListChoosesAndFreezeWaitsForTheFormToBeApplied`). The form is read

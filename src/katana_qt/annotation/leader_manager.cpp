@@ -976,7 +976,9 @@ void LeaderManagerDialog::updateButtons()
         other = other || id != shown_;
     }
     attach_->setEnabled(any && !dirty && other);
-    along_->setEnabled(any && ids.size() == 1 && current != nullptr &&
+    // Enabled with several selected too, so an Along changed before the
+    // others were selected can be set back (apply() refuses it for them).
+    along_->setEnabled(any && current != nullptr &&
                        current->tipRef.point == katana::entity::AnchorPoint::Along);
     scope_->setText(ids.size() > 1 ? QStringLiteral("Apply, Freeze and Detach change the ") +
                                          QString::number(ids.size()) +
@@ -1025,7 +1027,19 @@ bool LeaderManagerDialog::apply()
         report(makeError(ErrorCode::InvalidState, "no leader is shown"));
         return false;
     }
-    auto command = ann::changeLeaders(document_.model(), targets(), formChange());
+    const auto ids = targets();
+    const ann::LeaderChange change = formChange();
+    if (change.tip && ids.size() > 1) {
+        // Along is where THIS leader's tip is on THIS leader's entity: sent
+        // to the others too, it would move every tip onto that one place.
+        report(makeError(ErrorCode::InvalidArgument,
+                         "Along moves one leader's tip: select only leader " +
+                             std::to_string(shown_) + " to move it, or set Along back to " +
+                             QString::number(loaded_->along, 'f', kSizeDecimals).toStdString() +
+                             " %"));
+        return false;
+    }
+    auto command = ann::changeLeaders(document_.model(), ids, change);
     if (!command) {
         report(command.error());
         return false;
