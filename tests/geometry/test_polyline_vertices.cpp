@@ -287,3 +287,36 @@ TEST(PolylineVertices, NearestVertexAndSegment)
     EXPECT_EQ(nearestSegment(p, Point2(11, 6)), 1u);
     EXPECT_EQ(minimumVertices(p), 2u);
 }
+
+TEST(PolylineVertices, SubPathCutsArcsOnTheirCircleAndInterpolatesHeights)
+{
+    CurvePolyline2 p = CurvePolyline2::fromPoints({Point2(0, 0), Point2(10, 0), Point2(20, 0)});
+    p.vertices[1].bulge = 1.0; // a semicircle of radius 5 about (15,0)
+    p.vertices[0].height = 0.0;
+    p.vertices[1].height = 10.0;
+    p.vertices[2].height = 20.0;
+    const double arcLength = 5.0 * katana::math::kPi;
+    const CurvePolyline2 part = subPath(p, 5.0, 10.0 + arcLength / 2.0);
+    ASSERT_EQ(part.vertices.size(), 3u);
+    EXPECT_EQ(part.vertices[0].position, Point2(5, 0));
+    EXPECT_DOUBLE_EQ(*part.vertices[0].height, 5.0);
+    EXPECT_EQ(part.vertices[1].position, Point2(10, 0)) << "the vertex between is kept exactly";
+    EXPECT_DOUBLE_EQ(*part.vertices[1].height, 10.0);
+    EXPECT_NEAR(part.vertices[1].bulge, std::tan(katana::math::kPi / 8.0), 1e-12)
+        << "half the semicircle is a quarter turn";
+    EXPECT_NEAR(part.vertices[2].position.distanceTo(Point2(15, -5)), 0.0, 1e-9);
+    EXPECT_NEAR(*part.vertices[2].height, 15.0, 1e-9);
+    EXPECT_NEAR(part.length(), 5.0 + arcLength / 2.0, 1e-9);
+}
+
+TEST(PolylineVertices, WrappingPathRunsRoundThroughTheFirstVertex)
+{
+    CurvePolyline2 square =
+        CurvePolyline2::fromPoints({Point2(0, 0), Point2(4, 0), Point2(4, 4), Point2(0, 4)}, true);
+    const CurvePolyline2 part = wrappingPath(square, 14.0, 2.0);
+    ASSERT_EQ(part.vertices.size(), 3u);
+    EXPECT_EQ(part.vertices.front().position, Point2(0, 2));
+    EXPECT_EQ(part.vertices[1].position, Point2(0, 0));
+    EXPECT_EQ(part.vertices.back().position, Point2(2, 0));
+    EXPECT_FALSE(part.closed);
+}
