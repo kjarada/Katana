@@ -80,8 +80,10 @@ QDialog* openDialog(katana::qt::MainWindow& window, const QString& name)
 // tool the menus and toolbars show running. One of the window's menus
 // (formatMenu), found whatever the target, is its title and its items, each
 // with the status tip it shows - the window makes an item's tooltip from the
-// two - so a test can read everything a menu says without opening it. False,
-// said, for none of these.
+// two - so a test can read everything a menu says without opening it. A NAME
+// that is none of these may be any widget of the window's, so what a dialog
+// did to the window - framing the views - is read with the dialog still the
+// target. False, said, for none of these.
 bool reportWidget(const QWidget& target, const QWidget& window, const QString& name)
 {
     const QWidget* widget = target.findChild<QWidget*>(name);
@@ -90,6 +92,11 @@ bool reportWidget(const QWidget& target, const QWidget& window, const QString& n
     }
     QString text;
     const auto* action = widget == nullptr ? window.findChild<QAction*>(name) : nullptr;
+    // Last, any of the window's own widgets: the status bar's
+    // FrameStatsLabel after a dialog framed the views.
+    if (widget == nullptr && action == nullptr) {
+        widget = window.findChild<QWidget*>(name);
+    }
     if (action != nullptr) {
         text = QString(action->text()).remove('&') +
                (action->isCheckable() ? (action->isChecked() ? ", checked" : ", unchecked")

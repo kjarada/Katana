@@ -177,13 +177,25 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `MIRROR`, `ARRAY`, `ERASE`), editing (`OFFSET`, `TRIM`, `EXTEND`, `FILLET`,
 `CHAMFER`), `SELECT`, `LAYER`, the tables (`LINETYPE`, `DIMSTYLE`, `HATCH`,
 `STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
-`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`. Aliases include
+`UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`, and the sheet,
+annotation and utility families below. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
 and civil verbs until the audit of 2026-09-23.
 
 The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
 `TITLEBLOCK`, and `HELP SHEETS`) are handed to `plotting::runSheetVerb`;
 `docs/plotting.md`, "Sheets on the command line", describes them.
+
+The AS 5488 subsurface utility verbs (`UTILITY REPORT`, `VERIFY`,
+`CLEARANCE`, `CHECK`, `DRAW`, and `HELP UTILITY`) are handed to
+`utilities::runUtilityVerb` (`include/katana/cad/utilities/`);
+`docs/subsurface_utilities.md`, "UTILITY on the command line", describes
+them. They were `katana_cli`'s own until 2026-09-25; in the interpreter the
+window's command line, `katana_cli` and `katana_mcp` all have them. The four
+reports read files and never touch the drawing; `UTILITY DRAW` adds the graded
+services - layers by type and quality level, a linetype per level, a
+polyline per run at one level, a point per located vertex - as one undo
+step, and its first reply record carries the `bounds=` a front end frames.
 
 Added on 2026-09-23 for the style, linetype and symbol managers (fixing audit
 CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
