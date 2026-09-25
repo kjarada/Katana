@@ -339,12 +339,15 @@ The **GIS** menu and toolbar hold all of it, grouped by library and data:
 
 Decisions, and what was rejected:
 
-* **File > Import stays as it was.** It is the quick way in - any file, the
+* **File > Import stays the quick way in** for GIS files - any file, the
   default options, no questions - and a command-line argument and the `IMPORT`
-  verb take the same path. The GIS imports are the considered way: they
-  describe the file and offer its options before anything is read. Putting a
-  dialog on File > Import was rejected: a single-layer shapefile would then
-  cost a click for nothing, every time.
+  verb take the same path; it runs the `IMPORT "<file>"` line through the
+  window's one executor, so the log shows it. The GIS imports are the
+  considered way: they describe the file and offer its options before
+  anything is read. Putting a dialog on File > Import for every file was
+  rejected: a single-layer shapefile would then cost a click for nothing,
+  every time. A DXF or a .12da archive is the exception (below, "Placing an
+  import"): where it lands is its one choice, and no GIS dialog offers it.
 * **A dialog is built from a description of the file, not from the kind of
   menu item.** `makeImportOptions` routes by what `describeSource` finds, so a
   `.las` picked through Import Vector's "All files" still gets the point-cloud
@@ -383,7 +386,8 @@ Since 2026-09-26 the two command lines read these verbs alike
 - **`IMPORT <file> LOCAL`** moves a DXF, vector file or .12da archive as one
   piece so the lower-left corner of what it holds sits at 0,0 - read again with
   that `originShift`, so the one reader moves every kind of geometry alike -
-  in the window too, where it asks no placement question. Both front ends read
+  in the window too, where it asks no placement question. `ALONGSIDE` and
+  `OFFSET=dE,dN` joined it ("Placing an import", below). Both front ends read
   the argument with `CommandInterpreter::importArgument`: one pair of quotes
   off the path, and `LOCAL` only as an unquoted last word. The session had
   taken `LOCAL` off and left the quotes on, so `IMPORT "<path>" LOCAL` - what
@@ -407,6 +411,73 @@ of the approximate statistics GDAL had once written into a
 `terrain.asc.aux.xml` that was then committed by accident; audit IO-13, and
 the file is gone and `samples/**/*.aux.xml` ignored), and the sample scan's
 29 512 ground points counted by `pdal translate` with `filters.range`.
+
+## Placing an import
+
+Survey data arrives at its own coordinates - (255440, 7410850) in MGA - and a
+drawing is often somewhere else, near 0,0. Where imported data lands is one
+choice with four answers, defined once in `include/katana/cad/import_placement.hpp`
+(`cad::resolveImportShift`) and used by every importer and every front end:
+
+| Placement | Typed | The move |
+|---|---|---|
+| Keep (the default) | `IMPORT <file>` | none; the window asks when the data lands far from the drawing |
+| Local | `IMPORT <file> LOCAL` | its lower-left corner to 0,0 |
+| Alongside | `IMPORT <file> ALONGSIDE` | its lower-left corner onto the drawing's; into an empty drawing, none, and it says so |
+| Offset | `IMPORT <file> OFFSET=dE,dN` | by exactly dE east and dN north |
+
+- **One reader applies one shift.** The file is read at its own coordinates,
+  the move worked out from what it holds, and the file read again with that
+  `originShift`, so every kind of geometry - entities, a .12da's surfaces and
+  clouds - moves alike. Moving the entities afterwards was rejected: it would
+  leave the surfaces behind.
+- **The word is the line's last**, read by `CommandInterpreter::importArgument`
+  in the window and in the session alike: never inside the quotes, never the
+  only word (a file called `LOCAL` can be imported), any case. A mistyped
+  `OFFSET=` is refused as `InvalidArgument` rather than taken for part of
+  the path.
+- **Every move is said**, in the same words everywhere
+  (`ImportShift::said`): `LOCAL: moved as one piece by -180.000,0.000, so its
+  lower-left corner sits at 0,0.` A raster or a point cloud refuses a
+  placement by name: it is reference data drawn at its own coordinates.
+- **Alongside is the far-apart question's Shift Alongside**: the same move
+  (`interop::advisePlacement`'s `suggestedShift`), which is now made by
+  `resolveImportShift` in both places.
+
+On every surface:
+
+- **The window.** Typed, as above. GIS > Import Vector Data's dialog has a
+  Placement group (`importPlacementKeep`, `importPlacementLocal`,
+  `importPlacementAlongside`, `importPlacementOffset` with `importOffsetE` and
+  `importOffsetN`; `importPlacementShift` says what the choice will do and the
+  line that does the same), and the choice last accepted is offered next time
+  (QSettings `import/placement`). File > Import of a DXF or a .12da asks the
+  same group as a small step (`importPlacementDialog`) and then runs the
+  `IMPORT "<file>" <word>` line it makes through the window's one executor;
+  GIS > Import Vector Data given a DXF or a .12da does the same. The vector
+  dialog imports itself - its layer and attribute choices have no `IMPORT`
+  word - and logs the move it makes. The three importers decide where the
+  data goes in one place, `decideImportPlacement`
+  (`src/katana_qt/import_placement.hpp`), which asks the far-apart question
+  for Keep and, in a headless session, keeps the coordinates and says why.
+  A headless File > Import opens no file dialog: it names the verb.
+- **katana_cli**: `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, the move
+  printed after the "imported" line; the DXF import too, in a build without
+  GDAL. The plan had given katana_cli `LOCAL` alone and left the rest for
+  later; that was rejected, because a verb the window types and the CLI does
+  not is the gap this work closes.
+- **katana_mcp**: `katana_import` takes `placement` (`keep`, `local`,
+  `alongside`, `offset`) with `offset_east` and `offset_north`; `local: true`
+  still means `placement: local`, and the two disagreeing is refused.
+
+Tests: `ImportPlacement.*` and `CadInterpreter.AnImportArgument*`
+(`tests/cad/test_cad.cpp`), `Session.AlongsideAndAnOffset*`,
+`McpServer.TheImportToolRefusesAPlacementItCannotSay`,
+`cli.import_alongside_and_offset_place_the_data_and_say_the_move`,
+`qt_widgets.ImportPlacementBox.*` and `qt_import_placement_typed_on_the_windows_command_line_headless`.
+
+Not done: the vector dialog's source layer, target layer and attributes have
+no `IMPORT` word, so that one dialog imports without a line to log.
 
 ## The 12d Archive format (.12da, .12daz)
 

@@ -167,4 +167,46 @@ TEST(Session, AQuotedImportEndingInLocalMovesTheDataToTheOrigin)
     EXPECT_DOUBLE_EQ(bounds.max.x, 185.0);
     EXPECT_DOUBLE_EQ(bounds.max.y, 165.0);
 }
+
+TEST(Session, AlongsideAndAnOffsetPlaceTheDataAndSayTheMove)
+{
+    // parcels.geojson spans (180, 0) to (365, 165). ALONGSIDE puts that
+    // corner on the drawing's, the rectangle's (1000, 2000); OFFSET=10,-20.5
+    // moves it to (190, -20.5).
+    Session session(nullptr);
+    const std::string parcels =
+        "\"" + (std::filesystem::path(KATANA_GIS_SAMPLES) / "parcels.geojson").generic_string() +
+        "\"";
+    ASSERT_TRUE(run(session, "RECT 1000,2000 1010,2005").ok);
+    const Printed along = run(session, "IMPORT " + parcels + " ALONGSIDE");
+    EXPECT_TRUE(along.ok) << along.err;
+    EXPECT_TRUE(contains(along.out, "ALONGSIDE: moved as one piece by 820.000,2000.000"))
+        << along.out;
+    EXPECT_TRUE(contains(along.out, "extent 1000,2000 to 1185,2165")) << along.out;
+
+    Session offset(nullptr);
+    const Printed moved = run(offset, "IMPORT " + parcels + " offset=10,-20.5");
+    EXPECT_TRUE(moved.ok) << moved.err;
+    const auto bounds = offset.document().model().entities.bounds();
+    EXPECT_DOUBLE_EQ(bounds.min.x, 190.0);
+    EXPECT_DOUBLE_EQ(bounds.min.y, -20.5);
+    EXPECT_DOUBLE_EQ(bounds.max.x, 375.0);
+    EXPECT_DOUBLE_EQ(bounds.max.y, 144.5);
+}
+
+TEST(Session, APlacementIsRefusedByNameForRasterAndABadOffsetForAnyFile)
+{
+    Session session(nullptr);
+    const std::string terrain =
+        "\"" + (std::filesystem::path(KATANA_GIS_SAMPLES) / "terrain.asc").generic_string() +
+        "\"";
+    const Printed raster = run(session, "IMPORT " + terrain + " OFFSET=1,2");
+    EXPECT_FALSE(raster.ok);
+    EXPECT_TRUE(contains(raster.err, "OFFSET is not supported for rasters and point clouds"))
+        << raster.err;
+    const Printed bad = run(session, "IMPORT " + terrain + " OFFSET=1");
+    EXPECT_FALSE(bad.ok);
+    EXPECT_TRUE(contains(bad.err, "OFFSET= takes the east and north")) << bad.err;
+    EXPECT_TRUE(session.document().model().entities.empty());
+}
 #endif

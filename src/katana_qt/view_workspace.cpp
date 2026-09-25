@@ -870,6 +870,21 @@ void ViewWorkspace::wireTools(ViewportWidget& plan, ViewId id)
             onTextTyped(text);
         }
     };
+    // Read when the menu is asked for, not when the view is made: the first
+    // view is made before the window sets its hooks. With no taker the
+    // right-click cancels, as a view with no handler does.
+    plan.onContextMenu = [this, &plan](const QPoint& globalPos) {
+        if (onContextMenu) {
+            onContextMenu(globalPos);
+        } else {
+            plan.cancel();
+        }
+    };
+    plan.onEntityDoubleClicked = [this](katana::entity::EntityId entity) {
+        if (onEntityDoubleClicked) {
+            onEntityDoubleClicked(entity);
+        }
+    };
 }
 
 Status ViewWorkspace::startTool(std::string_view id)

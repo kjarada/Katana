@@ -90,6 +90,16 @@ add_executable(katana_qt_widget_tests
     ${_qt_src}/command_reference_dialog.cpp
     ${_qt_src}/keyboard_shortcuts_dialog.cpp
     test_command_reference.cpp
+    # Where an import lands: the Placement group, File > Import's step and
+    # GIS > Import Vector Data's dialog (test_import_placement).
+    ${_qt_src}/import_placement.cpp
+    ${_qt_src}/gis_dialogs.cpp
+    test_import_placement.cpp
+    # The plan view's shortcut menu and Edit > Select by ID
+    # (test_plan_context_menu).
+    ${_qt_src}/plan_context_menu.cpp
+    ${_qt_src}/select_by_id_dialog.cpp
+    test_plan_context_menu.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}

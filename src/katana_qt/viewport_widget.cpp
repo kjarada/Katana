@@ -562,6 +562,21 @@ void ViewportWidget::selectAt(const QPointF& screen, Qt::KeyboardModifiers modif
     document_.notifySelectionChanged();
 }
 
+void ViewportWidget::selectForMenu(const QPointF& screen)
+{
+    // A right-click on an entity with nothing selected means "this one", as
+    // a left click would have; with a selection, the click may miss what the
+    // menu is for, so the selection stands.
+    if (!document_.selection().empty()) {
+        return;
+    }
+    if (const auto picked = entityAt(screen)) {
+        document_.selection().add(*picked);
+        document_.notifySelectionChanged();
+        update();
+    }
+}
+
 std::vector<katana::entity::EntityId> ViewportWidget::pickedInBox(const QPointF& from,
                                                                   const QPointF& to) const
 {
@@ -641,6 +656,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
         } else if (!boxStart_ && onContextMenu) {
             // Nothing to finish or cancel, and cancel() here would only have
             // cleared the selection the menu is about to act on.
+            selectForMenu(event->position());
             onContextMenu(event->globalPosition().toPoint());
         } else {
             cancel();
@@ -710,9 +726,16 @@ void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
     // SECOND press arrives here and never reaches mousePressEvent. Swallowing it
     // means a user clicking quickly while drawing silently loses that vertex, so
     // a drawing tool has to consume it exactly as it would an ordinary press.
-    // Select is left alone: there a double click is not a second pick.
+    // With no tool, the first click has selected what is under the cursor and
+    // the second asks to edit it; empty space asks for nothing.
     if (tools_.active()) {
         mousePressEvent(event);
+        return;
+    }
+    if (event->button() == Qt::LeftButton && onEntityDoubleClicked) {
+        if (const auto id = entityAt(event->position())) {
+            onEntityDoubleClicked(*id);
+        }
     }
 }
 
@@ -866,6 +889,9 @@ void ViewportWidget::contextMenuEvent(QContextMenuEvent* event)
         return;
     }
     const QPoint local = mapFromGlobal(QCursor::pos());
+    if (rect().contains(local)) {
+        selectForMenu(QPointF(local));
+    }
     onContextMenu(mapToGlobal(rect().contains(local) ? local : rect().center()));
 }
 

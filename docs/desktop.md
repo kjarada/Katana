@@ -37,11 +37,85 @@ entity; dragging left-to-right is a window selection and right-to-left a
 crossing selection (shown by a solid or dashed rubber band); middle-drag pans;
 the wheel zooms about the cursor; Delete erases the selection. With no tool
 running, Shift adds to the selection and Ctrl toggles; Enter or Space starts
-the last tool again; Esc abandons a box and then clears the selection; and a
-right-click cancels as Esc does, since nothing is wired to the view's context
-menu (`ViewportWidget::onContextMenu`). While a tool runs, Enter, Space and a
-right-click are the tool's Enter, and Esc ends the tool first. What a tool
+the last tool again; Esc abandons a box and then clears the selection; a
+right-click, or the keyboard's menu key, opens the shortcut menu; and a double
+click on an entity edits it (both below, "The plan view's shortcut menu").
+While a tool runs, Enter, Space and a right-click are the tool's Enter, a
+double click is two clicks for it, and Esc ends the tool first. What a tool
 does with each is `docs/tools.md`, "The tool host".
+
+## The plan view's shortcut menu
+
+A right-click in a plan view with no tool running opens the shortcut menu
+(`PlanContextMenu`, `src/katana_qt/plan_context_menu.hpp`, object name
+`planContextMenu`); so does the keyboard's menu key, at the cursor. With
+nothing selected, the entity under the cursor is selected first, so the menu
+acts on what was clicked; a selection already there is kept, since the click
+may land beside what the menu is for (`ViewportWidget::selectForMenu`).
+
+It holds no command of its own. Its items are the window's existing actions,
+found by object name, so the menu item, the menu bar's, the toolbar button
+and a headless `--trigger` are ONE action and cannot drift: Erase
+(`editErase`); Move, Copy, Rotate, Scale, Mirror and Offset (the tools
+`modify.move` ... `modify.offset`, which start with the selection as their
+objects); Attributes (`editAttributes`); List (`inquiry.list`); Select Similar,
+Quick Select and Global Modify (`select.similar`, `select.quick`,
+`formatGlobalModify`); Edit Text and Edit Label (`annotateEditText`,
+`annotateEditLabel`) for a text or a label in the selection; and Deselect
+(`editDeselect`). An action the window does not have is left out, not faked,
+which is how Edit Text appears once the text tools add it. With nothing
+selected it offers Repeat and the last tool's name (`planContextRepeat`, the
+tool's own action), Select All, Select by ID, Quick Select and Zoom Extents.
+
+What it adds is the verb lines a person would otherwise type, run through
+the window's one executor ("One executor", below), so the log shows each
+line and each is one undo step: Put on Layer (`planContextLayer`) runs
+`CHLAYER "<layer>"`; Style (`planContextStyle`) runs `STYLE APPLY <name>`, or
+`STYLE APPLY -` for ByLayer; Colour (`planContextColour`) runs `COLOR BYLAYER`
+or, after the colour dialog, `COLOR #RRGGBB`; Entity Information
+(`planContextInfo`, for one entity) runs `INFO <id>`, whose answer is in the
+log. An item's status tip is its line, so a person learns the verb. Put on
+Layer is the layer tree, not a list: a layer with layers under it is a
+submenu headed by the layer itself (`planContextLayerTree.<path>`), because a
+drawing brought in from a survey has hundreds of layers. The layer, style or
+ByLayer the whole selection shares is ticked. An argument is quoted only when
+it holds a blank (`verbArgument`).
+
+`popup`, not `exec`: nothing waits on the menu, and it deletes itself when it
+closes. It is not built in a headless run, which has no mouse; everything on
+it is a menu action or a verb, so an agent reaches the same through
+`--trigger` and `--command`. `tests/qt_widgets/test_plan_context_menu.cpp`
+checks what it offers with and without a selection, that Put on Layer is one
+undo step, the layer tree, the ticks, and that the view raises it from a view
+made before the window set the hook (the workspace's first plan view is).
+
+**Double click to edit.** A double click on an entity with no tool running
+(`ViewportWidget::onEntityDoubleClicked`, after its first click selected it)
+makes it the whole selection and opens what edits it: Edit Text for a text
+and Edit Label for a label where the window has those actions, and the
+Properties panel for anything else (`MainWindow::editDoubleClicked`). On empty
+space it does nothing; while a tool runs it is two clicks for the tool.
+
+**Select by ID** (Edit > Select by ID..., `editSelectById`;
+`src/katana_qt/select_by_id_dialog.hpp`) turns the ids that `LIST`, `INFO`,
+`AREA` and a refusal print back into a selection. It builds `SELECT id id
+...` from `selectByIdIds` (commas or blanks between them, `#12` as well as
+12), with the current selection first when `selectByIdAdd` is ticked, and
+runs it through the executor; `SELECT` takes `#12` too, as `INFO` does. A
+missing id, or one on a hidden or locked layer, is `SELECT`'s own refusal,
+shown in `selectByIdStatus`, and the selection is left as it was. Then, with
+`selectByIdZoom` (on by default), the active plan view frames the selection,
+and the Properties panel is brought forward to show it. It is non-modal and
+kept, like Format > Layers, so several lookups need no reopening, and
+`--dialog editSelectById` makes it a headless run's target
+(`qt_select_by_id_selects_and_frames_headless`).
+
+**Every Edit and View action has an object name**, so `--trigger` and
+`--report` reach it as a person's click does: `editUndo`, `editRedo`,
+`editSelectAll`, `editDeselect`, `editSelectById`, `editErase`,
+`editAttributes`, `viewZoomExtents`, `viewGrid` and `viewSnap`. Until
+2026-09-26 Undo, Redo, Select All, Erase Selection, Zoom Extents, Grid and
+Object Snap had none, and a headless run could not reach them.
 
 Two rendering details are worth noting. Arcs and circles are tessellated in
 *model* space with a chord count chosen for a sub-quarter-pixel sagitta, so a
@@ -767,7 +841,9 @@ Each now reaches the same code on every front end
   so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
   cloud refuses it by name. The path and the `LOCAL` are read by
   `CommandInterpreter::importArgument`, as the session reads them; `LOCAL` was
-  once taken for part of the path. The import dialogs do not offer it yet.
+  once taken for part of the path. `ALONGSIDE` and `OFFSET=dE,dN` work the
+  same way, and the import dialogs offer all of them (`docs/interop.md`,
+  "Placing an import").
 
 ## Run Script: a katana_cli script in the window
 

@@ -144,7 +144,7 @@ imported (anything else), in order, before any step runs.
 | `--style-manager` | open the styles and linetypes manager and grab it |
 | `--layer-manager` | open the Layers dialog and grab it; Format > Layers is non-modal, so `--dialog formatLayers` reaches the same dialog as a step |
 | `--attributes [ID]` | open the attribute manager (Edit > Attributes, still modal in a person's session) on entity ID and grab it |
-| `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it |
+| `--dataset-info FILE`, `--import-options FILE` | build GIS > Dataset Information or the GIS import dialog for FILE and grab it; for a DXF or a .12da the import dialog is File > Import's placement step (`docs/interop.md`, "Placing an import") |
 | `--check-shortcuts` | fail the run when a key reaches more than one thing (`desktop.md`, "Every key reaches one thing") |
 | `--script FILE` | run a `katana_cli` script (`.kcs`) in the window, a step among the others: the window's `SCRIPT` verb through its one executor, each line its own undo step, stopping at the first refused (`desktop.md`, "Run Script"). A script that stops fails the run, exit 1. Without `--screenshot`, `--plot` or `--plot-sheets` the run is a batch, as `katana_cli`'s is: never shown, over when its steps are, and failed by the first step refused |
 | the steps | below |
@@ -243,7 +243,8 @@ A modal box in a headless run is a hang until the test's timeout. So
 - File > Open, Save As (and Save of a drawing with no project), Import and
   Export Vector, and Format > Load and Replace Customisation, open no file
   dialog and name the line that does the same - `OPEN <directory>`,
-  `SAVE <directory>`, `IMPORT <file> [LOCAL]`, `EXPORT <file>`,
+  `SAVE <directory>`, `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`,
+  `EXPORT <file>`,
   `CUSTOMISE [REPLACE] <file>...` - since `--trigger` reaches them by their
   object names (`MainWindow::refuseFileDialog`,
   `qt_the_file_items_name_their_verbs_in_a_headless_run_headless`); Export of

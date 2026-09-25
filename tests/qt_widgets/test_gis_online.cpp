@@ -9,7 +9,10 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDateEdit>
 #include <QDoubleSpinBox>
+#include <QGroupBox>
+#include <QSpinBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -109,7 +112,9 @@ TEST(GisOnlineDialog, EveryControlHasItsObjectName)
           "onlineResolutionAuto", "onlineResolution", "onlineTargetLayer", "onlineTag", "onlineUseDates",
           "onlineFrom", "onlineTo", "onlineCloud", "onlineProjectCrs", "onlineCrs", "onlineKey",
           "onlineSaveKey", "onlineCustomUrl", "onlineAddCustom", "onlineImport", "onlineStatus",
-          "onlineClose"}) {
+          "onlineClose", "onlineTimeDefault", "onlineTime", "onlineAdvanced", "onlineTimeoutOn",
+          "onlineTimeout", "onlineCatalogue", "onlineCatalogueSearch", "onlineCatalogueRun",
+          "onlineCatalogueResults", "onlineCatalogueAdd"}) {
         EXPECT_NE(dialog.findChild<QWidget*>(name), nullptr) << name;
     }
 }
@@ -224,6 +229,128 @@ TEST(GisOnlineDialog, NoLayerChosenMeansNoImport)
     ASSERT_TRUE(dialog.selectLayer("data-gov-au", "search"));
     EXPECT_FALSE(child<QPushButton>(dialog, "onlineImport")->isEnabled());
     EXPECT_TRUE(child<QLabel>(dialog, "onlineDetails")->text().contains("ONLINE LAYERS data-gov-au"));
+}
+
+TEST(GisOnlineDialog, ACatalogueIsSearchedFromTheDialogAndAResultAddedAsACustomService)
+{
+    Recorder recorder = withBuiltIn();
+    OnlineDataDialog dialog(contextFor(recorder));
+    // Not a catalogue: no search offered.
+    ASSERT_TRUE(dialog.selectLayer("osm", "buildings"));
+    EXPECT_FALSE(child<QGroupBox>(dialog, "onlineCatalogue")->isVisibleTo(&dialog));
+
+    ASSERT_TRUE(dialog.selectLayer("data-gov-au", "search"));
+    EXPECT_TRUE(child<QGroupBox>(dialog, "onlineCatalogue")->isVisibleTo(&dialog));
+    // Nothing typed: said, and nothing runs.
+    child<QPushButton>(dialog, "onlineCatalogueRun")->click();
+    EXPECT_TRUE(recorder.run.empty());
+    EXPECT_TRUE(child<QLabel>(dialog, "onlineStatus")->text().contains("search the catalogue for"));
+
+    child<QLineEdit>(dialog, "onlineCatalogueSearch")->setText("  flood   mapping ");
+    child<QPushButton>(dialog, "onlineCatalogueRun")->click();
+    ASSERT_EQ(recorder.run.size(), 1u);
+    EXPECT_EQ(recorder.run[0].verb, katana::interop::OnlineVerb::Layers);
+    EXPECT_EQ(recorder.run[0].provider, "data-gov-au");
+    EXPECT_EQ(recorder.run[0].filter, "flood mapping");
+
+    // What the workbench's search found comes back to be listed.
+    dialog.showCatalogueResults(
+        {{"flood-studies", "Flood Studies", "WMS", "https://example.org/wms?key=SECRET", "CC-BY"},
+         {"levees", "Levees", "WFS", "https://example.org/wfs", "CC-BY"}});
+    auto* results = child<QTreeWidget>(dialog, "onlineCatalogueResults");
+    ASSERT_EQ(results->topLevelItemCount(), 2);
+    EXPECT_EQ(results->topLevelItem(1)->text(0), "Levees");
+    EXPECT_EQ(results->topLevelItem(1)->text(2), "WFS");
+    EXPECT_FALSE(results->topLevelItem(0)->text(3).contains("SECRET"))
+        << "an address is shown with its key taken out";
+    EXPECT_TRUE(child<QLabel>(dialog, "onlineStatus")->text().startsWith("2 web services found"));
+
+    results->setCurrentItem(results->topLevelItem(1));
+    child<QPushButton>(dialog, "onlineCatalogueAdd")->click();
+    ASSERT_EQ(recorder.run.size(), 2u);
+    EXPECT_EQ(recorder.run[1].verb, katana::interop::OnlineVerb::Custom);
+    EXPECT_EQ(recorder.run[1].url, "https://example.org/wfs");
+    // The first result's full address, key and all, is what is asked.
+    results->setCurrentItem(results->topLevelItem(0));
+    child<QPushButton>(dialog, "onlineCatalogueAdd")->click();
+    ASSERT_EQ(recorder.run.size(), 3u);
+    EXPECT_EQ(recorder.run[2].url, "https://example.org/wms?key=SECRET");
+    EXPECT_FALSE(child<QLabel>(dialog, "onlineStatus")->text().contains("SECRET"));
+
+    // A search that finds nothing says so.
+    dialog.showCatalogueResults({});
+    EXPECT_EQ(results->topLevelItemCount(), 0);
+    EXPECT_FALSE(child<QPushButton>(dialog, "onlineCatalogueAdd")->isEnabled());
+}
+
+TEST(GisOnlineDialog, ATimeEnabledLayerTakesADateAndOthersDoNot)
+{
+    Recorder recorder = withBuiltIn();
+    OnlineDataDialog dialog(contextFor(recorder));
+    auto* latest = child<QCheckBox>(dialog, "onlineTimeDefault");
+    auto* date = child<QDateEdit>(dialog, "onlineTime");
+    ASSERT_TRUE(latest && date);
+    // NASA GIBS's tiles hold {time} in their address.
+    ASSERT_TRUE(dialog.selectLayer("nasa-gibs", "modis-terra"));
+    EXPECT_TRUE(latest->isEnabled());
+    EXPECT_FALSE(date->isEnabled()) << "the latest, until a date is chosen";
+    auto command = dialog.command();
+    ASSERT_TRUE(command.ok()) << command.error().describe();
+    EXPECT_TRUE(command->time.empty());
+
+    latest->setChecked(false);
+    EXPECT_TRUE(date->isEnabled());
+    date->setDate(QDate(2024, 1, 15));
+    command = dialog.command();
+    ASSERT_TRUE(command.ok()) << command.error().describe();
+    EXPECT_EQ(command->time, "2024-01-15");
+    EXPECT_TRUE(child<QLabel>(dialog, "onlineDetails")->text().contains("time series"));
+
+    // A layer with no time dimension neither offers nor writes one.
+    ASSERT_TRUE(dialog.selectLayer("copernicus", "dem"));
+    EXPECT_FALSE(latest->isEnabled());
+    EXPECT_FALSE(date->isEnabled());
+    command = dialog.command();
+    ASSERT_TRUE(command.ok());
+    EXPECT_TRUE(command->time.empty());
+}
+
+TEST(GisOnlineDialog, AGiveUpAfterIsWrittenOnlyWhenAskedFor)
+{
+    Recorder recorder = withBuiltIn();
+    OnlineDataDialog dialog(contextFor(recorder));
+    ASSERT_TRUE(dialog.selectLayer("copernicus", "dem"));
+    auto* on = child<QCheckBox>(dialog, "onlineTimeoutOn");
+    auto* seconds = child<QSpinBox>(dialog, "onlineTimeout");
+    ASSERT_TRUE(on && seconds);
+    EXPECT_FALSE(seconds->isEnabled());
+    EXPECT_EQ(seconds->value(), 600) << "a headless import's own deadline";
+    auto command = dialog.command();
+    ASSERT_TRUE(command.ok());
+    EXPECT_FALSE(command->timeoutSeconds.has_value());
+
+    on->setChecked(true);
+    seconds->setValue(45);
+    command = dialog.command();
+    ASSERT_TRUE(command.ok()) << command.error().describe();
+    ASSERT_TRUE(command->timeoutSeconds.has_value());
+    EXPECT_EQ(*command->timeoutSeconds, 45);
+}
+
+TEST(GisOnlineDialog, TheDetailsSayTheServicesSystemVersionAndLimits)
+{
+    Recorder recorder = withBuiltIn();
+    OnlineDataDialog dialog(contextFor(recorder));
+    auto* details = child<QLabel>(dialog, "onlineDetails");
+    // OpenStreetMap buildings, through Overpass: an area limit.
+    ASSERT_TRUE(dialog.selectLayer("osm", "buildings"));
+    EXPECT_TRUE(details->text().contains("Service CRS")) << details->text().toStdString();
+    EXPECT_TRUE(details->text().contains("square kilometres an import"))
+        << details->text().toStdString();
+    // NASA GIBS: Web Mercator tiles to zoom 9 (the catalogue's maxZoom).
+    ASSERT_TRUE(dialog.selectLayer("nasa-gibs", "modis-terra"));
+    EXPECT_TRUE(details->text().contains("EPSG:3857")) << details->text().toStdString();
+    EXPECT_TRUE(details->text().contains("tiles to zoom 9")) << details->text().toStdString();
 }
 
 TEST(GisOnlineDialog, AKeyIsSavedUnderTheLayersKeyNameAndNeverShownBack)
