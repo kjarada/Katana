@@ -1322,6 +1322,22 @@ if(TARGET katana)
             "-DFORBID=unknown command|usage: CUSTOMISE"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/session_verbs_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # INFO #1 - what Entity Information sends - is the entity in a working
+    # directory holding files called 1 and #1, where it was once read as a
+    # file: "no importer reads files named ''".
+    set(_info_dir "${CMAKE_CURRENT_BINARY_DIR}/qt_info_beside_files")
+    file(WRITE "${_info_dir}/1" "")
+    file(WRITE "${_info_dir}/#1" "")
+    add_test(NAME qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 0,0 10,5|>INFO #1"
+            "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
+            "-DFORBID=no importer"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/info_beside_files_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake"
+        WORKING_DIRECTORY "${_info_dir}")
     # COPC typed, into a folder name with blanks, then described: every point
     # of the sample's 40 000 (`pdal info`, as cli.copc_then_info) kept, and
     # the IMPORT line that reads the result said after it. One path is a
@@ -1385,6 +1401,7 @@ if(TARGET katana)
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/run_line_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_session_verbs_run_on_the_windows_command_line_headless
+        qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless
         qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
         qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
         qt_import_placement_typed_on_the_windows_command_line_headless

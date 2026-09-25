@@ -430,7 +430,10 @@ const std::vector<Tool>& tools()
             "(UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW), inspection (LIST, INFO), UNDO/REDO, "
             "and files (NEW, OPEN, SAVE, IMPORT, EXPORT). Each command is one undoable step. By "
             "default the batch stops at the first command that fails. Returns each command's "
-            "output and the drawing's status afterwards.",
+            "output and the drawing's status afterwards. PLOT, PLOTSHEETS, SNAPSHOT, ONLINE and "
+            "SCRIPT are the desktop window's verbs and are refused here, saying so: plotting, "
+            "view pictures and online data need the window (or katana run headless); a script "
+            "file is katana_run_script's.",
             objectSchema(
                 Json{{"commands",
                       {{"type", "array"},
@@ -452,8 +455,9 @@ const std::vector<Tool>& tools()
 
         list.push_back(Tool{
             "katana_run_script", "Run a Katana script file",
-            "Run a Katana command script (.kcs): one command per line, '#' starts a comment - the "
-            "file katana_cli runs. Stops at the first failing line unless stop_on_error is false.",
+            "Run a Katana command script (.kcs): one command per line, a line whose first "
+            "non-blank is '#' a comment - the file katana_cli runs. Stops at the first failing "
+            "line unless stop_on_error is false.",
             objectSchema(
                 Json{{"path", {{"type", "string"}, {"description", "The script file to run."}}},
                      {"stop_on_error",
@@ -566,7 +570,9 @@ const std::vector<Tool>& tools()
                 if (!id.is_number_integer() || id.get<long long>() < 1) {
                     throw ToolRefusal{"\"id\" must be a positive whole number"};
                 }
-                return oneLine(session, "INFO " + std::to_string(id.get<long long>()));
+                // #id: always the entity, whatever files the server's
+                // working directory holds (session.cpp, INFO).
+                return oneLine(session, "INFO #" + std::to_string(id.get<long long>()));
             }});
 
         list.push_back(Tool{

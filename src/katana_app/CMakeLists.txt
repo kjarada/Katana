@@ -225,6 +225,54 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.info_with_an_id_describes_the_entity PROPERTIES
         PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
         FAIL_REGULAR_EXPRESSION "error")
+    # INFO #1 is the entity whatever files the working directory holds: run
+    # beside files called 1 and #1 (a mistyped shell 2>1 makes the first), it
+    # was once read as INFO <file> - "no importer reads files named ''" -
+    # and so were katana_mcp's katana_describe_entity and the window's Entity
+    # Information, which send it. INFO 1 there is the file, as it was.
+    set(_info_dir "${CMAKE_CURRENT_BINARY_DIR}/cli_info_beside_files")
+    file(WRITE "${_info_dir}/1" "")
+    file(WRITE "${_info_dir}/#1" "")
+    add_test(NAME cli.info_hash_id_is_the_entity_beside_a_file_of_that_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "RECT 0,0 10,5" -c "INFO #1"
+        WORKING_DIRECTORY "${_info_dir}")
+    set_tests_properties(cli.info_hash_id_is_the_entity_beside_a_file_of_that_name PROPERTIES
+        PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
+        FAIL_REGULAR_EXPRESSION "error")
+    # A line whose first non-blank is '#' is a note, indented or not, in a
+    # file with Windows line ends - the rule File > Run Script keeps. An
+    # indented note was once a command here, and stopped the script the
+    # window ran through.
+    set(_notes "${CMAKE_CURRENT_BINARY_DIR}/cli_scripts/indented notes.kcs")
+    file(WRITE "${_notes}"
+        "# a note\r\nRECT 0,0 10,5\r\n\r\n  # an indented note\r\n\t# and a tabbed one\r\nCIRCLE 5,5 1\r\nLIST\r\n")
+    add_test(NAME cli.an_indented_note_in_a_script_runs_nothing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> "${_notes}")
+    set_tests_properties(cli.an_indented_note_in_a_script_runs_nothing PROPERTIES
+        PASS_REGULAR_EXPRESSION "rectangle created${_eol}circle created${_eol}2 entities"
+        FAIL_REGULAR_EXPRESSION "error")
+    # The window's own verbs are refused by name, saying where they run,
+    # rather than as unknown commands: a script written for File > Run Script
+    # that plots fails here saying so. Each stops the batch (exit 1).
+    foreach(_verb IN ITEMS "PLOT a.pdf" "PLOTSHEETS" "SNAPSHOT a.png" "ONLINE PROVIDERS"
+                           "SCRIPT a.kcs")
+        string(REGEX REPLACE " .*" "" _name "${_verb}")
+        string(TOLOWER "${_name}" _name)
+        add_test(NAME cli.the_windows_${_name}_verb_is_refused_saying_where_it_runs
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                    $<TARGET_FILE:katana_cli> -c "${_verb}" -c "POINT 1,1")
+        set_tests_properties(cli.the_windows_${_name}_verb_is_refused_saying_where_it_runs
+            PROPERTIES
+            PASS_REGULAR_EXPRESSION "error: Unsupported: [A-Z]+ is the desktop window's"
+            FAIL_REGULAR_EXPRESSION "unknown command|point created")
+    endforeach()
+    # And the refusal fails the batch, as any refused line does.
+    add_test(NAME cli.a_window_verb_in_a_batch_fails_it
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLOT a.pdf")
+    set_tests_properties(cli.a_window_verb_in_a_batch_fails_it PROPERTIES WILL_FAIL TRUE)
 
     # STATUS and STATUS JSON: the record katana_mcp's katana_status gives,
     # here as a verb (cad/document_status.hpp). One rectangle, selected, one

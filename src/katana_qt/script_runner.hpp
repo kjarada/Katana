@@ -5,9 +5,11 @@
 // runs a .kcs file (docs/desktop.md, "Run Script").
 //
 // A script is what katana_cli reads: a command a line, UTF-8, a Windows line
-// end taken off, and a blank line or one whose first word starts with '#'
-// skipped. So a file written for katana_cli runs in the window, and one
-// written in the window runs in katana_cli. Each line is echoed and run as a
+// end taken off, and a blank line or one whose first non-blank is '#'
+// skipped - the session's rule too (katana_app/session.cpp, runLine), which
+// once refused an indented note. So a file written for katana_cli or
+// katana_mcp's katana_run_script runs in the window, and one written in the
+// window runs in both. Each line is echoed and run as a
 // dialog's line is - never a running tool's answer, since a script names its
 // points (LINE 0,0 10,0, not LINE and then its points) - and so each is its own
 // undo step, as in katana_cli. The run stops at the first line refused unless

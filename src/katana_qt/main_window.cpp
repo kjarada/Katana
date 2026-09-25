@@ -2550,9 +2550,12 @@ void MainWindow::dispatchLine(const QString& line)
     }
     // INFO 12 describes entity 12, as the interpreter's INFO does - unless a
     // file is really called that. Every INFO was once taken for a file here,
-    // so INFO 12 answered that the file did not exist.
+    // so INFO 12 answered that the file did not exist. INFO #12 is always
+    // the entity, as in the session (session.cpp): Entity Information sends
+    // it, whatever files the working directory holds.
     if (verb == "INFO" && words.size() == 2 &&
-        cad::CommandInterpreter::isEntityId(words[1].toStdString()) && !QFileInfo::exists(words[1])) {
+        cad::CommandInterpreter::isEntityId(words[1].toStdString()) &&
+        (words[1].startsWith('#') || !QFileInfo::exists(words[1]))) {
         runInterpreterLine(line, verb);
         return;
     }

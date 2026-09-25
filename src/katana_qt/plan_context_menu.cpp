@@ -152,10 +152,11 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
     addExisting(*this, "editAttributes");
     addSeparator();
 
-    // INFO names one entity; for several, List says what each is.
+    // INFO names one entity; for several, List says what each is. #id, which
+    // is always the entity: INFO 12 is a file when one is called 12.
     if (selected.size() == 1) {
         addLine(*this, QStringLiteral("Entity &Information"), QStringLiteral("planContextInfo"),
-                QString(QStringLiteral("INFO ") + QString::number(selected.front())));
+                QString(QStringLiteral("INFO #") + QString::number(selected.front())));
     }
     addExisting(*this, "inquiry.list");
     addSeparator();

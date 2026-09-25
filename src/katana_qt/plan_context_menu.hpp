@@ -14,14 +14,14 @@
 //
 // Its own items, by object name:
 //   planContextLayer                 Put on Layer, a submenu in the layer tree
-//   planContextLayer.<layer path>    CHLAYER "<layer path>"
+//   planContextLayer.<layer path>    CHLAYER <layer path>, quoted when it must be
 //   planContextStyle                 Style, a submenu
 //   planContextStyle.ByLayer         STYLE APPLY -
-//   planContextStyle.<name>          STYLE APPLY "<name>"
+//   planContextStyle.<name>          STYLE APPLY <name>, quoted when it must be
 //   planContextColour                Colour, a submenu
 //   planContextColour.ByLayer        COLOR BYLAYER
 //   planContextColour.Choose         COLOR #RRGGBB, the colour asked for
-//   planContextInfo                  INFO <id>, for one entity
+//   planContextInfo                  INFO #<id>, for one entity
 //   planContextRepeat                the last tool again, with nothing selected
 
 #include <functional>

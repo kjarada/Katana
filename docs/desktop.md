@@ -70,16 +70,20 @@ tool's own action), Select All, Select by ID, Quick Select and Zoom Extents.
 What it adds is the verb lines a person would otherwise type, run through
 the window's one executor ("One executor", below), so the log shows each
 line and each is one undo step: Put on Layer (`planContextLayer`) runs
-`CHLAYER "<layer>"`; Style (`planContextStyle`) runs `STYLE APPLY <name>`, or
+`CHLAYER <layer>`; Style (`planContextStyle`) runs `STYLE APPLY <name>`, or
 `STYLE APPLY -` for ByLayer; Colour (`planContextColour`) runs `COLOR BYLAYER`
 or, after the colour dialog, `COLOR #RRGGBB`; Entity Information
-(`planContextInfo`, for one entity) runs `INFO <id>`, whose answer is in the
-log. An item's status tip is its line, so a person learns the verb. Put on
-Layer is the layer tree, not a list: a layer with layers under it is a
-submenu headed by the layer itself (`planContextLayerTree.<path>`), because a
-drawing brought in from a survey has hundreds of layers. The layer, style or
-ByLayer the whole selection shares is ticked. An argument is quoted only when
-it holds a blank (`verbArgument`).
+(`planContextInfo`, for one entity) runs `INFO #<id>`, whose answer is in the
+log - `#`, because `INFO 12` is a file when the working directory holds one
+called 12, and the item once failed there. An item's status tip is its line,
+so a person learns the verb. Put on Layer is the layer tree, not a list: a
+layer with layers under it is a submenu headed by the layer itself
+(`planContextLayerTree.<path>`), because a drawing brought in from a survey
+has hundreds of layers. The layer, style or ByLayer the whole selection
+shares is ticked. A name is written by `namedLine`, through `commandWord`
+("One rule for a word on the line", below): bare when it can be, quoted when
+it is empty or holds a blank (`CHLAYER 0`, `CHLAYER "Site Boundary"`), and a
+name holding a double quote or a line break is offered disabled.
 
 `popup`, not `exec`: nothing waits on the menu, and it deletes itself when it
 closes. It is not built in a headless run, which has no mouse; everything on
@@ -891,8 +895,12 @@ Each now reaches the same code on every front end
 `qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless`,
 `qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless`):
 
-- `INFO 12` (or `INFO #12`) describes entity 12, unless a file of that name
-  exists: `CommandInterpreter::isEntityId`. The window, and the session under
+- `INFO 12` describes entity 12, unless a file of that name exists, and
+  `INFO #12` describes it whatever files there are:
+  `CommandInterpreter::isEntityId`. Entity Information and
+  `katana_describe_entity` send `INFO #<id>`; run beside a file called `1`
+  or `#1` they once failed (`cli.info_hash_id_is_the_entity_beside_a_file_of_that_name`,
+  `qt_info_hash_id_is_the_entity_beside_a_file_of_that_name_headless`). The window, and the session under
   `katana_cli` and `katana_mcp`, once took every `INFO` for `INFO <file>`, so
   `katana_describe_entity` answered that the file did not exist.
 - `CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST` and `MAPFILE CHECK`
@@ -917,7 +925,11 @@ Each now reaches the same code on every front end
 
 A script is what `katana_cli` runs: a `.kcs` file of commands, one a line,
 UTF-8, a Windows line end taken off, blank lines and lines whose first
-non-blank is `#` skipped. The window runs the same files three ways, all
+non-blank is `#` skipped. The session under `katana_cli` and `katana_mcp`
+once skipped only a line whose first character was `#`, and refused an
+indented note that the window skipped; it reads the same rule now
+(`cli.an_indented_note_in_a_script_runs_nothing`,
+`McpServer.AScriptsIndentedNoteRunsNothing`). The window runs the same files three ways, all
 through one function, `MainWindow::runScript`
 (`src/katana_qt/script_runner.hpp`):
 
