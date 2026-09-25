@@ -235,6 +235,9 @@ Json viewportJson(const Viewport& viewport)
         marks.push_back(markJson(mark));
     }
     putList(json, "marks", std::move(marks));
+    if (viewport.revisionLimit != d.revisionLimit) {
+        json["revision_limit"] = viewport.revisionLimit;
+    }
     return json;
 }
 
@@ -281,6 +284,14 @@ Viewport viewportFrom(const Json& json)
     viewport.text = json.value("text", d.text);
     for (const Json& mark : json.value("marks", Json::array())) {
         viewport.marks.push_back(markFrom(mark));
+    }
+    if (json.contains("revision_limit")) {
+        // A count: -1 or 2.5 would read as some other count, not as an error.
+        const Json& limit = json.at("revision_limit");
+        if (!limit.is_number_unsigned()) {
+            throw BadValue{"the revision limit is not a whole number of at least 0"};
+        }
+        viewport.revisionLimit = limit.get<std::size_t>();
     }
     return viewport;
 }

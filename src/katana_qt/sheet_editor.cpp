@@ -48,6 +48,7 @@
 #include "icons.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
+#include "katana/cad/plotting/tables.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -78,7 +79,8 @@ const QColor kGuide(230, 60, 160);
 constexpr std::array kKinds{ViewportKind::Plan,          ViewportKind::LongSection,
                             ViewportKind::CrossSections, ViewportKind::Model3D,
                             ViewportKind::KeyPlan,       ViewportKind::Legend,
-                            ViewportKind::Notes,         ViewportKind::Image};
+                            ViewportKind::Notes,         ViewportKind::Image,
+                            ViewportKind::SheetIndex,    ViewportKind::Revisions};
 
 QString kindName(ViewportKind kind)
 {
@@ -91,6 +93,8 @@ QString kindName(ViewportKind kind)
     case ViewportKind::Notes: return QStringLiteral("Notes");
     case ViewportKind::Image: return QStringLiteral("Image");
     case ViewportKind::KeyPlan: return QStringLiteral("Key plan");
+    case ViewportKind::SheetIndex: return QStringLiteral("Drawing register");
+    case ViewportKind::Revisions: return QStringLiteral("Revision table");
     }
     return {};
 }
@@ -900,6 +904,7 @@ void SheetEditor::buildActions()
     auto* addMenu = new QMenu(this);
     for (const ViewportKind kind : kKinds) {
         QAction* a = addMenu->addAction(kindName(kind));
+        a->setObjectName(QStringLiteral("sheetAddView_") + QString::fromUtf8(plotting::toString(kind)));
         connect(a, &QAction::triggered, this, [this, kind] {
             if (auto s = addViewport(kind); !s) {
                 report(QString::fromStdString(s.error().describe()), true);
@@ -1217,6 +1222,25 @@ void SheetEditor::rebuildProperties()
             form->addRow(QStringLiteral("Text"), text);
             form->addRow(QString(), apply);
         }
+        if (v.kind == ViewportKind::Revisions) {
+            auto* limit = new QSpinBox(box);
+            limit->setObjectName(QStringLiteral("sheetRevisionLimit"));
+            limit->setRange(0, 999);
+            limit->setSpecialValueText(QStringLiteral("All"));
+            limit->setValue(static_cast<int>(std::min<std::size_t>(v.revisionLimit, 999)));
+            limit->setToolTip(QStringLiteral("Only the newest so many revisions; All shows every one"));
+            // One step per value settled on, not per digit typed; queued, as
+            // the edit rebuilds this panel and so deletes the spin box.
+            limit->setKeyboardTracking(false);
+            connect(
+                limit, &QSpinBox::valueChanged, this,
+                [edit](int n) {
+                    edit([n](Viewport& e) { e.revisionLimit = static_cast<std::size_t>(n); },
+                         "VIEWPORT_REVISION_LIMIT");
+                },
+                Qt::QueuedConnection);
+            form->addRow(QStringLiteral("Newest revisions"), limit);
+        }
         if (v.kind == ViewportKind::Image) {
             auto* file = new QLineEdit(QString::fromStdString(v.text), box);
             file->setPlaceholderText(QStringLiteral("a file in the project's assets folder"));
@@ -1528,6 +1552,12 @@ Status SheetEditor::addViewport(ViewportKind kind)
         v.rect = freePlace(sheet, 90.0, 80.0);
         v.text = "1. ALL DIMENSIONS ARE IN METRES UNLESS NOTED OTHERWISE.";
         break;
+    case ViewportKind::SheetIndex:
+        v.rect = freePlace(sheet, 200.0, 150.0);
+        break;
+    case ViewportKind::Revisions:
+        v.rect = freePlace(sheet, 130.0, 60.0);
+        break;
     case ViewportKind::Image: {
         v.rect = freePlace(sheet, 100.0, 80.0);
         const SheetSource src = source();
@@ -1655,7 +1685,12 @@ void SheetEditor::generateSheets()
                     QStringLiteral("Plan strips along an alignment"),
                     QStringLiteral("Plan and profile along an alignment"),
                     QStringLiteral("Cross sections along an alignment"),
-                    QStringLiteral("One sheet per imported plot frame")});
+                    QStringLiteral("One sheet per imported plot frame"),
+                    QStringLiteral("Drawing register (cover sheet)")});
+    kind->setObjectName(QStringLiteral("sheetGenerateLayout"));
+    // The register lists the sheets there are, so it goes in front of them
+    // (plotting::addRegisterSheet) rather than after or instead of them.
+    constexpr int kRegisterLayout = 6;
     form->addRow(QStringLiteral("Layout"), kind);
 
     auto* paper = new QComboBox(&dialog);
@@ -1708,7 +1743,8 @@ void SheetEditor::generateSheets()
         columns->setEnabled(k == 4);
         snapshot->setEnabled(k == 0);
         legend->setEnabled(k == 0);
-        scale->setEnabled(k != 5);
+        scale->setEnabled(k != 5 && k != kRegisterLayout);
+        replace->setEnabled(k != kRegisterLayout);
     };
     connect(kind, &QComboBox::currentIndexChanged, &dialog, enable);
     enable();
@@ -1731,6 +1767,17 @@ void SheetEditor::generateSheets()
 
     katana::core::Result<std::vector<Sheet>> sheets = std::vector<Sheet>{};
     const int k = kind->currentIndex();
+    if (k == kRegisterLayout) {
+        auto added = plotting::addRegisterSheet(document_, paperTemplate);
+        if (!added) {
+            report(QString::fromStdString(added.error().describe()), true);
+            return;
+        }
+        setCurrentSheet(0);
+        canvas_->fitPage();
+        report(QStringLiteral("Added the drawing register as sheet 1."));
+        return;
+    }
     const auto needAlignment = [&]() -> katana::core::Result<katana::geometry::SolvedAlignment> {
         const auto* a = model.alignments.find(name);
         if (a == nullptr) {
