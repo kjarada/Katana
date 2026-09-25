@@ -33,10 +33,15 @@ code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
 "Sheets on the command line") are the interpreter's, so they run here too
 (`cli.sheet_verbs_lay_out_edit_and_list_the_sheets`); only `PLOTSHEETS`,
 which paints, needs the window. `UTILITY REPORT | VERIFY | CLEARANCE |
-CHECK | DRAW` grades subsurface utility schedules by AS 5488 quality level,
-checks them against a delivery schema and draws them into the drawing
+CHECK | DRAW | REGRADE | SCHEDULE` grades subsurface utility schedules by
+AS 5488 quality level, checks them against a delivery schema, draws them into
+the drawing, and does the same to what is drawn
 (`docs/subsurface_utilities.md`); it is the interpreter's too, and the
-`cli.utility_*` tests run it on `samples/utilities/`.
+`cli.utility_*` tests run it on `samples/utilities/`. Every verb on drawing
+data takes the shared scope words (`docs/cad.md`, "Scope and filter"), except
+that `VIEW` is the window's plan view: headless it is refused, and `AREA
+x0,y0,x1,y1` names the window instead
+(`cli.utility_view_is_refused_headless_naming_area`).
 
 The same session is served to Claude over the Model Context Protocol by
 `katana_mcp` (`docs/mcp.md`).

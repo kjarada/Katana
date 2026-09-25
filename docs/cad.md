@@ -187,15 +187,18 @@ The sheet verbs (`SHEETS`, `SHEET`, `VIEW`, `TILE`, `GENERATE`,
 `docs/plotting.md`, "Sheets on the command line", describes them.
 
 The AS 5488 subsurface utility verbs (`UTILITY REPORT`, `VERIFY`,
-`CLEARANCE`, `CHECK`, `DRAW`, and `HELP UTILITY`) are handed to
-`utilities::runUtilityVerb` (`include/katana/cad/utilities/`);
+`CLEARANCE`, `CHECK`, `DRAW`, `REGRADE`, `SCHEDULE`, and `HELP UTILITY`) are
+handed to `utilities::runUtilityVerb` (`include/katana/cad/utilities/`);
 `docs/subsurface_utilities.md`, "UTILITY on the command line", describes
 them. They were `katana_cli`'s own until 2026-09-25; in the interpreter the
-window's command line, `katana_cli` and `katana_mcp` all have them. The four
-reports read files and never touch the drawing; `UTILITY DRAW` adds the graded
-services - layers by type and quality level, a linetype per level, a
-polyline per run at one level, a point per located vertex - as one undo
-step, and its first reply record carries the `bounds=` a front end frames.
+window's command line, `katana_cli` and `katana_mcp` all have them. Every one
+but `DRAW` takes a schedule file or what is drawn, by the shared scope words
+("Scope and filter", below); the reports never touch the drawing. `UTILITY
+DRAW` adds the graded services - layers by type and quality level, a
+linetype per level, a polyline per run at one level, a point per located
+vertex carrying its whole schedule row - as one undo step, `UTILITY REGRADE`
+draws what is drawn again from its points as one, and the first reply record
+of each carries the `bounds=` a front end frames.
 
 Added on 2026-09-23 for the style, linetype and symbol managers (fixing audit
 CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
@@ -211,7 +214,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
-| `MODIFY [SELECTION\|DRAWING\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter, the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
+| `MODIFY [SELECTION\|DRAWING\|VIEW [id]\|AREA x0,y0,x1,y1\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter ("Scope and filter"), the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
 
 The annotation verbs (2026-09-25; `docs/annotation.md`, "The verbs") are
 `ANNOSCALE`, `TEXTSTYLE` (`TS`), `TEXT` and `MTEXT` with `style=`, `paper=`,
@@ -821,6 +824,72 @@ alone and why. `summary()` is what the dialog shows as its preview and
 
 Tested in `tests/cad/customisation/test_global_modify.cpp`, each expectation
 worked out by hand from the drawing its fixture lays out.
+
+## Scope and filter: one grammar for every verb on drawing data
+
+On 2026-09-26 the owner asked for the utility tools to act "on data on view,
+layer/s, elements, filtered elements, like global change", and for every
+tool to be able to act that way. Global Modify's scope and filter became the
+one mechanism for it (`include/katana/cad/scope_verbs.hpp`): every verb that
+reads or changes drawing data takes the same words, read by one parser and
+resolved by the one matcher, `cad::matchEntities`.
+
+```
+SELECTION | DRAWING | VIEW [<view id>] | AREA x0,y0,x1,y1 | LAYERS a,b[,c] [ONLY]
+then [WHERE key=value ...]
+```
+
+Words are case-insensitive; `SEL`, `ALL` and `LAYER` are the aliases `MODIFY`
+already took. No scope word is the selection. The `WHERE` keys are Global
+Modify's filter: `TYPE=point,line`, `LAYER=pat[,pat]`, `STYLE=pat|ByLayer`,
+`COLOUR=#RRGGBB|ByLayer`, `PROP=key[:pat]`, `TEXT=pat` and `DRAWN`, with `*`
+and `?` wildcards. After `WHERE`, a word holding `=` (or `DRAWN`) is a
+condition and the first that is neither ends the filter, which is where a
+verb's own words begin (`SET`, `MINCOVER`, `SCHEMA` ...). A verb that also
+reads a file asks `cad::isScopeWord` of its first word: a scope word or
+`WHERE` is the drawing, anything else a path.
+
+It is read in two steps, each tested alone
+(`tests/cad/test_scope_verbs.cpp`):
+
+- `cad::parseScopeWords` turns words into `ScopeWords`, plain data with
+  nothing looked up, and refuses by the word what does not read: two scope
+  words, `LAYERS` with no list, `ONLY` other than after one, an `AREA` that
+  is not four finite numbers (its corners may come in either order), a view
+  id of 0, a `WHERE` word whose key or value does not read.
+  `cad::formatScopeWords` writes `ScopeWords` back as words the parser reads
+  as the same - what the window's scope and filter controls give a dialog to
+  put in the line it runs - and refuses what a line cannot say: a double
+  quote inside a word, a comma inside a layer name.
+- `cad::resolveScope` turns them into the `ModifyScope` and `ModifyFilter`
+  `matchEntities` takes. Only `VIEW` looks anything up.
+
+**`VIEW` is the window's.** The Document holds no views, so
+`CommandInterpreter::setScopeContext` takes a `cad::ScopeViewProvider`, as
+`setSheetContext` takes the sheet verbs' context: given no id it answers the
+active plan view, given an id that view, as its own hidden layers and its
+visible area (`ViewTransform::visibleWorldBounds`). Headless there is no
+provider, and `VIEW` is refused naming `AREA`: **`AREA x0,y0,x1,y1` is the
+same scope with the window typed in**, a view hiding nothing of its own
+looking at that box. That is why it is a `ScopeKind::View` scope with an
+area and no view layers rather than a kind of its own - `matchEntities`
+already reads a View scope exactly so, and a kind of its own would be a
+second reading of the same thing. Like a view, it takes only what is drawn.
+
+**Every reply says what the scope took**, as Global Modify's preview does:
+`cad::scopeRecord` is a `key=value` record -
+`scope=layers layers=utilities/water sublayers=yes where="TYPE=point" matched=9`
+- that a verb extends with its own keys. A scope that takes nothing is an
+answer, not a refusal. `MODIFY` keeps its own summary, which already begins
+with the count.
+
+`MODIFY` reads its scope and filter through the parser now, which is how it
+gained `VIEW` and `AREA`; its tests pass unchanged. One thing it no longer
+takes is `WHERE` after `SET`, which its help never offered. The `UTILITY`
+verbs are the second user (`docs/subsurface_utilities.md`, "Drawing data").
+The window's side - Global Modify's "Apply to" and "Only those that match"
+as one widget every dialog shares, and the window answering `VIEW` - is not
+built yet.
 
 ## What the managers stand on
 

@@ -392,9 +392,11 @@ DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           PAPER on|off (sizes in paper mm, drawn at the annotation scale)
           LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
-Global    MODIFY [SELECTION|DRAWING|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]
-          global modify, one undo step. WHERE: TYPE=point,line LAYER=pat STYLE=pat|ByLayer
-          COLOUR=#RRGGBB|ByLayer PROP=key[:pat] TEXT=pat DRAWN ('*' '?' wildcards)
+Global    MODIFY [scope] [WHERE k=v ...] SET k=v ... [PREVIEW]   global modify, one undo step
+Scope     every verb on drawing data: SELECTION (the default) | DRAWING | VIEW [id] (the window's
+          plan view) | AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] (ONLY: not their sublayers)
+          WHERE: TYPE=point,line LAYER=pat STYLE=pat|ByLayer COLOUR=#RRGGBB|ByLayer
+          PROP=key[:pat] TEXT=pat DRAWN ('*' '?' wildcards)
           SET entities: LAYER= COLOUR= STYLE=name|ByLayer VISIBLE=yes|no PROP=key:value
           UNPROP=key HEIGHT=h SYMBOL=name[@size]   layers: LAYER.COLOUR= LAYER.LTYPE=
           LAYER.WEIGHT= LAYER.HATCH= LAYER.DIMSTYLE= LAYER.VISIBLE= LAYER.LOCKED=
@@ -409,8 +411,9 @@ Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS:
           SHEET NEW|REMOVE|MOVE|COPY|RENAME|SET|FIELD | VIEW ADD|SET|REMOVE|LIST | TILE n preset
           GENERATE fit|grid|strips|profile|sections|frames | TITLEBLOCK [LIST] | field value
           TITLEBLOCK REVISION ADD|REMOVE | LOGO path | PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]
-Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW schedule.csv ...  AS 5488 subsurface utilities:
-          grade, verify, clear, check against a schema, draw by quality level (HELP UTILITY)
+Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK schedule.csv|scope ...  AS 5488 subsurface utilities:
+          grade, verify, clear, check against a schema, on a schedule or what is drawn;
+          DRAW schedule.csv, REGRADE scope, SCHEDULE out.csv scope (HELP UTILITY)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM ?  LE MT TS LS
 )" + annotationHelpText();
 }
@@ -585,7 +588,7 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
         return plotting::runSheetVerb(document_, *tokens, sheetContext_);
     }
     if (utilities::isUtilityVerb(verb)) {
-        return utilities::runUtilityVerb(document_, *tokens);
+        return utilities::runUtilityVerb(document_, *tokens, scopeViews_);
     }
     for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {
@@ -2420,22 +2423,8 @@ CommandInterpreter::Reply CommandInterpreter::attributes(const std::string& verb
 namespace {
 
 constexpr const char* kModifyUsage =
-    "MODIFY [SELECTION|DRAWING|LAYERS a,b [ONLY]] [WHERE key=value ...] SET key=value ... "
-    "[PREVIEW]; HELP lists the keys";
-
-std::vector<std::string> splitList(std::string_view text)
-{
-    std::vector<std::string> parts;
-    std::size_t start = 0;
-    while (start <= text.size()) {
-        const std::size_t comma = std::min(text.find(',', start), text.size());
-        if (comma > start) {
-            parts.emplace_back(text.substr(start, comma - start));
-        }
-        start = comma + 1;
-    }
-    return parts;
-}
+    "MODIFY [SELECTION|DRAWING|VIEW [id]|AREA x0,y0,x1,y1|LAYERS a,b [ONLY]] [WHERE key=value ...] "
+    "SET key=value ... [PREVIEW]; HELP lists the keys";
 
 Result<bool> parseYesNo(const std::string& text)
 {
@@ -2447,74 +2436,6 @@ Result<bool> parseYesNo(const std::string& text)
         return false;
     }
     return makeError(ErrorCode::ParseFailure, "expected yes or no", text);
-}
-
-// "#RRGGBB" or ByLayer, as an entity's or a style's colour says it.
-Result<std::optional<katana::entity::Color>> parseColourOrByLayer(const std::string& text)
-{
-    if (upper(text) == "BYLAYER") {
-        return std::optional<katana::entity::Color>{};
-    }
-    auto colour = katana::entity::Color::fromHex(text);
-    if (!colour) {
-        return colour.error();
-    }
-    return std::optional<katana::entity::Color>(*colour);
-}
-
-Result<katana::entity::EntityType> parseTypeName(const std::string& text)
-{
-    // entityTypeFromString takes the enumerator's spelling: title case.
-    std::string name = katana::core::lowered(text);
-    if (!name.empty()) {
-        name.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(name.front())));
-    }
-    return katana::entity::entityTypeFromString(name);
-}
-
-Status parseFilterWord(const std::string& word, ModifyFilter& filter)
-{
-    if (upper(word) == "DRAWN") {
-        filter.drawnOnly = true;
-        return {};
-    }
-    const std::size_t equals = word.find('=');
-    if (equals == std::string::npos) {
-        return makeError(ErrorCode::ParseFailure, "a WHERE condition is key=value", word);
-    }
-    const std::string key = upper(word.substr(0, equals));
-    const std::string value = word.substr(equals + 1);
-    if (key == "TYPE") {
-        for (const std::string& name : splitList(value)) {
-            auto type = parseTypeName(name);
-            if (!type) {
-                return type.error();
-            }
-            filter.types.insert(*type);
-        }
-    } else if (key == "LAYER") {
-        filter.layers = splitList(value);
-    } else if (key == "STYLE") {
-        filter.style = value;
-    } else if (key == "COLOUR" || key == "COLOR") {
-        auto colour = parseColourOrByLayer(value);
-        if (!colour) {
-            return colour.error();
-        }
-        filter.colour = *colour;
-    } else if (key == "PROP") {
-        const std::size_t colon = value.find(':');
-        filter.property = value.substr(0, colon);
-        if (colon != std::string::npos) {
-            filter.propertyValue = value.substr(colon + 1);
-        }
-    } else if (key == "TEXT") {
-        filter.text = value;
-    } else {
-        return makeError(ErrorCode::ParseFailure,
-                         "not a WHERE key: TYPE LAYER STYLE COLOUR PROP TEXT or DRAWN", word);
-    }
-    return {};
 }
 
 Status parseSetWord(const std::string& word, GlobalModify& change)
@@ -2633,67 +2554,40 @@ Status parseSetWord(const std::string& word, GlobalModify& change)
 
 CommandInterpreter::Reply CommandInterpreter::modify(const Tokens& args)
 {
-    ModifyScope scope;
-    ModifyFilter filter;
-    GlobalModify request;
+    // PREVIEW may stand anywhere; the rest is the shared scope and filter
+    // words (scope_verbs.hpp), then SET and the fields to set.
+    Tokens words;
     bool preview = false;
-    bool sawSet = false;
-    enum class Part { Scope, Where, Set } part = Part::Scope;
-
-    for (std::size_t i = 0; i < args.size(); ++i) {
-        const std::string& word = args[i];
-        const std::string folded = upper(word);
-        if (folded == "WHERE") {
-            part = Part::Where;
-            continue;
-        }
-        if (folded == "SET") {
-            part = Part::Set;
-            sawSet = true;
-            continue;
-        }
-        if (folded == "PREVIEW") {
+    for (const std::string& word : args) {
+        if (upper(word) == "PREVIEW") {
             preview = true;
-            continue;
-        }
-        switch (part) {
-        case Part::Scope:
-            if (folded == "SELECTION" || folded == "SEL") {
-                scope.kind = ScopeKind::Selection;
-            } else if (folded == "DRAWING" || folded == "ALL") {
-                scope.kind = ScopeKind::Drawing;
-            } else if (folded == "LAYERS" || folded == "LAYER") {
-                if (i + 1 >= args.size()) {
-                    return usage(kModifyUsage);
-                }
-                scope.kind = ScopeKind::Layers;
-                scope.layers = splitList(args[++i]);
-            } else if (folded == "ONLY") {
-                scope.sublayers = false;
-            } else {
-                return usage(kModifyUsage);
-            }
-            break;
-        case Part::Where:
-            if (auto status = parseFilterWord(word, filter); !status) {
-                return status.error();
-            }
-            break;
-        case Part::Set:
-            if (auto status = parseSetWord(word, request); !status) {
-                return status.error();
-            }
-            break;
+        } else {
+            words.push_back(word);
         }
     }
-    if (!sawSet) {
+    std::size_t at = 0;
+    const auto scopeWords = parseScopeWords(words, at);
+    if (!scopeWords) {
+        return scopeWords.error();
+    }
+    if (at >= words.size() || upper(words[at]) != "SET") {
         return usage(kModifyUsage);
     }
-    if (scope.kind == ScopeKind::Selection && document_.selection().empty()) {
+    GlobalModify request;
+    for (std::size_t i = at + 1; i < words.size(); ++i) {
+        if (auto status = parseSetWord(words[i], request); !status) {
+            return status.error();
+        }
+    }
+    if (scopeWords->source == ScopeSource::Selection && document_.selection().empty()) {
         return makeError(ErrorCode::InvalidState,
                          "nothing is selected; SELECT first, or MODIFY DRAWING or MODIFY LAYERS");
     }
-    auto plan = planGlobalModify(document_, scope, filter, request);
+    const auto resolved = resolveScope(*scopeWords, scopeViews_);
+    if (!resolved) {
+        return resolved.error();
+    }
+    auto plan = planGlobalModify(document_, resolved->scope, resolved->filter, request);
     if (!plan) {
         return plan.error();
     }
