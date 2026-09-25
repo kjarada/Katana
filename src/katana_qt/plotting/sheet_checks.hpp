@@ -23,6 +23,7 @@
 
 #include <QDockWidget>
 #include <QIcon>
+#include <QShowEvent>
 #include <QStringList>
 
 #include "katana/cad/document.hpp"
@@ -78,6 +79,8 @@ class SheetChecksDock final : public QDockWidget {
     // dropped, since this one is newer.
     const std::vector<katana::cad::plotting::Finding>& checkNow();
     // Runs them kRecheckDelayMs after the last call (setDelay changes it).
+    // While the window the dock is in is hidden, only marks the findings out
+    // of date: they are checked again when it is shown.
     void schedule();
     [[nodiscard]] bool pending() const;
     void setDelay(int milliseconds);
@@ -99,6 +102,9 @@ class SheetChecksDock final : public QDockWidget {
     // Called with the finding a row leads to when it is activated.
     std::function<void(const katana::cad::plotting::Finding&)> onActivated;
 
+  protected:
+    void showEvent(QShowEvent* event) override;
+
   private:
     void rebuild();
 
@@ -111,6 +117,7 @@ class SheetChecksDock final : public QDockWidget {
     QTimer* timer_ = nullptr;
     std::array<QIcon, 3> icons_;
     int runs_ = 0;
+    bool stale_ = false; // a change came while the window was hidden
 };
 
 } // namespace katana::qt

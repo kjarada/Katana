@@ -346,6 +346,52 @@ TEST(SheetPreflight, AlignmentsAndImageryCountAsShown)
     EXPECT_TRUE(withCode(check(set, model), "plan.empty").empty());
 }
 
+TEST(SheetPreflight, AWindowInsideABareOutlineIsEmptyAndInsideAHatchedOneIsNot)
+{
+    // The clean set's window is 192.5 x 125 m about (50, 0). A closed
+    // 2 km square and a circle of radius 1 km around it are drawn well
+    // outside it: unhatched, the window sees nothing of either.
+    Model model;
+    katana::entity::Layer boundary;
+    boundary.name = "boundary";
+    ASSERT_TRUE(model.layers.add(boundary).ok());
+    katana::geometry::Polyline2 square;
+    square.vertices = {Point2(-1000.0, -1000.0), Point2(1000.0, -1000.0), Point2(1000.0, 1000.0),
+                       Point2(-1000.0, 1000.0)};
+    square.closed = true;
+    add(model, square, "boundary");
+    add(model, katana::geometry::Circle2{Point2(50.0, 0.0), 1000.0}, "boundary");
+    const SheetSet set = cleanSet();
+    EXPECT_EQ(withCode(check(set, model), "plan.empty").size(), 1u);
+    // Hatched, both are fill under the window.
+    katana::entity::HatchPattern solid;
+    solid.name = "solid";
+    solid.solid = true;
+    ASSERT_TRUE(model.hatchPatterns.add(solid).ok());
+    boundary.hatchPattern = "solid";
+    ASSERT_TRUE(model.layers.update(boundary).ok());
+    EXPECT_TRUE(withCode(check(set, model), "plan.empty").empty());
+    // A circle whose outline crosses the window is seen, hatched or not.
+    Model ring;
+    add(ring, katana::geometry::Circle2{Point2(50.0, 0.0), 80.0});
+    EXPECT_TRUE(withCode(check(set, ring), "plan.empty").empty());
+}
+
+TEST(SheetPreflight, ADimensionIsSeenByItsLabelNotOnlyByWhatItMeasures)
+{
+    // A dimension of (0, 200) to (50, 200) with its line 10 m below: what it
+    // measures is 75 m above the window's top edge (y = 62.5), but its line,
+    // arrows and label, drawn about y = 190, are not in it either; one
+    // offset 150 m down draws its line at y = 50, inside the window, though
+    // the points it measures are not.
+    Model model;
+    add(model, katana::entity::DimensionGeometry{Point2(0.0, 200.0), Point2(50.0, 200.0), -10.0, {}});
+    SheetSet set = cleanSet();
+    EXPECT_EQ(withCode(check(set, model), "plan.empty").size(), 1u);
+    add(model, katana::entity::DimensionGeometry{Point2(0.0, 200.0), Point2(50.0, 200.0), -150.0, {}});
+    EXPECT_TRUE(withCode(check(set, model), "plan.empty").empty());
+}
+
 // ---- text.too-small -------------------------------------------------------------------------
 
 TEST(SheetPreflight, TextSmallerThanTheMinimumAtThePlansScaleIsCounted)

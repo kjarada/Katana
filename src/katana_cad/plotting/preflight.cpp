@@ -13,6 +13,7 @@
 
 #include "katana/cad/dimension_draw.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/cad/hatching.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/frame.hpp"
 #include "katana/cad/plotting/layout.hpp"
@@ -290,7 +291,9 @@ bool boxMeets(const Window& window, const Box2& box)
         Box2(Point2(-window.halfWidth, -window.halfHeight), Point2(window.halfWidth, window.halfHeight)));
 }
 
-bool polylineMeets(const Window& window, const geometry::Polyline2& line)
+// `filled`: the outline is hatched, so a window wholly inside it looks at its
+// fill; an outline that is not shows nothing inside it.
+bool polylineMeets(const Window& window, const geometry::Polyline2& line, bool filled = false)
 {
     const auto& vertices = line.vertices;
     if (vertices.size() == 1) {
@@ -305,8 +308,12 @@ bool polylineMeets(const Window& window, const geometry::Polyline2& line)
         if (segmentMeets(window, vertices.back(), vertices.front())) {
             return true;
         }
-        // A window wholly inside a closed outline may be looking at its fill:
-        // counted as shown, so a hatched area is never called empty.
+        // A window wholly inside a hatched outline is looking at its fill:
+        // counted as shown, so a hatched area is never called empty. Inside
+        // a bare outline - a boundary, a buffer - there is nothing to see.
+        if (!filled) {
+            return false;
+        }
         bool inside = false;
         const Point2 c = window.centre;
         for (std::size_t i = 0, j = vertices.size() - 1; i < vertices.size(); j = i++) {
@@ -323,10 +330,14 @@ bool polylineMeets(const Window& window, const geometry::Polyline2& line)
 }
 
 // Whether an entity's drawing reaches into the window. Exact for points,
-// lines and polylines; a circle counts when its outline crosses the window or
-// the window is inside it (its fill); arcs, text and dimensions by their box.
-bool entityMeets(const Window& window, const entity::Geometry& geometry)
+// lines and polylines; a closed outline or a circle counts when it crosses
+// the window, or when the window is inside it and it is hatched (its fill);
+// a dimension by everything it draws - its label and arrows reach well past
+// the points it measures (queryExtents); arcs, text and anything else by
+// their box.
+bool entityMeets(const Window& window, const entity::Model& model, const entity::Entity& entity)
 {
+    const entity::Geometry& geometry = entity.geometry;
     if (const auto* point = std::get_if<entity::PointGeometry>(&geometry)) {
         return window.containsLocal(window.local(point->position));
     }
@@ -334,13 +345,24 @@ bool entityMeets(const Window& window, const entity::Geometry& geometry)
         return segmentMeets(window, segment->start, segment->end);
     }
     if (const auto* line = std::get_if<geometry::Polyline2>(&geometry)) {
-        return polylineMeets(window, *line);
+        return polylineMeets(window, *line,
+                             line->closed && resolveHatchPattern(model, entity) != nullptr);
     }
     if (const auto* circle = std::get_if<geometry::Circle2>(&geometry)) {
         const Point2 c = window.local(circle->center);
         const double dx = std::max(std::abs(c.x) - window.halfWidth, 0.0);
         const double dy = std::max(std::abs(c.y) - window.halfHeight, 0.0);
-        return std::hypot(dx, dy) <= circle->radius;
+        if (std::hypot(dx, dy) > circle->radius) {
+            return false; // the window is wholly outside the circle
+        }
+        // The farthest corner of the window from the centre: inside the
+        // circle, the window sees only its fill.
+        const double fx = std::abs(c.x) + window.halfWidth;
+        const double fy = std::abs(c.y) + window.halfHeight;
+        return std::hypot(fx, fy) >= circle->radius || resolveHatchPattern(model, entity) != nullptr;
+    }
+    if (std::holds_alternative<entity::DimensionGeometry>(geometry)) {
+        return boxMeets(window, katana::cad::detail::queryExtents(model, entity));
     }
     return boxMeets(window, entity::boundingBox(geometry));
 }
@@ -559,7 +581,7 @@ PlanContent planContent(const Viewport& viewport, const Window& window, double s
     const double minimumModel = options.minimumTextMm * scale / 1000.0;
     std::vector<geometry::SpatialId> scratch;
     katana::cad::detail::forEachCandidate(model, options.index, window.reach(), scratch, [&](const entity::Entity& e) {
-        if (!isDrawn(model, e, viewport.hiddenLayers) || !entityMeets(window, e.geometry)) {
+        if (!isDrawn(model, e, viewport.hiddenLayers) || !entityMeets(window, model, e)) {
             return;
         }
         content.shown = true;

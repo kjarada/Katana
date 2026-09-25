@@ -10,6 +10,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QPolygonF>
+#include <QShowEvent>
 #include <QStatusBar>
 #include <QTimer>
 #include <QTreeWidget>
@@ -250,6 +251,7 @@ SheetChecksDock::SheetChecksDock(const katana::cad::Document& document, Checker 
               severityIcon(Severity::Info)};
 
     auto* panel = new QWidget(this);
+    panel->setObjectName(QStringLiteral("sheetChecksPanel"));
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(4, 4, 4, 4);
     summary_ = new QLabel(panel);
@@ -275,6 +277,7 @@ SheetChecksDock::SheetChecksDock(const katana::cad::Document& document, Checker 
     setWidget(panel);
 
     timer_ = new QTimer(this);
+    timer_->setObjectName(QStringLiteral("sheetChecksTimer"));
     timer_->setSingleShot(true);
     timer_->setInterval(kRecheckDelayMs);
     connect(timer_, &QTimer::timeout, this, [this] { (void)checkNow(); });
@@ -310,7 +313,28 @@ const std::vector<Finding>& SheetChecksDock::checkNow()
     return findings_;
 }
 
-void SheetChecksDock::schedule() { timer_->start(); }
+void SheetChecksDock::schedule()
+{
+    // The editor lives on while it is closed, and the document keeps
+    // changing under it: checking every sheet after each edit nobody can see
+    // the result of would only slow the drawing down. Marked out of date,
+    // and checked once the editor is shown again.
+    if (!window()->isVisible()) {
+        stale_ = true;
+        timer_->stop();
+        return;
+    }
+    timer_->start();
+}
+
+void SheetChecksDock::showEvent(QShowEvent* event)
+{
+    QDockWidget::showEvent(event);
+    if (stale_) {
+        stale_ = false;
+        timer_->start();
+    }
+}
 
 bool SheetChecksDock::pending() const { return timer_->isActive(); }
 
