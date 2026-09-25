@@ -170,7 +170,10 @@ PlanPlacement fitKeyPlan(const Viewport& keyPlan, std::span<const KeyPlanOutline
     for (const KeyPlanOutline& outline : outlines) {
         points.insert(points.end(), outline.corners.begin(), outline.corners.end());
     }
-    if (!drawing.empty()) {
+    // The sheets are what a key plan is for: it frames them, and the drawing
+    // only when there is no sheet to frame, so a stray entity far off - a
+    // survey mark, a datum - cannot shrink every outline to a speck.
+    if (points.empty() && !drawing.empty()) {
         points.insert(points.end(), {drawing.min, Point2(drawing.max.x, drawing.min.y), drawing.max,
                                      Point2(drawing.min.x, drawing.max.y)});
     }
@@ -221,7 +224,9 @@ PlanPlacement placePlan(const entity::Model& model, const SheetSet& set, std::si
         return placePlan(model, viewport);
     }
     const auto outlines = keyPlanOutlines(set, sheetIndex, modelPlacer(model));
-    return fitKeyPlan(viewport, outlines, drawingExtent(model, viewport.hiddenLayers));
+    // The drawing is only the fallback for a set with no plan to frame.
+    return fitKeyPlan(viewport, outlines,
+                      outlines.empty() ? drawingExtent(model, viewport.hiddenLayers) : Box2{});
 }
 
 PlanPlacer modelPlacer(const entity::Model& model)

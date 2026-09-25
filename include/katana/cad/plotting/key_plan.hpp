@@ -73,8 +73,10 @@ keyPlanOutlines(const SheetSet& set, std::size_t sheetIndex, const PlanPlacer& p
 [[nodiscard]] PlanPlacement fitPlanPlacement(const Viewport& viewport,
                                              std::span<const Point2> points);
 
-// Where an automatic key plan goes: fitted to every outline and to `drawing`
-// (the drawing's extent; empty for none), so no sheet falls off the edge.
+// Where an automatic key plan goes: fitted to the union of the outlines, so no
+// sheet falls off the edge and none is shrunk by drawing far away. With no
+// outline at all, fitted to `drawing` instead (the drawing's extent; empty
+// for none).
 [[nodiscard]] PlanPlacement fitKeyPlan(const Viewport& keyPlan,
                                        std::span<const KeyPlanOutline> outlines,
                                        const Box2& drawing);
@@ -98,7 +100,8 @@ keyPlanOutlines(const SheetSet& set, std::size_t sheetIndex, const PlanPlacer& p
 
 // The same for a viewport on sheet `sheetIndex` of `set`: an automatic key plan
 // is fitted to every outline (keyPlanOutlines, each automatic plan placed by
-// placePlan) and to the drawing (fitKeyPlan). Any other viewport is placed as
+// placePlan), or to the drawing when there is none (fitKeyPlan). Any other
+// viewport is placed as
 // above.
 [[nodiscard]] PlanPlacement placePlan(const entity::Model& model, const SheetSet& set,
                                       std::size_t sheetIndex, const Viewport& viewport);

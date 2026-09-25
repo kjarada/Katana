@@ -160,7 +160,7 @@ SheetPaintStats paintSheet(QPainter& painter, const katana::cad::plotting::Sheet
                                                    const SheetSource& source);
 // The same for a viewport on sheet `sheetIndex` of `set`, which is what the
 // painter draws: an automatic key plan fits every sheet's plan outline
-// (keyPlanOutlines) as well as the drawing, so no sheet falls off it. Any
+// (keyPlanOutlines), the drawing only when there is none (fitKeyPlan). Any
 // other viewport resolves as above.
 [[nodiscard]] ResolvedViewport resolvePlanViewport(const katana::cad::plotting::Viewport& viewport,
                                                    const SheetSource& source,
