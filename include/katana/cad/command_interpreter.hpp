@@ -71,6 +71,10 @@ class CommandInterpreter {
     // printing the same report the Survey menu's dialogs print.
     [[nodiscard]] Reply survey(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply attributes(const std::string& verb, const Tokens& args);
+    // MODIFY: Global Modify (global_modify.hpp) on the selection, the drawing
+    // or named layers. The interpreter knows no view, so the View scope is
+    // the window's alone.
+    [[nodiscard]] Reply modify(const Tokens& args);
     [[nodiscard]] Reply undoRedo(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply file(const std::string& verb, const Tokens& args);
     [[nodiscard]] Reply inspect(const std::string& verb, const Tokens& args) const;
