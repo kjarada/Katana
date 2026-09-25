@@ -191,3 +191,52 @@ TEST_F(AnnotationStorage, AProjectFromBeforeSchema11OpensWithNoneAndModelDimensi
     EXPECT_FALSE(loaded.dimensionStyles.find(kDefaultDimensionStyleName)->paperSized)
         << "the column's default is what every style was: model units";
 }
+
+// Smart leaders (docs/annotation.md, "Smart leaders"): a leader whose note is
+// its own template or a label style's, tips along and inside what they are
+// on, and a dimension along a line - written in geometry blob version 3 -
+// come back exactly, beside a plain leader that is still version 2.
+TEST_F(AnnotationStorage, SmartLeadersAndAnchorsAlongSurviveSavingTwiceAndReopening)
+{
+    Model model = annotatedModel();
+    LabelStyle invert;
+    invert.name = "Invert";
+    invert.kind = LabelKind::Point;
+    invert.text = "IL {prop.invert:.3f}";
+    ASSERT_TRUE(model.labelStyles.add(invert).ok());
+    const auto add = [&](Geometry geometry) {
+        Entity entity;
+        entity.geometry = std::move(geometry);
+        EXPECT_TRUE(model.entities.add(std::move(entity)).ok());
+    };
+    LeaderGeometry own{.vertices = {Point2(5, 0), Point2(8, 4)},
+                       .text = "{bearing:dms}\nCH {chainage:.2f}",
+                       .tipRef = AnchorRef{1, AnchorPoint::Along, 0, 0.5},
+                       .fields = true};
+    add(own);
+    LeaderGeometry styled{.vertices = {Point2(7, 3), Point2(12, 8)},
+                          .arrow = ArrowHead::Dot,
+                          .tipRef = AnchorRef{1, AnchorPoint::Inside},
+                          .labelStyle = "Invert"};
+    add(styled);
+    DimensionGeometry along{Point2(0, 0), Point2(5, 0), 2.0, ""};
+    along.endRef = AnchorRef{1, AnchorPoint::Along, 0, 0.5};
+    add(along);
+    {
+        auto store = ProjectStore::create(projectDir(), {});
+        ASSERT_TRUE(store.ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+        ASSERT_TRUE(store->save(captureModel(model, {})).ok());
+    }
+    auto store = ProjectStore::open(projectDir());
+    ASSERT_TRUE(store.ok()) << store.error().describe();
+    const auto contents = store->load();
+    ASSERT_TRUE(contents.ok()) << contents.error().describe();
+    Model loaded;
+    ASSERT_TRUE(applyToModel(*contents, loaded).ok());
+    std::vector<Entity> saved;
+    model.entities.forEach([&](const Entity& e) { saved.push_back(e); });
+    std::vector<Entity> reopened;
+    loaded.entities.forEach([&](const Entity& e) { reopened.push_back(e); });
+    EXPECT_EQ(reopened, saved);
+}

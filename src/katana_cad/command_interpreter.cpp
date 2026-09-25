@@ -7,8 +7,11 @@
 #include "katana/cad/project_crs.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/cad/style_catalogue.hpp"
+#include "katana/cad/survey_coding.hpp"
 #include "katana/cad/survey_tools.hpp"
+#include "katana/entity/anchor.hpp"
 #include "katana/entity/display.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/table_usage.hpp"
 
 #include "katana/entity/dimension_text.hpp"
@@ -170,13 +173,14 @@ const std::map<std::string, std::string, std::less<>>& aliases()
     return table;
 }
 
-std::string describe(const Entity& entity)
+std::string describe(const katana::entity::Model& model, const Entity& entity)
 {
     std::ostringstream out;
     out.precision(12);
     out << entity.id << "  " << toString(entity.type()) << "  layer=" << entity.layer;
     struct Detail {
         std::ostream& out;
+        const katana::entity::Model& model;
         void operator()(const katana::entity::PointGeometry& g) const
         {
             out << "  at " << g.position.x << "," << g.position.y;
@@ -263,15 +267,27 @@ std::string describe(const Entity& entity)
         {
             out << "  vertices=" << g.vertices.size() << "  tip " << g.vertices.front().x << ","
                 << g.vertices.front().y;
-            if (!g.text.empty()) {
-                out << "  \"" << oneLine(g.text) << "\"";
+            // What the leader says as it is drawn: a smart leader's note is
+            // read off its target now (docs/annotation.md, "Smart leaders").
+            const std::string note = katana::entity::leaderNote(model, g, codePropertyCandidates());
+            if (!note.empty()) {
+                out << "  \"" << oneLine(note) << "\"";
+            }
+            if (g.tipRef.associated()) {
+                out << "  on " << g.tipRef.entity << " " << katana::entity::describe(g.tipRef);
+            }
+            if (g.fields) {
+                out << "  template=\"" << oneLine(g.text) << "\"";
+            }
+            if (!g.labelStyle.empty()) {
+                out << "  labelstyle=" << g.labelStyle;
             }
             if (g.callout != katana::entity::CalloutShape::None) {
                 out << "  callout=" << katana::entity::toString(g.callout);
             }
         }
     };
-    std::visit(Detail{out}, entity.geometry);
+    std::visit(Detail{out, model}, entity.geometry);
     if (!entity.visible) {
         out << "  hidden";
     }
@@ -415,6 +431,15 @@ Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
 {
     return katana::cad::tokenize(line);
+}
+
+Result<katana::entity::PropertyValue> CommandInterpreter::propertyValue(const std::string& text,
+                                                                        const std::string* type)
+{
+    if (type != nullptr) {
+        return typedPropertyValue(*type, text);
+    }
+    return parsePropertyValue(text);
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -2769,7 +2794,7 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         if (entity == nullptr) {
             return makeError(ErrorCode::NotFound, "entity does not exist", args[0]);
         }
-        std::string text = describe(*entity);
+        std::string text = describe(model, *entity);
         for (const auto& [key, value] : entity->properties) {
             text += "\n    " + key + " = ";
             std::visit(
@@ -2783,7 +2808,7 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         return text;
     }
     std::string text = std::to_string(model.entities.size()) + " entities";
-    model.entities.forEach([&](const Entity& entity) { text += "\n" + describe(entity); });
+    model.entities.forEach([&](const Entity& entity) { text += "\n" + describe(model, entity); });
     return text;
 }
 

@@ -68,18 +68,20 @@
 #include <map>
 #include <set>
 
+#include "katana/archive12d/customisation.hpp"
+#include "katana/archive12d/domain.hpp"
+#include "katana/cad/corridor.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
-#include "katana/cad/corridor.hpp"
-#include "katana/geometry/alignment.hpp"
-#include "katana/commands/entity_commands.hpp"
-#include "katana/dxf/reader.hpp"
-#include "katana/entity/entity_geometry.hpp"
-#include "katana/archive12d/customisation.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
-#include "katana/archive12d/domain.hpp"
+#include "katana/commands/entity_commands.hpp"
+#include "katana/dxf/reader.hpp"
+#include "katana/entity/anchor.hpp"
+#include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/leader_values.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "katana/gis/gdal_adapter.hpp"
 #include "katana/interop/archive12d.hpp"
 #include "katana/interop/dataset_info.hpp"
@@ -167,10 +169,12 @@ QString point(const katana::geometry::Point2& p)
 }
 
 // Rows shown in the property panel for one entity.
-std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::Geometry& geometry)
+std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::Model& model,
+                                                          const katana::entity::Geometry& geometry)
 {
     using Rows = std::vector<std::pair<QString, QString>>;
     struct Visitor {
+        const katana::entity::Model& model;
         Rows operator()(const katana::entity::PointGeometry& g) const
         {
             return {{"Position", point(g.position)}};
@@ -257,13 +261,28 @@ std::vector<std::pair<QString, QString>> describeGeometry(const katana::entity::
         }
         Rows operator()(const katana::entity::LeaderGeometry& g) const
         {
-            return {{"Tip", point(g.vertices.front())},
-                    {"Vertices", QString::number(g.vertices.size())},
-                    {"Text", QString::fromStdString(g.text)},
-                    {"Callout", QString::fromUtf8(katana::entity::toString(g.callout))}};
+            // The note as it is drawn: a smart leader's is read off the
+            // entity its tip is on (docs/annotation.md, "Smart leaders").
+            Rows rows = {{"Tip", point(g.vertices.front())},
+                         {"Vertices", QString::number(g.vertices.size())},
+                         {"Text", QString::fromStdString(katana::entity::leaderNote(
+                                      model, g, katana::cad::codePropertyCandidates()))}};
+            if (g.fields) {
+                rows.push_back({"Template", QString::fromStdString(g.text)});
+            }
+            if (!g.labelStyle.empty()) {
+                rows.push_back({"Label style", QString::fromStdString(g.labelStyle)});
+            }
+            if (g.tipRef.associated()) {
+                rows.push_back(
+                    {"On", QString::number(g.tipRef.entity) + " (" +
+                               QString::fromStdString(katana::entity::describe(g.tipRef)) + ")"});
+            }
+            rows.push_back({"Callout", QString::fromUtf8(katana::entity::toString(g.callout))});
+            return rows;
         }
     };
-    return std::visit(Visitor{}, geometry);
+    return std::visit(Visitor{model}, geometry);
 }
 
 // How many of the loaded library's definitions are symbols by decision D3 -
@@ -1606,7 +1625,7 @@ void MainWindow::refreshProperties()
         rows.push_back({"Layer", QString::fromStdString(entity.layer)});
         rows.push_back({"Colour", entity.color ? QString::fromStdString(entity.color->toHex())
                                                : QString("ByLayer")});
-        for (auto& row : describeGeometry(entity.geometry)) {
+        for (auto& row : describeGeometry(document_.model(), entity.geometry)) {
             rows.push_back(std::move(row));
         }
         for (const auto& [key, value] : entity.properties) {

@@ -33,6 +33,7 @@
 #include "katana/cad/annotation/text_layout.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/dimension_draw.hpp"
+#include "katana/cad/survey_coding.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
@@ -40,6 +41,7 @@
 #include "katana/entity/anchor.hpp"
 #include "katana/entity/label_text.hpp"
 #include "katana/entity/label_values.hpp"
+#include "katana/entity/leader_values.hpp"
 #include "katana/entity/text_block.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -578,8 +580,9 @@ std::string CommandInterpreter::annotationHelpText()
 {
     return R"(Annotation (docs/annotation.md): sizes in PAPER mm, drawn at mm x scale / 1000
           options are key=value; \n in a text or template is a line break; replies are
-          key=value records.  A point may be #id[.start|.end|.mid|.centre|.vN|.sN]: the
-          annotation made from it follows that entity (associative).
+          key=value records.  A point may be #id[.start|.end|.mid|.centre|.inside|.vN|.sN],
+          or #id@x,y (the point of #id nearest x,y): the annotation made from it follows
+          that entity (associative).
 AnnoScale ANNOSCALE [N | 1:N]   the plan view's annotation scale (one undo step)
 TextStyle TEXTSTYLE LIST | NEW name [opts] | SET name opts | DELETE name
           opts: font= paper=mm width= oblique=deg bold= italic= colour=#RRGGBB|bylayer
@@ -605,9 +608,23 @@ Dim       DIM LINEAR|HORIZONTAL|VERTICAL p p at=p [angle=deg] | DIM ALIGNED p p 
           DIM ANGULAR vertex p p [at=p] | DIM ANGULAR line-id line-id at=p
           DIM RADIUS|DIAMETER circle-id [at=p] | DIM ORDINATE p at=p [datum=p axis=x|y]
           DIM BASELINE dim-id p [p...] [spacing=] | DIM CONTINUE dim-id p [p...]
-Leader    LEADER p p [p...] [text= arrow=closed|open|tick|dot|none callout=none|box|circle
-          style= paper=mm arrowsize=mm landing=mm]
-          BALLOON p p [p...] [n=number style= paper=]   a numbered circle callout)";
+Leader    LEADER p p [p...] [text= | template= | labelstyle=] [arrow=closed|open|tick|dot|none
+          callout=none|box|circle style= paper=mm arrowsize=mm landing=mm]
+          a SMART leader's tip is on an entity (#id...) and its note is read off it every
+          time it is drawn: template="IL {prop.invert:.3f}\n{length:.2f} m" (the label
+          template language), or labelstyle=name (that style's template); a line naming a
+          value the entity lacks is dropped. A tip inside an outline (#id.inside) ends in a dot
+          LEADER VALUES id | #id[.point|@x,y]   every value a note there can name
+          LEADER LIST [id...] [target=id] | SET id...|SELECTION [text= template= labelstyle=
+          arrow= callout= style= paper= arrowsize= landing= tip=p at=p]
+          LEADER ATTACH id #id[.point|@x,y] | DETACH id...|SELECTION | FREEZE id...|SELECTION
+          LEADER PROP id SET key value [type] | PROP id DELETE key   the tip entity's attribute
+          LEADER FOR id...|SELECTION [text=|template=|labelstyle=] [angle=deg length=mm ...]
+          a leader to each entity, one undo step (a point, mid-line, mid-arc, inside a lot)
+          LEADER ALIGN id id...|SELECTION [x=] [spacing=mm]   the notes in a column
+          BALLOON p p [p...] [n=number | template= | labelstyle=] [style= paper=]   a numbered
+          circle callout; BALLOON FOR id...|SELECTION numbers one to each entity;
+          BALLOON RENUMBER [start=1] [order=id|x|y]   the numbered balloons, in order)";
 }
 
 CommandInterpreter::Reply CommandInterpreter::annotation(const std::string& verb,
@@ -651,6 +668,33 @@ Result<ann::AnchoredPoint> CommandInterpreter::parseAnchoredPoint(const std::str
         }
         return ann::AnchoredPoint{*point, {}};
     }
+    // "#12@x,y": the place on #12 nearest x,y, named so that it stays there
+    // as #12 moves and stretches (entity::nearestAnchor). Split before the
+    // '.' of "#12.end", since the point may have decimals.
+    if (const std::size_t at = text.find('@'); at != std::string::npos) {
+        auto id = idOf(std::string_view(text).substr(0, at));
+        if (!id) {
+            return id.error();
+        }
+        const Entity* entity = document_.model().entities.find(*id);
+        if (entity == nullptr) {
+            return makeError(ErrorCode::NotFound, "entity does not exist", text);
+        }
+        auto near = parsePoint(text.substr(at + 1));
+        if (!near) {
+            return near.error();
+        }
+        const auto ref = katana::entity::nearestAnchor(*entity, *near);
+        if (!ref) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "that entity has no place on it to attach to", text);
+        }
+        auto anchored = ann::anchoredPoint(document_.model(), *ref);
+        if (anchored) {
+            lastPoint_ = anchored->point;
+        }
+        return anchored;
+    }
     const std::size_t dot = text.find('.');
     auto id = idOf(std::string_view(text).substr(0, dot));
     if (!id) {
@@ -684,7 +728,8 @@ Result<ann::AnchoredPoint> CommandInterpreter::parseAnchoredPoint(const std::str
             auto point = katana::entity::anchorPointFromString(part);
             if (!point) {
                 return makeError(ErrorCode::ParseFailure,
-                                 "unknown point of an entity (start end mid centre position vN sN)",
+                                 "unknown point of an entity (start end mid centre position "
+                                 "inside vN sN, or #id@x,y for the nearest point on it)",
                                  text);
             }
             ref.point = *point;
@@ -1606,19 +1651,854 @@ CommandInterpreter::Reply CommandInterpreter::dimension(const Tokens& args)
 
 // ---- LEADER, BALLOON --------------------------------------------------------------------------
 
+namespace {
+
+constexpr const char* kLeaderUsage =
+    "LEADER p p [p...] [text= | template= | labelstyle=] [arrow= callout= style= paper= "
+    "arrowsize= landing=] | LEADER LIST | VALUES | SET | ATTACH | DETACH | FREEZE | PROP | FOR "
+    "| ALIGN (HELP says each)";
+
+// The long names and the short ones a person types.
+Result<katana::entity::ArrowHead> arrowOf(const std::string& value)
+{
+    auto head = katana::entity::arrowHeadFromString(value);
+    if (head) {
+        return *head;
+    }
+    const std::string v = lowerCase(value);
+    if (v == "closed" || v == "filled") {
+        return katana::entity::ArrowHead::ClosedFilled;
+    }
+    if (v == "open") {
+        return katana::entity::ArrowHead::Open;
+    }
+    if (v == "tick") {
+        return katana::entity::ArrowHead::Tick;
+    }
+    if (v == "dot") {
+        return katana::entity::ArrowHead::Dot;
+    }
+    if (v == "none") {
+        return katana::entity::ArrowHead::None;
+    }
+    return head.error();
+}
+
+// One more than the highest balloon numbered: a circled plain leader whose
+// note is a whole number. A smart balloon's note is read off its target and
+// is no number in the sequence.
+long long nextBalloonNumber(const katana::entity::Model& model)
+{
+    long long highest = 0;
+    model.entities.forEach([&](const Entity& entity) {
+        const auto* other = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+        if (other == nullptr || other->callout != katana::entity::CalloutShape::Circle ||
+            katana::entity::isSmart(*other)) {
+            return;
+        }
+        long long value = 0;
+        const auto [end, error] =
+            std::from_chars(other->text.data(), other->text.data() + other->text.size(), value);
+        if (error == std::errc{} && end == other->text.data() + other->text.size()) {
+            highest = std::max(highest, value);
+        }
+    });
+    return highest + 1;
+}
+
+// What a leader's note is: at most one of text= (literal), template= (read
+// off the tip's entity), labelstyle= (that style's template) and, for a
+// balloon, n=. A label style given with no style= or paper= lends the leader
+// its text style and paper height, so the leader looks as the style's labels
+// do when it is made; after that the look is the leader's own.
+Status applyLeaderNote(const Arguments& args, const katana::entity::Model& model,
+                       katana::entity::LeaderGeometry& leader)
+{
+    int given = 0;
+    for (const char* key : {"text", "template", "labelstyle", "n"}) {
+        given += args.has(key) ? 1 : 0;
+    }
+    if (given > 1) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a leader's note is one of text=, template= or labelstyle=");
+    }
+    for (const char* key : {"text", "n"}) {
+        if (const std::string* text = args.find(key)) {
+            leader.text = unescape(*text);
+            leader.fields = false;
+            leader.labelStyle.clear();
+        }
+    }
+    if (const std::string* templateText = args.find("template")) {
+        std::string text = unescape(*templateText);
+        if (auto status = katana::entity::checkLeaderTemplate(text); !status) {
+            return status;
+        }
+        leader.text = std::move(text);
+        leader.fields = true;
+        leader.labelStyle.clear();
+    }
+    if (const std::string* name = args.find("labelstyle")) {
+        const katana::entity::LabelStyle* style = model.labelStyles.find(*name);
+        if (style == nullptr) {
+            return makeError(ErrorCode::NotFound, "label style does not exist", *name);
+        }
+        leader.labelStyle = *name;
+        leader.text.clear();
+        leader.fields = false;
+        if (!args.has("style") && !style->textStyle.empty()) {
+            leader.style = style->textStyle;
+        }
+        if (!args.has("paper") && style->paperHeight > 0.0) {
+            leader.paperHeight = style->paperHeight;
+        }
+    }
+    return {};
+}
+
+// What a leader looks like: arrow=, callout=, style=, paper=, arrowsize=,
+// landing=.
+Status applyLeaderLook(const Arguments& args, const katana::entity::Model& model,
+                       katana::entity::LeaderGeometry& leader)
+{
+    if (const std::string* value = args.find("arrow")) {
+        auto head = arrowOf(*value);
+        if (!head) {
+            return head.error();
+        }
+        leader.arrow = *head;
+    }
+    if (const std::string* value = args.find("callout")) {
+        auto shape = katana::entity::calloutShapeFromString(*value);
+        if (!shape) {
+            return shape.error();
+        }
+        leader.callout = *shape;
+    }
+    if (const std::string* value = args.find("style")) {
+        if (!model.textStyles.contains(*value)) {
+            return makeError(ErrorCode::NotFound, "text style does not exist", *value);
+        }
+        leader.style = *value;
+    }
+    for (const char* key : {"paper", "arrowsize", "landing"}) {
+        if (const std::string* value = args.find(key)) {
+            auto number = numberOf(*value, key);
+            if (!number) {
+                return number.error();
+            }
+            (std::string_view(key) == "paper"       ? leader.paperHeight
+             : std::string_view(key) == "arrowsize" ? leader.arrowSize
+                                                    : leader.landing) = *number;
+        }
+    }
+    return {};
+}
+
+// A smart leader that would say nothing is refused, naming what its target
+// lacks (entity::checkLeaderSaysSomething), the survey code looked for where
+// survey coding looks.
+Status requireNote(const katana::entity::Model& model, const katana::entity::LeaderGeometry& leader)
+{
+    return katana::entity::checkLeaderSaysSomething(model, leader, codePropertyCandidates());
+}
+
+// One leader as a record: where it is, what it is on, what it says.
+std::string describeLeader(const katana::entity::Model& model, const Entity& entity)
+{
+    const auto& leader = std::get<katana::entity::LeaderGeometry>(entity.geometry);
+    const Point2& tip = leader.vertices.front();
+    std::ostringstream line;
+    line << "id=" << entity.id << " layer=" << field(entity.layer)
+         << " vertices=" << leader.vertices.size() << " tip=" << real(tip.x) << "," << real(tip.y);
+    if (leader.tipRef.associated()) {
+        line << " target=" << leader.tipRef.entity
+             << " anchor=" << field(katana::entity::describe(leader.tipRef));
+    }
+    line << " smart=" << (katana::entity::isSmart(leader) ? "yes" : "no");
+    if (leader.fields) {
+        line << " template=" << field(leader.text);
+    }
+    if (!leader.labelStyle.empty()) {
+        line << " labelstyle=" << field(leader.labelStyle);
+    }
+    line << " arrow=" << katana::entity::toString(leader.arrow)
+         << " callout=" << katana::entity::toString(leader.callout)
+         << " text=" << field(katana::entity::leaderNote(model, leader, codePropertyCandidates()));
+    return line.str();
+}
+
+// Where LEADER FOR puts a tip on `entity`: a point's or a text's position,
+// the middle of a line or an arc, halfway along an open polyline, inside a
+// closed one (a lot), and on a circle on the side the note goes - `angle`,
+// the direction from the tip to the note, radians. nullopt for what offers
+// no place (a dimension, a label, a leader).
+std::optional<katana::entity::AnchorRef> naturalAnchor(const Entity& entity, double angle)
+{
+    using katana::entity::AnchorPoint;
+    katana::entity::AnchorRef ref;
+    ref.entity = entity.id;
+    ref.point = AnchorPoint::Along;
+    const auto& geometry = entity.geometry;
+    if (std::holds_alternative<katana::entity::PointGeometry>(geometry) ||
+        std::holds_alternative<katana::entity::TextGeometry>(geometry)) {
+        ref.point = AnchorPoint::Position;
+        return ref;
+    }
+    if (std::holds_alternative<katana::geometry::Segment2>(geometry) ||
+        std::holds_alternative<katana::geometry::Arc2>(geometry)) {
+        ref.parameter = 0.5;
+        return ref;
+    }
+    if (std::holds_alternative<katana::geometry::Circle2>(geometry)) {
+        const double turn = katana::math::normalizeAngle(angle) / katana::math::kTwoPi;
+        ref.parameter = turn < 1.0 ? turn : 0.0;
+        return ref;
+    }
+    if (const auto* polyline = std::get_if<katana::geometry::Polyline2>(&geometry)) {
+        const auto& v = polyline->vertices;
+        if (polyline->closed && v.size() >= 3) {
+            ref.point = AnchorPoint::Inside;
+            return ref;
+        }
+        const double half = 0.5 * polyline->length();
+        if (!(half > 0.0) || v.size() < 2) {
+            return std::nullopt;
+        }
+        double before = 0.0;
+        for (std::size_t i = 0; i + 1 < v.size(); ++i) {
+            const double length = v[i].distanceTo(v[i + 1]);
+            if (length > 0.0 && (before + length >= half || i + 2 == v.size())) {
+                ref.index = static_cast<std::uint32_t>(i);
+                ref.parameter = std::clamp((half - before) / length, 0.0, 1.0);
+                return ref;
+            }
+            before += length;
+        }
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
 CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, const Tokens& args)
 {
     const bool balloon = verb == "BALLOON";
+    const auto& model = document_.model();
+    const std::string action = args.empty() ? std::string() : upperCase(args.front());
+
+    // The leaders `tokens` name: ids, or SELECTION for the selected ones.
+    // In id order, each once.
+    const auto leadersOf =
+        [&](const std::vector<std::string>& tokens) -> Result<std::vector<EntityId>> {
+        std::vector<EntityId> ids;
+        if (tokens.size() == 1 && upperCase(tokens.front()) == "SELECTION") {
+            for (const EntityId id : document_.selection().ids()) {
+                const Entity* entity = model.entities.find(id);
+                if (entity != nullptr &&
+                    std::holds_alternative<katana::entity::LeaderGeometry>(entity->geometry)) {
+                    ids.push_back(id);
+                }
+            }
+            if (ids.empty()) {
+                return makeError(ErrorCode::InvalidState,
+                                 "no leader is selected; use SELECT first");
+            }
+            return ids;
+        }
+        for (const std::string& token : tokens) {
+            auto id = idOf(token);
+            if (!id) {
+                return id.error();
+            }
+            const Entity* entity = model.entities.find(*id);
+            if (entity == nullptr ||
+                !std::holds_alternative<katana::entity::LeaderGeometry>(entity->geometry)) {
+                return makeError(ErrorCode::InvalidArgument, "that entity is not a leader",
+                                 "id=" + std::to_string(*id));
+            }
+            ids.push_back(*id);
+        }
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        return ids;
+    };
+    // `changes` as one step named `name`.
+    const auto apply = [&](const char* name, cmd::ChangeSet changes) {
+        return document_.execute(std::make_unique<cmd::ChangeSetCommand>(
+            name,
+            [changes = std::move(changes)](const cmd::CommandContext&) -> Result<cmd::ChangeSet> {
+                return changes;
+            }));
+    };
+    const auto leaderOf = [&](EntityId id) -> const katana::entity::LeaderGeometry& {
+        return std::get<katana::entity::LeaderGeometry>(model.entities.find(id)->geometry);
+    };
+
+    if (!balloon && action == "LIST") {
+        auto parsed = splitArguments(args, 1, {"target"});
+        if (!parsed) {
+            return parsed.error();
+        }
+        std::set<EntityId> only;
+        for (const std::string& token : parsed->positional) {
+            auto id = idOf(token);
+            if (!id) {
+                return id.error();
+            }
+            only.insert(*id);
+        }
+        std::optional<EntityId> target;
+        if (const std::string* value = parsed->find("target")) {
+            auto id = idOf(*value);
+            if (!id) {
+                return id.error();
+            }
+            target = *id;
+        }
+        std::string out;
+        model.entities.forEach([&](const Entity& entity) {
+            const auto* leader = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+            if (leader == nullptr || (!only.empty() && !only.contains(entity.id)) ||
+                (target && leader->tipRef.entity != *target)) {
+                return;
+            }
+            out += out.empty() ? "" : "\n";
+            out += describeLeader(model, entity);
+        });
+        return out;
+    }
+
+    if (!balloon && action == "VALUES") {
+        if (args.size() != 2 || args[1].empty()) {
+            return usageOf("LEADER VALUES id | #id[.point] | #id@x,y");
+        }
+        katana::entity::LabelValues values;
+        std::ostringstream out;
+        const auto asLeader = idOf(args[1]);
+        const Entity* named = asLeader ? model.entities.find(*asLeader) : nullptr;
+        if (named != nullptr &&
+            std::holds_alternative<katana::entity::LeaderGeometry>(named->geometry)) {
+            const auto& leader = std::get<katana::entity::LeaderGeometry>(named->geometry);
+            if (!leader.tipRef.associated()) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "that leader's tip is on no entity (LEADER ATTACH puts it on one)",
+                                 "id=" + std::to_string(named->id));
+            }
+            auto read = katana::entity::leaderValues(model, leader, codePropertyCandidates());
+            if (!read) {
+                return makeError(ErrorCode::NotFound, "the entity the leader's tip is on is gone",
+                                 "id=" + std::to_string(leader.tipRef.entity));
+            }
+            values = std::move(*read);
+            out << "leader=" << named->id << " target=" << leader.tipRef.entity;
+        } else {
+            // A place on an entity: what a leader there could say.
+            auto place = parseAnchoredPoint(args[1].front() == '#' ? args[1] : "#" + args[1]);
+            if (!place) {
+                return place.error();
+            }
+            const Entity* target = model.entities.find(place->ref.entity);
+            values = katana::entity::anchorValues(*target, place->ref, place->point,
+                                                  codePropertyCandidates());
+            out << "target=" << target->id;
+        }
+        const auto& type = values.at("type").text;
+        out << " type=" << type;
+        const auto line = [&](const std::string& name, const katana::entity::LabelValue& value) {
+            out << "\nvalue=" << field(name)
+                << " text=" << field(katana::entity::formatValue(value));
+        };
+        for (const std::string_view name : katana::entity::leaderValueNames()) {
+            if (const auto found = values.find(name); found != values.end()) {
+                line(std::string(name), found->second);
+            }
+        }
+        for (const auto& [name, value] : values) {
+            if (name.starts_with("prop.")) {
+                line(name, value);
+            }
+        }
+        return out.str();
+    }
+
+    if (!balloon && action == "SET") {
+        auto parsed = splitArguments(args, 1,
+                                     {"text", "template", "labelstyle", "arrow", "callout", "style",
+                                      "paper", "arrowsize", "landing", "tip", "at"});
+        if (!parsed) {
+            return parsed.error();
+        }
+        if (parsed->positional.empty() || parsed->options.empty()) {
+            return usageOf("LEADER SET id [id...] | SELECTION [text= template= labelstyle= arrow= "
+                           "callout= style= paper= arrowsize= landing= tip=p at=p]");
+        }
+        auto ids = leadersOf(parsed->positional);
+        if (!ids) {
+            return ids.error();
+        }
+        if (parsed->has("at") && ids->size() != 1) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "at= moves one leader's note; name one leader");
+        }
+        std::optional<ann::AnchoredPoint> tip;
+        if (const std::string* value = parsed->find("tip")) {
+            auto point = parseAnchoredPoint(*value);
+            if (!point) {
+                return point.error();
+            }
+            tip = *point;
+        }
+        std::optional<Point2> at;
+        if (const std::string* value = parsed->find("at")) {
+            auto point = parsePoint(*value);
+            if (!point) {
+                return point.error();
+            }
+            at = *point;
+        }
+        cmd::ChangeSet changes;
+        for (const EntityId id : *ids) {
+            Entity changed = *model.entities.find(id);
+            auto& leader = std::get<katana::entity::LeaderGeometry>(changed.geometry);
+            if (auto status = applyLeaderNote(*parsed, model, leader); !status) {
+                return status.error();
+            }
+            if (auto status = applyLeaderLook(*parsed, model, leader); !status) {
+                return status.error();
+            }
+            if (tip) {
+                if (tip->ref.entity == id) {
+                    return makeError(ErrorCode::InvalidArgument,
+                                     "a leader's tip cannot be on the leader itself",
+                                     "id=" + std::to_string(id));
+                }
+                leader.vertices.front() = tip->point;
+                leader.tipRef = tip->ref;
+            }
+            if (at) {
+                leader.vertices.back() = *at;
+            }
+            if (auto status = requireNote(model, leader); !status) {
+                return makeError(status.error().code, status.error().message,
+                                 "leader=" + std::to_string(id) + " " + status.error().context);
+            }
+            changes.modify.push_back(std::move(changed));
+        }
+        if (auto status = apply("SET_LEADER", std::move(changes)); !status) {
+            return status.error();
+        }
+        std::string out = "updated leaders=" + std::to_string(ids->size());
+        for (const EntityId id : *ids) {
+            if (const Entity* entity = model.entities.find(id)) {
+                out += "\n" + describeLeader(model, *entity);
+            }
+        }
+        return out;
+    }
+
+    if (!balloon && action == "ATTACH") {
+        if (args.size() != 3) {
+            return usageOf("LEADER ATTACH id #id[.point] | #id@x,y");
+        }
+        auto ids = leadersOf({args[1]});
+        if (!ids) {
+            return ids.error();
+        }
+        const EntityId id = ids->front();
+        auto place = parseAnchoredPoint(args[2]);
+        if (!place) {
+            return place.error();
+        }
+        if (!place->ref.associated()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "ATTACH puts the tip on an entity: give #id, #id.end, #id.inside or "
+                             "#id@x,y",
+                             args[2]);
+        }
+        if (place->ref.entity == id) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "a leader's tip cannot be on the leader itself",
+                             "id=" + std::to_string(id));
+        }
+        Entity changed = *model.entities.find(id);
+        auto& leader = std::get<katana::entity::LeaderGeometry>(changed.geometry);
+        leader.vertices.front() = place->point;
+        leader.tipRef = place->ref;
+        if (auto status = requireNote(model, leader); !status) {
+            return status.error();
+        }
+        cmd::ChangeSet changes;
+        changes.modify.push_back(std::move(changed));
+        if (auto status = apply("ATTACH_LEADER", std::move(changes)); !status) {
+            return status.error();
+        }
+        return "attached leader " + describeLeader(model, *model.entities.find(id));
+    }
+
+    if (!balloon && (action == "DETACH" || action == "FREEZE")) {
+        const bool detach = action == "DETACH";
+        if (args.size() < 2) {
+            return usageOf(detach ? "LEADER DETACH id [id...] | SELECTION"
+                                  : "LEADER FREEZE id [id...] | SELECTION");
+        }
+        auto ids = leadersOf(Tokens(args.begin() + 1, args.end()));
+        if (!ids) {
+            return ids.error();
+        }
+        // FREEZE turns a smart note into the words it says now; DETACH lets
+        // the tip go, freezing a smart note first, since a note read off
+        // nothing would say nothing.
+        cmd::ChangeSet changes;
+        std::size_t frozen = 0;
+        for (const EntityId id : *ids) {
+            Entity changed = *model.entities.find(id);
+            auto& leader = std::get<katana::entity::LeaderGeometry>(changed.geometry);
+            if (detach && !leader.tipRef.associated()) {
+                continue;
+            }
+            if (katana::entity::isSmart(leader)) {
+                leader.text = katana::entity::leaderNote(model, leader, codePropertyCandidates());
+                leader.fields = false;
+                leader.labelStyle.clear();
+                ++frozen;
+            } else if (!detach) {
+                continue;
+            }
+            if (detach) {
+                leader.tipRef = katana::entity::AnchorRef{};
+            }
+            changes.modify.push_back(std::move(changed));
+        }
+        const std::size_t touched = changes.modify.size();
+        if (!changes.empty()) {
+            if (auto status = apply(detach ? "DETACH_LEADER" : "FREEZE_LEADER", std::move(changes));
+                !status) {
+                return status.error();
+            }
+        }
+        return detach ? "detached leaders=" + std::to_string(touched) +
+                            " frozen=" + std::to_string(frozen)
+                      : "frozen leaders=" + std::to_string(frozen);
+    }
+
+    if (!balloon && action == "PROP") {
+        static constexpr const char* kUsage =
+            "LEADER PROP id SET key value [text|integer|real|boolean] | LEADER PROP id DELETE key";
+        if (args.size() < 4) {
+            return usageOf(kUsage);
+        }
+        auto ids = leadersOf({args[1]});
+        if (!ids) {
+            return ids.error();
+        }
+        const EntityId id = ids->front();
+        const katana::entity::AnchorRef tipRef = leaderOf(id).tipRef;
+        if (!tipRef.associated()) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "that leader's tip is on no entity, so it has no attributes to set",
+                             "id=" + std::to_string(id));
+        }
+        if (!model.entities.contains(tipRef.entity)) {
+            return makeError(ErrorCode::NotFound, "the entity the leader's tip is on is gone",
+                             "id=" + std::to_string(tipRef.entity));
+        }
+        const std::string sub = upperCase(args[2]);
+        const std::string& key = args[3];
+        Status status;
+        if (sub == "SET") {
+            if (args.size() < 5 || args.size() > 6) {
+                return usageOf(kUsage);
+            }
+            auto value = propertyValue(args[4], args.size() == 6 ? &args[5] : nullptr);
+            if (!value) {
+                return value.error();
+            }
+            status =
+                document_.execute(cmd::setEntityProperty({tipRef.entity}, key, std::move(*value)));
+        } else if (sub == "DELETE") {
+            if (args.size() != 4) {
+                return usageOf(kUsage);
+            }
+            status = document_.execute(cmd::removeEntityProperty({tipRef.entity}, key));
+        } else {
+            return usageOf(kUsage);
+        }
+        if (!status) {
+            return status.error();
+        }
+        return "leader=" + std::to_string(id) + " target=" + std::to_string(tipRef.entity) +
+               " property=" + field(key) + " text=" +
+               field(katana::entity::leaderNote(model, leaderOf(id), codePropertyCandidates()));
+    }
+
+    if (!balloon && action == "ALIGN") {
+        auto parsed = splitArguments(args, 1, {"x", "spacing"});
+        if (!parsed) {
+            return parsed.error();
+        }
+        if (parsed->positional.empty()) {
+            return usageOf("LEADER ALIGN id id [id...] | SELECTION [x=] [spacing=mm]");
+        }
+        auto ids = leadersOf(parsed->positional);
+        if (!ids) {
+            return ids.error();
+        }
+        // Top to bottom by where each note hangs (the last vertex), then by id.
+        std::vector<EntityId> order = *ids;
+        std::stable_sort(order.begin(), order.end(), [&](EntityId a, EntityId b) {
+            return leaderOf(a).vertices.back().y > leaderOf(b).vertices.back().y;
+        });
+        const Point2 top = leaderOf(order.front()).vertices.back();
+        double x = top.x;
+        if (const std::string* value = parsed->find("x")) {
+            auto number = numberOf(*value, "x");
+            if (!number) {
+                return number.error();
+            }
+            x = *number;
+        }
+        std::optional<double> step;
+        if (const std::string* value = parsed->find("spacing")) {
+            auto number = numberOf(*value, "spacing");
+            if (!number) {
+                return number.error();
+            }
+            if (!(*number > 0.0)) {
+                return makeError(ErrorCode::InvalidArgument, "spacing= must be more than zero",
+                                 *value);
+            }
+            step = katana::entity::annotationModelSize(*number, document_.annotationScale());
+        }
+        cmd::ChangeSet changes;
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            Entity changed = *model.entities.find(order[k]);
+            auto& leader = std::get<katana::entity::LeaderGeometry>(changed.geometry);
+            Point2& hang = leader.vertices.back();
+            const Point2 moved(x, step ? top.y - static_cast<double>(k) * *step : hang.y);
+            if (moved == hang) {
+                continue;
+            }
+            hang = moved;
+            changes.modify.push_back(std::move(changed));
+        }
+        if (!changes.empty()) {
+            if (auto status = apply("ALIGN_LEADERS", std::move(changes)); !status) {
+                return status.error();
+            }
+        }
+        return "aligned leaders=" + std::to_string(order.size()) + " x=" + real(x) +
+               (step ? " spacing=" + real(*step) : std::string());
+    }
+
+    if (balloon && action == "RENUMBER") {
+        auto parsed = splitArguments(args, 1, {"start", "order"});
+        if (!parsed) {
+            return parsed.error();
+        }
+        if (!parsed->positional.empty()) {
+            return usageOf("BALLOON RENUMBER [start=1] [order=id|x|y]");
+        }
+        int start = 1;
+        if (const std::string* value = parsed->find("start")) {
+            auto number = integerOf(*value, "start");
+            if (!number) {
+                return number.error();
+            }
+            start = *number;
+        }
+        const std::string order =
+            parsed->has("order") ? lowerCase(*parsed->find("order")) : std::string("id");
+        if (order != "id" && order != "x" && order != "y") {
+            return makeError(ErrorCode::InvalidArgument, "order= is id, x or y", order);
+        }
+        // The numbered balloons - a circled plain leader saying a whole
+        // number, which is what BALLOON makes - in id order first.
+        std::vector<EntityId> balloons;
+        model.entities.forEach([&](const Entity& entity) {
+            const auto* other = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
+            if (other == nullptr || other->callout != katana::entity::CalloutShape::Circle ||
+                katana::entity::isSmart(*other) || other->text.empty()) {
+                return;
+            }
+            long long value = 0;
+            const auto [end, error] = std::from_chars(
+                other->text.data(), other->text.data() + other->text.size(), value);
+            if (error == std::errc{} && end == other->text.data() + other->text.size()) {
+                balloons.push_back(entity.id);
+            }
+        });
+        // Across the sheet (x, left to right) or down it (y, top to bottom),
+        // by the point each balloon's arrow touches; ties keep id order.
+        if (order != "id") {
+            std::stable_sort(balloons.begin(), balloons.end(), [&](EntityId a, EntityId b) {
+                const Point2& p = leaderOf(a).vertices.front();
+                const Point2& q = leaderOf(b).vertices.front();
+                return order == "x" ? p.x < q.x : p.y > q.y;
+            });
+        }
+        cmd::ChangeSet changes;
+        for (std::size_t k = 0; k < balloons.size(); ++k) {
+            Entity changed = *model.entities.find(balloons[k]);
+            auto& leader = std::get<katana::entity::LeaderGeometry>(changed.geometry);
+            const std::string number =
+                std::to_string(static_cast<long long>(start) + static_cast<long long>(k));
+            if (leader.text == number) {
+                continue;
+            }
+            leader.text = number;
+            changes.modify.push_back(std::move(changed));
+        }
+        const std::size_t renumbered = changes.modify.size();
+        if (!changes.empty()) {
+            if (auto status = apply("RENUMBER_BALLOONS", std::move(changes)); !status) {
+                return status.error();
+            }
+        }
+        return "balloons=" + std::to_string(balloons.size()) +
+               " renumbered=" + std::to_string(renumbered);
+    }
+
+    if (action == "FOR") {
+        auto parsed = splitArguments(args, 1,
+                                     {"text", "template", "labelstyle", "n", "arrow", "callout",
+                                      "style", "paper", "arrowsize", "landing", "angle", "length"});
+        if (!parsed) {
+            return parsed.error();
+        }
+        if (parsed->positional.empty()) {
+            return usageOf(balloon ? "BALLOON FOR id [id...] | SELECTION [n= template= "
+                                     "labelstyle= angle=deg length=mm ...]"
+                                   : "LEADER FOR id [id...] | SELECTION [text= template= "
+                                     "labelstyle= angle=deg length=mm ...]");
+        }
+        std::vector<EntityId> targets;
+        if (parsed->positional.size() == 1 &&
+            upperCase(parsed->positional.front()) == "SELECTION") {
+            targets = document_.selection().ids();
+            if (targets.empty()) {
+                return makeError(ErrorCode::InvalidState, "nothing is selected; use SELECT first");
+            }
+        } else {
+            for (const std::string& token : parsed->positional) {
+                auto id = idOf(token);
+                if (!id) {
+                    return id.error();
+                }
+                if (!model.entities.contains(*id)) {
+                    return makeError(ErrorCode::NotFound, "entity does not exist",
+                                     "id=" + std::to_string(*id));
+                }
+                targets.push_back(*id);
+            }
+            std::sort(targets.begin(), targets.end());
+            targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+        }
+        // The note goes `length` paper millimetres from the tip at `angle`:
+        // up and to the right by default, the way a callout is usually drawn.
+        double angle = 45.0;
+        double length = 10.0;
+        for (const auto& [key, target] :
+             {std::pair{"angle", &angle}, std::pair{"length", &length}}) {
+            if (const std::string* value = parsed->find(key)) {
+                auto number = numberOf(*value, key);
+                if (!number) {
+                    return number.error();
+                }
+                *target = *number;
+            }
+        }
+        if (!(length > 0.0)) {
+            return makeError(ErrorCode::InvalidArgument, "length= must be more than zero",
+                             real(length));
+        }
+        const double radians = angle * katana::math::kDegToRad;
+        const Vec2 toNote =
+            Vec2(std::cos(radians), std::sin(radians)) *
+            katana::entity::annotationModelSize(length, document_.annotationScale());
+        const bool numbered = balloon && !parsed->has("text") && !parsed->has("template") &&
+                              !parsed->has("labelstyle") && !parsed->has("n");
+        long long number = balloon ? nextBalloonNumber(model) : 0;
+        const auto attributes = document_.currentAttributes();
+        cmd::ChangeSet changes;
+        std::size_t skipped = 0;
+        std::string firstSkip;
+        for (const EntityId id : targets) {
+            const Entity* target = model.entities.find(id);
+            if (target == nullptr) {
+                ++skipped;
+                continue;
+            }
+            const auto ref = naturalAnchor(*target, radians);
+            const auto tip = ref ? katana::entity::resolveAnchor(*target, *ref) : std::nullopt;
+            if (!tip) {
+                ++skipped;
+                if (firstSkip.empty()) {
+                    firstSkip = "id=" + std::to_string(id) + " (a " +
+                                std::string(katana::entity::toString(target->type())) +
+                                ") has no place to attach a leader to";
+                }
+                continue;
+            }
+            katana::entity::LeaderGeometry leader;
+            leader.vertices = {*tip, *tip + toNote};
+            leader.tipRef = *ref;
+            if (ref->point == katana::entity::AnchorPoint::Inside) {
+                // A leader that ends inside an outline ends in a dot, one
+                // that ends on it in an arrowhead (ISO 128-22, leader lines).
+                leader.arrow = katana::entity::ArrowHead::Dot;
+            }
+            if (balloon) {
+                leader.callout = katana::entity::CalloutShape::Circle;
+            }
+            if (auto status = applyLeaderNote(*parsed, model, leader); !status) {
+                return status.error();
+            }
+            if (auto status = applyLeaderLook(*parsed, model, leader); !status) {
+                return status.error();
+            }
+            if (numbered) {
+                leader.text = std::to_string(number++);
+            }
+            if (auto status = requireNote(model, leader); !status) {
+                ++skipped;
+                if (firstSkip.empty()) {
+                    firstSkip = status.error().message + " [" + status.error().context + "]";
+                }
+                continue;
+            }
+            Entity entity;
+            entity.geometry = std::move(leader);
+            entity.layer = attributes.layer;
+            entity.style = attributes.style;
+            entity.color = attributes.color;
+            changes.add.push_back(std::move(entity));
+        }
+        if (changes.add.empty()) {
+            return makeError(ErrorCode::InvalidArgument, "no leader made", firstSkip);
+        }
+        if (auto status = apply(balloon ? "CREATE_BALLOONS" : "CREATE_LEADERS", std::move(changes));
+            !status) {
+            return status.error();
+        }
+        const auto ids = document_.lastCreatedEntities();
+        return std::string("created ") + (balloon ? "balloons=" : "leaders=") +
+               std::to_string(ids.size()) + " ids=" + idList(ids) +
+               " skipped=" + std::to_string(skipped);
+    }
+
+    // Making one: LEADER p p [p...] / BALLOON p p [p...].
     auto parsed = splitArguments(args, 0,
-                                 {"text", "arrow", "callout", "style", "paper", "arrowsize",
-                                  "landing", "n"});
+                                 {"text", "template", "labelstyle", "arrow", "callout", "style",
+                                  "paper", "arrowsize", "landing", "n"});
     if (!parsed) {
         return parsed.error();
     }
     if (parsed->positional.size() < 2) {
-        return usageOf(balloon ? "BALLOON p p [p...] [n= style= paper=]"
-                               : "LEADER p p [p...] [text= arrow= callout= style= paper= "
-                                 "arrowsize= landing=]");
+        return usageOf(balloon ? "BALLOON p p [p...] [n= | template= | labelstyle=] [style= "
+                                 "paper=] | BALLOON FOR id... | SELECTION | BALLOON RENUMBER"
+                               : kLeaderUsage);
     }
     katana::entity::LeaderGeometry leader;
     for (std::size_t i = 0; i < parsed->positional.size(); ++i) {
@@ -1631,66 +2511,22 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
             leader.tipRef = point->ref; // the tip follows what it points at
         }
     }
+    if (leader.tipRef.point == katana::entity::AnchorPoint::Inside) {
+        // Inside an outline a leader ends in a dot (ISO 128-22, leader lines).
+        leader.arrow = katana::entity::ArrowHead::Dot;
+    }
     if (balloon) {
         leader.callout = katana::entity::CalloutShape::Circle;
-        // The next number: one more than the highest balloon already numbered.
-        long long highest = 0;
-        document_.model().entities.forEach([&](const Entity& entity) {
-            const auto* other = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
-            if (other == nullptr || other->callout != katana::entity::CalloutShape::Circle) {
-                return;
-            }
-            long long value = 0;
-            const auto [end, error] = std::from_chars(
-                other->text.data(), other->text.data() + other->text.size(), value);
-            if (error == std::errc{} && end == other->text.data() + other->text.size()) {
-                highest = std::max(highest, value);
-            }
-        });
-        leader.text = std::to_string(highest + 1);
+        leader.text = std::to_string(nextBalloonNumber(model));
     }
-    for (const auto& [key, value] : parsed->options) {
-        if (key == "text" || key == "n") {
-            leader.text = unescape(value);
-        } else if (key == "arrow") {
-            auto head = katana::entity::arrowHeadFromString(value);
-            if (!head) {
-                // The short names a person types.
-                const std::string v = lowerCase(value);
-                if (v == "closed" || v == "filled") {
-                    head = katana::entity::ArrowHead::ClosedFilled;
-                } else if (v == "open") {
-                    head = katana::entity::ArrowHead::Open;
-                } else if (v == "tick") {
-                    head = katana::entity::ArrowHead::Tick;
-                } else if (v == "dot") {
-                    head = katana::entity::ArrowHead::Dot;
-                } else if (v == "none") {
-                    head = katana::entity::ArrowHead::None;
-                } else {
-                    return head.error();
-                }
-            }
-            leader.arrow = *head;
-        } else if (key == "callout") {
-            auto shape = katana::entity::calloutShapeFromString(value);
-            if (!shape) {
-                return shape.error();
-            }
-            leader.callout = *shape;
-        } else if (key == "style") {
-            if (!document_.model().textStyles.contains(value)) {
-                return makeError(ErrorCode::NotFound, "text style does not exist", value);
-            }
-            leader.style = value;
-        } else {
-            auto number = numberOf(value, key.c_str());
-            if (!number) {
-                return number.error();
-            }
-            (key == "paper" ? leader.paperHeight
-                            : key == "arrowsize" ? leader.arrowSize : leader.landing) = *number;
-        }
+    if (auto status = applyLeaderNote(*parsed, model, leader); !status) {
+        return status.error();
+    }
+    if (auto status = applyLeaderLook(*parsed, model, leader); !status) {
+        return status.error();
+    }
+    if (auto status = requireNote(model, leader); !status) {
+        return status.error();
     }
     if (auto status = document_.execute(std::make_unique<cmd::ChangeSetCommand>(
             balloon ? "CREATE_BALLOON" : "CREATE_LEADER",
@@ -1709,9 +2545,21 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         return status.error();
     }
     const auto ids = document_.lastCreatedEntities();
-    return std::string(balloon ? "created balloon id=" : "created leader id=") + idList(ids) +
-           " text=" + field(leader.text) + " associative=" +
-           (leader.tipRef.associated() ? "yes" : "no");
+    std::string reply =
+        std::string(balloon ? "created balloon id=" : "created leader id=") + idList(ids) +
+        " text=" + field(katana::entity::leaderNote(model, leader, codePropertyCandidates())) +
+        " associative=" + (leader.tipRef.associated() ? "yes" : "no");
+    if (leader.tipRef.associated()) {
+        reply += " target=" + std::to_string(leader.tipRef.entity) +
+                 " anchor=" + field(katana::entity::describe(leader.tipRef));
+    }
+    if (leader.fields) {
+        reply += " template=" + field(leader.text);
+    }
+    if (!leader.labelStyle.empty()) {
+        reply += " labelstyle=" + field(leader.labelStyle);
+    }
+    return reply;
 }
 
 } // namespace katana::cad
