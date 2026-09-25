@@ -50,6 +50,7 @@
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
+#include "plotting/sheet_checks.hpp"
 
 namespace katana::qt {
 
@@ -834,6 +835,12 @@ SheetEditor::SheetEditor(katana::cad::Document& document, SourceProvider source,
     propertiesDock->setWidget(properties_);
     addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
 
+    // The preflight checks, with the painter's knowledge of the drawing.
+    checks_ = new SheetChecksDock(
+        document_, [this] { return checkSheetsFor(document_.sheetSet(), this->source()); }, this);
+    checks_->onActivated = [this](const plotting::Finding& finding) { showFinding(finding); };
+    addDockWidget(Qt::BottomDockWidgetArea, checks_);
+
     status_ = new QLabel(this);
     statusBar()->addWidget(status_, 1);
 
@@ -945,6 +952,11 @@ void SheetEditor::buildActions()
     connect(fit, &QAction::triggered, this, [this] { canvas_->fitPage(); });
 
     bar->addSeparator();
+    QAction* check = bar->addAction(checkSheetsIcon(), QStringLiteral("Check Sheets"));
+    check->setObjectName(QStringLiteral("sheetCheck"));
+    check->setToolTip(QStringLiteral("Find what a plot would get wrong: views off the paper or over "
+                                     "nothing, sections off their alignment, blanks in the title block"));
+    connect(check, &QAction::triggered, this, [this] { (void)checkSheets(); });
     QAction* plotOne = bar->addAction(icon(Icon::Plot), QStringLiteral("Plot Sheet..."));
     connect(plotOne, &QAction::triggered, this, [this] { plotInteractive(false); });
     QAction* plotAll = bar->addAction(icon(Icon::Plot), QStringLiteral("Plot All..."));
@@ -964,6 +976,7 @@ void SheetEditor::refresh()
         text += "  -  " + QString::fromStdString(status.error().describe());
     }
     status_->setText(text);
+    checks_->schedule();
 }
 
 void SheetEditor::rebuildList()
@@ -1602,6 +1615,15 @@ Status SheetEditor::plotToPdf(const QString& path, bool allSheets)
         }
         pages.push_back(currentSheet());
     }
+    // The checks first. What they find on these sheets is reported with the
+    // plot, and the Checks dock is brought up; the plot still goes ahead -
+    // an error there is paper wasted, not a file that cannot be written.
+    const std::size_t errors =
+        plotting::summarize(plotting::findingsOnSheets(checks_->checkNow(), pages)).errors;
+    if (errors > 0) {
+        checks_->show();
+        checks_->raise();
+    }
     SheetPaintCache cache;
     std::vector<std::string> problems;
     QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -1614,10 +1636,17 @@ Status SheetEditor::plotToPdf(const QString& path, bool allSheets)
     for (const std::string& problem : problems) {
         report(QString::fromStdString(problem), true);
     }
-    report(QString("Plotted %1 sheet%2 to %3.")
-               .arg(allSheets ? set.sheets.size() : 1)
-               .arg(allSheets && set.sheets.size() != 1 ? "s" : "")
-               .arg(path));
+    QString done = QString("Plotted %1 sheet%2 to %3.")
+                       .arg(allSheets ? set.sheets.size() : 1)
+                       .arg(allSheets && set.sheets.size() != 1 ? "s" : "")
+                       .arg(path);
+    if (errors > 0) {
+        done += QString(" The checks found %1 error%2 on %3: the Checks panel lists them.")
+                    .arg(errors)
+                    .arg(errors == 1 ? "" : "s")
+                    .arg(allSheets ? QStringLiteral("the sheets") : QStringLiteral("it"));
+    }
+    report(done);
     return {};
 }
 
