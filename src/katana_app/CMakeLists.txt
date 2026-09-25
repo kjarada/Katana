@@ -407,6 +407,22 @@ if(KATANA_BUILD_TESTS)
                 -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli rules.ifc\" RULES \"${PROJECT_SOURCE_DIR}/samples/ifc/classification_rules.csv\"")
     set_tests_properties(cli.ifc_a_projects_rules_classify_what_the_defaults_would_not PROPERTIES
         PASS_REGULAR_EXPRESSION "classes: IfcColumn 1; IfcDistributionChamberElement 1; IfcDistributionSystem 1;")
+    # The sample schedule drawn (UTILITY DRAW) and the drawing exported: the
+    # services the schedule's own export writes, class for class. The draw's
+    # reply gives the runs - W1 three (QL-B, QL-A, QL-C), E1 two (QL-B,
+    # QL-C), T1 and G1 one each - and its 14 located vertices; so W1's three
+    # and G1's one are pipes, E1's two are conduits (IfcCableCarrierSegment,
+    # its "4 x 100 mm conduits"), T1's one a cable, each vertex a survey
+    # annotation, and one system a service.
+    set(_ifc_drawn "${CMAKE_CURRENT_BINARY_DIR}/cli drawn services.ifc")
+    add_test(NAME cli.ifc_a_drawn_services_plan_goes_out_by_service
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${PROJECT_SOURCE_DIR}/samples/utilities/schedule.csv\""
+                -c "EXPORT \"${_ifc_drawn}\"")
+    set_tests_properties(cli.ifc_a_drawn_services_plan_goes_out_by_service PROPERTIES
+        FIXTURES_SETUP cli_ifc_drawn_file PASS_REGULAR_EXPRESSION
+        "21 entities written, 0 skipped.*classes: IfcAnnotation 14; IfcCableCarrierSegment 2; IfcCableSegment 1; IfcDistributionSystem 4; IfcPipeSegment 4;")
     add_test(NAME cli.ifc_refuses_an_unknown_option
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "EXPORT \"${_ifc}\" UTILITIS x.csv")
@@ -428,6 +444,10 @@ if(KATANA_BUILD_TESTS)
                 COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_tfnsw}")
             set_tests_properties(cli.ifc_the_tfnsw_export_is_valid_to_ifcopenshell
                 PROPERTIES FIXTURES_REQUIRED cli_ifc_tfnsw_file)
+            add_test(NAME cli.ifc_the_drawn_services_export_is_valid_to_ifcopenshell
+                COMMAND "${KATANA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/check_ifc.py" "${_ifc_drawn}")
+            set_tests_properties(cli.ifc_the_drawn_services_export_is_valid_to_ifcopenshell
+                PROPERTIES FIXTURES_REQUIRED cli_ifc_drawn_file)
         endif()
     endif()
 endif()
