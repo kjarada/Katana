@@ -33,6 +33,8 @@ namespace katana::cad::tools::annotate {
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeRadiusDimensionTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeDiameterDimensionTool(const ToolContext& context);
 [[nodiscard]] std::unique_ptr<InteractiveTool> makeOrdinateDimensionTool(const ToolContext& context);
+// annotate_label.cpp: Label Objects, the LABEL verb's labels placed by hand.
+[[nodiscard]] std::unique_ptr<InteractiveTool> makeLabelTool(const ToolContext& context);
 
 // True when `typed` names the option `keyword`: the keyword or any prefix of it
 // at least `shortest` letters long, in any case - "u", "UN" and "Undo" all name

@@ -43,6 +43,14 @@ struct LabelRequest {
 [[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
 createLabel(const katana::entity::Model& model, const LabelRequest& request);
 
+// Every request as ONE command ("CREATE_LABEL"), so one undo takes back the
+// lot: what the LABEL verb and the Label Objects tool both make, so the two
+// cannot differ. The first request refused refuses the whole, its context
+// naming the target ("id=12 ..." or "alignment=MC01 ..."); InvalidArgument
+// for no requests.
+[[nodiscard]] katana::core::Result<katana::commands::CommandPtr>
+createLabels(const katana::entity::Model& model, const std::vector<LabelRequest>& requests);
+
 // What AUTOLABEL RUN did or would do.
 struct AutoLabelReport {
     std::size_t created = 0;

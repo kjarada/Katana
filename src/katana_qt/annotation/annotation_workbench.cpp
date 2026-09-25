@@ -10,9 +10,12 @@
 #include <QWidget>
 
 #include "annotation/annotation_managers.hpp"
+#include "annotation/label_edit_dialog.hpp"
+#include "annotation/label_layout_report.hpp"
 #include "katana/cad/document.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/core/text.hpp"
+#include "tools/tool_menus.hpp"
 
 namespace katana::qt {
 
@@ -103,8 +106,79 @@ AnnotationWorkbench::~AnnotationWorkbench()
     // Here, not left to the window's children: the dialogs hold the
     // Document, which goes when the window's members do - before Qt deletes
     // its children (CustomisationWorkbench's destructor says the same).
+    delete labelLayout_.data();
+    delete editLabel_.data();
     delete labelStyles_.data();
     delete textStyles_.data();
+}
+
+void AnnotationWorkbench::addLabelActions(QMenu& annotateMenu)
+{
+    // The letters the tools' items took (withMnemonic adds an item's own
+    // letter to `taken`), so each of these reaches one item
+    // (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
+    std::string taken;
+    for (const QAction* item : annotateMenu.actions()) {
+        if (!item->isSeparator()) {
+            (void)tools::withMnemonic(item->text().toStdString(), taken);
+        }
+    }
+    const auto make = [&](const char* text, const char* name, const char* dialog,
+                          const QString& tip) {
+        auto* action =
+            new QAction(QString::fromStdString(tools::withMnemonic(text, taken)), &window_);
+        action->setObjectName(QString::fromLatin1(name));
+        action->setToolTip(tip);
+        action->setStatusTip(tip);
+        // The dialog's object name, as the headless --dialog looks it up.
+        action->setData(QString::fromLatin1(dialog));
+        return action;
+    };
+    QAction* editLabel = make("Edit Label...", "annotateEditLabel", "labelEditDialog",
+                              QStringLiteral("The selected label's style, own text, pinned place "
+                                             "and layer (LABEL SET)"));
+    QAction* labelLayout =
+        make("Label Layout Report...", "annotateLabelLayout", "labelLayoutDialog",
+             QStringLiteral("How many labels are placed, moved to find room, left without "
+                            "room or label nothing at the annotation scale; selects those "
+                            "without room (LABEL LAYOUT)"));
+    QObject::connect(editLabel, &QAction::triggered, &window_, [this] { showEditLabel(); });
+    QObject::connect(labelLayout, &QAction::triggered, &window_, [this] { showLabelLayout(); });
+    annotateMenu.addSeparator();
+    annotateMenu.addActions({editLabel, labelLayout});
+}
+
+CommandRunner AnnotationWorkbench::deferredRunner()
+{
+    // The runner the window gives, read when a line runs rather than when a
+    // dialog is made: a dialog may be made before the window has one.
+    return [this](const QString& line) {
+        return run_ ? run_(line)
+                    : VerbOutcome{false, {},
+                                  QStringLiteral("There is no command line to run it on.")};
+    };
+}
+
+LabelEditDialog& AnnotationWorkbench::showEditLabel()
+{
+    if (editLabel_.isNull()) {
+        editLabel_ = new LabelEditDialog(document_, deferredRunner(), &window_);
+        editLabel_->setModal(false);
+    }
+    (void)editLabel_->loadSelection();
+    raise(*editLabel_);
+    return *editLabel_;
+}
+
+LabelLayoutReportDialog& AnnotationWorkbench::showLabelLayout()
+{
+    if (labelLayout_.isNull()) {
+        labelLayout_ = new LabelLayoutReportDialog(deferredRunner(), &window_);
+        labelLayout_->setModal(false);
+    }
+    raise(*labelLayout_);
+    (void)labelLayout_->run();
+    return *labelLayout_;
 }
 
 void AnnotationWorkbench::showScale()

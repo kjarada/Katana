@@ -371,4 +371,32 @@ TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)
     EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
 }
 
+TEST_F(McpServer, LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem)
+{
+    // Two numbered points at one place (1, 2), labelled in a style that may
+    // not move its labels: label 4 finds no room and is named on its own
+    // line; pinned elsewhere by LABEL SET, it is placed where it was put -
+    // counted as displaced, being away from its own place with a leader back.
+    initialize();
+    const Json made = call(
+        "katana_run_commands",
+        Json{{"commands",
+              {"LABELSTYLE NEW pt kind=point text={point} displace=off", "POINT 0,0", "SELECT 1",
+               "PROP SET point P1", "POINT 0,0", "SELECT 2", "PROP SET point P2",
+               "LABEL 1 2 style=pt", "LABEL LAYOUT"}}});
+    ASSERT_FALSE(made["isError"].get<bool>()) << textOf(made);
+    const Json& lines = made["structuredContent"]["commands"];
+    const std::string layout = lines.back()["output"].get<std::string>();
+    EXPECT_NE(layout.find("placed=1 displaced=0 suppressed=1"), std::string::npos) << layout;
+    EXPECT_NE(layout.find("\nlabel=4 piece=0 suppressed=yes"), std::string::npos) << layout;
+
+    const Json moved =
+        call("katana_run_commands", Json{{"commands", {"LABEL SET 4 at=50,50", "LABEL LAYOUT"}}});
+    ASSERT_FALSE(moved["isError"].get<bool>()) << textOf(moved);
+    const std::string after =
+        moved["structuredContent"]["commands"].back()["output"].get<std::string>();
+    EXPECT_NE(after.find("placed=2 displaced=1 suppressed=0"), std::string::npos) << after;
+    EXPECT_EQ(after.find("suppressed=yes"), std::string::npos) << after;
+}
+
 } // namespace

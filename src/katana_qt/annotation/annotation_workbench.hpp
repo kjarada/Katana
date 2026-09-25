@@ -2,7 +2,9 @@
 
 // The annotation front end in the Format menu (docs/annotation.md, "In the
 // window"): Text Styles..., Label Styles and Rules..., and the plan view's
-// annotation scale on the Format toolbar.
+// annotation scale on the Format toolbar; and in the Annotate menu, after
+// its tools, Edit Label... and Label Layout Report..., which change and read
+// the drawing only through verb lines run by the window's executor.
 //
 // Every one of them is a thin front end over katana_cad and katana_commands:
 // a text style is changed by updateTextStyle, a rule run by
@@ -33,6 +35,8 @@ namespace katana::qt {
 
 class TextStyleManagerDialog;
 class LabelStyleManagerDialog;
+class LabelEditDialog;
+class LabelLayoutReportDialog;
 
 class AnnotationWorkbench {
   public:
@@ -54,7 +58,19 @@ class AnnotationWorkbench {
     void setCommandRunner(CommandRunner run) { run_ = std::move(run); }
     [[nodiscard]] const CommandRunner& commandRunner() const { return run_; }
 
+    // Annotate > Edit Label... (annotateEditLabel) and Label Layout
+    // Report... (annotateLabelLayout), put after the menu's tools by the
+    // window, each with a menu letter the tools have left free.
+    void addLabelActions(QMenu& annotateMenu);
+    // Edit Label on the selected label; with none it says so and runs
+    // nothing (label_edit_dialog.hpp).
+    LabelEditDialog& showEditLabel();
+    // The report, run afresh each time it is shown (label_layout_report.hpp).
+    LabelLayoutReportDialog& showLabelLayout();
+
   private:
+    // What the dialogs run their lines with: run_, whenever it is set.
+    [[nodiscard]] CommandRunner deferredRunner();
     // The box shows the document's scale; called whenever the document
     // changes, since an undo or an ANNOSCALE typed changes it too.
     void showScale();
@@ -66,6 +82,8 @@ class AnnotationWorkbench {
     QComboBox* scale_ = nullptr;
     QPointer<TextStyleManagerDialog> textStyles_;
     QPointer<LabelStyleManagerDialog> labelStyles_;
+    QPointer<LabelEditDialog> editLabel_;
+    QPointer<LabelLayoutReportDialog> labelLayout_;
     CommandRunner run_;
     struct Listener;
     std::unique_ptr<Listener> listener_;
