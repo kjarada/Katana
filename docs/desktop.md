@@ -777,7 +777,11 @@ works follows `DESIGN`, which also ends a `WHERE` filter plainly. The
 Regrade tab says that nothing is added to the undo history when nothing
 changed, and the status says which happened; the Schedule tab names the
 `.csv` to write and, optionally, the delivery schema whose words to write it
-in.
+in. The status is read from the reply's first record, never from the tab
+alone: a scope that takes no utility line is answered with the scope's
+record, and the status then says nothing was regraded or written, rather
+than offering an Undo that would take back the person's previous edit
+(`UtilityDialog.AScopeThatTakesNoUtilityLineIsSaidSoAndNothingIsSaidRegradedOrWritten`).
 
 `utilityCommandLine` - a pure function of
 the fields, tested without a window - writes the `UTILITY` line (a path with

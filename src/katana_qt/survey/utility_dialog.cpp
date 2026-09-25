@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -771,20 +772,31 @@ void UtilityToolsDialog::run()
         return;
     }
     showOutput(qs(*reply));
+    // Said from the reply's own first record, never from the tab alone: a
+    // scope that takes no utility line answers with the scope's record, and
+    // then nothing was regraded or written, and no step is there to undo.
+    const auto leads = [&reply](std::string_view record) { return reply->starts_with(record); };
     switch (running) {
     case UtilityTool::Draw:
         setStatus("Drawn as one undo step - Undo removes it all. The records are below and in "
                   "the command log.");
         break;
     case UtilityTool::Regrade:
-        setStatus(reply->starts_with("utilities regraded changed=0 ")
-                      ? "Nothing needed regrading: the drawing is as it was, and nothing was "
-                        "added to the undo history."
-                      : "Regraded as one undo step - Undo puts it back. The records are below "
-                        "and in the command log.");
+        if (leads("utilities regraded changed=0 ")) {
+            setStatus("Nothing needed regrading: the drawing is as it was, and nothing was added "
+                      "to the undo history.");
+        } else if (leads("utilities regraded ")) {
+            setStatus("Regraded as one undo step - Undo puts it back. The records are below and "
+                      "in the command log.");
+        } else {
+            setStatus("Nothing in the scope is a utility line: nothing was regraded, and nothing "
+                      "was added to the undo history.");
+        }
         break;
     case UtilityTool::Schedule:
-        setStatus("Written. What was written is below and in the command log.");
+        setStatus(leads("utilities scheduled ")
+                      ? "Written. What was written is below and in the command log."
+                      : "Nothing in the scope is a utility line: nothing was written.");
         break;
     case UtilityTool::Report:
     case UtilityTool::Verify:
