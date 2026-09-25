@@ -361,6 +361,31 @@ std::optional<ConstrainedPoint> trackAcquired(const std::vector<Point2>& acquire
     return best;
 }
 
+bool TrackingPoints::tracks(SnapMode mode)
+{
+    switch (mode) {
+    case SnapMode::Endpoint:
+    case SnapMode::Midpoint:
+    case SnapMode::Center:
+    case SnapMode::Intersection:
+    case SnapMode::Quadrant:
+    case SnapMode::Node:
+    case SnapMode::ApparentIntersection:
+        return true;
+    default:
+        return false;
+    }
+}
+
+void TrackingPoints::acquire(const Point2& point, double tolerance)
+{
+    std::erase_if(points_, [&](const Point2& p) { return p.distanceTo(point) <= tolerance; });
+    points_.insert(points_.begin(), point);
+    if (points_.size() > kMost) {
+        points_.resize(kMost);
+    }
+}
+
 // ---- one-shot snaps ------------------------------------------------------------------------------
 
 Result<Point2> fromBase(const Point2& base, std::string_view offset,

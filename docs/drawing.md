@@ -176,7 +176,17 @@ default), and then the length lock. The view prints what constrained the
 point beside the cursor ("Polar 45°00'00"", "Ortho", "Length lock 10").
 Object snap tracking (`trackAcquired`) snaps to the horizontal and vertical
 paths through acquired points and, preferring them, to where two paths
-cross.
+cross. The plan view acquires a point (`TrackingPoints`) each time an object
+snap whose point is worth tracking from - an end, a middle, a centre, a
+crossing, a node, a quadrant - takes the cursor while tracking is on (F11 or
+`TRACKING on`), keeps the seven most recent, marks each with a small cross
+and draws the path the cursor is on dotted from the point it runs through;
+it forgets them when no tool or grip wants a point. Tracking yields to an
+object snap, a lock, ortho and polar: it only moves a cursor nothing else
+has fixed. Acquiring is immediate rather than after a pause, since a view
+cannot tell a pause from a slow mouse, and landing on an acquired point
+again moves it to the front of the seven. Tested in
+`tests/qt_widgets/drawing/test_plan_view_tracking.cpp`.
 
 **One-shot snaps**: From (`fromBase`: a base point, then an offset, the `@`
 implied) and Midpoint Between Two Points (`midBetween`).
@@ -198,6 +208,10 @@ within 25 apertures of the cursor, since what they find lies away from the
 geometry that produces it; Extension and Parallel are "somewhere along a
 line" snaps and so rank after Nearest - an endpoint beats them however close
 they are.
+
+Each new mode has its own marker in the plan view, beside its name: Quadrant
+a filled diamond, Node a circle with a cross, Extension three dots,
+Parallel two slanted strokes, Apparent Intersection a cross in a square.
 
 ## The Vertices tools (Draw > Vertices)
 
