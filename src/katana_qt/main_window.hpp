@@ -14,6 +14,7 @@
 #include <memory>
 #include <vector>
 
+#include "annotation/annotation_workbench.hpp"
 #include "icons.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_record.hpp"
@@ -359,6 +360,9 @@ class MainWindow final : public QMainWindow {
     // The Format menu's managers and what they share. Declared after the
     // Document, so it - and the dialogs it deletes - go first.
     std::unique_ptr<CustomisationWorkbench> format_;
+    // Format > Text Styles, Label Styles and Rules, and the annotation scale
+    // (docs/annotation.md). After the Document for the reason format_ is.
+    std::unique_ptr<AnnotationWorkbench> annotation_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's
