@@ -50,7 +50,16 @@ as session data outside the model, the loaded style library and survey map
   replaced, and never on "a listener fired", which a selection click also
   does.
 
-* `execute`/`undo`/`redo` delegate to the command stack.
+* `execute`/`undo`/`redo` delegate to the command stack. `execute` wraps each
+  command with the associative update (`cad/annotation/associative.hpp`):
+  when the command moves or reshapes an entity that a dimension, label or
+  leader follows, the annotation is brought up to date by the SAME undo
+  step, so an undo puts both back together.
+* The ANNOTATION SCALE (`annotationScale`, `setAnnotationScale`) is the scale
+  the plan view draws paper-sized annotation at, 1 : 1000 until one is set
+  (`docs/annotation.md`). Setting it is one undoable step, and it is kept in
+  the project's metadata under `annotation_scale`, a key the storage layer
+  carries without reading it, so it needed no schema change.
 * Listeners are notified after anything observable changes — model, selection,
   current layer, project. Views rebuild from the document rather than tracking
   deltas.
@@ -186,6 +195,17 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
+
+The annotation verbs (2026-09-25; `docs/annotation.md`, "The verbs") are
+`ANNOSCALE`, `TEXTSTYLE` (`TS`), `TEXT` and `MTEXT` with `style=`, `paper=`,
+`justify=` and `rotation=`, `TEXTEDIT`, `LABELSTYLE` (`LS`), `LABEL`,
+`AUTOLABEL`, the `DIM` kinds (`DIM LINEAR|HORIZONTAL|VERTICAL|ALIGNED|ANGULAR|
+RADIUS|DIAMETER|ORDINATE|BASELINE|CONTINUE`), `LEADER` (`LE`) and `BALLOON`,
+and `DIMSTYLE SET <name> PAPER on`. They take `key=value` options and reply
+in `key=value` lines, so a script or an agent reads what happened; each edit
+is one undo step. `CommandInterpreter::annotationHelpText` is their
+reference, and `HELP` prints it after the rest. The plain `TEXT p height
+"text"` and `DIM p p offset` are unchanged.
 
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line

@@ -24,7 +24,7 @@ open-ended property maps.
 ```cpp
 struct Entity {
     EntityId id;                  // uint64, 1-based
-    Geometry geometry;            // variant of the seven entity geometries
+    Geometry geometry;            // variant of the nine entity geometries
     std::string layer;            // "0" by default
     std::string style;            // empty means ByLayer
     std::optional<Color> color;   // empty means ByLayer
@@ -35,8 +35,13 @@ struct Entity {
 ```
 
 `Geometry` is a `std::variant` over `PointGeometry`, `Segment2`, `Arc2`,
-`Polyline2`, `Circle2`, `TextGeometry` and `DimensionGeometry`, ordered to match
-`EntityType` so `typeOf()` is a cast of the variant index. Using a variant rather
+`Polyline2`, `Circle2`, `TextGeometry`, `DimensionGeometry`, `LabelGeometry`
+and `LeaderGeometry`, ordered to match `EntityType` so `typeOf()` is a cast of
+the variant index. The last two, and the text style, justification and paper
+height of a text and the kinds of a dimension, came with the annotation
+system on 2026-09-25 (`docs/annotation.md`): a label stores WHAT it labels and
+in which label style, never its text, and a leader is one entity from its
+arrow to its note. Using a variant rather
 than an inheritance hierarchy keeps entities copyable values, makes exhaustive
 handling a compile-time property, and means the database owns its entities
 outright. **The order is load-bearing** - see "Adding a geometry kind" below.
@@ -200,7 +205,7 @@ paragraph said geometry was JSON too, from before schema 3.)
 history and its reference: each entry's comment says why the change was made
 and why no existing row needed repairing. The file is marked as a Katana
 project by `PRAGMA application_id` ("KTNA") and versioned by
-`PRAGMA user_version`. At schema 9 it holds fourteen tables:
+`PRAGMA user_version`. At schema 11 it holds nineteen tables:
 
 | Migration | Adds |
 |---|---|
@@ -213,6 +218,8 @@ project by `PRAGMA application_id` ("KTNA") and versioned by
 | 7 | `alignments` and `alignment_pis`: the PI definition only; the elements are solved on load |
 | 8 | `alignment_pvis`: an alignment's design profile |
 | 9 | a style's `description`, `symbol` and `symbol_size` |
+| 10 | `survey_jobs` and `survey_job_files`: each imported field file kept whole, with its settings, report and the entities it made |
+| 11 | `text_styles`, `label_styles` (name, kind and the rest as versioned JSON) and `label_rules`, and a dimension style's `paper_sized` (`docs/annotation.md`, "Stored with the project") |
 
 A new table or column is a new entry at the end, never an edit of a released
 one, and each default is chosen so that a project written before it draws
@@ -388,7 +395,7 @@ the same change, and `remove` orphaned children because of it.
 
 ## Named tables
 
-`Linetype`, `DimensionStyle`, `Style`, `HatchPattern` and `Alignment` are stored in `NamedTable<T, Policy>`
+`Linetype`, `DimensionStyle`, `Style`, `HatchPattern`, `Alignment`, `TextStyle`, `LabelStyle` and `LabelRule` are stored in `NamedTable<T, Policy>`
 (`include/katana/entity/named_table.hpp`), one implementation of "an ordered map
 from name to record" with the add / update / remove / find / all surface, the
 `AlreadyExists` and `NotFound` shape, and the built-in entry that `remove`
