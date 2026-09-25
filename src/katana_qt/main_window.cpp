@@ -8,6 +8,7 @@
 #include "theme.hpp"
 
 #include "icons.hpp"
+#include "alignment_manager.hpp"
 #include "attribute_manager.hpp"
 #include "format.hpp"
 #include "gis_dialogs.hpp"
@@ -797,15 +798,29 @@ void MainWindow::buildActions()
                                          {}, "surfaceFromDrawing");
     QAction* quantities = makeAction(Icon::CorridorQuantities, "Corridor &Quantities...",
                                      "Cut and fill along an alignment, by average end area",
-                                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q));
+                                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q),
+                                     "terrainCorridorQuantities");
     QAction* corridor = makeAction(Icon::CorridorSurface, "Corridor &Surface...",
-                                   "Build the finished design along an alignment as a surface");
+                                   "Build the finished design along an alignment as a surface",
+                                   {}, "terrainCorridorSurface");
     QAction* alignmentSection = makeAction(Icon::SectionAlignment, "Cut Section Along &Alignment...",
                                            "Long section down a named alignment, with its design profile",
-                                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
+                                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K),
+                                           "terrainSectionAlongAlignment");
     QAction* selectionSection = makeAction(Icon::Section, "&Cut Section Along Selection",
                                            "Long section along the selected line or polyline",
-                                           QKeySequence(Qt::CTRL | Qt::Key_K));
+                                           QKeySequence(Qt::CTRL | Qt::Key_K),
+                                           "terrainSectionAlongSelection");
+    // The alignments a section and a corridor are cut along, defined and
+    // edited in one window (alignment_manager.hpp) rather than only by ALIGN.
+    QAction* alignmentManager =
+        makeAction(Icon::SectionAlignment, "Alignment &Manager...",
+                   "Define and edit alignments: PIs and curves, the design profile, the "
+                   "setting-out table and chainage labels",
+                   {}, "terrainAlignmentManager");
+    // The dialog it shows, by object name: how --dialog finds it.
+    alignmentManager->setData(QString("alignmentManagerDialog"));
+    connect(alignmentManager, &QAction::triggered, this, [this] { showAlignmentManager(); });
     connect(cloudSurface, &QAction::triggered, this, [this] { buildSurfaceFromPointCloud(); });
     connect(rasterSurface, &QAction::triggered, this, [this] { buildSurfaceFromRaster(); });
     connect(drawingSurface, &QAction::triggered, this, [this] { buildSurfaceFromDrawing(); });
@@ -814,13 +829,20 @@ void MainWindow::buildActions()
     connect(alignmentSection, &QAction::triggered, this, &MainWindow::cutSectionAlongAlignment);
     connect(selectionSection, &QAction::triggered, this, [this] { cutSectionAlongSelection(); });
 
+    // Sections rather than plain separators, as the Survey and GIS menus
+    // have them; alignments first, since sections and corridors need one.
+    terrainMenu->addSection("Alignments");
+    terrainMenu->addAction(alignmentManager);
+    terrainMenu->addSection("Surfaces");
     terrainMenu->addActions({cloudSurface, rasterSurface, drawingSurface});
-    terrainMenu->addSeparator();
+    terrainMenu->addSection("Sections");
     terrainMenu->addActions({selectionSection, alignmentSection});
-    terrainMenu->addSeparator();
+    terrainMenu->addSection("Corridors");
     terrainMenu->addActions({quantities, corridor});
 
     QToolBar* terrainBar = makeToolBar("Terrain", Qt::TopToolBarArea);
+    terrainBar->addAction(alignmentManager);
+    terrainBar->addSeparator();
     terrainBar->addActions({cloudSurface, rasterSurface, drawingSurface});
     terrainBar->addSeparator();
     terrainBar->addActions({selectionSection, alignmentSection});
@@ -4432,8 +4454,14 @@ void MainWindow::cutSectionAlongAlignment()
 {
     const std::vector<std::string> names = document_.model().alignments.names();
     if (names.empty()) {
-        logMessage("Define an alignment first: ALIGN NEW name x,y x,y ... in the command line.",
+        logMessage("Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW name "
+                   "x,y x,y ... on the command line.",
                    true);
+        // Where one is defined, opened for the person; a headless run has
+        // nobody to show it to.
+        if (!headless_) {
+            showAlignmentManager();
+        }
         return;
     }
     QStringList items;
@@ -4486,8 +4514,12 @@ std::optional<MainWindow::CorridorRequest> MainWindow::askCorridor(const QString
         }
     }
     if (names.isEmpty()) {
-        logMessage("No alignment has a design profile. Define one with ALIGN DESIGN name s,z ...",
+        logMessage("No alignment has a design profile. Define one in Terrain > Alignment "
+                   "Manager (Vertical), or with ALIGN DESIGN name s,z ...",
                    true);
+        if (!headless_) {
+            showAlignmentManager();
+        }
         return std::nullopt;
     }
     QStringList surfaceNames;
@@ -4822,6 +4854,20 @@ SheetSource MainWindow::sheetSource() const
         source.assets = *directory / "assets";
     }
     return source;
+}
+
+void MainWindow::showAlignmentManager()
+{
+    if (!alignments_) {
+        AlignmentManagerContext context;
+        context.document = &document_;
+        context.run = commandRunner();
+        context.headless = [this] { return headless_; };
+        alignments_ = std::make_unique<AlignmentManagerDialog>(std::move(context), this);
+    }
+    alignments_->show();
+    alignments_->raise();
+    alignments_->activateWindow();
 }
 
 void MainWindow::showSheets()

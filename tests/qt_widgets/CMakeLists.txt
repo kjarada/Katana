@@ -83,6 +83,9 @@ add_executable(katana_qt_widget_tests
     # File > Project Coordinate System (test_project_crs_dialog).
     ${_qt_src}/project_crs_dialog.cpp
     test_project_crs_dialog.cpp
+    # Terrain > Alignment Manager (test_alignment_manager).
+    ${_qt_src}/alignment_manager.cpp
+    test_alignment_manager.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}

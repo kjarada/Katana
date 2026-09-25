@@ -372,3 +372,37 @@ TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)
 }
 
 } // namespace
+
+// What Terrain > Alignment Manager does, as an agent does it: the PIs read
+// back exactly as records, rewritten as one line (one undo step), and the
+// setting-out table a record a station with its key stations named.
+TEST_F(McpServer, AnAgentReadsAndRewritesAnAlignmentsPIsAndItsSettingOutTable)
+{
+    initialize();
+    const Json result =
+        call("katana_run_commands",
+             Json{{"commands",
+                   {"ALIGN NEW road 0,0 100,0 100,100", "ALIGN PIS road",
+                    "ALIGN PIS road 0,0 100,0,50 100,100", "ALIGN STATIONS road 1000"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 4U);
+    EXPECT_NE(lines[1]["output"].get<std::string>().find(
+                  "pi index=1 x=100 y=0 radius=0 spiral_in=0 spiral_out=0"),
+              std::string::npos)
+        << lines[1].dump();
+    EXPECT_NE(lines[2]["output"].get<std::string>().find("alignment road now has 3 PIs"),
+              std::string::npos)
+        << lines[2].dump();
+    const std::string table = lines[3]["output"].get<std::string>();
+    for (const char* key : {"key=start", "key=TC", "key=CT", "key=end"}) {
+        EXPECT_NE(table.find(key), std::string::npos) << key << "\n" << table;
+    }
+    const Json undone = call("katana_undo");
+    EXPECT_FALSE(undone["isError"].get<bool>()) << textOf(undone);
+    const Json back = call("katana_run_commands", Json{{"commands", {"ALIGN PIS road"}}});
+    EXPECT_NE(back["structuredContent"]["commands"][0]["output"].get<std::string>().find(
+                  "pi index=1 x=100 y=0 radius=0 "),
+              std::string::npos)
+        << textOf(back);
+}

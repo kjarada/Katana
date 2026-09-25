@@ -226,6 +226,43 @@ if(TARGET katana)
         TIMEOUT 180)
 endif()
 
+# Terrain > Alignment Manager (src/katana_qt/alignment_manager.hpp) through the
+# real window: an alignment made from the dialog's fields is the ALIGN NEW line
+# echoed in the command log and run by the window's executor; the dialog's list
+# follows a PI typed on the command line and its undo; the setting-out note and
+# ALIGN STATIONS agree. By hand, for (0,0) (100,0) (100,100) with no curve:
+# every 25 m is 0 to 175, eight stations, and the key stations are the start
+# (on the interval), the PI at 100 (on it) and the end at 200 (not): nine rows,
+# three of them key; every 150 m is 0 and 150, so the table is the start, the
+# PI - where the northward tangent begins, so azimuth 0 - 150 and the end.
+if(TARGET katana)
+    add_test(NAME qt_alignment_manager_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@terrainAlignmentManager|alignmentName=main road|alignmentPoints=0,0 100,0 100,100|!alignmentNew|?alignmentStatus|alignmentInterval=25|?alignmentStationsNote|?alignmentList|>ALIGN PI \"main road\" 200,100|?alignmentList|>UNDO|?alignmentList|>ALIGN STATIONS \"main road\" 150|?commandLog"
+            "-DEXPECT=--dialog terrainAlignmentManager opened alignmentManagerDialog \"Alignment Manager\".*alignmentStatus: alignment main road created with 3 PIs.*alignmentStationsNote: 9 stations, 3 of them key stations[.].*alignmentList: main road [|] 3 [|] 0[.]000 [|] 200[.]000 [|] 200[.]000 [|] none.*alignmentList: main road [|] 4 [|] 0[.]000 [|] 300[.]000 [|] 300[.]000 [|] none.*alignmentList: main road [|] 3 [|] 0[.]000 [|] 200[.]000.*station=0[.]000 x=0[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^0-9]+00'00\" radius=straight key=start[\r\n]+station=100[.]000 x=100[.]000 y=0[.]000 direction=90[.]000 azimuth=0[^0-9]+00'00\" radius=straight key=PI[\r\n]+station=150[.]000 x=100[.]000 y=50[.]000 direction=90[.]000 azimuth=0[^0-9]+00'00\" radius=straight[\r\n]+station=200[.]000 x=100[.]000 y=100[.]000 [^\r\n]* key=end.*commandLog: .*> ALIGN NEW \"main road\" 0,0 100,0 100,100 alignment main road created with 3 PIs"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/alignment_manager_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The Terrain menu's section and corridor items by the object names
+    # --trigger reaches them by, in a drawing with no alignment: each says
+    # where one is defined - the Alignment Manager, which a headless run does
+    # not open - and the menu starts with it.
+    add_test(NAME qt_terrain_commands_point_to_the_alignment_manager_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=*terrainSectionAlongAlignment|*terrainCorridorQuantities|*terrainCorridorSurface|*terrainSectionAlongSelection|?terrainMenu"
+            "-DEXPECT=Define an alignment first: Terrain > Alignment Manager, or ALIGN NEW.*No alignment has a design profile[.] Define one in Terrain > Alignment Manager [(]Vertical[)].*No alignment has a design profile.*Select exactly one line or polyline to cut along.*terrainMenu: Terrain: Alignment Manager[.][.][.] [[]Define and edit alignments"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/terrain_commands_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_alignment_manager_headless
+        qt_terrain_commands_point_to_the_alignment_manager_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # The whole main window with a customisation loaded into it: the two
 # libraries and the survey code file read, resolved against each other, and
 # reported. This is the path the Format > Load Customisation menu item takes, so what
