@@ -51,6 +51,22 @@ struct ParcelReport {
 // than reported as zero-length courses with no bearing.
 [[nodiscard]] core::Result<ParcelReport> parcelReport(const geometry::Polyline2& boundary);
 
+// What PARCEL id prints and Survey > Parcel Report shows: a row per course -
+// its number, the corner it runs from, its bearing and its distance - then
+// formatParcelSummary's line. One formatter for both, so the dialog and the
+// command line cannot come to differ.
+[[nodiscard]] std::string formatParcelReport(const ParcelReport& report);
+
+// The report's last line: "area 5000.000 m2 (0.5000 ha), perimeter 300.000
+// m, centroid 50.000,25.000, drawn counter-clockwise".
+[[nodiscard]] std::string formatParcelSummary(const ParcelReport& report);
+
+// The courses as CSV (RFC 4180: CRLF, a field quoted where it needs it, as
+// cad::csvField does) with a header record: the course number, the corners
+// it runs from and to, its azimuth in decimal degrees, its bearing and its
+// distance - for a spreadsheet or a plan's schedule.
+[[nodiscard]] std::string parcelCoursesCsv(const ParcelReport& report);
+
 // The description a deed carries:
 //   "<name>: Beginning at E 100.000 N 200.000; thence N 45°30'15" E, 120.000
 //    m; thence ...; to the point of beginning. Containing 5000.000 m²

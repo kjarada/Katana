@@ -210,6 +210,8 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LINETYPE MERGE <from> <into>` | repoints every layer and style, then deletes `from`; `into` must be a model linetype |
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
+| `HATCH SET <name> angle spacing [angle spacing ...]` or `HATCH SET <name> SOLID` | replaces a pattern's families (degrees, model units) or makes it a solid fill, one undo step; keeps its description and each family's offset by position, none being typeable; an unchanged SET is no step; `none` is refused a fill. The Hatch Patterns tab's Save (`docs/desktop.md`) |
+| `STYLE NEW <name> [field value]` | a style made with one field set as `STYLE SET` would set it, one undo step - the Hatch Patterns tab's New Style Using This (`STYLE NEW name HATCH pattern`); a second word that is no field is still refused as a name that wanted quotes |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 | `MODIFY [SELECTION\|DRAWING\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter, the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
 
@@ -465,15 +467,97 @@ from far below it to far above and compares.
 
 `ALIGN NEW name x,y x,y [x,y ...]` defines an alignment by its PIs, with no
 curves; `ALIGN SET name index radius [spiralIn [spiralOut]]` rounds a corner;
-`ALIGN PI name x,y [...]` appends one; `ALIGN START name station` sets the
-chainage origin; `ALIGN STATIONS name interval` prints a setting-out table.
-PI indices count from 0, to match the PI the solver names in its refusals.
+`ALIGN PI name x,y [...]` appends one; `ALIGN PIS name` prints every PI as a
+`pi index= x= y= radius= spiral_in= spiral_out=` record, exactly, and
+`ALIGN PIS name x,y[,radius[,spiralIn[,spiralOut]]] ...` replaces them all;
+`ALIGN START name station` sets the chainage origin; `ALIGN STATIONS name
+interval` prints a setting-out table. PI indices count from 0, to match the PI
+the solver names in its refusals.
+
+**`PIS` replaces the whole horizontal definition, as `DESIGN` does the
+profile.** An edit of several PIs - moving two corners and rounding a third -
+is then one line and one undo step, and the model judges the result whole: a
+move that is only valid together with another is never refused halfway. A
+verb per PI edit (MOVE, REMOVE, INSERT) was the alternative; it makes the
+Alignment Manager's grid several undo steps per Apply and gives an agent three
+more verbs to learn for what one does. The start chainage and the design
+profile are not PIs and are kept. `PIS` alone is how an agent reads the PIs it
+is about to edit - `ALIGN LIST` gives only the count - and prints the stored
+doubles in their shortest exact form, so writing them back changes nothing.
 
 **The station table always includes the key stations.** An interval table
 that skipped the TS, SC, CS and ST would be useless in the field, because
-those are the points that get pegged. The key stations are merged with the
-interval stations, sorted, and de-duplicated to a nanometre, so a key station
-that happens to land on the interval appears once.
+those are the points that get pegged. `cad::settingOutStations`
+(`include/katana/cad/alignment_report.hpp`) merges the key stations with the
+interval stations (each `start + k * interval`, multiplied rather than summed
+so the hundredth is not off by a hundred roundings), sorts them and merges any
+two within `tolerance::kGeometric`, so a key station that lands on the interval
+is one row - carrying its key. (The first version merged to a nanometre, a
+local epsilon of the kind `include/katana/math/numerics.hpp` rules out, and
+skipped without a word any station it could not find a position for. The last
+key station is the sum of the element lengths, which can differ from the end
+station in the last bit, so the end could have been skipped that way. It is
+now clamped into the alignment, and a station with no position is an Internal
+error.) Each row is named where the geometry changes character:
+`start` and `end`; `TS`, `SC`, `CS`, `ST` through a spiralled curve; `TC` and
+`CT` either side of a simple one; `PI` at a corner with no curve; the letters
+of the elements met (`SS`, `CC`) where curves run back to back. `ALIGN
+STATIONS` prints a `station= x= y= direction= azimuth= radius= [turn=] [key=]`
+record per row (`cad::formatSettingOut`), the azimuth in degrees, minutes and
+whole seconds clockwise from grid north and one within half a second of a turn
+written 0; the manager's table and its CSV (`cad::settingOutCsv`) are the same
+rows. More than 100 000 rows is refused before one is made.
+
+## The Alignment Manager
+
+Terrain > Alignment Manager... (`AlignmentManagerDialog`,
+`src/katana_qt/alignment_manager.hpp`) is the window's way to every `ALIGN`
+verb, where before the window had none and told a person to type `ALIGN NEW`.
+It follows the rules every manager does (`docs/desktop.md`, "The rules a
+dialog or panel follows"):
+
+- **It changes nothing itself.** Each button writes the `ALIGN` line - `NEW`,
+  `DELETE`, `PIS`, `START`, `DESIGN`, `CLEARPROFILE`, or `LABEL ALIGN` for
+  chainage labels - and runs it through the window's one executor
+  (`MainWindow::runVerbLine`), so it is echoed, kept in the history and one
+  undo step; an agent types the same line.
+- **The grids are buffers.** The PI grid (easting, northing, radius, spirals)
+  and the PVI grid (chainage, level, curve length) are edited in place and
+  applied by one line - `ALIGN PIS`, `ALIGN DESIGN` - with Revert beside it; no
+  line runs from a table's own signal. They show the stored numbers exactly,
+  so applying an edit to one easting writes every other number back
+  unchanged. Unapplied edits survive a reload that did not change what they
+  were made to, and a refused Apply keeps them for correcting.
+- **What it shows is the verbs' own.** The setting-out table is
+  `cad::settingOutStations`, as `ALIGN STATIONS` prints it; the profile's
+  elements, grades, K values (`cad::curveK`: the curve's length over its
+  change of grade in percent) and high and low points are what `ALIGN
+  PROFILE` prints (`cad::formatProfileReport`); a small preview draws the
+  profile over its tangent polygon. The interval is applied as it is typed,
+  with its own note line, so a half-typed interval never hides the last
+  line's reply.
+- **Save CSV opens no file dialog in a headless run**; `ALIGN STATIONS` gives
+  the same table.
+
+Cut Section Along Alignment... and the corridor commands, when there is no
+alignment (or none with a profile) to use, now name Terrain > Alignment
+Manager and open it - except in a headless run. The Terrain menu is in
+sections - Alignments, Surfaces, Sections, Corridors - and its section and
+corridor items carry object names (`terrainSectionAlongAlignment`,
+`terrainSectionAlongSelection`, `terrainCorridorQuantities`,
+`terrainCorridorSurface`), so `--trigger` reaches them.
+
+Tested by `tests/cad/test_alignment_report.cpp` (the table worked by hand from
+the circle, `PIS`), `tests/qt_widgets/test_alignment_manager.cpp` (every
+button's line, one undo step each, the grids' buffering) and, through the
+window, `qt_alignment_manager_headless` and
+`qt_terrain_commands_point_to_the_alignment_manager_headless`.
+
+Not done: picking PIs in the plan view, or a Draw tool that makes an
+alignment by its PIs; the list does not keep another alignment's unapplied
+grid edits when a different alignment is chosen (as the Styles form, it drops
+them); station equations; the chainage labels' layer must exist already, as
+`LABEL ALIGN` requires.
 
 **Chainage labels use `to_chars`, not `snprintf`.** The overlay prints
 1234.5 as `1+234.50`. `snprintf` obeys the C locale and would print
@@ -605,7 +689,12 @@ lines of dialog.
 polyline into its courses as bearings and distances, its area, perimeter and
 centroid; `legalDescription` writes the deed wording; `parcelLabels` makes
 the text entities. `PARCEL id`, `PARCEL id LEGAL [name]` and
-`PARCEL id LABEL [height]` drive them.
+`PARCEL id LABEL [height]` drive them, and so does Survey > Parcel Report
+(`docs/survey.md`): `formatParcelReport` is the report both print and
+`formatParcelSummary` its last line, so the dialog and the verb cannot come
+to differ. `PARCEL id LABEL` says which layer the labels went on - "5 labels
+created on layer 0, the current layer" - since a person labelling from a
+dialog has not been looking at the layer control.
 
 **Nothing is stored.** A parcel is computed from its boundary on demand, so
 the report can never disagree with the drawing and there is no second table

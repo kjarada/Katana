@@ -1,5 +1,6 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/cad/alignment_report.hpp"
 #include "katana/cad/annotation/dimension_style_verbs.hpp"
 #include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
@@ -112,6 +113,39 @@ Result<katana::geometry::ProfilePVI> parsePVI(const std::string& text)
     }
     return katana::geometry::ProfilePVI{numbers[0], numbers[1],
                                         numbers.size() == 3 ? numbers[2] : 0.0};
+}
+
+// "x,y[,radius[,spiralIn[,spiralOut]]]", as ALIGN PIS takes its PIs - one
+// token per PI, the horizontal counterpart of parsePVI.
+Result<katana::geometry::AlignmentPI> parseAlignmentPI(const std::string& text)
+{
+    const auto malformed = [&text] {
+        return makeError(ErrorCode::InvalidArgument, "a PI is x,y[,radius[,spiralIn[,spiralOut]]]",
+                         text);
+    };
+    std::vector<double> numbers;
+    for (std::size_t start = 0;;) {
+        const std::size_t comma = text.find(',', start);
+        const auto value = parseNumber(std::string_view(text).substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        if (!value) {
+            return malformed();
+        }
+        numbers.push_back(*value);
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    if (numbers.size() < 2 || numbers.size() > 5) {
+        return malformed();
+    }
+    katana::geometry::AlignmentPI pi{Point2(numbers[0], numbers[1])};
+    double* fields[] = {&pi.radius, &pi.spiralIn, &pi.spiralOut};
+    for (std::size_t i = 2; i < numbers.size(); ++i) {
+        *fields[i - 2] = numbers[i];
+    }
+    return pi;
 }
 
 Result<double> parseNumber(std::string_view text)
@@ -366,14 +400,18 @@ Linetype  LINETYPE LIST | NEW name dash gap [dash gap ...] | RENAME old new | DE
           LINETYPE MERGE from into   (repoints every layer and style, then deletes from)
           lengths are MODEL units: + dash, - gap, 0 dot. e.g. LINETYPE NEW fence 1 -0.5
 Hatch     HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...] | DELETE name
+          HATCH SET name angle spacing [angle spacing ...] | SET name SOLID   edits one
           angle in DEGREES, spacing in MODEL units.  LAYER HATCH layer pattern attaches one
-Style     STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new
+Style     STYLE LIST | SYMBOLS [filter] | NEW name [field value] | SET name field value
+          STYLE RENAME old new
           STYLE DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]
           fields: linetype weight colour hatch symbol symbolsize description; APPLY - = ByLayer
           linetype takes a model linetype, a loaded library linestyle or ByLayer (the layer's)
 Purge     PURGE [STYLES|LINETYPES|HATCHES|ALL]   deletes what nothing uses, as one undo step
 Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [spOut]]]
-          SET name index radius [spIn [spOut]] | START name station | STATIONS name interval
+          SET name index radius [spIn [spOut]] | START name station
+          PIS name prints the PIs; PIS name x,y[,r[,in[,out]]] ... replaces them all
+          STATIONS name interval   the setting-out table with the key stations, key=value
           DELETE name.  PI indices count from 0; radius 0 is a kink; spirals in MODEL units
           DESIGN name s,z[,L] s,z[,L] ... defines the design profile (parabolic vertical
           curves, symmetric); PVI name s z [L] appends; PROFILE name prints it with its
@@ -804,7 +842,8 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
     }
 
     static constexpr const char* kUsage =
-        "STYLE LIST | SYMBOLS [filter] | NEW name | SET name field value | RENAME old new |"
+        "STYLE LIST | SYMBOLS [filter] | NEW name [field value] | SET name field value |"
+        " RENAME old new |"
         " DELETE name | APPLY name | MERGE from into | USAGE [name] | CURRENT [name|-]\n"
         "  fields: linetype (a model linetype, a library linestyle or ByLayer), weight (mm),\n"
         "  colour (#RRGGBB or bylayer), hatch, symbol,\n"
@@ -827,12 +866,109 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
                                args[count]));
     };
 
-    if (action == "NEW") {
-        if (const auto wrong = wants(2)) {
-            return *wrong;
+    // SET's fields, applied to `changed`: a refusal, or nothing when the
+    // field and its value were taken. Shared by SET and by NEW with a field,
+    // so a new style and an edited one read a field the same way.
+    const auto setField = [&](katana::entity::Style& changed) -> std::optional<Reply> {
+        const std::string field = upper(args[2]);
+        const std::string& value = args[3];
+        if (field == "LINETYPE") {
+            // The rest of the line, as SYMBOL takes it: "WATR Main" unquoted
+            // used to become "WATR" with "Main" dropped.
+            const std::string linetypeName = restOfLine(args, 3);
+            if (katana::entity::isByLayer(linetypeName)) {
+                changed.linetype = std::string(katana::entity::kByLayerLinetype);
+            } else {
+                if (auto status = checkLinetypeName(document_, linetypeName); !status) {
+                    return Reply(status.error());
+                }
+                changed.linetype = linetypeName;
+            }
+        } else if (field == "WEIGHT") {
+            const auto weight = parseNumber(value);
+            if (!weight) {
+                return Reply(weight.error());
+            }
+            changed.lineWeight = *weight;
+        } else if (field == "COLOUR" || field == "COLOR") {
+            if (upper(value) == "BYLAYER") {
+                changed.color.reset();
+            } else {
+                const auto colour = katana::entity::Color::fromHex(value);
+                if (!colour) {
+                    return Reply(colour.error());
+                }
+                changed.color = *colour;
+            }
+        } else if (field == "HATCH") {
+            if (value != "-" && !model.hatchPatterns.contains(value)) {
+                return Reply(makeError(ErrorCode::NotFound, "hatch pattern does not exist", value));
+            }
+            changed.hatchPattern = value == "-" ? std::string() : value;
+        } else if (field == "SYMBOL") {
+            // A library symbol's name has spaces in it - "CULT Bollard" -
+            // so the rest of the line is the name, as DESCRIPTION does.
+            std::string symbolName;
+            for (std::size_t i = 3; i < args.size(); ++i) {
+                symbolName += (i > 3 ? " " : "") + args[i];
+            }
+            if (symbolName == "-") {
+                changed.symbol.clear();
+            } else {
+                // The model itself accepts any name, because a project can be
+                // opened before its library is loaded (see entity::validate).
+                // A person TYPING one should still be told about a typo, which
+                // is the same courtesy HATCH above pays.
+                if (!katana::entity::isBuiltInSymbolName(symbolName) &&
+                    document_.definitionFor(symbolName) == nullptr) {
+                    return Reply(makeError(
+                        ErrorCode::NotFound,
+                        "no symbol of that name is built in or in the loaded library",
+                        symbolName));
+                }
+                changed.symbol = symbolName;
+            }
+        } else if (field == "SYMBOLSIZE") {
+            const auto size = parseNumber(value);
+            if (!size) {
+                return Reply(size.error());
+            }
+            changed.symbolSize = *size;
+        } else if (field == "DESCRIPTION") {
+            std::string text;
+            for (std::size_t i = 3; i < args.size(); ++i) {
+                text += (i > 3 ? " " : "") + args[i];
+            }
+            changed.description = text;
+        } else {
+            return Reply(usage(kUsage));
         }
+        return std::nullopt;
+    };
+
+    if (action == "NEW") {
         katana::entity::Style item;
         item.name = name;
+        // NEW name field value: a style made with one field set, as SET would
+        // set it, in one step - the Hatch Patterns tab's "New Style Using
+        // This". A second word that is no field is a name that needed quotes.
+        if (args.size() > 2) {
+            static constexpr std::string_view kFields[] = {
+                "LINETYPE", "WEIGHT", "COLOUR", "COLOR", "HATCH", "SYMBOL", "SYMBOLSIZE",
+                "DESCRIPTION"};
+            const std::string field = upper(args[2]);
+            if (std::find(std::begin(kFields), std::end(kFields), field) == std::end(kFields)) {
+                if (const auto wrong = wants(2)) {
+                    return *wrong;
+                }
+            }
+            if (args.size() < 4) {
+                return usage(kUsage);
+            }
+            if (auto refused = setField(item)) {
+                return *refused;
+            }
+        }
         return finish(document_.execute(cmd::createStyle(std::move(item))),
                       "style " + name + " created");
     }
@@ -891,77 +1027,8 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
             return makeError(ErrorCode::NotFound, "style does not exist", name);
         }
         katana::entity::Style changed = *existing;
-        const std::string field = upper(args[2]);
-        const std::string& value = args[3];
-        if (field == "LINETYPE") {
-            // The rest of the line, as SYMBOL takes it: "WATR Main" unquoted
-            // used to become "WATR" with "Main" dropped.
-            const std::string linetypeName = restOfLine(args, 3);
-            if (katana::entity::isByLayer(linetypeName)) {
-                changed.linetype = std::string(katana::entity::kByLayerLinetype);
-            } else {
-                if (auto status = checkLinetypeName(document_, linetypeName); !status) {
-                    return status.error();
-                }
-                changed.linetype = linetypeName;
-            }
-        } else if (field == "WEIGHT") {
-            const auto weight = parseNumber(value);
-            if (!weight) {
-                return weight.error();
-            }
-            changed.lineWeight = *weight;
-        } else if (field == "COLOUR" || field == "COLOR") {
-            if (upper(value) == "BYLAYER") {
-                changed.color.reset();
-            } else {
-                const auto colour = katana::entity::Color::fromHex(value);
-                if (!colour) {
-                    return colour.error();
-                }
-                changed.color = *colour;
-            }
-        } else if (field == "HATCH") {
-            if (value != "-" && !model.hatchPatterns.contains(value)) {
-                return makeError(ErrorCode::NotFound, "hatch pattern does not exist", value);
-            }
-            changed.hatchPattern = value == "-" ? std::string() : value;
-        } else if (field == "SYMBOL") {
-            // A library symbol's name has spaces in it - "CULT Bollard" -
-            // so the rest of the line is the name, as DESCRIPTION does.
-            std::string symbolName;
-            for (std::size_t i = 3; i < args.size(); ++i) {
-                symbolName += (i > 3 ? " " : "") + args[i];
-            }
-            if (symbolName == "-") {
-                changed.symbol.clear();
-            } else {
-                // The model itself accepts any name, because a project can be
-                // opened before its library is loaded (see entity::validate).
-                // A person TYPING one should still be told about a typo, which
-                // is the same courtesy HATCH above pays.
-                if (!katana::entity::isBuiltInSymbolName(symbolName) &&
-                    document_.definitionFor(symbolName) == nullptr) {
-                    return makeError(ErrorCode::NotFound,
-                                     "no symbol of that name is built in or in the loaded library",
-                                     symbolName);
-                }
-                changed.symbol = symbolName;
-            }
-        } else if (field == "SYMBOLSIZE") {
-            const auto size = parseNumber(value);
-            if (!size) {
-                return size.error();
-            }
-            changed.symbolSize = *size;
-        } else if (field == "DESCRIPTION") {
-            std::string text;
-            for (std::size_t i = 3; i < args.size(); ++i) {
-                text += (i > 3 ? " " : "") + args[i];
-            }
-            changed.description = text;
-        } else {
-            return usage(kUsage);
+        if (auto refused = setField(changed)) {
+            return *refused;
         }
         // Setting what is already there is not an edit: no undo step.
         auto command = cmd::updateStyleIfChanged(model, std::move(changed));
@@ -1522,11 +1589,36 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
         return text;
     }
 
+    const char* const kUsage = "HATCH LIST | SOLID name | NEW name angle spacing [angle spacing"
+                               " ...] | SET name angle spacing [angle spacing ...] | SET name"
+                               " SOLID | DELETE name";
     if (args.size() < 2) {
-        return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
-                     " | DELETE name");
+        return usage(kUsage);
     }
     const std::string& name = args[1];
+
+    // "angle spacing [angle spacing ...]" from args[2] on. Angles are DEGREES
+    // here and radians in the model. Every other angle the interpreter takes
+    // is in degrees, because that is what a drafter types; converting at the
+    // edge keeps the model in one unit.
+    const auto families = [&args]() -> Result<std::vector<katana::entity::HatchLineFamily>> {
+        std::vector<katana::entity::HatchLineFamily> parsed;
+        for (std::size_t i = 2; i + 1 < args.size(); i += 2) {
+            const auto angle = parseNumber(args[i]);
+            if (!angle) {
+                return angle.error();
+            }
+            const auto spacing = parseNumber(args[i + 1]);
+            if (!spacing) {
+                return spacing.error();
+            }
+            katana::entity::HatchLineFamily family;
+            family.angle = *angle * katana::math::kDegToRad;
+            family.spacing = *spacing;
+            parsed.push_back(family);
+        }
+        return parsed;
+    };
 
     if (action == "DELETE") {
         return finish(document_.execute(cmd::deleteHatchPattern(name)),
@@ -1541,9 +1633,6 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
                       "hatch pattern " + name + " created (solid)");
     }
     if (action == "NEW") {
-        // Angles are DEGREES here and radians in the model. Every other angle
-        // the interpreter takes is in degrees, because that is what a drafter
-        // types; converting at the edge keeps the model in one unit.
         if (args.size() < 4 || (args.size() - 2) % 2 != 0) {
             return usage("HATCH NEW name angle spacing [angle spacing ...]\n"
                          "  angle in DEGREES, spacing in MODEL units."
@@ -1551,26 +1640,66 @@ CommandInterpreter::Reply CommandInterpreter::hatchPattern(const Tokens& args)
         }
         katana::entity::HatchPattern pattern;
         pattern.name = name;
-        for (std::size_t i = 2; i + 1 < args.size(); i += 2) {
-            const auto angle = parseNumber(args[i]);
-            if (!angle) {
-                return angle.error();
-            }
-            const auto spacing = parseNumber(args[i + 1]);
-            if (!spacing) {
-                return spacing.error();
-            }
-            katana::entity::HatchLineFamily family;
-            family.angle = *angle * katana::math::kDegToRad;
-            family.spacing = *spacing;
-            pattern.families.push_back(family);
+        auto parsed = families();
+        if (!parsed) {
+            return parsed.error();
         }
+        pattern.families = std::move(*parsed);
+        const std::size_t count = pattern.families.size();
         return finish(document_.execute(cmd::createHatchPattern(std::move(pattern))),
-                      "hatch pattern " + name + " created (" +
-                          std::to_string(pattern.families.size()) + " families)");
+                      "hatch pattern " + name + " created (" + std::to_string(count) +
+                          " families)");
     }
-    return usage("HATCH LIST | SOLID name | NEW name angle spacing [angle spacing ...]"
-                 " | DELETE name");
+    if (action == "SET") {
+        // An existing pattern's families, or its fill, replaced as one undo
+        // step - what the Hatch Patterns tab's Save runs. The name and the
+        // description are the pattern's and are kept; so is each family's
+        // offset where a family of that position remains, since none can be
+        // typed and an imported pattern's would otherwise be lost to an edit
+        // of its spacing.
+        const bool toSolid = args.size() == 3 && upper(args[2]) == "SOLID";
+        if (!toSolid && (args.size() < 4 || (args.size() - 2) % 2 != 0)) {
+            return usage("HATCH SET name angle spacing [angle spacing ...] | HATCH SET name SOLID"
+                         "\n  angle in DEGREES, spacing in MODEL units");
+        }
+        const katana::entity::HatchPattern* existing = model.hatchPatterns.find(name);
+        if (existing == nullptr) {
+            return makeError(ErrorCode::NotFound, "hatch pattern does not exist", name);
+        }
+        katana::entity::HatchPattern changed = *existing;
+        if (toSolid) {
+            changed.solid = true;
+            changed.families.clear();
+            // What HATCH SOLID calls one, when it has no words of its own.
+            if (changed.description.empty()) {
+                changed.description = "Solid fill";
+            }
+        } else {
+            auto parsed = families();
+            if (!parsed) {
+                return parsed.error();
+            }
+            for (std::size_t i = 0; i < parsed->size() && i < existing->families.size(); ++i) {
+                (*parsed)[i].offset = existing->families[i].offset;
+            }
+            changed.solid = false;
+            changed.families = std::move(*parsed);
+            // HATCH SOLID's own words, which would now be untrue.
+            if (existing->solid && changed.description == "Solid fill") {
+                changed.description.clear();
+            }
+        }
+        // Setting what is already there is not an edit: no undo step.
+        if (changed == *existing) {
+            return "hatch pattern " + name + " unchanged";
+        }
+        const std::string kind = changed.solid ? std::string("solid")
+                                               : std::to_string(changed.families.size()) +
+                                                     " families";
+        return finish(document_.execute(cmd::updateHatchPattern(std::move(changed))),
+                      "hatch pattern " + name + " updated (" + kind + ")");
+    }
+    return usage(kUsage);
 }
 
 CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
@@ -1580,6 +1709,7 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
     const char* const kUsage =
         "ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spiralIn [spiralOut]]]"
         "\n      | SET name index radius [spiralIn [spiralOut]] | START name station"
+        "\n      | PIS name [x,y[,radius[,spiralIn[,spiralOut]]] ...]"
         "\n      | STATIONS name interval | DELETE name     (PI indices count from 0)"
         "\n      | DESIGN name station,elevation[,curveLength] ... (at least two PVIs)"
         "\n      | PVI name station elevation [curveLength] | PROFILE name | CLEARPROFILE name";
@@ -1687,6 +1817,42 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
                       "alignment " + name + " PI " + args[2] + " updated");
     }
+    if (action == "PIS") {
+        // Alone, what an agent needs to edit an alignment it did not draw:
+        // every PI, exactly, a record each.
+        if (args.size() == 2) {
+            std::string text;
+            const auto& pis = existing->horizontal.pis;
+            for (std::size_t i = 0; i < pis.size(); ++i) {
+                text += (i == 0 ? "" : "\n") + std::string("pi index=") + std::to_string(i) +
+                        " x=" + katana::core::formatExactReal(pis[i].point.x) +
+                        " y=" + katana::core::formatExactReal(pis[i].point.y) +
+                        " radius=" + katana::core::formatExactReal(pis[i].radius) +
+                        " spiral_in=" + katana::core::formatExactReal(pis[i].spiralIn) +
+                        " spiral_out=" + katana::core::formatExactReal(pis[i].spiralOut);
+            }
+            return text;
+        }
+        // With PIs, the whole horizontal definition at once, as DESIGN is
+        // the whole profile: an edit of several PIs - the Alignment Manager's
+        // grid - is one undo step, and the model judges the result whole.
+        if (args.size() < 4) {
+            return usage("ALIGN PIS name x,y[,radius[,spiralIn[,spiralOut]]] ...   at least two;"
+                         " ALIGN PIS name alone prints them");
+        }
+        std::vector<katana::geometry::AlignmentPI> pis;
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            auto pi = parseAlignmentPI(args[i]);
+            if (!pi) {
+                return pi.error();
+            }
+            pis.push_back(*pi);
+        }
+        changed.horizontal.pis = std::move(pis);
+        const std::size_t count = changed.horizontal.pis.size();
+        return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
+                      "alignment " + name + " now has " + std::to_string(count) + " PIs");
+    }
     if (action == "START") {
         if (args.size() < 3) {
             return usage("ALIGN START name station");
@@ -1707,51 +1873,16 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         if (!interval) {
             return interval.error();
         }
-        if (!(*interval > 0.0)) {
-            return makeError(ErrorCode::InvalidArgument, "the interval must be positive");
-        }
         auto solved = katana::geometry::solveAlignment(existing->horizontal);
         if (!solved) {
             return solved.error();
         }
-        // Every interval station plus every key station, in order, once. A
-        // setting-out table with the TS, SC, CS and ST missing is not one.
-        std::vector<double> stations = solved->keyStations();
-        for (double s = solved->startStation(); s < solved->endStation(); s += *interval) {
-            stations.push_back(s);
+        // The table Terrain > Alignment Manager shows, from the same function.
+        auto stations = settingOutStations(*solved, *interval);
+        if (!stations) {
+            return stations.error();
         }
-        std::sort(stations.begin(), stations.end());
-        stations.erase(std::unique(stations.begin(), stations.end(),
-                                   [](double a, double b) { return std::abs(a - b) < 1e-9; }),
-                       stations.end());
-        if (stations.size() > 100000) {
-            return makeError(ErrorCode::InvalidArgument, "that interval gives too many stations",
-                             std::to_string(stations.size()) + " stations, the limit is 100000");
-        }
-        std::ostringstream out;
-        out << std::fixed;
-        out.precision(3);
-        out << "  station        x             y        direction  radius\n";
-        for (double s : stations) {
-            const auto point = solved->pointAtStation(s);
-            const auto direction = solved->directionAtStation(s);
-            const auto curvature = solved->curvatureAtStation(s);
-            if (!point || !direction || !curvature) {
-                continue;
-            }
-            out << "  " << std::setw(10) << s << "  " << std::setw(12) << point->x << "  "
-                << std::setw(12) << point->y << "  " << std::setw(8)
-                << *direction * katana::math::kRadToDeg << "  ";
-            if (*curvature == 0.0) {
-                out << "straight";
-            } else {
-                out << std::setw(8) << 1.0 / *curvature;
-            }
-            out << "\n";
-        }
-        std::string text = out.str();
-        text.pop_back();
-        return text;
+        return formatSettingOut(*stations);
     }
     if (action == "DESIGN") {
         // The whole profile at once, because a profile with one PVI cannot be
@@ -1818,36 +1949,7 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         if (!solved) {
             return solved.error();
         }
-        std::ostringstream out;
-        out << std::fixed;
-        out.precision(3);
-        out << "  PVIs:";
-        for (const katana::geometry::ProfilePVI& pvi : existing->vertical->pvis) {
-            out << "  " << pvi.station << " @ " << pvi.elevation;
-            if (pvi.curveLength > 0.0) {
-                out << " L=" << pvi.curveLength;
-            }
-        }
-        out << "\n";
-        for (const katana::geometry::ProfileElement& element : solved->elements()) {
-            out << "  " << (element.kind == katana::geometry::ProfileElementKind::Curve
-                                ? "curve  "
-                                : "tangent")
-                << "  " << std::setw(10) << element.startStation << " to " << std::setw(10)
-                << element.startStation + element.length << "  grade " << std::setw(7)
-                << element.startGrade * 100.0 << "%";
-            if (element.kind == katana::geometry::ProfileElementKind::Curve) {
-                out << " to " << std::setw(7) << element.endGrade * 100.0 << "%";
-            }
-            out << "\n";
-        }
-        for (const katana::geometry::ProfileExtremum& point : solved->highLowPoints()) {
-            out << "  " << (point.high ? "high point" : "low point ") << " at " << point.station
-                << " @ " << point.elevation << "\n";
-        }
-        std::string text = out.str();
-        text.pop_back();
-        return text;
+        return formatProfileReport(*existing->vertical, *solved);
     }
     if (action == "CLEARPROFILE") {
         changed.vertical.reset();
@@ -1989,27 +2091,17 @@ CommandInterpreter::Reply CommandInterpreter::parcel(const Tokens& args)
             chain->add(cmd::createText(std::move(label), attributes));
         }
         const std::size_t count = labels->size();
+        // The layer by name: "the current layer" does not say which, and a
+        // person who asked from a dialog has not been looking at it.
         return finish(document_.execute(std::move(chain)),
-                      std::to_string(count) + " labels created on the current layer");
+                      std::to_string(count) + " labels created on layer " +
+                          attributes.layer + ", the current layer");
     }
     if (action != "REPORT") {
         return usage(kUsage);
     }
-
-    std::ostringstream out;
-    out << std::fixed;
-    out.precision(3);
-    out << "  course  from                      bearing           distance\n";
-    std::size_t index = 1;
-    for (const ParcelCourse& course : report->courses) {
-        out << "  " << std::setw(4) << index++ << "    " << std::setw(10) << course.from.x << ","
-            << std::setw(10) << course.from.y << "   " << course.bearing << "   " << std::setw(10)
-            << course.distance << "\n";
-    }
-    out << "  area " << report->area << " m2 (" << report->area / 10000.0 << " ha), perimeter "
-        << report->perimeter << " m, centroid " << report->centroid.x << "," << report->centroid.y
-        << ", drawn " << (report->clockwise ? "clockwise" : "counter-clockwise");
-    return out.str();
+    // What Survey > Parcel Report shows, from the same formatter.
+    return formatParcelReport(*report);
 }
 
 // ---- survey tools ---------------------------------------------------------------------------

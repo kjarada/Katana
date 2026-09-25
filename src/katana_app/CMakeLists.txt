@@ -238,6 +238,40 @@ if(KATANA_BUILD_TESTS)
         "Entities: 1  Layers: 1  Alignments: 0${_eol}Current layer: 0${_eol}Selected: 1  Undo steps: 1  Redo steps: 0${_eol}.*  \"entities\": 1,${_eol}.*  \"selected\": 1,${_eol}.*  \"undoSteps\": 1${_eol}}"
         FAIL_REGULAR_EXPRESSION "error")
 
+    # An alignment's PIs read back exactly, rewritten as one line, and its
+    # setting-out table a record a station with the key stations named - what
+    # Terrain > Alignment Manager runs and shows (docs/cad.md). R = 50 round
+    # the right angle at (100,0) puts the TC at chainage 50 and the CT at
+    # 50 + 25 pi = 128.540.
+    add_test(NAME cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "ALIGN NEW road 0,0 100,0 100,100"
+                -c "ALIGN PIS road 0,0 100,0,50 100,100" -c "ALIGN PIS road"
+                -c "ALIGN STATIONS road 1000")
+    # PARCEL as Survey > Parcel Report runs it: the report the dialog shows,
+    # and LABEL naming the layer the labels went on (4 courses and the area).
+    add_test(NAME cli.parcel_reports_and_labels_naming_the_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 100,0 100,50 0,50 CLOSE" -c "PARCEL 1"
+                -c "PARCEL 1 LABEL 2")
+    set_tests_properties(cli.parcel_reports_and_labels_naming_the_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m.*5 labels created on layer 0, the current layer"
+        FAIL_REGULAR_EXPRESSION "error")
+    # HATCH SET and STYLE NEW with a field, as the Hatch Patterns tab runs
+    # them: the pattern edited to a crosshatch, a style made hatching with it.
+    add_test(NAME cli.hatch_set_edits_a_pattern_and_a_style_is_made_with_it
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "HATCH NEW brick 45 0.25"
+                -c "HATCH SET brick 45 0.5 135 0.5" -c "STYLE NEW paving HATCH brick"
+                -c "HATCH LIST" -c "STYLE LIST")
+    set_tests_properties(cli.hatch_set_edits_a_pattern_and_a_style_is_made_with_it PROPERTIES
+        PASS_REGULAR_EXPRESSION "hatch pattern brick updated [(]2 families[)].*style paving created.*brick  [[]45 deg @ 0[.]5[]]  [[]135 deg @ 0[.]5[]].*paving  [^\n]*hatch=brick"
+        FAIL_REGULAR_EXPRESSION "error")
+    set_tests_properties(cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
+        PROPERTIES
+        PASS_REGULAR_EXPRESSION "pi index=1 x=100 y=0 radius=50 spiral_in=0 spiral_out=0.*station=50[.]000 x=50[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^ ]+ radius=50[.]000 turn=left key=TC.*station=128[.]540 x=100[.]000 y=50[.]000 direction=90[.]000 [^ ]+ radius=straight key=CT.*key=end"
+        FAIL_REGULAR_EXPRESSION "error")
+
     # The help names the customisation's files by what they are, in the words
     # the window uses, and no product: what STYLE's linetype takes and what
     # CUSTOMISE loads.

@@ -170,10 +170,11 @@ struct StyleDiagnostic {
 
 // ---- select users -------------------------------------------------------------------
 
-enum class UsageTable { Style, Linetype, Symbol };
+enum class UsageTable { Style, Linetype, Symbol, HatchPattern };
 
 // The entities reaching any of `names` in `table` - wearing the style, drawn
-// with the linetype, drawn with the symbol - by entity::tableUsage's rule,
+// with the linetype, the symbol or the hatch pattern - by entity::tableUsage's
+// rule,
 // ascending and without repeats. What "Select Users" selects.
 [[nodiscard]] std::vector<katana::entity::EntityId>
 entitiesUsing(const katana::entity::Model& model, UsageTable table,
