@@ -244,7 +244,7 @@ TEST(KeyPlan, AnAutomaticPlanIsFittedByThePaintersRule)
     EXPECT_EQ(fitPlanPlacement(viewport, {}), storedPlacement(viewport));
 }
 
-TEST(KeyPlan, AnAutomaticKeyPlanHoldsEveryOutlineAndTheDrawing)
+TEST(KeyPlan, AnAutomaticKeyPlanFramesTheOutlinesAndTheDrawingOnlyWithoutThem)
 {
     const SheetSet set = keyAndTwoPlans();
     Viewport key = set.sheets[0].viewports[0]; // 100 x 70 mm
@@ -252,24 +252,30 @@ TEST(KeyPlan, AnAutomaticKeyPlanHoldsEveryOutlineAndTheDrawing)
     key.autoCentre = true;
     const auto outlines = keyPlanOutlines(set, 0);
 
-    // The outlines alone span 950..1150 x 1975..2025: 200 m across 100 mm
-    // with 4% to spare is 1:2080, so 1:2500.
+    // The outlines span 950..1150 x 1975..2025: 200 m across 100 mm with 4%
+    // to spare is 1:2080, so 1:2500, centred on them.
     const PlanPlacement tight = fitKeyPlan(key, outlines, Box2{});
     EXPECT_DOUBLE_EQ(tight.scale, 2500.0);
     EXPECT_NEAR(tight.centre.x, 1050.0, 1e-9);
     EXPECT_NEAR(tight.centre.y, 2000.0, 1e-9);
-
-    // With a drawing down at the origin the key plan takes both in.
-    const Box2 drawing(Point2(0.0, 0.0), Point2(10.0, 10.0));
-    const PlanPlacement wide = fitKeyPlan(key, outlines, drawing);
-    EXPECT_NEAR(wide.centre.x, 575.0, 1e-9);
-    EXPECT_NEAR(wide.centre.y, 1012.5, 1e-9);
     for (const KeyPlanOutline& outline : outlines) {
         for (const Point2& corner : outline.corners) {
-            EXPECT_TRUE(key.rect.contains(planWorldToPaper(key, wide, corner)));
+            EXPECT_TRUE(key.rect.contains(planWorldToPaper(key, tight, corner)));
         }
     }
-    EXPECT_TRUE(key.rect.contains(planWorldToPaper(key, wide, drawing.min)));
+
+    // Drawing far off - a stray down at the origin - does not shrink the
+    // sheets: the key plan frames them alone.
+    const Box2 drawing(Point2(0.0, 0.0), Point2(10.0, 10.0));
+    EXPECT_EQ(fitKeyPlan(key, outlines, drawing), tight);
+
+    // With no sheet to frame it shows the drawing.
+    const PlanPlacement alone = fitKeyPlan(key, {}, drawing);
+    EXPECT_NEAR(alone.centre.x, 5.0, 1e-9);
+    EXPECT_NEAR(alone.centre.y, 5.0, 1e-9);
+    EXPECT_LT(alone.scale, tight.scale);
+    // And with nothing at all it keeps its own.
+    EXPECT_EQ(fitKeyPlan(key, {}, Box2{}), storedPlacement(key));
 }
 
 TEST(KeyPlan, HeadlessAPlanIsPlacedOverTheModelAndAKeyPlanOverEverySheet)
@@ -310,7 +316,7 @@ TEST(KeyPlan, HeadlessAPlanIsPlacedOverTheModelAndAKeyPlanOverEverySheet)
     EXPECT_EQ(placePlan(katana::entity::Model{}, plan), storedPlacement(plan));
 
     // A key plan on sheet 1 over the automatic plan (sheet 2) and the fixed
-    // one far off (sheet 3): it holds both outlines and the drawing.
+    // one far off (sheet 3): it frames both outlines.
     SheetSet set;
     Viewport key = keyPlanOf("vp1", Box2(Point2(30.0, 40.0), Point2(130.0, 110.0)));
     key.autoScale = true;
@@ -324,7 +330,7 @@ TEST(KeyPlan, HeadlessAPlanIsPlacedOverTheModelAndAKeyPlanOverEverySheet)
     EXPECT_NEAR(outlines[0].corners[0].x, -100.0, 1e-9);
     EXPECT_NEAR(outlines[0].corners[2].y, 175.0, 1e-9);
     const PlanPlacement keyAt = placePlan(model, set, 0, key);
-    EXPECT_EQ(keyAt, fitKeyPlan(key, outlines, Box2(Point2(0.0, 0.0), Point2(300.0, 100.0))));
+    EXPECT_EQ(keyAt, fitKeyPlan(key, outlines, Box2{}));
     for (const KeyPlanOutline& outline : outlines) {
         for (const Point2& corner : outline.corners) {
             EXPECT_TRUE(key.rect.contains(planWorldToPaper(key, keyAt, corner)));

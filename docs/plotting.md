@@ -741,9 +741,9 @@ edges it meets.
 - A label is kept only when it lies wholly inside the viewport, clear of the
   view's title, scale bar and north arrow, and at least 1.5 mm clear of the
   labels already kept (`PlanGridOptions::labelSpacingMm`): two closer than
-  that read as one label run on into the next. The painter passes the exact boxes those three knock out
-  (`PlanGridOptions::keepOut`), so a label never sits over the title or the
-  scale-bar corner, and never half-under either. Labels are taken bottom,
+  that read as one label run on into the next. The painter passes the exact
+  boxes those three knock out (`PlanGridOptions::keepOut`), so a label never
+  sits over the title or the scale-bar corner, and never half-under either. Labels are taken bottom,
   left, top, right, and along each edge in order, so the same grid always
   keeps the same ones.
 
@@ -814,9 +814,11 @@ the stale copies. Its other marks, match lines, still are. The editor's Add
 View > Key Plan stores none. The tile and strip generators still store them,
 and they still reserve their sheets' ids (`newSheetIds`).
 
-**An automatic key plan** (`autoScale` or `autoCentre`) fits every outline as
-well as the drawing (`fitKeyPlan`). Before, it fitted the drawing alone, so a
-sheet over ground outside the drawing's extent fell off it. The painter and
+**An automatic key plan** (`autoScale` or `autoCentre`) fits the union of
+the outlines (`fitKeyPlan`), and the drawing only when the set has no plan to
+outline. Before, it fitted the drawing alone, so a sheet over ground outside
+the drawing's extent fell off it, and a stray entity far away shrank every
+sheet to a speck. The painter and
 the editor resolve it through the four-argument `resolvePlanViewport(viewport,
 source, set, sheetIndex)`. For every other viewport that gives the same as
 the two-argument form.

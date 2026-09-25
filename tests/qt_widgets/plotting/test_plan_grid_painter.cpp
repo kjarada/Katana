@@ -499,7 +499,7 @@ TEST(SheetKeyPlan, StoredOutlinesAreNotDrawnButItsOtherMarksAre)
     EXPECT_LT(darkestIn(image, box(175.0, 139.5, 225.0, 140.5)), 100);
 }
 
-TEST(SheetKeyPlan, AnAutomaticKeyPlanTakesInEverySheetAndTheDrawing)
+TEST(SheetKeyPlan, AnAutomaticKeyPlanFramesEverySheetNotTheDrawing)
 {
     Model model;
     addLine(model, Point2(0.0, 0.0), Point2(10.0, 10.0));
@@ -511,7 +511,8 @@ TEST(SheetKeyPlan, AnAutomaticKeyPlanTakesInEverySheetAndTheDrawing)
     key.autoCentre = true;
 
     // On the drawing alone it would show the line at the origin and neither
-    // sheet; with the set it takes in both.
+    // sheet; with the set it frames both sheets, and the line - far off, a
+    // kilometre and more away - is left out rather than shrinking them.
     const auto drawingOnly = katana::qt::resolvePlanViewport(key, source);
     const auto withSheets = katana::qt::resolvePlanViewport(key, source, set, 0);
     const auto outlines = plotting::keyPlanOutlines(set, 0);
@@ -526,8 +527,14 @@ TEST(SheetKeyPlan, AnAutomaticKeyPlanTakesInEverySheetAndTheDrawing)
             EXPECT_TRUE(inside(withSheets, corner));
         }
     }
-    EXPECT_TRUE(inside(withSheets, Point2(0.0, 0.0)));
-    EXPECT_TRUE(inside(withSheets, Point2(10.0, 10.0)));
+    EXPECT_FALSE(inside(withSheets, Point2(0.0, 0.0)));
+    EXPECT_EQ(withSheets.scale, plotting::fitKeyPlan(key, outlines, Box2{}).scale);
+    // A set with no plan to frame falls back to the drawing.
+    plotting::SheetSet lonely;
+    lonely.sheets.push_back(set.sheets[0]);
+    const auto noSheets = katana::qt::resolvePlanViewport(key, source, lonely, 0);
+    EXPECT_EQ(noSheets.scale, drawingOnly.scale);
+    EXPECT_EQ(noSheets.centre, drawingOnly.centre);
     // A plan is fitted as before: the set changes nothing for it.
     const plotting::Viewport& tile = set.sheets[1].viewports[0];
     plotting::Viewport automatic = tile;
@@ -644,5 +651,85 @@ TEST(SheetKeyPlan, AnAutomaticPlanIsFittedByTheSameRuleHeadlessAsPainted)
         EXPECT_EQ(painter.scale, headless.scale) << rotation;
         EXPECT_NEAR(painter.centre.x, headless.centre.x, 1e-6) << rotation;
         EXPECT_NEAR(painter.centre.y, headless.centre.y, 1e-6) << rotation;
+    }
+}
+
+// ---- a whole set, framed, to look at -----------------------------------------------------
+
+TEST(SheetGrid, AFramedSetReadsCleanlyInEveryStyleAndOnItsKeyPlan)
+{
+    // Three sheets as they are plotted - in the built-in frame, over a road
+    // and a few lines - each plan in another grid style, one turned 25
+    // degrees, and a key plan beside the first. With KATANA_SHEET_PNG set
+    // these are the pictures to look at; here every label is held inside its
+    // viewport, clear of the others and of the furniture, and every sheet
+    // paints without a problem.
+    Model model;
+    katana::entity::Alignment road;
+    road.name = "ROAD";
+    road.horizontal.pis = {{Point2(305000.0, 6250200.0)},
+                           {Point2(305400.0, 6250300.0)},
+                           {Point2(305700.0, 6250650.0)}};
+    road.horizontal.pis[1].radius = 250.0;
+    ASSERT_TRUE(model.alignments.add(road).ok());
+    addLine(model, Point2(305050.0, 6250260.0), Point2(305420.0, 6250350.0));
+    addLine(model, Point2(305420.0, 6250350.0), Point2(305660.0, 6250640.0));
+    SheetSource source;
+    source.plan.model = &model;
+
+    plotting::SheetSet set;
+    const std::vector<std::pair<GridStyle, double>> styles = {
+        {GridStyle::Lines, 0.0}, {GridStyle::Crosses, 0.0}, {GridStyle::Ticks, 0.4363}};
+    for (std::size_t i = 0; i < styles.size(); ++i) {
+        plotting::Sheet sheet;
+        sheet.id = "s" + std::to_string(i + 1);
+        sheet.name = sheet.id;
+        const Box2 area = plotting::drawingArea(sheet);
+        ASSERT_FALSE(area.empty());
+        const double split = i == 0 ? area.min.x + 0.68 * area.width() : area.max.x;
+        const double step = static_cast<double>(i);
+        plotting::Viewport view =
+            plan("vp" + std::to_string(i + 1), box(area.min.x, area.min.y, split, area.max.y),
+                 1000.0, Point2(305180.0 + 220.0 * step, 6250280.0 + 150.0 * step),
+                 styles[i].second);
+        view.gridStyle = styles[i].first;
+        view.northArrow = true;
+        view.scaleBar = true;
+        sheet.viewports.push_back(view);
+        if (i == 0) {
+            plotting::Viewport key = keyPlan(
+                "vpk", box(split + 4.0, area.max.y - 90.0, area.max.x, area.max.y), 5000.0,
+                Point2());
+            key.autoScale = true;
+            key.autoCentre = true;
+            key.northArrow = true;
+            key.gridStyle = GridStyle::Ticks;
+            sheet.viewports.push_back(key);
+        }
+        set.sheets.push_back(std::move(sheet));
+    }
+
+    for (std::size_t index = 0; index < set.sheets.size(); ++index) {
+        SheetPaintStats stats;
+        const std::string tag = "_sheet" + std::to_string(index + 1);
+        (void)painted(set, index, source, &stats, tag.c_str());
+        EXPECT_TRUE(stats.problems.empty()) << stats.problems.front();
+        for (const plotting::Viewport& viewport : set.sheets[index].viewports) {
+            const katana::qt::ResolvedViewport at =
+                katana::qt::resolvePlanViewport(viewport, source, set, index);
+            const auto grid = plotting::planGrid(viewport, {at.scale, at.centre});
+            ASSERT_TRUE(grid.ok()) << grid.error().message;
+            EXPECT_FALSE(grid->labels.empty()) << viewport.id;
+            for (std::size_t a = 0; a < grid->labels.size(); ++a) {
+                EXPECT_TRUE(viewport.rect.contains(grid->labels[a].box)) << grid->labels[a].text;
+                for (std::size_t b = a + 1; b < grid->labels.size(); ++b) {
+                    const Box2& p = grid->labels[a].box;
+                    const Box2& q = grid->labels[b].box;
+                    EXPECT_TRUE(p.max.x <= q.min.x || q.max.x <= p.min.x || p.max.y <= q.min.y ||
+                                q.max.y <= p.min.y)
+                        << grid->labels[a].text << " / " << grid->labels[b].text;
+                }
+            }
+        }
     }
 }
