@@ -123,6 +123,10 @@ TEST(SheetVerbs, TheInterpreterHandsSheetVerbsOnAndListsThemInItsHelp)
     const std::string help = CommandInterpreter::helpText();
     EXPECT_TRUE(contains(help, "Sheets    SHEETS [LIST]"));
     EXPECT_TRUE(contains(help, "PLOTSHEETS path.pdf"));
+    // katana_cli prints this help and refuses PLOTSHEETS, so the help says
+    // whose verb it is rather than advertise one the reader cannot run.
+    EXPECT_TRUE(contains(help, "the desktop window's alone"));
+    EXPECT_TRUE(contains(help, "katana_cli refuses it"));
 
     Session session;
     const std::string sheetHelp = session.ok("HELP SHEETS");

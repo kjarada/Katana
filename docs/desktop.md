@@ -169,7 +169,8 @@ any, and `qt_every_shortcut_and_menu_letter_reaches_one_thing_headless` runs
 it. Ten underlined letters were changed to pass it (A&ttributes, Sym&bol
 Library, Loa&d Customisation, In&verse, Toggle Pe&rspective and others).
 The tool actions built from the catalogue have no underlined letters; their
-aliases are in their tooltips.
+aliases are in their tooltips. Help > Keyboard Shortcuts lists the keys for a
+person ("The Command Reference and the keyboard shortcuts", below).
 
 `katana --screenshot` grabs the window headlessly so that the look can be
 reviewed, and the same run can drive the menus and dialogs step by step:
@@ -825,6 +826,60 @@ rules, the record, the dialog) and through the real window by
 `qt_several_lines_on_the_command_line_run_as_a_script_headless` and the two
 batch runs, `qt_script_batch_run_exits_when_the_script_is_done_headless` and
 `qt_script_batch_run_fails_at_a_refused_line_headless`.
+
+## The Command Reference and the keyboard shortcuts
+
+Help > Command Reference (`helpCommandReference`, F1) used to print the
+interpreter's help into the log, which left out every verb the window's front
+end runs itself, and the sheet verbs' options could be read only by typing
+HELP SHEETS. It is now a non-modal, searchable dialog (`commandReferenceDialog`,
+`src/katana_qt/command_reference_dialog.hpp`), built from the texts the verbs'
+own code keeps, so nothing is written twice:
+
+- **Commands**: `CommandInterpreter::helpText`, the annotation verbs included;
+- **Sheets**: `plotting::sheetVerbHelp`, every option (Help > Sheets and
+  Plotting Commands, `helpSheetCommands`, opens the reference here);
+- **Subsurface utilities**: `utilities::utilityVerbHelp`;
+- **Online data**: `interop::onlineUsage`;
+- **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
+  `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
+  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `CUSTOMISE`, `PLOTSHEETS`, `ZOOM`,
+  `GRID`, `SNAP`, `ONLINE`, `UTILITY`, `QUIT`), and the rule for a bare tool
+  word - with the one word that means different things on the two command
+  lines: a bare `LS` starts the List tool in the window and is `LABELSTYLE`
+  in `katana_cli`;
+- **the tools**, a section a menu: each tool's name, aliases, key, tip and id,
+  from the tool catalogue.
+
+`referenceEntries` reads a help text into entries by the layout every help
+here keeps: an entry starts at a line that does not start with a blank, a
+label in the first column (`DimStyle  DIMSTYLE LIST ...`) titles a group, and a
+first paragraph ended by a blank line is the section's introduction. The
+search wants every word it is given, in any case; a double-click puts the
+entry's verb on the command line, to be finished there, and the reference
+itself runs nothing. `windowHelpText` lives beside the reference rather than
+in `main_window.cpp` so that the widget tests search the real text; a comment
+on `dispatchLine` says a verb added there is added to it, and
+`CommandReference.TheWindowSectionNamesEveryVerbTheWindowRunsItself` checks
+the list. A typed `HELP` (or `?`) alone prints the interpreter's help and then
+`windowHelpText`; `HELP SHEETS` and `HELP UTILITY` are unchanged.
+
+The reverse fault is fixed too: the interpreter's help listed `PLOTSHEETS`,
+which `katana_cli` refuses (it paints, and only the window can), so
+`katana_cli -h` and `katana_mcp`'s `katana_help` advertised a verb their
+reader could not run. The line now says it is the window's, and names
+`--plot-sheets` for a headless run.
+
+Help > Keyboard Shortcuts (`helpKeyboardShortcuts`, `keyboardShortcutsDialog`,
+`src/katana_qt/keyboard_shortcuts_dialog.hpp`) is a searchable table of every
+key the window answers to - the key, the command, the menu it is under and its
+status tip (`MainWindow::shortcutRows`) - with any key that
+`MainWindow::shortcutClashes` finds reaching two commands marked "(clash)" and
+listed under the table. The keys are the ones `--check-shortcuts` counts, so
+the two cannot disagree.
+
+Tested in `tests/qt_widgets/test_command_reference.cpp` and, through the Help
+menu, by `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`.
 
 ## GIS > Online Data: a workbench of its own
 

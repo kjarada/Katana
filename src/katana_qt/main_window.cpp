@@ -852,13 +852,27 @@ void MainWindow::buildActions()
     buildGisActions(*gisMenu, exportAction);
 
     // ---- Help ------------------------------------------------------------------------
+    // The reference and the shortcuts are dialogs of their own, non-modal and
+    // kept (command_reference_dialog.hpp, keyboard_shortcuts_dialog.hpp);
+    // each action's data names its dialog, as --dialog finds it.
     QAction* reference = makeAction(Icon::Help, "&Command Reference",
-                                    "List every command the command line accepts",
+                                    "Every command the command line accepts, searchable",
                                     QKeySequence::HelpContents);
+    reference->setData("commandReferenceDialog");
+    connect(reference, &QAction::triggered, this, [this] { showCommandReference({}); });
+    QAction* sheetCommands =
+        makeAction(Icon::Help, "&Sheets and Plotting Commands",
+                   "The sheet verbs and every option they take (HELP SHEETS)", QKeySequence(),
+                   "helpSheetCommands");
+    sheetCommands->setData("commandReferenceDialog");
+    connect(sheetCommands, &QAction::triggered, this, [this] { showCommandReference("Sheets"); });
+    QAction* shortcuts =
+        makeAction(Icon::Help, "&Keyboard Shortcuts...",
+                   "Every key the window answers to, where its command is and what it does",
+                   QKeySequence(), "helpKeyboardShortcuts");
+    shortcuts->setData("keyboardShortcutsDialog");
+    connect(shortcuts, &QAction::triggered, this, [this] { showKeyboardShortcuts(); });
     QAction* about = makeAction(Icon::About, "&About Katana", "Version and build information");
-    connect(reference, &QAction::triggered, this, [this] {
-        logMessage(QString::fromStdString(cad::CommandInterpreter::helpText()));
-    });
     connect(about, &QAction::triggered, this, [this] {
         QMessageBox box(this);
         box.setWindowTitle("About Katana");
@@ -885,7 +899,9 @@ void MainWindow::buildActions()
     });
     reference->setObjectName("helpCommandReference");
     about->setObjectName("helpAbout");
-    helpMenu->addActions({reference, about});
+    helpMenu->addActions({reference, sheetCommands, shortcuts});
+    helpMenu->addSeparator();
+    helpMenu->addAction(about);
 }
 
 // Every GDAL and PDAL capability the program has, in one menu, grouped by the
@@ -1195,6 +1211,86 @@ QStringList MainWindow::shortcutClashes(int* sequences) const
         }
     }
     return clashes;
+}
+
+std::vector<ShortcutRow> MainWindow::shortcutRows() const
+{
+    // The menus first, in their order, each key with the menu path it is
+    // found under; then any action no menu shows, and the QShortcuts - the
+    // keys shortcutClashes counts, so the table and the check agree.
+    std::vector<ShortcutRow> rows;
+    std::set<const QAction*> inMenus;
+    const auto add = [&rows](const QAction& action, const QString& menu) {
+        for (const QKeySequence& key : action.shortcuts()) {
+            if (!key.isEmpty()) {
+                rows.push_back({key.toString(QKeySequence::PortableText),
+                                QString(action.text()).remove('&').remove("..."), menu,
+                                action.statusTip()});
+            }
+        }
+    };
+    const std::function<void(const QMenu&, const QString&)> walk = [&](const QMenu& menu,
+                                                                       const QString& path) {
+        for (const QAction* item : menu.actions()) {
+            if (item->isSeparator()) {
+                continue;
+            }
+            if (const QMenu* sub = item->menu()) {
+                walk(*sub, path + " > " + QString(item->text()).remove('&'));
+                continue;
+            }
+            inMenus.insert(item);
+            add(*item, path);
+        }
+    };
+    for (const QAction* top : menuBar()->actions()) {
+        if (const QMenu* menu = top->menu()) {
+            walk(*menu, QString(top->text()).remove('&'));
+        }
+    }
+    for (const QAction* action : findChildren<QAction*>()) {
+        if (!inMenus.contains(action)) {
+            add(*action, "(no menu)");
+        }
+    }
+    for (const QShortcut* shortcut : findChildren<QShortcut*>()) {
+        if (!shortcut->key().isEmpty()) {
+            rows.push_back({shortcut->key().toString(QKeySequence::PortableText),
+                            shortcut->objectName(), "(no menu)", shortcut->whatsThis()});
+        }
+    }
+    return rows;
+}
+
+void MainWindow::showCommandReference(const QString& section)
+{
+    if (referenceDialog_ == nullptr) {
+        // A double-click puts the verb on the command line, to be finished
+        // there: the reference runs nothing.
+        referenceDialog_ = new CommandReferenceDialog(
+            commandReferenceSections(),
+            [this](const QString& verb) {
+                commandInput_->setText(verb);
+                commandInput_->setFocus(Qt::OtherFocusReason);
+            },
+            this);
+    }
+    if (!section.isEmpty()) {
+        referenceDialog_->showSection(section);
+    }
+    referenceDialog_->show();
+    referenceDialog_->raise();
+    referenceDialog_->activateWindow();
+}
+
+void MainWindow::showKeyboardShortcuts()
+{
+    if (shortcutsDialog_ == nullptr) {
+        shortcutsDialog_ = new KeyboardShortcutsDialog(shortcutRows(), shortcutClashes(), this);
+    }
+    shortcutsDialog_->show();
+    shortcutsDialog_->raise();
+    shortcutsDialog_->activateWindow();
 }
 
 void MainWindow::buildDocks()
@@ -2069,6 +2165,9 @@ CommandRunner MainWindow::commandRunner()
     return [this](const QString& line) { return runVerbLine(line); };
 }
 
+// The verbs taken here before the interpreter are listed for people by
+// windowHelpText (command_reference_dialog.cpp): what the typed HELP adds and
+// the Command Reference's Window section. A verb added here is added there.
 void MainWindow::dispatchLine(const QString& line)
 {
     // A note, as a katana_cli script has them: a dialog's or a script's line
@@ -2286,6 +2385,14 @@ void MainWindow::dispatchLine(const QString& line)
             logMessage(QString("file=\"%1\"").arg(QDir::toNativeSeparators(file)));
         }
         errorsLogged_ = errorsBefore;
+        return;
+    }
+    // HELP (or ?) alone: the interpreter's commands, then the verbs this
+    // front end runs itself, which the interpreter cannot know of. With a
+    // word, HELP SHEETS and HELP UTILITY stay the interpreter's.
+    if ((verb == "HELP" || verb == "?") && words.size() == 1) {
+        runInterpreterLine(line, verb);
+        logMessage(windowHelpText());
         return;
     }
     // A bare tool word starts the tool, as in any CAD package: an alias
