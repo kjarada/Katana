@@ -156,7 +156,8 @@ plotting::SheetSet sheetWith(std::vector<plotting::Viewport> viewports)
 }
 
 QImage painted(const plotting::SheetSet& set, const SheetSource& source,
-               SheetPaintStats* stats = nullptr, const char* tag = "")
+               SheetPaintStats* stats = nullptr, const char* tag = "",
+               katana::cad::PlotColourMode mode = katana::cad::PlotColourMode::Colour)
 {
     const auto& sheet = set.sheets.front();
     const auto paper = katana::cad::paperDimensions(sheet.paper, sheet.landscape);
@@ -166,6 +167,7 @@ QImage painted(const plotting::SheetSet& set, const SheetSource& source,
     image.fill(Qt::gray);
     SheetPaintOptions options;
     options.pixelsPerMillimetre = kPpmm;
+    options.plot.colourMode = mode;
     SheetPaintCache cache;
     QPainter painter(&image);
     const SheetPaintStats result = katana::qt::paintSheet(painter, set, 0, source, options, cache);
@@ -287,6 +289,26 @@ TEST(SheetSections, CutAndFillAreShadedBetweenTheDesignAndTheGround)
     const QImage bare = painted(sheetWith({viewport}), ground.source(), nullptr, "_no_design");
     EXPECT_EQ(colourIn(bare, kLongRect, kFill), 0);
     EXPECT_EQ(colourIn(bare, kLongRect, kCut), 0);
+}
+
+// The shading follows the plot style as every line does: in greyscale the
+// cut and fill print as the greys of their colours, not in pink and green.
+TEST(SheetSections, CutAndFillShadingFollowsThePlotStyle)
+{
+    const Road road;
+    const auto viewport = longSection(kLongRect, 1000.0, 10.0, Point2(90.0, 25.0));
+    const QImage grey = painted(sheetWith({viewport}), road.source(), nullptr, "_grey",
+                                katana::cad::PlotColourMode::Greyscale);
+    const Box2 fill = box(longX(35.0), longY(22.8), longX(45.0), longY(24.7));
+    const Box2 cut = box(longX(135.0), longY(25.3), longX(145.0), longY(27.2));
+    EXPECT_EQ(colourIn(grey, fill, kFill, 4), 0);
+    EXPECT_EQ(colourIn(grey, cut, kCut, 4), 0);
+    const auto luma = [](QColor c) {
+        const int l = (299 * c.red() + 587 * c.green() + 114 * c.blue() + 500) / 1000;
+        return QColor(l, l, l);
+    };
+    EXPECT_GT(colourIn(grey, fill, luma(kFill), 3), 40 * 76 * 8 / 10);
+    EXPECT_GT(colourIn(grey, cut, luma(kCut), 3), 40 * 76 * 8 / 10);
 }
 
 TEST(SheetSections, TheDataBandHasACutAndFillRowWhenThereIsADesign)
