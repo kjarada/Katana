@@ -245,8 +245,13 @@ void ScopeFilterWidget::reloadViews()
         const QSignalBlocker quiet(view_);
         const QVariant kept = view_->currentData();
         view_->clear();
+        // Each open view by its title and by the id a line names it by,
+        // which is not the number in its title: "Plan 2 (VIEW 4)".
         for (const ScopeFilterView& open : openViews()) {
-            view_->addItem(open.title, QVariant::fromValue<quint32>(open.id));
+            const QString shown = open.id == katana::cad::kNoView
+                                      ? open.title
+                                      : QStringLiteral("%1 (VIEW %2)").arg(open.title).arg(open.id);
+            view_->addItem(shown, QVariant::fromValue<quint32>(open.id));
         }
         if (const int index = view_->findData(kept); index >= 0) {
             view_->setCurrentIndex(index);

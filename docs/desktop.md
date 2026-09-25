@@ -843,9 +843,14 @@ nothing of its own. Non-modal, one instance kept by the Format workbench
   the same controls: `scope()` and `filter()`, what `matchEntities` takes and
   Global Modify plans with, and `verbWords()`, the same as the shared
   grammar's words (`cad::formatScopeWords`), for a dialog that builds a verb
-  line. A view is named by its id; "Only what is on screen" unticked is
+  line. A view is named by its id, which the view list shows beside its
+  title - "Plan 2 (VIEW 3)" - since the number in a title counts only the
+  views of its kind; "Only what is on screen" unticked is
   `VIEW <id> EXTENTS`, a word added to the grammar for it, since without it
-  the controls could say what no line could. The fallback "Whole drawing
+  the controls could say what no line could. What a line cannot say - a `:`
+  in the property's name, a comma in a layer's - `verbWords()` refuses
+  rather than write words that take something else; a value with the
+  property left empty is `PROP=:value`, any property's. The fallback "Whole drawing
   view" of a dialog with no workspace is read by `scope()` and refused by
   `verbWords()`: a line can name only an open view.
   `tests/qt_widgets/customisation/test_scope_filter_widget.cpp` shows every

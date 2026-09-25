@@ -23,7 +23,12 @@
 // DRAWING and LAYERS, as MODIFY accepted them. No scope word is the selection.
 // The WHERE keys are MODIFY's: TYPE=point,line LAYER=pat[,pat] STYLE=pat|ByLayer
 // COLOUR=#RRGGBB|ByLayer PROP=key[:pat] TEXT=pat DRAWN, with '*' and '?'
-// wildcards (matchesPattern).
+// wildcards (matchesPattern). PROP=:pat is a value any property may hold, as
+// Global Modify's controls say it with the property left empty.
+//
+// A view id is the window's cad::ViewId, which is not the number in a view's
+// title ("Plan 2" is numbered among the plan views, the id among all views):
+// a reply on VIEW says it (view=), and the "Apply to" list shows it.
 //
 // It is read in two steps so each can be tested alone and a front end can
 // build the words without a document:
@@ -101,12 +106,22 @@ struct ScopeWords {
 [[nodiscard]] katana::core::Result<ScopeWords>
 parseScopeWords(const std::vector<std::string>& words, std::size_t& at);
 
+// One WHERE condition - key=value or DRAWN - into `filter`: what
+// parseScopeWords reads after WHERE, for a verb whose own words may take the
+// filter up again, as MODIFY's WHERE after SET does. ParseFailure naming the
+// word for a word that is no condition ("a WHERE condition is key=value"), a
+// key that is no WHERE key, or a value that does not read.
+[[nodiscard]] katana::core::Status parseWhereCondition(const std::string& word,
+                                                       ModifyFilter& filter);
+
 // The words that say `words` back, as a line takes them: parseScopeWords
 // reads the result as `words`. The scope word is always written, so the
 // result can begin a UTILITY line; a word with a blank in it is quoted.
 // InvalidArgument for what a line cannot say: a double quote anywhere (the
 // command line has no way to type one inside a word), a comma in a layer name
-// or pattern (it separates the list), an empty layer list.
+// or pattern (it separates the list), an empty layer list, a ':' in a
+// property's name (PROP= ends the name at the first one), a value of a
+// property whose name is empty (PROP=:pat is a value of any property).
 [[nodiscard]] katana::core::Result<std::string> formatScopeWords(const ScopeWords& words);
 
 // "#RRGGBB" or ByLayer (any case), as an entity's or a style's colour says it:
@@ -116,7 +131,7 @@ parseColourOrByLayer(std::string_view text);
 
 // ---- the window's side ---------------------------------------------------------------------
 
-// What the window knows of a plan view that the Document does not.
+// What the window knows of a view that the Document does not.
 struct ScopeView {
     std::uint32_t id = 0; // its cad::ViewId, for the reply
     // The layers it hides of its own (ViewState::layers).
@@ -128,8 +143,8 @@ struct ScopeView {
 };
 
 // Answers VIEW: the active plan view when `id` is empty, else the view with
-// that id. A front end fails with NotFound naming an id that is no open plan
-// view, and InvalidState when no plan view is open.
+// that id, of any kind. A front end fails with NotFound naming an id no open
+// view has, and InvalidState when no id is given and no plan view is open.
 using ScopeViewProvider =
     std::function<katana::core::Result<ScopeView>(std::optional<std::uint32_t> id)>;
 

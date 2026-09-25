@@ -15,15 +15,19 @@
 //   Filter     types, layer and style patterns, colour, a property and its
 //              value, text, drawn only - each optional
 //
-// It says what it holds in two forms, which cannot disagree because both are
-// read from the same controls:
+// It says what it holds in two forms, read from the same controls, so they
+// agree wherever a line can say what the controls hold - and where it cannot
+// (a ':' in a property's name, a comma in a layer's), verbWords() refuses
+// rather than write another filter:
 //   - scope() and filter(): the cad::ModifyScope and cad::ModifyFilter that
 //     cad::matchEntities takes - what Global Modify plans with;
 //   - verbWords(): the same as the words of the shared grammar
 //     (cad::formatScopeWords, include/katana/cad/scope_verbs.hpp), for a
 //     dialog that builds a verb line and hands it to the window's command
 //     executor - the utilities dialog. A view is named by its id: VIEW <id>
-//     for what is on screen, VIEW <id> EXTENTS for everything it draws.
+//     for what is on screen, VIEW <id> EXTENTS for everything it draws. The
+//     view list shows each view's id beside its title ("Plan 2 (VIEW 4)"):
+//     the number in a title counts the views of its kind, the id all of them.
 //
 // Every control's object name is the prefix given, then its part:
 //   <prefix>ScopeGroup, <prefix>FilterGroup     the two group boxes

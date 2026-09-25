@@ -681,7 +681,7 @@ TEST(UtilityDialog, TheSourceAndTheScopeControlsGiveTheLineItsServices)
     press(dialog, "utilityScopeView");
     auto* view = child<QComboBox>(dialog, "utilityView");
     ASSERT_EQ(view->count(), 1);
-    EXPECT_EQ(view->itemText(0), "Plan 2");
+    EXPECT_EQ(view->itemText(0), "Plan 2 (VIEW 4)");
     EXPECT_EQ(command->text(), "UTILITY REPORT VIEW 4 EXTENTS");
     child<QCheckBox>(dialog, "utilityOnScreen")->setChecked(true);
     EXPECT_EQ(command->text(), "UTILITY REPORT VIEW 4");
@@ -921,7 +921,8 @@ TEST(UtilityWorkbench, TheDialogsViewScopeOffersTheWindowsViewsByTheirIds)
     auto* view = child<QComboBox>(dialog, "utilityView");
     ASSERT_NE(view, nullptr);
     ASSERT_EQ(view->count(), static_cast<int>(open.size()));
-    EXPECT_EQ(view->itemText(0), "Plan 1");
+    EXPECT_EQ(view->itemText(0).toStdString(),
+              "Plan 1 (VIEW " + std::to_string(open.front()->id) + ")");
     dialog.setSource(katana::qt::UtilitySource::Drawing);
     dialog.scopeControls().setChoice(katana::qt::ScopeChoice::View);
     view->setCurrentIndex(0);

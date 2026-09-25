@@ -742,8 +742,8 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
-            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityReport|!utilitySourceDrawing|?utilityCommand|!utilityRun|?utilityOutput|!utilityScopeView|utilityView=Plan 1|utilityOnScreen=on|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput"
-            "-DEXPECT=utilityCommand: UTILITY REPORT DRAWING[\r\n]+.*utilityOutput: scope=drawing matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*utilityCommand: UTILITY REPORT VIEW [0-9]+[\r\n]+.*utilityStatus: Done\\. The report is below.*utilityOutput: scope=view view=[0-9]+ area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices"
+            "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|@utilityReport|!utilitySourceDrawing|?utilityCommand|!utilityRun|?utilityOutput|!utilityScopeView|utilityView=Plan 1 (VIEW 1)|utilityOnScreen=on|?utilityCommand|!utilityRun|?utilityStatus|?utilityOutput"
+            "-DEXPECT=utilityCommand: UTILITY REPORT DRAWING[\r\n]+.*utilityOutput: scope=drawing matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*utilityCommand: UTILITY REPORT VIEW 1[\r\n]+.*utilityStatus: Done\\. The report is below.*utilityOutput: scope=view view=[0-9]+ area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ matched=21 lines=4 completed=0 ignored=0 AS 5488 subsurface utility investigation: 4 lines, 14 vertices"
             "-DFORBID=there is none here"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_drawing_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -780,7 +780,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>UTILITY DRAW \"${_utility_samples}/schedule.csv\"|>MODIFY VIEW WHERE TYPE=point SET COLOUR=#FF0000|>MODIFY VIEW EXTENTS WHERE TYPE=point SET COLOUR=#00FF00 PREVIEW"
-            "-DEXPECT=14 entities matched; changing 14 entities\\. One UNDO restores it\\..*preview: 14 entities matched; changing 14 entities\\."
+            "-DEXPECT=scope=view view=1 area=[-0-9.e]+,[-0-9.e]+,[-0-9.e]+,[-0-9.e]+ where=.TYPE=point. matched=14[\r\n]+14 entities matched; changing 14 entities\\. One UNDO restores it\\..*scope=view view=1 extents=yes where=.TYPE=point. matched=14[\r\n]+preview: 14 entities matched; changing 14 entities\\."
             "-DFORBID=there is none here|no plan view is open"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/modify_view_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")

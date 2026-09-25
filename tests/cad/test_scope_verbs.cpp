@@ -291,9 +291,29 @@ TEST(ScopeWordsParse, TheWordsWrittenBackReadAsTheSameScope)
     EXPECT_EQ(formatScopeWords(comma).error().code, ErrorCode::InvalidArgument);
     comma.layers = {};
     EXPECT_EQ(formatScopeWords(comma).error().code, ErrorCode::InvalidArgument);
+    // PROP= ends a property's name at the first ':', so a name with one
+    // would be written as another filter: refused instead.
+    ScopeWords colon;
+    colon.source = ScopeSource::Drawing;
+    colon.filter.property = "addr:street";
+    const auto colonLine = formatScopeWords(colon);
+    ASSERT_FALSE(colonLine.ok()) << *colonLine;
+    EXPECT_EQ(colonLine.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(colonLine.error().context, "addr:street");
+    ScopeWords emptyName;
+    emptyName.filter.property = "";
+    emptyName.filter.propertyValue = "x";
+    EXPECT_EQ(formatScopeWords(emptyName).error().code, ErrorCode::InvalidArgument);
+
+    // A value with no property is a value of any property: PROP=:pat.
     ScopeWords valueAlone;
-    valueAlone.filter.propertyValue = "x";
-    EXPECT_EQ(formatScopeWords(valueAlone).error().code, ErrorCode::InvalidArgument);
+    valueAlone.filter.propertyValue = "TREE*";
+    line = formatScopeWords(valueAlone);
+    ASSERT_TRUE(line.ok()) << line.error().describe();
+    EXPECT_EQ(*line, "SELECTION WHERE PROP=:TREE*");
+    const ScopeWords valueBack = parsed(*line);
+    EXPECT_FALSE(valueBack.filter.property.has_value());
+    EXPECT_EQ(valueBack.filter.propertyValue, std::optional<std::string>("TREE*"));
 }
 
 // ---- what the words take ---------------------------------------------------------------------
@@ -311,6 +331,9 @@ TEST_F(ScopeVerbsTest, TheScopesTakeWhatGlobalModifysTakes)
     // x -1..12, y -1..1: the two survey points.
     EXPECT_EQ(match("AREA -1,-1,12,1"), (std::vector<EntityId>{pA, pB}));
     EXPECT_EQ(match("DRAWING WHERE PROP=code:TREE*"), (std::vector<EntityId>{pA, pC}));
+    // A value any property holds, as Global Modify's controls take it with
+    // the property left empty.
+    EXPECT_EQ(match("DRAWING WHERE PROP=:TREE*"), (std::vector<EntityId>{pA, pC}));
     EXPECT_EQ(match("LAYERS survey WHERE TYPE=point PROP=code:P*"), (std::vector<EntityId>{pB}));
     EXPECT_EQ(match("DRAWING WHERE \"TEXT=CH *\""), (std::vector<EntityId>{tx}));
 
@@ -520,7 +543,9 @@ TEST_F(ScopeVerbsTest, ModifyTakesTheAreaAndTheWindowsView)
     CommandInterpreter interpreter(document);
     auto reply = interpreter.run("MODIFY AREA 0,4,8,6 SET COLOUR=#0000FF");
     ASSERT_TRUE(reply.ok()) << reply.error().describe();
-    EXPECT_EQ(*reply, "1 entity matched; changing 1 entity. One UNDO restores it.");
+    // Led by what the window took, as the UTILITY replies are.
+    EXPECT_EQ(*reply, "scope=area area=0,4,8,6 matched=1\n"
+                      "1 entity matched; changing 1 entity. One UNDO restores it.");
     const auto colourOf = [this](EntityId id) { return document.model().entities.find(id)->color; };
     EXPECT_EQ(colourOf(ln), std::optional<Color>(Color{0, 0, 255, 255}));
     EXPECT_EQ(colourOf(tx), std::nullopt);
@@ -535,13 +560,17 @@ TEST_F(ScopeVerbsTest, ModifyTakesTheAreaAndTheWindowsView)
     // The window's view: here one hiding the roads, so the points are taken.
     interpreter.setScopeContext([](std::optional<std::uint32_t>) -> katana::core::Result<ScopeView> {
         ScopeView view;
-        view.id = 1;
+        view.id = 3;
         view.layers.hide("roads");
+        view.area = Box2(Point2(-1, -1), Point2(30, 1));
         return view;
     });
+    // The reply says which view, by the id a line takes, and which part of
+    // the drawing it showed when the line ran.
     reply = interpreter.run("MODIFY VIEW WHERE PROP=code:TREE* SET COLOUR=#00FF00 PREVIEW");
     ASSERT_TRUE(reply.ok()) << reply.error().describe();
-    EXPECT_EQ(*reply, "preview: 2 entities matched; changing 2 entities.");
+    EXPECT_EQ(*reply, "scope=view view=3 area=-1,-1,30,1 where=\"PROP=code:TREE*\" matched=2\n"
+                      "preview: 2 entities matched; changing 2 entities.");
     reply = interpreter.run("GM VIEW WHERE PROP=code:TREE* SET COLOUR=#00FF00");
     ASSERT_TRUE(reply.ok()) << reply.error().describe();
     EXPECT_EQ(colourOf(pA), std::optional<Color>(Color{0, 255, 0, 255}));
@@ -552,4 +581,53 @@ TEST_F(ScopeVerbsTest, ModifyTakesTheAreaAndTheWindowsView)
     EXPECT_FALSE(interpreter.run("MODIFY SELECTION DRAWING SET COLOUR=#FF0000").ok());
     EXPECT_FALSE(interpreter.run("MODIFY AREA 1,2 SET COLOUR=#FF0000").ok());
     EXPECT_FALSE(interpreter.run("MODIFY DRAWING WHERE TYPE=point").ok());
+}
+
+TEST_F(ScopeVerbsTest, ModifyTakesItsOwnWordsWhereverTheyStoodBeforeTheSharedParser)
+{
+    CommandInterpreter interpreter(document);
+    const auto colourOf = [this](EntityId id) { return document.model().entities.find(id)->color; };
+    const std::optional<Color> red(Color{255, 0, 0, 255});
+
+    // A WHERE after SET takes the filter up again: the three points.
+    auto reply = interpreter.run("MODIFY DRAWING SET COLOUR=#FF0000 WHERE TYPE=point");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "3 entities matched; changing 3 entities. One UNDO restores it.");
+    EXPECT_EQ(colourOf(pA), red);
+    EXPECT_EQ(colourOf(pC), red);
+    EXPECT_EQ(colourOf(ln), std::nullopt);
+
+    // A second SET goes on setting.
+    reply = interpreter.run("MODIFY DRAWING SET COLOUR=#00FF00 SET VISIBLE=yes WHERE TYPE=line");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(colourOf(ln), std::optional<Color>(Color{0, 255, 0, 255}));
+
+    // A LAYERS list is the word after LAYERS, even PREVIEW or SET.
+    for (const char* name : {"preview", "set"}) {
+        Layer layer;
+        layer.name = name;
+        ASSERT_TRUE(document.execute(cmd::createLayer(layer)).ok());
+        const EntityId point = create(cmd::createPoint(Point2(50, 50), {name, "", {}}));
+        reply = interpreter.run(std::string("MODIFY LAYERS ") + name + " SET COLOUR=#0000FF");
+        ASSERT_TRUE(reply.ok()) << name << ": " << reply.error().describe();
+        EXPECT_EQ(*reply, "1 entity matched; changing 1 entity. One UNDO restores it.") << name;
+        EXPECT_EQ(colourOf(point), std::optional<Color>(Color{0, 0, 255, 255})) << name;
+    }
+    // PREVIEW anywhere else is PREVIEW: nothing changes.
+    const std::size_t steps = document.history().undoCount();
+    reply = interpreter.run("MODIFY PREVIEW LAYERS preview SET COLOUR=#FF0000");
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "preview: 1 entity matched; changing 1 entity.");
+    EXPECT_EQ(document.history().undoCount(), steps);
+
+    // A word in the filter that is no condition is named as one.
+    auto bad = interpreter.run("MODIFY DRAWING WHERE TYPE point SET COLOUR=#FF0000");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_EQ(bad.error().code, ErrorCode::ParseFailure);
+    EXPECT_EQ(bad.error().message, "a WHERE condition is key=value");
+    EXPECT_EQ(bad.error().context, "TYPE");
+    bad = interpreter.run("MODIFY DRAWING SET COLOUR=#FF0000 WHERE TYPE");
+    ASSERT_FALSE(bad.ok());
+    EXPECT_EQ(bad.error().context, "TYPE");
+    EXPECT_EQ(document.history().undoCount(), steps);
 }

@@ -64,7 +64,9 @@ bool isConditionWord(std::string_view word)
     return upper(word) == "DRAWN" || word.find('=') != std::string_view::npos;
 }
 
-Status parseFilterWord(const std::string& word, ModifyFilter& filter)
+} // namespace
+
+Status parseWhereCondition(const std::string& word, ModifyFilter& filter)
 {
     if (upper(word) == "DRAWN") {
         filter.drawnOnly = true;
@@ -95,8 +97,15 @@ Status parseFilterWord(const std::string& word, ModifyFilter& filter)
         }
         filter.colour = *colour;
     } else if (key == "PROP") {
+        // PROP=key, PROP=key:pat, and PROP=:pat - a value any property of
+        // the entity may hold, as Global Modify's "Property" left empty with
+        // a value takes it. The key ends at the first ':'.
         const std::size_t colon = value.find(':');
-        filter.property = value.substr(0, colon);
+        if (colon == 0) {
+            filter.property.reset();
+        } else {
+            filter.property = value.substr(0, colon);
+        }
         if (colon != std::string::npos) {
             filter.propertyValue = value.substr(colon + 1);
         }
@@ -108,6 +117,8 @@ Status parseFilterWord(const std::string& word, ModifyFilter& filter)
     }
     return {};
 }
+
+namespace {
 
 // "x0,y0,x1,y1", corners in either order.
 Result<katana::geometry::Box2> parseArea(std::string_view text)
@@ -178,12 +189,20 @@ Result<std::vector<std::string>> conditionWords(const ModifyFilter& filter)
     if (filter.colour) {
         words.push_back("COLOUR=" + (*filter.colour ? (*filter.colour)->toHex() : "ByLayer"));
     }
-    if (filter.propertyValue && !filter.property) {
+    if (filter.property && filter.property->find(':') != std::string::npos) {
         return makeError(ErrorCode::InvalidArgument,
-                         "a property value to match needs the property it is the value of");
+                         "a property whose name has a ':' in it cannot be written as PROP=, "
+                         "which ends the name at the first ':'",
+                         *filter.property);
     }
-    if (filter.property) {
-        words.push_back("PROP=" + *filter.property +
+    if (filter.property && filter.property->empty() && filter.propertyValue) {
+        return makeError(ErrorCode::InvalidArgument,
+                         "a value of a property with no name cannot be written: PROP=:pat is a "
+                         "value of any property");
+    }
+    if (filter.property || filter.propertyValue) {
+        // No property with a value is a value of any: PROP=:pat.
+        words.push_back("PROP=" + filter.property.value_or(std::string()) +
                         (filter.propertyValue ? ":" + *filter.propertyValue : std::string()));
     }
     if (filter.text) {
@@ -291,8 +310,9 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
                 const auto id = katana::core::parseInteger(words[i]);
                 if (!id || *id < 1 || *id > std::numeric_limits<std::uint32_t>::max()) {
                     return makeError(ErrorCode::ParseFailure,
-                                     "a view id is a whole number from 1, as the window numbers "
-                                     "its views",
+                                     "a view id is a whole number from 1: the id a reply's "
+                                     "view= gives, and the Apply to list shows as VIEW <id> - "
+                                     "not the number in the view's title",
                                      words[i]);
                 }
                 result.view = static_cast<std::uint32_t>(*id);
@@ -340,7 +360,7 @@ Result<ScopeWords> parseScopeWords(const std::vector<std::string>& words, std::s
             if (!isConditionWord(words[i])) {
                 break;
             }
-            if (auto status = parseFilterWord(words[i], result.filter); !status) {
+            if (auto status = parseWhereCondition(words[i], result.filter); !status) {
                 return status.error();
             }
             ++i;
