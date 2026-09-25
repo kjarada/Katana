@@ -1,5 +1,6 @@
 #include "katana/cad/command_interpreter.hpp"
 
+#include "katana/cad/document_status.hpp"
 #include "katana/cad/global_modify.hpp"
 #include "katana/core/text.hpp"
 
@@ -410,7 +411,7 @@ Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
           PROP RENAME old new   (selection; the type is guessed unless stated)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
-Inspect   LIST | INFO id (or #id) | HELP
+Inspect   LIST | INFO id (or #id) | STATUS [JSON] (the drawing at a glance) | HELP
 Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS: every option)
           SHEET NEW|REMOVE|MOVE|COPY|RENAME|SET|FIELD | VIEW ADD|SET|REMOVE|LIST | TILE n preset
           GENERATE fit|grid|strips|profile|sections|frames | TITLEBLOCK [LIST] | field value
@@ -686,7 +687,7 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (verb == "NEW" || verb == "OPEN" || verb == "SAVE") {
         return file(verb, args);
     }
-    if (verb == "LIST" || verb == "INFO") {
+    if (verb == "LIST" || verb == "INFO" || verb == "STATUS") {
         return inspect(verb, args);
     }
     return makeError(ErrorCode::ParseFailure, "unknown command; type HELP", verb);
@@ -2803,6 +2804,18 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
                                                       const Tokens& args) const
 {
     const auto& model = document_.model();
+    // The drawing's state, as katana_mcp's katana_status gives it and File >
+    // Drawing Summary copies it (document_status.hpp): one definition, so an
+    // agent reads the same record whichever front end it drives.
+    if (verb == "STATUS") {
+        if (args.empty()) {
+            return formatStatus(documentStatus(document_));
+        }
+        if (args.size() == 1 && upper(args[0]) == "JSON") {
+            return statusJson(documentStatus(document_));
+        }
+        return usage("STATUS [JSON]");
+    }
     if (verb == "INFO") {
         if (args.size() != 1) {
             return usage("INFO id");

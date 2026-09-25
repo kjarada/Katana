@@ -9,6 +9,7 @@
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
+#include "customisation/drawing_summary_dialog.hpp"
 #include "format.hpp"
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
@@ -22,6 +23,7 @@
 
 #include <chrono>
 #include <QAction>
+#include <QAbstractButton>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
@@ -58,6 +60,7 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QTabWidget>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTimer>
@@ -612,6 +615,16 @@ void MainWindow::buildActions()
     connect(crsAction, &QAction::triggered, this,
             [this] { (void)chooseProjectCrs(this, document_); });
     fileMenu->addAction(crsAction);
+    // The drawing at a glance, kept live beside it: what STATUS reports and
+    // the customisation report (customisation/drawing_summary_dialog.hpp).
+    QAction* summaryAction =
+        makeAction(Icon::Properties, "Drawing S&ummary...",
+                   "The drawing at a glance: project, contents, what is current, the history and "
+                   "the customisation loaded, and what it leaves undefined",
+                   QKeySequence(), "fileDrawingSummary");
+    summaryAction->setData("drawingSummaryDialog");
+    connect(summaryAction, &QAction::triggered, this, [this] { showDrawingSummary(); });
+    fileMenu->addAction(summaryAction);
     fileMenu->addSeparator();
     QAction* quitAction =
         fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
@@ -1283,6 +1296,48 @@ void MainWindow::showCommandReference(const QString& section)
     referenceDialog_->activateWindow();
 }
 
+void MainWindow::showDrawingSummary()
+{
+    if (summaryDialog_ == nullptr) {
+        DrawingSummaryContext context;
+        context.document = &document_;
+        context.customisation = [this] {
+            return cad::customisationSummary(document_, customisation_,
+                                             customisationMissingAtOpen_);
+        };
+        context.run = commandRunner();
+        context.load = [this] { (void)triggerAction("loadCustomisation"); };
+        context.showMissing = [this](const QString& name) { showMissingInStyles(name); };
+        context.crs = [this] { return projectCrsLabel(document_); };
+        summaryDialog_ = new DrawingSummaryDialog(std::move(context), this);
+    }
+    summaryDialog_->refresh();
+    summaryDialog_->show();
+    summaryDialog_->raise();
+    summaryDialog_->activateWindow();
+}
+
+void MainWindow::showMissingInStyles(const QString& name)
+{
+    // The manager has no call for this, so it is reached as a person reaches
+    // it - its Styles tab, its Missing chip, its search - by the object names
+    // style_manager.hpp gives them.
+    StyleManagerDialog& manager = format_->showStyleManager();
+    auto* page = manager.findChild<QWidget*>("stylesPage");
+    if (page == nullptr) {
+        return;
+    }
+    if (auto* tabs = manager.findChild<QTabWidget*>("managerTabs")) {
+        tabs->setCurrentWidget(page);
+    }
+    if (auto* missing = page->findChild<QAbstractButton*>("filterMissing")) {
+        missing->click();
+    }
+    if (auto* search = page->findChild<QLineEdit*>("filterText")) {
+        search->setText(name);
+    }
+}
+
 void MainWindow::showKeyboardShortcuts()
 {
     if (shortcutsDialog_ == nullptr) {
@@ -1524,6 +1579,11 @@ void MainWindow::buildStatusBar()
     layerLabel_ = new QLabel(this);
     frameStatsLabel_ = new QLabel(this);
     frameStatsLabel_->setObjectName("FrameStatsLabel");
+    // How many of how many are selected, always in view: the one count a
+    // person acting on a selection needs before every command.
+    selectionCountLabel_ = new QLabel(this);
+    selectionCountLabel_->setObjectName("statusSelectionCount");
+    selectionCountLabel_->setToolTip("Entities selected, of all the drawing holds");
     // The project's coordinate system, one click from changing it.
     crsButton_ = new QToolButton(this);
     crsButton_->setObjectName("statusProjectCrs");
@@ -1533,6 +1593,7 @@ void MainWindow::buildStatusBar()
             [this] { (void)chooseProjectCrs(this, document_); });
     statusBar()->addPermanentWidget(crsButton_);
     statusBar()->addPermanentWidget(frameStatsLabel_);
+    statusBar()->addPermanentWidget(selectionCountLabel_);
     statusBar()->addPermanentWidget(layerLabel_);
     statusBar()->addPermanentWidget(snapLabel_);
     statusBar()->addPermanentWidget(coordinateLabel_);
@@ -1646,6 +1707,9 @@ void MainWindow::refreshAll()
                                                             static_cast<int>(document_.history().undoName().size()))
                              : "&Undo");
     layerLabel_->setText("Layer: " + QString::fromStdString(document_.currentLayer()));
+    selectionCountLabel_->setText(QString("%1 selected / %2 entities")
+                                      .arg(document_.selection().size())
+                                      .arg(document_.model().entities.size()));
     if (crsButton_ != nullptr) {
         crsButton_->setText("CRS: " + projectCrsLabel(document_));
     }
