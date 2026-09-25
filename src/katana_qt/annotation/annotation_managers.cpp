@@ -21,7 +21,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
-#include "katana/cad/annotation/command_words.hpp"
+#include "command_word.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/label_text.hpp"
@@ -29,7 +29,6 @@
 
 namespace katana::qt {
 
-namespace ann = katana::cad::annotation;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
@@ -152,25 +151,9 @@ QString describe(const katana::core::Error& error)
                                   (error.context.empty() ? std::string() : ": " + error.context));
 }
 
-// A value as a line gives it: exact, so it reads back as stored.
-QString exact(double value)
-{
-    return QString::fromStdString(katana::core::formatExactReal(value));
-}
-
 QString onOff(bool on)
 {
     return on ? QStringLiteral("on") : QStringLiteral("off");
-}
-
-// `text` as one word of a line, or why it cannot be one.
-Result<QString> word(const std::string& text)
-{
-    auto written = ann::commandWord(text);
-    if (!written) {
-        return written.error();
-    }
-    return QString::fromStdString(*written);
 }
 
 // Runs `line` through `run`; the refusal, or why the line could not be built,
@@ -388,21 +371,21 @@ Result<QString> TextStyleManagerDialog::applyLine() const
     // what the form changed.
     QStringList options;
     if (form.fontFamily != stored->fontFamily) {
-        auto font = word(form.fontFamily);
+        auto font = commandWord(QString::fromStdString(form.fontFamily), QStringLiteral("Font"));
         if (!font) {
             return font.error();
         }
         options << QStringLiteral("font=") + *font;
     }
     if (form.paperHeight != stored->paperHeight) {
-        options << QStringLiteral("paper=") + exact(form.paperHeight);
+        options << QStringLiteral("paper=") + exactNumber(form.paperHeight);
     }
     if (form.widthFactor != stored->widthFactor) {
-        options << QStringLiteral("width=") + exact(form.widthFactor);
+        options << QStringLiteral("width=") + exactNumber(form.widthFactor);
     }
     if (form.oblique != stored->oblique) {
         // In degrees, as the box shows it and the verb takes it.
-        options << QStringLiteral("oblique=") + exact(oblique_->value());
+        options << QStringLiteral("oblique=") + exactNumber(oblique_->value());
     }
     if (form.bold != stored->bold) {
         options << QStringLiteral("bold=") + onOff(form.bold);
@@ -419,18 +402,18 @@ Result<QString> TextStyleManagerDialog::applyLine() const
         options << QStringLiteral("mask=") + onOff(form.mask);
     }
     if (form.maskMargin != stored->maskMargin) {
-        options << QStringLiteral("margin=") + exact(form.maskMargin);
+        options << QStringLiteral("margin=") + exactNumber(form.maskMargin);
     }
     if (form.readable != stored->readable) {
         options << QStringLiteral("readable=") + onOff(form.readable);
     }
     if (form.lineSpacing != stored->lineSpacing) {
-        options << QStringLiteral("spacing=") + exact(form.lineSpacing);
+        options << QStringLiteral("spacing=") + exactNumber(form.lineSpacing);
     }
     if (options.isEmpty()) {
         return QString();
     }
-    auto name = word(stored->name);
+    auto name = commandWord(QString::fromStdString(stored->name), QStringLiteral("Style"));
     if (!name) {
         return name.error();
     }
@@ -462,7 +445,7 @@ bool TextStyleManagerDialog::addStyle()
 {
     const QString typed = newName_->text().trimmed();
     const QString name = typed.isEmpty() ? freshName() : typed;
-    auto written = word(name.toStdString());
+    auto written = commandWord(name, QStringLiteral("Name"));
     if (!written) {
         return run(written.error());
     }
@@ -476,7 +459,7 @@ bool TextStyleManagerDialog::addStyle()
 
 bool TextStyleManagerDialog::deleteStyle()
 {
-    auto written = word(current().toStdString());
+    auto written = commandWord(current(), QStringLiteral("Style"));
     if (!written) {
         return run(written.error());
     }
@@ -971,14 +954,14 @@ Result<QString> LabelStyleManagerDialog::applyLine() const
     // what the form changed.
     QStringList options;
     if (form.text != stored->text) {
-        auto text = ann::annotationTextWord(form.text);
+        auto text = annotationTextWord(QString::fromStdString(form.text), QStringLiteral("Text"));
         if (!text) {
             return text.error();
         }
-        options << QStringLiteral("text=") + QString::fromStdString(*text);
+        options << QStringLiteral("text=") + *text;
     }
     if (form.textStyle != stored->textStyle) {
-        auto name = word(form.textStyle);
+        auto name = commandWord(QString::fromStdString(form.textStyle), QStringLiteral("Text style"));
         if (!name) {
             return name.error();
         }
@@ -986,7 +969,7 @@ Result<QString> LabelStyleManagerDialog::applyLine() const
     }
     const auto number = [&options](const char* key, double before, double after) {
         if (after != before) {
-            options << QString::fromLatin1(key) + QStringLiteral("=") + exact(after);
+            options << QString::fromLatin1(key) + QStringLiteral("=") + exactNumber(after);
         }
     };
     const auto named = [&options](const char* key, std::string_view before,
@@ -1018,7 +1001,7 @@ Result<QString> LabelStyleManagerDialog::applyLine() const
     if (options.isEmpty()) {
         return QString();
     }
-    auto name = word(stored->name);
+    auto name = commandWord(QString::fromStdString(stored->name), QStringLiteral("Style"));
     if (!name) {
         return name.error();
     }
@@ -1070,7 +1053,7 @@ bool LabelStyleManagerDialog::addStyle()
 {
     const QString typed = newName_->text().trimmed();
     const QString name = typed.isEmpty() ? freshName() : typed;
-    auto written = word(name.toStdString());
+    auto written = commandWord(name, QStringLiteral("Name"));
     if (!written) {
         return run(written.error());
     }
@@ -1087,7 +1070,7 @@ bool LabelStyleManagerDialog::addStyle()
 
 bool LabelStyleManagerDialog::deleteStyle()
 {
-    auto written = word(current().toStdString());
+    auto written = commandWord(current(), QStringLiteral("Style"));
     if (!written) {
         return run(written.error());
     }
@@ -1113,7 +1096,7 @@ Result<QString> LabelStyleManagerDialog::ruleOptions(bool everyField) const
         if (value.isEmpty() && !everyField) {
             return {};
         }
-        auto written = word(value.toStdString());
+        auto written = commandWord(value, QString::fromLatin1(key));
         if (!written) {
             return written.error();
         }
@@ -1139,7 +1122,7 @@ Result<QString> LabelStyleManagerDialog::ruleOptions(bool everyField) const
 
 bool LabelStyleManagerDialog::addRule()
 {
-    auto name = word(ruleName_->text().trimmed().toStdString());
+    auto name = commandWord(ruleName_->text().trimmed(), QStringLiteral("Rule"));
     if (!name) {
         return run(name.error());
     }
@@ -1156,7 +1139,7 @@ bool LabelStyleManagerDialog::addRule()
 
 bool LabelStyleManagerDialog::updateRule()
 {
-    auto name = word(ruleName_->text().trimmed().toStdString());
+    auto name = commandWord(ruleName_->text().trimmed(), QStringLiteral("Rule"));
     if (!name) {
         return run(name.error());
     }
@@ -1174,7 +1157,7 @@ bool LabelStyleManagerDialog::deleteRule()
         problem_->setText(QStringLiteral("choose the rule to delete in the table"));
         return false;
     }
-    auto name = word(rules_->item(row, kRuleName)->text().toStdString());
+    auto name = commandWord(rules_->item(row, kRuleName)->text(), QStringLiteral("Rule"));
     if (!name) {
         return run(name.error());
     }
@@ -1183,7 +1166,7 @@ bool LabelStyleManagerDialog::deleteRule()
 
 bool LabelStyleManagerDialog::setRuleEnabled(const QString& name, bool enabled)
 {
-    auto written = word(name.toStdString());
+    auto written = commandWord(name, QStringLiteral("Rule"));
     if (!written) {
         return run(written.error());
     }
@@ -1199,7 +1182,7 @@ bool LabelStyleManagerDialog::ruleVerb(const QString& action)
 {
     QString line = QStringLiteral("AUTOLABEL ") + action;
     for (const QString& rule : chosenRules()) {
-        auto written = word(rule.toStdString());
+        auto written = commandWord(rule, QStringLiteral("Rule"));
         if (!written) {
             return run(written.error());
         }
