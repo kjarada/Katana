@@ -1020,6 +1020,12 @@ TEST(SheetArrange, MatchingAScaleCopiesItToEveryScaledViewOnAnySheet)
     SheetSet drawn = set;
     ASSERT_TRUE(matchScale(drawn, std::vector<std::string>{"vp1"}, "vp2", 750.0).ok());
     EXPECT_EQ(drawn.sheets[0].viewports[0].scale, 750.0);
+    // An automatic section's exaggeration is passed as drawn too, not its
+    // stale stored one.
+    SheetSet fitted = set;
+    ASSERT_TRUE(matchScale(fitted, std::vector<std::string>{"vp3"}, "vp2", 750.0, 5.0).ok());
+    EXPECT_EQ(fitted.sheets[1].viewports[1].scale, 750.0);
+    EXPECT_EQ(fitted.sheets[1].viewports[1].verticalExaggeration, 5.0);
 
     SheetSet refused = set;
     EXPECT_EQ(matchScale(refused, targets, "vp9").error().code, ErrorCode::NotFound);

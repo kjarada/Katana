@@ -1317,15 +1317,16 @@ context menu hold:
 | Command | Object name | Acts on |
 |---|---|---|
 | Auto Arrange | `sheetArrangeAuto` | the sheet |
-| Align Left, Right, Top, Bottom, Centres Horizontally, Centres Vertically | `sheetAlignLeft`, `sheetAlignRight`, `sheetAlignTop`, `sheetAlignBottom`, `sheetAlignHCentre`, `sheetAlignVCentre` | the selected view (to the tiling area), or every view |
-| Distribute Horizontally, Vertically | `sheetDistributeHorizontal`, `sheetDistributeVertical` | every view on the sheet, until a selection holds three |
-| Match Scale To | `sheetMatchScaleMenu`, each item `sheetMatchScale_<id>` | the selected view, or every scaled view on the sheet, takes the chosen view's scale as drawn |
+| Align Left, Right, Top, Bottom, Centres Horizontally, Centres Vertically | `sheetAlignLeft`, `sheetAlignRight`, `sheetAlignTop`, `sheetAlignBottom`, `sheetAlignHCentre`, `sheetAlignVCentre` | the selected views (one alone to the tiling area), or every view |
+| Distribute Horizontally, Vertically | `sheetDistributeHorizontal`, `sheetDistributeVertical` | the selected views, three or more (fewer is refused, so views not chosen never move), or every view on the sheet |
+| Match Scale To | `sheetMatchScaleMenu`, each item `sheetMatchScale_<id>` | the selected views, or every scaled view on the sheet, take the chosen view's scale as drawn - an automatic section's fitted scale and exaggeration |
 | Fit View to Content | `sheetFitToContent` | the selected plan, or the sheet's main plan |
 | Rotate to Best Fit | `sheetRotateToBestFit` | the same |
 
 The Match Scale list is filled when it opens: every view in the set drawn to
 a scale, but the selected one, with the scale it is drawn at. The ids come
-from `arrangeTargets`, the one place the selection is read. Every command
+from `arrangeTargets`, the one place the selection is read: the whole group
+chosen on the canvas (`selectedIds`), whichever of it is the primary. Every command
 reports what it did, or why it did nothing, in the status bar and the log.
 
 With nothing selected, the sheet's properties have a **Choose paper for this
@@ -1375,7 +1376,12 @@ sheets:
 - the scale is what its title block reports (`sheetScaleText`). An automatic
   plan scale is decided first, as the painter decides it for the title block
   (`resolvedSheetSet` in `src/katana_qt/plotting/sheet_tables.hpp`), so a
-  plan drawn at 1:2000 is not listed at the 1:500 it was stored with;
+  plan drawn at 1:2000 is not listed at the 1:500 it was stored with. An
+  automatic key plan is fitted to the sheets' outlines, as the painter fits
+  it, and an automatic section's scale and exaggeration are the fitted ones
+  (`resolveSectionViewport`). Preflight lays a register out with the same
+  scales (`PreflightOptions::drawnSet`), and `SHEET FIELD n scale` in the
+  window prints them;
 - the revision is the one typed on the sheet (its `revision` field), else
   the set's latest - the last in `SheetSet::revisions`.
 

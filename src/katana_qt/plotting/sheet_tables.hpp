@@ -18,10 +18,13 @@
 namespace katana::qt {
 
 // `set` with every automatic plan and key-plan scale and centre decided
-// (resolvePlanViewport) and the viewports marked automatic no longer: the
-// set as the painter draws it.
+// (resolvePlanViewport with the set and the sheet), every automatic section's
+// scale and exaggeration fitted (resolveSectionViewport, cutting through
+// `cache` when one is given), and the viewports marked automatic no longer:
+// the set as the painter draws it.
 [[nodiscard]] katana::cad::plotting::SheetSet
-resolvedSheetSet(const katana::cad::plotting::SheetSet& set, const SheetSource& source);
+resolvedSheetSet(const katana::cad::plotting::SheetSet& set, const SheetSource& source,
+                 SheetPaintCache* cache = nullptr);
 
 // The drawing register as it plots: drawingRegister of resolvedSheetSet.
 [[nodiscard]] std::vector<katana::cad::plotting::RegisterRow>

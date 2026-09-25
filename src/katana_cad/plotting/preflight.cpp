@@ -1044,7 +1044,8 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
                 "Add a revision on the Title Block, or remove the table");
             break;
         }
-        const TableLayout table = layoutViewportTable(set, index, viewport);
+        const TableLayout table =
+            layoutViewportTable(options.drawnSet != nullptr ? *options.drawnSet : set, index, viewport);
         if (table.rowsHidden > 0) {
             add(Severity::Warning, "table.overflow", {},
                 std::format("{} shows {} of its {} rows: {} do not fit and print as \"+{} {}\"",

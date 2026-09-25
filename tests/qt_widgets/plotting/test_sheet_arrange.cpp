@@ -223,26 +223,46 @@ TEST(SheetArrangeEditor, AligningActsOnTheSelectionOrOnEveryView)
     EXPECT_EQ(viewportOf(document, "vp3").rect.min.x, 24.0);
     EXPECT_EQ(viewportOf(document, "vp1").rect.min.x, 30.0);
 
-    // Spacing with one selected spaces them all. vp3 is now first (24..84)
-    // and vp2 last (100..130), with the 50 mm of vp1 to fit in the 16 mm
-    // between them: refused, as a message, and nothing moves.
+    // Spacing with one selected: nothing between to space, and the views
+    // not chosen are not moved - refused, as a message.
     shown.trigger("sheetDistributeHorizontal");
     EXPECT_EQ(document.history().undoCount(), before + 2);
     EXPECT_EQ(shown.errors, 1);
     ASSERT_FALSE(shown.messages.empty());
-    EXPECT_TRUE(shown.messages.back().contains("overlap")) << shown.messages.back().toStdString();
+    EXPECT_TRUE(shown.messages.back().contains("three views")) << shown.messages.back().toStdString();
     EXPECT_EQ(viewportOf(document, "vp1").rect.min.x, 30.0);
 
     // Back as they were - vp1 at 30..80, vp2 at 100..130, vp3 at 300..360 -
-    // vp2 goes half way along the 220 mm between the others less its width.
+    // and nothing selected, vp2 goes half way along the 220 mm between the
+    // others less its width.
     ASSERT_TRUE(document.undo().ok());
     ASSERT_TRUE(document.undo().ok());
     katana::qt::test::processEvents();
+    shown.editor.canvas()->setSelection({});
     shown.trigger("sheetDistributeHorizontal");
     EXPECT_EQ(document.history().undoCount(), before + 1);
     EXPECT_EQ(shown.errors, 1);
     const double gap = (300.0 - 80.0 - 30.0) / 2.0;
     EXPECT_NEAR(viewportOf(document, "vp2").rect.min.x, 80.0 + gap, 1e-9);
+}
+
+// A group chosen on the canvas is arranged as a group, whichever of it is the
+// primary: aligned together, and the view not chosen left where it is.
+TEST(SheetArrangeEditor, AGroupOnTheCanvasIsArrangedAsAGroup)
+{
+    Document document;
+    addSheetWith(document,
+                 {viewportAt("vp1", plotting::ViewportKind::Notes, Box2(Point2(30.0, 40.0), Point2(80.0, 80.0))),
+                  viewportAt("vp2", plotting::ViewportKind::Notes, Box2(Point2(100.0, 50.0), Point2(130.0, 120.0))),
+                  viewportAt("vp3", plotting::ViewportKind::Notes, Box2(Point2(300.0, 45.0), Point2(360.0, 60.0)))});
+    Shown shown(document);
+    const std::size_t before = document.history().undoCount();
+    shown.editor.canvas()->setSelection({"vp1", "vp2"}, "vp2");
+    shown.trigger("sheetAlignTop");
+    EXPECT_EQ(document.history().undoCount(), before + 1);
+    EXPECT_EQ(viewportOf(document, "vp1").rect.max.y, 120.0);
+    EXPECT_EQ(viewportOf(document, "vp2").rect.max.y, 120.0);
+    EXPECT_EQ(viewportOf(document, "vp3").rect.max.y, 60.0) << "not chosen";
 }
 
 TEST(SheetArrangeEditor, MatchScaleListsTheOtherScaledViewsAndMatchesTheSelection)

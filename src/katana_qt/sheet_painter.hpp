@@ -203,7 +203,8 @@ resolveSectionViewport(const katana::cad::plotting::Viewport& viewport, const Sh
 sheetFrame(const katana::cad::plotting::Sheet& sheet);
 
 // Plots the sheets at `indices` of `set` (every sheet when empty), in that
-// order, to one vector PDF at `path`, each page the size of its sheet's paper.
+// order, to one vector PDF at `path`, each page the size of its sheet's paper,
+// in the set's plot style (its colour mode and line weight scale) at `dpi`.
 // `problems` receives what paintSheet reports, prefixed with the sheet's
 // name. FileExportFailure when the file cannot be written; InvalidArgument
 // for an index past the end or a set with nothing to plot.

@@ -284,15 +284,32 @@ Result<std::vector<std::string>> pasteViewports(Document& document, std::size_t 
         return makeError(ErrorCode::InvalidArgument, "nothing to paste");
     }
     SheetSet set = document.sheetSet();
+    auto ids = pasteViewports(set, sheetIndex, std::move(viewports), offsetMm);
+    if (!ids) {
+        return ids.error();
+    }
+    if (Status status = document.setSheetSet(set, std::move(stepName)); !status) {
+        return status.error();
+    }
+    return ids;
+}
+
+Result<std::vector<std::string>> pasteViewports(SheetSet& set, std::size_t sheetIndex,
+                                                std::vector<Viewport> viewports,
+                                                std::optional<Point2> offsetMm)
+{
+    if (viewports.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "nothing to paste");
+    }
     if (sheetIndex >= set.sheets.size()) {
         return noSheet(sheetIndex, set.sheets.size()).error();
     }
-    Sheet& sheet = set.sheets[sheetIndex];
-    const Point2 offset = offsetMm.value_or(pasteOffset(sheet, viewports));
+    const Point2 offset = offsetMm.value_or(pasteOffset(set.sheets[sheetIndex], viewports));
     if (!offset.isFinite()) {
         return makeError(ErrorCode::InvalidArgument, "the paste offset is not a finite distance");
     }
     std::vector<std::string> ids = newViewportIds(set, viewports.size());
+    Sheet& sheet = set.sheets[sheetIndex];
     for (std::size_t i = 0; i < viewports.size(); ++i) {
         Viewport& pasted = viewports[i];
         pasted.id = ids[i];
@@ -300,9 +317,6 @@ Result<std::vector<std::string>> pasteViewports(Document& document, std::size_t 
             pasted.rect = moved(pasted.rect, offset);
         }
         sheet.viewports.push_back(std::move(pasted));
-    }
-    if (Status status = document.setSheetSet(set, std::move(stepName)); !status) {
-        return status.error();
     }
     return ids;
 }

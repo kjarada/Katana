@@ -302,12 +302,14 @@ distributeViewports(Sheet& sheet, std::span<const std::string> ids, DistributeAx
 // `fromScale` when given, which is how a caller passes the scale an automatic
 // viewport is drawn at - and turns their automatic scale off. A section
 // matched to a section takes its vertical exaggeration too. Viewports with no
-// scale (hasScale) are left out. Returns the ids that changed. NotFound for
-// an unknown id; InvalidArgument when `fromId` has no scale or the scale is
-// not positive.
+// scale (hasScale) are left out. `fromExaggeration` is the exaggeration an
+// automatic section `fromId` is drawn at, when the caller knows it; else its
+// stored one. Returns the ids that changed. NotFound for an unknown id;
+// InvalidArgument when `fromId` has no scale or the scale is not positive.
 [[nodiscard]] core::Result<std::vector<std::string>>
 matchScale(SheetSet& set, std::span<const std::string> ids, std::string_view fromId,
-           std::optional<double> fromScale = std::nullopt);
+           std::optional<double> fromScale = std::nullopt,
+           std::optional<double> fromExaggeration = std::nullopt);
 
 // Sizes a viewport to its content at its scale: the rectangle grows or
 // shrinks about its centre until the content, with kFitSpare round it, just

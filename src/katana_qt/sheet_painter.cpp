@@ -1451,8 +1451,8 @@ void SheetPainter::paintTableViewport(const Viewport& viewport, TextSetter& text
     // automatic one decided first.
     const plotting::TableLayout table =
         viewport.kind == ViewportKind::SheetIndex
-            ? plotting::layoutViewportTable(resolvedSheetSet(set_, source_), index_, viewport,
-                                            measure)
+            ? plotting::layoutViewportTable(resolvedSheetSet(set_, source_, &cache_), index_,
+                                            viewport, measure)
             : plotting::layoutViewportTable(set_, index_, viewport, measure);
     paintTable(painter_, paper, text, table);
     if (table.rowsHidden > 0) {
@@ -1801,6 +1801,9 @@ katana::core::Status plotSheetsToPdf(const QString& path, const plotting::SheetS
     SheetPaintOptions options;
     options.medium = PlanMedium::Paper;
     options.pixelsPerMillimetre = katana::cad::millimetresToPixels(1.0, dpi);
+    // In the set's plot style, as every plot of the set is (page_setup.hpp).
+    options.plot.colourMode = set.pageSetup.colourMode;
+    options.plot.lineWeightScale = set.pageSetup.lineWeightScale;
     options.plot.dpi = dpi;
     for (std::size_t n = 0; n < pages.size(); ++n) {
         if (n > 0) {

@@ -279,6 +279,40 @@ TEST(SheetTablePainter, TheRegisterReportsTheScaleAnAutomaticPlanIsDrawnAt)
     EXPECT_EQ(resolvedSet.sheets[2], set.sheets[2]);
 }
 
+// A sheet whose only scaled view is an automatic key plan: the register says
+// the scale the key plan is drawn at, fitted to the sheets' outlines as the
+// painter fits it, not to the drawing - here a stray line 20 km away that
+// would make it a far smaller scale.
+TEST(SheetTablePainter, TheRegisterReportsAKeyPlansScaleAsThePainterFitsIt)
+{
+    Model model;
+    for (const Segment2& segment : {Segment2{Point2(0.0, 0.0), Point2(100.0, 0.0)},
+                                    Segment2{Point2(20000.0, 20000.0), Point2(20010.0, 20000.0)}}) {
+        Entity line;
+        line.geometry = segment;
+        line.layer = "0";
+        ASSERT_TRUE(model.entities.add(std::move(line)).ok());
+    }
+    plotting::SheetSet set = registerSet(box(30.0, 50.0, 250.0, 270.0));
+    set.sheets.push_back(sheetNamed("s4", "KEY"));
+    plotting::Viewport key;
+    key.id = "vp9";
+    key.kind = plotting::ViewportKind::KeyPlan;
+    key.rect = box(30.0, 40.0, 130.0, 110.0);
+    key.autoScale = true;
+    key.autoCentre = true;
+    set.sheets.back().viewports.push_back(key);
+    SheetSource source;
+    source.plan.model = &model;
+
+    const double painted = katana::qt::resolvePlanViewport(key, source, set, 3).scale;
+    const double ofTheDrawing = katana::qt::resolvePlanViewport(key, source).scale;
+    ASSERT_LT(painted, ofTheDrawing) << "the outlines are nearer than the stray line";
+    const auto drawn = katana::qt::drawnRegister(set, source);
+    ASSERT_EQ(drawn.size(), 4u);
+    EXPECT_EQ(drawn[3].scale, std::format("1:{}", std::llround(painted)));
+}
+
 TEST(SheetTablePainter, TheRegisterCoverPlotsBothTablesAndNoUtilityLegend)
 {
     // The cover registerSheet makes, put first in a set of six tiles and a

@@ -380,6 +380,19 @@ TEST(SheetLegendSample, APlainLinePrintsInItsPaperColourAndWeight)
     }
     EXPECT_EQ(dark, 2);
 
+    // At a line weight scale of 2, as the plan beside it is drawn: 1 mm.
+    katana::cad::PlotSettings bold;
+    bold.lineWeightScale = 2.0;
+    LegendSampleContext boldContext = context();
+    boldContext.plot = &bold;
+    QImage heavy = blank();
+    ASSERT_TRUE(paintSample(heavy, entry, boldContext));
+    int heavyDark = 0;
+    for (int y = 40; y < 60; ++y) {
+        heavyDark += heavy.pixelColor(100, y).lightnessF() < 0.3 ? 1 : 0;
+    }
+    EXPECT_EQ(heavyDark, 4);
+
     // A red line stays red.
     QImage red = blank();
     ASSERT_TRUE(paintSample(red, entryOf(plotting::LegendKind::Line, kRed), context()));
