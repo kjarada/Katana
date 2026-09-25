@@ -1319,7 +1319,7 @@ context menu hold:
 | Auto Arrange | `sheetArrangeAuto` | the sheet |
 | Align Left, Right, Top, Bottom, Centres Horizontally, Centres Vertically | `sheetAlignLeft`, `sheetAlignRight`, `sheetAlignTop`, `sheetAlignBottom`, `sheetAlignHCentre`, `sheetAlignVCentre` | the selected views (one alone to the tiling area), or every view |
 | Distribute Horizontally, Vertically | `sheetDistributeHorizontal`, `sheetDistributeVertical` | the selected views, three or more (fewer is refused, so views not chosen never move), or every view on the sheet |
-| Match Scale To | `sheetMatchScaleMenu`, each item `sheetMatchScale_<id>` | the selected views, or every scaled view on the sheet, take the chosen view's scale as drawn - an automatic section's fitted scale and exaggeration |
+| Match Scale To... | `sheetMatchScaleMenu`, each item `sheetMatchScale_<id>` (`sheetMatchScaleNone` when there is none) | the selected views, or every scaled view on the sheet, take the chosen view's scale as drawn - an automatic section's fitted scale and exaggeration |
 | Fit View to Content | `sheetFitToContent` | the selected plan, or the sheet's main plan |
 | Rotate to Best Fit | `sheetRotateToBestFit` | the same |
 

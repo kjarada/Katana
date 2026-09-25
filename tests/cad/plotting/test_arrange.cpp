@@ -692,6 +692,28 @@ TEST(SheetArrange, UnplacedViewsTakeTheCellsTilingWouldGiveThem)
     expectBox(byId(sheet, "vp1").rect, cells[1].min.x, cells[1].min.y, cells[1].max.x, cells[1].max.y);
 }
 
+TEST(SheetArrange, AMainViewUnderALockedOneIsMovedOffItAtItsFullSize)
+{
+    // The plan sits under a locked note, with a legend over it. The plan is
+    // moved off the note at its full size, not shrunk with the panels, and
+    // stays the largest view; the note does not move.
+    Sheet sheet;
+    const Box2 note(Point2(30.0, 40.0), Point2(80.0, 70.0));
+    sheet.viewports.push_back(viewportAt("vp1", ViewportKind::Plan,
+                                         Box2(Point2(25.5, 37.5), Point2(200.0, 180.0))));
+    sheet.viewports.push_back(viewportAt("vp2", ViewportKind::Notes, note, true));
+    sheet.viewports.push_back(viewportAt("vp3", ViewportKind::Legend,
+                                         Box2(Point2(90.0, 90.0), Point2(380.0, 280.0))));
+    const ArrangeResult result = autoArrange(sheet);
+    expectTidy(sheet);
+    EXPECT_TRUE(result.overlapping.empty());
+    EXPECT_EQ(byId(sheet, "vp2").rect, note);
+    EXPECT_NEAR(byId(sheet, "vp1").rect.width(), 174.5, 1e-9);
+    EXPECT_NEAR(byId(sheet, "vp1").rect.height(), 142.5, 1e-9);
+    EXPECT_GE(areaOf(byId(sheet, "vp1").rect), areaOf(byId(sheet, "vp3").rect));
+    EXPECT_FALSE(result.mainShrunk);
+}
+
 TEST(SheetArrange, WhenNothingElseMakesRoomTheMainViewShrinksFromItsTopLeftCorner)
 {
     // The plan fills the sheet and a legend sits on it: no room anywhere

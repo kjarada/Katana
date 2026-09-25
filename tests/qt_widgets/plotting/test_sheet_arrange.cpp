@@ -165,10 +165,27 @@ TEST(SheetArrangeEditor, TheArrangeMenuOffersEveryCommandByName)
     }
     EXPECT_NE(button->menu()->findChild<QMenu*>(QStringLiteral("sheetMatchScaleMenu")), nullptr);
 
-    // The context menu is filled by the same function.
-    QMenu context;
-    katana::qt::fillArrangeMenu(context, document, shown.editor);
-    EXPECT_NE(context.findChild<QAction*>(QStringLiteral("sheetRotateToBestFit")), nullptr);
+    // The canvas's context menu has the same commands in its Arrange
+    // submenu: looked for while the menu is up, then closed.
+    bool seen = false;
+    QTimer::singleShot(0, &shown.editor, [&shown, &seen] {
+        auto* arrange = shown.editor.findChild<QMenu*>(QStringLiteral("sheetContextArrangeMenu"));
+        if (arrange != nullptr) {
+            seen = arrange->findChild<QAction*>(QStringLiteral("sheetRotateToBestFit")) != nullptr &&
+                   arrange->findChild<QAction*>(QStringLiteral("sheetArrangeAuto")) != nullptr &&
+                   arrange->findChild<QMenu*>(QStringLiteral("sheetMatchScaleMenu")) != nullptr;
+            if (auto* context = qobject_cast<QMenu*>(arrange->parent())) {
+                context->close();
+                return;
+            }
+        }
+        if (auto* popup = QApplication::activePopupWidget()) {
+            popup->close();
+        }
+    });
+    ASSERT_TRUE(shown.editor.canvas()->onContextMenu);
+    shown.editor.canvas()->onContextMenu(QPointF(200.0, 200.0), std::string{});
+    EXPECT_TRUE(seen);
 
     // With no sheet, a command says so and changes nothing.
     shown.trigger("sheetArrangeAuto");

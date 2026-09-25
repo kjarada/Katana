@@ -102,8 +102,8 @@ katana::core::Result<std::string> choosePaperForSheet(katana::cad::Document& doc
 // sheetArrangeAuto, sheetAlignLeft, sheetAlignRight, sheetAlignTop,
 // sheetAlignBottom, sheetAlignHCentre, sheetAlignVCentre,
 // sheetDistributeHorizontal, sheetDistributeVertical, sheetMatchScaleMenu
-// (its items sheetMatchScale_<viewport id>, filled by fillMatchScaleMenu when
-// it opens), sheetFitToContent and sheetRotateToBestFit.
+// (its items sheetMatchScale_<viewport id>, or sheetMatchScaleNone, filled
+// by fillMatchScaleMenu when it opens), sheetFitToContent and sheetRotateToBestFit.
 void fillArrangeMenu(QMenu& menu, katana::cad::Document& document, SheetEditor& editor);
 // The Match Scale To list: every view drawn to a scale in the set but the
 // selected one, by sheet, with the scale it is drawn at.
