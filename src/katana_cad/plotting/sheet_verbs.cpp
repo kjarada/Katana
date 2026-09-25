@@ -541,13 +541,6 @@ Box2 freePlace(const Sheet& sheet, double width, double height)
                 Point2(c.x + width / 2.0, c.y + height / 2.0));
 }
 
-Point2 rotatedBy(const Point2& p, double angle)
-{
-    const double c = std::cos(angle);
-    const double s = std::sin(angle);
-    return Point2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
 // The chainage half way along alignment `name`, when it solves.
 std::optional<double> middleStation(const entity::Model& model, const std::string& name)
 {
@@ -2364,33 +2357,9 @@ Viewport defaultViewport(const SheetSet& set, std::size_t sheetIndexIn, Viewport
         viewport.autoScale = true;
         viewport.autoCentre = true;
         viewport.northArrow = true;
-        // The other sheets' plans, outlined and numbered. Only a plan at a
-        // fixed scale and centre has an outline to give: where an automatic
-        // one falls is decided when it is drawn.
-        for (const Sheet& other : set.sheets) {
-            if (sheet != nullptr && other.id == sheet->id) {
-                continue;
-            }
-            for (const Viewport& plan : other.viewports) {
-                if (plan.kind != ViewportKind::Plan || plan.rect.empty() || plan.autoScale ||
-                    plan.autoCentre) {
-                    continue;
-                }
-                const double halfWidth = plan.rect.width() * plan.scale / 2000.0;
-                const double halfHeight = plan.rect.height() * plan.scale / 2000.0;
-                WorldMark mark;
-                mark.kind = WorldMark::Kind::SheetOutline;
-                mark.sheet = other.id;
-                for (const Point2& corner :
-                     {Point2(-halfWidth, -halfHeight), Point2(halfWidth, -halfHeight),
-                      Point2(halfWidth, halfHeight), Point2(-halfWidth, halfHeight)}) {
-                    const Point2 turned = rotatedBy(corner, plan.rotation);
-                    mark.points.push_back(Point2(plan.centre.x + turned.x, plan.centre.y + turned.y));
-                }
-                viewport.marks.push_back(std::move(mark));
-                break;
-            }
-        }
+        // No outlines are stored: a key plan draws the sheets' plans where
+        // they are when it is drawn (key_plan.hpp), numbered as the set
+        // numbers them then, and fits itself to them.
     } else if (kind == ViewportKind::LongSection) {
         viewport.rect = place(380.0, 110.0);
         viewport.scale = 500.0;

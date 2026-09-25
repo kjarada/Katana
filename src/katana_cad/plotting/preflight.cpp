@@ -16,6 +16,7 @@
 #include "katana/cad/hatching.hpp"
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/frame.hpp"
+#include "katana/cad/plotting/key_plan.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/cad/plotting/tables.hpp"
@@ -625,10 +626,18 @@ PlanContent planContent(const Viewport& viewport, const Window& window, double s
         content.shown = std::any_of(options.otherContent.begin(), options.otherContent.end(),
                                     [&](const Box2& box) { return boxMeets(window, box); });
     }
-    // A key plan's sheet outlines and a plan's match lines are drawn too.
+    // A plan's match lines are drawn too.
     if (!content.shown) {
         content.shown = std::any_of(viewport.marks.begin(), viewport.marks.end(),
                                     [&](const WorldMark& mark) {
+                                        // A key plan's stored outlines are
+                                        // stale copies the painter no longer
+                                        // draws; its live ones are counted
+                                        // by checkPlan.
+                                        if (viewport.kind == ViewportKind::KeyPlan &&
+                                            mark.kind == WorldMark::Kind::SheetOutline) {
+                                            return false;
+                                        }
                                         // Its lines only: an outline is not filled.
                                         geometry::Polyline2 line{mark.points, false};
                                         if (mark.kind == WorldMark::Kind::SheetOutline &&
@@ -641,7 +650,7 @@ PlanContent planContent(const Viewport& viewport, const Window& window, double s
     return content;
 }
 
-void checkPlan(const Viewport& viewport, std::size_t index, const Sheet& sheet,
+void checkPlan(const SheetSet& set, const Viewport& viewport, std::size_t index, const Sheet& sheet,
                const entity::Model& model, const PreflightOptions& options, Report& report)
 {
     const auto add = [&](Severity severity, std::string_view code, std::string subject,
@@ -656,8 +665,27 @@ void checkPlan(const Viewport& viewport, std::size_t index, const Sheet& sheet,
             std::format("{} follows the alignment {}, which the drawing does not have", label, alignment),
             "Generate the sheet again from an alignment the drawing has, or clear the view's alignment");
     }
-    const PlanWindow at =
+    PlanWindow at =
         options.resolvePlan ? options.resolvePlan(viewport) : planWindow(viewport, model, options.otherContent);
+    // A key plan is drawn live (key_plan.hpp): the sheets' plans outlined
+    // where they are now, each automatic one placed as the painter places it,
+    // and an automatic key plan fitted to those outlines rather than to the
+    // drawing - so it is checked at the window it is drawn at, and what it
+    // shows includes the outlines.
+    std::vector<KeyPlanOutline> outlines;
+    if (viewport.kind == ViewportKind::KeyPlan) {
+        const PlanPlacer place = options.resolvePlan
+                                     ? PlanPlacer([&options](const Viewport& plan) {
+                                           const PlanWindow placed = options.resolvePlan(plan);
+                                           return PlanPlacement{placed.scale, placed.centre};
+                                       })
+                                     : modelPlacer(model);
+        outlines = keyPlanOutlines(set, index, place);
+        if (!outlines.empty() && (viewport.autoScale || viewport.autoCentre)) {
+            const PlanPlacement fitted = fitKeyPlan(viewport, outlines, Box2{});
+            at = PlanWindow{fitted.scale, fitted.centre};
+        }
+    }
     if (!(at.scale > 0.0) || !std::isfinite(at.scale) || !std::isfinite(at.centre.x) ||
         !std::isfinite(at.centre.y)) {
         // A fixed scale that cannot be used has had scale.invalid. An
@@ -674,7 +702,16 @@ void checkPlan(const Viewport& viewport, std::size_t index, const Sheet& sheet,
         return;
     }
     const Window window = windowOf(viewport, at);
-    const PlanContent content = planContent(viewport, window, at.scale, model, options);
+    PlanContent content = planContent(viewport, window, at.scale, model, options);
+    if (!content.shown) {
+        content.shown = std::any_of(outlines.begin(), outlines.end(), [&](const KeyPlanOutline& outline) {
+            geometry::Polyline2 ring{outline.corners, false};
+            if (!ring.vertices.empty()) {
+                ring.vertices.push_back(ring.vertices.front());
+            }
+            return ring.vertices.size() > 1 && polylineMeets(window, ring);
+        });
+    }
     if (!content.shown) {
         add(Severity::Warning, "plan.empty", {},
             std::format("{} shows nothing: nothing it draws lies in its {:.1f} x {:.1f} m window at {} "
@@ -936,7 +973,7 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
     switch (viewport.kind) {
     case ViewportKind::Plan:
     case ViewportKind::KeyPlan: // drawn as a plan is, so checked as one
-        checkPlan(viewport, index, sheet, model, options, report);
+        checkPlan(set, viewport, index, sheet, model, options, report);
         break;
     case ViewportKind::LongSection:
     case ViewportKind::CrossSections:
