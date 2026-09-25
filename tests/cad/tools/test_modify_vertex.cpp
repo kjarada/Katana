@@ -343,3 +343,89 @@ TEST(VertexTools, OffsettingACurvePolylineMakesConcentricArcs)
     EXPECT_NEAR(arc.radius, 4.0, 1e-9);
     EXPECT_NEAR(arc.center.distanceTo(Point2(10, 5)), 0.0, 1e-9);
 }
+
+TEST(VertexTools, BreakingACurvePolylineKeepsItsArcsCircle)
+{
+    // A straight 10 m then a quarter circle of radius 5 about (10,5): broken
+    // from (5,0) to the arc's middle, the piece kept past the gap is the
+    // arc's second half, still on its circle, and the first piece a straight
+    // polyline (stored as one) with the heights it had.
+    ToolDriver driver;
+    katana::entity::Entity entity;
+    CurvePolyline2 shape = CurvePolyline2::fromPoints({Point2(0, 0), Point2(10, 0), Point2(15, 5)});
+    shape.vertices[1].bulge = std::tan(katana::math::kPi / 8.0);
+    shape.vertices[0].height = 100.0;
+    shape.vertices[1].height = 110.0;
+    shape.vertices[2].height = 120.0;
+    entity.geometry = shape;
+    const EntityId id = driver.add(katana::commands::createEntities({entity}));
+    const Point2 middle = Point2(10, 5) + katana::geometry::Vec2(5, 0).rotated(-katana::math::kPi / 4.0);
+    driver.start("modify.break");
+    ASSERT_EQ(driver.pick(id, 5, 0).outcome, katana::cad::ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.click(middle.x, middle.y).outcome, katana::cad::ToolStep::Outcome::Done);
+    const auto* first = driver.document().model().entities.find(id);
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(first->type(), katana::entity::EntityType::Polyline);
+    const auto firstShape = readPolyline(*first);
+    ASSERT_TRUE(firstShape.has_value());
+    EXPECT_EQ(firstShape->vertices.back().position, Point2(5, 0));
+    EXPECT_DOUBLE_EQ(*firstShape->vertices.back().height, 105.0);
+    const auto made = driver.document().lastCreatedEntities();
+    ASSERT_EQ(made.size(), 1u);
+    const auto second =
+        std::get<CurvePolyline2>(driver.document().model().entities.find(made[0])->geometry);
+    ASSERT_EQ(second.vertices.size(), 2u);
+    const auto arc = std::get<katana::geometry::Arc2>(second.segment(0));
+    EXPECT_NEAR(arc.radius, 5.0, 1e-9);
+    EXPECT_NEAR(arc.center.distanceTo(Point2(10, 5)), 0.0, 1e-9);
+    EXPECT_NEAR(std::abs(arc.sweep), katana::math::kPi / 4.0, 1e-9);
+    EXPECT_NEAR(*second.vertices[0].height, 115.0, 1e-9) << "halfway along the arc";
+    ASSERT_TRUE(driver.document().undo().ok());
+    EXPECT_EQ(driver.document().model().entities.size(), 1u);
+}
+
+TEST(VertexTools, TrimmingACurvePolylineAtALineCrossingItsArc)
+{
+    // The same path, cut by the line x = 10 + 5 sin 45 through the arc; the
+    // pick on the arc's far end trims that end away.
+    ToolDriver driver;
+    katana::entity::Entity entity;
+    CurvePolyline2 shape = CurvePolyline2::fromPoints({Point2(0, 0), Point2(10, 0), Point2(15, 5)});
+    shape.vertices[1].bulge = std::tan(katana::math::kPi / 8.0);
+    entity.geometry = shape;
+    const EntityId id = driver.add(katana::commands::createEntities({entity}));
+    const double x = 10.0 + 5.0 * std::sin(katana::math::kPi / 4.0);
+    const EntityId cutter = driver.add(katana::commands::createLine(
+        Point2(x, -10), Point2(x, 10), driver.document().currentAttributes()));
+    driver.start("modify.trim");
+    driver.pick(cutter, x, 0);
+    driver.enter();
+    ASSERT_EQ(driver.pick(id, 14.9, 4).outcome, katana::cad::ToolStep::Outcome::Continue);
+    ASSERT_EQ(driver.enter().outcome, katana::cad::ToolStep::Outcome::Done);
+    const auto kept = std::get<CurvePolyline2>(driver.document().model().entities.find(id)->geometry);
+    ASSERT_EQ(kept.vertices.size(), 3u);
+    EXPECT_NEAR(kept.vertices.back().position.x, x, 1e-9);
+    const auto arc = std::get<katana::geometry::Arc2>(kept.segment(1));
+    EXPECT_NEAR(arc.radius, 5.0, 1e-9);
+    EXPECT_NEAR(kept.length(), 10.0 + 5.0 * katana::math::kPi / 4.0, 1e-9);
+}
+
+TEST(VertexTools, ACurvePolylineIsACuttingEdgeForTrim)
+{
+    ToolDriver driver;
+    katana::entity::Entity entity;
+    CurvePolyline2 shape = CurvePolyline2::fromPoints({Point2(0, 0), Point2(10, 0)});
+    shape.vertices[0].bulge = 1.0; // a semicircle below the chord, centre (5,0), radius 5
+    entity.geometry = shape;
+    const EntityId edge = driver.add(katana::commands::createEntities({entity}));
+    const EntityId target = driver.add(katana::commands::createLine(
+        Point2(5, 0), Point2(5, -10), driver.document().currentAttributes()));
+    driver.start("modify.trim");
+    driver.pick(edge, 5, -5);
+    driver.enter();
+    driver.pick(target, 5, -8);
+    ASSERT_EQ(driver.enter().outcome, katana::cad::ToolStep::Outcome::Done);
+    const auto line =
+        std::get<katana::geometry::Segment2>(driver.document().model().entities.find(target)->geometry);
+    EXPECT_NEAR(line.end.y, -5.0, 1e-9) << "cut where it crosses the arc";
+}
