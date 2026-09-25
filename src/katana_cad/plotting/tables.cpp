@@ -68,6 +68,20 @@ std::string oneLine(std::string_view text)
     return out;
 }
 
+// `text` without the spaces, tabs and line breaks at either end: a
+// description typed with a trailing line break would otherwise make its row
+// a line taller, and a centred code with a trailing space would sit off
+// centre.
+std::string_view trimmed(std::string_view text)
+{
+    constexpr std::string_view kBlank = " \t\r\n";
+    const std::size_t first = text.find_first_not_of(kBlank);
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return text.substr(first, text.find_last_not_of(kBlank) - first + 1);
+}
+
 // A word of a wrapping cell and its width at a cap height of 1 mm.
 struct Word {
     std::string_view text;
@@ -384,12 +398,14 @@ TableLayout layoutTable(const TableSpec& spec, const Box2& rect, const TextWidth
 
     // What each cell prints: a line break in a cell that does not wrap, or
     // in the heading, is a space - the row is one line high, and a painter
-    // would step a second line down over the row below.
-    const std::string heading = oneLine(spec.heading);
+    // would step a second line down over the row below. Blanks at either
+    // end of a text are dropped (trimmed).
+    const std::string heading = oneLine(trimmed(spec.heading));
     std::vector<std::vector<std::string>> texts(rowCount, std::vector<std::string>(columns));
     for (std::size_t i = 0; i < rowCount; ++i) {
         for (std::size_t j = 0; j < columns && j < spec.rows[i].size(); ++j) {
-            texts[i][j] = spec.columns[j].wrap ? spec.rows[i][j] : oneLine(spec.rows[i][j]);
+            const std::string_view cell = trimmed(spec.rows[i][j]);
+            texts[i][j] = spec.columns[j].wrap ? std::string(cell) : oneLine(cell);
         }
     }
 
