@@ -44,6 +44,9 @@ enum class ViewportKind {
     Notes,         // free text
     Image,         // an image from the project's assets
     KeyPlan,       // where the other sheets are: their outlines, numbered
+    SheetIndex,    // the drawing register: every sheet's number, title, scale,
+                   // paper and revision (tables.hpp)
+    Revisions,     // the revision table, newest first (tables.hpp)
 };
 
 [[nodiscard]] std::string_view toString(ViewportKind kind);
@@ -102,6 +105,8 @@ struct Viewport {
     bool locked = false; // tiling and snapping leave a locked viewport alone
     std::string text;    // Notes: the text; Image: the asset's file name
     std::vector<WorldMark> marks;
+    // Revisions: only the newest so many; 0 shows every revision.
+    std::size_t revisionLimit = 0;
 
     friend bool operator==(const Viewport&, const Viewport&) = default;
 };

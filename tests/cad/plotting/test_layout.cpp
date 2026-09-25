@@ -48,7 +48,8 @@ const Viewport& byId(const Sheet& sheet, std::string_view id)
 constexpr ViewportKind kEveryKind[] = {
     ViewportKind::Plan,  ViewportKind::LongSection, ViewportKind::CrossSections,
     ViewportKind::Model3D, ViewportKind::Legend,    ViewportKind::Notes,
-    ViewportKind::Image, ViewportKind::KeyPlan,
+    ViewportKind::Image, ViewportKind::KeyPlan,     ViewportKind::SheetIndex,
+    ViewportKind::Revisions,
 };
 
 } // namespace
@@ -121,9 +122,9 @@ TEST(SheetLayout, EveryViewportKindHasItsOwnRankAndTheMainDrawingComesFirst)
     for (const ViewportKind kind : kEveryKind) {
         ranks.insert(tilingRank(kind));
     }
-    // Eight kinds, eight different ranks: no kind falls through a missing
-    // table entry the way the owner's app's map panels did.
-    EXPECT_EQ(ranks.size(), 8u);
+    // Every kind its own rank: no kind falls through a missing table entry
+    // the way the owner's app's map panels did.
+    EXPECT_EQ(ranks.size(), std::size(kEveryKind));
     EXPECT_LT(tilingRank(ViewportKind::Plan), tilingRank(ViewportKind::LongSection));
     EXPECT_LT(tilingRank(ViewportKind::LongSection), tilingRank(ViewportKind::CrossSections));
     EXPECT_LT(tilingRank(ViewportKind::CrossSections), tilingRank(ViewportKind::Model3D));
