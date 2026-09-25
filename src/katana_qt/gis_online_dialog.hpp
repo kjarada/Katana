@@ -41,7 +41,9 @@
 #include <QDialog>
 
 #include <functional>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "katana/core/error.hpp"
 #include "katana/interop/online_catalogue.hpp"
@@ -73,6 +75,10 @@ struct OnlineDialogContext {
     // Discovers the service at a URL and adds it to the user catalogue, in
     // the background; the dialog is refreshed by the workbench when it lands.
     std::function<katana::core::Status(const std::string& url)> addCustom;
+    // Opens the project coordinate system dialog, suggesting systems for the
+    // typed box's centre when it is in longitude and latitude; true when the
+    // project's coordinate system changed.
+    std::function<bool(std::optional<std::pair<double, double>> place)> chooseProjectCrs;
 };
 
 class OnlineDataDialog final : public QDialog {
@@ -87,6 +93,8 @@ class OnlineDataDialog final : public QDialog {
     // missing, when no layer is chosen or the typed box does not parse.
     [[nodiscard]] katana::core::Result<katana::interop::OnlineCommand> command() const;
     void setStatus(const QString& text, bool isError = false);
+    // Shows the project's coordinate system as it is now.
+    void refreshProjectCrs();
 
   private:
     void showDetails();

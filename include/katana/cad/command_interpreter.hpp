@@ -70,6 +70,9 @@ class CommandInterpreter {
     [[nodiscard]] Reply hatchPattern(const Tokens& args);
     [[nodiscard]] Reply style(const Tokens& args);
     [[nodiscard]] Reply alignment(const Tokens& args);
+    // CRS: the project's coordinate system - shown, set, cleared, found in the
+    // common list, suggested for a place (project_crs.hpp).
+    [[nodiscard]] Reply coordinateSystem(const Tokens& args);
     [[nodiscard]] Reply parcel(const Tokens& args);
     // INVERSE, FORWARD (RADIATE) and AREA: the survey tools of survey_tools.hpp,
     // printing the same report the Survey menu's dialogs print.

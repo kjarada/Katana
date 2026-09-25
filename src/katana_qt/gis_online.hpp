@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "icons.hpp"
@@ -66,6 +67,10 @@ struct OnlineServices {
     std::function<katana::interop::ReferenceId(katana::interop::RasterOverlay)> addRaster;
     // The version the User-Agent names.
     std::string version;
+    // Opens File > Project Coordinate System, suggesting systems for a
+    // longitude and latitude when there is one; true when the project's
+    // coordinate system changed.
+    std::function<bool(std::optional<std::pair<double, double>> place)> chooseProjectCrs;
 };
 
 class OnlineDataWorkbench {
