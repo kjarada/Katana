@@ -1,5 +1,6 @@
 #include "katana/cad/drawing/vertex_editing.hpp"
 
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -158,6 +159,40 @@ std::vector<bool> verticesOnSurveyPoints(const katana::entity::Model& model,
         }
     }
     return keep;
+}
+
+std::optional<double> heightAtPoint(const Document& document, const Point2& at, double tolerance)
+{
+    std::optional<double> best;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    const auto offer = [&](const Point2& p, const std::optional<double>& height) {
+        const double d = p.distanceTo(at);
+        if (height && d <= tolerance && d < bestDistance) {
+            bestDistance = d;
+            best = height;
+        }
+    };
+    std::vector<katana::geometry::SpatialId> ids;
+    document.spatialIndex().query(
+        katana::geometry::Box2(at, at).inflated(std::max(tolerance, 1.0e-9)), ids);
+    for (const auto id : ids) {
+        const Entity* entity = document.model().entities.find(static_cast<EntityId>(id));
+        if (entity == nullptr) {
+            continue;
+        }
+        if (const auto* point = std::get_if<katana::entity::PointGeometry>(&entity->geometry)) {
+            offer(point->position, katana::entity::heightsOf(entity->properties, 1)[0]);
+        } else if (const auto* line = std::get_if<katana::geometry::Segment2>(&entity->geometry)) {
+            const auto heights = katana::entity::heightsOf(entity->properties, 2);
+            offer(line->start, heights[0]);
+            offer(line->end, heights[1]);
+        } else if (const auto polyline = readPolyline(*entity)) {
+            for (const auto& vertex : polyline->vertices) {
+                offer(vertex.position, vertex.height);
+            }
+        }
+    }
+    return best;
 }
 
 } // namespace katana::cad

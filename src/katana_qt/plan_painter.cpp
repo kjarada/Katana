@@ -1,5 +1,7 @@
 #include "plan_painter.hpp"
 
+#include "katana/cad/drawing/construction.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -898,6 +900,11 @@ void PlanPainter::drawEntities()
             const Resolved& resolved = resolve(entity);
             // cad::isDrawn, with the layer's half answered once per layer.
             if (!entity.visible || !resolved.layerDrawn) {
+                return;
+            }
+            // Construction lines and rays are drawing aids: on screen, never
+            // on paper (drawing/construction.hpp).
+            if (paper() && cad::isConstructionLayer(entity.layer)) {
                 return;
             }
             // This box test is NOT the one forEachCandidate already did:

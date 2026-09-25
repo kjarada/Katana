@@ -1,5 +1,6 @@
 #include "katana/cad/selection.hpp"
 
+#include "katana/cad/drawing/construction.hpp"
 #include "katana/entity/curve_pieces.hpp"
 
 #include "katana/cad/spatial_query.hpp"
@@ -80,7 +81,9 @@ Box2 drawnExtent(const Model& model, const LayerOverrides& view)
 {
     Box2 extent;
     model.entities.forEach([&](const Entity& entity) {
-        if (isDrawn(model, entity, view)) {
+        // A construction line reaches 100 km each way; it is an aid to the
+        // drawing, not part of its extent (drawing/construction.hpp).
+        if (isDrawn(model, entity, view) && !isConstructionLayer(entity.layer)) {
             extent.expand(katana::entity::boundingBox(entity.geometry));
         }
     });

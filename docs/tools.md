@@ -84,7 +84,11 @@ spellings of the same verbs, so a word means one thing whichever reads it:
 The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
 List), is listed and empty. The drawing system added Draw > Vertices
 (`modify_vertex.cpp`, eighteen tools gathered into a Vertices submenu of
-Draw by their "Vertices, <tool>" names); `docs/drawing.md` has its table. The Survey menu's tools (`docs/survey.md`) are
+Draw by their "Vertices, <tool>" names) and the professional draw tools
+(`draw_professional.cpp`: 3D Polyline, Construction Line, Ray, Double Line,
+Freehand Sketch, Revision Cloud, Spline, the Ellipse submenu, Circle Tangent
+Tangent Tangent and Arc Start End Direction); `docs/drawing.md` has their
+tables. The Survey menu's tools (`docs/survey.md`) are
 dialogs, not catalogue tools.
 
 **One command per tool session.** A tool that completes returns ONE command,

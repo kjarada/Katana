@@ -8,6 +8,7 @@
 // the tools apart.
 
 #include <cmath>
+#include <utility>
 
 #include "tools/tool_icons.hpp"
 
@@ -177,6 +178,104 @@ bool paintDrawingIcon(std::string_view toolId, const ToolInk& ink)
         ink.node(4, 20, true);
         ink.node(12, 4, true);
         ink.node(20, 12, true);
+        return true;
+    }
+    // ---- the draw tools ----
+    if (toolId == "draw.polyline3d") {
+        ink.stroke(polyline({{3, 19}, {10, 11}, {21, 14}}), true);
+        for (const auto& [x, y] : {std::pair{3.0, 19.0}, std::pair{10.0, 11.0}, std::pair{21.0, 14.0}}) {
+            ink.line(x, y, x, y - 7, false, 1.0);
+            ink.node(x, y);
+        }
+        return true;
+    }
+    if (toolId == "draw.spline") {
+        QPainterPath path;
+        path.moveTo(3, 17);
+        path.cubicTo(8, 2, 14, 24, 21, 7);
+        ink.stroke(path, true);
+        ink.node(3, 17);
+        ink.node(12, 13);
+        ink.node(21, 7);
+        return true;
+    }
+    if (toolId == "draw.ellipse" || toolId == "draw.ellipse.centre" || toolId == "draw.ellipse.arc") {
+        QPainterPath path;
+        if (toolId == "draw.ellipse.arc") {
+            path.arcMoveTo(QRectF(2, 6, 20, 12), 0);
+            path.arcTo(QRectF(2, 6, 20, 12), 0, 200);
+            ink.dashed(polyline({{12, 12}, {22, 12}}));
+        } else {
+            path.addEllipse(QRectF(2, 6, 20, 12));
+        }
+        ink.stroke(path, true);
+        if (toolId == "draw.ellipse.centre") {
+            ink.node(12, 12);
+            ink.node(22, 12);
+        } else {
+            ink.node(2, 12);
+            ink.node(22, 12);
+        }
+        return true;
+    }
+    if (toolId == "draw.xline") {
+        ink.line(1, 20, 23, 4, true);
+        ink.node(9.5, 13.8);
+        return true;
+    }
+    if (toolId == "draw.ray") {
+        ink.line(5, 18, 23, 5, true);
+        ink.node(5, 18);
+        return true;
+    }
+    if (toolId == "draw.dline") {
+        ink.stroke(polyline({{3, 16}, {12, 7}, {21, 12}}), true);
+        ink.stroke(polyline({{3, 20}, {12, 11}, {21, 16}}), true);
+        ink.dashed(polyline({{3, 18}, {12, 9}, {21, 14}}));
+        return true;
+    }
+    if (toolId == "draw.sketch") {
+        QPainterPath path;
+        path.moveTo(3, 15);
+        path.cubicTo(6, 6, 8, 20, 11, 12);
+        path.cubicTo(13, 6, 16, 18, 21, 9);
+        ink.stroke(path, true);
+        return true;
+    }
+    if (toolId == "draw.revcloud") {
+        QPainterPath path;
+        path.moveTo(4, 8);
+        for (const auto& [x, y] : {std::pair{10.0, 5.0}, std::pair{16.0, 5.0}, std::pair{21.0, 9.0},
+                                   std::pair{21.0, 15.0}, std::pair{16.0, 19.0}, std::pair{10.0, 19.0},
+                                   std::pair{4.0, 15.0}, std::pair{4.0, 8.0}}) {
+            const QPointF from = path.currentPosition();
+            const QPointF to(x, y);
+            const QPointF mid = (from + to) / 2.0;
+            const QPointF out(-(to.y() - from.y()) * 0.35, (to.x() - from.x()) * 0.35);
+            path.quadTo(mid - out, to);
+        }
+        ink.stroke(path, true);
+        return true;
+    }
+    if (toolId == "draw.circle.ttt") {
+        // Three tangent lines round the circle they touch.
+        QPainterPath circle;
+        circle.addEllipse(QRectF(7, 8, 10, 10));
+        ink.stroke(circle, true);
+        ink.line(2, 18, 22, 18, false, 1.0);
+        ink.line(4, 5, 13, 21, false, 1.0);
+        ink.line(20, 5, 11, 21, false, 1.0);
+        return true;
+    }
+    if (toolId == "draw.arc.sed") {
+        // An arc between its ends, with the direction it leaves its start.
+        QPainterPath path;
+        path.moveTo(4, 19);
+        path.quadTo(4, 5, 20, 7);
+        ink.stroke(path, true);
+        ink.dashed(polyline({{4, 19}, {4, 5}}));
+        ink.node(4, 19);
+        ink.node(20, 7);
         return true;
     }
     return false;

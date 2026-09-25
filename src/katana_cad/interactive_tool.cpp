@@ -147,11 +147,12 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
         tool.expects() != ToolInput::Value &&
         (input.find(',') != std::string_view::npos || (!input.empty() && input.front() == '@'));
     if (looksLikePoint) {
-        auto point = parsePointInput(input, tool.lastPoint());
+        auto point = parsePrecisePoint(input, tool.lastPoint());
         if (!point) {
             return ToolStep::rejected(point.error().describe());
         }
-        return tool.point(*point);
+        // x,y,z: a height for a tool that takes one (point3d's default drops it).
+        return point->z ? tool.point3d(point->point, *point->z) : tool.point(point->point);
     }
     return tool.value(input);
 }
@@ -307,6 +308,7 @@ const BuiltCatalog& builtCatalog()
         tools::addPropertyTools(out.catalog, report);
         tools::addSelectTools(out.catalog, report);
         tools::addModifyVertexTools(out.catalog, report);
+        tools::addDrawProfessionalTools(out.catalog, report);
         return out;
     }();
     return built;
