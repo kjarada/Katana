@@ -13,13 +13,20 @@
 //
 // The camera is the HOST's (a ViewState's, like RenderViewWidget's), held by
 // reference: switching between this view and the software one keeps the view.
-// Two things make that true. The widget leaves the camera in LOGICAL pixels,
-// as RenderViewWidget keeps it, and draws each frame through a copy sized to
-// the device pixels it draws - so the software view taking over after a
-// failure finds a camera its rasteriser accepts. And it frames the scene on
-// its first frame only when the host has not said the camera is framed
-// already (setCameraFramed, fed from ViewState::cameraFramed) - so a view
-// rebuilt over a ViewState keeps the user's orbit and zoom.
+// Two things make that true. The camera's view - eye, target, zoom - does not
+// depend on the viewport's pixel count, only on its aspect: framing, panning
+// by pixels and zooming about a pixel all count against the viewport's own
+// size. So this widget sizes the camera to its LOGICAL pixels and draws each
+// frame through a copy sized to the device pixels it draws, while
+// RenderViewWidget sizes it to device pixels before every paint
+// (resizeTarget) - and the software view taking over after a failure finds
+// the same view at its own resolution. And the widget frames the scene on its
+// first frame only when the host has not said the camera is framed already
+// (setCameraFramed, fed from ViewState::cameraFramed) - so a view rebuilt
+// over a ViewState keeps the user's orbit and zoom.
+//
+// The API is the build's (renderer_choice.hpp, GpuBackend): Direct3D 11 on
+// Windows, Vulkan on Linux.
 //
 // No Q_OBJECT (Katana has no moc): QRhiWidget's renderFailed signal is
 // connected to a lambda, and what the host needs to hear comes out through
@@ -29,8 +36,10 @@
 // renderFailed - which is why chooseRenderer() sends headless runs to the
 // software path, and why the tests exercise GpuRenderer through OffscreenGpu.
 
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <span>
 
 #include <QPoint>
 #include <QRhiWidget>
@@ -58,6 +67,11 @@ class GpuSceneView final : public QRhiWidget {
     // Packs `list` for the GPU and repaints; the upload happens in the next
     // frame, and only then. Call it when the scene changes, not per frame.
     void setDrawList(const katana::render::DrawList& list);
+    // The same for a scene of layers drawn with their own depth rules
+    // (GpuRenderer::setLayers), and for one layer that changed alone
+    // (GpuRenderer::updateLayer) - a selection, faded edges.
+    void setLayers(std::span<const LayerSource> layers);
+    void updateLayer(std::size_t index, const katana::render::DrawList& list);
 
     void setFrameSettings(const FrameSettings& settings);
     [[nodiscard]] const FrameSettings& frameSettings() const { return settings_; }
@@ -65,6 +79,11 @@ class GpuSceneView final : public QRhiWidget {
     // False for an orthographic elevation view, which is a measured drawing:
     // a left drag then pans instead of orbiting, as RenderViewWidget does.
     void setOrbitAllowed(bool allowed) { orbitAllowed_ = allowed; }
+
+    // Whether a software device (WARP, lavapipe) may draw this view; by
+    // default it is refused as a failure, so the host falls back to the
+    // software rasteriser (RendererDecision::softwareDeviceAllowed).
+    void setSoftwareDeviceAllowed(bool allowed) { softwareDeviceAllowed_ = allowed; }
 
     // Frames the scene: onZoomExtents when the host set it (the host knows
     // what "the scene" is), otherwise the packed draw list's bounds - and
@@ -88,7 +107,8 @@ class GpuSceneView final : public QRhiWidget {
     [[nodiscard]] const GpuFrameStats& lastStats() const { return stats_; }
 
     // Raised once, the first time rendering fails (QRhiWidget::renderFailed,
-    // a pipeline that does not build, a backend other than Direct3D 11). The
+    // a pipeline that does not build, a backend other than the build's, a
+    // software device that was not allowed). The
     // camera is in the widget's logical pixels then, as the software view
     // wants it; a software view of a different size must still set its own.
     std::function<void(const QString& reason)> onRenderFailed;
@@ -98,6 +118,12 @@ class GpuSceneView final : public QRhiWidget {
     std::function<void()> onZoomExtents;
     // "GPU  12345 tri  0.8 ms" after every frame (CPU time to record it).
     std::function<void(const QString&)> onFrameStats;
+    // Called at the start of every frame with the camera it will be drawn
+    // through - the host's, sized to the device pixels drawn - before
+    // anything is uploaded: where a host fits the depth range to its scene
+    // and fades its edges for the frame's scale, as cad::renderLayers does
+    // for the software path, and calls updateLayer for what that changed.
+    std::function<void(katana::render::Camera& frameCamera)> onPrepareFrame;
 
   protected:
     void initialize(QRhiCommandBuffer* commands) override;
@@ -135,6 +161,9 @@ class GpuSceneView final : public QRhiWidget {
     // clears framed_, so that it is framed in its turn.
     bool framedEmpty_ = false;
     bool orbitAllowed_ = true;
+    bool softwareDeviceAllowed_ = false;
+    // True while onPrepareFrame runs, inside render().
+    bool inFrame_ = false;
 
     // Our own render target (setAutoRenderTarget(false)): the widget's colour
     // buffer with a 32-bit FLOAT depth texture, which the automatic target
@@ -153,7 +182,8 @@ class GpuSceneView final : public QRhiWidget {
 
 // Builds a GPU view when chooseRenderer(environment) says the GPU, and
 // returns null with the decision's reason otherwise: the one call a host
-// makes to decide between this widget and the software one.
+// makes to decide between this widget and the software one. The view gets
+// the decision's permission for a software device.
 [[nodiscard]] std::unique_ptr<GpuSceneView>
 makeGpuSceneViewIfChosen(katana::render::Camera& camera, const RendererEnvironment& environment,
                          RendererDecision* decision = nullptr, QWidget* parent = nullptr);

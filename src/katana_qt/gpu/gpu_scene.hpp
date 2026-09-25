@@ -105,10 +105,16 @@ struct GpuSceneData {
 // centre of the list's bounds.
 void packDrawList(const katana::render::DrawList& list, GpuSceneData& out);
 
-// Same, relative to a given origin. For tests that need to prove the origin is
-// what makes large coordinates safe - the renderer always uses the centre.
+// Same, relative to a given origin: for the layers of one scene, which share
+// the centre of their joint bounds, and for tests that need to prove the
+// origin is what makes large coordinates safe.
 void packDrawList(const katana::render::DrawList& list, const katana::math::Vec3& origin,
                   GpuSceneData& out);
+
+// Same, with the list's bounds (list.bounds()) already worked out: a caller
+// that needed them to choose the origin does not bound the list twice.
+void packDrawList(const katana::render::DrawList& list, const katana::math::Vec3& origin,
+                  const katana::math::AABB& bounds, GpuSceneData& out);
 
 // ---- point clouds ---------------------------------------------------------------
 

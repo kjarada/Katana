@@ -187,4 +187,15 @@ struct MissingName {
 // library's Assign, which names a new style after its symbol.
 [[nodiscard]] std::string freeStyleName(const katana::entity::Model& model, std::string_view base);
 
+// The one answer to "may a style or a layer be given this linetype name":
+// a model linetype, or a loaded library definition drawn along a line - the
+// same two places the viewport resolves it in (D2). A library linestyle used to
+// be refused here although the model and the viewport both take one (audit
+// CAD-06). A vertex symbol is refused BY NAME, because it is never drawn as
+// a line pattern (D8) and "does not exist" would be untrue. The command
+// line's STYLE SET and LAYER LTYPE ask it, and so does Global Modify
+// (global_modify.hpp), so the two cannot disagree about a name.
+[[nodiscard]] katana::core::Status checkLinetypeName(const Document& document,
+                                                     std::string_view name);
+
 } // namespace katana::cad

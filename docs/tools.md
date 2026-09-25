@@ -79,7 +79,28 @@ spellings of the same verbs, so a word means one thing whichever reads it:
 | Draw > Curves (`draw_curves.cpp`) | Circle (`CIRCLE`, `C`) and its Centre Diameter, 2 Points, 3 Points and Tangent Tangent Radius variants; Arc (`ARC`, `A`, three points) and its Start Centre End, Centre Start End and Start End Radius variants - a variant has no verb, being an option of the general tool, as drafters expect |
 | Modify > Transform (`modify_transform.cpp`) | Move (`MOVE`, `M`), Copy (`COPY`, `CO`, `CP`), Rotate (`ROTATE`, `RO`), Scale (`SCALE`, `SC`), Mirror (`MIRROR`, `MI`), Stretch (`STRETCH`, `S`), Rectangular Array (`ARRAYRECT`, `ARRAY`, `AR`), Polar Array (`ARRAYPOLAR`), Erase (`ERASE`, `E`, `DELETE`, `DEL`) |
 | Modify > Edit (`modify_edit*.cpp`) | Trim (`TRIM`, `TR`), Extend (`EXTEND`, `EX`), Offset (`OFFSET`, `O`), Fillet (`FILLET`, `F`), Chamfer (`CHAMFER`, `CHA`), Break (`BREAK`, `BR`), Break at Point (`BREAKATPOINT`), Join (`JOIN`, `J`), Explode (`EXPLODE`, `X`) |
-| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Leader (`LEADER`, `LEAD`, `LE`) |
+| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Leader (`LEADER`, `LEAD`, `LE`) |
+
+**The Annotate tools and the annotation system** (`docs/annotation.md`,
+2026-09-25). The Leader tool makes ONE leader entity (`LeaderGeometry`) -
+before, it drew a polyline, an arrowhead and a text per line, which drifted
+apart when one was moved - with its arrow head and sizes from the layer's
+dimension style: a paper-sized style's millimetres as they are, a model-unit
+style's converted to paper at the document's annotation scale, so a leader is
+made the size it would have been drawn and then keeps its size on paper. It
+keeps the old hook rule as its landing: one arrowhead long, only for a note on
+a last segment more than 15 degrees off level. The Angular, Radius, Diameter
+and Ordinate Dimension tools (`annotate_dimension_kinds.cpp`) make the
+dimension the `DIM` verb makes, through the same builders
+(`include/katana/cad/annotation/dimension_build.hpp`), so a picked pair of
+lines, arc or circle is FOLLOWED when it is edited; a dimension given by
+clicked points measures those points. The ordinate's datum is the drawing's
+origin (`DIM ORDINATE ... datum=x,y` measures from another). The Linear
+Dimension tool still stores the projected aligned dimension described in
+`annotate_dimension.cpp`: that is what the DXF writer exports, and it draws
+the same picture; `DIM LINEAR` makes a Linear-kind one. A bare `LEADER`, `DAN`
+or `DIMRADIUS` typed starts the tool; with arguments the line is the command
+interpreter's, as `LINE 0,0 10,0` is.
 
 The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
 List), is listed and empty. The drawing system added Draw > Vertices

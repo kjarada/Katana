@@ -31,7 +31,9 @@
 #include <ogr_spatialref.h>
 #include <ogrsf_frmts.h>
 
+#include "gdal_registry.hpp"
 #include "katana/core/text.hpp"
+#include "proj_search_paths.hpp"
 
 namespace katana::gis {
 namespace {
@@ -132,6 +134,7 @@ void ensureRegistered()
     static std::once_flag once;
     std::call_once(once, [] {
         locateGdalData();
+        katana::io_detail::pointGdalAtProjData();
         GDALAllRegister();
         // Keep GDAL's chatter off stderr; failures are reported through Result
         // with CPLGetLastErrorMsg() as context instead.
@@ -476,6 +479,15 @@ class ScopedThreadConfig {
 };
 
 } // namespace
+
+namespace detail {
+
+void ensureGdalRegistered()
+{
+    ensureRegistered();
+}
+
+} // namespace detail
 
 // ---- lifetime -------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 add_library(katana_core STATIC
     cpu_features.cpp
+    library_data.cpp
     log.cpp
     task_pool.cpp
     text.cpp

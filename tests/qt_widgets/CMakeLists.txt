@@ -8,7 +8,7 @@
 # Registered with the prefix "qt_widgets." so that `ctest -R qt_` runs these
 # with the application's headless checks.
 # Found in src/katana_qt's own directory scope, which this one does not see.
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
 set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
 # The customisation managers' shared pieces (the style painter the plan view
@@ -51,6 +51,7 @@ add_executable(katana_qt_widget_tests
     main.cpp
     test_view_focus.cpp
     test_render_view.cpp
+    test_render_view_gpu.cpp
     test_section_view.cpp
     test_plan_view.cpp
     test_plan_painter.cpp
@@ -61,6 +62,9 @@ add_executable(katana_qt_widget_tests
     # The background job runner (test_jobs).
     test_jobs.cpp
     ${_qt_src}/jobs.cpp
+    # GIS > Online Data's dialog (test_gis_online).
+    test_gis_online.cpp
+    ${_qt_src}/gis_online_dialog.cpp
     ${_qt_src}/viewport_widget.cpp
     ${_qt_src}/plan_painter.cpp
     ${_qt_src}/sheet_painter.cpp
@@ -77,6 +81,9 @@ add_executable(katana_qt_widget_tests
     # customisation widgets (tests/qt_widgets/customisation/test_style_manager*).
     ${_qt_src}/style_manager.cpp
     ${_qt_src}/layer_manager.cpp
+    # File > Project Coordinate System (test_project_crs_dialog).
+    ${_qt_src}/project_crs_dialog.cpp
+    test_project_crs_dialog.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}
@@ -96,11 +103,16 @@ target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
 # katana_surveyio and katana_survey: the survey pages read and reduce field files.
 target_link_libraries(katana_qt_widget_tests PRIVATE
     katana_cad katana_interop katana_render katana_archive12d katana_survey katana_surveyio
-    Qt6::Widgets GTest::gtest)
+    Qt6::Widgets Qt6::PrintSupport GTest::gtest)
 target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
     KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data")
 katana_target_defaults(katana_qt_widget_tests)
+# The 3D view hosts the GPU renderer where it is built, so the widget tests
+# compile what the application does; offscreen, the rules choose software.
+if(TARGET katana_gpu)
+    target_link_libraries(katana_qt_widget_tests PRIVATE katana_gpu)
+endif()
 set_target_properties(katana_qt_widget_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KATANA_TEST_OUTPUT_DIRECTORY}")
 
@@ -117,3 +129,25 @@ gtest_discover_tests(katana_qt_widget_tests
     PROPERTIES ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
 )
+# The 3D view drawn on the GPU (test_render_view_gpu.cpp) needs a platform a
+# QRhiWidget can be shown on: on Linux, xcb under Xvfb, with KATANA_RENDERER=gpu
+# so that lavapipe may draw it where there is no GPU. Each case in a process
+# of its own - a GPU failure is remembered for the session. Offscreen, above,
+# the same cases skip.
+if(NOT WIN32)
+    find_program(KATANA_XVFB_RUN xvfb-run
+        DOC "Runs the Vulkan GPU tests under a virtual X server (Debian/Ubuntu: xvfb)")
+endif()
+if(TARGET katana_gpu AND NOT WIN32 AND KATANA_XVFB_RUN)
+    foreach(_case IN ITEMS OnTheDesktopTheHostsLayersAreDrawnByItsGpuChild
+                           OnTheDesktopAnEditReachesTheGpuView
+                           OnTheDesktopAFailedGpuViewLeavesTheSessionToTheSoftwareRasteriser)
+        add_test(NAME qt_widgets_gpu.RenderViewGpu.${_case}
+            COMMAND "${KATANA_XVFB_RUN}" -a -s "-screen 0 1280x1024x24"
+                    $<TARGET_FILE:katana_qt_widget_tests> --gtest_filter=RenderViewGpu.${_case})
+        set_tests_properties(qt_widgets_gpu.RenderViewGpu.${_case} PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "QT_QPA_PLATFORM=set:offscreen;KATANA_WIDGET_TEST_PLATFORM=set:xcb;KATANA_RENDERER=set:gpu"
+            TIMEOUT 120)
+    endforeach()
+endif()
