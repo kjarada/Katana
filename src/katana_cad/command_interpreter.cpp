@@ -414,7 +414,9 @@ Inspect   LIST | INFO id (or #id) | HELP
 Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS: every option)
           SHEET NEW|REMOVE|MOVE|COPY|RENAME|SET|FIELD | VIEW ADD|SET|REMOVE|LIST | TILE n preset
           GENERATE fit|grid|strips|profile|sections|frames | TITLEBLOCK [LIST] | field value
-          TITLEBLOCK REVISION ADD|REMOVE | LOGO path | PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]
+          TITLEBLOCK REVISION ADD|REMOVE | LOGO path
+          PLOTSHEETS path.pdf [sheets=1,3-5] [dpi=300]   the desktop window's alone (it paints);
+          katana_cli refuses it - headless, katana <project> --plot-sheets out.pdf
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW schedule.csv ...  AS 5488 subsurface utilities:
           grade, verify, clear, check against a schema, draw by quality level (HELP UTILITY)
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM ?  LE MT TS LS
