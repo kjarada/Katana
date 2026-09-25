@@ -147,6 +147,8 @@ ScriptRunDialog::ScriptRunDialog(ScriptDialogContext context, QWidget* parent)
     setObjectName("fileRunScriptDialog");
     setWindowTitle("Run Script");
     setModal(false);
+    // Wide enough for a path and the line it runs to be read whole.
+    setMinimumWidth(560);
 
     auto* intro = new QLabel(
         "A script is a file of commands, one a line, as katana_cli runs it: blank lines and "

@@ -233,6 +233,8 @@ ViewImageDialog::ViewImageDialog(ViewImageDialogContext context, QWidget* parent
     setObjectName("viewImageDialog");
     setWindowTitle("Export View as Image");
     setModal(false);
+    // Wide enough for a path and the line it runs to be read whole.
+    setMinimumWidth(560);
 
     path_ = new QLineEdit(context_.suggestedPath, this);
     path_->setObjectName("viewImagePath");

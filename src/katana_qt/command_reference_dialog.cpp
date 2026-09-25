@@ -84,10 +84,15 @@ ReferenceEntry entryFor(QString line)
 }
 
 // The first line of an entry's text, blanks run together: what the tree
-// shows beside the title.
+// shows beside the title - without a group's label, which the title column
+// already shows ("Layers  LAYER LIST ..." reads "LAYER LIST ...").
 QString summaryOf(const ReferenceEntry& entry)
 {
-    return entry.text.section('\n', 0, 0).simplified();
+    QString first = entry.text.section('\n', 0, 0).simplified();
+    if (entry.title != entry.verb && first.startsWith(entry.title + ' ')) {
+        first = first.mid(entry.title.size() + 1);
+    }
+    return first;
 }
 
 } // namespace

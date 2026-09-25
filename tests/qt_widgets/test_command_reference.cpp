@@ -207,6 +207,8 @@ TEST(CommandReferenceDialog, ADoubleClickPutsTheVerbOnTheCommandLine)
     auto* tree = child<QTreeWidget>(dialog, "commandReferenceTree");
     const QList<QTreeWidgetItem*> found = tree->findItems("DimStyle", Qt::MatchExactly | Qt::MatchRecursive);
     ASSERT_FALSE(found.isEmpty());
+    // Beside the title, the group's first line without its label.
+    EXPECT_TRUE(found.front()->text(1).startsWith("DIMSTYLE LIST")) << found.front()->text(1).toStdString();
     emit tree->itemDoubleClicked(found.front(), 0);
     EXPECT_EQ(inserted, "DIMSTYLE ");
     tree->setCurrentItem(found.front());
