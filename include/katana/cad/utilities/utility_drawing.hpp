@@ -116,12 +116,27 @@ inline constexpr std::string_view kCover = "utility.cover";
 inline constexpr std::string_view kCoverNote = "utility.cover_note";
 inline constexpr std::string_view kCoverBelowMinimum = "utility.cover_below_minimum";
 inline constexpr std::string_view kVerifies = "utility.verifies";
+// The settings the line was graded with, on each of its points, so that
+// UTILITY REGRADE grades it again as it was drawn unless told otherwise:
+// SPACING (GradingSettings::maximumDetectedSpacing, metres; absent when it
+// is infinite, the rule off) and MINCOVER (metres; absent when none was
+// given). The points of one line must agree on them, as on its attributes.
+inline constexpr std::string_view kSpacing = "utility.spacing";
+inline constexpr std::string_view kMinimumCover = "utility.min_cover";
 // A delivery schema's attributes that nothing interprets, kept by their own
 // name after this prefix: "utility.field.AssetStatus". A polyline carries its
 // service's; a point its service's and its own. Which are which is the
 // schedule format's to say (subsurface::utilityCsvColumns, CarriedOn), as it
 // said when the schedule was read.
 inline constexpr std::string_view kFieldPrefix = "utility.field.";
+// A cell the schedule reader reads as "not recorded", or reads only in part,
+// as the schedule wrote it (subsurface::UtilityAttributes::recorded and
+// UtilityVertex::recorded), by the reader's column name after this prefix:
+// "utility.recorded.size" = "Not Applicable". The line's - type, status,
+// size - on its polylines and points; a vertex's - ql, level_ref - on its
+// point. Nothing is graded from them: they are what UTILITY SCHEDULE and
+// CHECK of the drawing write back, while they still read as the value held.
+inline constexpr std::string_view kRecordedPrefix = "utility.recorded.";
 } // namespace keys
 
 // "water", "electricity", "telecommunications", "gas", "recycled-water",

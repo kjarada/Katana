@@ -251,3 +251,70 @@ TEST(SubsurfaceScheduleWriter, ASchemasDialectNamesTheColumnsAndSpellsTheValuesI
                      "W-1,b,5,0,electromagnetic location,,,W,Live\n");
     EXPECT_EQ(readBack({line}, dialect), std::vector<UtilityLine>{line});
 }
+
+TEST(SubsurfaceScheduleWriter, CellsTheReaderReadsAsNotRecordedAreWrittenAsTheScheduleWroteThem)
+{
+    // Each of these reads as "not recorded", or in part: a claim of Unknown,
+    // a Depth Location with nothing measured on it, a type Not Specified, a
+    // status Unknown, a size Not Applicable, a W x H size, a size beside a
+    // diameter_mm.
+    const auto lines = parseUtilityCsv(
+        "line,point,easting,northing,method,level_ref,ql,type,status,size,diameter_mm\n"
+        "A,a1,0,0,EML,Top of Pipe,Unknown,Not Specified,Unknown,Not Applicable,\n"
+        "A,a2,5,0,EML,,Unknown,Not Specified,Unknown,Not Applicable,\n"
+        "B,b1,0,1,EML,,QL-B,water,live,1200 x 900,\n"
+        "B,b2,5,1,EML,,,water,live,1200 x 900,\n"
+        "C,c1,0,2,EML,,,gas,,110,150\n"
+        "C,c2,5,2,EML,,,gas,,110,150\n");
+    ASSERT_TRUE(lines.ok()) << lines.error().describe();
+    ASSERT_EQ(lines->size(), 3u);
+    const UtilityLine& a = (*lines)[0];
+    EXPECT_EQ(a.attributes.type, UtilityType::Unknown);
+    EXPECT_EQ(a.attributes.status, UtilityStatus::Unknown);
+    EXPECT_EQ(a.attributes.diameter, 0.0);
+    EXPECT_FALSE(a.vertices[0].claimed.has_value());
+    EXPECT_EQ(a.vertices[0].levelReference, a.vertices[1].levelReference);
+    EXPECT_EQ((*lines)[1].attributes.diameter, 1.2);
+    EXPECT_EQ((*lines)[2].attributes.diameter, 0.15);
+
+    // Written back as they were written, and read back as they were read.
+    const auto text = writeUtilityCsv(*lines);
+    ASSERT_TRUE(text.ok()) << text.error().describe();
+    EXPECT_EQ(*text,
+              "line,point,easting,northing,method,level_ref,ql,type,diameter_mm,size,status\n"
+              "A,a1,0,0,electromagnetic location,Top of Pipe,Unknown,Not Specified,,"
+              "Not Applicable,Unknown\n"
+              "A,a2,5,0,electromagnetic location,,Unknown,Not Specified,,Not Applicable,Unknown\n"
+              "B,b1,0,1,electromagnetic location,,QL-B,water,,1200 x 900,in service\n"
+              "B,b2,5,1,electromagnetic location,,,water,,1200 x 900,in service\n"
+              "C,c1,0,2,electromagnetic location,,,gas,150,110,\n"
+              "C,c2,5,2,electromagnetic location,,,gas,150,110,\n");
+    EXPECT_EQ(parseUtilityCsv(*text).value(), *lines);
+
+    // What a schedule words the writer's own way is not kept: nothing to say
+    // again.
+    const auto plain = parseUtilityCsv("line,point,easting,northing,method,size,level_ref,depth\n"
+                                       "P,p1,0,0,EML,150,Top of Pipe,0.9\n"
+                                       "P,p2,5,0,EML,150,,\n");
+    ASSERT_TRUE(plain.ok());
+    EXPECT_TRUE(plain->front().attributes.recorded.empty());
+    EXPECT_TRUE(plain->front().vertices[0].recorded.empty());
+
+    // An edit made since wins over what was kept: each kept cell is written
+    // only while it still reads as the value held.
+    std::vector<UtilityLine> edited = *lines;
+    edited[0].attributes.status = UtilityStatus::InService;
+    edited[0].vertices[0].claimed = QualityLevel::C;
+    edited[0].vertices[0].level = 19.0;
+    edited[1].attributes.diameter = 0.3;
+    const auto rewritten = writeUtilityCsv(edited);
+    ASSERT_TRUE(rewritten.ok());
+    EXPECT_NE(rewritten->find(
+                  "A,a1,0,0,electromagnetic location,19,top,QL-C,Not Specified,,Not Applicable,"
+                  "in service\n"),
+              std::string::npos)
+        << *rewritten;
+    EXPECT_NE(rewritten->find("B,b1,0,1,electromagnetic location,,,QL-B,water,,300,in service\n"),
+              std::string::npos)
+        << *rewritten;
+}

@@ -600,10 +600,11 @@ Result<std::string> regrade(Document& document, const Words& args,
     if (source->lines.empty()) {
         return nothingIn(*source, "to regrade");
     }
-    UtilityDrawOptions drawOptions;
-    drawOptions.grading = grading(*options);
-    drawOptions.minimumCover = options->get("MINCOVER");
-    auto plan = planUtilityRegrade(document.model(), *source->data, drawOptions);
+    // SPACING and MINCOVER left out are each line's own, as it was drawn.
+    UtilityRegradeOptions regradeOptions;
+    regradeOptions.spacing = options->get("SPACING");
+    regradeOptions.minimumCover = options->get("MINCOVER");
+    auto plan = planUtilityRegrade(document.model(), *source->data, regradeOptions);
     if (!plan) {
         return plan.error();
     }
@@ -758,13 +759,15 @@ std::string utilityVerbHelp()
     return R"(AS 5488 subsurface utilities (docs/subsurface_utilities.md). A schedule is a CSV of
 located vertices, one row each; a path with blanks is quoted. Lengths are metres.
 
-Every verb but DRAW acts on a schedule file OR on what is drawn: a first word that is a
-scope word takes the lines UTILITY DRAW drew, by the scope and filter every verb shares
+REPORT, VERIFY, CLEARANCE and CHECK act on a schedule file OR on what is drawn; REGRADE
+and SCHEDULE on what is drawn only; DRAW on a file only. A first word that is a scope
+word or WHERE takes the lines UTILITY DRAW drew, by the scope and filter MODIFY takes too
 (HELP: "Scope") - SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 |
-LAYERS a,b [ONLY], then [WHERE key=value ...]. A scope that takes part of a line takes
-all of it; the reply leads with "scope=... matched= lines= completed= ignored="
-(completed: lines read whole from beyond the scope; ignored: entities with no utility
-data).
+LAYERS a,b [ONLY], then [WHERE key=value ...]; any other word is a file's path. A scope
+that takes part of a line takes all of it. The scope's record says what it took:
+"scope=... matched= lines= completed= ignored=" (completed: lines read whole from beyond
+the scope; ignored: entities with no utility data). REPORT, VERIFY, CLEARANCE and CHECK
+lead their reply with it; REGRADE and SCHEDULE lead with their own record, then it.
 
 UTILITY REPORT <schedule.csv> | <scope> [MINCOVER <m>] [SPACING <m>]
           grade located services by AS 5488 quality level: vertices, segments, length at
@@ -795,10 +798,12 @@ UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
 UTILITY REGRADE <scope> [SPACING <m>] [MINCOVER <m>]
           grade the lines in scope again from their points as they are now (moved, levels
           or methods edited) and draw their runs again, as ONE undo step; nothing changed,
-          no step. Reply: "utilities regraded changed= lines= ... bounds=", the scope, lines
+          no step. SPACING and MINCOVER left out are each line's own, as it was drawn.
+          Reply: "utilities regraded changed= lines= ... bounds=", the scope, lines
 UTILITY SCHEDULE <out.csv> <scope> [SCHEMA <schema.csv>]
           write the lines in scope as a schedule this reads back as they are: a drawing
-          edited in CAD made a deliverable, in the schema's words when SCHEMA is given)";
+          edited in CAD made a deliverable, in the schema's words when SCHEMA is given.
+          Reply: "utilities scheduled path= lines= vertices=", the scope)";
 }
 
 } // namespace katana::cad::utilities
