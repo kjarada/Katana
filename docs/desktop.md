@@ -752,13 +752,17 @@ Report and live on those tabs only, because the verb reads `SPACING` and
 `MINCOVER` for both: a drawing and a report of one schedule are graded and
 flagged alike. The dialog never calls the AS 5488 library. `utilityCommandLine` - a pure function of
 the fields, tested without a window - writes the `UTILITY` line (a path with
-blanks quoted, a blank option left out, a missing file or a number that does
-not read refused with the field named, and nothing run); `utilityCommand`
+blanks quoted, a blank option left out, a file field left empty or a number
+that does not read refused with the field named, and nothing run; a file that
+cannot be read is the verb's refusal, by its path, once the line has run); `utilityCommand`
 shows that line as it is edited; Run hands it back to the window
 (`UtilityServices::runCommand`), so it is echoed, kept in the history and
 undone exactly as a typed line - but never offered to a running tool first,
 since the dialog's line is never a text - and the reply the workbench got for it comes
-back into `utilityOutput`, with Copy and Save As beside it. A headless session
+back into `utilityOutput`, with Copy and Save As beside it. The reply stays
+while another tab is brought forward, and Save As offers the name of the tool
+it came from, `utility_draw.txt`, not of the tab in front
+(`UtilityToolsDialog::suggestedFileName`). A headless session
 opens no file dialog: Browse and Save As say so, and a script fills the path
 fields instead. Tested in `tests/qt_widgets/survey/test_utility_dialog.cpp`
 and, through the real window, by `qt_utility_dialog_writes_the_line_headless`,

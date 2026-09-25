@@ -14,9 +14,10 @@
 //
 // The line is made by utilityCommandLine, a pure function of what the fields
 // hold, so it is tested without a window: a path with blanks is quoted, an
-// option left blank is left out (the verb's default applies), and a missing
-// file or a number that does not read refuses the whole line, saying which
-// field - nothing runs.
+// option left blank is left out (the verb's default applies), and a file field
+// left empty or a number that does not read refuses the whole line, saying
+// which field - nothing runs. Whether a named file can be read is not the
+// dialog's to say: the line runs, and the verb refuses it (NotFound, by path).
 //
 // Every control has an object name, which is how the tests
 // (tests/qt_widgets/survey/test_utility_dialog.cpp) and the headless --dialog,
@@ -52,6 +53,7 @@
 #include <QString>
 
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "katana/core/error.hpp"
@@ -99,7 +101,7 @@ struct UtilityForm {
 //   UTILITY CLEARANCE <schedule> <design> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
 //   UTILITY CHECK <schedule> SCHEMA <schema>
 // A word holding a blank is double-quoted, as the command line reads it.
-// InvalidArgument, naming the field, for a missing schedule, design or schema,
+// InvalidArgument, naming the field, for a schedule, design or schema left empty,
 // for a number that is not one (a comma is not a decimal point here, as it is
 // not on the command line), and for a double quote in any word - the command
 // line has no way to write one inside a quoted word. A negative number is
@@ -134,6 +136,11 @@ class UtilityToolsDialog final : public QDialog {
     // Writes the reply to `path` as UTF-8 text: what Save As does once a
     // file is chosen.
     [[nodiscard]] katana::core::Status saveOutputTo(const QString& path);
+    // The file name Save As offers, "utility_draw.txt": named for the tool
+    // whose reply utilityOutput shows, which stays while another tab is
+    // brought forward to prepare the next run. The tab in front before
+    // anything has run.
+    [[nodiscard]] QString suggestedFileName() const;
     void setStatus(const QString& text, bool isError = false);
 
   private:
@@ -143,6 +150,8 @@ class UtilityToolsDialog final : public QDialog {
     void showOutput(const QString& text);
 
     UtilityDialogContext context_;
+    // The tool whose reply utilityOutput shows; nullopt before the first run.
+    std::optional<UtilityTool> shown_;
     QTabWidget* tabs_ = nullptr;
     QLineEdit* schedule_ = nullptr;
     QLineEdit* spacing_ = nullptr;

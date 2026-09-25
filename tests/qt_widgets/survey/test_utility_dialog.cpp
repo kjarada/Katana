@@ -223,7 +223,7 @@ TEST(UtilityDialog, OnlyTheChosenToolsFieldsAreRead)
     EXPECT_EQ(utilityCommandLine(verify).valueOr({}), "UTILITY VERIFY C:/survey/schedule.csv");
 }
 
-TEST(UtilityDialog, AMissingFileOrANumberThatDoesNotReadWritesNoLine)
+TEST(UtilityDialog, AFileLeftEmptyOrANumberThatDoesNotReadWritesNoLine)
 {
     UtilityForm blank;
     blank.tool = UtilityTool::Report;
@@ -378,6 +378,31 @@ TEST(UtilityDialog, AFailedLineShowsWhyInTheOutputAndItsFirstLineInTheStatus)
     EXPECT_EQ(text(dialog, "utilityStatus"), "7 rows: 2 errors");
     // What failed is still a report worth keeping.
     EXPECT_TRUE(child<QPushButton>(dialog, "utilityCopy")->isEnabled());
+}
+
+TEST(UtilityDialog, SaveAsNamesTheToolWhoseReplyIsShownNotTheTabInFront)
+{
+    Executor executor;
+    executor.reply = kDrawReply;
+    UtilityToolsDialog dialog(executor.context());
+    dialog.showTool(UtilityTool::Report);
+    EXPECT_EQ(dialog.suggestedFileName().toStdString(), "utility_report.txt");
+    dialog.showTool(UtilityTool::Draw);
+    fill(dialog, "utilitySchedule", "C:/survey/schedule.csv");
+    click(dialog, "utilityRun");
+    EXPECT_EQ(dialog.suggestedFileName().toStdString(), "utility_draw.txt");
+    // The records stay while the next run is prepared on another tab, and
+    // they are still the draw's.
+    dialog.showTool(UtilityTool::Report);
+    EXPECT_EQ(text(dialog, "utilityOutput").toStdString() + "\n", kDrawReply);
+    EXPECT_EQ(dialog.suggestedFileName().toStdString(), "utility_draw.txt");
+    // A check that failed is still the check's report.
+    executor.reply = makeError(ErrorCode::InvalidArgument, "7 rows: 2 errors");
+    dialog.showTool(UtilityTool::Check);
+    fill(dialog, "utilitySchema", "C:/survey/schema.csv");
+    click(dialog, "utilityRun");
+    dialog.showTool(UtilityTool::Verify);
+    EXPECT_EQ(dialog.suggestedFileName().toStdString(), "utility_check.txt");
 }
 
 TEST(UtilityDialog, AHeadlessSessionOpensNoFileDialog)

@@ -434,6 +434,7 @@ void UtilityToolsDialog::run()
     }
     const UtilityTool running = tool();
     const auto reply = context_.execute(*line);
+    shown_ = running;
     if (!reply) {
         // The whole of it below - a schema check with errors is a whole
         // report - and its first line beside Run.
@@ -479,8 +480,8 @@ void UtilityToolsDialog::saveOutput()
         setStatus("A headless session opens no file dialog; the reply is in the command log.", true);
         return;
     }
-    const QString suggested = QString("utility_%1.txt").arg(QString(utilityVerbWord(tool())).toLower());
-    const QString path = QFileDialog::getSaveFileName(this, "Save Utility Output", suggested,
+    const QString path = QFileDialog::getSaveFileName(this, "Save Utility Output",
+                                                      suggestedFileName(),
                                                       "Text files (*.txt);;All files (*)");
     if (path.isEmpty()) {
         return;
@@ -490,6 +491,12 @@ void UtilityToolsDialog::saveOutput()
         return;
     }
     setStatus("Saved to " + QDir::toNativeSeparators(path) + ".");
+}
+
+QString UtilityToolsDialog::suggestedFileName() const
+{
+    const UtilityTool named = shown_.value_or(tool());
+    return QString("utility_%1.txt").arg(QString(utilityVerbWord(named)).toLower());
 }
 
 katana::core::Status UtilityToolsDialog::saveOutputTo(const QString& path)
