@@ -346,7 +346,8 @@ TEST(PlanContextMenu, EntityInformationIsForOneEntityAndRunsInfo)
         PlanContextMenu menu(context);
         item(menu, "planContextInfo")->trigger();
     }
-    EXPECT_EQ(f.lines, (std::vector<QString>{"INFO 1"}));
+    // #1: the entity, even where a file is called 1 (session.cpp, INFO).
+    EXPECT_EQ(f.lines, (std::vector<QString>{"INFO #1"}));
     EXPECT_TRUE(outcome.ok);
     // A 10 x 5 rectangle: perimeter 30, area 50.
     EXPECT_EQ(outcome.reply, "1  Polyline  layer=0  vertices=4  closed  length=30  area=50");

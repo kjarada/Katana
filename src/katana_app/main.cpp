@@ -5,8 +5,8 @@
 //   katana_cli -c "LINE 0,0 5,5" -c LIST
 //
 // Scripts and -c commands stop at the first failing command and exit with
-// status 1, so the tool can be used in automated pipelines. Lines starting with
-// '#' are comments. It drives exactly the same Document, commands and storage
+// status 1, so the tool can be used in automated pipelines. Lines whose first
+// non-blank is '#' are comments. It drives exactly the same Document, commands and storage
 // as the desktop application; the verbs themselves are session.cpp's.
 
 #include <fstream>
