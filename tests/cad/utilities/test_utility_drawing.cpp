@@ -436,6 +436,58 @@ TEST(UtilityDrawing, ThePointsCarryWhatTheGradingFoundAtEachVertex)
     EXPECT_NEAR(real(point(unreferenced, "S2-1"), keys::kCover), 1.0, 1e-9);
 }
 
+TEST(UtilityDrawing, EachPointCarriesItsWholeScheduleRowSoThePointsAreTheSchedule)
+{
+    // W1-2: "W1,W1-2,334008.000,6250000.150,EML,19.20,centre,20.25,0.10,0.35,QL-B"
+    // on a line whose path column says the pothole's stretch is exposed.
+    const UtilityDrawing drawing = drawn(sample());
+    const Entity& w12 = point(drawing, "W1-2");
+    EXPECT_EQ(text(w12, keys::kOrder), "2");
+    EXPECT_DOUBLE_EQ(real(w12, keys::kLevel), 19.20);
+    EXPECT_EQ(text(w12, keys::kLevelReference), "centre");
+    EXPECT_DOUBLE_EQ(real(w12, keys::kSurfaceLevel), 20.25);
+    EXPECT_DOUBLE_EQ(real(w12, keys::kHorizontalUncertainty), 0.10);
+    EXPECT_DOUBLE_EQ(real(w12, keys::kVerticalUncertainty), 0.35);
+    EXPECT_EQ(text(w12, keys::kClaimed), "QL-B");
+    EXPECT_EQ(text(w12, keys::kMethod), "electromagnetic location");
+    EXPECT_FALSE(has(w12, keys::kDepth));
+    // Its line's attributes, as the runs carry them.
+    EXPECT_EQ(text(w12, keys::kType), "water");
+    EXPECT_EQ(text(w12, keys::kOwner), "WaterCo");
+    EXPECT_EQ(text(w12, keys::kMaterial), "DICL");
+    EXPECT_DOUBLE_EQ(real(w12, keys::kDiameter), 0.150);
+    EXPECT_EQ(text(w12, keys::kDiameterInside), "false");
+    EXPECT_EQ(text(w12, keys::kStatus), "in service");
+    EXPECT_EQ(text(w12, keys::kDescription), "trunk main");
+    // A path is to the next point: given for one stretch of W1, so on every
+    // point of it but the last, the rest detected.
+    EXPECT_EQ(text(w12, keys::kPath), "detected");
+    EXPECT_EQ(text(point(drawing, "W1-X1"), keys::kPath), "exposed");
+    EXPECT_FALSE(has(point(drawing, "W1-5"), keys::kPath));
+    EXPECT_EQ(text(point(drawing, "W1-5"), keys::kOrder), "6");
+    // A line with no path column value has none: every stretch detected.
+    EXPECT_FALSE(has(point(drawing, "E1-1"), keys::kPath));
+    EXPECT_EQ(text(point(drawing, "T1-P1"), keys::kPath), "assumed");
+    // No level and no depth: no reference, since there is nothing it is of.
+    EXPECT_FALSE(has(point(drawing, "T1-P1"), keys::kLevelReference));
+
+    // A depth and no level, as a delivery schema records it: the depth, its
+    // reference, and the service level the surface makes of it - and the
+    // schema's own fields, the point's and its line's.
+    const UtilityDrawing tfnsw = drawn(parsed(sampleText("schedule_tfnsw.csv")));
+    const Entity& w1 = point(tfnsw, "W1");
+    EXPECT_FALSE(has(w1, keys::kLevel));
+    EXPECT_DOUBLE_EQ(real(w1, keys::kDepth), 0.95);
+    EXPECT_EQ(text(w1, keys::kLevelReference), "top");
+    EXPECT_NEAR(real(w1, keys::kServiceLevel), 20.30 - 0.95, 1e-9);
+    EXPECT_DOUBLE_EQ(real(w1, keys::kDiameter), 0.150);
+    EXPECT_EQ(text(w1, keys::kDiameterInside), "true");
+    EXPECT_EQ(text(w1, std::string(keys::kFieldPrefix) + "DateInfoObtained"), "2026/09/20");
+    EXPECT_EQ(text(w1, std::string(keys::kFieldPrefix) + "AssetType"), "Water");
+    // Recorded as unknown, the reference is kept although there is no level.
+    EXPECT_EQ(text(point(tfnsw, "G1"), keys::kLevelReference), "unknown");
+}
+
 TEST(UtilityDrawing, SpacingChangesTheGrading)
 {
     UtilityDrawOptions options;
