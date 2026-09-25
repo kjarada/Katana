@@ -745,3 +745,12 @@ it skipped dimensions, and so does the archive exporter.
   RENUMBER` - save a note holding a double quote (above); the change is an
   executor handed to the dialog, as the utilities dialog is given one, and
   its tests driving lines.
+* **Scope and filter.** `LEADER FOR`, `LEADER ALIGN`, `LEADER LIST`,
+  `LEADER FREEZE` and `DETACH`, `BALLOON FOR` and `BALLOON RENUMBER`, and the
+  Leaders manager's For Selection and Arrange tabs, act on ids, the
+  selection or every balloon - not yet on the Global Modify scope and filter
+  (a view, layers, an area; only those that match) that the contributors'
+  contract now asks of every tool. The shared verb grammar and the shared
+  "Apply to" widget it names are not built yet, and a second scope reader
+  here would be the second implementation the contract forbids; once they
+  are, these take them.
