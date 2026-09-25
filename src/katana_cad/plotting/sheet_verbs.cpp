@@ -22,6 +22,7 @@
 #include "katana/cad/plotting/sheet_json.hpp"
 #include "katana/cad/plotting/tables.hpp"
 #include "katana/cad/selection.hpp"
+#include "katana/core/text.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 
@@ -77,26 +78,10 @@ std::string joined(const Words& words, std::size_t from, std::string_view separa
     return out;
 }
 
-// A typed "\n" is a line break: a command line has no other way to put one
-// in a note. "\\" is a backslash, so a text that holds "\n" itself (a path,
-// C:\\new) can be typed, as a reply writes it (inQuotes). Any other
-// backslash is itself.
+// A typed text read back, as a reply writes it (inQuotes): core's reader.
 std::string unescaped(std::string_view text)
 {
-    std::string out;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char next = i + 1 < text.size() ? text[i + 1] : '\0';
-        if (text[i] == '\\' && next == 'n') {
-            out += '\n';
-            ++i;
-        } else if (text[i] == '\\' && next == '\\') {
-            out += '\\';
-            ++i;
-        } else {
-            out += text[i];
-        }
-    }
-    return out;
+    return katana::core::unescapeTyped(text);
 }
 
 // A value in a reply: in double quotes, a line break written back as "\n"

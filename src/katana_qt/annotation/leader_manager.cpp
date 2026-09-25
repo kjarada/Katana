@@ -63,10 +63,14 @@ constexpr int kAutomatic = -1;
 // the form cannot hold exactly is kept as it is by not being sent (formChange).
 constexpr double kLargestSize = 1000.0;
 constexpr int kSizeDecimals = 3;
+// Where Arrange's stacking starts: a two-line note of the default 2.5 mm text
+// runs 2.5 + 2.5 x 5/3 = 6.7 mm from the top of its first line to its last
+// baseline (entity::kLinePitch), so 8 mm stacks such notes with a gap.
+constexpr double kStackSpacing = 8.0;
 
 constexpr const char* kAttachTip =
-    "Put the tip on the selected entity, at the place of it nearest the tip: select the leader "
-    "and the entity, then press (LEADER ATTACH)";
+    "Put the tip on the selected entity - inside a lot or circle the tip is in, else at the "
+    "place of it nearest the tip: select the leader and the entity, then press (LEADER ATTACH)";
 constexpr const char* kFreezeTip =
     "Keep the words the note says now; the tip still follows (LEADER FREEZE)";
 constexpr const char* kDetachTip =
@@ -269,7 +273,7 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     along_ = spin(leaderTab, "leaderAlong", 0.0, 100.0, 5.0, 3, QStringLiteral(" %"));
     along_->setToolTip(QStringLiteral(
         "How far along what it is on the tip is: of the line or the arc from its start, of "
-        "the polyline segment, of a turn of the circle (LEADER SET tip=#id@x,y)"));
+        "the polyline segment, of a turn of the circle (LEADER SET id tip=#on.alongN:T)"));
     noteKind_ = noteKindBox(leaderTab, "leaderNoteKind");
     note_ = noteEdit(leaderTab, "leaderNote", QStringLiteral("IL {prop.invert:.3f}"));
     labelStyle_ = new QComboBox(leaderTab);
@@ -409,10 +413,11 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
                        QStringLiteral(" mm"));
     forLanding_->setSpecialValueText(QStringLiteral("none"));
     forLanding_->setValue(LeaderGeometry{}.landing);
+    // LEADER FOR's own defaults, from their one source.
     forAngle_ = spin(forTab, "leaderForAngle", -360.0, 360.0, 15.0, 1, QStringLiteral(" deg"));
-    forAngle_->setValue(45.0);
-    forLength_ = spin(forTab, "leaderForLength", 0.5, 500.0, 1.0, 1, QStringLiteral(" mm"));
-    forLength_->setValue(10.0);
+    forAngle_->setValue(ann::LeadersForOptions{}.angle * katana::math::kRadToDeg);
+    forLength_ = spin(forTab, "leaderForLength", 0.5, kLargestSize, 1.0, 1, QStringLiteral(" mm"));
+    forLength_->setValue(ann::LeadersForOptions{}.length);
     forBalloon_ =
         check(forTab, "leaderForBalloon", QStringLiteral("Balloons (numbered when no note)"));
     forReport_ = new QLabel(forTab);
@@ -452,11 +457,13 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     auto* arrangeTab = new QWidget(tabs_);
     arrangeTab->setObjectName(QStringLiteral("leaderArrangeTab"));
     alignUseX_ = check(arrangeTab, "leaderAlignUseX", QStringLiteral("At x"));
+    // Model units: wider than any drawing's coordinates, a national grid's
+    // included.
     alignX_ = spin(arrangeTab, "leaderAlignX", -1.0e9, 1.0e9, 1.0, 3);
     alignUseSpacing_ = check(arrangeTab, "leaderAlignUseSpacing", QStringLiteral("Stacked"));
     alignSpacing_ =
         spin(arrangeTab, "leaderAlignSpacing", 0.5, 500.0, 1.0, 1, QStringLiteral(" mm apart"));
-    alignSpacing_->setValue(8.0);
+    alignSpacing_->setValue(kStackSpacing);
     auto* alignButton = button(arrangeTab, "leaderAlign", QStringLiteral("Align Selected Leaders"));
     auto* alignForm = new QFormLayout;
     alignForm->addRow(alignUseX_, alignX_);
@@ -467,6 +474,7 @@ LeaderManagerDialog::LeaderManagerDialog(katana::cad::Document& document, QWidge
     alignBox->setLayout(alignForm);
     renumberStart_ = new QSpinBox(arrangeTab);
     renumberStart_->setObjectName(QStringLiteral("balloonRenumberStart"));
+    // More balloons than any sheet holds, either way from 0.
     renumberStart_->setRange(-1000000, 1000000);
     renumberStart_->setValue(1);
     renumberOrder_ = new QComboBox(arrangeTab);
@@ -988,7 +996,14 @@ ann::LeaderChange LeaderManagerDialog::formChange() const
     if (now.along != was.along && current->tipRef.point == katana::entity::AnchorPoint::Along) {
         katana::entity::AnchorRef ref = current->tipRef;
         ref.parameter = std::clamp(now.along / 100.0, 0.0, 1.0);
-        if (const katana::entity::Entity* on = document_.model().entities.find(ref.entity)) {
+        const katana::entity::Entity* on = document_.model().entities.find(ref.entity);
+        // A circle's turn is [0, 1), as the verb's along reads it: a whole
+        // turn is where it starts.
+        if (on != nullptr && std::holds_alternative<katana::geometry::Circle2>(on->geometry) &&
+            ref.parameter == 1.0) {
+            ref.parameter = 0.0;
+        }
+        if (on != nullptr) {
             if (const auto point = katana::entity::resolveAnchor(*on, ref)) {
                 change.tip = ann::AnchoredPoint{*point, ref};
             }
@@ -1191,7 +1206,8 @@ bool LeaderManagerDialog::attachToSelected()
         return false;
     }
     // The first other selected entity that offers a place for the tip (a
-    // dimension or a label does not), those that are not leaders first.
+    // dimension or a label does not), those that are not leaders first:
+    // inside an outline the tip is in, else the place nearest it.
     const katana::entity::Entity* first = nullptr;
     std::optional<ann::AnchoredPoint> place;
     for (const bool leadersToo : {false, true}) {
@@ -1202,11 +1218,7 @@ bool LeaderManagerDialog::attachToSelected()
                 continue;
             }
             first = first != nullptr ? first : entity;
-            const auto ref = katana::entity::nearestAnchor(*entity, current->vertices.front());
-            if (const auto point =
-                    ref ? katana::entity::resolveAnchor(*entity, *ref) : std::nullopt) {
-                place = ann::AnchoredPoint{*point, *ref};
-            }
+            place = ann::tipPlaceOn(*entity, current->vertices.front());
         }
     }
     if (first == nullptr) {
@@ -1369,8 +1381,14 @@ void LeaderManagerDialog::updateForPreview()
         return;
     }
     if (options.balloon && !change.note) {
-        change.note =
-            ann::LeaderNote{Kind::Text, std::to_string(ann::nextBalloonNumber(document_.model()))};
+        const auto number = ann::nextBalloonNumber(document_.model());
+        if (!number) {
+            forCheck_->setStyleSheet(QStringLiteral("color: #d9534f"));
+            forCheck_->setText(describe(number.error()));
+            forPreview_->clear();
+            return;
+        }
+        change.note = ann::LeaderNote{Kind::Text, std::to_string(*number)};
     }
     const QString first = QString::fromUtf8(katana::entity::toString(target->type())) +
                           QStringLiteral(" ") + QString::number(target->id);

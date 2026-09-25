@@ -162,6 +162,65 @@ TEST(SmartLeaders, ATipOnALineStaysAtItsPlaceAlongIt)
     EXPECT_EQ(s.leader(leader).vertices.front(), Point2(10, 0)) << "one undo each";
 }
 
+TEST(SmartLeaders, AnExactPlaceAlongIsTypedAsLongAsTheEntityHasIt)
+{
+    Session s;
+    // A closed 100 x 100 square: segment 3 (numbered from 0; the value
+    // "segment" counts from 1) closes it, from (0,100) down to (0,0).
+    const EntityId square =
+        s.add(Polyline2{{Point2(0, 0), Point2(100, 0), Point2(100, 100), Point2(0, 100)}, true});
+    // A quarter of the way down segment 3 is (0,75), chainage 300 + 25.
+    s.run("LEADER #" + id(square) +
+          ".along3:0.25 -20,75 template=\"S{segment} CH {chainage:.0f}\"");
+    const EntityId quarter = s.last();
+    EXPECT_EQ(s.leader(quarter).vertices.front(), Point2(0, 75));
+    EXPECT_EQ(s.leader(quarter).tipRef.index, 3u);
+    EXPECT_EQ(s.leader(quarter).tipRef.parameter, 0.25);
+    EXPECT_EQ(s.note(quarter), "S4 CH 325");
+    EXPECT_TRUE(contains(s.run("LEADER LIST " + id(quarter)), "anchor=\"along 3 0.25\""))
+        << "LIST prints the place as it is typed back";
+
+    // The end of segment 3 and the start of segment 0 are one point, (0,0);
+    // only .along names which: chainage 400, or the nearest place's 0.
+    s.run("LEADER #" + id(square) + ".along3:1 -20,-20 template=\"CH {chainage:.0f}\"");
+    EXPECT_EQ(s.note(s.last()), "CH 400");
+    s.run("LEADER #" + id(square) + "@0,0 -20,-20 template=\"CH {chainage:.0f}\"");
+    EXPECT_EQ(s.note(s.last()), "CH 0");
+
+    // A circle's whole turn is where it starts, as the turn is [0, 1).
+    const EntityId ring = s.add(Circle2{Point2(0, 0), 5.0});
+    s.run("LEADER #" + id(ring) + ".along0:1 10,10 text=R");
+    EXPECT_EQ(s.leader(s.last()).tipRef.parameter, 0.0);
+
+    // Refused: a fraction off the segment or no number, a segment the square
+    // has not, the fraction left out, a segment of a line.
+    const EntityId line = s.add(Segment2{Point2(0, 0), Point2(10, 0)});
+    for (const std::string place : {".along3:1.5", ".along3:nan", ".along3:-0.1", ".along4:0.5",
+                                    ".along", ".along3", ".alongx:0.5"}) {
+        EXPECT_FALSE(s.refusal("LEADER #" + id(square) + place + " 5,5 text=X").empty()) << place;
+    }
+    EXPECT_TRUE(contains(s.refusal("LEADER #" + id(line) + ".along1:0.5 5,5 text=X"),
+                         "only a polyline has segments"));
+}
+
+TEST(SmartLeaders, ABackslashIsTypedAsTwoSoANoteMayHoldBackslashN)
+{
+    Session s;
+    // Typed: C:\\new and a line break. Stored: C:\new on one line, then B.
+    s.run("LEADER 0,0 5,5 text=\"C:\\\\new\\nB\"");
+    const EntityId leader = s.last();
+    EXPECT_EQ(s.leader(leader).text, "C:\\new\nB");
+    // LIST writes it as it is typed, so its words typed back are the same.
+    const std::string listed = s.run("LEADER LIST " + id(leader));
+    EXPECT_TRUE(contains(listed, "text=\"C:\\\\new\\nB\"")) << listed;
+    s.run("LEADER SET " + id(leader) + " text=\"C:\\\\new\\nB\"");
+    EXPECT_EQ(s.leader(leader).text, "C:\\new\nB");
+    // A template too.
+    const EntityId pit = s.add(PointGeometry{Point2(9, 9)});
+    s.run("LEADER #" + id(pit) + " 15,15 template=\"\\\\{id}\"");
+    EXPECT_EQ(s.note(s.last()), "\\" + id(pit));
+}
+
 TEST(SmartLeaders, InsideALotTheArrowIsADotAndTheNoteItsArea)
 {
     Session s;
@@ -221,7 +280,7 @@ TEST(SmartLeaders, ValuesListsWhatANoteThereCouldSay)
     EXPECT_TRUE(contains(s.refusal("LEADER VALUES " + id(s.last())), "on no entity"));
 }
 
-TEST(SmartLeaders, ListSetAttachDetachAndFreeze)
+TEST(SmartLeaders, LeadersCanBeListedRetargetedAttachedFrozenAndLetGoKeepingTheirWords)
 {
     Session s;
     const EntityId pit = s.add(PointGeometry{Point2(0, 0)}, {{"invert", 10.25}});

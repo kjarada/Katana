@@ -22,6 +22,7 @@
 #include <charconv>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -115,20 +116,11 @@ bool isKey(std::string_view key)
     });
 }
 
-// "\n" typed on the command line is a line break in the value.
+// A typed text read back, as field() writes it: "\n" a line break, "\\" a
+// backslash (core's reader, shared with the sheet verbs).
 std::string unescape(std::string_view text)
 {
-    std::string out;
-    out.reserve(text.size());
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == 'n') {
-            out += '\n';
-            ++i;
-        } else {
-            out += text[i];
-        }
-    }
-    return out;
+    return katana::core::unescapeTyped(text);
 }
 
 Result<Arguments> splitArguments(const std::vector<std::string>& args, std::size_t from,
@@ -722,15 +714,51 @@ Result<ann::AnchoredPoint> CommandInterpreter::parseAnchoredPoint(const std::str
             }
             return false;
         };
-        if (!indexed("vertex", katana::entity::AnchorPoint::Vertex) &&
-            !indexed("v", katana::entity::AnchorPoint::Vertex) &&
-            !indexed("segment", katana::entity::AnchorPoint::SegmentMid) &&
-            !indexed("s", katana::entity::AnchorPoint::SegmentMid)) {
+        if (part.starts_with("along")) {
+            // "#12.along1:0.25": a quarter of the way along segment 1 of #12
+            // (0 on a line, an arc or a circle), exactly - what LIST prints as
+            // "along 1 0.25", and what the window's Along sets; "#12@x,y"
+            // names only the place nearest a point.
+            const std::string_view spec = std::string_view(part).substr(5);
+            const std::size_t colon = spec.find(':');
+            std::uint32_t index = 0;
+            std::optional<double> fraction;
+            if (colon != std::string_view::npos) {
+                const auto [end, error] = std::from_chars(spec.data(), spec.data() + colon, index);
+                if (error == std::errc{} && end == spec.data() + colon) {
+                    fraction = katana::core::parseFiniteDouble(spec.substr(colon + 1));
+                }
+            }
+            if (!fraction || *fraction < 0.0 || *fraction > 1.0) {
+                return makeError(ErrorCode::ParseFailure,
+                                 "along is #id.along<segment>:<fraction>, the fraction from 0 "
+                                 "to 1 (#12.along0:0.5 is the middle of a line)",
+                                 text);
+            }
+            if (index != 0 &&
+                !std::holds_alternative<katana::geometry::Polyline2>(entity->geometry)) {
+                return makeError(ErrorCode::InvalidArgument,
+                                 "only a polyline has segments to number: along0:t on a line, "
+                                 "an arc or a circle",
+                                 text);
+            }
+            ref.point = katana::entity::AnchorPoint::Along;
+            ref.index = index;
+            // A circle's turn is [0, 1), as nearestAnchor names it: a whole
+            // turn is where it starts.
+            ref.parameter = std::holds_alternative<katana::geometry::Circle2>(entity->geometry) &&
+                                    *fraction == 1.0
+                                ? 0.0
+                                : *fraction;
+        } else if (!indexed("vertex", katana::entity::AnchorPoint::Vertex) &&
+                   !indexed("v", katana::entity::AnchorPoint::Vertex) &&
+                   !indexed("segment", katana::entity::AnchorPoint::SegmentMid) &&
+                   !indexed("s", katana::entity::AnchorPoint::SegmentMid)) {
             auto point = katana::entity::anchorPointFromString(part);
             if (!point) {
                 return makeError(ErrorCode::ParseFailure,
                                  "unknown point of an entity (start end mid centre position "
-                                 "inside vN sN, or #id@x,y for the nearest point on it)",
+                                 "inside vN sN alongN:T, or #id@x,y for the nearest point on it)",
                                  text);
             }
             ref.point = *point;
@@ -2133,18 +2161,21 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
         ann::LeadersForOptions options;
         options.change = std::move(*change);
         options.balloon = balloon;
-        double angle = 45.0;
-        for (const auto& [key, target] :
-             {std::pair{"angle", &angle}, std::pair{"length", &options.length}}) {
-            if (const std::string* value = parsed->find(key)) {
-                auto number = numberOf(*value, key);
-                if (!number) {
-                    return number.error();
-                }
-                *target = *number;
+        // Degrees typed; left out, LeadersForOptions' own (its one source).
+        if (const std::string* value = parsed->find("angle")) {
+            auto number = numberOf(*value, "angle");
+            if (!number) {
+                return number.error();
             }
+            options.angle = *number * katana::math::kDegToRad;
         }
-        options.angle = angle * katana::math::kDegToRad;
+        if (const std::string* value = parsed->find("length")) {
+            auto number = numberOf(*value, "length");
+            if (!number) {
+                return number.error();
+            }
+            options.length = *number;
+        }
         auto made = ann::leadersFor(model, *targets, options, document_.annotationScale(),
                                     document_.currentAttributes());
         if (!made) {
