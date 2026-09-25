@@ -428,6 +428,16 @@ order they were made, across the sheet by their tips, or down it; a smart
 balloon is left alone (`RenumberingNumbersTheBalloonsInTheOrderAsked`). Each
 is one step, and none when nothing moves.
 
+### One set of edits
+
+`include/katana/cad/annotation/leader_edit.hpp` is every leader edit - the
+note and look (`changeLeaders`, `applyLeaderChange`), attaching, freezing
+and detaching, an attribute through the leader, one per entity
+(`leadersFor`), aligning, renumbering - each checked against the model and
+returned as ONE command or refused. The verbs parse their words into it, and
+the window's Leaders manager ("In the window" below) fills it from its form,
+so a verb typed and a button pressed cannot differ.
+
 ### Freezing and letting go
 
 `LEADER FREEZE id...` turns a smart note into the words it says now and
@@ -488,6 +498,43 @@ with Run and Clear, which report what `AUTOLABEL` replies. The dialogs keep
 no copy of the tables: an undo or a verb typed while one is open shows at
 once. The Annotate menu's tools are in `docs/tools.md`; the painting is in
 `docs/plan_view.md`, "Annotation".
+
+**Leaders.** Under the Annotate menu's tools, three entries open the Leaders
+manager (`LeaderManagerDialog`, `src/katana_qt/annotation/leader_manager.hpp`,
+the dialog `leaderManagerDialog`) on one of its tabs: **Leaders...**
+(`annotateLeaders`), **Leaders for Selection...**
+(`annotateLeadersForSelection`) and **Arrange Leaders and Balloons...**
+(`annotateArrangeLeaders`), each given a menu letter the tools have not taken
+(`AnnotationWorkbench::addLeaderActions`). It is the smart leaders' front end
+and decides nothing of its own: every button is an edit of
+`include/katana/cad/annotation/leader_edit.hpp`, the same the LEADER and
+BALLOON verbs make, one undo step each, and a refusal is said in the
+dialog's problem line in the command's words.
+
+* **Leader**: every leader in the drawing, by what it says, and a form for
+  the chosen one, which follows the drawing's selection. The form says what
+  the tip is on in words ("Polyline 1, 50% along segment 2"); the note is
+  Text, a Template read off that entity, or a Label style's template, checked
+  as it is typed and shown as it would read ("Says"); beside it are the
+  values the entity offers at the tip, and double-clicking one puts
+  `{name}` into the note and makes it a template. Below: the arrow, callout,
+  text style and sizes; an attribute of the entity set or removed through
+  the leader, of the type chosen or as typed (`LEADER PROP`, which reads a
+  value as `PROP SET` does - `CommandInterpreter::propertyValue`); and Freeze
+  Note, Detach Tip and Apply. Choosing a label style lends the form that
+  style's text style and height, as `labelstyle=` lends a leader them. An
+  unchanged form applied is no step. The form is read again from the leader
+  when the leader changes under it - an undo, a verb typed - and left alone,
+  unapplied edits and all, when something else changes
+  (`TheFormFollowsTheSelectionAndAnUndoButKeepsUnappliedEdits`); it watches
+  the document through `DocumentWatcher`, as `docs/desktop.md` asks.
+* **For Selection**: a leader, or with Balloons ticked a numbered balloon, to
+  each selected entity, its note text, a template or a label style's, the
+  note's direction and its distance on paper (`LEADER FOR`); it says how
+  many it made and why it skipped any.
+* **Arrange**: the selected leaders' notes lined up at the topmost's x or a
+  given one, stacked or not (`LEADER ALIGN`), and the balloons numbered again
+  from a number, as made, across or down (`BALLOON RENUMBER`).
 
 ## Stored with the project
 
@@ -565,6 +612,8 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/entity/annotation/test_leader_values.cpp` | Along and Inside anchors, the nearest place, what a leader can say of every kind of target, the leader template check, validation, the version-3 blob and JSON |
 | `tests/cad/annotation/test_smart_leaders.cpp` | the LEADER verbs end to end: templates, label styles, `#id@x,y` and `.inside`, VALUES, LIST, SET, ATTACH, DETACH, FREEZE, PROP, FOR, ALIGN, BALLOON FOR and RENUMBER; following stretches and moves, going with the target, copies |
 | `tests/cad/tools/test_smart_leader_tool.cpp` | the Leader tool: a tip put on what it is clicked on, fields checked as typed, a note that would say nothing refused |
+| `tests/cad/annotation/test_leader_edit.cpp` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped, a label style's look lent, attaching, the value rows |
+| `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name: the form, the template checked and previewed, values inserted, attributes set, freeze and detach, following the selection and undo, For Selection, Arrange, the menu's letters |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
 
