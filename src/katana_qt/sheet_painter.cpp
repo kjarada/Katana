@@ -19,6 +19,8 @@
 #include <QPolygonF>
 
 #include "katana/cad/document.hpp"
+#include "katana/cad/plotting/key_plan.hpp"
+#include "katana/cad/plotting/plan_grid.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
 #include "katana/render/camera.hpp"
@@ -65,6 +67,11 @@ QColor qColour(const katana::entity::Color& c) { return QColor(c.r, c.g, c.b, c.
 const QColor kInk(0, 0, 0);
 const QColor kGridInk(190, 190, 190);
 const QColor kFaint(150, 150, 150);
+// A key plan: the other sheets' outlines, and this sheet's own - "you are here".
+const QColor kOutlineInk(200, 0, 30);
+const QColor kOutlineFill(200, 0, 30, 18);
+const QColor kHereInk(0, 80, 180);
+const QColor kHereFill(0, 110, 230, 90);
 
 // A pen of `widthMm` on paper, round-capped as the frame is drawn.
 QPen paperPen(const Paper& paper, const QColor& colour, double widthMm,
@@ -539,6 +546,32 @@ QString metres(double length)
                : QString("%1 m").arg(length);
 }
 
+// The paper a plan's furniture knocks out white - the scale bar, the north
+// arrow, the title - and so what a coordinate grid's labels keep off. Each
+// paint function knocks out exactly its box, so the two cannot disagree.
+Box2 scaleBarBox(const Box2& rect, double scale)
+{
+    const double mmPerMetre = 1000.0 / scale;
+    const double lengthMm = niceAtMost(std::min(50.0, 0.4 * rect.width()) / mmPerMetre) * mmPerMetre;
+    const double right = rect.max.x - 4.0;
+    const double base = rect.min.y + 5.0;
+    return Box2(Point2(right - lengthMm - 3.0, base - 4.2), Point2(right + 3.0, base + 1.2 + 3.2));
+}
+
+constexpr double kNorthArrowRadius = 4.5;
+
+Point2 northArrowCentre(const Box2& rect)
+{
+    return Point2(rect.max.x - kNorthArrowRadius - 3.5, rect.max.y - kNorthArrowRadius - 5.5);
+}
+
+Box2 northArrowBox(const Box2& rect)
+{
+    const Point2 centre = northArrowCentre(rect);
+    return Box2(Point2(centre.x - kNorthArrowRadius - 1.0, centre.y - kNorthArrowRadius - 1.0),
+                Point2(centre.x + kNorthArrowRadius + 1.0, centre.y + kNorthArrowRadius + 4.5));
+}
+
 void paintScaleBar(QPainter& painter, const Paper& paper, TextSetter& text, const Box2& rect,
                    double scale)
 {
@@ -560,8 +593,7 @@ void paintScaleBar(QPainter& painter, const Paper& paper, TextSetter& text, cons
     label.capMm = 1.6;
     label.xFactor = 0.9;
     label.horizontal = HorizontalJustify::Centre;
-    knockOut(painter, paper,
-             Box2(Point2(left - 3.0, base - 4.2), Point2(right + 3.0, base + barH + 3.2)));
+    knockOut(painter, paper, scaleBarBox(rect, scale));
     painter.setPen(paperPen(paper, kInk, 0.18));
     for (int i = 0; i < divisions; ++i) {
         const double x0 = left + lengthMm * i / divisions;
@@ -584,14 +616,13 @@ void paintScaleBar(QPainter& painter, const Paper& paper, TextSetter& text, cons
 void paintNorthArrow(QPainter& painter, const Paper& paper, TextSetter& text, const Box2& rect,
                      double rotation)
 {
-    const double radius = 4.5;
-    const Point2 centre(rect.max.x - radius - 3.5, rect.max.y - radius - 5.5);
+    const double radius = kNorthArrowRadius;
+    const Point2 centre = northArrowCentre(rect);
     const double north = katana::math::kPi / 2.0 - rotation; // paper angle of world +Y
     const auto at = [&](double along, double across) {
         return paper.at(centre + rotated(Point2(along, across), north));
     };
-    knockOut(painter, paper, Box2(Point2(centre.x - radius - 1.0, centre.y - radius - 1.0),
-                                  Point2(centre.x + radius + 1.0, centre.y + radius + 4.5)));
+    knockOut(painter, paper, northArrowBox(rect));
     painter.setPen(paperPen(paper, kInk, 0.25));
     painter.setBrush(Qt::NoBrush);
     painter.drawEllipse(paper.at(centre), paper.mm(radius), paper.mm(radius));
@@ -612,24 +643,69 @@ void paintNorthArrow(QPainter& painter, const Paper& paper, TextSetter& text, co
     text.draw(centre + rotated(Point2(radius + 2.6, 0.0), north), QStringLiteral("N"), n);
 }
 
-// The viewport's name and scale under its bottom-left corner, inside it.
-void paintTitle(QPainter& painter, const Paper& paper, TextSetter& text, const Box2& rect,
-                const QString& title)
+TextStyle titleStyle()
 {
-    if (title.isEmpty()) {
-        return;
-    }
     TextStyle style;
     style.capMm = 2.5;
     style.bold = true;
     style.xFactor = 0.9;
-    const double width = std::min(text.widthMm(title, style), rect.width() - 6.0);
+    return style;
+}
+
+// A coordinate grid's labels: small, narrow, in ink.
+TextStyle gridLabelStyle()
+{
+    TextStyle style;
+    style.capMm = 1.8;
+    style.xFactor = 0.9;
+    return style;
+}
+
+// What a view is titled: its own title, else the automatic one at `scale`.
+QString viewTitle(const Viewport& viewport, double scale)
+{
+    if (!viewport.title.empty()) {
+        return QString::fromStdString(viewport.title);
+    }
+    Viewport titled = viewport;
+    titled.scale = scale;
+    return QString::fromStdString(plotting::automaticTitle(titled));
+}
+
+// Where the title is set, and the box it knocks out; nothing when it is not
+// drawn (no title, or no room for one).
+struct TitlePlace {
+    Point2 at;
+    double widthMm = 0.0;
+    Box2 box;
+};
+
+std::optional<TitlePlace> titlePlace(TextSetter& text, const Box2& rect, const QString& title)
+{
+    if (title.isEmpty()) {
+        return std::nullopt;
+    }
+    const double width = std::min(text.widthMm(title, titleStyle()), rect.width() - 6.0);
     if (!(width > 0.0)) {
-        return;
+        return std::nullopt;
     }
     const Point2 at(rect.min.x + 3.0, rect.min.y + 3.5);
-    knockOut(painter, paper, Box2(Point2(at.x - 1.0, at.y - 1.6), Point2(at.x + width + 1.0,
-                                                                          at.y + 3.4)));
+    return TitlePlace{at, width,
+                      Box2(Point2(at.x - 1.0, at.y - 1.6), Point2(at.x + width + 1.0, at.y + 3.4))};
+}
+
+// The viewport's name and scale under its bottom-left corner, inside it.
+void paintTitle(QPainter& painter, const Paper& paper, TextSetter& text, const Box2& rect,
+                const QString& title)
+{
+    const auto place = titlePlace(text, rect, title);
+    if (!place) {
+        return;
+    }
+    const TextStyle style = titleStyle();
+    const double width = place->widthMm;
+    const Point2 at = place->at;
+    knockOut(painter, paper, place->box);
     double squeeze = 1.0;
     if (const double full = text.widthMm(title, style); full > width) {
         squeeze = width / full;
@@ -972,6 +1048,23 @@ class SheetPainter {
     bool paintImage(const Viewport& viewport, const Paper& paper);
     void paintMarks(const Viewport& viewport, const ResolvedViewport& at, TextSetter& text,
                     const Paper& paper);
+    // The coordinate grid (plan_grid.hpp): worked out once per viewport, its
+    // strokes under the marks and its labels over them.
+    std::optional<plotting::PlanGrid> planGridFor(const Viewport& viewport,
+                                                  const ResolvedViewport& at, TextSetter& text);
+    void paintGridStrokes(const plotting::PlanGrid& grid, const Paper& paper);
+    void paintGridLabels(const plotting::PlanGrid& grid, TextSetter& text, const Paper& paper);
+    // A key plan's outlines, live (key_plan.hpp).
+    void paintKeyPlan(const Viewport& viewport, const ResolvedViewport& at, TextSetter& text,
+                      const Paper& paper);
+    // Decides an automatic plan's placement for the key plans, as it is drawn.
+    [[nodiscard]] plotting::PlanPlacer placer() const
+    {
+        return [this](const Viewport& viewport) {
+            const ResolvedViewport at = resolvePlanViewport(viewport, source_);
+            return plotting::PlanPlacement{at.scale, at.centre};
+        };
+    }
     void problem(const Viewport& viewport, std::string what)
     {
         stats_.problems.push_back(viewport.id + ": " + std::move(what));
@@ -1125,8 +1218,124 @@ bool SheetPainter::paintPlanViewport(const Viewport& viewport, TextSetter& text,
         // The drawing faded, so the sheets over it read first.
         painter_.fillRect(device, QColor(255, 255, 255, 165));
     }
+    const std::optional<plotting::PlanGrid> grid = planGridFor(viewport, at, text);
+    if (grid) {
+        paintGridStrokes(*grid, paper);
+    }
+    if (viewport.kind == ViewportKind::KeyPlan) {
+        paintKeyPlan(viewport, at, text, paper);
+    }
     paintMarks(viewport, at, text, paper);
+    if (grid) {
+        paintGridLabels(*grid, text, paper);
+    }
     return true;
+}
+
+std::optional<plotting::PlanGrid> SheetPainter::planGridFor(const Viewport& viewport,
+                                                            const ResolvedViewport& at,
+                                                            TextSetter& text)
+{
+    if (viewport.gridStyle == plotting::GridStyle::None) {
+        return std::nullopt;
+    }
+    const TextStyle style = gridLabelStyle();
+    plotting::PlanGridOptions options;
+    options.labelCapMm = style.capMm;
+    options.labelWidthMm = [&text, &style](std::string_view label) {
+        return text.widthMm(QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size())),
+                            style);
+    };
+    // The furniture paintViewport draws over the plan, which the labels keep off.
+    if (viewport.northArrow) {
+        options.keepOut.push_back(northArrowBox(viewport.rect));
+    }
+    if (viewport.scaleBar) {
+        options.keepOut.push_back(scaleBarBox(viewport.rect, at.scale));
+    }
+    if (const auto title = titlePlace(text, viewport.rect, viewTitle(viewport, at.scale))) {
+        options.keepOut.push_back(title->box);
+    }
+    auto grid = plotting::planGrid(viewport, {at.scale, at.centre}, options);
+    if (!grid) {
+        problem(viewport, grid.error().message);
+        return std::nullopt;
+    }
+    return std::move(*grid);
+}
+
+void SheetPainter::paintGridStrokes(const plotting::PlanGrid& grid, const Paper& paper)
+{
+    // Lines light and fine, under everything; crosses and ticks in ink, as
+    // they are few and must be found.
+    painter_.setPen(grid.style == plotting::GridStyle::Lines ? paperPen(paper, kGridInk, 0.13)
+                                                             : paperPen(paper, kInk, 0.18));
+    painter_.setBrush(Qt::NoBrush);
+    for (const plotting::GridSegment& stroke : grid.strokes) {
+        painter_.drawLine(paper.at(stroke.from), paper.at(stroke.to));
+    }
+}
+
+void SheetPainter::paintGridLabels(const plotting::PlanGrid& grid, TextSetter& text,
+                                   const Paper& paper)
+{
+    TextStyle style = gridLabelStyle();
+    for (const plotting::GridLabel& label : grid.labels) {
+        knockOut(painter_, paper, label.box);
+        style.angleDegrees = label.angleDegrees;
+        style.horizontal = label.horizontal;
+        style.vertical = label.vertical;
+        text.draw(label.anchor, QString::fromStdString(label.text), style);
+    }
+}
+
+void SheetPainter::paintKeyPlan(const Viewport& viewport, const ResolvedViewport& at,
+                                TextSetter& text, const Paper& paper)
+{
+    const plotting::PlanPlacement placed{at.scale, at.centre};
+    const auto outlines = plotting::keyPlanOutlines(set_, index_, placer());
+    const auto onPaper = [&](const plotting::KeyPlanOutline& outline) {
+        std::vector<Point2> points;
+        for (const Point2& corner : outline.corners) {
+            points.push_back(plotting::planWorldToPaper(viewport, placed, corner));
+        }
+        return points;
+    };
+    // The other sheets first, then this sheet's over them in a fill of its
+    // own - "you are here" - so no neighbour's outline hides it.
+    for (const bool current : {false, true}) {
+        for (const plotting::KeyPlanOutline& outline : outlines) {
+            if (outline.current != current) {
+                continue;
+            }
+            QPolygonF ring;
+            for (const Point2& point : onPaper(outline)) {
+                ring << paper.at(point);
+            }
+            painter_.setPen(paperPen(paper, current ? kHereInk : kOutlineInk, current ? 0.5 : 0.35));
+            painter_.setBrush(current ? kHereFill : kOutlineFill);
+            painter_.drawPolygon(ring);
+        }
+    }
+    painter_.setBrush(Qt::NoBrush);
+    // The numbers after every fill, so none is covered; each sized to its
+    // outline, so a small sheet's number stays inside it.
+    for (const plotting::KeyPlanOutline& outline : outlines) {
+        if (!outline.labelled || outline.label.empty()) {
+            continue;
+        }
+        Box2 extent;
+        for (const Point2& point : onPaper(outline)) {
+            extent.expand(point);
+        }
+        TextStyle style;
+        style.capMm = std::clamp(0.4 * std::min(extent.width(), extent.height()), 1.2, 3.0);
+        style.bold = true;
+        style.colour = outline.current ? kHereInk : kOutlineInk;
+        style.horizontal = HorizontalJustify::Centre;
+        style.vertical = VerticalJustify::Middle;
+        text.draw(extent.center(), QString::fromStdString(outline.label), style);
+    }
 }
 
 void SheetPainter::paintMarks(const Viewport& viewport, const ResolvedViewport& at,
@@ -1143,7 +1352,10 @@ void SheetPainter::paintMarks(const Viewport& viewport, const ResolvedViewport& 
     painter_.save();
     painter_.setClipRect(paper.at(viewport.rect), Qt::IntersectClip);
     for (const plotting::WorldMark& mark : viewport.marks) {
-        if (mark.points.size() < 2) {
+        // A key plan draws its sheets' outlines live (paintKeyPlan); the ones
+        // stored when it was made go stale as the sheets change.
+        if (mark.points.size() < 2 || (viewport.kind == ViewportKind::KeyPlan &&
+                                       mark.kind == plotting::WorldMark::Kind::SheetOutline)) {
             continue;
         }
         QPolygonF line;
@@ -1504,11 +1716,7 @@ void SheetPainter::paintViewport(const Viewport& viewport, TextSetter& text, con
     }
     if (viewport.kind != ViewportKind::Legend && viewport.kind != ViewportKind::Notes &&
         viewport.kind != ViewportKind::Image) {
-        Viewport titled = viewport;
-        titled.scale = scale;
-        paintTitle(painter_, paper, text, viewport.rect,
-                   QString::fromStdString(viewport.title.empty() ? plotting::automaticTitle(titled)
-                                                                 : viewport.title));
+        paintTitle(painter_, paper, text, viewport.rect, viewTitle(viewport, scale));
     }
     painter_.restore();
 
@@ -1544,7 +1752,7 @@ SheetPaintStats SheetPainter::run()
     for (Viewport& viewport : drawnSheet.viewports) {
         if ((viewport.kind == ViewportKind::Plan || viewport.kind == ViewportKind::KeyPlan) &&
             (viewport.autoScale || viewport.autoCentre)) {
-            const ResolvedViewport at = resolvePlanViewport(viewport, source_);
+            const ResolvedViewport at = resolvePlanViewport(viewport, source_, set_, index_);
             viewport.scale = at.scale;
             viewport.centre = at.centre;
             viewport.autoScale = false;
@@ -1681,6 +1889,23 @@ ResolvedViewport resolvePlanViewport(const Viewport& viewport, const SheetSource
         }
     }
     return at;
+}
+
+ResolvedViewport resolvePlanViewport(const Viewport& viewport, const SheetSource& source,
+                                     const plotting::SheetSet& set, std::size_t sheetIndex)
+{
+    if (viewport.kind != ViewportKind::KeyPlan || (!viewport.autoScale && !viewport.autoCentre) ||
+        source.plan.model == nullptr || viewport.rect.empty()) {
+        return resolvePlanViewport(viewport, source);
+    }
+    const auto outlines =
+        plotting::keyPlanOutlines(set, sheetIndex, [&source](const Viewport& plan) {
+            const ResolvedViewport at = resolvePlanViewport(plan, source);
+            return plotting::PlanPlacement{at.scale, at.centre};
+        });
+    const plotting::PlanPlacement fitted = plotting::fitKeyPlan(
+        viewport, outlines, planDrawnBounds(source.plan, viewport.hiddenLayers, {}));
+    return {fitted.scale, fitted.centre};
 }
 
 SheetPaintStats paintSheet(QPainter& painter, const plotting::SheetSet& set, std::size_t index,

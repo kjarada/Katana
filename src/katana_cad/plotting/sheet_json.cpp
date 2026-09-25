@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/plotting/plan_grid.hpp"
+
 namespace katana::cad::plotting {
 
 using katana::core::ErrorCode;
@@ -235,6 +237,10 @@ Json viewportJson(const Viewport& viewport)
         marks.push_back(markJson(mark));
     }
     putList(json, "marks", std::move(marks));
+    if (viewport.gridStyle != d.gridStyle) {
+        json["grid_style"] = toString(viewport.gridStyle);
+    }
+    putNumber(json, "grid_interval", viewport.gridInterval, d.gridInterval);
     return json;
 }
 
@@ -282,6 +288,15 @@ Viewport viewportFrom(const Json& json)
     for (const Json& mark : json.value("marks", Json::array())) {
         viewport.marks.push_back(markFrom(mark));
     }
+    if (json.contains("grid_style")) {
+        const std::string grid = json.at("grid_style").get<std::string>();
+        const auto style = gridStyleFrom(grid);
+        if (!style) {
+            throw BadValue{"unknown grid style \"" + grid + "\""};
+        }
+        viewport.gridStyle = *style;
+    }
+    viewport.gridInterval = json.value("grid_interval", d.gridInterval);
     return viewport;
 }
 
