@@ -271,7 +271,7 @@ TEST(SubsurfaceUtilityLine, DepthOfCoverIsSurfaceMinusTopOfService)
     ASSERT_TRUE(cover.ok()) << cover.error().describe();
     ASSERT_EQ(cover->size(), 4u);
     EXPECT_FALSE((*cover)[0].cover);
-    EXPECT_EQ((*cover)[0].note, "no surface level");
+    EXPECT_EQ((*cover)[0].note, "no level or depth of the service");
     ASSERT_TRUE((*cover)[1].cover);
     EXPECT_NEAR(*(*cover)[1].cover, 0.8, 1e-12);
     EXPECT_NE((*cover)[1].note.find("do not rely"), std::string::npos);

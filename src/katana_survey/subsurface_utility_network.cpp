@@ -84,12 +84,16 @@ const char* toString(UtilityType type)
         return "water";
     case UtilityType::RecycledWater:
         return "recycled water";
+    case UtilityType::FireService:
+        return "fire service";
     case UtilityType::Sewer:
         return "sewer";
     case UtilityType::Stormwater:
         return "stormwater";
     case UtilityType::Fuel:
         return "fuel";
+    case UtilityType::IntelligentTransport:
+        return "ITS";
     case UtilityType::Other:
         return "other";
     }
@@ -98,7 +102,7 @@ const char* toString(UtilityType type)
 
 std::optional<UtilityType> parseUtilityType(std::string_view text)
 {
-    static constexpr std::array<std::pair<std::string_view, UtilityType>, 29> kNames{{
+    static constexpr auto kNames = std::to_array<std::pair<std::string_view, UtilityType>>({
         {"unknown", UtilityType::Unknown},
         {"electricity", UtilityType::Electricity},
         {"electrical", UtilityType::Electricity},
@@ -128,7 +132,25 @@ std::optional<UtilityType> parseUtilityType(std::string_view text)
         {"fuel", UtilityType::Fuel},
         {"oil", UtilityType::Fuel},
         {"other", UtilityType::Other},
-    }};
+        // The asset type names of AS 5488.2 Table A.4, and the one-letter
+        // codes delivery schemas key them by.
+        {"communication", UtilityType::Telecommunications},
+        {"fireservice", UtilityType::FireService},
+        {"its", UtilityType::IntelligentTransport},
+        {"intelligenttransport", UtilityType::IntelligentTransport},
+        {"petroleum", UtilityType::Fuel},
+        {"notspecified", UtilityType::Unknown},
+        {"c", UtilityType::Telecommunications},
+        {"d", UtilityType::Stormwater},
+        {"e", UtilityType::Electricity},
+        {"f", UtilityType::FireService},
+        {"g", UtilityType::Gas},
+        {"i", UtilityType::IntelligentTransport},
+        {"p", UtilityType::Fuel},
+        {"s", UtilityType::Sewer},
+        {"w", UtilityType::Water},
+        {"n", UtilityType::Unknown},
+    });
     return lookUp(kNames, text);
 }
 
@@ -139,6 +161,8 @@ const char* toString(UtilityStatus status)
         return "unknown";
     case UtilityStatus::InService:
         return "in service";
+    case UtilityStatus::Disused:
+        return "disused";
     case UtilityStatus::Abandoned:
         return "abandoned";
     case UtilityStatus::Proposed:
@@ -149,16 +173,16 @@ const char* toString(UtilityStatus status)
 
 std::optional<UtilityStatus> parseUtilityStatus(std::string_view text)
 {
-    static constexpr std::array<std::pair<std::string_view, UtilityStatus>, 8> kNames{{
+    static constexpr auto kNames = std::to_array<std::pair<std::string_view, UtilityStatus>>({
         {"unknown", UtilityStatus::Unknown},
         {"inservice", UtilityStatus::InService},
         {"live", UtilityStatus::InService},
         {"active", UtilityStatus::InService},
         {"abandoned", UtilityStatus::Abandoned},
-        {"disused", UtilityStatus::Abandoned},
+        {"disused", UtilityStatus::Disused},
         {"redundant", UtilityStatus::Abandoned},
         {"proposed", UtilityStatus::Proposed},
-    }};
+    });
     return lookUp(kNames, text);
 }
 
@@ -171,13 +195,15 @@ const char* toString(LevelReference reference)
         return "centre";
     case LevelReference::Invert:
         return "invert";
+    case LevelReference::Unknown:
+        return "unknown";
     }
-    return "top";
+    return "unknown";
 }
 
 std::optional<LevelReference> parseLevelReference(std::string_view text)
 {
-    static constexpr std::array<std::pair<std::string_view, LevelReference>, 8> kNames{{
+    static constexpr auto kNames = std::to_array<std::pair<std::string_view, LevelReference>>({
         {"top", LevelReference::Top},
         {"crown", LevelReference::Top},
         {"obvert", LevelReference::Top},
@@ -186,7 +212,17 @@ std::optional<LevelReference> parseLevelReference(std::string_view text)
         {"cl", LevelReference::Centre},
         {"invert", LevelReference::Invert},
         {"il", LevelReference::Invert},
-    }};
+        {"unknown", LevelReference::Unknown},
+        // AS 5488.2's Depth Location names, as delivery schemas spell them.
+        // What is met first above the service counts as its top: cover is
+        // measured to it.
+        {"topofpipe", LevelReference::Top},
+        {"topofconcreteencasement", LevelReference::Top},
+        {"plasticcoverprotectionencountered", LevelReference::Top},
+        {"groundlevel", LevelReference::Top},
+        {"toprowinvert", LevelReference::Invert},
+        {"other", LevelReference::Unknown},
+    });
     return lookUp(kNames, text);
 }
 
@@ -218,7 +254,7 @@ core::Result<GradedLine> gradeLine(const UtilityLine& line, const GradingSetting
     graded.vertices.reserve(line.vertices.size());
     for (const UtilityVertex& vertex : line.vertices) {
         PositionEvidence evidence = vertex.evidence;
-        evidence.hasLevel = vertex.level.has_value();
+        evidence.hasLevel = hasVerticalMeasurement(vertex);
         GradedVertex out;
         out.classification = classify(evidence, settings.tolerances);
         if (vertex.claimed && *vertex.claimed > out.classification.level) {
@@ -272,21 +308,46 @@ core::Result<GradedLine> gradeLine(const UtilityLine& line, const GradingSetting
     return graded;
 }
 
-std::optional<double> topLevel(const UtilityVertex& vertex, double diameter)
+std::optional<double> serviceLevel(const UtilityVertex& vertex)
 {
-    if (!vertex.level) {
-        return std::nullopt;
+    if (vertex.level) {
+        return vertex.level;
     }
-    const bool haveDiameter = std::isfinite(diameter) && diameter > 0.0;
-    switch (vertex.levelReference) {
-    case LevelReference::Top:
-        return *vertex.level;
-    case LevelReference::Centre:
-        return haveDiameter ? std::optional<double>(*vertex.level + diameter / 2.0) : std::nullopt;
-    case LevelReference::Invert:
-        return haveDiameter ? std::optional<double>(*vertex.level + diameter) : std::nullopt;
+    if (vertex.surfaceLevel && vertex.depth) {
+        return *vertex.surfaceLevel - *vertex.depth;
     }
     return std::nullopt;
+}
+
+bool hasVerticalMeasurement(const UtilityVertex& vertex)
+{
+    return vertex.level.has_value() || vertex.depth.has_value();
+}
+
+std::optional<double> topOffset(LevelReference reference, double diameter)
+{
+    const bool haveDiameter = std::isfinite(diameter) && diameter > 0.0;
+    switch (reference) {
+    case LevelReference::Top:
+        return 0.0;
+    case LevelReference::Centre:
+        return haveDiameter ? std::optional<double>(diameter / 2.0) : std::nullopt;
+    case LevelReference::Invert:
+        return haveDiameter ? std::optional<double>(diameter) : std::nullopt;
+    case LevelReference::Unknown:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::optional<double> topLevel(const UtilityVertex& vertex, double diameter)
+{
+    const std::optional<double> level = serviceLevel(vertex);
+    const std::optional<double> offset = topOffset(vertex.levelReference, diameter);
+    if (!level || !offset) {
+        return std::nullopt;
+    }
+    return *level + *offset;
 }
 
 core::Result<std::vector<CoverResult>> depthOfCover(const UtilityLine& line,
@@ -308,20 +369,31 @@ core::Result<std::vector<CoverResult>> depthOfCover(const UtilityLine& line,
         const UtilityVertex& vertex = line.vertices[i];
         CoverResult result;
         result.vertexId = vertex.id;
-        const std::optional<double> top = topLevel(vertex, line.attributes.diameter);
-        if (!vertex.surfaceLevel) {
-            result.note = "no surface level";
-        } else if (!vertex.level) {
-            result.note = "no level of the service";
-        } else if (!top) {
+        const std::optional<double> offset =
+            topOffset(vertex.levelReference, line.attributes.diameter);
+        const std::optional<double> level = serviceLevel(vertex);
+        if (!hasVerticalMeasurement(vertex)) {
+            result.note = "no level or depth of the service";
+        } else if (vertex.levelReference == LevelReference::Unknown) {
+            result.note = "the level's place on the service is unknown";
+        } else if (!offset) {
             result.note = std::string("a level on the ") + toString(vertex.levelReference) +
                           " needs the service's diameter";
+        } else if (level && vertex.surfaceLevel) {
+            result.cover = *vertex.surfaceLevel - (*level + *offset);
+        } else if (vertex.depth && !vertex.level) {
+            result.cover = *vertex.depth - *offset;
         } else {
-            result.cover = *vertex.surfaceLevel - *top;
+            result.note = "no surface level";
+        }
+        if (result.cover) {
             if (!graded->vertices[i].classification.levelQualified) {
                 result.note = std::string("the level is not qualified at ") +
                               toString(graded->vertices[i].classification.level) +
                               "; do not rely on this cover";
+            } else if (line.attributes.diameterIsInside && *offset > 0.0) {
+                result.note = "the size is an inside dimension: this cover is to the inside "
+                              "top, and the service's outside is higher by its wall";
             }
             result.belowMinimum = minimumCover && *result.cover < *minimumCover;
         }

@@ -60,6 +60,8 @@ std::optional<QualityLevel> parseQualityLevel(std::string_view text)
     std::string letters = compacted(text);
     if (letters.size() == 3 && letters.starts_with("ql")) {
         letters.erase(0, 2);
+    } else if (letters.size() == 13 && letters.starts_with("qualitylevel")) {
+        letters.erase(0, 12);
     }
     if (letters.size() != 1) {
         return std::nullopt;
@@ -81,6 +83,8 @@ std::optional<QualityLevel> parseQualityLevel(std::string_view text)
 const char* toString(LocationMethod method)
 {
     switch (method) {
+    case LocationMethod::Unknown:
+        return "unknown method";
     case LocationMethod::Records:
         return "records";
     case LocationMethod::Anecdotal:
@@ -103,8 +107,15 @@ const char* toString(LocationMethod method)
 
 std::optional<LocationMethod> parseLocationMethod(std::string_view text)
 {
-    static constexpr std::array<std::pair<std::string_view, LocationMethod>, 22> kNames{{
+    static constexpr auto kNames = std::to_array<std::pair<std::string_view, LocationMethod>>({
+        {"unknown", LocationMethod::Unknown},
         {"records", LocationMethod::Records},
+        {"archivedrawingsandplans", LocationMethod::Records},
+        {"geographicinformationsystem", LocationMethod::Records},
+        {"gis", LocationMethod::Records},
+        {"electronicdetection", LocationMethod::ElectromagneticLocation},
+        {"potholing", LocationMethod::NonDestructiveExcavation},
+        {"survey", LocationMethod::SurfaceFeature},
         {"record", LocationMethod::Records},
         {"plans", LocationMethod::Records},
         {"anecdotal", LocationMethod::Anecdotal},
@@ -126,7 +137,7 @@ std::optional<LocationMethod> parseLocationMethod(std::string_view text)
         {"nondestructiveexcavation", LocationMethod::NonDestructiveExcavation},
         {"trench", LocationMethod::OpenExcavation},
         {"openexcavation", LocationMethod::OpenExcavation},
-    }};
+    });
     // Blanks, '-' and '_' are not significant: "non-destructive excavation",
     // "Non_Destructive_Excavation" and "NonDestructiveExcavation" are one name.
     const std::string key = compacted(text);
@@ -141,6 +152,7 @@ std::optional<LocationMethod> parseLocationMethod(std::string_view text)
 QualityLevel maximumQualityLevel(LocationMethod method)
 {
     switch (method) {
+    case LocationMethod::Unknown:
     case LocationMethod::Records:
     case LocationMethod::Anecdotal:
         return QualityLevel::D;

@@ -116,6 +116,38 @@ const char* toString(ClearanceStatus status)
     return "conflict";
 }
 
+const char* toString(Clash clash)
+{
+    switch (clash) {
+    case Clash::Hard:
+        return "Hard";
+    case Clash::Soft:
+        return "Soft";
+    case Clash::Unknown:
+        return "Unknown";
+    case Clash::No:
+        return "No";
+    }
+    return "Unknown";
+}
+
+Clash clashOf(const ClearanceResult& result)
+{
+    switch (result.status) {
+    case ClearanceStatus::Clear:
+        return Clash::No;
+    case ClearanceStatus::Unconfirmed:
+        return Clash::Unknown;
+    case ClearanceStatus::WithinTolerance:
+        return Clash::Soft;
+    case ClearanceStatus::Conflict:
+        break;
+    }
+    const bool overlapInPlan = result.horizontalGap < 0.0;
+    const bool overlapInLevel = !result.verticalGap || *result.verticalGap < 0.0;
+    return overlapInPlan && overlapInLevel ? Clash::Hard : Clash::Soft;
+}
+
 core::Result<std::vector<ClearanceResult>> checkClearance(const DesignAlignment& design,
                                                           const std::vector<UtilityLine>& utilities,
                                                           const ClearanceRequirement& requirement,

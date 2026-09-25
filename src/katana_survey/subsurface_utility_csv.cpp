@@ -1,11 +1,13 @@
 #include "katana/survey/subsurface/utility_csv.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <optional>
 #include <utility>
 
 #include "katana/core/text.hpp"
+#include "subsurface_table.hpp"
 
 namespace katana::survey::subsurface {
 
@@ -14,80 +16,12 @@ namespace {
 using core::ErrorCode;
 using core::makeError;
 
-std::string key(std::string_view text)
-{
-    std::string out;
-    for (const char ch : text) {
-        if (!core::isAsciiSpace(ch) && ch != '-' && ch != '_') {
-            out += core::asciiLower(ch);
-        }
-    }
-    return out;
-}
-
-std::string at(std::size_t lineNumber)
-{
-    return "line " + std::to_string(lineNumber);
-}
-
-// The comma-separated fields of one line, trimmed, with double quotes
-// removed. nullopt for an unterminated quote or text after a closing quote.
-std::optional<std::vector<std::string>> splitFields(std::string_view line)
-{
-    std::vector<std::string> fields;
-    std::size_t i = 0;
-    while (true) {
-        while (i < line.size() && core::isAsciiSpace(line[i])) {
-            ++i;
-        }
-        std::string field;
-        if (i < line.size() && line[i] == '"') {
-            ++i;
-            bool closed = false;
-            while (i < line.size()) {
-                if (line[i] == '"') {
-                    if (i + 1 < line.size() && line[i + 1] == '"') {
-                        field += '"';
-                        i += 2;
-                        continue;
-                    }
-                    ++i;
-                    closed = true;
-                    break;
-                }
-                field += line[i++];
-            }
-            if (!closed) {
-                return std::nullopt;
-            }
-            while (i < line.size() && core::isAsciiSpace(line[i])) {
-                ++i;
-            }
-            if (i < line.size() && line[i] != ',') {
-                return std::nullopt;
-            }
-        } else {
-            const std::size_t comma = line.find(',', i);
-            const std::size_t end = comma == std::string_view::npos ? line.size() : comma;
-            field = std::string(core::trimmed(line.substr(i, end - i)));
-            i = end;
-        }
-        fields.push_back(std::move(field));
-        if (i >= line.size()) {
-            return fields;
-        }
-        ++i; // the comma
-    }
-}
-
-struct Row {
-    std::size_t lineNumber = 0;
-    std::vector<std::string> fields;
-};
+using detail::at;
+using detail::key;
+using Row = detail::RawRow;
 
 struct Table {
     std::map<std::string, std::size_t> columns; // canonical name -> field index
-    std::size_t width = 0;
     std::vector<Row> rows;
 
     // The trimmed cell, or empty when the column is absent.
@@ -99,73 +33,45 @@ struct Table {
     }
 };
 
-// The header and the rows of `text`, with columns resolved against `known`.
+// The rows of `text`, with its header's columns resolved against `known`.
 core::Result<Table> readTable(std::string_view text, const std::vector<UtilityCsvColumn>& known)
 {
-    if (text.starts_with("\xEF\xBB\xBF")) {
-        text.remove_prefix(3);
+    auto raw = detail::readRawTable(text);
+    if (!raw) {
+        return raw.error();
     }
     Table table;
-    bool haveHeader = false;
-    const std::vector<std::string_view> lines = core::splitLines(text);
-    for (std::size_t index = 0; index < lines.size(); ++index) {
-        const std::size_t lineNumber = index + 1;
-        const std::string_view line = core::trimmed(lines[index]);
-        if (line.empty() || line.front() == '#') {
-            continue;
-        }
-        auto fields = splitFields(line);
-        if (!fields) {
-            return makeError(ErrorCode::ParseFailure, "unbalanced quotes", at(lineNumber));
-        }
-        if (!haveHeader) {
-            haveHeader = true;
-            table.width = fields->size();
-            for (std::size_t column = 0; column < fields->size(); ++column) {
-                const std::string name = key((*fields)[column]);
-                const UtilityCsvColumn* match = nullptr;
-                for (const UtilityCsvColumn& candidate : known) {
-                    if (name == key(candidate.name)) {
-                        match = &candidate;
-                    }
-                    for (const std::string_view alias : candidate.aliases) {
-                        if (name == key(alias)) {
-                            match = &candidate;
-                        }
-                    }
-                }
-                if (!match) {
-                    return makeError(ErrorCode::ParseFailure,
-                                     "unknown column \"" + (*fields)[column] + "\"",
-                                     at(lineNumber));
-                }
-                if (!table.columns.emplace(std::string(match->name), column).second) {
-                    return makeError(ErrorCode::ParseFailure,
-                                     "column \"" + std::string(match->name) + "\" given twice",
-                                     at(lineNumber));
+    const std::string where = at(raw->headerLine);
+    for (std::size_t column = 0; column < raw->header.size(); ++column) {
+        const std::string name = key(raw->header[column]);
+        const UtilityCsvColumn* match = nullptr;
+        for (const UtilityCsvColumn& candidate : known) {
+            if (name == key(candidate.name)) {
+                match = &candidate;
+            }
+            for (const std::string_view alias : candidate.aliases) {
+                if (name == key(alias)) {
+                    match = &candidate;
                 }
             }
-            for (const UtilityCsvColumn& column : known) {
-                if (column.required && !table.columns.contains(std::string(column.name))) {
-                    return makeError(ErrorCode::ParseFailure,
-                                     "required column \"" + std::string(column.name) +
-                                         "\" is missing",
-                                     at(lineNumber));
-                }
-            }
-            continue;
         }
-        if (fields->size() != table.width) {
+        if (!match) {
             return makeError(ErrorCode::ParseFailure,
-                             std::to_string(fields->size()) + " fields where the header has " +
-                                 std::to_string(table.width),
-                             at(lineNumber));
+                             "unknown column \"" + raw->header[column] + "\"", where);
         }
-        table.rows.push_back({lineNumber, std::move(*fields)});
+        if (!table.columns.emplace(std::string(match->name), column).second) {
+            return makeError(ErrorCode::ParseFailure,
+                             "column \"" + std::string(match->name) + "\" given twice", where);
+        }
     }
-    if (!haveHeader) {
-        return makeError(ErrorCode::ParseFailure, "no header row");
+    for (const UtilityCsvColumn& column : known) {
+        if (column.required && !table.columns.contains(std::string(column.name))) {
+            return makeError(ErrorCode::ParseFailure,
+                             "required column \"" + std::string(column.name) + "\" is missing",
+                             where);
+        }
     }
+    table.rows = std::move(raw->rows);
     return table;
 }
 
@@ -212,6 +118,45 @@ std::optional<PathEvidence> parsePathEvidence(std::string_view text)
     return std::nullopt;
 }
 
+// A quality level a schedule claims; "Unknown" parses (as no claim, which the
+// caller makes of it) so that it is not refused as a typo.
+std::optional<QualityLevel> parseClaim(std::string_view text)
+{
+    if (key(text) == "unknown") {
+        return QualityLevel::D; // replaced by "no claim" by the caller
+    }
+    return parseQualityLevel(text);
+}
+
+// A size in millimetres, as metres: "150", or "1200 x 900" (a culvert's or a
+// duct bank's width by height), whose larger side is taken - the choice that
+// places a top from an invert higher and a service wider, both of which err
+// towards less cover and less clearance. 0 for "Not Applicable" and
+// "Unknown", which record that there is none to give.
+std::optional<double> parseSize(std::string_view text)
+{
+    const std::string name = key(text);
+    if (name == "notapplicable" || name == "unknown") {
+        return 0.0;
+    }
+    double largest = 0.0;
+    std::size_t start = 0;
+    const std::string lower = core::lowered(text);
+    while (true) {
+        const std::size_t cross = lower.find('x', start);
+        const auto part = core::parseFiniteDouble(core::trimmed(std::string_view(lower).substr(
+            start, cross == std::string::npos ? std::string::npos : cross - start)));
+        if (!part || *part <= 0.0) {
+            return std::nullopt;
+        }
+        largest = std::max(largest, *part);
+        if (cross == std::string::npos) {
+            return largest / 1000.0;
+        }
+        start = cross + 1;
+    }
+}
+
 // One line attribute from one row: set it if unset, refuse if it disagrees.
 struct AttributeSource {
     std::string value;
@@ -223,26 +168,64 @@ struct AttributeSource {
 const std::vector<UtilityCsvColumn>& utilityCsvColumns()
 {
     static const std::vector<UtilityCsvColumn> kColumns{
-        {"line", {"line_id", "utility", "utility_id", "service", "asset"}, true},
+        {"line", {"line_id", "utility", "utility_id", "service", "asset", "AssetIdentifier"}, true},
         {"point", {"point_id", "id", "vertex", "pt"}, true},
         {"easting", {"e", "mga_e"}, true},
         {"northing", {"n", "mga_n"}, true},
-        {"method", {"location_method", "locating_method", "survey_method"}, true},
+        {"method", {"location_method", "locating_method", "survey_method", "LocateMethod"}, true},
         {"level", {"rl", "z", "utility_level", "ahd"}, false},
-        {"level_ref", {"level_reference", "rl_ref", "level_on"}, false},
+        {"level_ref", {"level_reference", "rl_ref", "level_on", "DepthLocation"}, false},
+        {"depth", {"depth_m"}, false},
         {"surface", {"surface_level", "surface_rl", "ground", "nsl"}, false},
         {"h_unc", {"horizontal_uncertainty", "h_accuracy", "hz_unc"}, false},
         {"v_unc", {"vertical_uncertainty", "v_accuracy", "vt_unc"}, false},
-        {"ql", {"quality_level", "qualitylevel"}, false},
+        {"ql", {"quality_level", "QualityLevel"}, false},
         {"path", {"path_evidence", "path_to_next"}, false},
         {"verifies", {"checks", "verifies_point"}, false},
-        {"type", {"utility_type", "service_type"}, false},
-        {"owner", {"asset_owner", "authority", "operator"}, false},
+        {"type", {"utility_type", "service_type", "AssetTypeCode"}, false},
+        {"owner", {"AssetOwner", "authority", "operator"}, false},
         {"material", {}, false},
-        {"diameter_mm", {"size_mm", "dia_mm", "od_mm"}, false},
-        {"status", {"utility_status"}, false},
+        {"diameter_mm", {"dia_mm", "od_mm"}, false},
+        {"size", {"size_mm"}, false},
+        {"status", {"utility_status", "AssetStatus"}, false},
         {"config", {"configuration"}, false},
         {"description", {"desc", "comment", "remarks"}, false},
+        // The rest of the AS 5488 attribute set as the TfNSW Utility Schema
+        // names it: read, kept by that name, never interpreted here. Per
+        // service, so that two rows of one service may not disagree ...
+        {"AssetType", {}, false, CarriedOn::Line},
+        {"AssetSubtypeCode", {}, false, CarriedOn::Line},
+        {"AssetSubtype", {}, false, CarriedOn::Line},
+        {"AssetSubtypeDescription", {}, false, CarriedOn::Line},
+        {"AssetFeature", {}, false, CarriedOn::Line},
+        {"AssetFeatureDescription", {}, false, CarriedOn::Line},
+        {"Capacity", {}, false, CarriedOn::Line},
+        {"SizeDescription", {}, false, CarriedOn::Line},
+        {"ConfigurationDescription", {}, false, CarriedOn::Line},
+        {"MaterialDescription", {}, false, CarriedOn::Line},
+        {"Limitation", {}, false, CarriedOn::Line},
+        {"Condition", {}, false, CarriedOn::Line},
+        {"UtilityInstallDate", {}, false, CarriedOn::Line},
+        {"SourceofInformation", {}, false, CarriedOn::Line},
+        {"Location", {}, false, CarriedOn::Line},
+        {"Clash", {}, false, CarriedOn::Line},
+        {"ClashDescription", {}, false, CarriedOn::Line},
+        {"ClashID", {}, false, CarriedOn::Line},
+        {"ClashRisk", {}, false, CarriedOn::Line},
+        {"Treatment", {}, false, CarriedOn::Line},
+        {"TreatmentDescription", {}, false, CarriedOn::Line},
+        {"TreatmentReference", {}, false, CarriedOn::Line},
+        {"TreatmentLength", {}, false, CarriedOn::Line},
+        {"TreatmentRisk", {}, false, CarriedOn::Line},
+        {"tbCoordSys", {}, false, CarriedOn::Line},
+        {"TfNSW_ContractOrgCode", {}, false, CarriedOn::Line},
+        {"TfNSW_ContractOrgName", {}, false, CarriedOn::Line},
+        // ... and per vertex, where each point may say something of its own.
+        {"DepthDescription", {}, false, CarriedOn::Vertex},
+        {"DateInfoObtained", {}, false, CarriedOn::Vertex},
+        {"PotholeReport", {}, false, CarriedOn::Vertex},
+        {"PitReport", {}, false, CarriedOn::Vertex},
+        {"Notes", {}, false, CarriedOn::Vertex},
     };
     return kColumns;
 }
@@ -294,13 +277,13 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
                  optionalCell(*table, row, "method", "a location method", parseLocationMethod,
                               method),
                  optionalCell(*table, row, "level", "a number", kNumber, vertex.level),
+                 optionalCell(*table, row, "depth", "a number of metres", kNumber, vertex.depth),
                  optionalCell(*table, row, "surface", "a number", kNumber, vertex.surfaceLevel),
                  optionalCell(*table, row, "h_unc", "a number", kNumber,
                               vertex.evidence.horizontalUncertainty),
                  optionalCell(*table, row, "v_unc", "a number", kNumber,
                               vertex.evidence.verticalUncertainty),
-                 optionalCell(*table, row, "ql", "a quality level", parseQualityLevel,
-                              vertex.claimed),
+                 optionalCell(*table, row, "ql", "a quality level", parseClaim, vertex.claimed),
              }) {
             if (!status) {
                 return status.error();
@@ -313,7 +296,13 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
         }
         vertex.position = {*northing, *easting};
         vertex.evidence.method = *method;
-        vertex.evidence.hasLevel = vertex.level.has_value();
+        vertex.evidence.hasLevel = hasVerticalMeasurement(vertex);
+        if (vertex.depth && *vertex.depth < 0.0) {
+            return bad(row, "depth", table->cell(row, "depth"), "a depth below the surface");
+        }
+        if (auto claim = table->cell(row, "ql"); key(claim) == "unknown") {
+            vertex.claimed.reset(); // a schedule's "Unknown" claims nothing
+        }
         std::optional<LevelReference> reference;
         if (auto status = optionalCell(*table, row, "level_ref", "a level reference",
                                        parseLevelReference, reference);
@@ -332,8 +321,18 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
         // Line attributes: the first row to give one sets it; a later row
         // giving a different one is a contradiction in the schedule.
         auto& sources = attributeSources[lineId];
-        for (const std::string_view column :
-             {"type", "owner", "material", "diameter_mm", "status", "config", "description"}) {
+        std::vector<std::string_view> lineColumns{"type", "owner",  "material", "diameter_mm",
+                                                  "size", "status", "config",   "description"};
+        for (const UtilityCsvColumn& carried : utilityCsvColumns()) {
+            if (carried.carried == CarriedOn::Line) {
+                lineColumns.push_back(carried.name);
+            } else if (carried.carried == CarriedOn::Vertex) {
+                if (const std::string_view value = table->cell(row, carried.name); !value.empty()) {
+                    vertex.fields.emplace(std::string(carried.name), std::string(value));
+                }
+            }
+        }
+        for (const std::string_view column : lineColumns) {
             const std::string_view value = table->cell(row, column);
             if (value.empty()) {
                 continue;
@@ -370,14 +369,29 @@ core::Result<std::vector<UtilityLine>> parseUtilityCsv(std::string_view text)
                     return bad(row, column, value, "a positive number of millimetres");
                 }
                 attributes.diameter = *millimetres / 1000.0;
+                attributes.diameterIsInside = false;
+            } else if (column == "size") {
+                const auto size = parseSize(value);
+                if (!size) {
+                    return bad(row, column, value,
+                               "millimetres, W x H millimetres, Not Applicable or Unknown");
+                }
+                // An outside diameter, where both are given, is the better
+                // one to find a top from.
+                if (*size > 0.0 && !sources.contains("diameter_mm")) {
+                    attributes.diameter = *size;
+                    attributes.diameterIsInside = true;
+                }
             } else if (column == "owner") {
                 attributes.owner = std::string(value);
             } else if (column == "material") {
                 attributes.material = std::string(value);
             } else if (column == "config") {
                 attributes.configuration = std::string(value);
-            } else {
+            } else if (column == "description") {
                 attributes.description = std::string(value);
+            } else {
+                attributes.fields.emplace(std::string(column), std::string(value));
             }
         }
         line.vertices.push_back(std::move(vertex));
