@@ -49,13 +49,21 @@ double fitExaggeration(double depthM, double scale, double heightMm, double flat
     if (!(depthM > 0.0) || !std::isfinite(depthM)) {
         return flatExaggeration;
     }
+    // The largest that fits, among those that give a vertical scale a rule
+    // reads - a whole denominator (1 : 750 at 2.5 is V 1:300, at 4 would be
+    // V 1:187.5) - else the largest that fits at all.
     double best = kSectionExaggerations.front();
+    std::optional<double> whole;
     for (const double candidate : kSectionExaggerations) {
         if (depthM * 1000.0 * candidate / scale <= heightMm) {
             best = candidate;
+            const double vertical = scale / candidate;
+            if (std::abs(vertical - std::round(vertical)) <= 1e-9 * vertical) {
+                whole = candidate;
+            }
         }
     }
-    return best;
+    return whole ? *whole : best;
 }
 
 Result<SectionFit> fitSection(const SectionFitRequest& request)
@@ -225,6 +233,42 @@ SectionLayout sectionPlotLayout(const SectionLayoutRequest& request)
         return {};
     }
     return layout;
+}
+
+// ---- a section viewport ----------------------------------------------------------------
+
+Box2 sectionDrawingArea(const Box2& rect)
+{
+    if (rect.empty()) {
+        return rect;
+    }
+    Box2 area = rect;
+    area.min.y = std::min(area.min.y + kSectionTitleMm, area.max.y);
+    return area;
+}
+
+std::vector<double> viewportStations(const ViewportSource& source)
+{
+    std::vector<double> stations = source.stations;
+    if (stations.empty() && source.sectionInterval > 0.0 && source.chainageTo > source.chainageFrom) {
+        // Counted in whole intervals, so the last is not an accumulation of
+        // additions' rounding short of the range's end.
+        for (std::size_t i = 0; stations.size() < kMaximumSectionRows; ++i) {
+            const double at = source.chainageFrom + static_cast<double>(i) * source.sectionInterval;
+            if (at > source.chainageTo + 1e-9) {
+                break;
+            }
+            stations.push_back(at);
+        }
+    }
+    return stations;
+}
+
+double viewportHalfWidth(const ViewportSource& source)
+{
+    return source.sectionHalfWidth > 0.0 && std::isfinite(source.sectionHalfWidth)
+               ? source.sectionHalfWidth
+               : kDefaultSectionHalfWidth;
 }
 
 } // namespace katana::cad::plotting

@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/core/error.hpp"
 #include "katana/geometry/primitives2d.hpp"
 
@@ -75,8 +76,10 @@ struct SectionFit {
 [[nodiscard]] core::Result<SectionFit> fitSection(const SectionFitRequest& request);
 
 // The largest of kSectionExaggerations at which `depthM` metres at
-// 1 : `scale` fits `heightMm`; 1 when even that does not fit, and
-// `flatExaggeration` when there is no depth.
+// 1 : `scale` fits `heightMm` and the vertical scale, 1 : scale / it, has a
+// whole denominator (at 1 : 750, 2.5 - V 1:300 - rather than 4 - V 1:187.5);
+// the largest that fits when none of those does; 1 when even that does not
+// fit, and `flatExaggeration` when there is no depth.
 [[nodiscard]] double fitExaggeration(double depthM, double scale, double heightMm,
                                      double flatExaggeration = 1.0);
 
@@ -139,5 +142,24 @@ struct SectionLayout {
 // leave the plot less than kSectionMinimumBandPlotMm high; the axis values
 // take its place. An empty plot when the area is too small for any.
 [[nodiscard]] SectionLayout sectionPlotLayout(const SectionLayoutRequest& request);
+
+// ---- a section viewport ----------------------------------------------------------------
+
+// The strip at a section viewport's foot kept for its title.
+inline constexpr double kSectionTitleMm = 7.0;
+// A cross section's half width when the viewport gives none.
+inline constexpr double kDefaultSectionHalfWidth = 20.0;
+// At most so many cross sections are cut for one viewport's interval.
+inline constexpr std::size_t kMaximumSectionRows = 64;
+
+// Where a section viewport draws its sections: its rectangle less the
+// title's strip.
+[[nodiscard]] Box2 sectionDrawingArea(const Box2& rect);
+// The chainages a CrossSections viewport cuts at, one row each, top down:
+// its stations, else every interval from its first chainage to its last
+// (kMaximumSectionRows at most).
+[[nodiscard]] std::vector<double> viewportStations(const ViewportSource& source);
+// Its sections' half width: its own, else kDefaultSectionHalfWidth.
+[[nodiscard]] double viewportHalfWidth(const ViewportSource& source);
 
 } // namespace katana::cad::plotting
