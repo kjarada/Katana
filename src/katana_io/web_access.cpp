@@ -254,6 +254,81 @@ std::string_view localOf(std::string_view name)
 
 // ---- HTTP -------------------------------------------------------------------
 
+katana::core::Error explainHttpFailure(const HttpFailure& failure, std::string context)
+{
+    const int status = failure.status;
+    const int curlCode = failure.curlCode;
+    const std::string& error = failure.error;
+    const auto says = [](const std::string& text, std::string_view words) {
+        return text.find(words) != std::string::npos;
+    };
+    if (status == 404) {
+        return makeError(ErrorCode::NotFound, "the service has nothing at this address",
+                         std::move(context));
+    }
+    if (status == 401 || status == 403) {
+        // CloudFront's own refusal page, not the service's: a distribution
+        // that answers only from some countries (some Australian government
+        // services answer only from Australia) or blocks this network.
+        if (status == 403 && says(failure.body, "The request could not be satisfied") &&
+            says(failure.body, "Request blocked")) {
+            return makeError(ErrorCode::FileImportFailure,
+                             "the service's network blocked the request (403) before it reached "
+                             "the service; it may answer only from its own country, or not from "
+                             "this network - try from a connection in that country",
+                             std::move(context));
+        }
+        return makeError(ErrorCode::FileImportFailure,
+                         "the service refused the request (" + std::to_string(status) +
+                             "); it may need a key (ONLINE KEY), not allow this use, or not "
+                             "answer from where this computer is",
+                         std::move(context));
+    }
+    if (status == 429) {
+        return makeError(ErrorCode::FileImportFailure,
+                         "the service is limiting requests (429); wait and try again, or "
+                         "ask for a smaller area",
+                         std::move(context));
+    }
+    if (says(error, "CONNECT tunnel failed") || curlCode == 5 /* CURLE_COULDNT_RESOLVE_PROXY */) {
+        return makeError(ErrorCode::FileImportFailure,
+                         "the network's proxy refused the connection to this service; the "
+                         "host may be blocked where Katana is running",
+                         std::move(context));
+    }
+    if (curlCode == 6 /* CURLE_COULDNT_RESOLVE_HOST */) {
+        return makeError(ErrorCode::FileImportFailure,
+                         "the service's host name could not be found; check the address and "
+                         "the network connection",
+                         std::move(context));
+    }
+    if (curlCode == 28) {
+        return makeError(ErrorCode::FileImportFailure,
+                         "the service did not answer within " +
+                             std::to_string(failure.timeoutSeconds) +
+                             " s; try a smaller area or later",
+                         std::move(context));
+    }
+    // libcurl reads the certificates it checks https:// against from
+    // etc/ssl/certs/ca-bundle.crt beside its own bin folder (the deploy puts
+    // it there, cmake/KatanaDeploy.cmake.in). When that file is missing every
+    // https:// request fails here, before reaching any server.
+    if (curlCode == 77 /* CURLE_SSL_CACERT_BADFILE */ || says(error, "trust anchors")) {
+        return makeError(ErrorCode::FileImportFailure,
+                         "the certificates https:// is checked against could not be read "
+                         "(etc/ssl/certs/ca-bundle.crt beside Katana's bin folder); reinstall "
+                         "or rebuild Katana",
+                         std::move(context));
+    }
+    if (curlCode == 60 /* CURLE_PEER_FAILED_VERIFICATION */) {
+        return makeError(ErrorCode::FileImportFailure,
+                         "the service's certificate could not be verified; a proxy or "
+                         "antivirus that inspects https:// may be in the way",
+                         std::move(context));
+    }
+    return makeError(ErrorCode::FileImportFailure, "the request failed", std::move(context));
+}
+
 Result<HttpResponse> httpFetch(const HttpRequest& request, const std::stop_token& stop,
                                const TransferProgress& progress)
 {
@@ -345,47 +420,17 @@ Result<HttpResponse> httpFetch(const HttpRequest& request, const std::stop_token
             delay *= 2.0;
             continue;
         }
-        const std::string context =
+        std::string context =
             shown + (status != 0 ? " (HTTP " + std::to_string(status) + ")" : "") +
             (error.empty() ? "" : ": " + error) +
             (transfer.body.empty() ? "" : " - " + snippetOf(transfer.body));
-        if (status == 404) {
-            return makeError(ErrorCode::NotFound, "the service has nothing at this address",
-                             context);
-        }
-        if (status == 401 || status == 403) {
-            return makeError(ErrorCode::FileImportFailure,
-                             "the service refused the request (" + std::to_string(status) +
-                                 "); it may need a key (ONLINE KEY) or not allow this use",
-                             context);
-        }
-        if (status == 429) {
-            return makeError(ErrorCode::FileImportFailure,
-                             "the service is limiting requests (429); wait and try again, or "
-                             "ask for a smaller area",
-                             context);
-        }
-        if (error.find("CONNECT tunnel failed") != std::string::npos ||
-            curlCode == 5 /* CURLE_COULDNT_RESOLVE_PROXY */) {
-            return makeError(ErrorCode::FileImportFailure,
-                             "the network's proxy refused the connection to this service; the "
-                             "host may be blocked where Katana is running",
-                             context);
-        }
-        if (curlCode == 6 /* CURLE_COULDNT_RESOLVE_HOST */) {
-            return makeError(ErrorCode::FileImportFailure,
-                             "the service's host name could not be found; check the address and "
-                             "the network connection",
-                             context);
-        }
-        if (curlCode == 28) {
-            return makeError(ErrorCode::FileImportFailure,
-                             "the service did not answer within " +
-                                 std::to_string(request.timeoutSeconds) +
-                                 " s; try a smaller area or later",
-                             context);
-        }
-        return makeError(ErrorCode::FileImportFailure, "the request failed", context);
+        HttpFailure failure;
+        failure.status = status;
+        failure.curlCode = curlCode;
+        failure.error = error;
+        failure.body = transfer.body.substr(0, 4096);
+        failure.timeoutSeconds = request.timeoutSeconds;
+        return explainHttpFailure(failure, std::move(context));
     }
 }
 

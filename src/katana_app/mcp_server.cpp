@@ -424,7 +424,8 @@ const std::vector<Tool>& tools()
             "draw (LINE, PLINE, RECT, CIRCLE, ARC, POINT, TEXT, DIM), select and modify (SELECT, "
             "MOVE, COPY, ROTATE, OFFSET, TRIM, FILLET...), layers and styles, alignments and "
             "design profiles (ALIGN), parcels (PARCEL), survey calculations (INVERSE, FORWARD, "
-            "AREA), survey codes (CODE, MAPFILE, CUSTOMISE), inspection (LIST, INFO), UNDO/REDO, "
+            "AREA), survey codes (CODE, MAPFILE, CUSTOMISE), AS 5488 subsurface utilities "
+            "(UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW), inspection (LIST, INFO), UNDO/REDO, "
             "and files (NEW, OPEN, SAVE, IMPORT, EXPORT). Each command is one undoable step. By "
             "default the batch stops at the first command that fails. Returns each command's "
             "output and the drawing's status afterwards.",
