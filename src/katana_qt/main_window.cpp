@@ -1777,7 +1777,14 @@ void MainWindow::runCommandLine()
         views_->pressEnter();
         return;
     }
-    commandLog_->appendPlainText("> " + line);
+    // What is typed is echoed - but an ONLINE KEY's value never is.
+    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(line));
+    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
+    // workbench's, as the interoperability verbs below are the window's - and
+    // before a running tool, which would take the line for an answer.
+    if (online_ != nullptr && online_->runLine(line)) {
+        return;
+    }
     // While a tool runs, what is typed is its answer - a point, a distance,
     // an option - before it is anything else: Polyline's C closes it, where
     // on its own C would start a Circle.
@@ -1849,11 +1856,6 @@ void MainWindow::runCommandLine()
         }
         applyCustomisation(paths, replace ? katana::archive12d::LoadMode::Replace
                                           : katana::archive12d::LoadMode::Merge);
-        return;
-    }
-    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
-    // workbench's, for the same reason as the verbs below.
-    if (online_ != nullptr && online_->runLine(line)) {
         return;
     }
     // The interoperability verbs, as katana_cli has them. They live in the

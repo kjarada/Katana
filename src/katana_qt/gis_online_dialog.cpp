@@ -522,11 +522,11 @@ void OnlineDataDialog::addCustomService()
     if (!context_.addCustom) {
         return;
     }
+    // Said first, for the reason importChosen gives.
+    setStatus("Asking " + qs(katana::gis::redactUrl(url)) + " what it offers...");
     if (const auto started = context_.addCustom(url); !started) {
         setStatus(qs(started.error().describe()), true);
-        return;
     }
-    setStatus("Asking " + qs(katana::gis::redactUrl(url)) + " what it offers...");
 }
 
 void OnlineDataDialog::saveKey()

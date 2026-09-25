@@ -194,12 +194,29 @@ TEST(OnlineDiscovery, TheUrlSaysWhatKindOfServiceItIs)
     EXPECT_EQ(guessServiceType("https://a/stac/v1"), OnlineServiceType::Stac);
     EXPECT_EQ(guessServiceType("https://a/item.json"), OnlineServiceType::Stac);
     EXPECT_FALSE(guessServiceType("https://a/geoserver/ows").has_value());
-    EXPECT_EQ(descriptionUrl(OnlineServiceType::Wms, "https://a/wms?x=1"),
-              "https://a/wms?SERVICE=WMS&REQUEST=GetCapabilities");
+    // A vendor's own parameter (MapServer's map=) is kept; the request's are
+    // replaced.
+    EXPECT_EQ(descriptionUrl(OnlineServiceType::Wms, "https://a/mapserv?map=/d/x.map&service=WMS&request=GetMap"),
+              "https://a/mapserv?map=/d/x.map&SERVICE=WMS&REQUEST=GetCapabilities");
     EXPECT_EQ(descriptionUrl(OnlineServiceType::ArcgisQuery, "https://a/FeatureServer/"),
               "https://a/FeatureServer/?f=json");
-    EXPECT_EQ(customProviderId("https://opendata.maps.vic.gov.au/geoserver/ows"),
-              "custom-opendata-maps-vic-gov-au");
+    // The host, and which service on it: two services of one server are two
+    // providers (one host alone let the second replace the first), and the
+    // same service asked with another query is the same one.
+    const std::string a = customProviderId("https://maps.example.org/arcgis/rest/services/A/MapServer");
+    const std::string b = customProviderId("https://maps.example.org/arcgis/rest/services/B/MapServer");
+    EXPECT_TRUE(a.starts_with("custom-maps-example-org-"));
+    EXPECT_NE(a, b);
+    EXPECT_EQ(a, customProviderId("https://maps.example.org/arcgis/rest/services/A/MapServer?f=json"));
+    // A key in a discovered address is taken out into the settings, and the
+    // address keeps {key}.
+    const auto [endpoint, secret] =
+        extractKey("https://tiles.example.org/{z}/{x}/{y}.png?api=SECRET&style=topo");
+    EXPECT_EQ(endpoint, "https://tiles.example.org/{z}/{x}/{y}.png?api={key}&style=topo");
+    EXPECT_EQ(secret, "SECRET");
+    EXPECT_TRUE(extractKey("https://a.org/x?layer=1").second.empty());
+    EXPECT_EQ(gis::redactUrl("https://a.org/x?api=S&subscription-key=T&auth=U"),
+              "https://a.org/x?api=***&subscription-key=***&auth=***");
 }
 
 TEST(OnlineDiscovery, Wms130CapabilitiesGiveNamedLayersWithInheritedExtent)
@@ -302,6 +319,7 @@ TEST(OnlineDiscovery, ArcgisDescriptionsGiveTheMapAndEachFeatureLayer)
     EXPECT_EQ(one->layers().front()->endpoint, url);
     EXPECT_EQ(one->layers().front()->layerName, "9");
     EXPECT_EQ(one->layers().front()->pageSize, 2000);
+    EXPECT_EQ(one->layers().front()->idField, "OBJECTID_1");
 
     auto image = parseArcgisDescription(fixture("arcgis_imageserver.json"),
                                         "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_5M_Elevation/ImageServer");
@@ -484,8 +502,11 @@ TEST(OnlineFetch, WfsAndOgcApiPagesAreFollowed)
     FakeTransport transport;
     // Two GeoJSON pages for the WFS (a server may answer GetFeature with
     // GeoJSON; GDAL reads it whatever the file is called).
+    // A WFS 2.0 page shorter than COUNT is not the last: it is asked again
+    // until a page comes back empty.
     transport.answers = {{"STARTINDEX=0", fixture("arcgis_query_page1.geojson")},
                          {"STARTINDEX=4", fixture("arcgis_query_page3.geojson")},
+                         {"STARTINDEX=7", R"({"type":"FeatureCollection","features":[]})"},
                          {"items?bbox=", fixture("oapif_items_page1.json")},
                          {"offset=2", fixture("arcgis_query_page3.geojson")}};
     OnlineEnvironment environment = environmentWith(transport, cache.path());
@@ -496,7 +517,8 @@ TEST(OnlineFetch, WfsAndOgcApiPagesAreFollowed)
     ASSERT_TRUE(viaWfs.ok()) << viaWfs.error().describe();
     EXPECT_EQ(viaWfs->vectors->entities.size(), 7u);
     // EPSG:4326 in WFS 2.0 is latitude first.
-    EXPECT_NE(transport.urls[0].find("&BBOX=-33.875,151.2,-33.865,151.215,EPSG%3A4326&"), std::string::npos);
+    EXPECT_NE(transport.urls[0].find("&BBOX=-33.875,151.2,-33.865,151.215,urn%3Aogc%3Adef%3Acrs%3AEPSG%3A%3A4326&"),
+              std::string::npos);
 
     OnlineLayer oapif;
     oapif.providerId = "custom-example-invalid";
@@ -768,13 +790,23 @@ TEST(OnlineFetch, AStacItemsVisualAssetIsReadAsACog)
         "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/56/H/LH/2026/1/S2B_56HLH_20260103_0_L2A/TCI.tif";
     ASSERT_NE(item.find(original), std::string::npos);
     item.replace(item.find(original), original.size(), fileUrl(visual));
-    FakeTransport transport;
-    transport.answers = {{"item.json", item}};
-    OnlineEnvironment environment = environmentWith(transport, work.path() / "cache");
+    // Read from a file, the item may name a file; served over the network,
+    // the same item is refused (a service cannot make Katana open a local file).
+    std::ofstream(work.path() / "item.json", std::ios::binary) << item;
     OnlineLayer layer = builtInLayer("sentinel2", "truecolour");
-    layer.endpoint = "https://example.invalid/item.json";
+    layer.endpoint = fileUrl(work.path() / "item.json");
+    OnlineEnvironment environment;
+    environment.cacheDirectory = work.path() / "cache";
     auto imported = fetchOnlineLayer(layer, sydneyOptions(), environment);
     ASSERT_TRUE(imported.ok()) << imported.error().describe();
+    FakeTransport transport;
+    transport.answers = {{"item.json", item}};
+    OnlineEnvironment network = environmentWith(transport, work.path() / "cache2");
+    OnlineLayer remote = layer;
+    remote.endpoint = "https://example.invalid/item.json";
+    const auto refused = fetchOnlineLayer(remote, sydneyOptions(), network);
+    ASSERT_FALSE(refused.ok());
+    EXPECT_NE(refused.error().message.find("names a file on this computer"), std::string::npos);
     EXPECT_TRUE(mentions(imported->warnings, "scene date 2026-01-03"));
     EXPECT_EQ(imported->raster->attribution, "Contains modified Copernicus Sentinel data");
     EXPECT_GT(imported->raster->width, 0);
