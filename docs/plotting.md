@@ -2002,8 +2002,9 @@ makes the same edits without the canvas and a test checks each without a
 mouse. The editor's pieces are in `src/katana_qt/plotting/`: the rulers and
 grid (`sheet_rulers.hpp`), the cursor readout (`sheet_readout.hpp`), the
 pictures of the sheets (`sheet_thumbnails.hpp`), the list
-(`sheet_list_widget.hpp`), the clipboard (`viewport_clipboard.hpp`), and the
-Edit and View menus (`sheet_editor_editing.cpp`).
+(`sheet_list_widget.hpp`), the clipboard (`viewport_clipboard.hpp`), the
+Edit and View menus (`sheet_editor_editing.cpp`), and the canvas's selection,
+view and cursor (`sheet_canvas_editing.cpp`).
 
 Nothing new is stored. The selection, the grid and the rulers belong to the
 editor; each edit stores the set through `Document::setSheetSet`, as every
