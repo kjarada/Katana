@@ -151,6 +151,18 @@ Status checkLeaderChange(const Model& model, const LeaderChange& change)
         !model.textStyles.contains(*change.textStyle)) {
         return makeError(ErrorCode::NotFound, "text style does not exist", *change.textStyle);
     }
+    // Millimetres on paper, where 0 already means something (the text
+    // style's height, no landing): below it there is nothing to draw, and a
+    // negative landing would hang the note back over its own line.
+    for (const auto& [size, key] :
+         {std::pair{change.paperHeight, "paper"}, std::pair{change.arrowSize, "arrowsize"},
+          std::pair{change.landing, "landing"}}) {
+        if (size && !(std::isfinite(*size) && *size >= 0.0)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             std::string(key) + "= must be a size of 0 mm or more",
+                             std::to_string(*size));
+        }
+    }
     return {};
 }
 
@@ -409,9 +421,8 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
             return makeError(ErrorCode::NotFound, "entity does not exist",
                              "id=" + std::to_string(id));
         }
-        const auto ref = naturalAnchor(*target, options.angle);
-        const auto tip = ref ? katana::entity::resolveAnchor(*target, *ref) : std::nullopt;
-        if (!tip) {
+        const auto place = leaderPlaceOn(*target, options.angle);
+        if (!place) {
             ++result.skipped;
             if (result.firstSkip.empty()) {
                 result.firstSkip = "id=" + std::to_string(id) + " (a " +
@@ -421,9 +432,9 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
             continue;
         }
         LeaderGeometry leader;
-        leader.vertices = {*tip, *tip + toNote};
-        leader.tipRef = *ref;
-        if (ref->point == AnchorPoint::Inside) {
+        leader.vertices = {place->point, place->point + toNote};
+        leader.tipRef = place->ref;
+        if (place->ref.point == AnchorPoint::Inside) {
             leader.arrow = katana::entity::ArrowHead::Dot; // ISO 128-22, leader lines
         }
         if (options.balloon) {
@@ -461,6 +472,16 @@ Result<LeadersFor> leadersFor(const Model& model, std::vector<EntityId> targets,
     result.command =
         commandOf(options.balloon ? "CREATE_BALLOONS" : "CREATE_LEADERS", std::move(changes));
     return result;
+}
+
+std::optional<AnchoredPoint> leaderPlaceOn(const Entity& entity, double angle)
+{
+    const auto ref = naturalAnchor(entity, angle);
+    const auto point = ref ? katana::entity::resolveAnchor(entity, *ref) : std::nullopt;
+    if (!point) {
+        return std::nullopt;
+    }
+    return AnchoredPoint{*point, *ref};
 }
 
 Result<LeaderAlignment> alignLeaders(const Model& model, std::vector<EntityId> ids,

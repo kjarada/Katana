@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <string>
 
 #include "katana/cad/annotation/leader_edit.hpp"
@@ -103,6 +104,52 @@ TEST(LeaderEdit, WhatCannotBeMadeIsRefusedNotSkipped)
     missingStyle.textStyle = "Nowhere";
     EXPECT_EQ(ann::checkLeaderChange(document.model(), missingStyle).error().code,
               katana::core::ErrorCode::NotFound);
+
+    // 0 mm is a size (the style's height, no landing); below it is none.
+    ann::LeaderChange none;
+    none.paperHeight = 0.0;
+    none.landing = 0.0;
+    EXPECT_TRUE(ann::checkLeaderChange(document.model(), none).ok());
+    for (const double bad : {-0.5, std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity()}) {
+        ann::LeaderChange landing;
+        landing.landing = bad;
+        EXPECT_EQ(ann::checkLeaderChange(document.model(), landing).error().code,
+                  katana::core::ErrorCode::InvalidArgument)
+            << bad;
+        ann::LeaderChange arrow;
+        arrow.arrowSize = bad;
+        EXPECT_FALSE(ann::checkLeaderChange(document.model(), arrow).ok()) << bad;
+        ann::LeaderChange paper;
+        paper.paperHeight = bad;
+        EXPECT_FALSE(ann::checkLeaderChange(document.model(), paper).ok()) << bad;
+    }
+}
+
+TEST(LeaderEdit, APlaceForALeaderIsOnTheEntityOrThereIsNone)
+{
+    Document document;
+    const EntityId point = add(document, PointGeometry{Point2(3, 4)});
+    const EntityId line = add(document, Segment2{Point2(0, 0), Point2(10, 0)});
+    DimensionGeometry measured;
+    measured.start = Point2(0, 0);
+    measured.end = Point2(10, 0);
+    const EntityId dimension = add(document, measured);
+    const auto onPoint =
+        ann::leaderPlaceOn(*document.model().entities.find(point), 0.25 * katana::math::kPi);
+    ASSERT_TRUE(onPoint);
+    EXPECT_EQ(onPoint->point, Point2(3, 4));
+    EXPECT_EQ(onPoint->ref.entity, point);
+    // A line's middle: half way along it.
+    const auto onLine =
+        ann::leaderPlaceOn(*document.model().entities.find(line), 0.25 * katana::math::kPi);
+    ASSERT_TRUE(onLine);
+    EXPECT_EQ(onLine->point, Point2(5, 0));
+    EXPECT_EQ(onLine->ref.point, AnchorPoint::Along);
+    EXPECT_EQ(onLine->ref.parameter, 0.5);
+    EXPECT_FALSE(
+        ann::leaderPlaceOn(*document.model().entities.find(dimension), 0.25 * katana::math::kPi))
+        << "a dimension is annotation, not something to point at";
 }
 
 TEST(LeaderEdit, ALabelStyleLendsItsLookUnlessTheChangeGivesOne)
