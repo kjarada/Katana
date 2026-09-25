@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -48,7 +49,9 @@
 #include <QImage>
 #include <QString>
 
+#include "gpu/gpu_scene.hpp"
 #include "gpu/offscreen_gpu.hpp"
+#include "katana/core/cpu_features.hpp"
 #if defined(KATANA_GPU_D3D11)
 #include "gpu/shader_compiler.hpp"
 #endif
@@ -558,6 +561,117 @@ bool saveSceneImages()
     return fromGpu.save(directory + "/scene_gpu.png") &&
            fromCpu.copy().save(directory + "/scene_cpu.png");
 }
+
+// ---- packing, on the CPU -------------------------------------------------------------
+//
+// What a scene change costs before anything reaches the GPU: packDrawList
+// turning the draw list's double positions into float offsets from the
+// scene's origin and giving every line its two ends (gpu_scene.hpp). The 3D
+// view does it for each layer it rebuilds, so on a dense TIN every edit pays
+// it. The ground grid, with a line along every triangle edge as a TIN's are
+// drawn: 256 cells is 131k triangles and 197k lines, 724 cells 1.05M and
+// 1.57M. No device is needed. "digest" is FNV-1a over every packed byte, the
+// same at both SIMD levels and in any build of the same packing.
+
+// A packing level, set for one benchmark and put back after it.
+class PackLevel {
+  public:
+    PackLevel(benchmark::State& state, int level)
+    {
+        const auto previous =
+            katana::core::setSimdLevel(static_cast<katana::core::SimdLevel>(level));
+        if (!previous) {
+            state.SkipWithError(previous.error().message.c_str());
+            ok_ = false;
+            return;
+        }
+        previous_ = *previous;
+    }
+    ~PackLevel()
+    {
+        if (ok_) {
+            (void)katana::core::setSimdLevel(previous_);
+        }
+    }
+    PackLevel(const PackLevel&) = delete;
+    PackLevel& operator=(const PackLevel&) = delete;
+    [[nodiscard]] bool ok() const { return ok_; }
+
+  private:
+    bool ok_ = true;
+    katana::core::SimdLevel previous_ = katana::core::SimdLevel::Scalar;
+};
+
+const DrawList& groundWithEdges(int cells)
+{
+    static std::map<int, DrawList> cache;
+    auto [it, inserted] = cache.try_emplace(cells);
+    if (inserted) {
+        DrawList& list = it->second;
+        list = groundGrid(cells);
+        const int side = cells + 1;
+        for (int j = 0; j < cells; ++j) {
+            for (int i = 0; i < cells; ++i) {
+                const auto v0 = static_cast<katana::render::VertexIndex>(j * side + i);
+                list.addLine(v0, v0 + 1);
+                list.addLine(v0, v0 + static_cast<katana::render::VertexIndex>(side));
+                list.addLine(v0, v0 + static_cast<katana::render::VertexIndex>(side) + 1);
+            }
+        }
+    }
+    return it->second;
+}
+
+std::uint64_t digestOf(const katana::qt::gpu::GpuSceneData& scene)
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    const auto mix = [&hash](const void* data, std::size_t bytes) {
+        const auto* p = static_cast<const unsigned char*>(data);
+        for (std::size_t i = 0; i < bytes; ++i) {
+            hash = (hash ^ p[i]) * 1099511628211ull;
+        }
+    };
+    mix(scene.vertices.data(), scene.vertices.size() * sizeof(scene.vertices[0]));
+    mix(scene.triangleIndices.data(), scene.triangleIndices.size() * sizeof(std::uint32_t));
+    mix(scene.lines.data(), scene.lines.size() * sizeof(scene.lines[0]));
+    mix(scene.points.data(), scene.points.size() * sizeof(scene.points[0]));
+    return hash;
+}
+
+void BM_GpuPack(benchmark::State& state, int level)
+{
+    PackLevel scope(state, level);
+    if (!scope.ok()) {
+        return;
+    }
+    const DrawList& list = groundWithEdges(static_cast<int>(state.range(0)));
+    katana::qt::gpu::GpuSceneData packed;
+    for (auto _ : state) {
+        katana::qt::gpu::packDrawList(list, packed);
+        benchmark::DoNotOptimize(packed.vertices.data());
+        benchmark::DoNotOptimize(packed.lines.data());
+    }
+    state.counters["vertices"] = static_cast<double>(packed.vertices.size());
+    state.counters["lines"] = static_cast<double>(packed.lines.size());
+    // Counters are doubles: the low 48 bits of the digest are exact in one.
+    state.counters["digest"] = static_cast<double>(digestOf(packed) & 0xFFFFFFFFFFFFull);
+}
+BENCHMARK_CAPTURE(BM_GpuPack, scalar, 0)->Arg(256)->Arg(724)->Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_GpuPack, avx2, 1)->Arg(256)->Arg(724)->Unit(benchmark::kMillisecond);
+// Lists the size of an entity or selection layer, 4 to 256 vertices: where
+// the kernel's minimum was found (docs/gpu.md, "Packing").
+BENCHMARK_CAPTURE(BM_GpuPack, scalar_small, 0)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(7)
+    ->Arg(15)
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(BM_GpuPack, avx2_small, 1)
+    ->Arg(1)
+    ->Arg(3)
+    ->Arg(7)
+    ->Arg(15)
+    ->Unit(benchmark::kMicrosecond);
 
 } // namespace
 
