@@ -8,7 +8,7 @@
 // what the dialog shows is what the model and the setting-out function hold.
 // The executor here runs the line through the real CommandInterpreter on the
 // same drawing, which is where the window's command line sends an ALIGN line;
-// the headless qt_alignment_manager_headless runs it through the window.
+// the headless qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless runs it through the window.
 
 #include <gtest/gtest.h>
 

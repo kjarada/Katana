@@ -272,7 +272,7 @@ endif()
 # three of them key; every 150 m is 0 and 150, so the table is the start, the
 # PI - where the northward tangent begins, so azimuth 0 - 150 and the end.
 if(TARGET katana)
-    add_test(NAME qt_alignment_manager_headless
+    add_test(NAME qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
@@ -298,7 +298,7 @@ if(TARGET katana)
     # runs due east (N 90 E) 100, the second due north (N 0 E) 50. Label
     # Courses is PARCEL 1 LABEL 2 run by the window's executor - four course
     # labels and the area - and a headless Save opens no file dialog.
-    add_test(NAME qt_parcel_report_headless
+    add_test(NAME qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
@@ -311,7 +311,7 @@ if(TARGET katana)
     # layer's use refuses, a purge that takes only the pattern nothing uses,
     # and the table following a HATCH SET typed on the command line. Layer 0
     # names "none" outright, so even "none" is used by a layer.
-    add_test(NAME qt_hatch_patterns_tab_headless
+    add_test(NAME qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
@@ -319,10 +319,10 @@ if(TARGET katana)
             "-DEXPECT=hatchPatternTable: brick [|] 1 family [|] used by 1 layer[^;]* ; none [|] draws nothing [|] used by 1 layer, e[.]g[.] +layer=0.*hatchPatternFamilies: 45 [|] 0[.]25.*hatchPatternStatus: style brick paving created.*hatchPatternStatus: [^\r\n]*used by 1 layer and 1 style.*hatchPatternStatus: purged 0 styles, 0 linetypes and 1 hatch pattern.*hatchPatternTable: brick [|] 2 families [|] used by 1 layer and 1 style.*commandLog: .*> STYLE NEW \"brick paving\" HATCH brick style brick paving created"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hatch_patterns_tab_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
-    set_tests_properties(qt_alignment_manager_headless
+    set_tests_properties(qt_the_alignment_manager_runs_its_align_lines_through_the_window_headless
         qt_terrain_commands_point_to_the_alignment_manager_headless
-        qt_parcel_report_headless
-        qt_hatch_patterns_tab_headless
+        qt_the_parcel_report_computes_labels_and_describes_a_lot_headless
+        qt_the_hatch_patterns_tab_runs_its_lines_and_follows_a_typed_edit_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
@@ -1657,7 +1657,7 @@ if(TARGET katana)
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>POINT 1,1|>POINT 2,2|>POINT 3,3|>RECT 0,0 4,4|?editUndoMenu|*undoStep3|>LIST|?editRedoMenu|*redoStep2|>LIST|?editRedoMenu"
-            "-DEXPECT=editUndoMenu: : 1 CREATE_POLYLINE \\[UNDO 1: CREATE_POLYLINE\\] ; 2 CREATE_POINT \\[UNDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POINT \\[UNDO 3: the last 3 steps, down to CREATE_POINT\\] ; 4 CREATE_POINT \\[UNDO 4: the last 4 steps, down to CREATE_POINT\\][\r\n]+3 undone[\r\n]+1 entities[\r\n]+1  Point [^\r\n]*[\r\n]+editRedoMenu: : 1 CREATE_POINT \\[REDO 1: CREATE_POINT\\] ; 2 CREATE_POINT \\[REDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POLYLINE \\[REDO 3: the last 3 steps, down to CREATE_POLYLINE\\][\r\n]+2 redone[\r\n]+3 entities[\r\n]+.*editRedoMenu: : 1 CREATE_POLYLINE \\[REDO 1: CREATE_POLYLINE\\][\r\n]"
+            "-DEXPECT=editUndoMenu: : 1 CREATE_POLYLINE \\[UNDO 1: CREATE_POLYLINE\\] ; 2 CREATE_POINT \\[UNDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POINT \\[UNDO 3: the last 3 steps, down to CREATE_POINT\\] ; 4 CREATE_POINT \\[UNDO 4: the last 4 steps, down to CREATE_POINT\\][\r\n]+3 undone[\r\n]+1 entities[\r\n]+1  Point [^\r\n]*[\r\n]+editRedoMenu: : 1 CREATE_POINT \\[REDO 1: CREATE_POINT\\] ; 2 CREATE_POINT \\[REDO 2: the next 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POLYLINE \\[REDO 3: the next 3 steps, down to CREATE_POLYLINE\\][\r\n]+2 redone[\r\n]+3 entities[\r\n]+.*editRedoMenu: : 1 CREATE_POLYLINE \\[REDO 1: CREATE_POLYLINE\\][\r\n]"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/undo_lists_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_the_undo_and_redo_lists_step_through_the_history_headless

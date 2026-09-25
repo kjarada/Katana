@@ -463,8 +463,8 @@ On every surface:
   A headless File > Import opens no file dialog: it names the verb.
 - **katana_cli**: `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, the move
   printed after the "imported" line; the DXF import too, in a build without
-  GDAL. The plan had given katana_cli `LOCAL` alone and left the rest for
-  later; that was rejected, because a verb the window types and the CLI does
+  GDAL. Giving katana_cli `LOCAL` alone and leaving the rest for later was
+  considered and rejected, because a verb the window types and the CLI does
   not is the gap this work closes.
 - **katana_mcp**: `katana_import` takes `placement` (`keep`, `local`,
   `alongside`, `offset`) with `offset_east` and `offset_north`; `local: true`

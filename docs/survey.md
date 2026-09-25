@@ -245,7 +245,7 @@ step, and its reply names the layer the labels went on. Copy and Save CSV
 legal text's Save open no file dialog in a headless run (`SurveyServices::headless`).
 Its menu item has no mnemonic: every letter of "Parcel Report" is another
 item's in that menu. Tested by `tests/qt_widgets/survey/test_parcel_dialog.cpp`
-and, through the window, `qt_parcel_report_headless`. Not done: the report
+and, through the window, `qt_the_parcel_report_computes_labels_and_describes_a_lot_headless`. Not done: the report
 is of the parcel as it was at Compute, as every survey tool's is, and is not
 recomputed when the boundary is edited.
 

@@ -8,7 +8,7 @@
 // those, and that Label Courses is the line PARCEL <id> LABEL <height> run
 // through the executor - here the real interpreter on the same drawing, where
 // the window's command line sends it - as one undo step. The headless
-// qt_parcel_report_headless runs it through the window.
+// qt_the_parcel_report_computes_labels_and_describes_a_lot_headless runs it through the window.
 
 #include <gtest/gtest.h>
 
