@@ -186,6 +186,8 @@ PlotDrawingDialog::PlotDrawingDialog(PlotDrawingDialogContext context, QWidget* 
     setObjectName("plotDrawingDialog");
     setWindowTitle("Plot to PDF");
     setModal(false);
+    // Wide enough for a path and the line it runs to be read whole.
+    setMinimumWidth(560);
     const katana::cad::PlotSettings defaults;
 
     path_ = new QLineEdit(context_.suggestedPath, this);
