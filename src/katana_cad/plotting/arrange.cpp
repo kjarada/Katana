@@ -774,12 +774,35 @@ std::vector<Point2> viewportContent(const entity::Model& model, const Viewport& 
     if (points.empty()) {
         points = drawnOutline(model, viewport.hiddenLayers);
     }
-    if (viewport.kind == ViewportKind::KeyPlan) {
-        for (const WorldMark& mark : viewport.marks) {
-            points.insert(points.end(), mark.points.begin(), mark.points.end());
+    std::erase_if(points, [](const Point2& point) { return !point.isFinite(); });
+    return geometry::convexHull(std::move(points));
+}
+
+std::vector<Point2> viewportContent(const entity::Model& model, const SheetSet& set,
+                                    const Viewport& viewport, const PlanPlacer& place)
+{
+    if (viewport.kind != ViewportKind::KeyPlan) {
+        return viewportContent(model, viewport);
+    }
+    std::optional<std::size_t> onSheet;
+    for (std::size_t i = 0; i < set.sheets.size() && !onSheet; ++i) {
+        for (const Viewport& each : set.sheets[i].viewports) {
+            if (each.id == viewport.id) {
+                onSheet = i;
+                break;
+            }
         }
     }
+    std::vector<Point2> points;
+    for (const KeyPlanOutline& outline :
+         keyPlanOutlines(set, onSheet.value_or(set.sheets.size()), place ? place : modelPlacer(model))) {
+        points.insert(points.end(), outline.corners.begin(), outline.corners.end());
+    }
     std::erase_if(points, [](const Point2& point) { return !point.isFinite(); });
+    if (points.empty()) {
+        // No plan to outline: the painter fits the drawing (fitKeyPlan).
+        return viewportContent(model, viewport);
+    }
     return geometry::convexHull(std::move(points));
 }
 

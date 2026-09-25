@@ -809,14 +809,24 @@ TEST(SheetPreflight, AKeyPlanIsCheckedAsAPlanIsButForItsText)
     auto found = withCode(check(set, model), "plan.empty");
     ASSERT_EQ(found.size(), 1u);
     EXPECT_EQ(found[0].viewportId, "vp9");
-    // ... unless a sheet outline it draws is there.
+    // ... and a sheet outline stored in it does not count: the painter draws
+    // the sheets' outlines live and no longer draws those stale copies ...
     WorldMark outline;
     outline.kind = WorldMark::Kind::SheetOutline;
     outline.sheet = "s1";
     outline.points = {Point2(4990.0, 4990.0), Point2(5010.0, 4990.0), Point2(5010.0, 5010.0),
                       Point2(4990.0, 5010.0)};
     set.sheets[1].viewports[0].marks.push_back(outline);
-    EXPECT_TRUE(withCode(check(set, model), "plan.empty").empty());
+    const auto onKey = [](const std::vector<Finding>& all) {
+        return std::count_if(all.begin(), all.end(), [](const Finding& f) {
+            return f.code == "plan.empty" && f.viewportId == "vp9";
+        });
+    };
+    EXPECT_EQ(onKey(check(set, model)), 1);
+    // ... but the live outline of a sheet's plan there does: it is drawn.
+    set.sheets.push_back(sheetOf("s3", "FAR", {planAt("vp8", kTiling, 500.0, Point2(5000.0, 5000.0))}));
+    EXPECT_EQ(onKey(check(set, model)), 0);
+    set.sheets.pop_back();
 
     set.sheets[1].viewports[0].source.alignment = "GONE";
     found = withCode(check(set, model), "plan.alignment-missing");

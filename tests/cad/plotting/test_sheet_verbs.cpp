@@ -763,11 +763,11 @@ TEST(SheetVerbs, SheetsListsEverySheetAndItsViews)
               "sheet 2 id=s2 name=\"KEY PLAN\" paper=A4 orientation=portrait frame=a3_landscape "
               "legendblock=on views=1\n"
               "  view id=vp3 kind=key_plan scale=auto rect=11,11,199,286");
-    // The key plan outlined the other sheet's fixed-scale plan.
+    // The key plan stores no outlines: it draws the other sheets' plans
+    // where they are when it is drawn (key_plan.hpp), so none goes stale.
     const Viewport& key = s.set().sheets[1].viewports[0];
-    ASSERT_EQ(key.marks.size(), 1u);
-    EXPECT_EQ(key.marks[0].sheet, "s1");
-    EXPECT_EQ(key.marks[0].points.front(), Point2(-96.25, -62.5));
+    EXPECT_TRUE(key.marks.empty());
+    EXPECT_TRUE(key.autoScale && key.autoCentre);
 }
 
 TEST(SheetVerbs, SheetsJsonSaveAndLoadRoundTripTheWholeSet)

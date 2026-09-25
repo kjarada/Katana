@@ -180,10 +180,27 @@ std::vector<Point2> drawingContent(const SheetSource& source, const katana::cad:
     return katana::geometry::convexHull(std::move(points));
 }
 
-std::vector<Point2> viewportContent(const Viewport& viewport, const SheetSource& source)
+std::vector<Point2> viewportContent(const Viewport& viewport, const SheetSource& source,
+                                    const plotting::SheetSet& set)
 {
     if (!isPlan(viewport.kind) || source.plan.model == nullptr) {
         return {};
+    }
+    if (viewport.kind == plotting::ViewportKind::KeyPlan) {
+        // The outlines, each automatic plan where the painter puts it.
+        const plotting::PlanPlacer place = [&source](const Viewport& plan) {
+            const ResolvedViewport at = resolvePlanViewport(plan, source);
+            return plotting::PlanPlacement{at.scale, at.centre};
+        };
+        std::vector<Point2> outlines = plotting::viewportContent(*source.plan.model, set, viewport, place);
+        const bool none = std::ranges::none_of(set.sheets, [](const plotting::Sheet& sheet) {
+            return std::ranges::any_of(sheet.viewports, [](const Viewport& v) {
+                return v.kind == plotting::ViewportKind::Plan && !v.rect.empty();
+            });
+        });
+        if (!none) {
+            return outlines;
+        }
     }
     std::vector<Point2> points = plotting::viewportContent(*source.plan.model, viewport);
     // A plan of the drawing also shows the window's reference layers and
@@ -197,10 +214,22 @@ std::vector<Point2> viewportContent(const Viewport& viewport, const SheetSource&
     return katana::geometry::convexHull(std::move(points));
 }
 
-double drawnScaleOf(const Viewport& viewport, const SheetSource& source)
+double drawnScaleOf(const Viewport& viewport, const SheetSource& source, const plotting::SheetSet& set)
 {
     if (isPlan(viewport.kind) && viewport.autoScale) {
-        return resolvePlanViewport(viewport, source).scale;
+        // With the set and its sheet, so an automatic key plan is at the
+        // scale it is drawn at: fitted to its outlines, not to the drawing.
+        std::size_t onSheet = set.sheets.size();
+        for (std::size_t i = 0; i < set.sheets.size(); ++i) {
+            if (std::ranges::any_of(set.sheets[i].viewports,
+                                    [&viewport](const Viewport& v) { return v.id == viewport.id; })) {
+                onSheet = i;
+                break;
+            }
+        }
+        return onSheet < set.sheets.size()
+                   ? resolvePlanViewport(viewport, source, set, onSheet).scale
+                   : resolvePlanViewport(viewport, source).scale;
     }
     return viewport.scale;
 }
@@ -303,7 +332,7 @@ Result<std::string> matchSelectionScale(katana::cad::Document& document, SheetEd
     if (from == nullptr) {
         return makeError(ErrorCode::NotFound, "no viewport of that id to take the scale from", fromId);
     }
-    const double scale = drawnScaleOf(*from, editor.source());
+    const double scale = drawnScaleOf(*from, editor.source(), document.sheetSet());
     const std::vector<std::string> ids = arrangeTargets(document, editor);
     const auto changed = plotting::matchScale(document, ids, fromId, scale);
     if (!changed) {
@@ -324,11 +353,11 @@ Result<std::string> fitSelectionToContent(katana::cad::Document& document, Sheet
     }
     const Viewport viewport = **plan;
     const SheetSource source = editor.source();
-    const std::vector<Point2> content = viewportContent(viewport, source);
+    const std::vector<Point2> content = viewportContent(viewport, source, document.sheetSet());
     if (content.empty()) {
         return makeError(ErrorCode::InvalidArgument, "the view shows nothing to fit to", viewport.id);
     }
-    const double scale = drawnScaleOf(viewport, source);
+    const double scale = drawnScaleOf(viewport, source, document.sheetSet());
     if (auto status = plotting::fitViewportToContent(document, viewport.id, content, scale); !status) {
         return status.error();
     }
@@ -344,7 +373,8 @@ Result<std::string> rotateSelectionToBestFit(katana::cad::Document& document, Sh
         return plan.error();
     }
     const std::string id = (*plan)->id;
-    const std::vector<Point2> content = viewportContent(**plan, editor.source());
+    const std::vector<Point2> content =
+        viewportContent(**plan, editor.source(), document.sheetSet());
     if (content.empty()) {
         return makeError(ErrorCode::InvalidArgument, "the view shows nothing to fit to", id);
     }
@@ -371,11 +401,11 @@ Result<std::string> choosePaperForSheet(katana::cad::Document& document, SheetEd
         return makeError(ErrorCode::InvalidArgument, "the sheet has no plan to choose paper for");
     }
     const SheetSource source = editor.source();
-    const std::vector<Point2> content = viewportContent(*plan, source);
+    const std::vector<Point2> content = viewportContent(*plan, source, document.sheetSet());
     if (content.empty()) {
         return makeError(ErrorCode::InvalidArgument, "the plan shows nothing to choose paper for", id);
     }
-    const double scale = drawnScaleOf(*plan, source);
+    const double scale = drawnScaleOf(*plan, source, document.sheetSet());
     const auto change = plotting::choosePaperForScale(document, id, content, scale);
     if (!change) {
         return change.error();
@@ -469,7 +499,7 @@ void fillMatchScaleMenu(QMenu& menu, katana::cad::Document& document, SheetEdito
             const std::string text =
                 std::format("{}  {}  ({}, {})", viewport.id, title,
                             sheet.name.empty() ? std::format("sheet {}", s + 1) : sheet.name,
-                            scaleWords(drawnScaleOf(viewport, source)));
+                            scaleWords(drawnScaleOf(viewport, source, document.sheetSet())));
             QAction* action = menu.addAction(QString::fromStdString(text));
             action->setObjectName(QString::fromStdString("sheetMatchScale_" + viewport.id));
             const std::string id = viewport.id;

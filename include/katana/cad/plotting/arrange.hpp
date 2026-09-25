@@ -39,6 +39,7 @@
 
 #include "katana/cad/layer_overrides.hpp"
 #include "katana/cad/plotting/generators.hpp"
+#include "katana/cad/plotting/key_plan.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/core/error.hpp"
@@ -122,11 +123,21 @@ struct RotationFit {
 // What a plan or key plan viewport shows of `model`, as the convex hull of
 // world points: its stretch of the alignment its source names (the whole
 // alignment when the chainage range is empty), else the drawing as its
-// hidden layers leave it (drawnOutline); a key plan adds the outlines it
-// marks. Empty for any other kind, and when there is nothing to show. The
-// sheet editor adds the window's reference layers and meshes to this.
+// hidden layers leave it (drawnOutline). Empty for any other kind, and when
+// there is nothing to show. The sheet editor adds the window's reference
+// layers and meshes to this.
 [[nodiscard]] std::vector<Point2> viewportContent(const entity::Model& model,
                                                   const Viewport& viewport);
+
+// The same for a viewport of `set`, where a key plan's content is what the
+// painter fits it to: the outlines of the sheets' plans, live
+// (keyPlanOutlines, each automatic plan placed by `place`, by placePlan over
+// `model` when none is given), and the drawing only when the set has no plan
+// to outline. The outlines it stored when it was made are stale and not
+// counted. Any other viewport is as above.
+[[nodiscard]] std::vector<Point2> viewportContent(const entity::Model& model, const SheetSet& set,
+                                                  const Viewport& viewport,
+                                                  const PlanPlacer& place = {});
 
 // ---- Paper and scale ------------------------------------------------------------------
 

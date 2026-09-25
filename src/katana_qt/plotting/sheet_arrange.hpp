@@ -42,17 +42,21 @@ class SheetEditor;
 drawingContent(const SheetSource& source,
                const katana::cad::LayerOverrides& layers = katana::cad::LayerOverrides{});
 
-// What a plan or key plan viewport shows, as world points: its stretch of its
-// alignment, or the drawing as its hidden layers leave it (drawingContent); a
-// key plan adds the sheet outlines it marks. Empty for any other kind, or
-// with nothing to show.
+// What a plan or key plan viewport of `set` shows, as world points: its
+// stretch of its alignment, or the drawing as its hidden layers leave it
+// (drawingContent); a key plan shows the outlines of the sheets' plans, live,
+// each automatic one placed as the painter places it, and the drawing only
+// when there is none (plotting::viewportContent). Empty for any other kind,
+// or with nothing to show.
 [[nodiscard]] std::vector<katana::geometry::Point2>
-viewportContent(const katana::cad::plotting::Viewport& viewport, const SheetSource& source);
+viewportContent(const katana::cad::plotting::Viewport& viewport, const SheetSource& source,
+                const katana::cad::plotting::SheetSet& set);
 
-// The scale a viewport is drawn at: an automatic plan's as the painter
-// resolves it, else its own.
+// The scale a viewport of `set` is drawn at: an automatic plan's (or key
+// plan's) as the painter resolves it, else its own.
 [[nodiscard]] double drawnScaleOf(const katana::cad::plotting::Viewport& viewport,
-                                  const SheetSource& source);
+                                  const SheetSource& source,
+                                  const katana::cad::plotting::SheetSet& set);
 
 // The viewports the commands act on: the canvas's selection, or with nothing
 // selected every placed viewport on the current sheet, in the sheet's order.

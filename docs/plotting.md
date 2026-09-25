@@ -767,9 +767,9 @@ View sets one up (`defaultViewport`):
   bar.
 - Sections run along the drawing's first alignment. Cross sections are cut
   half way along it, or half way along the one named by `alignment=`.
-- A key plan outlines the other sheets' plans. Headless, it outlines only
-  the plans at a fixed scale and centre, because where an automatic plan
-  falls is decided when it is drawn.
+- A key plan is automatic in scale and centre and stores no outlines: it
+  outlines the sheets' plans where they are when it is drawn, as the
+  editor's Add View > Key Plan does ("The live key plan").
 - An image view needs `file=path`, which is copied into the project's
   `assets/` as a logo is (`importImageAsset`, up to 32 MB), or
   `text=name` for a file already there.
@@ -1106,7 +1106,10 @@ draws:
 
 `viewportContent(model, viewport)` is what a plan or key plan shows: its
 stretch of the alignment its source names (sampled every 0.5 m, with every
-element change), else the drawing; a key plan adds the outlines it marks. A
+element change), else the drawing. Given the set, a key plan's content is
+the live outlines of the sheets' plans, each automatic plan placed as the
+painter places it, and the drawing only when there is no plan to outline;
+the outlines it stored when it was made are stale and not counted. A
 chainage range wholly off the alignment shows none of it, and then, as the
 painter does, the drawing. The
 editor adds the window's reference layers and meshes
@@ -1671,8 +1674,11 @@ sheet plots, worked out without drawing it.
 
 A key plan's stored `SheetOutline` marks are no longer drawn, since they are
 the stale copies. Its other marks, match lines, still are. The editor's Add
-View > Key Plan stores none. The tile and strip generators still store them,
-and they still reserve their sheets' ids (`newSheetIds`).
+View > Key Plan stores none, and neither does `VIEW ADD keyplan`. The tile
+and strip generators still store them, and they still reserve their sheets'
+ids (`newSheetIds`). Preflight and arrange ignore them too: preflight checks
+an automatic key plan at the window it is fitted to, and counts its live
+outlines as what it shows; arrange fits it to them.
 
 **An automatic key plan** (`autoScale` or `autoCentre`) fits the union of
 the outlines (`fitKeyPlan`), and the drawing only when the set has no plan to

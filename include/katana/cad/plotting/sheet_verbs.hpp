@@ -102,10 +102,9 @@ struct PlotSheetsRequest {
 // editor's Add View sets one up: its size for the kind, centred in the
 // tiling area (or filling it on an empty sheet), a plan scaled and centred
 // automatically with a north arrow and scale bar, sections on the drawing's
-// first alignment, a key plan outlining the other sheets' fixed-scale plans.
-// Unlike the editor, which outlines an automatic plan where the painter
-// resolves it, a plan with an automatic scale or centre is not outlined:
-// where it falls is decided when it is drawn. Its id is the set's next.
+// first alignment, a key plan fitted to the sheets' plans, which it outlines
+// live (key_plan.hpp), as the editor's Add View > Key Plan does. Its id is
+// the set's next.
 [[nodiscard]] Viewport defaultViewport(const SheetSet& set, std::size_t sheetIndex,
                                        ViewportKind kind, const entity::Model& model);
 

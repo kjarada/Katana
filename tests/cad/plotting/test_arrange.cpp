@@ -382,13 +382,30 @@ TEST(SheetArrange, AViewShowsItsStretchOfItsAlignmentOrTheDrawing)
     plan.source.alignment = "NOWHERE";
     expectBox(boxOf(viewportContent(model, plan)), 0.0, -50.0, 1000.0, 40.0);
 
-    // A key plan adds the outlines it marks.
+    // A key plan's stored outlines are stale copies the painter no longer
+    // draws: alone, it shows the drawing.
     Viewport key = viewportAt("vp3", ViewportKind::KeyPlan, Box2(Point2(30, 40), Point2(120, 110)));
     WorldMark outline;
     outline.kind = WorldMark::Kind::SheetOutline;
     outline.points = {Point2(-100.0, -100.0), Point2(1200.0, -100.0), Point2(1200.0, 300.0)};
     key.marks.push_back(outline);
-    expectBox(boxOf(viewportContent(model, key)), -100.0, -100.0, 1200.0, 300.0);
+    expectBox(boxOf(viewportContent(model, key)), 0.0, -50.0, 1000.0, 40.0);
+    // In a set, it shows the live outlines of the sheets' plans, as the
+    // painter fits it: here one plan, 100 x 50 mm at 1:1000 about (2000, 0).
+    SheetSet set;
+    Sheet planSheet;
+    planSheet.id = "s1";
+    Viewport far = viewportAt("vp6", ViewportKind::Plan, Box2(Point2(0, 0), Point2(100, 50)));
+    far.scale = 1000.0;
+    far.centre = Point2(2000.0, 0.0);
+    far.autoScale = false;
+    far.autoCentre = false;
+    planSheet.viewports = {far};
+    Sheet keySheet;
+    keySheet.id = "s2";
+    keySheet.viewports = {key};
+    set.sheets = {planSheet, keySheet};
+    expectBox(boxOf(viewportContent(model, set, key)), 1950.0, -25.0, 2050.0, 25.0);
 
     // Nothing for a view that is not a plan.
     EXPECT_TRUE(viewportContent(model, viewportAt("vp4", ViewportKind::Legend, {})).empty());
