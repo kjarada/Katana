@@ -1,5 +1,6 @@
 // The dimension and leader tools' options and their associative points:
-// the Leader's Arrow, Callout, Style and Paper, the Balloon tool, the Linear
+// the Leader's Arrow, Callout, Style, Paper, SIze and Landing, the Balloon
+// tool with its Number, Style and Paper, the Linear
 // Dimension's Rotated option and its dimension line between the origins'
 // levels, the Ordinate's Datum, and points snapped to an entity's end,
 // middle, centre or vertex, which the annotation made from them then
@@ -143,7 +144,8 @@ TEST(LeaderOptions, TheArrowCalloutStyleAndPaperAreTheLeaderVerbsOwn)
 {
     ToolDriver driver;
     driver.start("annotate.leader");
-    EXPECT_EQ(driver.tool().prompt(), "Specify leader start point or [Arrow/Callout/Style/Paper]");
+    EXPECT_EQ(driver.tool().prompt(),
+              "Specify leader start point or [Arrow/Callout/Style/Paper/SIze/Landing]");
     (void)driver.type("A");
     EXPECT_EQ(driver.tool().prompt(), "Enter arrowhead [Closed/Open/Tick/Dot/None] <Closed>");
     EXPECT_EQ(driver.type("zigzag").outcome, Outcome::Rejected);
@@ -159,8 +161,8 @@ TEST(LeaderOptions, TheArrowCalloutStyleAndPaperAreTheLeaderVerbsOwn)
     EXPECT_EQ(driver.type("0").outcome, Outcome::Rejected);
     (void)driver.type("3.5");
     EXPECT_EQ(driver.tool().prompt(),
-              "Specify leader start point or [Arrow/Callout/Style/Paper] (Open arrow, Box "
-              "callout, style Standard, 3.5 mm)");
+              "Specify leader start point or [Arrow/Callout/Style/Paper/SIze/Landing] (Open "
+              "arrow, Box callout, style Standard, 3.5 mm)");
     (void)driver.click(0.0, 0.0);
     (void)driver.click(8.0, 6.0);
     (void)driver.enter();
@@ -196,9 +198,66 @@ TEST(LeaderOptions, EnterAtAnOptionKeepsWhatItHasAndUndoLeavesIt)
     EXPECT_EQ(driver.tool().expects(), ToolInput::Point);
     (void)driver.type("A");
     EXPECT_EQ(driver.undo().outcome, Outcome::Continue);
-    EXPECT_EQ(driver.tool().prompt(), "Specify leader start point or [Arrow/Callout/Style/Paper]");
+    EXPECT_EQ(driver.tool().prompt(),
+              "Specify leader start point or [Arrow/Callout/Style/Paper/SIze/Landing]");
     EXPECT_EQ(driver.type("-2").outcome, Outcome::Rejected) << "not an option, not a point";
     EXPECT_EQ(driver.executed(), 0);
+}
+
+// SIze and Landing are LEADER's arrowsize= and landing=, which the tool once
+// had no way to give: only the verb could, and nothing after the leader was
+// drawn. A landing given is drawn as given, on a level leader too; Auto
+// gives the rule back - one arrowhead where the last segment slopes.
+TEST(LeaderOptions, SizeAndLandingAreTheLeaderVerbsArrowsizeAndLanding)
+{
+    ToolDriver driver;
+    driver.start("annotate.leader");
+    (void)driver.type("S");
+    EXPECT_EQ(driver.tool().prompt(), "Enter text style name <Standard>") << "S is Style's";
+    (void)driver.enter();
+    (void)driver.type("si");
+    EXPECT_EQ(driver.tool().prompt(), "Enter the arrowhead's size on paper, mm <2.5>");
+    EXPECT_EQ(driver.type("0").outcome, Outcome::Rejected);
+    EXPECT_EQ(driver.type("big").outcome, Outcome::Rejected);
+    (void)driver.type("4");
+    (void)driver.type("L");
+    EXPECT_EQ(driver.tool().prompt(),
+              "Enter the landing's length on paper, mm, 0 for none, or Auto <Auto>");
+    EXPECT_EQ(driver.type("-1").outcome, Outcome::Rejected);
+    (void)driver.type("5");
+    EXPECT_EQ(driver.tool().prompt(),
+              "Specify leader start point or [Arrow/Callout/Style/Paper/SIze/Landing] "
+              "(arrowhead 4 mm, landing 5 mm)");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(10.0, 0.0);
+    (void)driver.enter();
+    (void)driver.type("AB");
+    ASSERT_EQ(driver.enter().outcome, Outcome::Done);
+
+    // The Standard dimension style's closed arrow; its 2.5 model-unit text
+    // height is 2.5 mm at 1 : 1000.
+    Document typed;
+    run(typed, "LEADER 0,0 10,0 text=AB arrow=closed paper=2.5 arrowsize=4 landing=5");
+    expectSame<LeaderGeometry>(driver.document(), typed);
+
+    // Auto: the rule again. The last segment rises at atan(6/8) = 36.9
+    // degrees, more than 15, so the landing is one arrowhead: the 4 given.
+    (void)driver.type("SI");
+    (void)driver.type("4");
+    (void)driver.type("L");
+    (void)driver.type("5");
+    (void)driver.type("L");
+    EXPECT_EQ(driver.tool().prompt(),
+              "Enter the landing's length on paper, mm, 0 for none, or Auto <5>");
+    (void)driver.type("auto");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.click(8.0, 6.0);
+    (void)driver.enter();
+    (void)driver.type("CD");
+    ASSERT_EQ(driver.enter().outcome, Outcome::Done);
+    const LeaderGeometry sloped = newest<LeaderGeometry>(driver.document());
+    EXPECT_EQ(sloped.arrowSize, 4.0);
+    EXPECT_EQ(sloped.landing, 4.0);
 }
 
 // ---- Balloon -------------------------------------------------------------------------------
@@ -208,7 +267,7 @@ TEST(Balloon, ItIsTheBalloonVerbsNumberedCircleCountingOnFromTheHighest)
     ToolDriver driver;
     run(driver.document(), "BALLOON 0,0 5,5");
     driver.start("annotate.balloon");
-    EXPECT_EQ(driver.tool().prompt(), "Specify the balloon's arrow point or [Number]");
+    EXPECT_EQ(driver.tool().prompt(), "Specify the balloon's arrow point or [Number/Style/Paper]");
     (void)driver.click(10.0, 0.0);
     EXPECT_EQ(driver.enter().outcome, Outcome::Rejected) << "a balloon needs its circle's place";
     (void)driver.click(15.0, 5.0);
@@ -247,6 +306,37 @@ TEST(Balloon, NumberGivesAnotherAndTheNextCountsOnFromTheHighestWholeNumber)
     EXPECT_EQ(third.message, "balloon 8") << "one more than 7; A1 is not counted";
     EXPECT_EQ(driver.enter().outcome, Outcome::Done) << "Enter at the first prompt ends it";
     EXPECT_TRUE(driver.finished());
+}
+
+// Style and Paper are BALLOON's style= and paper=, which the tool once had
+// no way to give: a balloon in a text style, at a height on paper, made by
+// the tool is the entity the verb makes. The style is found ignoring case,
+// as the Leader's is.
+TEST(Balloon, StyleAndPaperAreTheBalloonVerbsOwn)
+{
+    ToolDriver driver;
+    run(driver.document(), "TEXTSTYLE NEW Notes");
+    driver.start("annotate.balloon");
+    (void)driver.type("S");
+    EXPECT_EQ(driver.tool().prompt(), "Enter text style name <Standard>");
+    EXPECT_EQ(driver.type("Nowhere").outcome, Outcome::Rejected) << "no such text style";
+    (void)driver.type("notes");
+    (void)driver.click(0.0, 0.0);
+    (void)driver.type("P");
+    EXPECT_EQ(driver.tool().prompt(), "Enter the number's height on paper, mm <the style's>");
+    EXPECT_EQ(driver.type("0").outcome, Outcome::Rejected);
+    EXPECT_EQ(driver.click(3.0, 3.0).outcome, Outcome::Rejected) << "a height is asked for";
+    (void)driver.type("3.5");
+    (void)driver.click(5.0, 5.0);
+    ASSERT_EQ(driver.enter().outcome, Outcome::Done);
+
+    Document typed;
+    run(typed, "TEXTSTYLE NEW Notes");
+    run(typed, "BALLOON 0,0 5,5 style=Notes paper=3.5");
+    expectSame<LeaderGeometry>(driver.document(), typed);
+    const LeaderGeometry balloon = newest<LeaderGeometry>(driver.document());
+    EXPECT_EQ(balloon.style, "Notes");
+    EXPECT_EQ(balloon.paperHeight, 3.5);
 }
 
 // ---- Linear: Rotated, and a line between the levels ---------------------------------------
