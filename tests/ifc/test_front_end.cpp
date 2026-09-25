@@ -4,9 +4,11 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
 
+#include "katana/core/text.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/ifc/front_end.hpp"
 #include "katana/ifc/import.hpp"
@@ -51,12 +53,14 @@ TEST(IfcFrontEnd, AnExportLineIsItsPathAndItsOptionsInAnyCase)
     EXPECT_EQ(arguments.schema, "s.csv");
     EXPECT_EQ(arguments.rules, "r.csv");
     EXPECT_EQ(arguments.spacing, 12.5);
-    EXPECT_FALSE(arguments.drawing);
+    // NODRAWING: the investigation alone - no entities, alignments or surfaces.
+    EXPECT_FALSE(arguments.entities || arguments.alignments || arguments.surfaces);
 
     const auto quoted = ifc::parseExportArguments("  \"C:/jobs/x y.IFC\"  ");
     ASSERT_TRUE(quoted && *quoted);
     EXPECT_EQ((*quoted)->path, "C:/jobs/x y.IFC");
-    EXPECT_TRUE((*quoted)->drawing);
+    EXPECT_TRUE((*quoted)->entities && (*quoted)->alignments && (*quoted)->surfaces);
+    EXPECT_FALSE((*quoted)->selected || (*quoted)->preview);
     EXPECT_FALSE((*quoted)->schedule);
 }
 
@@ -70,13 +74,14 @@ TEST(IfcFrontEnd, ALineThatNamesNoIfcIsLeftToTheOtherFormats)
     EXPECT_FALSE(ifc::parseImportArguments(""));
 }
 
-// The refusals, word for word what katana_cli has always said, since both
-// front ends now say it from here.
+// The refusals, said once here for both front ends: an unknown word names
+// every option the verb takes.
 TEST(IfcFrontEnd, ARefusedExportLineSaysWhyAsTheCommandLineAlwaysHas)
 {
     EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc UTILITIS s.csv")),
               "InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file.ifc>: UTILITIES "
-              "<schedule.csv>, SCHEMA <schema.csv>, RULES <rules.csv>, SPACING <m>, NODRAWING");
+              "<schedule.csv>, SCHEMA <schema.csv>, RULES <rules.csv>, SPACING <m>, NODRAWING, "
+              "NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW");
     EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc SCHEMA s.csv")),
               "InvalidArgument: SCHEMA describes a schedule: give it with UTILITIES");
     EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc SPACING 0")),
@@ -95,7 +100,167 @@ TEST(IfcFrontEnd, ARefusedExportLineSaysWhyAsTheCommandLineAlwaysHas)
     const auto wrong = ifc::parseImportArguments("x.ifc LOCALLY");
     ASSERT_TRUE(wrong && !*wrong);
     EXPECT_EQ(wrong->error().describe(),
-              "InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file.ifc>: LOCAL");
+              "InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file.ifc>: LOCAL, "
+              "NOALIGNMENTS, NOELEMENTS, NOSURFACES, TOLERANCE <m>, TAKECRS, KEEPCRS");
+}
+
+// Every choice the IFC dialogs offer is a word of the line, so that a typed
+// line, a script and an agent can ask for anything a dialog can.
+TEST(IfcFrontEnd, EveryChoiceOfTheDialogsIsAWordOfTheLine)
+{
+    const auto exported =
+        ifc::parseExportArguments("x.ifc noalignments NOSURFACES selected Preview");
+    ASSERT_TRUE(exported && *exported) << refusal(exported);
+    EXPECT_TRUE((*exported)->entities);
+    EXPECT_FALSE((*exported)->alignments);
+    EXPECT_FALSE((*exported)->surfaces);
+    EXPECT_TRUE((*exported)->selected);
+    EXPECT_TRUE((*exported)->preview);
+    const auto noEntities = ifc::parseExportArguments("x.ifc NOENTITIES");
+    ASSERT_TRUE(noEntities && *noEntities);
+    EXPECT_FALSE((*noEntities)->entities);
+    EXPECT_TRUE((*noEntities)->alignments && (*noEntities)->surfaces);
+
+    const auto imported =
+        ifc::parseImportArguments("x.ifc NOALIGNMENTS nosurfaces TOLERANCE 0.005 KeepCrs");
+    ASSERT_TRUE(imported && *imported);
+    EXPECT_FALSE((*imported)->alignments);
+    EXPECT_TRUE((*imported)->elements);
+    EXPECT_FALSE((*imported)->surfaces);
+    EXPECT_EQ((*imported)->tolerance, 0.005);
+    EXPECT_EQ((*imported)->takeCoordinateSystem, false);
+    const auto take = ifc::parseImportArguments("x.ifc TAKECRS NOELEMENTS");
+    ASSERT_TRUE(take && *take);
+    EXPECT_EQ((*take)->takeCoordinateSystem, true);
+    EXPECT_FALSE((*take)->elements);
+    // Neither: the front end's own way (the window asks, a typed line says how).
+    const auto plain = ifc::parseImportArguments("x.ifc");
+    ASSERT_TRUE(plain && *plain);
+    EXPECT_FALSE((*plain)->takeCoordinateSystem);
+}
+
+// What would be contradictory, repeated, or would import nothing is refused
+// by name rather than read one way or the other.
+TEST(IfcFrontEnd, ContradictoryOrRepeatedWordsAreRefused)
+{
+    EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc PREVIEW preview")),
+              "InvalidArgument: PREVIEW is given twice");
+    EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc NOENTITIES SELECTED")),
+              "InvalidArgument: SELECTED chooses among the entities, and NOENTITIES leaves them "
+              "out");
+    EXPECT_EQ(refusal(ifc::parseExportArguments("x.ifc SELECTED NODRAWING UTILITIES s.csv")),
+              "InvalidArgument: SELECTED chooses among the entities, and NODRAWING leaves them "
+              "out");
+    const auto importRefusal = [](std::string_view line) {
+        const auto parsed = ifc::parseImportArguments(line);
+        return !parsed ? std::string("<not an ifc line>")
+                       : (*parsed ? std::string("ok") : parsed->error().describe());
+    };
+    EXPECT_EQ(importRefusal("x.ifc LOCAL local"), "InvalidArgument: LOCAL is given twice");
+    EXPECT_EQ(importRefusal("x.ifc NOALIGNMENTS NOELEMENTS NOSURFACES"),
+              "InvalidArgument: NOALIGNMENTS, NOELEMENTS and NOSURFACES together leave nothing "
+              "to import");
+    EXPECT_EQ(importRefusal("x.ifc TAKECRS KEEPCRS"),
+              "InvalidArgument: TAKECRS and KEEPCRS say opposite things: give one");
+    EXPECT_EQ(importRefusal("x.ifc LOCAL TAKECRS"),
+              "InvalidArgument: LOCAL moves the data out of the file's coordinate system, which "
+              "TAKECRS would give the project");
+    EXPECT_EQ(importRefusal("x.ifc TOLERANCE -1"),
+              "InvalidArgument: TOLERANCE takes a positive number of metres");
+    EXPECT_NE(importRefusal("x.ifc TOLERANCE").find("\"TOLERANCE\" is not an option"),
+              std::string::npos);
+    // LOCAL with KEEPCRS says the same thing twice, and is taken.
+    EXPECT_EQ(importRefusal("x.ifc LOCAL KEEPCRS"), "ok");
+}
+
+// The line a dialog hands the command line reads back as what it was asked,
+// whatever the paths hold - blanks, a ".ifc " inside a folder's name, a name
+// that is an option's word - and a number to its last bit.
+TEST(IfcFrontEnd, TheLineADialogWritesReadsBackAsItsArguments)
+{
+    ifc::ExportArguments everything;
+    everything.path = "C:/jobs/old.ifc files/Site Plan.ifc";
+    everything.schedule = "a b.csv";
+    everything.schema = "NODRAWING";
+    everything.rules = "r.csv";
+    everything.spacing = 0.1; // not exact in binary: shortest round trip
+    everything.alignments = false;
+    everything.selected = true;
+    everything.preview = true;
+    ifc::ExportArguments alone;
+    alone.path = "x.ifc";
+    alone.schedule = "s.csv";
+    alone.entities = alone.alignments = alone.surfaces = false;
+    for (const ifc::ExportArguments& arguments : {everything, alone, ifc::ExportArguments{}}) {
+        ifc::ExportArguments asked = arguments;
+        if (asked.path.empty()) {
+            asked.path = "plain.ifc";
+        }
+        const auto line = ifc::formatExportLine(asked);
+        ASSERT_TRUE(line.ok());
+        ASSERT_TRUE(line->starts_with("EXPORT \"")) << *line;
+        const auto back = ifc::parseExportArguments(line->substr(std::string("EXPORT").size()));
+        ASSERT_TRUE(back && *back) << *line;
+        EXPECT_EQ(**back, asked) << *line;
+    }
+    EXPECT_EQ(*ifc::formatExportLine(alone), "EXPORT \"x.ifc\" UTILITIES \"s.csv\" NODRAWING");
+
+    ifc::ImportArguments imported;
+    imported.path = "a b.ifc";
+    imported.local = true;
+    imported.elements = false;
+    imported.tolerance = 0.003;
+    imported.takeCoordinateSystem = false;
+    const auto line = ifc::formatImportLine(imported);
+    ASSERT_TRUE(line.ok());
+    EXPECT_EQ(*line, "IMPORT \"a b.ifc\" LOCAL NOELEMENTS TOLERANCE 0.003 KEEPCRS");
+    const auto back = ifc::parseImportArguments(line->substr(std::string("IMPORT").size()));
+    ASSERT_TRUE(back && *back);
+    EXPECT_EQ(**back, imported);
+
+    // A double quote cannot be said inside a quoted word: refused, not
+    // written as a line that would read as something else.
+    ifc::ExportArguments quote;
+    quote.path = "say \"hi\".ifc";
+    EXPECT_EQ(ifc::formatExportLine(quote).error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(*ifc::formatInfoLine("a b.ifc"), "INFO \"a b.ifc\"");
+    EXPECT_EQ(*ifc::formatRulesLine("my rules.csv"), "IFC RULES \"my rules.csv\"");
+}
+
+// IFC RULES <file.csv>: the defaults, written for a project to edit, read
+// back as the defaults they are.
+TEST(IfcFrontEnd, IfcRulesWritesTheDefaultsForAProjectToEdit)
+{
+    EXPECT_FALSE(ifc::parseRulesArguments("OTHER x.csv"));
+    EXPECT_FALSE(ifc::parseRulesArguments(""));
+    const auto path = ifc::parseRulesArguments(" rules \"a b.csv\"");
+    ASSERT_TRUE(path && *path);
+    EXPECT_EQ(**path, "a b.csv");
+    const auto extra = ifc::parseRulesArguments("RULES a.csv b.csv");
+    ASSERT_TRUE(extra && !*extra);
+    EXPECT_EQ(extra->error().describe(), "InvalidArgument: usage: IFC RULES <file.csv>");
+
+    const std::string file =
+        (std::filesystem::temp_directory_path() / "katana ifc default rules.csv").string();
+    const auto reply = ifc::writeDefaultRules(file);
+    ASSERT_TRUE(reply.ok()) << reply.error().describe();
+    EXPECT_EQ(*reply, "ifc rules file=\"katana ifc default rules.csv\" rules=" +
+                          std::to_string(ifc::defaultClassificationRules().size()));
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto back = ifc::parseClassificationRules(text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    const auto& defaults = ifc::defaultClassificationRules();
+    ASSERT_EQ(back->size(), defaults.size());
+    for (std::size_t i = 0; i < defaults.size(); ++i) {
+        EXPECT_EQ((*back)[i].name, defaults[i].name);
+        EXPECT_EQ((*back)[i].target, defaults[i].target);
+    }
+
+    const auto nowhere = ifc::writeDefaultRules(
+        (std::filesystem::temp_directory_path() / "no such folder" / "r.csv").string());
+    ASSERT_FALSE(nowhere.ok());
+    EXPECT_EQ(nowhere.error().code, ErrorCode::FileExportFailure);
 }
 
 TEST(IfcFrontEnd, TheGlobalIdNamespaceIsTheProjectAndTheTimestampIsUtc)
@@ -442,4 +607,93 @@ TEST(IfcExportTally, EveryProductTheReportCountsIsAccountedForOnce)
     ASSERT_NE(point, out->tally.end());
     EXPECT_EQ(point->system, "WATERSUPPLY");
     EXPECT_EQ(point->count, 6u);
+}
+
+// The reply is records a reader can take back: the head's counts are the
+// report's, and the object records are the tally, row for row - the one
+// reader File > Export IFC's table is filled from, and what an agent reads.
+TEST(IfcReplies, AnExportsObjectRecordsReadBackAsItsTally)
+{
+    katana::entity::Model model;
+    Entity kerb;
+    kerb.geometry = Polyline2{{Point2{334000.0, 6250000.0}, Point2{334010.0, 6250000.0}}, false};
+    kerb.layer = "Survey/Kerb \"east\"";
+    ASSERT_TRUE(model.entities.add(kerb).ok());
+    Entity label;
+    label.geometry = katana::entity::PointGeometry{Point2{334005.0, 6250002.0}};
+    label.layer = "Stormwater/Pits";
+    ASSERT_TRUE(model.entities.add(label).ok());
+    ifc::ExportArguments arguments;
+    arguments.path = "x.ifc";
+    arguments.schedule = std::string(KATANA_SAMPLES) + "/utilities/schedule.csv";
+    auto files = ifc::readExportFiles(arguments);
+    ASSERT_TRUE(files.ok());
+    const auto out = ifc::writeIfc({&model, {}, std::move(files->utilities)});
+    ASSERT_TRUE(out.ok()) << out.error().describe();
+
+    const std::string reply = ifc::formatExportReply(*out, "site plan.ifc", false);
+    const auto lines = katana::core::splitLines(reply);
+    ASSERT_FALSE(lines.empty());
+    for (const std::string_view line : lines) {
+        EXPECT_TRUE(katana::core::readReplyRecord(line)) << line; // every line is a record
+    }
+    const auto head = katana::core::readReplyRecord(lines.front());
+    ASSERT_TRUE(head);
+    EXPECT_EQ(head->words, (std::vector<std::string>{"ifc", "exported"}));
+    EXPECT_EQ(head->value("file"), "site plan.ifc");
+    EXPECT_EQ(head->value("instances"), std::to_string(out->instances));
+
+    const auto objects = ifc::readExportObjects(reply);
+    ASSERT_TRUE(objects.ok()) << objects.error().describe();
+    EXPECT_EQ(*objects, out->tally);
+
+    const std::string preview = ifc::formatExportReply(*out, "x.ifc", true);
+    EXPECT_TRUE(preview.starts_with("ifc previewed file=\"x.ifc\" schema=IFC4X3_ADD2 instances="));
+    EXPECT_EQ(preview.find("bytes="), std::string::npos); // nothing was written
+
+    const auto broken = ifc::readExportObjects("ifc exported file=\"x.ifc\"\nobject count=many");
+    ASSERT_FALSE(broken.ok());
+    EXPECT_EQ(broken.error().code, ErrorCode::ParseFailure);
+}
+
+// An import's reply and INFO's description are records too, the counts the
+// read's own.
+TEST(IfcReplies, AnImportAndADescriptionAreRecordsOfWhatWasRead)
+{
+    katana::entity::Model model;
+    Entity kerb;
+    kerb.geometry = Polyline2{{Point2{334000.0, 6250000.0}, Point2{334010.0, 6250000.0}}, false};
+    kerb.layer = "Survey/Kerb";
+    ASSERT_TRUE(model.entities.add(kerb).ok());
+    katana::entity::Alignment alignment;
+    alignment.name = "MC 01";
+    alignment.horizontal.pis = {{Point2{334000.0, 6250000.0}, 0.0, 0.0, 0.0},
+                                {Point2{334100.0, 6250050.0}, 0.0, 0.0, 0.0}};
+    ASSERT_TRUE(model.alignments.add(alignment).ok());
+    const auto out = ifc::writeIfc({&model, {}, {}});
+    ASSERT_TRUE(out.ok());
+    const auto read = ifc::readIfc(out->text);
+    ASSERT_TRUE(read.ok()) << read.error().describe();
+
+    const std::string reply = ifc::formatImportReply(*read, "x.ifc", read->entities.size());
+    const auto head = katana::core::readReplyRecord(katana::core::splitLines(reply).front());
+    ASSERT_TRUE(head);
+    EXPECT_EQ(head->words, (std::vector<std::string>{"ifc", "imported"}));
+    EXPECT_EQ(head->value("entities"), std::to_string(read->entities.size()));
+    EXPECT_EQ(head->value("alignments"), "1");
+    EXPECT_EQ(head->value("crs"), ""); // none: absent, and said as empty, not as zero
+
+    const std::string described = ifc::formatDescription(*read, "x.ifc");
+    bool sawAlignment = false;
+    for (const std::string_view line : katana::core::splitLines(described)) {
+        const auto record = katana::core::readReplyRecord(line);
+        ASSERT_TRUE(record) << line;
+        if (record->words == std::vector<std::string>{"alignment"}) {
+            sawAlignment = true;
+            EXPECT_EQ(record->value("name"), "MC 01");
+            EXPECT_EQ(record->value("pis"), "2");
+        }
+    }
+    EXPECT_TRUE(sawAlignment);
+    EXPECT_TRUE(described.starts_with("ifc described file=\"x.ifc\""));
 }

@@ -3,7 +3,7 @@
 # investigation (docs/ifc.md), and what the two front ends share about it
 # (front_end.cpp: the IMPORT/EXPORT grammar and the files an export names).
 #
-# Deliberately NOT part of katana_interop, for the reason the DXF and 12d
+# Deliberately NOT part of katana_interop, for the reason the DXF and .12da
 # modules are not: writing IFC needs nothing but the domain model, so this
 # builds with -DKATANA_BUILD_IO=OFF. It sees survey for the AS 5488 grading
 # of the services it writes, and terrain for the surfaces.

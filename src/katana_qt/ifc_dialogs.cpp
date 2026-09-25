@@ -74,6 +74,34 @@ bool isIfcName(const QString& path)
     return path.endsWith(QStringLiteral(".ifc"), Qt::CaseInsensitive);
 }
 
+// The first record of a reply - "ifc exported ...", "ifc imported ..." - as
+// the verb wrote it (core::readReplyRecord).
+std::optional<core::ReplyRecord> headRecord(const std::string& reply)
+{
+    const auto lines = core::splitLines(reply);
+    return lines.empty() ? std::nullopt : core::readReplyRecord(lines.front());
+}
+
+// A reply's field, for a sentence; "?" when it is not there.
+QString field(const std::optional<core::ReplyRecord>& record, std::string_view key)
+{
+    const auto value = record ? record->value(key) : std::nullopt;
+    return value ? QString::fromStdString(*value) : QStringLiteral("?");
+}
+
+// A read-only field showing the line the dialog runs, as it is edited.
+QLineEdit* commandField(const QString& name, QWidget* parent)
+{
+    auto* field = new QLineEdit(parent);
+    field->setObjectName(name);
+    field->setReadOnly(true);
+    field->setToolTip(QStringLiteral(
+        "The command this runs, exactly as it could be typed on the command line, given to "
+        "katana_cli or sent by an agent"));
+    field->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    return field;
+}
+
 // "IfcPipeSegment RIGIDSEGMENT", "IfcDistributionChamberElement USERDEFINED
 // (HEADWALL)", or that nothing was written.
 QString classText(const katana::ifc::ClassTally& row)
@@ -127,7 +155,7 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
 
     entities_ = checkBox(QStringLiteral("ifcExportEntities"),
                          QStringLiteral("The drawing's entities, each as the class its layer, "
-                                        "survey code or 12d name makes it"),
+                                        "survey code or string name makes it"),
                          true, this);
     selectedOnly_ =
         checkBox(QStringLiteral("ifcExportSelectedOnly"),
@@ -187,12 +215,12 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
         },
         rulesRow);
     rules_->setToolTip(QStringLiteral(
-        "Rules tried before the defaults: a layer, survey code or 12d name word and the IFC "
+        "Rules tried before the defaults: a layer, survey code or string name word and the IFC "
         "class it makes (docs/ifc.md, \"Classification rules\")"));
     QPushButton* saveRulesButton = button(QStringLiteral("Save Default Rules..."),
                                           QStringLiteral("ifcExportSaveRules"), rulesRow);
-    saveRulesButton->setToolTip(
-        QStringLiteral("Write the default rules to a file, to edit into the project's own"));
+    saveRulesButton->setToolTip(QStringLiteral(
+        "Write the default rules to a file, to edit into the project's own (IFC RULES)"));
     rulesLayout->addWidget(rulesField, 1);
     rulesLayout->addWidget(saveRulesButton);
     form->addRow(QStringLiteral("Classification rules:"), rulesRow);
@@ -202,6 +230,11 @@ IfcExportDialog::IfcExportDialog(IfcExportContext context, QWidget* parent)
     crs_->setObjectName(QStringLiteral("ifcExportCrs"));
     crs_->setWordWrap(true);
     layout->addWidget(crs_);
+
+    command_ = commandField(QStringLiteral("ifcExportCommand"), this);
+    auto* commandRow = new QFormLayout();
+    commandRow->addRow(QStringLiteral("Command:"), command_);
+    layout->addLayout(commandRow);
 
     classes_ = new QTableWidget(0, 5, this);
     classes_->setObjectName(QStringLiteral("ifcExportClasses"));
@@ -311,26 +344,40 @@ void IfcExportDialog::refresh()
     recheck();
 }
 
-IfcExportRequest IfcExportDialog::request() const
+katana::ifc::ExportArguments IfcExportDialog::arguments() const
 {
-    IfcExportRequest out;
-    out.arguments.path = pathOf(file_).toStdString();
+    katana::ifc::ExportArguments out;
+    out.path = pathOf(file_).toStdString();
     if (const QString schedule = pathOf(schedule_); !schedule.isEmpty()) {
-        out.arguments.schedule = schedule.toStdString();
+        out.schedule = schedule.toStdString();
     }
     if (const QString schema = pathOf(schema_); !schema.isEmpty()) {
-        out.arguments.schema = schema.toStdString();
+        out.schema = schema.toStdString();
     }
     if (const QString rules = pathOf(rules_); !rules.isEmpty()) {
-        out.arguments.rules = rules.toStdString();
+        out.rules = rules.toStdString();
     }
-    out.arguments.spacing = core::parseFiniteDouble(spacing_->text().trimmed().toStdString());
+    // SPACING is said only when it matters and is not the verb's own
+    // default, so that the line is what a person would type.
+    const auto spacing = core::parseFiniteDouble(spacing_->text().trimmed().toStdString());
+    if (out.schedule && spacing &&
+        *spacing != katana::survey::subsurface::GradingSettings{}.maximumDetectedSpacing) {
+        out.spacing = *spacing;
+    }
     out.entities = entities_->isChecked();
-    out.selectedOnly = out.entities && selectedOnly_->isChecked();
+    out.selected = out.entities && selectedOnly_->isChecked();
     out.alignments = alignments_->isChecked();
     out.surfaces = surfaces_->isChecked();
-    out.arguments.drawing = out.entities || out.alignments || out.surfaces;
     return out;
+}
+
+QString IfcExportDialog::line() const
+{
+    if (!check().isEmpty()) {
+        return {};
+    }
+    const auto written = katana::ifc::formatExportLine(arguments());
+    return written ? QString::fromStdString(*written) : QString();
 }
 
 QString IfcExportDialog::check() const
@@ -355,17 +402,23 @@ QString IfcExportDialog::checkWithoutFile() const
     if (!spacing || *spacing <= 0.0) {
         return QStringLiteral("The detected spacing must be a positive number of metres.");
     }
-    const IfcExportRequest asked = request();
-    if (asked.selectedOnly && state_.selected == 0) {
+    const katana::ifc::ExportArguments asked = arguments();
+    if (asked.selected && state_.selected == 0) {
         return QStringLiteral("Selected entities only is ticked, and nothing is selected: select "
                               "what to export, or untick it.");
     }
     const bool drawing =
-        (asked.entities && (asked.selectedOnly ? state_.selected : state_.entities) > 0) ||
+        (asked.entities && (asked.selected ? state_.selected : state_.entities) > 0) ||
         (asked.alignments && state_.alignments > 0) || (asked.surfaces && state_.surfaces > 0);
     if (!drawing && pathOf(schedule_).isEmpty()) {
         return QStringLiteral("Nothing to write: the chosen parts of the drawing are empty, and no "
                               "utility schedule is chosen.");
+    }
+    for (QLineEdit* path : {file_, schedule_, schema_, rules_}) {
+        if (path->text().contains('"')) {
+            return QStringLiteral("A path holding a double quote cannot be written in a "
+                                  "command; rename the file.");
+        }
     }
     return {};
 }
@@ -378,6 +431,7 @@ void IfcExportDialog::recheck()
     export_->setEnabled(problem.isEmpty());
     // A preview needs everything but the file.
     preview_->setEnabled(checkWithoutFile().isEmpty());
+    command_->setText(line());
     if (!problem.isEmpty()) {
         // What stops the export is said, even over the last result: a
         // disabled button with a stale "Wrote ..." beside it says nothing.
@@ -388,12 +442,11 @@ void IfcExportDialog::recheck()
     if (showingResult_) {
         return;
     }
-    const IfcExportRequest asked = request();
+    const katana::ifc::ExportArguments asked = arguments();
     QStringList parts;
     if (asked.entities) {
-        parts << (asked.selectedOnly
-                      ? grouped(state_.selected) + QStringLiteral(" selected entities")
-                      : grouped(state_.entities) + QStringLiteral(" entities"));
+        parts << (asked.selected ? grouped(state_.selected) + QStringLiteral(" selected entities")
+                                 : grouped(state_.entities) + QStringLiteral(" entities"));
     }
     if (asked.alignments && state_.alignments > 0) {
         parts << grouped(state_.alignments) + QStringLiteral(" alignments");
@@ -401,7 +454,7 @@ void IfcExportDialog::recheck()
     if (asked.surfaces && state_.surfaces > 0) {
         parts << grouped(state_.surfaces) + QStringLiteral(" surfaces");
     }
-    if (asked.arguments.schedule) {
+    if (asked.schedule) {
         parts << QStringLiteral("the schedule's services");
     }
     say(QStringLiteral("Ready to write ") + parts.join(QStringLiteral(", ")) +
@@ -462,9 +515,22 @@ void IfcExportDialog::showTally(const std::vector<katana::ifc::ClassTally>& tall
     }
 }
 
+std::optional<std::vector<katana::ifc::ClassTally>>
+IfcExportDialog::showReply(const std::string& reply)
+{
+    auto objects = katana::ifc::readExportObjects(reply);
+    if (!objects) {
+        showTally({});
+        say(QString::fromStdString(objects.error().describe()), true);
+        return std::nullopt;
+    }
+    showTally(*objects);
+    return std::move(*objects);
+}
+
 void IfcExportDialog::preview()
 {
-    if (!context_.preview) {
+    if (!context_.runLine) {
         return;
     }
     refresh(); // the drawing, and its selection, as they are now
@@ -472,20 +538,31 @@ void IfcExportDialog::preview()
         say(problem, true);
         return;
     }
-    IfcExportRequest asked = request();
-    if (asked.arguments.path.empty() || !isIfcName(pathOf(file_))) {
-        asked.arguments.path = "preview.ifc";
+    // The export's own line, PREVIEW added: a file not yet named is given
+    // one, which PREVIEW never writes.
+    katana::ifc::ExportArguments asked = arguments();
+    if (asked.path.empty() || !isIfcName(pathOf(file_))) {
+        asked.path = "preview.ifc";
     }
-    const auto result = context_.preview(asked);
-    showingResult_ = true;
-    if (!result) {
-        showTally({});
-        say(QString::fromStdString(result.error().describe()), true);
+    asked.preview = true;
+    const auto written = katana::ifc::formatExportLine(asked);
+    if (!written) {
+        say(QString::fromStdString(written.error().describe()), true);
         return;
     }
-    showTally(result->tally);
+    const auto reply = context_.runLine(QString::fromStdString(*written));
+    showingResult_ = true;
+    if (!reply) {
+        showTally({});
+        say(QString::fromStdString(reply.error().describe()), true);
+        return;
+    }
+    const auto tally = showReply(*reply);
+    if (!tally) {
+        return;
+    }
     std::size_t objects = 0;
-    for (const auto& row : result->tally) {
+    for (const katana::ifc::ClassTally& row : *tally) {
         if (!row.entity.empty()) {
             objects += row.count;
         }
@@ -504,29 +581,29 @@ void IfcExportDialog::exportFile()
         say(problem, true);
         return;
     }
-    if (!context_.run) {
+    if (!context_.runLine) {
         return;
     }
-    const auto result = context_.run(request());
+    const auto reply = context_.runLine(line());
     showingResult_ = true;
-    if (!result) {
-        say(QString::fromStdString(result.error().describe()), true);
+    if (!reply) {
+        say(QString::fromStdString(reply.error().describe()), true);
         return;
     }
-    showTally(result->tally);
-    say(QStringLiteral("Wrote ") + pathOf(file_) + QStringLiteral(": ") +
-            grouped(result->instances) + QStringLiteral(" instances, ") +
-            grouped(result->entitiesWritten) + QStringLiteral(" entities, ") +
-            grouped(result->alignments) + QStringLiteral(" alignments, ") +
-            grouped(result->services) + QStringLiteral(" services and ") +
-            grouped(result->surfaces) + QStringLiteral(" surfaces (the log has the rest)."),
+    if (!showReply(*reply)) {
+        return;
+    }
+    const auto head = headRecord(*reply);
+    say(QStringLiteral("Wrote ") + pathOf(file_) + QStringLiteral(": ") + field(head, "instances") +
+            QStringLiteral(" instances (the log has the reply)."),
         false);
 }
 
 void IfcExportDialog::saveRules()
 {
     if (context_.headless && context_.headless()) {
-        say(QStringLiteral("Save Default Rules asks a person where; it is not available here."),
+        say(QStringLiteral("Save Default Rules asks a person where; type IFC RULES <file.csv> "
+                           "on the command line instead."),
             true);
         showingResult_ = true;
         return;
@@ -534,16 +611,21 @@ void IfcExportDialog::saveRules()
     QString chosen = QFileDialog::getSaveFileName(this, QStringLiteral("Save Default Rules"),
                                                   QStringLiteral("classification_rules.csv"),
                                                   QStringLiteral("Rules (*.csv)"));
-    if (chosen.isEmpty() || !context_.saveDefaultRules) {
+    if (chosen.isEmpty() || !context_.runLine) {
         return;
     }
     if (!chosen.endsWith(QStringLiteral(".csv"), Qt::CaseInsensitive)) {
         chosen += QStringLiteral(".csv");
     }
-    const auto status = context_.saveDefaultRules(chosen);
+    const auto written = katana::ifc::formatRulesLine(chosen.toStdString());
+    if (!written) {
+        say(QString::fromStdString(written.error().describe()), true);
+        return;
+    }
+    const auto reply = context_.runLine(QString::fromStdString(*written));
     showingResult_ = true;
-    if (!status) {
-        say(QString::fromStdString(status.error().describe()), true);
+    if (!reply) {
+        say(QString::fromStdString(reply.error().describe()), true);
         return;
     }
     rules_->setText(QDir::toNativeSeparators(chosen));
@@ -635,6 +717,8 @@ IfcImportDialog::IfcImportDialog(IfcImportContext context, QWidget* parent)
     options->addRow(QStringLiteral("Place:"), local_);
     options->addRow(QString(), takeCrs_);
     options->addRow(QStringLiteral("Curves within (m):"), tolerance_);
+    command_ = commandField(QStringLiteral("ifcImportCommand"), this);
+    options->addRow(QStringLiteral("Command:"), command_);
     layout->addLayout(options);
 
     check_ = new QLabel(this);
@@ -683,20 +767,35 @@ IfcImportDialog::IfcImportDialog(IfcImportContext context, QWidget* parent)
     recheck();
 }
 
-IfcImportRequest IfcImportDialog::request() const
+katana::ifc::ImportArguments IfcImportDialog::arguments() const
 {
-    IfcImportRequest out;
-    out.arguments.path = pathOf(file_).toStdString();
-    out.arguments.local = local_->isChecked();
+    katana::ifc::ImportArguments out;
+    out.path = pathOf(file_).toStdString();
+    out.local = local_->isChecked();
     out.alignments = alignments_->isChecked();
     out.elements = elements_->isChecked();
     out.surfaces = surfaces_->isChecked();
-    if (const auto tolerance =
-            core::parseFiniteDouble(tolerance_->text().trimmed().toStdString())) {
-        out.curveTolerance = *tolerance;
+    // TOLERANCE only when it is not the reader's own default: the line is
+    // what a person would type.
+    const auto tolerance = core::parseFiniteDouble(tolerance_->text().trimmed().toStdString());
+    if (tolerance && *tolerance != katana::ifc::ImportOptions{}.curveTolerance) {
+        out.tolerance = *tolerance;
     }
-    out.takeCoordinateSystem = !out.arguments.local && takeCrs_->isChecked();
+    // The dialog always answers, so its line never asks: moved to the
+    // origin, the data is in no system and there is nothing to take.
+    if (!out.local) {
+        out.takeCoordinateSystem = takeCrs_->isChecked();
+    }
     return out;
+}
+
+QString IfcImportDialog::line() const
+{
+    if (!check().isEmpty()) {
+        return {};
+    }
+    const auto written = katana::ifc::formatImportLine(arguments());
+    return written ? QString::fromStdString(*written) : QString();
 }
 
 QString IfcImportDialog::check() const
@@ -714,6 +813,10 @@ QString IfcImportDialog::check() const
     if (!alignments_->isChecked() && !elements_->isChecked() && !surfaces_->isChecked()) {
         return QStringLiteral("Nothing to import: tick alignments, elements or surfaces.");
     }
+    if (file_->text().contains('"')) {
+        return QStringLiteral("A path holding a double quote cannot be written in a command; "
+                              "rename the file.");
+    }
     return {};
 }
 
@@ -721,6 +824,7 @@ void IfcImportDialog::recheck()
 {
     const QString problem = check();
     import_->setEnabled(problem.isEmpty());
+    command_->setText(line());
     if (!problem.isEmpty()) {
         showingResult_ = false;
         say(problem, true);
@@ -748,17 +852,19 @@ void IfcImportDialog::say(const QString& text, bool isError)
 
 void IfcImportDialog::describe()
 {
-    if (pathOf(file_).isEmpty() || !context_.describe) {
+    if (pathOf(file_).isEmpty() || !context_.runLine) {
         return;
     }
-    const auto described = context_.describe(pathOf(file_));
+    const auto written = katana::ifc::formatInfoLine(pathOf(file_).toStdString());
+    const auto described = written ? context_.runLine(QString::fromStdString(*written))
+                                   : katana::core::Result<std::string>(written.error());
     if (!described) {
         summary_->clear();
         showingResult_ = true;
         say(QString::fromStdString(described.error().describe()), true);
         return;
     }
-    setSummary(*described);
+    setSummary(QString::fromStdString(*described));
 }
 
 void IfcImportDialog::setSummary(const QString& text)
@@ -776,24 +882,25 @@ void IfcImportDialog::importFile()
         say(problem, true);
         return;
     }
-    if (!context_.run) {
+    if (!context_.runLine) {
         return;
     }
-    const IfcImportOutcome outcome = context_.run(request());
+    const auto reply = context_.runLine(line());
     showingResult_ = true;
-    switch (outcome) {
-    case IfcImportOutcome::Imported:
-        say(QStringLiteral("Imported ") + pathOf(file_) +
-                QStringLiteral(": the log says what came in."),
-            false);
-        break;
-    case IfcImportOutcome::Cancelled:
-        say(QStringLiteral("Import cancelled."), false);
-        break;
-    case IfcImportOutcome::Failed:
-        say(QStringLiteral("The import failed: the log says why."), true);
-        break;
+    if (!reply) {
+        // Declining the far-apart question is a cancel, not a failure.
+        const bool cancelled = reply.error().code == katana::core::ErrorCode::CommandRejected;
+        say(cancelled ? QStringLiteral("Import cancelled.")
+                      : QString::fromStdString(reply.error().describe()),
+            !cancelled);
+        return;
     }
+    const auto head = headRecord(*reply);
+    say(QStringLiteral("Imported ") + field(head, "entities") + QStringLiteral(" entities, ") +
+            field(head, "alignments") + QStringLiteral(" alignments and ") +
+            field(head, "surfaces") + QStringLiteral(" surfaces from ") + pathOf(file_) +
+            QStringLiteral(": the log has the reply."),
+        false);
 }
 
 } // namespace katana::qt

@@ -469,7 +469,8 @@ TEST(IfcExportUtilities, ASegmentCarriesItsGradeAndIsDrawnAtTheCentreOfTheServic
 }
 
 // With the delivery schema, the schedule's own values go in a property set
-// named for it, in its order, a listed value as the enumeration it is from
+// named for it - its title's words joined by '_', "Utility Delivery Schema"
+// in the test data - in its order, a listed value as the enumeration it is from
 // - and a value the schema does not list (E-0001's "In service") as
 // written, not corrected. E-0001's two points are 18 m apart, beyond the
 // 10 m a detected path keeps QL-B for: it claims QL-B and attains QL-C.
@@ -495,10 +496,12 @@ TEST(IfcExportUtilities, TheDeliverySchemasAttributesAreWrittenAsTheScheduleWrot
     EXPECT_NE(out.text.find("IFCPROPERTYENUMERATEDVALUE('AssetTypeCode','Asset Type Code',"
                             "(IFCLABEL('E')),"),
               std::string::npos);
-    EXPECT_NE(out.text.find("'TfNSW_UtilitySchema'"), std::string::npos);
-    EXPECT_NE(out.text.find("IFCCLASSIFICATION('Transport for NSW','1.2',$,"
-                            "'TfNSW Utility Schema and Specification',"),
+    EXPECT_NE(out.text.find("'Utility_Delivery_Schema'"), std::string::npos);
+    // E-0001's asset type code E is electricity in AS 5488.2-2019 Table A.4,
+    // the standard the codes are from, whichever schema carried them.
+    EXPECT_NE(out.text.find("IFCCLASSIFICATION('Standards Australia','2019',$,'AS 5488.2-2019',"),
               std::string::npos);
+    EXPECT_NE(out.text.find("IFCCLASSIFICATIONREFERENCE($,'E','electricity',"), std::string::npos);
 
     const auto back = ifc::readIfc(out.text);
     ASSERT_TRUE(back.ok()) << back.error().describe();
@@ -508,7 +511,7 @@ TEST(IfcExportUtilities, TheDeliverySchemasAttributesAreWrittenAsTheScheduleWrot
     EXPECT_EQ(property(*conduit, "AS5488_QualityLevel/QualityLevel"), "QL-C");
     EXPECT_EQ(property(*conduit, "AS5488_QualityLevel/QualityLevelClaimed"), "QL-B");
     EXPECT_EQ(property(*conduit, "AS5488_QualityLevel/ClaimSupported"), "false");
-    EXPECT_EQ(property(*conduit, "TfNSW_UtilitySchema/AssetStatus"), "In service");
+    EXPECT_EQ(property(*conduit, "Utility_Delivery_Schema/AssetStatus"), "In service");
     EXPECT_EQ(property(*conduit, "Pset_ConstructionOccurence/InstallationDate"), "2011-02-14");
     // Top of encasement 20.40 - 0.70 = 19.70, the centre 50 mm below on a
     // 100 mm size.
@@ -581,10 +584,10 @@ TEST(IfcExportDrawing, AProjectsRulesMustNameAClassTheExportWritesAndSayWhatUser
     EXPECT_EQ(asked.classes.at("IfcBuildingElementProxy"), 4u);
 }
 
-// A 12d drainage string: pipes pit to pit, the pits chambers, one system.
+// A drainage string from a .12da archive: pipes pit to pit, the pits chambers, one system.
 // Pipe 1 runs 19.00 to 18.80 (flow_direction 1: upstream at the start), a
 // 375 mm pipe, so its axis is 0.1875 above: 19.1875 to 18.9875.
-TEST(IfcExportDrawing, A12dDrainageStringIsPipesPitToPitAndItsPitsChambers)
+TEST(IfcExportDrawing, AnArchivesDrainageStringIsPipesPitToPitAndItsPitsChambers)
 {
     Model model;
     Entity line;
@@ -682,7 +685,7 @@ Entity drainagePit(std::string name, Point2 at)
 
 } // namespace
 
-// 12d names a string's pits by its header, and two strings may share a name:
+// A .12da archive names a string's pits by its header, and two strings may share a name:
 // each pit is written once, with the string it stands on.
 TEST(IfcExportDrawing, TwoDrainageStringsOfOneNameWriteEachPitOnce)
 {
@@ -825,13 +828,197 @@ TEST(IfcExportDrawing, ADrawnServicesPlanGoesOutByServiceAsTheScheduleWouldClass
     EXPECT_EQ(grades, 4u);
     EXPECT_EQ(located, 5u);
 
-    // The preview says so, by service.
+    // The preview says so, by service - named apart from the schedule's
+    // "service E1", and by where it was drawn, so W1's two are two rows.
     const auto e1 = std::find_if(out.tally.begin(), out.tally.end(), [](const ifc::ClassTally& t) {
-        return t.source == "service E1" && t.entity == "IfcCableCarrierSegment";
+        return t.source == "drawn service E1 in utilities/electricity" &&
+               t.entity == "IfcCableCarrierSegment";
     });
     ASSERT_NE(e1, out.tally.end());
     EXPECT_EQ(e1->predefinedType, "CONDUITSEGMENT");
     EXPECT_EQ(e1->system, "ELECTRICAL");
     EXPECT_EQ(e1->count, 2u);
     EXPECT_EQ(e1->why, "a drawn run: configuration \"4 x 100 mm conduits\"");
+}
+
+// What the review of the drawn plan's export found (8f101e1). Each case is a
+// plan as UTILITY DRAW leaves it, then edited or drawn again as a person
+// would; the class each run should be is classifyUtilityRun's for its own
+// attributes, as the schedule's export gives it.
+
+namespace {
+
+std::size_t countOf(const std::string& text, const std::string& needle)
+{
+    std::size_t count = 0;
+    for (std::size_t at = text.find(needle); at != std::string::npos;
+         at = text.find(needle, at + 1)) {
+        ++count;
+    }
+    return count;
+}
+
+bool warned(const ifc::IfcExport& out, const std::string& words)
+{
+    return std::any_of(out.warnings.begin(), out.warnings.end(), [&](const std::string& warning) {
+        return warning.find(words) != std::string::npos;
+    });
+}
+
+} // namespace
+
+// Two schedules drawn under one prefix, each with an "E1": conduits in one,
+// a direct-buried cable in the other. Each run is its own service's class,
+// each service its own system with its own description, and the clash of
+// ids is said.
+TEST(IfcExportDrawing, TwoServicesDrawnWithOneLineIdStayTwoServices)
+{
+    Model model;
+    Entity conduit = drawnRun("utilities/electricity/QL-B", "E1", "electricity", "QL-B",
+                              {{0.0, 0.0}, {9.0, 0.0}}, "4 x 100 mm conduits");
+    conduit.properties["utility.description"] = std::string("11 kV");
+    Entity buried = drawnRun("utilities/electricity/QL-C", "E1", "electricity", "QL-C",
+                             {{0.0, 40.0}, {9.0, 40.0}}, "direct buried");
+    buried.properties["utility.description"] = std::string("LV street supply");
+    ASSERT_TRUE(model.entities.add(conduit).ok());
+    ASSERT_TRUE(model.entities.add(buried).ok());
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_EQ(out.classes.at("IfcCableCarrierSegment"), 1u);
+    EXPECT_EQ(out.classes.at("IfcCableSegment"), 1u);
+    EXPECT_EQ(out.classes.at("IfcDistributionSystem"), 2u);
+    std::set<std::string> described;
+    for (const std::string& line : instancesOf(out.text, "IFCDISTRIBUTIONSYSTEM")) {
+        described.insert(argumentsOf(line)[3]);
+    }
+    EXPECT_EQ(described, (std::set<std::string>{"'11 kV'", "'LV street supply'"}));
+    EXPECT_TRUE(warned(out, "line E1 under utilities/electricity was drawn from services with "
+                            "different attributes"));
+}
+
+// EXPLODE makes a run's segments lines that keep its layer and properties:
+// they stay in their service, as the class it gives, not a second system
+// classed by the layer's words.
+TEST(IfcExportDrawing, AnExplodedRunStaysInItsService)
+{
+    Model model;
+    Entity whole = drawnRun("utilities/electricity/QL-B", "E1", "electricity", "QL-B",
+                            {{0.0, 0.0}, {9.0, 0.0}}, "4 x 100 mm conduits");
+    Entity piece = whole;
+    piece.geometry = katana::geometry::Segment2{{9.0, 0.0}, {27.0, 0.0}};
+    piece.layer = "utilities/electricity/QL-C";
+    piece.properties["utility.quality_level"] = std::string("QL-C");
+    ASSERT_TRUE(model.entities.add(whole).ok());
+    ASSERT_TRUE(model.entities.add(piece).ok());
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_EQ(out.classes.at("IfcCableCarrierSegment"), 2u);
+    EXPECT_FALSE(out.classes.contains("IfcCableSegment"));
+    EXPECT_EQ(out.classes.at("IfcDistributionSystem"), 1u);
+}
+
+// A located point moved to another layer - an ordinary edit - still belongs
+// to the service it stands on, and one at the service's level is written in
+// 3D there, as the schedule's export places its points.
+TEST(IfcExportDrawing, APointMovedToAnotherLayerStaysWithTheRunItStandsOn)
+{
+    Model model;
+    ASSERT_TRUE(model.entities
+                    .add(drawnRun("utilities/water/QL-A", "W1", "water", "QL-A",
+                                  {{0.0, 5.0}, {20.0, 5.0}}, ""))
+                    .ok());
+    Entity moved = drawnPoint("survey/checked", "W1", "water", "W1-2", "QL-A", {20.0, 5.0});
+    moved.properties["utility.service_level"] = 19.3;
+    ASSERT_TRUE(model.entities.add(moved).ok());
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_EQ(out.classes.at("IfcDistributionSystem"), 1u);
+    const auto back = ifc::readIfc(out.text);
+    ASSERT_TRUE(back.ok()) << back.error().describe();
+    const Entity* point = withName(*back, "W1-2");
+    ASSERT_NE(point, nullptr);
+    const auto heights = katana::entity::heightsOf(point->properties, 1);
+    ASSERT_TRUE(heights[0]);
+    EXPECT_NEAR(*heights[0], 19.3, 1e-9);
+    // The derived level is ServiceLevel: the schedule export's Level is a
+    // recorded one, which the drawing does not keep.
+    EXPECT_EQ(property(*point, "AS5488_LocatedPoint/ServiceLevel"), "19.3");
+}
+
+// A project's own rule still names the class of what it drew; the defaults
+// give way to the service's class, a project's rules do not.
+TEST(IfcExportDrawing, AProjectsRuleStillClassesADrawnRun)
+{
+    Model model;
+    ASSERT_TRUE(
+        model.entities
+            .add(drawnRun("utilities/gas/QL-D", "G1", "gas", "QL-D", {{0.0, 0.0}, {40.0, 0.0}}, ""))
+            .ok());
+    const auto rules = ifc::parseClassificationRules(
+        "rule,words,kinds,class,predefined_type,object_type,system\n"
+        "gas flexible,GAS,Polyline,IfcPipeSegment,FLEXIBLESEGMENT,,GAS\n");
+    ASSERT_TRUE(rules.ok()) << rules.error().describe();
+    ifc::ExportOptions options;
+    options.rules = *rules;
+    const auto& defaults = ifc::defaultClassificationRules();
+    options.rules.insert(options.rules.end(), defaults.begin(), defaults.end());
+    const auto out = exported({&model, {}, {}}, options);
+    const auto pipes = instancesOf(out.text, "IFCPIPESEGMENT");
+    ASSERT_EQ(pipes.size(), 1u);
+    EXPECT_EQ(argumentsOf(pipes[0]).back(), ".FLEXIBLESEGMENT.");
+    // Without the project's rule, the service's own class.
+    const auto plain = exported({&model, {}, {}}, {});
+    ASSERT_EQ(instancesOf(plain.text, "IFCPIPESEGMENT").size(), 1u);
+    EXPECT_EQ(argumentsOf(instancesOf(plain.text, "IFCPIPESEGMENT")[0]).back(), ".RIGIDSEGMENT.");
+}
+
+// A level AS 5488 does not have, or none, is not written as the standard's:
+// it is said, and the run goes out unclassified.
+TEST(IfcExportDrawing, ALevelTheStandardDoesNotHaveIsSaidAndNotClassified)
+{
+    Model model;
+    ASSERT_TRUE(model.entities
+                    .add(drawnRun("utilities/water/QL-B", "W1", "water", "QL-E",
+                                  {{0.0, 0.0}, {20.0, 0.0}}, ""))
+                    .ok());
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_EQ(out.classes.at("IfcPipeSegment"), 1u);
+    EXPECT_TRUE(instancesOf(out.text, "IFCCLASSIFICATIONREFERENCE").empty());
+    // Not AS 5488's QualityLevel; the entity's own record keeps what it
+    // says (Katana_Attributes), as every entity's does.
+    EXPECT_EQ(countOf(out.text, "'QualityLevel'"), 0u);
+    EXPECT_EQ(countOf(out.text, "'QL-E'"), 1u);
+    EXPECT_NE(out.text.find("IFCPROPERTYSINGLEVALUE('utility.quality_level',$,IFCLABEL('QL-E')"),
+              std::string::npos);
+    EXPECT_TRUE(warned(out, "has quality level \"QL-E\", which is not one of AS 5488.1-2019's"));
+}
+
+// The plan drawn from a schedule and the schedule itself in one file is the
+// service twice: written, as asked, and said.
+TEST(IfcExportDrawing, AServiceBothDrawnAndGivenAsTheScheduleIsSaid)
+{
+    Model model;
+    ASSERT_TRUE(model.entities
+                    .add(drawnRun("utilities/water/QL-B", "W1", "water", "QL-B",
+                                  {{334000.0, 6250000.0}, {334010.0, 6250000.0}}, ""))
+                    .ok());
+    const auto out = exported({&model, {}, sampleSchedule()}, mga56());
+    EXPECT_TRUE(warned(out, "drawn service W1 in utilities/water is also in the schedule given "
+                            "with UTILITIES"));
+}
+
+// A name longer than IFC's 255 characters is cut there, between characters,
+// and the cut is said.
+TEST(IfcExport, ANameLongerThanIfcAllowsIsCutAndSaid)
+{
+    Model model;
+    Entity kerb;
+    kerb.geometry = Polyline2{{Point2{0.0, 0.0}, Point2{10.0, 0.0}}, false};
+    kerb.layer = "Survey/Kerb";
+    // 300 characters, the 255th a two-byte one: the cut must not split it.
+    std::string name(254, 'k');
+    name += "\xC3\xA9"; // é
+    name += std::string(45, 'k');
+    kerb.properties["point"] = name;
+    ASSERT_TRUE(model.entities.add(kerb).ok());
+    const auto out = exported({&model, {}, {}}, {});
+    EXPECT_NE(out.text.find("'" + std::string(254, 'k') + "\\X2\\00E9\\X0\\'"), std::string::npos);
+    EXPECT_TRUE(warned(out, "its name is longer than the 255 characters IFC allows"));
 }

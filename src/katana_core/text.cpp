@@ -126,4 +126,91 @@ std::string formatExactReal(double value)
     return std::string(buffer, result.ptr);
 }
 
+std::string replyQuoted(std::string_view text)
+{
+    std::string out = "\"";
+    for (const char c : text) {
+        if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '"') {
+            out += "\\\"";
+        } else {
+            out += c;
+        }
+    }
+    return out + "\"";
+}
+
+std::optional<std::string> ReplyRecord::value(std::string_view key) const
+{
+    for (const auto& [name, text] : fields) {
+        if (name == key) {
+            return text;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<ReplyRecord> readReplyRecord(std::string_view line)
+{
+    ReplyRecord record;
+    std::size_t at = 0;
+    while (at < line.size()) {
+        if (isAsciiSpace(line[at])) {
+            ++at;
+            continue;
+        }
+        std::size_t end = at;
+        while (end < line.size() && !isAsciiSpace(line[end]) && line[end] != '=') {
+            ++end;
+        }
+        if (end == line.size() || line[end] != '=') {
+            if (!record.fields.empty()) {
+                return std::nullopt; // a word after the fields began
+            }
+            record.words.emplace_back(line.substr(at, end - at));
+            at = end;
+            continue;
+        }
+        if (end == at) {
+            return std::nullopt; // "=value": a field with no key
+        }
+        std::string key(line.substr(at, end - at));
+        at = end + 1;
+        std::string value;
+        if (at < line.size() && line[at] == '"') {
+            // What replyQuoted writes, undone.
+            ++at;
+            bool closed = false;
+            while (at < line.size()) {
+                const char c = line[at++];
+                if (c == '"') {
+                    closed = true;
+                    break;
+                }
+                if (c == '\\' && at < line.size()) {
+                    const char next = line[at++];
+                    value += next == 'n' ? '\n' : next;
+                } else {
+                    value += c;
+                }
+            }
+            if (!closed) {
+                return std::nullopt;
+            }
+        } else {
+            while (at < line.size() && !isAsciiSpace(line[at])) {
+                value += line[at++];
+            }
+        }
+        record.fields.emplace_back(std::move(key), std::move(value));
+    }
+    if (record.words.empty() && record.fields.empty()) {
+        return std::nullopt;
+    }
+    return record;
+}
+
 } // namespace katana::core

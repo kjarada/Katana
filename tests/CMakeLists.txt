@@ -1203,7 +1203,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=${_ifc_scenario}>EXPORT ${_ifc_typed} UTILITIES ${_ifc_schedule}|>INFO ${_ifc_typed}|>IMPORT ${_ifc_typed}|>ALIGN LIST"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_typed_headless.png"
-            "-DEXPECT=Exported 5 entities, 1 alignments, 4 services \\(10 segments, 6 in 3D, 14 located points\\) and 0 surfaces to qt ifc typed\\.ifc \\(IFC4X3_ADD2, [0-9]+ instances\\).*qt ifc typed\\.ifc: IFC4X3_ADD2, EPSG:7856.*Imported 29 entities, 1 alignments and 0 surfaces from qt ifc typed\\.ifc \\(IFC4X3_ADD2\\).*the import's is \"MC01 \\(2\\)\".*MC01 \\(2\\)  4 PIs  1000\\.000 to 1339\\.016"
+            "-DEXPECT=ifc exported file=\"qt ifc typed\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+[\r\n]+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5 entities_skipped=0 surfaces=0.*ifc described file=\"qt ifc typed\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\".*ifc imported file=\"qt ifc typed\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*the import's is \\\\\"MC01 \\(2\\)\\\\\".*MC01 \\(2\\)  4 PIs  1000\\.000 to 1339\\.016"
             "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # File > Export IFC, driven as a person would: the schedule chosen, the
@@ -1217,7 +1217,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=${_ifc_scenario}@fileExportIfc|ifcExportSchedule=${_ifc_schedule}|!ifcExportPreview|?ifcExportClasses|ifcExportFile=${_ifc_dialog}|!ifcExportExport|?ifcExportCheck"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_export_dialog_headless.png"
-            "-DEXPECT=--dialog fileExportIfc opened fileExportIfcDialog \"Export IFC\"[\r\n].*ifcExportClasses: [^\r\n]*layer Survey/Kerb \\| 1 \\| IfcKerb NOTDEFINED \\| \\| rule kerb[^\r\n]*service E1 \\| 3 \\| IfcCableCarrierSegment CONDUITSEGMENT \\| ELECTRICAL.*Exported 5 entities, 1 alignments, 4 services \\(10 segments, 6 in 3D, 14 located points\\).*ifcExportCheck: Wrote [^\r\n]*qt_ifc_dialog\\.ifc: [0-9]+ instances"
+            "-DEXPECT=--dialog fileExportIfc opened fileExportIfcDialog \"Export IFC\"[\r\n].*> EXPORT \"preview\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\" PREVIEW[\r\n]+ifc previewed file=\"preview\\.ifc\".*ifcExportClasses: [^\r\n]*layer Survey/Kerb \\| 1 \\| IfcKerb NOTDEFINED \\| \\| rule kerb[^\r\n]*service E1 \\| 3 \\| IfcCableCarrierSegment CONDUITSEGMENT \\| ELECTRICAL.*> EXPORT \"[^\"]*qt_ifc_dialog\\.ifc\" UTILITIES \"[^\"]*schedule\\.csv\"[\r\n]+ifc exported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 instances=[0-9]+ bytes=[0-9]+[\r\n]+counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14 entities_written=5.*ifcExportCheck: Wrote [^\r\n]*qt_ifc_dialog\\.ifc: [0-9]+ instances"
             "-DFORBID=IfcBuildingElementProxy"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # File > Import IFC on that file, into a drawing with no coordinate
@@ -1229,10 +1229,12 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=@fileImportIfc|ifcImportFile=${_ifc_dialog}|!ifcImportDescribe|?ifcImportSummary|!ifcImportImport|>ALIGN LIST"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_import_dialog_headless.png"
-            "-DEXPECT=--dialog fileImportIfc opened fileImportIfcDialog \"Import IFC\"[\r\n].*ifcImportSummary: qt_ifc_dialog\\.ifc: IFC4X3_ADD2, EPSG:7856.*MC01 \\(4 PIs, 4 PVIs\\).*Imported 29 entities, 1 alignments and 0 surfaces from qt_ifc_dialog\\.ifc \\(IFC4X3_ADD2\\).*the project is now in EPSG:7856.*MC01  4 PIs  1000\\.000 to 1339\\.016"
+            "-DEXPECT=--dialog fileImportIfc opened fileImportIfcDialog \"Import IFC\"[\r\n].*> INFO \"[^\"]*qt_ifc_dialog\\.ifc\".*ifcImportSummary: ifc described file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\".*alignment name=\"MC01\" pis=4 pvis=4.*> IMPORT \"[^\"]*qt_ifc_dialog\\.ifc\" TAKECRS[\r\n]+ifc imported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*note text=\"the project is now in EPSG:7856.*MC01  4 PIs  1000\\.000 to 1339\\.016"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The session's surfaces go out as IFC terrain and come back as surfaces
-    # of the session: the four TINs of a 12d archive, there and back.
+    # of the session: the four TINs of a .12da archive, there and back. Each
+    # is added to the session (its "Surface" line) before the import's reply
+    # is logged.
     add_test(NAME qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
@@ -1240,7 +1242,7 @@ if(TARGET katana)
             "-DIMPORT=${PROJECT_SOURCE_DIR}/tests/archive12d/data/multiple_tins.12da"
             "-DDRIVE=>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_surfaces_headless.png"
-            "-DEXPECT=Exported 0 entities, 0 alignments, 0 services \\(0 segments, 0 in 3D, 0 located points\\) and 4 surfaces to qt_ifc_surfaces\\.ifc.*classes: IfcGeographicElement 4;.*Imported 0 entities, 0 alignments and 4 surfaces from qt_ifc_surfaces\\.ifc.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles"
+            "-DEXPECT=ifc exported file=\"qt_ifc_surfaces\\.ifc\".*counts alignments=0 services=0 segments=0 segments_3d=0 located_points=0 entities_written=0 entities_skipped=0 surfaces=4.*class name=IfcGeographicElement count=4.*Surface '[^']+': [0-9]+ vertices, [0-9]+ triangles.*ifc imported file=\"qt_ifc_surfaces\\.ifc\" schema=IFC4X3_ADD2 crs=\"[^\"]*\" entities=0 alignments=0 surfaces=4"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The File menu offers both, and a typed line with a word the verb does
     # not take is refused in the command line's own words.
@@ -1250,7 +1252,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=%fileMenu|?fileMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_menu_headless.png"
-            "-DEXPECT=fileMenu: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL.*! InvalidArgument: a quoted path is never closed"
+            "-DEXPECT=fileMenu: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING, NOENTITIES, SELECTED, NOALIGNMENTS, NOSURFACES, PREVIEW.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL, NOALIGNMENTS.*! InvalidArgument: a quoted path is never closed"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # --import-options on a .ifc builds File > Import IFC's dialog for it.
     add_test(NAME qt_ifc_import_options_are_the_import_dialog_headless
@@ -1268,7 +1270,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DIMPORT=${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_path_headless.png"
-            "-DEXPECT=Imported 29 entities, 1 alignments and 0 surfaces from qt_ifc_dialog\\.ifc \\(IFC4X3_ADD2\\).*the file is in EPSG:7856 and the project has no coordinate system: File > Project Coordinate System or CRS SET EPSG:7856 sets it"
+            "-DEXPECT=> IMPORT \"[^\"]*qt_ifc_dialog\\.ifc\"[\r\n]+ifc imported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*note text=\"the file is in EPSG:7856 and the project has no coordinate system: File > Project Coordinate System or CRS SET EPSG:7856 sets it\""
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # A drawing of an alignment alone is as far from a file as one of
     # lines: the far-apart question weighs the drawing's alignments too, and
@@ -1279,7 +1281,7 @@ if(TARGET katana)
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
             "-DDRIVE=>ALIGN NEW A1 0,0 100,50 200,0|>IMPORT ${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_far_headless.png"
-            "-DEXPECT=\\(kept: no one to ask\\)\\..*Imported 29 entities, 1 alignments and 0 surfaces from qt_ifc_dialog\\.ifc"
+            "-DEXPECT=ifc imported file=\"qt_ifc_dialog\\.ifc\" schema=IFC4X3_ADD2 crs=\"EPSG:7856\" entities=29 alignments=1 surfaces=0.*note text=\"[^\"]*\\(kept: no one to ask\\)\""
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # GIS > Dataset Information on a .ifc describes it; on one that cannot be
     # read, it and --import-options fail the run saying why, as they do for

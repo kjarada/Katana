@@ -26,27 +26,47 @@
 #include "katana/core/error.hpp"
 #include "katana/ifc/classification.hpp"
 #include "katana/ifc/export.hpp"
+#include "katana/ifc/import.hpp"
 #include "katana/survey/subsurface/delivery_schema.hpp"
 
 namespace katana::ifc {
 
 // EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]
 //                   [RULES <rules.csv>] [SPACING <m>] [NODRAWING]
+//                   [NOENTITIES] [SELECTED] [NOALIGNMENTS] [NOSURFACES] [PREVIEW]
+//
+// Every choice File > Export IFC offers is a word here, so that the dialog
+// only writes the line (formatExportLine) and a person, a script and an agent
+// can each ask for the same file.
 struct ExportArguments {
     std::string path;                    // the file to write, UTF-8, as given
     std::optional<std::string> schedule; // UTILITIES: an AS 5488 schedule
     std::optional<std::string> schema;   // SCHEMA: the delivery schema it was written to
     std::optional<std::string> rules;    // RULES: a project's classification rules
     std::optional<double> spacing;       // SPACING: longest detected spacing keeping QL-B, m
-    bool drawing = true;                 // false: NODRAWING - the investigation alone
+    // NODRAWING is all three false: the investigation alone.
+    bool entities = true;   // false: NOENTITIES
+    bool alignments = true; // false: NOALIGNMENTS
+    bool surfaces = true;   // false: NOSURFACES; the window's surfaces (katana_cli holds none)
+    bool selected = false;  // SELECTED: of the entities, the selected ones
+    bool preview = false;   // PREVIEW: the reply the file would give, no file written
 
     friend bool operator==(const ExportArguments&, const ExportArguments&) = default;
 };
 
-// IMPORT <file.ifc> [LOCAL]
+// IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]
+//                   [TOLERANCE <m>] [TAKECRS | KEEPCRS]
 struct ImportArguments {
     std::string path;
-    bool local = false; // LOCAL: moved to sit at the origin
+    bool local = false;              // LOCAL: moved to sit at the origin
+    bool alignments = true;          // false: NOALIGNMENTS
+    bool elements = true;            // false: NOELEMENTS - elements and annotations
+    bool surfaces = true;            // false: NOSURFACES
+    std::optional<double> tolerance; // TOLERANCE: ImportOptions::curveTolerance, m
+    // TAKECRS: the project takes the file's coordinate system when it has
+    // none; KEEPCRS: it does not. Neither: katana_cli and a typed line say how
+    // (CRS SET), and File > Import asks.
+    std::optional<bool> takeCoordinateSystem;
 
     friend bool operator==(const ImportArguments&, const ImportArguments&) = default;
 };
@@ -55,14 +75,36 @@ struct ImportArguments {
 // no .ifc - a path in quotes, or everything up to the first ".ifc" that ends
 // a word, so that an unquoted path with blanks still reads - and the caller's
 // other exporters and importers take the line. Otherwise the arguments, or
-// InvalidArgument saying what is wrong: an unclosed quote, an unknown word,
-// SCHEMA without UTILITIES, a SPACING that is not a positive number, a quote
-// opened before a .ifc and never closed. Words are matched in any letter
-// case; a value may be double-quoted.
+// InvalidArgument saying what is wrong: an unclosed quote, an unknown word, a
+// word given twice, SCHEMA without UTILITIES, SELECTED without the entities,
+// a SPACING or TOLERANCE that is not a positive number, TAKECRS with KEEPCRS
+// or with LOCAL (data moved to the origin is in no system), an import that
+// leaves out everything, a quote opened before a .ifc and never closed. Words
+// are matched in any letter case; a value may be double-quoted.
 [[nodiscard]] std::optional<core::Result<ExportArguments>>
 parseExportArguments(std::string_view argument);
 [[nodiscard]] std::optional<core::Result<ImportArguments>>
 parseImportArguments(std::string_view argument);
+
+// The whole line that says `arguments` - "EXPORT \"site.ifc\" NOSURFACES" -
+// every path quoted and every number as it reads back, so that the parse of
+// the line is `arguments` again. What a dialog hands the command line.
+// InvalidArgument for a path holding a double quote, which a line cannot say.
+[[nodiscard]] core::Result<std::string> formatExportLine(const ExportArguments& arguments);
+[[nodiscard]] core::Result<std::string> formatImportLine(const ImportArguments& arguments);
+// INFO "<file.ifc>": what the import dialog's Describe runs.
+[[nodiscard]] core::Result<std::string> formatInfoLine(std::string_view path);
+
+// IFC RULES <file.csv>: the default classification rules written to a file,
+// a project's starting point for its own (RULES). The path after IFC RULES,
+// nullopt when the line is not one; InvalidArgument for a missing path, an
+// unclosed quote or a word after the path.
+[[nodiscard]] std::optional<core::Result<std::string>>
+parseRulesArguments(std::string_view argument);
+[[nodiscard]] core::Result<std::string> formatRulesLine(std::string_view path);
+// Writes them, and answers "ifc rules file=... rules=N"; FileExportFailure
+// naming the file when it cannot be written.
+[[nodiscard]] core::Result<std::string> writeDefaultRules(std::string_view path);
 
 // A path given as UTF-8 text, as the filesystem takes it on every platform
 // (on Windows a narrow std::filesystem::path would read it in the ANSI code
@@ -92,6 +134,50 @@ struct ExportFiles {
 // every session, and two projects of one name do not collide.
 [[nodiscard]] std::string guidNamespaceFor(std::string_view projectName,
                                            std::string_view createdUtc);
+
+// ---- replies ------------------------------------------------------------------------
+//
+// What EXPORT, IMPORT and INFO answer, as key=value records one a line
+// (core::replyQuoted, docs/ifc.md "Replies"), the same from katana_cli, the
+// window's command line and a dialog:
+//
+//   ifc exported file="site.ifc" schema=IFC4X3_ADD2 instances=1097 bytes=82914
+//     (PREVIEW: "ifc previewed", and no bytes)
+//   counts alignments=1 services=4 segments=10 segments_3d=6 located_points=14
+//          entities_written=5 entities_skipped=0 surfaces=0
+//   class name=IfcKerb count=1                      one a class written
+//   object from="layer Survey/Kerb" count=1 class=IfcKerb predefined=NOTDEFINED
+//          object_type="" system="" why="rule kerb" one a ClassTally
+//   warning text="..."
+//
+//   ifc imported file="site.ifc" schema=IFC4X3_ADD2 crs=EPSG:7856 entities=29
+//          alignments=1 surfaces=0 objects=29 drawn=29 as_points=0
+//          alignments_as_polylines=0
+//   ifc described ...                               INFO: the same, and
+//   alignment name="MC01" pis=4 pvis=4              one a reconstructed alignment
+//   surface name="Terrain" triangles=2
+//   extent min_x=... min_y=... max_x=... max_y=...  metres, to the millimetre
+//
+// A front end adds its own records after them: "note text=..." for what it
+// did or says to do (the coordinate system, a shift).
+
+[[nodiscard]] std::string formatExportReply(const IfcExport& report, std::string_view fileName,
+                                            bool preview);
+// An import's reply is written after importCommand, whose renames are among
+// the warnings; `entities` is how many it brought, counted before the
+// command moved them out.
+[[nodiscard]] std::string formatImportReply(const IfcImport& imported, std::string_view fileName,
+                                            std::size_t entities);
+[[nodiscard]] std::string formatDescription(const IfcImport& read, std::string_view fileName);
+// "note text=..." and "warning text=...".
+[[nodiscard]] std::string noteRecord(std::string_view text);
+[[nodiscard]] std::string warningRecord(std::string_view text);
+
+// The object records of an EXPORT reply as the tally they were written from:
+// the one reader of what formatExportReply writes, which File > Export IFC's
+// table is filled from. Other records are passed over; ParseFailure naming
+// the line for an object record that does not read.
+[[nodiscard]] core::Result<std::vector<ClassTally>> readExportObjects(std::string_view reply);
 
 // `when` as the header's time stamp, ISO 8601 in UTC to the second:
 // "2026-09-25T16:01:09". The writer reads no clock (Rule 7); the caller

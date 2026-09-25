@@ -340,4 +340,15 @@ std::size_t characterCount(std::string_view utf8)
     return count;
 }
 
+std::string clipCharacters(std::string_view utf8, std::size_t limit)
+{
+    std::size_t count = 0;
+    std::size_t at = 0;
+    while (at < utf8.size() && count < limit) {
+        nextCodePoint(utf8, at);
+        ++count;
+    }
+    return std::string(utf8.substr(0, at));
+}
+
 } // namespace katana::ifc

@@ -387,20 +387,30 @@ Id Builder::productShape(const std::vector<Id>& representations)
     return file_.add("IfcProductDefinitionShape", Args().null().null().refs(representations));
 }
 
+std::string Builder::label(std::string_view text, std::string_view what)
+{
+    if (characterCount(text) <= kLabelLimit) {
+        return std::string(text);
+    }
+    warn(std::string(what) + " is longer than the 255 characters IFC allows it and is cut there");
+    return clipCharacters(text, kLabelLimit);
+}
+
 Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_view name,
                     std::string_view description, Id representation, std::string_view tag)
 {
     const ProductLayout layout = productLayout(ifcClass.entity);
+    const std::string of = ifcClass.entity + " " + std::string(key);
     Args args;
     args.string(guid(key))
         .null()
-        .stringOrNull(name)
+        .stringOrNull(label(name, of + ": its name"))
         .stringOrNull(description)
-        .stringOrNull(ifcClass.objectType)
+        .stringOrNull(label(ifcClass.objectType, of + ": its object type"))
         .ref(elementPlacement_)
         .refOrNull(representation);
     if (layout.hasTag) {
-        args.stringOrNull(tag);
+        args.stringOrNull(label(tag, of + ": its tag"));
     }
     if (layout.hasPredefinedType) {
         args.enumerationOrNull(ifcClass.predefinedType);

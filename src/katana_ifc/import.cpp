@@ -1758,7 +1758,7 @@ class Reader {
             if (!valid) {
                 continue;
             }
-            // Either way round, as the 12d import takes a triangle.
+            // Either way round, as the .12da import takes a triangle.
             const auto& a = vertices[t[0]];
             const auto& b = vertices[t[1]];
             const auto& c = vertices[t[2]];

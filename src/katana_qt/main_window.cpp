@@ -851,11 +851,14 @@ void MainWindow::buildActions()
         // because katana_cad may not see what they read and write.
         logMessage(
             "Window    IMPORT <file>, EXPORT <file>, INFO <file>  by extension, as File > Import\n"
-            "          and Export do: DXF, IFC, 12d archives, GIS vector and raster data, point\n"
+            "          and Export do: DXF, IFC, .12da archives, GIS vector and raster data, point\n"
             "          clouds\n"
-            "          IMPORT <file.ifc> [LOCAL]\n"
+            "          IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]\n"
+            "          [TOLERANCE <m>] [TAKECRS | KEEPCRS]\n"
             "          EXPORT <file.ifc> [UTILITIES <schedule.csv>] [SCHEMA <schema.csv>]\n"
-            "          [RULES <rules.csv>] [SPACING <m>] [NODRAWING]  IFC 4.3 (docs/ifc.md)\n"
+            "          [RULES <rules.csv>] [SPACING <m>] [NODRAWING] [NOENTITIES] [SELECTED]\n"
+            "          [NOALIGNMENTS] [NOSURFACES] [PREVIEW]  IFC 4.3 (docs/ifc.md)\n"
+            "          INFO <file.ifc>, IFC RULES <file.csv>\n"
             "          REFS, CUSTOMISE [REPLACE] <file>..., ZOOM, GRID [ON|OFF], SNAP [ON|OFF],\n"
             "          QUIT");
     });
@@ -2082,11 +2085,11 @@ void MainWindow::runCommandLine()
     // front ends, not the CommandInterpreter, because katana_cad may not see
     // GDAL or PDAL (tools/check_layering.cmake). The argument is the rest of
     // the line, one layer of quotes removed, so a path may hold spaces.
-    // A .ifc takes the verbs' options (LOCAL, UTILITIES, SCHEMA, RULES,
-    // SPACING, NODRAWING) exactly as katana_cli reads them, so its line is
-    // split by that grammar before the generic one takes the rest as a path.
-    if ((verb == "IMPORT" || verb == "EXPORT") &&
-        runIfcLine(verb, line.mid(words.front().size()))) {
+    // A .ifc takes the verbs' options exactly as katana_cli reads them
+    // (ifc/front_end.hpp), so its line is split by that grammar before the
+    // generic one takes the rest as a path; IFC RULES is IFC's alone.
+    if ((verb == "IMPORT" || verb == "EXPORT" || verb == "INFO" || verb == "IFC") &&
+        runIfcLine(verb, line.mid(words.front().size())).has_value()) {
         return;
     }
     if (verb == "IMPORT" || verb == "EXPORT" || verb == "INFO") {
@@ -2102,12 +2105,6 @@ void MainWindow::runCommandLine()
             importPath(path);
         } else if (verb == "EXPORT") {
             (void)exportDrawingTo(toPath(path), {});
-        } else if (katana::ifc::isIfcPath(toPath(path))) {
-            if (auto described = describeIfcFile(toPath(path))) {
-                logMessage(*described);
-            } else {
-                logMessage(QString::fromStdString(described.error().describe()), true);
-            }
         } else if (auto description = interop::describeSource(toPath(path))) {
             logMessage(QString::fromStdString(interop::formatDescription(*description)).trimmed());
         } else {
@@ -2443,9 +2440,14 @@ void MainWindow::importPath(const QString& path)
 {
     const std::filesystem::path file = toPath(path);
     if (katana::ifc::isIfcPath(file)) {
-        IfcImportRequest request;
-        request.arguments.path = path.toStdString();
-        (void)importIfcFile(request);
+        // As the line it is: echoed, and answered as a typed one is.
+        katana::ifc::ImportArguments arguments;
+        arguments.path = path.toStdString();
+        if (const auto line = katana::ifc::formatImportLine(arguments)) {
+            (void)runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu);
+        } else {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+        }
         return;
     }
     if (katana::dxf::isDxfPath(file)) {
@@ -2764,9 +2766,13 @@ void MainWindow::importFile()
     }
     const std::filesystem::path path = toPath(selected);
     if (katana::ifc::isIfcPath(path)) {
-        IfcImportRequest request;
-        request.arguments.path = selected.toStdString();
-        (void)importIfcFile(request);
+        katana::ifc::ImportArguments arguments;
+        arguments.path = selected.toStdString();
+        if (const auto line = katana::ifc::formatImportLine(arguments)) {
+            (void)runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu);
+        } else {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+        }
         return;
     }
     if (katana::dxf::isDxfPath(path)) {
@@ -3211,12 +3217,17 @@ bool MainWindow::exportDrawingTo(const std::filesystem::path& path,
 {
     if (katana::ifc::isIfcPath(path)) {
         // The typed EXPORT's defaults: everything, or the entities asked for
-        // (the selection, which is where they come from).
-        IfcExportRequest request;
+        // (the selection, which is where they come from) - as its line.
+        katana::ifc::ExportArguments arguments;
         const auto name = path.u8string();
-        request.arguments.path.assign(name.begin(), name.end());
-        request.selectedOnly = !options.entities.empty();
-        return exportIfcFile(request, true).ok();
+        arguments.path.assign(name.begin(), name.end());
+        arguments.selected = !options.entities.empty();
+        const auto line = katana::ifc::formatExportLine(arguments);
+        if (!line) {
+            logMessage(QString::fromStdString(line.error().describe()), true);
+            return false;
+        }
+        return runIfcCommand(QString::fromStdString(*line), IfcLineFrom::Menu).ok();
     }
     if (katana::dxf::isDxfPath(path)) {
         return exportDxfFile(path, options);

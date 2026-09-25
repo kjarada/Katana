@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace katana::core {
@@ -77,5 +78,31 @@ namespace katana::core {
 // Non-finite values are written as from_chars would ("inf", "nan"), which
 // parseFiniteDouble refuses; an exporter should not be handed one.
 [[nodiscard]] std::string formatExactReal(double value);
+
+// ---- key=value replies ---------------------------------------------------------
+//
+// A verb's reply is records, one a line: leading words, then key=value fields
+// ("line id=W1 type=water length=30.024"), so a script or an agent reads what
+// happened (docs/cad.md). A value that is text goes through replyQuoted, and
+// readReplyRecord reads a line back - one writer and one reader, here, for
+// every verb whose reply is read by something other than a person.
+
+// A text value in a reply: in double quotes, a line break written "\n", a
+// backslash "\\" and a double quote "\"", so the reply stays one fact a
+// line and reads back unambiguously.
+[[nodiscard]] std::string replyQuoted(std::string_view text);
+
+struct ReplyRecord {
+    std::vector<std::string> words;                          // before the first key=value
+    std::vector<std::pair<std::string, std::string>> fields; // in order, values unquoted
+
+    // The value of `key`, the first if it is given twice; nullopt when absent.
+    [[nodiscard]] std::optional<std::string> value(std::string_view key) const;
+};
+
+// One line of a reply read back: its leading words and its fields, a quoted
+// value unescaped. nullopt for a line that is not a record - blank, a quote
+// never closed, a word after the first field, a field with no key.
+[[nodiscard]] std::optional<ReplyRecord> readReplyRecord(std::string_view line);
 
 } // namespace katana::core

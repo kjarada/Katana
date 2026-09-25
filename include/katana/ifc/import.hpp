@@ -36,7 +36,7 @@
 // Every entity keeps what it was: `ifc.class`, `ifc.globalId`, `ifc.name`,
 // `ifc.predefinedType`, `ifc.tag` and the source file in its metadata; its
 // property sets and quantities as properties named "<set>/<property>" (the
-// way a 12d attribute group flattens), its classifications as
+// way a .12da attribute group flattens), its classifications as
 // "Classification/<system>", the distribution system it serves as "System";
 // its presentation layer as its layer, and its colour. What Katana itself
 // wrote - Katana_Attributes and Katana_Provenance - goes back where it came
@@ -72,8 +72,8 @@
 namespace katana::ifc {
 
 // How far a reconstructed alignment may stand from the geometry the file
-// states before the reconstruction is refused: the tolerance the 12d
-// archive import checks its reconstructions to (docs/interop.md,
+// states before the reconstruction is refused: the tolerance the .12da
+// import checks its reconstructions to (docs/interop.md,
 // "Alignments"), for the same reason.
 inline constexpr double kAlignmentTolerance = 0.010;
 

@@ -57,5 +57,8 @@ namespace katana::ifc {
 // How many characters `utf8` has, for the IfcLabel and IfcIdentifier limit
 // of 255 (the schema's STRING(255) counts characters, not bytes).
 [[nodiscard]] std::size_t characterCount(std::string_view utf8);
+// The longest start of `utf8` that is at most `limit` characters, cut
+// between code points so that what is left is still valid UTF-8.
+[[nodiscard]] std::string clipCharacters(std::string_view utf8, std::size_t limit);
 
 } // namespace katana::ifc

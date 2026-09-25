@@ -13,7 +13,7 @@
 // Two sources decide it:
 //
 //   * A SERVICE from an AS 5488 schedule (survey/subsurface): its type - the
-//     AS 5488.2 Table A.4 asset type the TfNSW Utility Schema codes as
+//     AS 5488.2 Table A.4 asset type a delivery schema codes as
 //     AssetTypeCode - gives the distribution system and the default segment
 //     class, and the words of its AssetFeature, AssetSubtype, configuration,
 //     material and description refine the class: a "Conduit (with Cable)" is
@@ -22,7 +22,8 @@
 //     when its feature says which.
 //
 //   * A DRAWING ENTITY: an ordered list of rules over the words of its layer
-//     path, its survey code and its 12d string name - "KERB" is an IfcKerb,
+//     path, its survey code and its string name (from a .12da archive) -
+//     "KERB" is an IfcKerb,
 //     "FENCE" an IfcRailing FENCE, a point on a "SEWER PITS" layer an
 //     IfcDistributionChamberElement in the SEWAGE system. The first rule that
 //     matches wins; the rules are data (ClassificationRule), so a project
@@ -50,7 +51,7 @@ struct IfcClass {
     friend bool operator==(const IfcClass&, const IfcClass&) = default;
 };
 
-// ---- services (AS 5488 / TfNSW) ----------------------------------------------
+// ---- services (AS 5488) -----------------------------------------------------
 
 struct UtilityClass {
     IfcClass element;             // a run's segments, or a point feature
@@ -93,8 +94,8 @@ struct UtilityClass {
 [[nodiscard]] std::optional<UtilityClass>
 classifyUtilityPoint(const survey::subsurface::UtilityAttributes& service);
 
-// The one-letter asset type code of AS 5488.2 Table A.4 that the TfNSW
-// Utility Schema's AssetTypeCode takes (C D E F G I P S W N), for a type the
+// The one-letter asset type code of AS 5488.2 Table A.4 that a delivery
+// schema's AssetTypeCode takes (C D E F G I P S W N), for a type the
 // table lists; empty for recycled water and "other", which it does not.
 [[nodiscard]] std::string_view assetTypeCode(survey::subsurface::UtilityType type);
 
@@ -117,6 +118,8 @@ struct ClassificationRule {
     // service words of the same text (serviceSystemFor), so a pit on a
     // "STORMWATER PITS" layer is in STORMWATER without a rule per service.
     std::string system;
+
+    friend bool operator==(const ClassificationRule&, const ClassificationRule&) = default;
 };
 
 // Services first (a "SEWER" polyline is a pipe, whatever else its layer
