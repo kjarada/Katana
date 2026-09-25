@@ -55,6 +55,7 @@ bool showsTheDrawing(const Sheet& sheet)
         switch (viewport.kind) {
         case ViewportKind::Notes:
         case ViewportKind::Image:
+        case ViewportKind::Revisions: // the set's revisions, in the key already
             return false;
         case ViewportKind::Plan:
         case ViewportKind::LongSection:
@@ -62,9 +63,19 @@ bool showsTheDrawing(const Sheet& sheet)
         case ViewportKind::Model3D:
         case ViewportKind::Legend:
         case ViewportKind::KeyPlan:
+        case ViewportKind::SheetIndex: // an automatic plan's scale is the drawing's
             return true;
         }
         return true;
+    });
+}
+
+bool showsTheOtherSheets(const Sheet& sheet)
+{
+    return std::ranges::any_of(sheet.viewports, [](const plotting::Viewport& viewport) {
+        return viewport.kind == ViewportKind::SheetIndex || viewport.kind == ViewportKind::KeyPlan ||
+               (viewport.kind == ViewportKind::Legend &&
+                viewport.legendScope == plotting::LegendScope::WholeSet);
     });
 }
 
@@ -78,7 +89,8 @@ bool SheetThumbnails::matches(const Key& key, const SheetSet& set, std::size_t i
            key.defaults == set.defaults && key.numbering == set.numbering &&
            key.revisions == set.revisions && key.fields == fieldsText(source.fields) &&
            key.markLabels == markLabelsText(set, sheet) &&
-           (!showsTheDrawing(sheet) || key.revision == source.revision);
+           (!showsTheDrawing(sheet) || key.revision == source.revision) &&
+           (!showsTheOtherSheets(sheet) || key.sheets == set.sheets);
 }
 
 bool SheetThumbnails::isStale(const SheetSet& set, std::size_t index, const SheetSource& source) const
@@ -154,6 +166,9 @@ QImage SheetThumbnails::thumbnail(const SheetSet& set, std::size_t index, const 
     key.revision = source.revision;
     key.pixelRatio = pixelRatio;
     key.markLabels = markLabelsText(set, sheet);
+    if (showsTheOtherSheets(sheet)) {
+        key.sheets = set.sheets;
+    }
     entries_.insert_or_assign(sheet.id, Entry{std::move(key), image});
     return image;
 }

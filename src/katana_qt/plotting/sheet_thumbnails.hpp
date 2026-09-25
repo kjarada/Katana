@@ -9,7 +9,9 @@
 //   the numbers its match lines and key plan print, overridden or not), the
 //   order of the sheets,
 //   the title-block values the sheets share, the project's field values, and
-//   - only for a sheet that shows the drawing - the drawing's revision.
+//   - only for a sheet that shows the drawing - the drawing's revision,
+//   - only for a sheet that shows the other sheets (a drawing register, a
+//     key plan, a legend of the whole set) - every sheet.
 //
 // So a sheet of notes is not painted again because a line was drawn, and a
 // set of a hundred sheets costs one paint for the sheet that was edited. The
@@ -80,6 +82,9 @@ class SheetThumbnails {
         // the number of the sheet they lead to, which that sheet's own
         // sheet_number override can change.
         std::string markLabels;
+        // Every sheet, for a sheet that lists or outlines the others
+        // (showsTheOtherSheets); empty for the rest.
+        std::vector<katana::cad::plotting::Sheet> sheets;
     };
     struct Entry {
         Key key;
@@ -99,5 +104,9 @@ class SheetThumbnails {
 // snapshot, a legend of the layers it draws), so its picture goes stale with
 // the drawing.
 [[nodiscard]] bool showsTheDrawing(const katana::cad::plotting::Sheet& sheet);
+// Whether any viewport of `sheet` shows what the other sheets hold: a drawing
+// register (their names, scales, papers), a key plan (their plans' outlines),
+// a legend of the whole set (what their plans show).
+[[nodiscard]] bool showsTheOtherSheets(const katana::cad::plotting::Sheet& sheet);
 
 } // namespace katana::qt

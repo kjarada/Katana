@@ -1084,6 +1084,35 @@ TEST(SheetEditorEditing, APictureGoesStaleWhenAnotherSheetsNumberItsMatchLinePri
     EXPECT_TRUE(thumbnails.isStale(set, 0, source));
 }
 
+// A drawing register lists the other sheets, so renaming one of them changes
+// its picture; a sheet of notes does not list them, so it keeps its picture.
+TEST(SheetEditorEditing, ARegistersPictureGoesStaleWhenAnotherSheetIsRenamed)
+{
+    plotting::SheetSet set = twoSheets();
+    plotting::Viewport table;
+    table.id = "vp90";
+    table.kind = plotting::ViewportKind::SheetIndex;
+    table.rect = box(30.0, 40.0, 200.0, 150.0);
+    set.sheets[0].viewports = {table};
+    plotting::Viewport notes;
+    notes.id = "vp91";
+    notes.kind = plotting::ViewportKind::Notes;
+    notes.rect = table.rect;
+    notes.text = "NOTES";
+    set.sheets[1].viewports = {notes};
+    EXPECT_TRUE(katana::qt::showsTheOtherSheets(set.sheets[0]));
+    EXPECT_FALSE(katana::qt::showsTheOtherSheets(set.sheets[1]));
+    katana::qt::SheetThumbnails thumbnails;
+    const SheetSource source;
+    (void)thumbnails.thumbnail(set, 0, source);
+    (void)thumbnails.thumbnail(set, 1, source);
+    set.sheets[1].name = "RENAMED";
+    EXPECT_TRUE(thumbnails.isStale(set, 0, source)) << "the register lists the new name";
+    (void)thumbnails.thumbnail(set, 1, source);
+    set.sheets[0].viewports[0].title = "DRAWINGS";
+    EXPECT_FALSE(thumbnails.isStale(set, 1, source)) << "the notes list no other sheet";
+}
+
 TEST(SheetEditorEditing, PicturesGoStaleOnUndoAndOnATitleBlockEdit)
 {
     Document document;
