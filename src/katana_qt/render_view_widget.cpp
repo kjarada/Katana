@@ -4,14 +4,21 @@
 #include "view_focus.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <vector>
 
 #include <QKeyEvent>
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QTimer>
 #include <QWheelEvent>
+
+#if defined(KATANA_HAS_GPU)
+#include "gpu/gpu_scene_view.hpp"
+#endif
 
 namespace katana::qt {
 
@@ -27,7 +34,45 @@ constexpr double kZoomPerNotch = 1.15;
 // The ground behind the model, and behind the empty view's message.
 const QColor kBackground(28, 30, 36);
 
+#if defined(KATANA_HAS_GPU)
+// Rule 4 of gpu::chooseRenderer: a GPU view that failed once is not tried
+// again behind the user's back, in this view or any other of the session.
+// The GUI thread's alone, as every widget is.
+bool gpuFailedThisSession = false;
+
+// The layers in cad::renderLayers' order, with its depth rules (scene.hpp:
+// the grid and the edges test depth and write none).
+constexpr std::size_t kGridLayer = 0;
+constexpr std::size_t kEdgesLayer = 2;
+constexpr std::size_t kEntitiesLayer = 3;
+constexpr std::size_t kSelectionLayer = 4;
+#endif
+
 } // namespace
+
+// Paints the legend and the empty message over the GPU view, which covers
+// the widget and so hides anything the widget paints itself. QRhiWidget
+// composes the widgets above it, so a transparent one on top shows. It takes
+// no input: the GPU view under it has the mouse.
+class RenderViewWidget::Overlay final : public QWidget {
+  public:
+    explicit Overlay(RenderViewWidget& owner) : QWidget(&owner), owner_(owner)
+    {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setAttribute(Qt::WA_NoSystemBackground);
+        setFocusPolicy(Qt::NoFocus);
+    }
+
+  protected:
+    void paintEvent(QPaintEvent* /*event*/) override
+    {
+        QPainter painter(this);
+        owner_.paintOverlays(painter);
+    }
+
+  private:
+    RenderViewWidget& owner_;
+};
 
 RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& state,
                                    QWidget* parent)
@@ -52,6 +97,219 @@ RenderViewWidget::RenderViewWidget(ViewContext context, katana::cad::ViewState& 
             onActivated();
         }
     });
+    makeGpuView();
+}
+
+double RenderViewWidget::sceneScale() const { return gpuView_ != nullptr ? 1.0 : pixelRatio(); }
+
+void RenderViewWidget::requestFrame()
+{
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        gpuView_->update();
+        if (overlay_ != nullptr) {
+            overlay_->update();
+        }
+        return;
+    }
+#endif
+    update();
+}
+
+void RenderViewWidget::makeGpuView()
+{
+#if defined(KATANA_HAS_GPU)
+    gpu::RendererDecision decision;
+    auto view = gpu::makeGpuSceneViewIfChosen(
+        camera(), gpu::currentRendererEnvironment(false, gpuFailedThisSession), &decision, this);
+    rendererReason_ = QString::fromStdString(decision.reason);
+    if (!view) {
+        return;
+    }
+    gpuView_ = view.release(); // a child of this widget: Qt owns it from here
+    gpuView_->setGeometry(rect());
+    // The software view's own test (the constructor): a camera already framed
+    // for this kind of view is kept through the first frame.
+    gpuView_->setCameraFramed(framed_);
+    gpuView_->setOrbitAllowed(state_.kind != katana::cad::ViewKind::Elevation);
+    gpuView_->installEventFilter(this);
+    // Focus given to this view reaches the GPU view, which has the keys; and
+    // focus arriving there activates the view as it does this widget
+    // (view_focus.hpp, which matches the exact widget focused).
+    setFocusProxy(gpuView_);
+    activateOnFocus(*gpuView_, [this] {
+        if (onActivated) {
+            onActivated();
+        }
+    });
+    gpuView_->onActivated = [this] {
+        if (onActivated) {
+            onActivated();
+        }
+    };
+    // The host frames: it knows what "the scene" is, and frames what it built.
+    gpuView_->onZoomExtents = [this] { zoomExtents(); };
+    gpuView_->onPrepareFrame = [this](katana::render::Camera& frameCamera) {
+        prepareGpuFrame(frameCamera);
+    };
+    gpuView_->onFrameStats = [this](const QString& text) {
+        if (!onFrameStats) {
+            return;
+        }
+        QString line = QString("%1  %2")
+                           .arg(QString::fromLatin1(katana::cad::toString(state_.kind)), text);
+        if (rebuiltSinceStats_) {
+            line += QString(" (scene %1 ms)").arg(lastBuildMs_, 0, 'f', 1);
+            rebuiltSinceStats_ = false;
+        }
+        onFrameStats(line);
+    };
+    gpuView_->onRenderFailed = [this](const QString& why) {
+        gpuFailedThisSession = true;
+        // Not from inside the failing widget's own call: after it returns.
+        QTimer::singleShot(0, this, [this, why] { dropGpuView(why); });
+    };
+    overlay_ = new Overlay(*this);
+    overlay_->setGeometry(rect());
+    gpuView_->show();
+    overlay_->raise();
+    overlay_->show();
+    // Widths in logical pixels from now on (sceneScale), so the scene is
+    // rebuilt for the GPU on its first frame.
+    terrainDirty_ = entitiesDirty_ = selectionDirty_ = true;
+#endif
+}
+
+void RenderViewWidget::dropGpuView(const QString& reason)
+{
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ == nullptr) {
+        return;
+    }
+    gpuView_->removeEventFilter(this);
+    setFocusProxy(nullptr);
+    gpuView_->hide();
+    gpuView_->deleteLater();
+    gpuView_ = nullptr;
+    delete overlay_;
+    overlay_ = nullptr;
+    rendererReason_ = QStringLiteral("the GPU renderer failed (%1); the software renderer draws")
+                          .arg(reason);
+    if (onStatus) {
+        onStatus(QStringLiteral("3D view: %1").arg(rendererReason_));
+    }
+    // The software view counts the camera in device pixels, and builds widths
+    // for them: rebuildIfNeeded sees the scale change.
+    gpuLayersStale_ = true;
+    update();
+#else
+    (void)reason;
+#endif
+}
+
+bool RenderViewWidget::eventFilter(QObject* watched, QEvent* event)
+{
+#if defined(KATANA_HAS_GPU)
+    if (watched == gpuView_) {
+        switch (event->type()) {
+        case QEvent::MouseButtonPress:
+        case QEvent::Wheel:
+        case QEvent::KeyPress:
+            // The user is moving the camera now, as in mousePressEvent and
+            // wheelEvent: a resize no longer frames the scene again.
+            refitOnResize_ = false;
+            break;
+        default:
+            break;
+        }
+    }
+#endif
+    return QWidget::eventFilter(watched, event);
+}
+
+void RenderViewWidget::prepareGpuFrame(katana::render::Camera& frameCamera)
+{
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ == nullptr) {
+        return;
+    }
+    const bool rebuilt = terrainDirty_ || entitiesDirty_ || selectionDirty_;
+    rebuildIfNeeded();
+    if (rebuilt) {
+        rebuiltSinceStats_ = true;
+        if (overlay_ != nullptr) {
+            overlay_->update(); // the legend and the empty message follow the scene
+        }
+    }
+    // The rebuild may have framed the host's camera (a first scene with
+    // something in it): the frame is drawn through the camera as it is now.
+    const int width = frameCamera.viewportWidth();
+    const int height = frameCamera.viewportHeight();
+    frameCamera = camera();
+    frameCamera.setViewportSize(width, height);
+    gpuView_->setOrbitAllowed(state_.kind != katana::cad::ViewKind::Elevation);
+
+    // As cad::renderLayers: the depth range fitted to what is drawn, every
+    // frame, and the edges faded for how large the triangles are now.
+    katana::math::AABB depthBox = layers_.bounds;
+    depthBox.expand(layers_.grid.bounds());
+    frameCamera.fitDepthRange(depthBox);
+    std::vector<float> applied;
+    applied.reserve(layers_.edgeRuns.size());
+    for (const auto& run : layers_.edgeRuns) {
+        applied.push_back(run.applied);
+    }
+    const bool drawEdges = katana::cad::SceneBuilder::fadeEdges(layers_, frameCamera);
+    bool edgesChanged = drawEdges != gpuEdgesShown_;
+    for (std::size_t i = 0; i < applied.size() && !edgesChanged; ++i) {
+        edgesChanged = applied[i] != layers_.edgeRuns[i].applied;
+    }
+    sendLayersToGpu(drawEdges, edgesChanged);
+#else
+    (void)frameCamera;
+#endif
+}
+
+void RenderViewWidget::sendLayersToGpu(bool drawEdges, bool edgesChanged)
+{
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ == nullptr) {
+        return;
+    }
+    static const katana::render::DrawList kNothing;
+    const katana::render::DrawList& edges = drawEdges ? layers_.edges : kNothing;
+    if (gpuLayersStale_) {
+        const std::array<gpu::LayerSource, 5> layers{{
+            {&layers_.grid, false},
+            {&layers_.terrain, true},
+            {&edges, false},
+            {&layers_.entities, true},
+            {&layers_.selection, true},
+        }};
+        gpuView_->setLayers(layers);
+    } else {
+        // An edit of the drawing over a large surface re-sends the drawing
+        // alone, against the origin the terrain set, as the software view
+        // rebuilds only what changed.
+        if (gpuDrawingStale_) {
+            gpuView_->updateLayer(kGridLayer, layers_.grid);
+            gpuView_->updateLayer(kEntitiesLayer, layers_.entities);
+        }
+        if (gpuDrawingStale_ || gpuSelectionStale_) {
+            gpuView_->updateLayer(kSelectionLayer, layers_.selection);
+        }
+        if (edgesChanged) {
+            gpuView_->updateLayer(kEdgesLayer, edges);
+        }
+    }
+    gpuLayersStale_ = false;
+    gpuDrawingStale_ = false;
+    gpuSelectionStale_ = false;
+    gpuEdgesShown_ = drawEdges;
+#else
+    (void)drawEdges;
+    (void)edgesChanged;
+#endif
 }
 
 void RenderViewWidget::setContext(const ViewContext& context)
@@ -91,7 +349,7 @@ void RenderViewWidget::documentChanged()
         entitiesDirty_ = true;
     }
     selectionDirty_ = true;
-    update();
+    requestFrame();
 }
 
 void RenderViewWidget::invalidateScene()
@@ -99,19 +357,19 @@ void RenderViewWidget::invalidateScene()
     terrainDirty_ = true;
     entitiesDirty_ = true;
     selectionDirty_ = true;
-    update();
+    requestFrame();
 }
 
 void RenderViewWidget::setStandardView(katana::render::StandardView view)
 {
     camera().setStandardView(view);
-    update();
+    requestFrame();
 }
 
 void RenderViewWidget::setProjection(katana::render::Projection projection)
 {
     camera().setProjection(projection);
-    update();
+    requestFrame();
 }
 
 void RenderViewWidget::setVerticalExaggeration(double factor)
@@ -138,8 +396,9 @@ void RenderViewWidget::rebuildIfNeeded()
     if (context_.document == nullptr) {
         return;
     }
-    // Line widths and point sizes follow the display the view is on.
-    const auto ratio = static_cast<float>(pixelRatio());
+    // Line widths and point sizes follow the display the view is on - for
+    // the software framebuffer; the GPU view scales logical ones itself.
+    const auto ratio = static_cast<float>(sceneScale());
     if (ratio != context_.options.pixelScale) {
         context_.options.pixelScale = ratio;
         terrainDirty_ = entitiesDirty_ = selectionDirty_ = true;
@@ -152,6 +411,7 @@ void RenderViewWidget::rebuildIfNeeded()
     // terrain and takes its datum from it, the grid stands on that datum and
     // spans the bounds of both.
     const bool gridDirty = terrainDirty_ || entitiesDirty_;
+    const bool terrainRebuilt = terrainDirty_;
     if (terrainDirty_) {
         builder_.buildTerrain(surfaces(), meshes(), context_.options, layers_);
         ++terrainBuilds_;
@@ -169,6 +429,14 @@ void RenderViewWidget::rebuildIfNeeded()
     }
     if (gridDirty) {
         builder_.buildGrid(context_.options, layers_);
+    }
+    // What the GPU view must be given at its next frame (prepareGpuFrame).
+    if (terrainRebuilt) {
+        gpuLayersStale_ = true;
+    } else if (gridDirty) {
+        gpuDrawingStale_ = true;
+    } else {
+        gpuSelectionStale_ = true;
     }
     terrainDirty_ = entitiesDirty_ = selectionDirty_ = false;
     lastBuildMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
@@ -191,6 +459,12 @@ void RenderViewWidget::zoomExtents()
     // anyway before the next paint.
     framedEmpty_ = false; // so the rebuild below does not frame again
     rebuildIfNeeded();
+    // The GPU view frames through this: it is given the scene now, so that
+    // what it frames is what it will draw (GpuSceneView::frameScene). Its
+    // first frame fades the edges; until then they are drawn as built.
+    if (gpuLayersStale_ || gpuDrawingStale_ || gpuSelectionStale_) {
+        sendLayersToGpu(gpuLayersStale_ || gpuEdgesShown_, false);
+    }
     auto box = layers_.bounds;
     framedEmpty_ = box.empty() || sceneEmpty_;
     if (framedEmpty_) {
@@ -209,7 +483,7 @@ void RenderViewWidget::zoomExtents()
     // Only a frame of something drawn is worth keeping for the next widget:
     // one of the empty ground is replaced by the first real frame anyway.
     state_.cameraFramed = !framedEmpty_;
-    update();
+    requestFrame();
 }
 
 double RenderViewWidget::pixelRatio() const
@@ -243,6 +517,20 @@ bool RenderViewWidget::resizeTarget()
 void RenderViewWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+#if defined(KATANA_HAS_GPU)
+    if (gpuView_ != nullptr) {
+        gpuView_->setGeometry(rect());
+        if (overlay_ != nullptr) {
+            overlay_->setGeometry(rect());
+        }
+        // Framed again at the GPU view's next frame, once it has the new size
+        // - framing now would fit the aspect it had.
+        if (framed_ && refitOnResize_ && context_.document != nullptr) {
+            gpuView_->setCameraFramed(false);
+        }
+        return;
+    }
+#endif
     if (!resizeTarget()) {
         return;
     }
@@ -256,6 +544,9 @@ void RenderViewWidget::resizeEvent(QResizeEvent* event)
 
 void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
 {
+    if (gpuView_ != nullptr) {
+        return; // the GPU view covers the widget and draws the frame
+    }
     const auto started = std::chrono::steady_clock::now();
     QPainter painter(this);
     emptyMessageShown_ = false;
@@ -301,15 +592,7 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
                  QImage::Format_ARGB32);
     image.setDevicePixelRatio(pixelRatio());
     painter.drawImage(0, 0, image);
-    drawLegend(painter);
-    // Only for a drawing with nothing in it. A scene of the grid alone is
-    // also what a drawing whose every layer is hidden - in the document or in
-    // this view - builds, and telling that user to draw or import something
-    // would be wrong; the plan view says nothing then either
-    // (ViewportWidget::drawEmptyHint).
-    if (sceneEmpty_ && drawingIsEmpty()) {
-        emptyMessageShown_ = drawEmptyMessage(painter);
-    }
+    paintOverlays(painter);
 
     lastFrameMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                              started)
@@ -325,6 +608,20 @@ void RenderViewWidget::paintEvent(QPaintEvent* /*event*/)
             text += QString(" (scene %1 ms)").arg(lastBuildMs_, 0, 'f', 1);
         }
         onFrameStats(text);
+    }
+}
+
+void RenderViewWidget::paintOverlays(QPainter& painter)
+{
+    emptyMessageShown_ = false;
+    drawLegend(painter);
+    // Only for a drawing with nothing in it. A scene of the grid alone is
+    // also what a drawing whose every layer is hidden - in the document or in
+    // this view - builds, and telling that user to draw or import something
+    // would be wrong; the plan view says nothing then either
+    // (ViewportWidget::drawEmptyHint).
+    if (sceneEmpty_ && drawingIsEmpty()) {
+        emptyMessageShown_ = drawEmptyMessage(painter);
     }
 }
 

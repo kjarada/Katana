@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <cstring>
 
+#include <QGuiApplication>
 #include <rhi/qrhi.h>
+#if defined(KATANA_GPU_VULKAN)
+#include <QVulkanInstance>
+#endif
 
 namespace katana::qt::gpu {
 
@@ -15,14 +19,19 @@ const char* toString(GpuDevice device)
     switch (device) {
     case GpuDevice::Hardware:
         return "hardware";
-    case GpuDevice::Warp:
-        return "WARP";
+    case GpuDevice::Software:
+        return "software";
     }
     return "unknown";
 }
 
 struct OffscreenGpu::Parts {
-    // Declared first so it is destroyed LAST: every resource below belongs to it.
+#if defined(KATANA_GPU_VULKAN)
+    // Before the QRhi, so it is destroyed after it: the device is made from it.
+    std::unique_ptr<QVulkanInstance> vulkan;
+#endif
+    // Declared before the resources so it is destroyed after them: every
+    // resource below belongs to it.
     std::unique_ptr<QRhi> rhi;
     int width = 0;
     int height = 0;
@@ -59,25 +68,52 @@ OffscreenGpu::create(int width, int height, const OffscreenOptions& options)
     p.width = width;
     p.height = height;
 
-#ifdef Q_OS_WIN
-    QRhiD3D11InitParams params;
     QRhi::Flags flags;
-    if (options.device == GpuDevice::Warp) {
+    if (options.device == GpuDevice::Software) {
         flags |= QRhi::PreferSoftwareRenderer;
     }
     if (options.timestamps) {
         flags |= QRhi::EnableTimestamps;
     }
+#if defined(KATANA_GPU_D3D11)
+    const char* const api = "Direct3D 11";
+    QRhiD3D11InitParams params;
     p.rhi.reset(QRhi::create(QRhi::D3D11, &params, flags));
+#elif defined(KATANA_GPU_VULKAN)
+    const char* const api = "Vulkan";
+    // A platform without Vulkan - Qt's offscreen one, where ordinary Katana
+    // tests run - cannot make an instance; that is no device, not a failure.
+    p.vulkan = std::make_unique<QVulkanInstance>();
+    p.vulkan->setExtensions(QRhiVulkanInitParams::preferredInstanceExtensions());
+    if (!p.vulkan->create()) {
+        return makeError(ErrorCode::Unsupported,
+                         "no Vulkan instance on the '" +
+                             QGuiApplication::platformName().toStdString() +
+                             "' platform (the GPU tests run on xcb, under Xvfb when there is "
+                             "no display)");
+    }
+    QRhiVulkanInitParams params;
+    params.inst = p.vulkan.get();
+    p.rhi.reset(QRhi::create(QRhi::Vulkan, &params, flags));
 #endif
     if (!p.rhi) {
         return makeError(ErrorCode::Unsupported,
-                         std::string("no Direct3D 11 device (") + toString(options.device) + ")");
+                         std::string("no ") + api + " device (" + toString(options.device) + ")");
     }
-    if (options.device == GpuDevice::Hardware &&
-        p.rhi->driverInfo().deviceType == QRhiDriverInfo::CpuDevice) {
-        // Asked for the GPU and given WARP: say so rather than measure the wrong thing.
-        return makeError(ErrorCode::Unsupported, "only a software Direct3D 11 device is available");
+    const bool cpuDevice = p.rhi->driverInfo().deviceType == QRhiDriverInfo::CpuDevice;
+    if (options.device == GpuDevice::Hardware && cpuDevice) {
+        // Asked for the GPU and given a software device: say so rather than
+        // measure the wrong thing.
+        return makeError(ErrorCode::Unsupported,
+                         std::string("only a software ") + api + " device is available");
+    }
+    if (options.device == GpuDevice::Software && !cpuDevice) {
+        // PreferSoftwareRenderer is a preference: without lavapipe installed
+        // Vulkan hands over the GPU, and the software run would repeat the
+        // hardware one under the other name.
+        return makeError(ErrorCode::Unsupported,
+                         std::string("no software ") + api + " device (" +
+                             p.rhi->driverInfo().deviceName.toStdString() + " is hardware)");
     }
 
     const QList<int> counts = p.rhi->supportedSampleCounts();
@@ -122,7 +158,7 @@ OffscreenGpu::create(int width, int height, const OffscreenOptions& options)
     if (auto status = p.renderer.initialise(p.rhi.get(), p.pass.get(), p.sampleCount,
                                              options.shaders != nullptr
                                                  ? *options.shaders
-                                                 : compiledHlslShaders(),
+                                                 : defaultShaders(),
                                              options.expansion);
         !status) {
         return status.error();

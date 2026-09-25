@@ -26,8 +26,11 @@
 //                     skipped without it. docs/gpu.md records the owner's
 //                     'Test 4 with Tin.12da'.
 //
-// The GPU cases skip when there is no Direct3D 11 hardware device; WARP is
-// never timed (it is a test device, not a renderer anyone should use).
+// The GPU cases skip when there is no hardware device - Direct3D 11 on
+// Windows, Vulkan on Linux; a software device (WARP, lavapipe) is never
+// timed: it is a test device, not a renderer anyone should use. On Linux,
+// Vulkan needs a platform that can make an instance, so run it on a desktop
+// or under Xvfb: xvfb-run -a katana_gpu_benchmarks.
 
 #include <benchmark/benchmark.h>
 
@@ -46,7 +49,9 @@
 #include <QString>
 
 #include "gpu/offscreen_gpu.hpp"
+#if defined(KATANA_GPU_D3D11)
 #include "gpu/shader_compiler.hpp"
+#endif
 #include "katana/cad/document.hpp"
 #include "katana/cad/scene.hpp"
 #include "katana/commands/command_stack.hpp"
@@ -391,22 +396,30 @@ BENCHMARK(BM_GpuSceneLinesBy)
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
 
-// What a 3D view pays when it starts: a Direct3D 11 device, the render
-// target, and the pipelines. 0: HLSL source, which QRhi compiles for every new
-// device; 1: the default, bytecode compiled once per process
-// (shader_compiler.hpp) - warmed before timing, as a host that precompiles at
-// start-up would have it.
+// What a 3D view pays when it starts: a device, the render target, and the
+// pipelines. 0: HLSL source, which QRhi compiles for every new device
+// (Direct3D 11 only); 1: the default - on Windows bytecode compiled once per
+// process (shader_compiler.hpp), warmed before timing as a host that
+// precompiles at start-up would have it; on Linux the SPIR-V baked at build
+// time.
 void BM_GpuStartUp(benchmark::State& state)
 {
     const bool fromSource = state.range(0) == 0;
     OffscreenOptions options;
     options.device = GpuDevice::Hardware;
+#if defined(KATANA_GPU_D3D11)
     options.shaders = fromSource ? &katana::qt::gpu::runtimeHlslShaders()
                                  : &katana::qt::gpu::compiledHlslShaders();
     if (!fromSource && !katana::qt::gpu::precompileHlslShaders()) {
         state.SkipWithError("the shaders did not compile");
         return;
     }
+#else
+    if (fromSource) {
+        state.SkipWithError("HLSL source is for Direct3D 11; this build draws with Vulkan");
+        return;
+    }
+#endif
     for (auto _ : state) {
         auto gpu = OffscreenGpu::create(kWidth, kHeight, options);
         if (!gpu) {
@@ -420,6 +433,8 @@ BENCHMARK(BM_GpuStartUp)->Arg(0)->Arg(1)->Iterations(5)->UseRealTime()->Unit(
     benchmark::kMillisecond);
 
 // The compile itself, cold: every stage the default expansion draws with.
+// Direct3D 11 only: the Vulkan build compiles its shaders when it is built.
+#if defined(KATANA_GPU_D3D11)
 void BM_GpuShaderCompile(benchmark::State& state)
 {
     using katana::qt::gpu::Program;
@@ -443,6 +458,7 @@ void BM_GpuShaderCompile(benchmark::State& state)
     }
 }
 BENCHMARK(BM_GpuShaderCompile)->Iterations(5)->UseRealTime()->Unit(benchmark::kMillisecond);
+#endif
 
 // Point clouds, which the software path does not draw in 3D at all: n
 // points in random order (a fixed linear congruential sequence, so every run
@@ -545,11 +561,15 @@ bool saveSceneImages()
 
 } // namespace
 
-// QRhi needs a QGuiApplication; offscreen, because a benchmark has no window
-// and raw QRhi on Direct3D 11 renders into textures there all the same.
+// QRhi needs a QGuiApplication. On Windows offscreen, because a benchmark
+// has no window and raw QRhi on Direct3D 11 renders into textures there all
+// the same; on Linux the platform the session has (xcb on a desktop or under
+// Xvfb), because Qt's offscreen platform cannot make a Vulkan instance.
 int main(int argc, char** argv)
 {
+#if defined(KATANA_GPU_D3D11)
     qputenv("QT_QPA_PLATFORM", "offscreen");
+#endif
     QGuiApplication application(argc, argv);
     benchmark::Initialize(&argc, argv);
     if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
