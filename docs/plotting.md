@@ -813,10 +813,13 @@ clearing the lines returns the set to its default.
 
 **Replies** are one fact per line, in the `key=value` form the options take,
 so an option an agent reads can be typed back. Text values are in double
-quotes, with a line break written as `\n` (and a typed `\n` in a name, a
-title, a text or a title-block value is read as a line break). The command
-line has no way to type a double quote inside a value, so a value holding
-one is printed as it is and cannot be typed back. What only describes (a
+quotes, with a line break written as `\n` and a backslash as `\\` (and a
+typed `\n` in a name, a title, a text or a title-block value is read as a
+line break, `\\` as a backslash, and any other backslash as itself, so
+`C:\data` needs no escaping). A text typed back as the reply wrote it is
+the text stored. The command line has no way to type a double quote inside
+a value, so a value holding one (only a loaded set can) is written `\"` and
+cannot be typed back. What only describes (a
 view's `id=`, `kind=` and `marks=`, a sheet's `views=`) is not an option. Numbers are rounded to a
 millionth and written in their shortest form. For example:
 
