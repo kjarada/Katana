@@ -239,7 +239,7 @@ Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
 (`MainWindow::runCommandLine`, whose `dispatchLine` the window's dialogs run
 their lines through too - `docs/desktop.md`, "One executor: the command
-runner") adds `IMPORT <file> [LOCAL]`, `EXPORT`, `INFO <file>`, `REFS`,
+runner") adds `IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
 report, `cad::customisationReport`), `PLOTSHEETS`, the view verbs `ZOOM`,
 `GRID` and `SNAP`, and `QUIT`; `katana_cli` adds the same interoperability
