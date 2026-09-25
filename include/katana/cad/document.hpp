@@ -93,6 +93,10 @@ struct DocumentChange {
         // rules (entity/annotation.hpp). One bit for the three, since
         // everything drawn from one is drawn from the others.
         AnnotationStyles = 1u << 16,
+        // The drafting aids (Document::drafting): ortho, polar, snaps, locks.
+        // Session state, not drawing: nothing is redrawn for it, but the
+        // toggles that show it are re-read.
+        Drafting = 1u << 17,
     };
 
     // Every table bit.
@@ -248,6 +252,8 @@ class Document {
     // drawing, so not saved and not undone.
     [[nodiscard]] DraftingSettings& drafting() { return drafting_; }
     [[nodiscard]] const DraftingSettings& drafting() const { return drafting_; }
+    // Call after changing the drafting settings so their toggles refresh.
+    void notifyDraftingChanged();
 
     [[nodiscard]] const std::string& currentLayer() const { return currentLayer_; }
     [[nodiscard]] katana::core::Status setCurrentLayer(const std::string& name);

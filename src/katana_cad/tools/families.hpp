@@ -38,6 +38,8 @@ void addModifyLengthTools(ToolCatalog& catalog, const Report& report);
 void addPropertyTools(ToolCatalog& catalog, const Report& report);
 // Select Similar and Quick Select: tools whose answer is a selection.
 void addSelectTools(ToolCatalog& catalog, const Report& report);
+// Draw > Vertices: vertex control of polylines (docs/drawing.md).
+void addModifyVertexTools(ToolCatalog& catalog, const Report& report);
 
 // Esc for a tool whose Enter only ever commits work it has collected - a
 // LINE or PLINE chain, the cuts of a Trim or Extend, Offset's copies, a run

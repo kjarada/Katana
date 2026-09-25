@@ -349,14 +349,14 @@ void ViewportWidget::setGridVisible(bool visible)
 
 void ViewportWidget::setSnapEnabled(bool enabled)
 {
-    snapEnabled_ = enabled;
+    document_.drafting().snapEnabled = enabled;
     activeSnap_.reset();
     update();
 }
 
 void ViewportWidget::setSnapModes(cad::SnapModes modes)
 {
-    snapModes_ = modes;
+    document_.drafting().snapModes = modes;
 }
 
 void ViewportWidget::cancel()
@@ -426,11 +426,12 @@ void ViewportWidget::updateCursor(const QPointF& screen)
     // a pick of an entity or a selection is made where the cursor really is.
     const bool gripping = gripsLive() && grips_.active();
     const std::optional<Point2> base = gripping ? grips_.base() : tools_.lastPoint();
-    if (snapEnabled_ && (tools_.expects() == cad::ToolInput::Point || gripping)) {
+    if (document_.drafting().snapEnabled &&
+        (tools_.expects() == cad::ToolInput::Point || gripping)) {
         cad::SnapRequest request;
         request.cursor = raw;
         request.aperture = state_.plan.pixelsToWorld(kSnapAperturePixels);
-        request.modes = snapModes_;
+        request.modes = document_.drafting().snapModes;
         request.from = base;
         request.gridSpacing = gridVisible_ ? cad::gridSpacing(state_.plan.scale) : 0.0;
         request.view = &state_.layers;

@@ -62,9 +62,20 @@ using PolylineEdit = std::function<katana::geometry::PolylineResult(
 [[nodiscard]] katana::commands::CommandPtr
 editPolylines(std::vector<katana::entity::EntityId> ids, std::string name, PolylineEdit edit);
 
+// An edit that depends on which polyline it is given (Weed keeping each
+// one's own survey-point vertices), on several polylines as ONE command.
+using PolylineEditOf = std::function<katana::geometry::PolylineResult(
+    const katana::entity::Model&, katana::entity::EntityId,
+    const katana::geometry::CurvePolyline2&)>;
+[[nodiscard]] katana::commands::CommandPtr
+editEachPolyline(std::vector<katana::entity::EntityId> ids, std::string name, PolylineEditOf edit);
+
 // Which vertices of polyline `id` carry survey point data: a survey point (a
 // point entity with the survey import's point-number property) lies on the
 // vertex within `tolerance`. What Weed's "keep survey points" option keeps.
+[[nodiscard]] std::vector<bool> verticesOnSurveyPoints(const katana::entity::Model& model,
+                                                       const katana::geometry::CurvePolyline2& polyline,
+                                                       double tolerance = 1.0e-4);
 [[nodiscard]] std::vector<bool> verticesOnSurveyPoints(const Document& document,
                                                        const katana::geometry::CurvePolyline2& polyline,
                                                        double tolerance = 1.0e-4);
