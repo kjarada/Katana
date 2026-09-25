@@ -6,8 +6,8 @@
 // It holds no commands of its own. Its items are the window's existing
 // actions, found by object name - Erase is editErase, Move is the tool
 // modify.move - so a menu item, its toolbar button and a headless --trigger
-// are one action and cannot drift; an action the window does not have (Edit
-// Text before the text tools arrive) is left out rather than faked. What it
+// are one action and cannot drift; an action the window does not have (as in
+// a test's window of a few actions) is left out rather than faked. What it
 // adds is the verb lines a person would otherwise type - CHLAYER, STYLE
 // APPLY, COLOR, INFO - which it hands to the window's one executor
 // (command_runner.hpp), so each is echoed in the log and is one undo step.
@@ -33,6 +33,7 @@
 
 #include "command_runner.hpp"
 #include "katana/cad/document.hpp"
+#include "katana/core/error.hpp"
 
 namespace katana::qt {
 
@@ -60,9 +61,10 @@ class PlanContextMenu final : public QMenu {
   private:
     // The window's action of that object name, when it has one.
     void addExisting(QMenu& menu, const char* objectName);
-    // An item of this menu's own that runs `line` when chosen.
+    // An item of this menu's own that runs `line` when chosen; offered
+    // disabled, saying why, when the line cannot be written (namedLine).
     QAction* addLine(QMenu& menu, const QString& text, const QString& objectName,
-                     const QString& line);
+                     const katana::core::Result<QString>& line);
     // The layers under `parent` ("" for the roots), `shared` ticked: the
     // layer every selected entity is on, "" when they are on several.
     void addLayerItems(QMenu& menu, const std::string& parent, const std::string& shared);
@@ -70,8 +72,12 @@ class PlanContextMenu final : public QMenu {
     PlanContextMenuContext context_;
 };
 
-// `word` as one argument of a verb line: as it is when it is a plain word,
-// otherwise in double quotes, which the interpreter's tokenizer takes off.
-[[nodiscard]] QString verbArgument(const QString& word);
+// `verb` followed by `name` as one word of its line, by the one rule every
+// dialog writes words with (command_word.hpp): as it is when it is a plain
+// word, otherwise in double quotes, which the interpreter's tokenizer takes
+// off; a name holding a double quote or a line break, which no line can
+// carry, is refused naming `what`.
+[[nodiscard]] katana::core::Result<QString> namedLine(const QString& verb, const QString& name,
+                                                      const QString& what);
 
 } // namespace katana::qt

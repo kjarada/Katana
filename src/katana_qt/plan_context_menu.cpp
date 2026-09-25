@@ -6,6 +6,7 @@
 
 #include <QAction>
 
+#include "command_word.hpp"
 #include "katana/entity/layer_path.hpp"
 
 namespace katana::qt {
@@ -47,12 +48,14 @@ bool selectionHas(const katana::cad::Document& document, katana::entity::EntityT
 
 } // namespace
 
-QString verbArgument(const QString& word)
+katana::core::Result<QString> namedLine(const QString& verb, const QString& name,
+                                        const QString& what)
 {
-    const bool plain = !word.isEmpty() && std::none_of(word.begin(), word.end(), [](QChar c) {
-        return c.isSpace() || c == '"';
-    });
-    return plain ? word : '"' + word + '"';
+    auto word = commandWord(name, what);
+    if (!word) {
+        return word.error();
+    }
+    return verb + ' ' + *word;
 }
 
 PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent)
@@ -119,8 +122,9 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
         styles->addSeparator();
     }
     for (const std::string& name : styleNames) {
-        QAction* item = addLine(*styles, qs(name), QStringLiteral("planContextStyle.") + qs(name),
-                                QStringLiteral("STYLE APPLY ") + verbArgument(qs(name)));
+        QAction* item =
+            addLine(*styles, qs(name), QStringLiteral("planContextStyle.") + qs(name),
+                    namedLine(QStringLiteral("STYLE APPLY"), qs(name), QStringLiteral("the style")));
         item->setCheckable(true);
         item->setChecked(!style.empty() && name == style);
     }
@@ -151,7 +155,7 @@ PlanContextMenu::PlanContextMenu(PlanContextMenuContext context, QWidget* parent
     // INFO names one entity; for several, List says what each is.
     if (selected.size() == 1) {
         addLine(*this, QStringLiteral("Entity &Information"), QStringLiteral("planContextInfo"),
-                QStringLiteral("INFO ") + QString::number(selected.front()));
+                QString(QStringLiteral("INFO ") + QString::number(selected.front())));
     }
     addExisting(*this, "inquiry.list");
     addSeparator();
@@ -180,10 +184,18 @@ void PlanContextMenu::addExisting(QMenu& menu, const char* objectName)
 }
 
 QAction* PlanContextMenu::addLine(QMenu& menu, const QString& text, const QString& objectName,
-                                  const QString& line)
+                                  const katana::core::Result<QString>& written)
 {
     auto* item = menu.addAction(text);
     item->setObjectName(objectName);
+    if (!written) {
+        // Shown, since the name is really there, but with nothing to run: a
+        // line cut short at the quote would act on another name.
+        item->setEnabled(false);
+        item->setStatusTip(QString::fromStdString(written.error().message));
+        return item;
+    }
+    const QString line = *written;
     // The line itself in the status bar, so a person learns the verb.
     item->setStatusTip(line);
     connect(item, &QAction::triggered, this, [this, line] {
@@ -202,7 +214,7 @@ void PlanContextMenu::addLayerItems(QMenu& menu, const std::string& parent,
     for (const std::string& name : names) {
         const QString leaf = qs(std::string(katana::entity::layerLeaf(name)));
         const QString objectName = QStringLiteral("planContextLayer.") + qs(name);
-        const QString line = QStringLiteral("CHLAYER ") + verbArgument(qs(name));
+        const auto line = namedLine(QStringLiteral("CHLAYER"), qs(name), QStringLiteral("the layer"));
         QMenu* target = &menu;
         if (table.hasChildren(name)) {
             // A layer with layers under it is a submenu of them, headed by
