@@ -279,3 +279,57 @@ when it starts.
 
 Tested in `tests/cad/drawing/test_vertex_table.cpp` and
 `tests/qt_widgets/drawing/test_vertex_panel.cpp`.
+
+## The draw tools
+
+The drawing system's draw tools (`src/katana_cad/tools/draw_professional.cpp`,
+registered as `addDrawProfessionalTools`) join the Draw family's Lines and
+Curves groups beside the tools already there; a "<Family>, <Variant>" name
+puts a tool in a submenu (Draw > Ellipse, Draw > Circle, Draw > Arc).
+
+| Tool (id, aliases) | Steps | Command |
+|---|---|---|
+| Polyline (`draw.polyline`, `PLINE`, `PL`, `POLYLINE`) | points; A switches to arcs, L back to lines, S takes an arc through a second point, C closes, U takes back | `CREATE_POLYLINE` |
+| 3D Polyline (`draw.polyline3d`, `PLINE3D`, `3DPOLY`, `3DPOLYLINE`) | points as x,y,z, or at the height of what they snap to, or at the current height (H) | `CREATE_POLYLINE` |
+| Construction Line (`draw.xline`, `XLINE`, `XL`) | a base point, then a point on each line; H and V fix the direction | `CREATE_XLINE` |
+| Ray (`draw.ray`, `RAY`) | a start point, then a point on each ray | `CREATE_RAY` |
+| Double Line (`draw.dline`, `DLINE`, `DL`) | points along the path; W sets the width, C closes | `CREATE_DOUBLE_LINE` |
+| Freehand Sketch (`draw.sketch`, `SKETCH`) | click to put the pen down, click to lift it, Enter keeps the strokes weeded to the tolerance (T) | `CREATE_SKETCH` |
+| Revision Cloud (`draw.revcloud`, `REVCLOUD`) | outline points, or R and two corners; A sets the arc length | `CREATE_REVISION_CLOUD` |
+| Spline (`draw.spline`, `SPLINE`, `SPL`) | fit points, or control points (C, and F back); D sets the degree; Enter finishes | `CREATE_SPLINE` |
+| Ellipse, Axis and End (`draw.ellipse`, `ELLIPSE`, `EL`) | both ends of one axis, then the other half-axis | `CREATE_ELLIPSE` |
+| Ellipse, Centre (`draw.ellipse.centre`) | the centre, the end of one axis, the other half-axis | `CREATE_ELLIPSE` |
+| Ellipse, Arc (`draw.ellipse.arc`, `ELLIPSEARC`) | as Axis and End, then the start and end angles | `CREATE_ELLIPSE` |
+| Circle, Tangent Tangent Tangent (`draw.circle.ttt`) | three lines or polyline segments; the circle touching all three nearest the picks | `CREATE_CIRCLE` |
+| Arc, Start End Direction (`draw.arc.sed`) | the start, the end, the direction it leaves the start | `CREATE_ARC` |
+
+**Polyline arcs.** In arc mode each new segment is the arc that leaves the
+previous segment's end tangent to it (the first segment's heading is the
+first chord's), stored as the DXF bulge of that segment; a polyline with
+any arc is made as a curve polyline, one without as a plain polyline
+(the storage rule above). Close is refused, not half-done, while fewer than
+three vertices stand.
+
+**Heights.** Point and 3D Polyline keep a current height (H), remembered
+from one use to the next. A typed x,y,z gives that vertex its own; a point
+snapped onto a vertex, point or line end that carries a height takes it
+(`cad::heightAtPoint`); otherwise the current height applies. The typed
+input router hands a tool a height through `InteractiveTool::point3d`.
+
+**Construction lines are layer-marked.** The model has no infinite line, so
+a construction line or ray is a line `kConstructionReach` (100 km) long on
+the "construction" layer, which the tool creates, in the same undo step, if
+the drawing has none (`include/katana/cad/drawing/construction.hpp`). That
+layer and every layer beneath it is drawn and snapped to on screen but
+never plotted (`plan_painter.cpp` skips it on paper) and never counted in
+the drawing's extents (`selection.cpp`'s `drawnExtent`), so Zoom Extents
+frames the drawing, not the reach of an aid.
+
+**Reviewed variants.** Circle already offered Centre Radius, Centre
+Diameter, 2 Points, 3 Points and Tangent Tangent Radius; Tangent Tangent
+Tangent completes the set. Arc already offered 3 Points, Start Centre End,
+Centre Start End and Start End Radius; Start End Direction is added. Polygon's inscribed, circumscribed and edge forms were
+complete and are unchanged.
+
+Tested in `tests/cad/tools/test_draw_professional.cpp` and
+`tests/cad/tools/test_draw_lines.cpp`.

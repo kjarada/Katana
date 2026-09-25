@@ -80,4 +80,12 @@ editEachPolyline(std::vector<katana::entity::EntityId> ids, std::string name, Po
                                                        const katana::geometry::CurvePolyline2& polyline,
                                                        double tolerance = 1.0e-4);
 
+// The height the drawing has at `at`: a point's, a polyline's vertex's or a
+// line's end's lying within `tolerance`, the nearest first; nullopt when
+// nothing with a height is there. What a 3D polyline takes from a snapped
+// point.
+[[nodiscard]] std::optional<double> heightAtPoint(const Document& document,
+                                                  const katana::geometry::Point2& at,
+                                                  double tolerance = 1.0e-6);
+
 } // namespace katana::cad
