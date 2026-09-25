@@ -12,6 +12,13 @@
 // and everything here can be done without it with the CRS verb (CRS SET,
 // CRS FIND, CRS SUGGEST). The status bar's coordinate-system button and
 // GIS > Online Data open it too.
+//
+// Non-modal, it follows the drawing while it is open (follow): a system set
+// from elsewhere (a typed CRS SET, an undo) is shown in projectCrsCurrent, and
+// in projectCrsText unless something else has been typed there; a new or
+// opened drawing is shown afresh - its system, its place, no place the
+// opener gave for the drawing before. Left open across an OPEN, it once
+// showed the old project's system and Set put it on the new one.
 
 #include <optional>
 #include <utility>
@@ -48,9 +55,17 @@ class ProjectCrsDialog final : public QDialog {
   private:
     void fill(const QString& filter);
     void recheck();
+    void follow(const katana::cad::DocumentChange& change);
+    // The place box: the opener's place, else the drawing's centre, else
+    // empty.
+    void showPlace();
 
     katana::cad::Document& document_;
+    katana::cad::Document::ListenerHandle listener_;
     std::optional<std::pair<double, double>> place_;
+    // The project's system as projectCrsText was last filled with it: while
+    // the box still says it, nothing has been typed there to keep.
+    QString shownSystem_;
     QLabel* current_ = nullptr;
     QLineEdit* search_ = nullptr;
     QLineEdit* placeText_ = nullptr;

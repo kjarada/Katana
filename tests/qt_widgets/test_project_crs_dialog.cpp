@@ -161,3 +161,52 @@ TEST(ProjectCrsDialog, LocalCoordinatesClearsIt)
     EXPECT_TRUE(document.metadata().coordinateSystem.empty());
     EXPECT_EQ(katana::qt::projectCrsLabel(document).toStdString(), "no coordinate system");
 }
+
+// Non-modal, the dialog follows the drawing: a system set elsewhere (a typed
+// CRS SET, an undo) is shown, in the text box too until something else is
+// typed there.
+TEST(ProjectCrsDialog, ASystemSetElsewhereIsShownAndWhatIsTypedIsKept)
+{
+    Document document;
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    ProjectCrsDialog dialog(document, std::nullopt);
+    auto* current = child<QLabel>(dialog, "projectCrsCurrent");
+    auto* text = child<QLineEdit>(dialog, "projectCrsText");
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:7856").ok());
+    EXPECT_TRUE(current->text().startsWith("Now: EPSG:7856")) << current->text().toStdString();
+    EXPECT_EQ(text->text(), "EPSG:7856");
+
+    text->setText("EPSG:7855");
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_TRUE(current->text().startsWith("Now: EPSG:28356")) << current->text().toStdString();
+    EXPECT_EQ(text->text(), "EPSG:7855") << "typed, so kept";
+}
+
+// Left open across a new or opened drawing, it shows that drawing's system,
+// and Set carries nothing of the last one's over. It once showed the old
+// project's system, and Set put it on the new one.
+TEST(ProjectCrsDialog, ANewDrawingIsShownAfreshAndSetCarriesNothingOver)
+{
+    Document document;
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:28356").ok());
+    // Sydney, as GIS > Online Data gives a place.
+    ProjectCrsDialog dialog(document, std::pair{151.21, -33.87});
+    auto* current = child<QLabel>(dialog, "projectCrsCurrent");
+    auto* text = child<QLineEdit>(dialog, "projectCrsText");
+    auto* list = child<QTreeWidget>(dialog, "projectCrsList");
+    ASSERT_EQ(list->topLevelItem(0)->text(0).toStdString(), "Suggested for this place");
+
+    document.newDocument();
+    EXPECT_EQ(current->text().toStdString(), "Now: no coordinate system");
+    EXPECT_TRUE(text->text().isEmpty());
+    EXPECT_TRUE(child<QLineEdit>(dialog, "projectCrsPlace")->text().isEmpty());
+    EXPECT_NE(list->topLevelItem(0)->text(0).toStdString(), "Suggested for this place")
+        << "the place was the last drawing's";
+    // The opened drawing's own system, then Set: nothing changes.
+    ASSERT_TRUE(document.setCoordinateSystem("EPSG:7856").ok());
+    EXPECT_EQ(text->text(), "EPSG:7856");
+    const std::size_t steps = document.history().undoCount();
+    EXPECT_TRUE(dialog.apply());
+    EXPECT_EQ(document.metadata().coordinateSystem, "EPSG:7856");
+    EXPECT_EQ(document.history().undoCount(), steps);
+}

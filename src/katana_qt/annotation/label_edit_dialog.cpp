@@ -234,18 +234,55 @@ LabelEditDialog::LabelEditDialog(katana::cad::Document& document, CommandRunner 
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
 
     setEnabledFields(false);
+    listener_ = document_.addListener(
+        [this](const katana::cad::DocumentChange& change) { follow(change); });
+}
+
+void LabelEditDialog::follow(const katana::cad::DocumentChange& change)
+{
+    if (current_.id == 0) {
+        return;
+    }
+    // Another drawing: an id there is another label, or none.
+    if (change.has(katana::cad::DocumentChange::Replaced)) {
+        clear(QStringLiteral("The drawing was replaced; select one label, then choose Edit "
+                             "Label."));
+        return;
+    }
+    if (!change.has(katana::cad::DocumentChange::Entities)) {
+        return;
+    }
+    const auto now = labelEditFormOf(document_.model(), current_.id);
+    if (!now) {
+        clear(QStringLiteral("Label %1 is no longer in the drawing; select one label, then "
+                             "choose Edit Label.")
+                  .arg(current_.id));
+        return;
+    }
+    // The label as it now is, what is typed in the form with it: Apply
+    // compares the fields with current_, which has to be the label the
+    // model holds. Another entity's change leaves the form alone.
+    if (*now != current_) {
+        (void)load(current_.id);
+    }
+}
+
+void LabelEditDialog::clear(const QString& why)
+{
+    current_ = LabelEditForm{};
+    showForm(current_);
+    target_->setText(QStringLiteral("-"));
+    setEnabledFields(false);
+    command_->clear();
+    status_->setText(why);
 }
 
 bool LabelEditDialog::load(katana::entity::EntityId id)
 {
     auto loaded = labelEditFormOf(document_.model(), id);
     if (!loaded) {
-        current_ = LabelEditForm{};
-        showForm(current_);
-        target_->setText(QStringLiteral("-"));
-        setEnabledFields(false);
-        status_->setText(QString::fromStdString(loaded.error().message) + " (" +
-                         QString::fromStdString(loaded.error().context) + ")");
+        clear(QString::fromStdString(loaded.error().message) + " (" +
+              QString::fromStdString(loaded.error().context) + ")");
         return false;
     }
     current_ = *loaded;
@@ -278,14 +315,10 @@ bool LabelEditDialog::loadSelection()
 {
     const auto ids = document_.selection().ids();
     if (ids.size() != 1) {
-        current_ = LabelEditForm{};
-        showForm(current_);
-        target_->setText(QStringLiteral("-"));
-        setEnabledFields(false);
-        status_->setText(ids.empty() ? QStringLiteral("Select one label, then choose Edit Label.")
-                                     : QStringLiteral("%1 entities are selected; select one "
-                                                      "label, then choose Edit Label.")
-                                           .arg(ids.size()));
+        clear(ids.empty() ? QStringLiteral("Select one label, then choose Edit Label.")
+                          : QStringLiteral("%1 entities are selected; select one label, then "
+                                           "choose Edit Label.")
+                                .arg(ids.size()));
         return false;
     }
     return load(ids.front());

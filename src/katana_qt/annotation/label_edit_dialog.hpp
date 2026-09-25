@@ -18,6 +18,15 @@
 // buttons are disabled; it never asks in a box, so a headless run drives it
 // like any other.
 //
+// Non-modal, it follows the drawing while it is open (follow): a label
+// changed from elsewhere - an undo, a typed LABEL SET - is shown afresh, the
+// edits in the form with it, as Edit Text does, so Apply never names only
+// the differences from a label the model no longer holds; a label erased
+// leaves the form empty and disabled; and a new or opened drawing empties it
+// too, since the id it holds is another drawing's. Left open across an OPEN,
+// it once wrote its label's edits onto whatever the opened project held at
+// that id.
+//
 // Object names:
 //   labelEditDialog     the dialog
 //   labelEditTarget     which label, and what it labels (read-only)
@@ -62,6 +71,8 @@ struct LabelEditForm {
     QString easting;
     QString northing;
     QString layer;
+
+    friend bool operator==(const LabelEditForm&, const LabelEditForm&) = default;
 };
 
 // The label as `form` holds it, from the model: its style, its own text, its
@@ -109,9 +120,14 @@ class LabelEditDialog final : public QDialog {
     void showForm(const LabelEditForm& form);
     void setEnabledFields(bool enabled);
     void updateLine();
+    // What a change to the drawing means for the label shown.
+    void follow(const katana::cad::DocumentChange& change);
+    // No label: the form emptied and disabled, `why` in the status.
+    void clear(const QString& why);
 
     katana::cad::Document& document_;
     CommandRunner run_;
+    katana::cad::Document::ListenerHandle listener_;
     LabelEditForm current_;
     QLabel* target_ = nullptr;
     QComboBox* style_ = nullptr;
