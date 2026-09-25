@@ -719,6 +719,19 @@ TEST(SheetEditorEditing, TheStatusLineReadsThePaperAndOverAPlanTheWorld)
     // Off the paper, it says so.
     EXPECT_FALSE(canvas.readoutAt(shown.at(-20.0, 100.0)).onPaper);
     EXPECT_TRUE(canvas.readoutAt(shown.at(-20.0, 100.0)).viewportId.empty());
+
+    // For a look: the page with the grid, both views selected, a band being
+    // drawn and the cursor over the plan.
+    if (const char* dir = std::getenv("KATANA_SHEET_PNG"); dir != nullptr) {
+        canvas.fitPage();
+        canvas.setSnapToGrid(true);
+        canvas.setSelection({"vp1", "vp2"});
+        drag(canvas, shown.at(330.0, 270.0), shown.at(250.0, 200.0), Qt::ControlModifier, Qt::LeftButton,
+             /*release=*/false);
+        mouse(canvas, QEvent::MouseMove, canvas.paperToWidget(paper), Qt::NoButton);
+        (void)shown.editor.grab().save(QString("%1/SheetEditorRotatedPlan.png").arg(dir));
+        key(canvas, Qt::Key_Escape);
+    }
 }
 
 TEST(SheetEditorEditing, AnAutomaticPlanReadsTheWorldAtTheScaleItIsDrawnAt)

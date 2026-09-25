@@ -112,7 +112,12 @@ void SheetEditor::setUpEditing()
     // Where the cursor is, on the status bar's right.
     cursorStatus_ = new QLabel(this);
     cursorStatus_->setObjectName(QStringLiteral("sheetCursorStatus"));
-    cursorStatus_->setMinimumWidth(380);
+    // Wide enough for a long line - an A0 sheet, a key plan, map coordinates
+    // in the millions - so the numbers never run under the size grip.
+    cursorStatus_->setMinimumWidth(cursorStatus_->fontMetrics().horizontalAdvance(
+                                       QStringLiteral("X 1189.0  Y 841.0 mm   vp100 Key plan 1:50000   "
+                                                      "E 9999999.999  N 9999999.999")) +
+                                   16);
     statusBar()->addPermanentWidget(cursorStatus_);
     canvas_->onCursorMoved = [this](const SheetCursorReadout& readout) {
         cursorStatus_->setText(readoutText(readout));
