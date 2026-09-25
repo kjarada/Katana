@@ -549,6 +549,8 @@ TEST_F(McpServer, ChosenLabelRulesArePreviewedByNameWithACountForEach)
               std::string::npos)
         << lines[6]["output"];
     EXPECT_EQ(result["structuredContent"]["status"]["entities"], 1) << "a preview makes nothing";
+}
+
 TEST_F(McpServer, LabelLayoutNamesTheLabelsWithNoRoomSoAnAgentCanMoveThem)
 {
     // Two numbered points at one place (1, 2), labelled in a style that may
