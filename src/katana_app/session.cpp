@@ -25,6 +25,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
+#include "katana/core/text.hpp"
 #include "katana/entity/tables.hpp"
 #include "dxf_verbs.hpp"
 #include "session.hpp"
@@ -88,6 +89,28 @@ std::string upperVerb(const std::string& line)
         verb += static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     }
     return verb;
+}
+
+// The desktop window's own verbs (MainWindow::dispatchLine), which this
+// session cannot run: why, and what to use here instead. Answered by name,
+// not as an unknown command, so a script written for File > Run Script that
+// uses one fails in katana_cli and katana_mcp saying where it runs.
+// Nullptr for any other verb.
+const char* windowOnlyVerb(const std::string& verb)
+{
+    if (verb == "PLOT" || verb == "PLOTSHEETS" || verb == "SNAPSHOT") {
+        return "is the desktop window's: its painter is Qt's, which katana_cli and katana_mcp "
+               "do not have; a headless katana run has --plot and --plot-sheets";
+    }
+    if (verb == "ONLINE") {
+        return "is the desktop window's (GIS > Online Data), which keeps the provider keys and "
+               "runs the requests; run katana headless with --command \"ONLINE ...\"";
+    }
+    if (verb == "SCRIPT") {
+        return "is the desktop window's: katana_cli runs a script given as its argument, and "
+               "katana_mcp with katana_run_script";
+    }
+    return nullptr;
 }
 
 // CUSTOMISE is here rather than in CommandInterpreter for the same reason
@@ -684,12 +707,17 @@ std::optional<bool> runInterop(katana::cad::Document& document, InteropState& st
             return false;
         }
         // INFO 12 is the interpreter's: an entity, described. Every INFO was
-        // once taken for a file here, so katana_describe_entity, which sends
-        // INFO <id>, answered "file does not exist" in every build with GDAL.
-        // A file that is really called 12 is still described.
+        // once taken for a file here, so katana_describe_entity answered
+        // "file does not exist" in every build with GDAL. A file that is
+        // really called 12 is still described - but INFO #12 is always the
+        // entity: katana_describe_entity and the plan view's Entity
+        // Information send it, and a file called 1 or #1 where the program
+        // was started (a mistyped shell 2>1 makes one) once turned both into
+        // "no importer reads files named ''".
         std::error_code error;
         if (verb == "INFO" && katana::cad::CommandInterpreter::isEntityId(argument) &&
-            !std::filesystem::exists(std::filesystem::path(argument), error)) {
+            (argument.starts_with('#') ||
+             !std::filesystem::exists(std::filesystem::path(argument), error))) {
             return std::nullopt;
         }
         // COPC takes the whole line: argumentOf strips one pair of
@@ -721,8 +749,18 @@ struct SessionState {
 // Returns false when the command failed.
 bool runLine(SessionState& session, const std::string& line)
 {
-    if (!line.empty() && line.front() == '#') {
+    // A note, whatever blanks come before its '#' - the rule the window's
+    // scripts and command line keep (src/katana_qt/script_runner.hpp), so one
+    // .kcs runs alike in katana_cli, katana_mcp and File > Run Script. An
+    // indented "# note" was once a command here and stopped the script the
+    // window ran through.
+    if (const std::string_view body = katana::core::trimmed(line);
+        !body.empty() && body.front() == '#') {
         return true;
+    }
+    if (const char* why = windowOnlyVerb(upperVerb(line))) {
+        std::cerr << "error: Unsupported: " << upperVerb(line) << ' ' << why << '\n';
+        return false;
     }
     if (upperVerb(line) == "CUSTOMISE" || upperVerb(line) == "CUSTOMIZE") {
         // Paths may have spaces, so they are taken as quoted words where they
@@ -913,6 +951,10 @@ std::string Session::helpText()
     text += "Interop   IMPORT <file.dxf> [LOCAL | ALONGSIDE | OFFSET=dE,dN] | EXPORT <file.dxf>\n"
             "          (this build has no GDAL: DXF only)\n";
 #endif
+    text += "Window    PLOT, PLOTSHEETS, SNAPSHOT, ONLINE and SCRIPT are the desktop window's\n"
+            "          verbs, refused here: katana --plot, --plot-sheets and --command run\n"
+            "          them headless; a script is katana_cli's argument, or katana_mcp's\n"
+            "          katana_run_script\n";
     return text;
 }
 

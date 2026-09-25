@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -273,13 +274,76 @@ TEST_F(McpServer, DescribeEntityDescribesTheEntityItNames)
     const Json described = call("katana_describe_entity", Json{{"id", 1}});
     EXPECT_FALSE(described["isError"].get<bool>()) << textOf(described);
     EXPECT_NE(textOf(described).find(
-                  "> INFO 1\n1  Polyline  layer=0  vertices=4  closed  length=30  area=50"),
+                  "> INFO #1\n1  Polyline  layer=0  vertices=4  closed  length=30  area=50"),
               std::string::npos)
         << textOf(described);
 
     const Json missing = call("katana_describe_entity", Json{{"id", 2}});
     EXPECT_TRUE(missing["isError"].get<bool>());
     EXPECT_NE(textOf(missing).find("entity does not exist"), std::string::npos) << textOf(missing);
+}
+
+TEST_F(McpServer, DescribeEntityNamesTheEntityWhateverFilesTheWorkingDirectoryHolds)
+{
+    // Files called 1 and #1 where the server runs - a mistyped shell 2>1
+    // makes the first - once turned the tool's INFO 1 into INFO <file>, "no
+    // importer reads files named ''". It sends INFO #1, always the entity.
+    const TempDir folder("describe-beside-files");
+    for (const char* name : {"1", "#1"}) {
+        std::ofstream(folder.file(name)) << "";
+    }
+    struct WorkingDirectory {
+        std::filesystem::path before = std::filesystem::current_path();
+        ~WorkingDirectory() { std::filesystem::current_path(before); }
+    } restore;
+    std::filesystem::current_path(folder.file("."));
+    ASSERT_TRUE(std::filesystem::exists("#1"));
+
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"RECT 0,0 10,5"}}});
+    const Json described = call("katana_describe_entity", Json{{"id", 1}});
+    EXPECT_FALSE(described["isError"].get<bool>()) << textOf(described);
+    EXPECT_NE(textOf(described).find("1  Polyline  layer=0  vertices=4  closed  length=30  area=50"),
+              std::string::npos)
+        << textOf(described);
+}
+
+TEST_F(McpServer, AScriptsIndentedNoteRunsNothing)
+{
+    // A line whose first non-blank is '#' is a note, as File > Run Script
+    // reads one; an indented one was once a command here, so the script
+    // stopped at it and the lines after it were "not run".
+    const TempDir folder("indented-notes");
+    std::ofstream(folder.file("notes.kcs"))
+        << "# a note\r\nRECT 0,0 10,5\r\n\r\n  # an indented note\r\n\t# a tabbed one\r\n"
+           "CIRCLE 5,5 1\r\nLIST\r\n";
+    initialize();
+    const Json ran = call("katana_run_script", Json{{"path", folder.file("notes.kcs")}});
+    EXPECT_FALSE(ran["isError"].get<bool>()) << textOf(ran);
+    EXPECT_EQ(session.document().model().entities.size(), 2U) << textOf(ran);
+    EXPECT_EQ(textOf(ran).find("not run"), std::string::npos) << textOf(ran);
+}
+
+TEST_F(McpServer, TheWindowsOwnVerbsAreRefusedSayingWhereTheyRun)
+{
+    // PLOT, SNAPSHOT, ONLINE and SCRIPT run only in the desktop window; an
+    // agent once met "unknown command" and could not tell a typo from a verb
+    // this surface lacks. The tool's description says so too.
+    initialize();
+    for (const char* line : {"PLOT a.pdf", "PLOTSHEETS", "SNAPSHOT a.png", "ONLINE PROVIDERS",
+                             "SCRIPT a.kcs"}) {
+        const Json ran = call("katana_run_commands", Json{{"commands", {line}}});
+        EXPECT_TRUE(ran["isError"].get<bool>()) << line;
+        EXPECT_NE(textOf(ran).find("is the desktop window's"), std::string::npos) << textOf(ran);
+        EXPECT_EQ(textOf(ran).find("unknown command"), std::string::npos) << textOf(ran);
+    }
+    const Json tools = request("tools/list")["result"]["tools"];
+    const auto run = std::find_if(tools.begin(), tools.end(), [](const Json& each) {
+        return each["name"] == "katana_run_commands";
+    });
+    ASSERT_NE(run, tools.end());
+    EXPECT_NE((*run)["description"].get<std::string>().find("desktop window's verbs"),
+              std::string::npos);
 }
 
 TEST_F(McpServer, TheImportToolSaysWhatLocalDoes)
