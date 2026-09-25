@@ -1174,9 +1174,9 @@ if(TARGET katana)
         COMMAND ${CMAKE_COMMAND}
             "-DAPP=$<TARGET_FILE:katana>"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
-            "-DDRIVE=%fileMenu|?fileMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY"
+            "-DDRIVE=%fileMenu|?fileMenu|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc UTILITIS x.csv|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_refused.ifc LOCALLY|>EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_unclosed.ifc"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_menu_headless.png"
-            "-DEXPECT=fileMenu: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL"
+            "-DEXPECT=fileMenu: [^\r\n]*Import IFC\\.\\.\\. \\[Import an IFC file[^\r\n]*Export IFC\\.\\.\\. \\[Export IFC 4\\.3.*! InvalidArgument: \"UTILITIS\" is not an option of EXPORT <file\\.ifc>: UTILITIES <schedule\\.csv>, SCHEMA <schema\\.csv>, RULES <rules\\.csv>, SPACING <m>, NODRAWING.*! InvalidArgument: \"LOCALLY\" is not an option of IMPORT <file\\.ifc>: LOCAL.*! InvalidArgument: a quoted path is never closed"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # --import-options on a .ifc builds File > Import IFC's dialog for it.
     add_test(NAME qt_ifc_import_options_are_the_import_dialog_headless
@@ -1186,10 +1186,60 @@ if(TARGET katana)
             "-DIMPORT_OPTIONS=${_ifc_dialog}"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_import_options_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A path given to the window is imported as File > Import would, and a
+    # headless session is told how to take the file's system, not asked.
+    add_test(NAME qt_ifc_a_path_given_to_the_window_is_imported_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DIMPORT=${_ifc_dialog}"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_path_headless.png"
+            "-DEXPECT=Imported 29 entities, 1 alignments and 0 surfaces from qt_ifc_dialog\\.ifc \\(IFC4X3_ADD2\\).*the file is in EPSG:7856 and the project has no coordinate system: File > Project Coordinate System or CRS SET EPSG:7856 sets it"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A drawing of an alignment alone is as far from a file as one of
+    # lines: the far-apart question weighs the drawing's alignments too, and
+    # headless keeps the survey coordinates and says so.
+    add_test(NAME qt_ifc_a_file_far_from_the_drawings_alignment_is_questioned_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDRIVE=>ALIGN NEW A1 0,0 100,50 200,0|>IMPORT ${_ifc_dialog}"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_far_headless.png"
+            "-DEXPECT=\\(kept: no one to ask\\)\\..*Imported 29 entities, 1 alignments and 0 surfaces from qt_ifc_dialog\\.ifc"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # GIS > Dataset Information on a .ifc describes it; on one that cannot be
+    # read, it and --import-options fail the run saying why, as they do for
+    # the GIS formats.
+    add_test(NAME qt_ifc_dataset_information_describes_the_file_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDATASET_INFO=${_ifc_dialog}"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_dataset_info_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_ifc_a_missing_file_has_no_description_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DDATASET_INFO=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_no_such_file.ifc"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_missing_info_headless.png"
+            "-DREFUSED=NotFound: the file cannot be read"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    add_test(NAME qt_ifc_a_missing_file_has_no_import_options_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_ifc"
+            "-DIMPORT_OPTIONS=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_no_such_file.ifc"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_ifc_missing_options_headless.png"
+            "-DREFUSED=NotFound: the file cannot be read"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless
         PROPERTIES FIXTURES_SETUP qt_ifc_dialog_file)
     set_tests_properties(qt_ifc_import_dialog_describes_imports_and_takes_the_files_system_headless
                          qt_ifc_import_options_are_the_import_dialog_headless
+                         qt_ifc_a_path_given_to_the_window_is_imported_headless
+                         qt_ifc_a_file_far_from_the_drawings_alignment_is_questioned_headless
+                         qt_ifc_dataset_information_describes_the_file_headless
         PROPERTIES FIXTURES_REQUIRED qt_ifc_dialog_file)
     set_tests_properties(qt_ifc_typed_export_and_import_are_the_command_lines_headless
                          qt_ifc_export_dialog_previews_each_class_and_writes_the_file_headless
@@ -1197,6 +1247,11 @@ if(TARGET katana)
                          qt_ifc_surfaces_of_the_session_go_out_and_come_back_as_surfaces_headless
                          qt_ifc_menu_items_and_the_verbs_refusals_headless
                          qt_ifc_import_options_are_the_import_dialog_headless
+                         qt_ifc_a_path_given_to_the_window_is_imported_headless
+                         qt_ifc_a_file_far_from_the_drawings_alignment_is_questioned_headless
+                         qt_ifc_dataset_information_describes_the_file_headless
+                         qt_ifc_a_missing_file_has_no_description_headless
+                         qt_ifc_a_missing_file_has_no_import_options_headless
         PROPERTIES
             ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"

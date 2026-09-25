@@ -24,15 +24,6 @@ namespace {
 // grows rather than with every point added.
 constexpr double kOriginStep = 100.0;
 
-bool isEpsgCode(std::string_view name)
-{
-    if (name.size() < 6 || name.substr(0, 5) != "EPSG:") {
-        return false;
-    }
-    return std::all_of(name.begin() + 5, name.end(),
-                       [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
-}
-
 // The south-west corner of everything the export writes, in plan.
 std::optional<math::Vec2> extentCorner(const ExportInput& input, const ExportOptions& options)
 {
@@ -81,6 +72,15 @@ std::string headerList(std::string_view value)
 }
 
 } // namespace
+
+bool isEpsgCode(std::string_view name)
+{
+    if (name.size() < 6 || name.substr(0, 5) != "EPSG:") {
+        return false;
+    }
+    return std::all_of(name.begin() + 5, name.end(),
+                       [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
+}
 
 bool isIfcPath(const std::filesystem::path& path)
 {

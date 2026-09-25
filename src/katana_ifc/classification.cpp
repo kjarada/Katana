@@ -576,17 +576,45 @@ core::Result<std::vector<CsvRow>> readCsv(std::string_view text)
     if (text.starts_with("\xEF\xBB\xBF")) {
         text.remove_prefix(3);
     }
+    const auto pastLineBreak = [&](std::size_t& at) {
+        if (at < text.size() && text[at] == '\r') {
+            ++at;
+        }
+        if (at < text.size() && text[at] == '\n') {
+            ++at;
+        }
+    };
+    const auto failAt = [](std::string message, std::size_t line) {
+        return core::makeError(core::ErrorCode::ParseFailure, std::move(message),
+                               "line " + std::to_string(line));
+    };
     std::vector<CsvRow> rows;
     std::size_t line = 1;
     std::size_t at = 0;
     while (at < text.size()) {
+        // A blank line or a comment is passed over whole, before any of it
+        // is read as fields: a quote in a comment must not open a field
+        // that swallows the rules after it. A quoted field starting '#' is
+        // data, not a comment.
+        std::size_t first = at;
+        while (first < text.size() && (text[first] == ' ' || text[first] == '\t')) {
+            ++first;
+        }
+        if (first == text.size() || text[first] == '\n' || text[first] == '\r' ||
+            text[first] == '#') {
+            const std::size_t end = text.find_first_of("\r\n", first);
+            at = end == std::string_view::npos ? text.size() : end;
+            pastLineBreak(at);
+            ++line;
+            continue;
+        }
         // One record, which a quoted field may carry over line breaks.
         CsvRow row;
         row.line = line;
         std::string field;
-        bool quoted = false;
-        bool wasQuoted = false;
-        bool blank = true;
+        bool quoted = false;    // inside a quoted field
+        bool wasQuoted = false; // the field being read was quoted
+        bool closed = false;    // its closing quote has been read
         for (; at < text.size(); ++at) {
             const char c = text[at];
             if (quoted) {
@@ -595,6 +623,7 @@ core::Result<std::vector<CsvRow>> readCsv(std::string_view text)
                     ++at;
                 } else if (c == '"') {
                     quoted = false;
+                    closed = true;
                 } else {
                     if (c == '\n') {
                         ++line;
@@ -606,40 +635,35 @@ core::Result<std::vector<CsvRow>> readCsv(std::string_view text)
             if (c == '\n' || c == '\r') {
                 break;
             }
-            if (c == '"' && core::trimmed(field).empty()) {
+            if (closed) {
+                // After a closing quote: blanks, then the comma or the end.
+                if (c == ' ' || c == '\t') {
+                    continue;
+                }
+                if (c != ',') {
+                    return failAt("text after a quoted field's closing quote", line);
+                }
+            }
+            if (c == '"' && !wasQuoted && core::trimmed(field).empty()) {
                 field.clear();
                 quoted = true;
                 wasQuoted = true;
-                blank = false;
             } else if (c == ',') {
                 row.fields.push_back(wasQuoted ? field : std::string(core::trimmed(field)));
                 field.clear();
                 wasQuoted = false;
-                blank = false;
+                closed = false;
             } else {
                 field.push_back(c);
-                if (!core::isAsciiSpace(c)) {
-                    blank = false;
-                }
             }
         }
         if (quoted) {
-            return core::makeError(core::ErrorCode::ParseFailure, "a quoted field is never closed",
-                                   "line " + std::to_string(row.line));
+            return failAt("a quoted field is never closed", row.line);
         }
         row.fields.push_back(wasQuoted ? field : std::string(core::trimmed(field)));
-        // Past the line break: \r\n, \n or \r.
-        if (at < text.size() && text[at] == '\r') {
-            ++at;
-        }
-        if (at < text.size() && text[at] == '\n') {
-            ++at;
-        }
+        pastLineBreak(at);
         ++line;
-        const bool comment = !row.fields.empty() && row.fields.front().starts_with('#');
-        if (!blank && !comment) {
-            rows.push_back(std::move(row));
-        }
+        rows.push_back(std::move(row));
     }
     return rows;
 }

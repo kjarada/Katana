@@ -73,6 +73,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "katana/core/error.hpp"
@@ -218,6 +219,12 @@ struct IfcExport {
 [[nodiscard]] katana::core::Result<IfcExport> writeIfcFile(const ExportInput& input,
                                                            const std::filesystem::path& path,
                                                            const ExportOptions& options = {});
+
+// True when `name` is what the export georeferences by: "EPSG:" and a code
+// of digits alone ("EPSG:7856"). A compound "EPSG:7856+5711", WKT or a PROJ
+// string is not, and a file written under one is not georeferenced (the
+// report says so), since IFC4X3_ADD2 names a system by one code.
+[[nodiscard]] bool isEpsgCode(std::string_view name);
 
 // True for a path ending ".ifc", any letter case.
 [[nodiscard]] bool isIfcPath(const std::filesystem::path& path);
