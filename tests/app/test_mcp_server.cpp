@@ -406,3 +406,31 @@ TEST_F(McpServer, AnAgentReadsAndRewritesAnAlignmentsPIsAndItsSettingOutTable)
               std::string::npos)
         << textOf(back);
 }
+
+// What Survey > Parcel Report does, as an agent does it: the report, the deed
+// wording under a name, and the labels as one undo step naming their layer.
+TEST_F(McpServer, AnAgentReportsDescribesAndLabelsAParcel)
+{
+    initialize();
+    const Json result = call("katana_run_commands",
+                             Json{{"commands",
+                                   {"PLINE 0,0 100,0 100,50 0,50 CLOSE", "PARCEL 1",
+                                    "PARCEL 1 LEGAL Lot7", "PARCEL 1 LABEL 2"}}});
+    ASSERT_FALSE(result["isError"].get<bool>()) << textOf(result);
+    const Json& lines = result["structuredContent"]["commands"];
+    ASSERT_EQ(lines.size(), 4U);
+    EXPECT_NE(lines[1]["output"].get<std::string>().find(
+                  "area 5000.000 m2 (0.500 ha), perimeter 300.000 m"),
+              std::string::npos)
+        << lines[1].dump();
+    EXPECT_NE(lines[2]["output"].get<std::string>().find("Lot7: Beginning at E 0.000 N 0.000"),
+              std::string::npos)
+        << lines[2].dump();
+    EXPECT_NE(lines[3]["output"].get<std::string>().find(
+                  "5 labels created on layer 0, the current layer"),
+              std::string::npos)
+        << lines[3].dump();
+    EXPECT_EQ(result["structuredContent"]["status"]["entities"], 6);
+    const Json undone = call("katana_undo");
+    EXPECT_EQ(undone["structuredContent"]["status"]["entities"], 1);
+}

@@ -236,6 +236,15 @@ if(KATANA_BUILD_TESTS)
                 $<TARGET_FILE:katana_cli> -c "ALIGN NEW road 0,0 100,0 100,100"
                 -c "ALIGN PIS road 0,0 100,0,50 100,100" -c "ALIGN PIS road"
                 -c "ALIGN STATIONS road 1000")
+    # PARCEL as Survey > Parcel Report runs it: the report the dialog shows,
+    # and LABEL naming the layer the labels went on (4 courses and the area).
+    add_test(NAME cli.parcel_reports_and_labels_naming_the_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "PLINE 0,0 100,0 100,50 0,50 CLOSE" -c "PARCEL 1"
+                -c "PARCEL 1 LABEL 2")
+    set_tests_properties(cli.parcel_reports_and_labels_naming_the_layer PROPERTIES
+        PASS_REGULAR_EXPRESSION "area 5000[.]000 m2 [(]0[.]500 ha[)], perimeter 300[.]000 m.*5 labels created on layer 0, the current layer"
+        FAIL_REGULAR_EXPRESSION "error")
     set_tests_properties(cli.align_pis_rewrites_the_pis_and_stations_names_the_key_stations
         PROPERTIES
         PASS_REGULAR_EXPRESSION "pi index=1 x=100 y=0 radius=50 spiral_in=0 spiral_out=0.*station=50[.]000 x=50[.]000 y=0[.]000 direction=0[.]000 azimuth=90[^ ]+ radius=50[.]000 turn=left key=TC.*station=128[.]540 x=100[.]000 y=50[.]000 direction=90[.]000 [^ ]+ radius=straight key=CT.*key=end"

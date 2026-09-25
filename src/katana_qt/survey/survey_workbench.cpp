@@ -13,6 +13,7 @@
 #include "survey/survey_dialogs.hpp"
 #include "survey/survey_import_wizard.hpp"
 #include "survey/survey_jobs_dialog.hpp"
+#include "survey/survey_parcel_dialog.hpp"
 #include "survey/survey_points_ui.hpp"
 
 namespace katana::qt {
@@ -34,6 +35,12 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     QAction* area = make(Icon::SurveyArea, "&Area of Selection",
                          "Area and perimeter of the selected closed polylines and circles",
                          "surveyArea");
+    // No mnemonic: every letter of its name is taken in this menu, and a
+    // shared one would make Alt+letter cycle instead of choose.
+    QAction* parcel =
+        make(Icon::SurveyArea, "Parcel Report...",
+             "A closed polyline's courses, area and legal description, and course labels",
+             "surveyParcelReport");
     QAction* angle = make(Icon::SurveyAngle, "Angle and &Bearing Calculator...",
                           "Convert angles between DMS, decimal degrees, gons, radians and bearings",
                           "surveyAngleCalculator");
@@ -96,6 +103,12 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
         open(forward_, [this] { return new SurveyForwardDialog(dialogContext(), &window_); });
     });
     QObject::connect(area, &QAction::triggered, &window_, [this] { areaOfSelection(); });
+    QObject::connect(parcel, &QAction::triggered, &window_, [this] {
+        open(parcel_, [this] {
+            return new SurveyParcelDialog(dialogContext(), services_.run, services_.headless,
+                                          &window_);
+        });
+    });
     QObject::connect(angle, &QAction::triggered, &window_, [this] {
         open(angle_, [this] { return new SurveyAngleDialog(dialogContext(), &window_); });
     });
@@ -114,7 +127,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
     menu.addSection("Survey Points");
     menu.addActions({importPoints, surveyJobs, exportPoints, pointManagerAction_, pointReport});
     menu.addSection("Coordinate Geometry");
-    menu.addActions({inverse, forward, area, angle});
+    menu.addActions({inverse, forward, area, parcel, angle});
     menu.addSection("Traverse and Levelling");
     menu.addActions({traverse, levelBook});
     menu.addSection("Coordinates");
@@ -135,7 +148,7 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
 
     toolBar.addActions({importPoints, surveyJobs, exportPoints, pointManagerAction_});
     toolBar.addSeparator();
-    toolBar.addActions({inverse, forward, area, angle});
+    toolBar.addActions({inverse, forward, area, parcel, angle});
     toolBar.addSeparator();
     toolBar.addActions({traverse, levelBook});
     toolBar.addSeparator();
@@ -149,7 +162,8 @@ SurveyWorkbench::SurveyWorkbench(QMainWindow& window, SurveyServices services, Q
 SurveyWorkbench::~SurveyWorkbench()
 {
     for (QPointer<QDialog>* slot : {&inverse_, &forward_, &angle_, &traverse_, &levelBook_,
-                                    &converter_, &import_, &jobs_, &export_, &pointReport_}) {
+                                    &converter_, &import_, &jobs_, &export_, &pointReport_,
+                                    &parcel_}) {
         delete slot->data();
     }
     // The dock holds a listener on the document too, and goes for the same

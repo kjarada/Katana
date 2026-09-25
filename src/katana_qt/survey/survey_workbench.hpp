@@ -16,7 +16,7 @@
 //                           Export Survey Points..., Point Manager (a dock),
 //                           Point Report...
 //   Coordinate Geometry     Inverse..., Forward Point..., Area of Selection,
-//                           Angle and Bearing Calculator...
+//                           Parcel Report..., Angle and Bearing Calculator...
 //   Traverse and Levelling  Traverse..., Level Book...
 //   Coordinates             Coordinate Converter...
 //   Survey Coding           the window's customisation actions and the
@@ -24,10 +24,11 @@
 // Each action's object name (surveyImport, surveyJobs, surveyExport,
 // surveyPointManager,
 // surveyPointReport, surveyInverse, surveyForward, surveyArea,
-// surveyAngleCalculator, surveyTraverse, surveyLevelBook,
+// surveyParcelReport, surveyAngleCalculator, surveyTraverse, surveyLevelBook,
 // surveyCoordinateConverter) is what --action and --survey-dialog know it by.
 // A dialog's object name is its action's plus "Dialog" (survey_dialogs.hpp,
-// survey_import_wizard.hpp, survey_jobs_dialog.hpp, survey_points_ui.hpp); the
+// survey_import_wizard.hpp, survey_jobs_dialog.hpp, survey_points_ui.hpp,
+// survey_parcel_dialog.hpp); the
 // Point Manager is the
 // dock SurveyPointsDock, which --survey-dock knows it by.
 //
@@ -87,6 +88,9 @@ struct SurveyServices {
     // The window's one executor (command_runner.hpp), for a dialog that
     // changes the drawing through a verb line. May be empty (a test).
     CommandRunner run;
+    // True in a headless session, where a dialog opens no file dialog. May
+    // be empty (a test): then never headless.
+    std::function<bool()> headless;
 };
 
 class SurveyWorkbench {
@@ -125,6 +129,7 @@ class SurveyWorkbench {
     QPointer<QDialog> jobs_;
     QPointer<QDialog> export_;
     QPointer<QDialog> pointReport_;
+    QPointer<QDialog> parcel_;
     QPointer<SurveyPointsDock> pointManager_;
     QAction* pointManagerAction_ = nullptr;
 };
