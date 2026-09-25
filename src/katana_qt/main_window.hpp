@@ -45,6 +45,7 @@
 #include "plotting/plot_drawing_dialog.hpp"
 #include "plotting/plot_output.hpp"
 #include "plotting/view_image_export.hpp"
+#include "project_crs_dialog.hpp"
 // Whole, not declared: selectById_ is destroyed wherever the window is.
 #include "select_by_id_dialog.hpp"
 #include "sheet_editor.hpp"
@@ -187,6 +188,11 @@ class MainWindow final : public QMainWindow {
     // Edit > Select by ID (select_by_id_dialog.hpp), made the first time and
     // kept, as Format > Layers is.
     void showSelectById();
+    // File > Project Coordinate System and the status bar's CRS button
+    // (project_crs_dialog.hpp): non-modal, so a headless run fills it by its
+    // object names instead of hanging on it; made afresh when it is opened
+    // from closed, or for a place, so it starts from the project as it is now.
+    void showProjectCrs(std::optional<std::pair<double, double>> place = std::nullopt);
     // Runs `line` as if it were typed on the command line and Enter pressed.
     // For the headless --command switch, so a test can set up a drawing -
     // styles, entities, a selection - through the verbs a person types. An
@@ -517,6 +523,8 @@ class MainWindow final : public QMainWindow {
     // Terrain > Alignment Manager, kept between uses and owned here for the
     // reason layers_ is.
     std::unique_ptr<AlignmentManagerDialog> alignments_;
+    // File > Project Coordinate System, owned here for the reason layers_ is.
+    std::unique_ptr<ProjectCrsDialog> projectCrs_;
 
     // Surfaces shown in the 3D and section views. Built on demand from
     // imported point clouds, rasters and drawing geometry, and owned here for

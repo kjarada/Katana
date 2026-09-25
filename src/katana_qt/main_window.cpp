@@ -620,8 +620,8 @@ void MainWindow::buildActions()
                                     "Set the coordinate system the project is in (EPSG code, WKT or "
                                     "PROJ); online data and reprojection need one",
                                     QKeySequence(), "fileProjectCrs");
-    connect(crsAction, &QAction::triggered, this,
-            [this] { (void)chooseProjectCrs(this, document_); });
+    crsAction->setData(QStringLiteral("projectCrsDialog")); // for --dialog
+    connect(crsAction, &QAction::triggered, this, [this] { showProjectCrs(); });
     fileMenu->addAction(crsAction);
     // The drawing at a glance, kept live beside it: what STATUS reports and
     // the customisation report (customisation/drawing_summary_dialog.hpp).
@@ -1060,6 +1060,14 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     };
     online.version = KATANA_VERSION;
     online.chooseProjectCrs = [this](std::optional<std::pair<double, double>> place) {
+        // Online Data waits for the answer, to import into the system chosen.
+        // A headless run has nobody to answer: it gets the non-modal dialog,
+        // to fill by object name, and Online Data reads the system again when
+        // it next refreshes.
+        if (headless_) {
+            showProjectCrs(place);
+            return false;
+        }
         return chooseProjectCrs(this, document_, place);
     };
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
@@ -1661,8 +1669,7 @@ void MainWindow::buildStatusBar()
     crsButton_->setObjectName("statusProjectCrs");
     crsButton_->setAutoRaise(true);
     crsButton_->setToolTip("The project's coordinate system: click to change it");
-    connect(crsButton_, &QToolButton::clicked, this,
-            [this] { (void)chooseProjectCrs(this, document_); });
+    connect(crsButton_, &QToolButton::clicked, this, [this] { showProjectCrs(); });
     statusBar()->addPermanentWidget(crsButton_);
     statusBar()->addPermanentWidget(frameStatsLabel_);
     statusBar()->addPermanentWidget(selectionCountLabel_);
@@ -2135,6 +2142,19 @@ void MainWindow::showPlanContextMenu(const QPoint& globalPos)
     auto* menu = new PlanContextMenu(std::move(context), this);
     connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
     menu->popup(globalPos);
+}
+
+void MainWindow::showProjectCrs(std::optional<std::pair<double, double>> place)
+{
+    // Made afresh unless it is open: the dialog reads the project's system
+    // and the drawing's centre when it is made, and a place asked about is a
+    // new question.
+    if (!projectCrs_ || !projectCrs_->isVisible() || place) {
+        projectCrs_ = std::make_unique<ProjectCrsDialog>(document_, place, this);
+    }
+    projectCrs_->show();
+    projectCrs_->raise();
+    projectCrs_->activateWindow();
 }
 
 void MainWindow::showSelectById()

@@ -1734,3 +1734,24 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# File > Project Coordinate System through the real window (docs/cad.md, "The
+# project's coordinate system"): non-modal, so --dialog fills it by its object
+# names instead of hanging on exec() as it once did. Perth, 115.86 E, is in
+# UTM zone 50 (114 to 120 E), which GDA2020 names EPSG:7850, "GDA2020 / MGA
+# zone 50" in the EPSG registry; Set is one step, which one UNDO takes back.
+if(TARGET katana)
+    add_test(NAME qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@fileProjectCrs|?projectCrsCurrent|projectCrsPlace=115.86,-31.95|!projectCrsSuggest|?projectCrsList|projectCrsText=EPSG:7850|?projectCrsCheck|!projectCrsApply|>CRS|>UNDO|>CRS"
+            "-DEXPECT=--dialog fileProjectCrs opened projectCrsDialog \"Project Coordinate System\"[\r\n]+projectCrsCurrent: Now: no coordinate system[\r\n]+projectCrsList: Suggested for this place [^\r\n]*[\r\n]+projectCrsCheck: EPSG:7850 GDA2020 / MGA zone 50 - projected, metre[^\r\n]*[\r\n]+crs id=EPSG:7850 name=\"GDA2020 / MGA zone 50\"[^\r\n]*[\r\n]+1 undone[\r\n]+crs id=none"
+            "-DFORBID=\\(modal\\)"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/project_crs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_project_crs_dialog_is_driven_and_sets_one_step_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
