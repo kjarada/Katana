@@ -1566,6 +1566,7 @@ void MainWindow::newDocument()
         interpreter_.resetPointState();
         document_.newDocument();
         clearReferenceData();
+        clearSceneData();
         views_->zoomExtentsAll();
         logMessage("New drawing.");
     }
@@ -1643,6 +1644,7 @@ void MainWindow::openProject(const QString& directory)
     views_->resetInteraction();
     interpreter_.resetPointState();
     clearReferenceData();
+    clearSceneData();
     views_->zoomExtentsAll();
     logMessage("Opened " + directory + " (" +
                QString::number(document_.model().entities.size()) + " entities).");
@@ -1887,8 +1889,10 @@ void MainWindow::runInterpreterLine(const QString& line, const QString& verb)
     }
     logMessage(QString::fromStdString(*reply));
     if (replacesDocument) {
-        // The same as File > New and Open: the backdrop went with the drawing.
+        // The same as File > New and Open: the backdrop and the surfaces went
+        // with the drawing.
         clearReferenceData();
+        clearSceneData();
         views_->zoomExtentsAll();
     }
     if (verb == "OPEN") {
@@ -3064,6 +3068,17 @@ void MainWindow::clearReferenceData()
     reference_.clear();
     views_->invalidateReferenceCache();
     refreshReferences();
+}
+
+void MainWindow::clearSceneData()
+{
+    // The scene lists first: they point into the stores. The views keep their
+    // pointers to the (now empty) lists, which stay where they are.
+    sceneSurfaces_.clear();
+    sceneMeshes_.clear();
+    surfaceStore_.clear();
+    meshStore_.clear();
+    views_->drawingReplaced();
 }
 
 // ---- GIS menu: GDAL and PDAL (PLAN.MD Phases 17 and 20) ------------------------------------
