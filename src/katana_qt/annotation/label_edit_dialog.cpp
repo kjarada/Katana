@@ -14,6 +14,7 @@
 #include <QStringList>
 #include <QVBoxLayout>
 
+#include "katana/cad/annotation/command_words.hpp"
 #include "katana/core/text.hpp"
 #include "katana/entity/annotation.hpp"
 
@@ -30,16 +31,15 @@ QString exact(double value)
     return QString::fromStdString(katana::core::formatExactReal(value));
 }
 
-// A word as the command line reads it: quoted when it holds a blank or is
-// empty (tokenize groups a quoted run into one word and drops the quotes).
-QString word(const QString& value)
+// A value as a word of the LABEL SET line, by the rule every dialog writes
+// words with (cad/annotation/command_words.hpp); a refusal names the field.
+Result<QString> written(Result<std::string> word, const char* field)
 {
-    for (const QChar c : value) {
-        if (c.isSpace()) {
-            return '"' + value + '"';
-        }
+    if (!word) {
+        return makeError(word.error().code, std::string(field) + ": " + word.error().message,
+                         word.error().context);
     }
-    return value.isEmpty() ? QStringLiteral("\"\"") : value;
+    return QString::fromStdString(*word);
 }
 
 std::optional<double> number(const QString& text)
@@ -79,14 +79,7 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
     if (form.id == 0) {
         return makeError(ErrorCode::InvalidArgument, "no label is chosen: select one label first");
     }
-    const auto quoteless = [](const QString& value, const char* field) -> katana::core::Status {
-        if (value.contains('"')) {
-            return makeError(ErrorCode::InvalidArgument,
-                             std::string(field) + ": a double quote cannot be written on the "
-                                                  "command line");
-        }
-        return {};
-    };
+    namespace ann = katana::cad::annotation;
     const QString style = form.style.trimmed();
     const QString layer = form.layer.trimmed();
     if (style.isEmpty()) {
@@ -95,16 +88,20 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
     if (layer.isEmpty()) {
         return makeError(ErrorCode::InvalidArgument, "Layer: choose the layer the label is on");
     }
-    for (const auto& [value, field] : {std::pair{style, "Style"}, std::pair{layer, "Layer"},
-                                       std::pair{form.text, "Own text"}}) {
-        if (auto status = quoteless(value, field); !status) {
-            return status.error();
-        }
+    // Every field is written, even one left as it was, so a value no line
+    // can carry is refused whichever field changed.
+    const auto styleWord = written(ann::commandWord(style.toStdString()), "Style");
+    if (!styleWord) {
+        return styleWord.error();
+    }
+    const auto layerWord = written(ann::commandWord(layer.toStdString()), "Layer");
+    if (!layerWord) {
+        return layerWord.error();
     }
 
     QStringList words{QStringLiteral("LABEL"), QStringLiteral("SET"), QString::number(form.id)};
     if (style != current.style) {
-        words << "style=" + word(style);
+        words << "style=" + *styleWord;
     }
     if (form.override) {
         if (form.text.isEmpty()) {
@@ -117,10 +114,17 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
                              "Own text: the word none on its own means \"no own text\" to LABEL "
                              "SET; untick Own text for the style's words");
         }
+        // LABEL SET's text= reads "\n" as a line break, as TEXT's does, so
+        // the text is written as the annotation verbs' texts are - and one
+        // holding a typed backslash and n, which would come back a break, is
+        // refused.
+        const auto textWord = written(ann::annotationTextWord(form.text.toStdString()),
+                                      "Own text");
+        if (!textWord) {
+            return textWord.error();
+        }
         if (!current.override || form.text != current.text) {
-            QString text = form.text;
-            text.replace('\n', QStringLiteral("\\n"));
-            words << "text=" + word(text);
+            words << "text=" + *textWord;
         }
     } else if (current.override) {
         words << QStringLiteral("text=none");
@@ -145,7 +149,7 @@ Result<QString> labelSetLine(const LabelEditForm& form, const LabelEditForm& cur
         words << QStringLiteral("at=none");
     }
     if (layer != current.layer) {
-        words << "layer=" + word(layer);
+        words << "layer=" + *layerWord;
     }
     if (words.size() == 3) {
         return QString();

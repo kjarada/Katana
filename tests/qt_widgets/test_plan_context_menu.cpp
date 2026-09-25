@@ -250,6 +250,29 @@ TEST(PlanContextMenu, LayersUnderALayerAreASubmenuHeadedByThatLayerAndBlanksAreQ
     EXPECT_EQ(f.entity(1).layer, "old work");
 }
 
+// A DXF can bring a layer whose name holds a double quote, which no typed line
+// can carry. Its item is still listed - the layer is there - but disabled,
+// saying why, rather than running CHLAYER on the name cut short at the quote.
+TEST(PlanContextMenu, ALayerNoLineCanNameIsOfferedDisabledAndRunsNothing)
+{
+    MenuFixture f;
+    katana::entity::Layer pipes;
+    pipes.name = "6\" pipes";
+    ASSERT_TRUE(f.document.execute(katana::commands::createLayer(pipes)).ok());
+    f.run("LINE 0,0 10,0");
+    f.run("SELECT 1");
+    PlanContextMenu menu(f.context());
+
+    QAction* quoted = item(menu, "planContextLayer.6\" pipes");
+    ASSERT_NE(quoted, nullptr);
+    EXPECT_FALSE(quoted->isEnabled());
+    EXPECT_EQ(quoted->statusTip(),
+              "the layer: a double quote cannot be written on a command line");
+    quoted->trigger();
+    EXPECT_TRUE(f.lines.empty());
+    EXPECT_EQ(f.entity(1).layer, "0");
+}
+
 TEST(PlanContextMenu, TheLayerTheWholeSelectionIsOnIsTickedAndNoneWhenItIsOnSeveral)
 {
     MenuFixture f;
@@ -335,11 +358,19 @@ TEST(PlanContextMenu, EntityInformationIsForOneEntityAndRunsInfo)
 
 TEST(PlanContextMenu, AnArgumentIsQuotedOnlyWhenItMustBe)
 {
-    using katana::qt::verbArgument;
-    EXPECT_EQ(verbArgument("walls"), "walls");
-    EXPECT_EQ(verbArgument("site/kerb"), "site/kerb");
-    EXPECT_EQ(verbArgument("old work"), "\"old work\"");
-    EXPECT_EQ(verbArgument(""), "\"\"");
+    const auto line = [](const QString& name) {
+        return katana::qt::namedLine("CHLAYER", name, "the layer");
+    };
+    EXPECT_EQ(line("walls").value(), "CHLAYER walls");
+    EXPECT_EQ(line("site/kerb").value(), "CHLAYER site/kerb");
+    EXPECT_EQ(line("old work").value(), "CHLAYER \"old work\"");
+    EXPECT_EQ(line("").value(), "CHLAYER \"\"");
+    // No line can carry a double quote - the tokenizer has no escape - so
+    // quoting one would act on the name cut short at it.
+    const auto refused = line("6\" pipes");
+    ASSERT_FALSE(refused.ok());
+    EXPECT_EQ(refused.error().message, "the layer: a double quote cannot be written on a "
+                                       "command line");
 }
 
 // ---- the plan view raises it ----------------------------------------------------------------

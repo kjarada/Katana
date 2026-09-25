@@ -125,9 +125,9 @@ through the window's one executor: one undo step, the verb's refusal in the
 dialog's words. A text or a name holding a double quote cannot be written on
 a command line at all (the interpreter's quotes have no escape), and is
 refused before anything runs rather than sent cut short
-(`include/katana/cad/annotation/command_words.hpp`). The plan-view
-double-click that opens it on the text under the cursor is the plan view's
-(`annotateEditText` is what it triggers).
+(`include/katana/cad/annotation/command_words.hpp`). A double click on a
+text in the plan view opens it on that text (`MainWindow::editDoubleClicked`
+triggers `annotateEditText`).
 
 ## Labels
 
@@ -509,9 +509,11 @@ reported one. Now:
   what changed - shown as it will run - and run it through the window's one
   executor (`docs/desktop.md`), so it is echoed, kept and one undo step. With
   no label selected it says so and runs nothing; it asks nothing in a box.
-  A text the command line cannot write (a double quote, or the bare word
-  `none`, which `LABEL SET` reads as "no own text") is refused in the dialog,
-  naming the field.
+  A text the command line cannot write is refused in the dialog, naming the
+  field. That is a double quote, or a backslash before an n, which
+  `LABEL SET` would read back as a line break. So is the bare word `none`,
+  which `LABEL SET` reads as "no own text". The words are written as every
+  annotation dialog writes them (`commandWord`, `annotationTextWord`).
 * **The Properties panel** shows a label's resolved **Text** and its
   **Position** (`pinned at E, N` or `automatic`) beside its style, target,
   part and rule. The text is `annotation::shownLabelText`, which `LABEL LIST`
@@ -527,9 +529,10 @@ reported one. Now:
   (`LabelLayout::suppressedPieces`, `LabelLayoutNamesEachPieceThatFoundNoRoom`).
   The dialog works nothing out itself: an agent reads the same records.
 
-Opening Edit Label by double-clicking a label is left to the plan view's
-double-click work, which reaches the dialog through the action's name,
-`annotateEditLabel`.
+A double click on a label in the plan view opens Edit Label on it
+(`MainWindow::editDoubleClicked` triggers `annotateEditLabel`, as it
+triggers `annotateEditText` for a text; `docs/desktop.md`, "Double click to
+edit").
 
 ## Stored with the project
 
