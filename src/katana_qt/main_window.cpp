@@ -8,6 +8,7 @@
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
+#include "plotting/sheet_checks.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
@@ -4481,6 +4482,10 @@ katana::core::Status MainWindow::plotSheetsToPdf(const QString& path,
         cad::plotting::prepareForAppend(set, *fitted);
         set.sheets = std::move(*fitted);
         logMessage("The project has no sheets: plotting one fitted to the drawing.");
+    }
+    // What the checks find is logged, and the plot goes ahead.
+    for (const QString& line : preflightLog(checkSheetsFor(set, source))) {
+        logMessage(line);
     }
     SheetPaintCache cache;
     std::vector<std::string> problems;
