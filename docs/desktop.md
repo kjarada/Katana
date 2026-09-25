@@ -974,6 +974,24 @@ style: the colour plot has coloured pixels and the greyscale and monochrome
 ones none, the monochrome one fewer mid greys than the greyscale one, and
 line weights times 4 and times 0.25 more and less ink than times 1.
 
+## Undo and Redo lists
+
+Edit > Undo and Redo move one step a click; `UNDO n` and `REDO n` have always
+moved several, but only for someone who typed them. The Edit toolbar's Undo
+and Redo are now split buttons (`editUndoButton`, `editRedoButton`): the
+button is one step, as before, and the arrow drops down the history
+(`editUndoMenu`, `editRedoMenu`) from `CommandStack::undoNames` and
+`CommandStack::redoNames`, the next step first. The k-th entry (`undoStepK`,
+`redoStepK`, so `--trigger undoStep3` reaches it) runs `UNDO k` or `REDO k`
+through the one executor: one line in the log, and what it did said as the
+typed line says it. The lists show 25 steps each way, with a last line saying
+how many more there are and that `UNDO n` reaches them; they are refilled with
+the panels. The names are the commands' own (`CREATE_POINT`), the words the
+Undo item and the Drawing Summary use. Tested in
+`tests/commands/test_command_stack_names.cpp` and by
+`qt_the_undo_and_redo_lists_step_through_the_history_headless`. The optional
+Undo History dock of the plan, with the save point marked, is not built.
+
 ## GIS > Online Data: a workbench of its own
 
 The online import (`docs/gis_online.md`) is `OnlineDataWorkbench`

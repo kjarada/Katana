@@ -55,6 +55,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -727,7 +728,26 @@ void MainWindow::buildActions()
     });
 
     QToolBar* editBar = makeToolBar("Edit", Qt::TopToolBarArea);
-    editBar->addActions({undoAction_, redoAction_});
+    // Undo and Redo, each with its history dropped down beside it (the
+    // button is one step; the k-th entry of the list is UNDO k or REDO k,
+    // run through the one executor as one line). The menus are refilled
+    // with the panels (refreshHistoryMenus).
+    const auto historyButton = [this, editBar](QAction* action, const char* name,
+                                               const char* menuName) {
+        auto* button = new QToolButton(editBar);
+        button->setObjectName(name);
+        button->setDefaultAction(action);
+        button->setPopupMode(QToolButton::MenuButtonPopup);
+        button->setAutoRaise(true);
+        button->setIconSize(editBar->iconSize());
+        auto* menu = new QMenu(button);
+        menu->setObjectName(menuName);
+        button->setMenu(menu);
+        editBar->addWidget(button);
+        return menu;
+    };
+    undoHistory_ = historyButton(undoAction_, "editUndoButton", "editUndoMenu");
+    redoHistory_ = historyButton(redoAction_, "editRedoButton", "editRedoMenu");
     editBar->addSeparator();
     editBar->addActions({selectAllAction, eraseAction});
 
@@ -1723,6 +1743,7 @@ void MainWindow::refreshAll()
                              ? "&Undo " + QString::fromUtf8(document_.history().undoName().data(),
                                                             static_cast<int>(document_.history().undoName().size()))
                              : "&Undo");
+    refreshHistoryMenus();
     layerLabel_->setText("Layer: " + QString::fromStdString(document_.currentLayer()));
     selectionCountLabel_->setText(QString("%1 selected / %2 entities")
                                       .arg(document_.selection().size())
@@ -1730,6 +1751,38 @@ void MainWindow::refreshAll()
     if (crsButton_ != nullptr) {
         crsButton_->setText("CRS: " + projectCrsLabel(document_));
     }
+}
+
+void MainWindow::refreshHistoryMenus()
+{
+    // The steps each way, the next first, as far as a list can be read: a
+    // longer history is said in a last line and reached by typing UNDO n.
+    constexpr std::size_t kListed = 25;
+    const auto fill = [this](QMenu& menu, const std::vector<std::string_view>& names,
+                             const QString& verb, const QString& itemName) {
+        menu.clear();
+        for (std::size_t k = 0; k < names.size() && k < kListed; ++k) {
+            const QString name =
+                QString::fromUtf8(names[k].data(), static_cast<qsizetype>(names[k].size()));
+            // '&&' so a name's own '&' is shown, not taken for a mnemonic.
+            QAction* item = menu.addAction(QString("%1  %2").arg(k + 1).arg(
+                QString(name).replace("&", "&&")));
+            item->setObjectName(itemName + QString::number(k + 1));
+            const QString line = QString("%1 %2").arg(verb).arg(k + 1);
+            item->setStatusTip(k == 0 ? QString("%1: %2").arg(line, name)
+                                      : QString("%1: the last %2 steps, down to %3")
+                                            .arg(line)
+                                            .arg(k + 1)
+                                            .arg(name));
+            connect(item, &QAction::triggered, this, [this, line] { (void)runVerbLine(line); });
+        }
+        if (names.size() > kListed) {
+            menu.addAction(QString("%1 more: type %2 n").arg(names.size() - kListed).arg(verb))
+                ->setEnabled(false);
+        }
+    };
+    fill(*undoHistory_, document_.history().undoNames(), "UNDO", "undoStep");
+    fill(*redoHistory_, document_.history().redoNames(), "REDO", "redoStep");
 }
 
 void MainWindow::refreshTitle()

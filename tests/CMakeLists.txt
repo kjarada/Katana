@@ -1462,3 +1462,23 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# The Edit toolbar's Undo and Redo lists (docs/desktop.md, "Undo and Redo
+# lists"): four points, so the Undo list holds four CREATE_POINT steps, newest
+# first; its third entry runs UNDO 3 and leaves one point; the Redo list then
+# holds three, and its second entry runs REDO 2, leaving three points and one
+# step still to redo.
+if(TARGET katana)
+    add_test(NAME qt_the_undo_and_redo_lists_step_through_the_history_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>POINT 1,1|>POINT 2,2|>POINT 3,3|>RECT 0,0 4,4|?editUndoMenu|*undoStep3|>LIST|?editRedoMenu|*redoStep2|>LIST|?editRedoMenu"
+            "-DEXPECT=editUndoMenu: : 1 CREATE_POLYLINE \\[UNDO 1: CREATE_POLYLINE\\] ; 2 CREATE_POINT \\[UNDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POINT \\[UNDO 3: the last 3 steps, down to CREATE_POINT\\] ; 4 CREATE_POINT \\[UNDO 4: the last 4 steps, down to CREATE_POINT\\][\r\n]+3 undone[\r\n]+1 entities[\r\n]+1  Point [^\r\n]*[\r\n]+editRedoMenu: : 1 CREATE_POINT \\[REDO 1: CREATE_POINT\\] ; 2 CREATE_POINT \\[REDO 2: the last 2 steps, down to CREATE_POINT\\] ; 3 CREATE_POLYLINE \\[REDO 3: the last 3 steps, down to CREATE_POLYLINE\\][\r\n]+2 redone[\r\n]+3 entities[\r\n]+.*editRedoMenu: : 1 CREATE_POLYLINE \\[REDO 1: CREATE_POLYLINE\\][\r\n]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/undo_lists_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_undo_and_redo_lists_step_through_the_history_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
