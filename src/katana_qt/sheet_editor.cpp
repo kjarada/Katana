@@ -1405,9 +1405,11 @@ void SheetEditor::buildActions()
     bar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 
     auto* undo = new QAction(icon(Icon::Undo), QStringLiteral("Undo"), this);
+    undo->setObjectName(QStringLiteral("sheetUndo"));
     undo->setShortcut(QKeySequence::Undo);
     connect(undo, &QAction::triggered, this, [this] { (void)document_.undo(); });
     auto* redo = new QAction(icon(Icon::Redo), QStringLiteral("Redo"), this);
+    redo->setObjectName(QStringLiteral("sheetRedo"));
     redo->setShortcut(QKeySequence::Redo);
     connect(redo, &QAction::triggered, this, [this] { (void)document_.redo(); });
     addAction(undo);
@@ -1419,11 +1421,13 @@ void SheetEditor::buildActions()
     connect(generate, &QAction::triggered, this, [this] { generateSheets(); });
 
     QAction* blank = bar->addAction(icon(Icon::New), QStringLiteral("New Sheet"));
+    blank->setObjectName(QStringLiteral("sheetNewSheet"));
     connect(blank, &QAction::triggered, this, [this] { (void)addBlankSheet(); });
 
     auto* addMenu = new QMenu(this);
     for (const ViewportKind kind : kKinds) {
         QAction* a = addMenu->addAction(kindName(kind));
+        a->setObjectName(QStringLiteral("sheetAddView_") + QString::fromUtf8(plotting::toString(kind)));
         connect(a, &QAction::triggered, this, [this, kind] {
             if (auto s = addViewport(kind); !s) {
                 report(QString::fromStdString(s.error().describe()), true);
@@ -1431,6 +1435,7 @@ void SheetEditor::buildActions()
         });
     }
     auto* addButton = new QToolButton(bar);
+    addButton->setObjectName(QStringLiteral("sheetAddViewButton"));
     addButton->setText(QStringLiteral("Add View"));
     addButton->setIcon(icon(Icon::Rectangle));
     addButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -1443,6 +1448,7 @@ void SheetEditor::buildActions()
         const auto preset = static_cast<TilingPreset>(i);
         QAction* a = tileMenu->addAction(QString::fromUtf8(plotting::presetName(preset).data(),
                                                            static_cast<qsizetype>(plotting::presetName(preset).size())));
+        a->setObjectName(QStringLiteral("sheetTile_%1").arg(i));
         connect(a, &QAction::triggered, this, [this, preset] {
             if (auto s = tile(preset); !s) {
                 report(QString::fromStdString(s.error().describe()), true);
@@ -1450,6 +1456,7 @@ void SheetEditor::buildActions()
         });
     }
     auto* tileButton = new QToolButton(bar);
+    tileButton->setObjectName(QStringLiteral("sheetTileButton"));
     tileButton->setText(QStringLiteral("Tile"));
     tileButton->setIcon(icon(Icon::Grid));
     tileButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -1459,6 +1466,7 @@ void SheetEditor::buildActions()
 
     bar->addSeparator();
     QAction* titleBlock = bar->addAction(icon(Icon::Properties), QStringLiteral("Title Block..."));
+    titleBlock->setObjectName(QStringLiteral("sheetTitleBlock"));
     titleBlock->setToolTip(
         QStringLiteral("The organisation, project, sign-offs, notes, revisions and logo every sheet shares"));
     connect(titleBlock, &QAction::triggered, this, [this] { editTitleBlock(); });
@@ -1471,6 +1479,7 @@ void SheetEditor::buildActions()
 
     bar->addSeparator();
     QAction* plotOne = bar->addAction(icon(Icon::Plot), QStringLiteral("Plot Sheet..."));
+    plotOne->setObjectName(QStringLiteral("sheetPlotSheet"));
     connect(plotOne, &QAction::triggered, this, [this] { plotInteractive(false); });
     QAction* plotAll = bar->addAction(icon(Icon::Plot), QStringLiteral("Plot All..."));
     plotAll->setObjectName(QStringLiteral("sheetPlotAll"));
@@ -1917,7 +1926,7 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
     QMenu menu(this);
     if (!viewportId.empty()) {
         const std::size_t index = currentSheet();
-        menu.addAction(QStringLiteral("Bring to Front"), this, [this, index, viewportId] {
+        QAction* front = menu.addAction(QStringLiteral("Bring to Front"), this, [this, index, viewportId] {
             (void)plotting::editSheet(document_, index, [&viewportId](Sheet& s) {
                 auto it = std::find_if(s.viewports.begin(), s.viewports.end(),
                                        [&](const Viewport& v) { return v.id == viewportId; });
@@ -1927,7 +1936,8 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
                 return Status{};
             }, "ORDER_VIEWPORT");
         });
-        menu.addAction(QStringLiteral("Send to Back"), this, [this, index, viewportId] {
+        front->setObjectName(QStringLiteral("sheetBringToFront"));
+        QAction* back = menu.addAction(QStringLiteral("Send to Back"), this, [this, index, viewportId] {
             (void)plotting::editSheet(document_, index, [&viewportId](Sheet& s) {
                 auto it = std::find_if(s.viewports.begin(), s.viewports.end(),
                                        [&](const Viewport& v) { return v.id == viewportId; });
@@ -1937,7 +1947,8 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
                 return Status{};
             }, "ORDER_VIEWPORT");
         });
-        menu.addAction(QStringLiteral("Fill the Drawing Area"), this, [this, viewportId] {
+        back->setObjectName(QStringLiteral("sheetSendToBack"));
+        QAction* fill = menu.addAction(QStringLiteral("Fill the Drawing Area"), this, [this, viewportId] {
             const Sheet& sheet = document_.sheetSet().sheets[currentSheet()];
             const Box2 area = plotting::tilingArea(sheet);
             (void)plotting::editViewport(document_, viewportId, [area](Viewport& v) {
@@ -1945,6 +1956,7 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
                 return Status{};
             }, "RESIZE_VIEWPORT");
         });
+        fill->setObjectName(QStringLiteral("sheetFillDrawingArea"));
         menu.addSeparator();
         // The Edit and View menus' own actions, shortcuts and all.
         for (const char* name : {"sheetCut", "sheetCopy", "sheetDuplicateViews", "sheetZoomSelection"}) {
@@ -1953,26 +1965,30 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
             }
         }
         menu.addSeparator();
-        menu.addAction(QStringLiteral("Delete"), this, [this] { (void)removeSelectedViewport(); });
+        if (QAction* a = findChild<QAction*>(QStringLiteral("sheetDeleteViews"))) {
+            menu.addAction(a);
+        }
     } else {
         QMenu* add = menu.addMenu(QStringLiteral("Add View"));
         for (const ViewportKind kind : kKinds) {
-            add->addAction(kindName(kind), this, [this, kind] { (void)addViewport(kind); });
+            add->addAction(kindName(kind), this, [this, kind] { (void)addViewport(kind); })
+                ->setObjectName(QStringLiteral("sheetMenuAddView_") +
+                                QString::fromUtf8(plotting::toString(kind)));
         }
         QMenu* tiles = menu.addMenu(QStringLiteral("Tile"));
         for (std::size_t i = 0; i < plotting::kTilingPresetCount; ++i) {
             const auto preset = static_cast<TilingPreset>(i);
             const auto name = plotting::presetName(preset);
             tiles->addAction(QString::fromUtf8(name.data(), static_cast<qsizetype>(name.size())), this,
-                             [this, preset] { (void)tile(preset); });
+                             [this, preset] { (void)tile(preset); })
+                ->setObjectName(QStringLiteral("sheetMenuTile_%1").arg(i));
         }
         menu.addSeparator();
-        for (const char* name : {"sheetPaste", "sheetSelectAll"}) {
+        for (const char* name : {"sheetPaste", "sheetSelectAll", "sheetFitPage"}) {
             if (QAction* a = findChild<QAction*>(QString::fromLatin1(name))) {
                 menu.addAction(a);
             }
         }
-        menu.addAction(QStringLiteral("Fit Page"), this, [this] { canvas_->fitPage(); });
     }
     menu.exec(global.toPoint());
 }
