@@ -6,11 +6,15 @@ add_library(katana_app STATIC
     session.cpp session.hpp
     dxf_verbs.cpp dxf_verbs.hpp
     utility_verbs.cpp utility_verbs.hpp
+    ifc_verbs.cpp ifc_verbs.hpp
     mcp_server.cpp mcp_server.hpp
 )
 katana_target_defaults(katana_app)
 target_include_directories(katana_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf)
+target_link_libraries(katana_app PUBLIC katana_cad PRIVATE katana_archive12d katana_dxf katana_ifc)
+# The version an exported file names as the program that wrote it.
+set_source_files_properties(ifc_verbs.cpp PROPERTIES
+    COMPILE_DEFINITIONS "KATANA_VERSION=\"${PROJECT_VERSION}\"")
 find_package(nlohmann_json CONFIG REQUIRED)
 target_link_libraries(katana_app PRIVATE nlohmann_json::nlohmann_json)
 
