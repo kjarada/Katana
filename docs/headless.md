@@ -22,7 +22,10 @@ katana_cli --help                         every verb it knows
 ```
 
 Scripts and `-c` batches stop at the first failing command and exit 1, so the
-tool composes with shell pipelines. The `cli.*` tests
+tool composes with shell pipelines. A refusal is one line on stderr; a
+refusal that carries a report - `UTILITY CHECK` of a schedule with errors -
+prints the report after it on stdout, where a reply goes, so output kept from
+stdout has it (`tests/app/test_session.cpp`). The `cli.*` tests
 (`src/katana_app/CMakeLists.txt`) use it to draw, save, reopen in a SEPARATE
 process and check the geometry, to confirm that invalid input fails the
 process (`cli.rejects_bad_input`), and to exercise the survey-code verbs on a

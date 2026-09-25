@@ -159,8 +159,10 @@ with the report; they never touch the drawing, so they are safe against any
 open project. `SPACING` is `GradingSettings::maximumDetectedSpacing` (default
 10 m) for both `REPORT` and `DRAW`, so a drawing and a report of one schedule
 agree. `CHECK` with errors against the schema is refused, and the refusal
-carries the whole check - a script that stops must still say why - so
-`katana_cli` shows it (on stderr, as every refusal) and exits 1. An option
+carries the whole check - a script that stops must still say why. `katana_cli`
+prints the refusal's first line on stderr, as every refusal, and the check
+after it on stdout, where a report goes, so `katana_cli -c "UTILITY CHECK
+..." > check.txt` keeps the check exactly when it failed; and exits 1. An option
 that is not the verb's, one given twice, or a negative or missing number is
 refused by name; so is a file that cannot be read or parsed, with its path.
 
