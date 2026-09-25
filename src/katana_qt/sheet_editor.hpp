@@ -56,6 +56,9 @@ class SheetCanvas final : public QWidget {
     // The selected viewport's id; empty for none (the sheet itself).
     [[nodiscard]] const std::string& selected() const { return selected_; }
     void select(std::string viewportId);
+    // What the canvas has cut and drawn, per revision: the properties read an
+    // automatic section's scale through it, so nothing is cut twice.
+    [[nodiscard]] SheetPaintCache& paintCache() { return cache_; }
 
     // The whole paper in the window.
     void fitPage();
@@ -188,9 +191,6 @@ class SheetEditor final : public QMainWindow {
     QLabel* status_ = nullptr;
     bool rebuilding_ = false;
     katana::cad::Document::ListenerHandle listener_;
-    // The sections the properties cut to show an automatic section's scale:
-    // kept, so a selection does not cut them again (cut per revision).
-    SheetPaintCache sectionCuts_;
 };
 
 } // namespace katana::qt

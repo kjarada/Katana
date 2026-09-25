@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -680,4 +681,34 @@ TEST(SheetSections, ASheetOfALongSectionAndServiceCrossSections)
     EXPECT_TRUE(stats.problems.empty());
     EXPECT_EQ(stats.viewportsDrawn, 2u);
     EXPECT_EQ(stats.sectionNotesDropped, 0u);
+}
+
+TEST(SheetSections, WhatCannotBeDrawnIsReportedNotCountedAsDrawn)
+{
+    const Road road;
+    // A range that lies off the plot of a fixed centre: 30 m to 50 m at
+    // 1 : 1000, centred 500 m away.
+    auto off = longSection(kLongRect, 1000.0, 10.0, Point2(590.0, 25.0));
+    off.source.chainageFrom = 30.0;
+    off.source.chainageTo = 50.0;
+    SheetPaintStats stats;
+    painted(sheetWith({off}), road.source(), &stats, "_off");
+    ASSERT_EQ(stats.problems.size(), 1u);
+    EXPECT_NE(stats.problems.front().find("off the plot"), std::string::npos);
+    EXPECT_EQ(stats.viewportsDrawn, 0u);
+
+    // A viewport too small for any plot.
+    const auto tiny = longSection(box(23.0, 150.0, 40.0, 162.0), 1000.0, 10.0, Point2(90.0, 25.0));
+    painted(sheetWith({tiny}), road.source(), &stats, "_tiny");
+    ASSERT_EQ(stats.problems.size(), 1u);
+    EXPECT_NE(stats.problems.front().find("no room"), std::string::npos);
+    EXPECT_EQ(stats.viewportsDrawn, 0u);
+
+    // A chainage that is not a finite number, as a file could hold.
+    auto infinite = longSection(kLongRect, 1000.0, 10.0, Point2(90.0, 25.0));
+    infinite.source.chainageTo = std::numeric_limits<double>::infinity();
+    painted(sheetWith({infinite}), road.source(), &stats, "_infinite");
+    ASSERT_EQ(stats.problems.size(), 1u);
+    EXPECT_NE(stats.problems.front().find("not a finite number"), std::string::npos);
+    EXPECT_EQ(stats.viewportsDrawn, 0u);
 }
