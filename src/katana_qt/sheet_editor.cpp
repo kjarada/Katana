@@ -47,9 +47,11 @@
 
 #include "icons.hpp"
 #include "katana/cad/plotting/generators.hpp"
+#include "katana/cad/plotting/plan_grid.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
+#include "plotting/grid_properties.hpp"
 
 namespace katana::qt {
 
@@ -487,7 +489,8 @@ void SheetCanvas::mousePressEvent(QMouseEvent* event)
         (v->kind == ViewportKind::Plan || v->kind == ViewportKind::KeyPlan)) {
         drag_ = Drag::PanView;
         viewShift_ = Point2();
-        const ResolvedViewport resolved = resolvePlanViewport(*v, editor_.source());
+        const ResolvedViewport resolved =
+            resolvePlanViewport(*v, editor_.source(), document_.sheetSet(), sheet_);
         startCentre_ = resolved.centre;
         setCursor(Qt::SizeAllCursor);
         return;
@@ -633,7 +636,8 @@ void SheetCanvas::commitDrag()
             drag == Drag::Move ? "MOVE_VIEWPORT" : "RESIZE_VIEWPORT");
     } else if (drag == Drag::PanView &&
                (viewShift_.x != 0.0 || viewShift_.y != 0.0)) {
-        const ResolvedViewport resolved = resolvePlanViewport(*v, editor_.source());
+        const ResolvedViewport resolved =
+            resolvePlanViewport(*v, editor_.source(), document_.sheetSet(), sheet_);
         // The drawing follows the hand, so the centre moves the other way.
         const Point2 centre =
             startCentre_ - rotated(viewShift_, v->rotation) * (resolved.scale / 1000.0);
@@ -1040,7 +1044,7 @@ void SheetEditor::rebuildProperties()
             auto* scale = scaleBox(box, plan);
             if (plan && v.autoScale) {
                 scale->setCurrentIndex(0);
-                const ResolvedViewport resolved = resolvePlanViewport(v, source());
+                const ResolvedViewport resolved = resolvePlanViewport(v, source(), set, index);
                 scale->setToolTip(QString("Automatic: now %1").arg(scaleLabel(resolved.scale)));
             } else {
                 scale->setCurrentText(scaleLabel(v.scale));
@@ -1164,6 +1168,22 @@ void SheetEditor::rebuildProperties()
                     [edit](bool on) { edit([on](Viewport& e) { e.scaleBar = on; }); });
             form->addRow(QString(), north);
             form->addRow(QString(), bar);
+            addGridRows(*form, box, v,
+                        plotting::automaticGridInterval(
+                            resolvePlanViewport(v, source(), set, index).scale),
+                        [this, id](plotting::GridStyle style, double interval) {
+                            // Once the list or box that asked has finished
+                            // signalling: the edit rebuilds this panel, them with it.
+                            QMetaObject::invokeMethod(
+                                this,
+                                [this, id, style, interval] {
+                                    if (auto s = plotting::setPlanGrid(document_, id, style, interval);
+                                        !s) {
+                                        report(QString::fromStdString(s.error().describe()), true);
+                                    }
+                                },
+                                Qt::QueuedConnection);
+                        });
 
             auto* layers = new QPushButton(
                 QString("Hidden layers (%1)...").arg(v.hiddenLayers.size()), box);
@@ -1470,29 +1490,9 @@ Status SheetEditor::addViewport(ViewportKind kind)
         v.autoScale = true;
         v.autoCentre = true;
         v.northArrow = true;
-        // The other sheets' plans, outlined and numbered.
-        const SheetSource src = source();
-        for (const Sheet& other : set.sheets) {
-            if (other.id == sheet.id) {
-                continue;
-            }
-            for (const Viewport& p : other.viewports) {
-                if (p.kind != ViewportKind::Plan || p.rect.empty()) {
-                    continue;
-                }
-                const ResolvedViewport at = resolvePlanViewport(p, src);
-                const double hw = p.rect.width() * at.scale / 2000.0;
-                const double hh = p.rect.height() * at.scale / 2000.0;
-                plotting::WorldMark mark;
-                mark.kind = plotting::WorldMark::Kind::SheetOutline;
-                mark.sheet = other.id;
-                for (const Point2& corner : {Point2(-hw, -hh), Point2(hw, -hh), Point2(hw, hh), Point2(-hw, hh)}) {
-                    mark.points.push_back(at.centre + rotated(corner, p.rotation));
-                }
-                v.marks.push_back(std::move(mark));
-                break;
-            }
-        }
+        // Its outlines are the sheets' plans as they are when it is drawn
+        // (key_plan.hpp), numbered as the set numbers them then; nothing is
+        // stored to go stale.
         break;
     }
     case ViewportKind::LongSection:
