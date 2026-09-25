@@ -1,6 +1,7 @@
 #include "plan_painter.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <functional>
@@ -173,6 +174,156 @@ double strokeWidth(const QPen& pen)
     return pen.isCosmetic() || pen.widthF() <= 0.0 ? std::max(1.0, pen.widthF()) : pen.widthF();
 }
 
+// The frame's viewport corners in the model: for a turned frame the turned
+// rectangle's own corners, where visibleBox is the box around them. A device
+// offset (dx, dy) from the centre is where the painter's rotation by -angle
+// (y down) put the unrotated offset R(angle) (dx, dy) in the same y-down
+// pixels: undo it by turning the other way.
+std::array<Point2, 4> viewportCorners(const PlanFrame& frame)
+{
+    const cad::ViewTransform& view = frame.transform;
+    const double halfWidth = 0.5 * view.widthPixels;
+    const double halfHeight = 0.5 * view.heightPixels;
+    const double c = std::cos(frame.rotation);
+    const double s = std::sin(frame.rotation);
+    std::array<Point2, 4> corners;
+    std::size_t i = 0;
+    for (const auto& [dx, dy] : {std::pair{-halfWidth, -halfHeight}, std::pair{halfWidth, -halfHeight},
+                                 std::pair{halfWidth, halfHeight}, std::pair{-halfWidth, halfHeight}}) {
+        const double ux = c * dx - s * dy;
+        const double uy = s * dx + c * dy;
+        corners[i++] = view.screenToWorld(Point2(halfWidth + ux, halfHeight + uy));
+    }
+    return corners;
+}
+
+// What one output column (or row) of a resampled image covers of its source:
+// the source pixels [first, first + count), and how much of each, a share of
+// weights starting at `weight`. `total` is the covered length, the sum of
+// those shares.
+struct Footprint {
+    int first = 0;
+    int count = 0;
+    std::size_t weight = 0;
+    double total = 0.0;
+};
+
+// Splits `sourceLength` pixels evenly into `outputLength`: output pixel o
+// covers source [o L / N, (o + 1) L / N), a pixel the boundary cuts shared
+// between its two neighbours by how much of it each covers.
+std::vector<Footprint> footprintsOf(int sourceLength, int outputLength, std::vector<double>& weights)
+{
+    const double step = static_cast<double>(sourceLength) / static_cast<double>(outputLength);
+    std::vector<Footprint> footprints(static_cast<std::size_t>(outputLength));
+    for (int o = 0; o < outputLength; ++o) {
+        const double from = static_cast<double>(o) * step;
+        const double to = o + 1 == outputLength ? static_cast<double>(sourceLength)
+                                                 : static_cast<double>(o + 1) * step;
+        Footprint& footprint = footprints[static_cast<std::size_t>(o)];
+        footprint.first = std::clamp(static_cast<int>(std::floor(from)), 0, sourceLength - 1);
+        const int last =
+            std::clamp(static_cast<int>(std::ceil(to)) - 1, footprint.first, sourceLength - 1);
+        footprint.count = last - footprint.first + 1;
+        footprint.weight = weights.size();
+        for (int s = footprint.first; s <= last; ++s) {
+            const double share = std::max(0.0, std::min(static_cast<double>(s + 1), to) -
+                                                   std::max(static_cast<double>(s), from));
+            weights.push_back(share);
+            footprint.total += share;
+        }
+    }
+    return footprints;
+}
+
+// The rectangle `crop` of an RGBA image (straight alpha, `stride` bytes a
+// row, top row first - a RasterOverlay's pixels), averaged down to `size`:
+// each output pixel the mean of the source area it covers, a pixel its edge
+// cuts counted by the part inside (a box filter, exact at any ratio, so a
+// fine image does not shimmer into moire as a point-sampled one does).
+// Premultiplied before it is averaged, so a transparent pixel's colour does
+// not bleed into its neighbours; the result is premultiplied ARGB, what the
+// raster engine draws fastest.
+//
+// It reads the source in place, a row at a time, and never copies the crop:
+// QImage::scaled converts an RGBA8888 image to premultiplied ARGB first,
+// which for the whole of a 400-megapixel orthophoto is a second 1.6 GB. The
+// output rows are shared out across the pool; each is one task's, summed in
+// the same order at every thread count, so the image is the same whatever
+// the number of threads. Accumulated in double: a pixel averaging a thousand
+// source pixels square sums a million terms, which a float would round to a
+// visibly different colour.
+QImage areaResample(const std::uint8_t* rgba, std::size_t stride, const QRect& crop, const QSize& size)
+{
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) {
+        return image;
+    }
+    std::vector<double> columnWeights;
+    std::vector<double> rowWeights;
+    const std::vector<Footprint> columns = footprintsOf(crop.width(), size.width(), columnWeights);
+    const std::vector<Footprint> rows = footprintsOf(crop.height(), size.height(), rowWeights);
+    // bits() once, here: scanLine() from the workers would detach the image
+    // from each of them at once.
+    uchar* const bits = image.bits();
+    const auto bytesPerLine = static_cast<std::size_t>(image.bytesPerLine());
+    const auto width = static_cast<std::size_t>(size.width());
+    katana::core::TaskPool::shared().parallelRanges(
+        0, static_cast<std::size_t>(size.height()), 8, [&](std::size_t lo, std::size_t hi) {
+            std::vector<double> sums(width * 4);
+            for (std::size_t oy = lo; oy < hi; ++oy) {
+                std::fill(sums.begin(), sums.end(), 0.0);
+                const Footprint& row = rows[oy];
+                for (int k = 0; k < row.count; ++k) {
+                    const double wy = rowWeights[row.weight + static_cast<std::size_t>(k)];
+                    if (wy <= 0.0) {
+                        continue;
+                    }
+                    const std::uint8_t* line =
+                        rgba + static_cast<std::size_t>(crop.y() + row.first + k) * stride +
+                        static_cast<std::size_t>(crop.x()) * 4;
+                    for (std::size_t ox = 0; ox < width; ++ox) {
+                        const Footprint& column = columns[ox];
+                        const std::uint8_t* pixel = line + static_cast<std::size_t>(column.first) * 4;
+                        double r = 0.0;
+                        double g = 0.0;
+                        double b = 0.0;
+                        double a = 0.0;
+                        for (int j = 0; j < column.count; ++j, pixel += 4) {
+                            const double coverage =
+                                columnWeights[column.weight + static_cast<std::size_t>(j)] * pixel[3];
+                            r += coverage * pixel[0];
+                            g += coverage * pixel[1];
+                            b += coverage * pixel[2];
+                            a += coverage;
+                        }
+                        double* sum = &sums[ox * 4];
+                        sum[0] += wy * r;
+                        sum[1] += wy * g;
+                        sum[2] += wy * b;
+                        sum[3] += wy * a;
+                    }
+                }
+                auto* target = reinterpret_cast<QRgb*>(bits + oy * bytesPerLine);
+                for (std::size_t ox = 0; ox < width; ++ox) {
+                    const double area = columns[ox].total * row.total;
+                    const double* sum = &sums[ox * 4];
+                    const int alpha = area > 0.0
+                                          ? std::clamp(static_cast<int>(std::lround(sum[3] / area)), 0, 255)
+                                          : 0;
+                    // A premultiplied channel is at most its alpha; rounding
+                    // must not lift it past.
+                    const auto channel = [&](double value) {
+                        return area > 0.0 ? std::clamp(static_cast<int>(std::lround(value / (255.0 * area))),
+                                                       0, alpha)
+                                          : 0;
+                    };
+                    target[ox] = qRgba(channel(sum[0]), channel(sum[1]), channel(sum[2]), alpha);
+                }
+            }
+        });
+    return image;
+}
+
 } // namespace
 
 // ---- the cache ------------------------------------------------------------------------
@@ -180,6 +331,7 @@ double strokeWidth(const QPen& pen)
 void PlanPaintCache::invalidateReferences()
 {
     rasters_.clear();
+    rasterCrops_.clear();
     clouds_.clear();
 }
 
@@ -189,6 +341,7 @@ void PlanPaintCache::clear()
     fonts_.clear();
     paperFont_.reset();
     rasters_.clear();
+    rasterCrops_.clear();
     clouds_.clear();
     sprites_.clear();
     spriteScale_ = 0.0;
@@ -287,14 +440,34 @@ class PlanPainter {
     {
         return markPixels() / std::max(view_.scale, 1e-12);
     }
+    // On paper, the finest imagery is embedded at as a share of the device's
+    // resolution: rasterDpiCap over the plot's own, and never more than 1 -
+    // imagery is not embedded finer than the page is printed.
+    [[nodiscard]] double imageryShare() const
+    {
+        const double ppmm = options_.pixelsPerMillimetre;
+        if (!(options_.rasterDpiCap > 0.0) || !(ppmm > 0.0)) {
+            return 1.0;
+        }
+        return std::min(1.0, cad::millimetresToPixels(1.0, options_.rasterDpiCap) / ppmm);
+    }
     const QFont& fontFor(double pixels);
     const QFont& paperFont();
     const Resolved& resolve(const Entity& entity);
     const Stamp& stampOf(const std::string& symbol, double size);
 
     void drawRasters();
+    // A raster on paper: cropped to the viewport, averaged down to the
+    // capped resolution, and drawn where the whole image would have been.
+    // `imageToView` is the whole image's pixels to the frame's.
+    void drawRasterOnPaper(const katana::interop::RasterOverlay& raster,
+                           const QTransform& imageToView);
     void drawGrid();
     void drawPointClouds();
+    // A cloud on paper: splatted into an image of the part of the viewport
+    // it covers, at the capped resolution, and that image laid on the page.
+    void splatOnPaper(const katana::interop::PointCloudLayer& cloud,
+                      const katana::geometry::SplatCloud& splat);
     void drawMeshFootprints();
     void drawEntities();
     void drawAlignments();
@@ -427,20 +600,22 @@ PlanPaintStats PlanPainter::paint()
 
     // Imagery sits beneath everything: it is a backdrop, and the grid has to
     // stay legible over it. Point clouds sit above the grid but below the
-    // drawing, so drawn geometry is never obscured by survey returns.
-    if (options_.rasters && !paper()) {
+    // drawing, so drawn geometry is never obscured by survey returns. The
+    // same order on paper, less the grid: a sheet over an orthophoto prints
+    // the photo, the cloud over it and the linework over both.
+    if (options_.rasters) {
         drawRasters();
     }
     if (options_.grid && !paper()) {
         drawGrid();
     }
-    if (options_.pointClouds && !paper()) {
+    if (options_.pointClouds) {
         drawPointClouds();
     }
     painter_.setRenderHint(QPainter::Antialiasing, true);
     // Beneath the drawing, like a surface: a mesh is context for what is
     // drawn over it, not a thing to be picked in plan.
-    if (options_.meshFootprints && !paper()) {
+    if (options_.meshFootprints) {
         drawMeshFootprints();
     }
     if (source_.model != nullptr) {
@@ -465,6 +640,26 @@ void PlanPainter::drawRasters()
             continue;
         }
 
+        // Pixel -> world is the geotransform; world -> screen is the view. The
+        // composition is itself affine, so it is handed to QPainter as one
+        // transform rather than resampling the image here.
+        //
+        //   world.x = g0 + px*g1 + py*g2       screen.x = w/2 + (world.x - cx)*s
+        //   world.y = g3 + px*g4 + py*g5       screen.y = h/2 - (world.y - cy)*s
+        //
+        // so screen.x = [w/2 + (g0-cx)s] + px*(g1 s) + py*(g2 s)
+        //    screen.y = [h/2 - (g3-cy)s] + px*(-g4 s) + py*(-g5 s)
+        const auto& g = raster.geotransform;
+        const double s = view_.scale;
+        const double dx = 0.5 * widthPixels() + (g[0] - view_.center.x) * s;
+        const double dy = 0.5 * heightPixels() - (g[3] - view_.center.y) * s;
+        const QTransform transform(g[1] * s, -g[4] * s, g[2] * s, -g[5] * s, dx, dy);
+
+        if (paper()) {
+            drawRasterOnPaper(raster, transform);
+            continue;
+        }
+
         // Cache the QImage: rebuilding it from the RGBA bytes every frame would
         // copy tens of megabytes per repaint.
         auto cached = std::find_if(
@@ -481,21 +676,6 @@ void PlanPainter::drawRasters()
             cached = std::prev(cache_.rasters_.end());
         }
 
-        // Pixel -> world is the geotransform; world -> screen is the view. The
-        // composition is itself affine, so it is handed to QPainter as one
-        // transform rather than resampling the image here.
-        //
-        //   world.x = g0 + px*g1 + py*g2       screen.x = w/2 + (world.x - cx)*s
-        //   world.y = g3 + px*g4 + py*g5       screen.y = h/2 - (world.y - cy)*s
-        //
-        // so screen.x = [w/2 + (g0-cx)s] + px*(g1 s) + py*(g2 s)
-        //    screen.y = [h/2 - (g3-cy)s] + px*(-g4 s) + py*(-g5 s)
-        const auto& g = raster.geotransform;
-        const double s = view_.scale;
-        const double dx = 0.5 * widthPixels() + (g[0] - view_.center.x) * s;
-        const double dy = 0.5 * heightPixels() - (g[3] - view_.center.y) * s;
-        const QTransform transform(g[1] * s, -g[4] * s, g[2] * s, -g[5] * s, dx, dy);
-
         painter_.save();
         painter_.setOpacity(std::clamp(raster.opacity, 0.0, 1.0));
         // Composed with the frame's own placement (origin, rotation), which
@@ -506,7 +686,141 @@ void PlanPainter::drawRasters()
         painter_.setRenderHint(QPainter::SmoothPixmapTransform, std::abs(g[1] * s) > 1.0);
         painter_.drawImage(QPointF(0.0, 0.0), cached->image);
         painter_.restore();
+        ++stats_.rastersDrawn;
     }
+}
+
+void PlanPainter::drawRasterOnPaper(const katana::interop::RasterOverlay& raster,
+                                    const QTransform& imageToView)
+{
+    // The screen draws the whole image and lets the view clip it, which on
+    // paper would embed all of it - every pixel of a 400-megapixel
+    // orthophoto in every PDF page that shows a corner of it - at its own
+    // resolution, finer than any plot can print.
+    const auto& g = raster.geotransform;
+    const double determinant = g[1] * g[5] - g[2] * g[4];
+    const auto bytesPerRow = static_cast<std::size_t>(raster.width) * 4;
+    if (!std::isfinite(determinant) || determinant == 0.0 ||
+        raster.rgba.size() < bytesPerRow * static_cast<std::size_t>(raster.height)) {
+        return;
+    }
+
+    // The viewport's corners in the image's pixels, through the inverse of
+    // the geotransform:
+    //   px = ( g5 (x - g0) - g2 (y - g3)) / det
+    //   py = (-g4 (x - g0) + g1 (y - g3)) / det
+    // The turned rectangle's own corners and not the box around them, so a
+    // rotated image under a turned viewport is not cropped to a box around a
+    // box.
+    double left = std::numeric_limits<double>::infinity();
+    double right = -std::numeric_limits<double>::infinity();
+    double top = std::numeric_limits<double>::infinity();
+    double bottom = -std::numeric_limits<double>::infinity();
+    for (const Point2& corner : viewportCorners(frame_)) {
+        const double east = corner.x - g[0];
+        const double north = corner.y - g[3];
+        const double px = (g[5] * east - g[2] * north) / determinant;
+        const double py = (g[1] * north - g[4] * east) / determinant;
+        left = std::min(left, px);
+        right = std::max(right, px);
+        top = std::min(top, py);
+        bottom = std::max(bottom, py);
+    }
+    if (!std::isfinite(left) || !std::isfinite(right) || !std::isfinite(top) ||
+        !std::isfinite(bottom)) {
+        return;
+    }
+    // A whole pixel of margin beyond the pixels the viewport cuts: a pixel on
+    // its edge is kept whole, and the smoothing that draws the crop reads, at
+    // the edge, the same neighbours the whole image's would.
+    const auto within = [](double value, int limit) {
+        return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(limit)));
+    };
+    const int x0 = within(std::floor(left) - 1.0, raster.width);
+    const int x1 = within(std::ceil(right) + 1.0, raster.width);
+    const int y0 = within(std::floor(top) - 1.0, raster.height);
+    const int y1 = within(std::ceil(bottom) + 1.0, raster.height);
+    if (x1 <= x0 || y1 <= y0) {
+        return; // none of it in the viewport
+    }
+    const QRect crop(x0, y0, x1 - x0, y1 - y0);
+
+    // How finely to embed it. A step along an image row moves (g1, g4) in
+    // the model and a step down a column (g2, g5), so one image pixel reaches
+    // |(g1, g4)| s device pixels across and |(g2, g5)| s down, whatever the
+    // rotation; in capped pixels, those times imageryShare. Where a pixel
+    // reaches less than one capped pixel the crop is averaged down so that
+    // it reaches one; where it reaches more it is kept as it is - never
+    // enlarged, since a PDF viewer magnifies an embedded image itself. Then
+    // the pixel cap, evenly.
+    const double share = imageryShare();
+    const double across = std::hypot(g[1], g[4]) * view_.scale * share;
+    const double down = std::hypot(g[2], g[5]) * view_.scale * share;
+    int columns = std::clamp(
+        static_cast<int>(std::lround(static_cast<double>(crop.width()) * std::min(1.0, across))), 1,
+        crop.width());
+    int rows = std::clamp(
+        static_cast<int>(std::lround(static_cast<double>(crop.height()) * std::min(1.0, down))), 1,
+        crop.height());
+    const double budget = static_cast<double>(std::max<std::size_t>(options_.rasterPixelCap, 1));
+    const double pixels = static_cast<double>(columns) * static_cast<double>(rows);
+    if (pixels > budget) {
+        // Rounded down, so the product is within the cap.
+        const double shrink = std::sqrt(budget / pixels);
+        columns = std::max(1, static_cast<int>(static_cast<double>(columns) * shrink));
+        rows = std::max(1, static_cast<int>(static_cast<double>(rows) * shrink));
+    }
+    const QSize size(columns, rows);
+
+    // The crop, from the cache when the same part of the same raster was
+    // resampled to the same size before; most recently used last.
+    std::vector<PlanPaintCache::RasterCrop>& crops = cache_.rasterCrops_;
+    auto found = std::find_if(crops.begin(), crops.end(), [&](const PlanPaintCache::RasterCrop& entry) {
+        return entry.id == raster.id && entry.source == crop && entry.size == size;
+    });
+    if (found != crops.end()) {
+        std::rotate(found, std::next(found), crops.end());
+    } else {
+        QImage image = areaResample(raster.rgba.data(), bytesPerRow, crop, size);
+        if (image.isNull()) {
+            return; // could not be allocated: the page goes without it
+        }
+        crops.push_back(PlanPaintCache::RasterCrop{raster.id, crop, size, std::move(image)});
+        ++stats_.rasterCropsMade;
+        // Bounded, oldest out first, but never the one just made: a sheet's
+        // viewports each want their own crop, and one kept past the bound
+        // is at most one capped image.
+        std::size_t total = 0;
+        for (const PlanPaintCache::RasterCrop& entry : crops) {
+            total += static_cast<std::size_t>(entry.size.width()) *
+                     static_cast<std::size_t>(entry.size.height());
+        }
+        while (crops.size() > 1 && (crops.size() > PlanPaintCache::kMaximumRasterCrops ||
+                                    total > PlanPaintCache::kMaximumRasterCropPixels)) {
+            total -= static_cast<std::size_t>(crops.front().size.width()) *
+                     static_cast<std::size_t>(crops.front().size.height());
+            crops.erase(crops.begin());
+        }
+    }
+    const QImage& image = crops.back().image;
+
+    // Resampled pixel (u, v) is the crop's pixel (x0 + u w / columns,
+    // y0 + v h / rows) - its whole rectangle, exactly - and that is where the
+    // whole image's transform puts it.
+    const QTransform placed =
+        QTransform::fromScale(static_cast<double>(crop.width()) / columns,
+                              static_cast<double>(crop.height()) / rows) *
+        QTransform::fromTranslate(crop.x(), crop.y()) * imageToView;
+    painter_.save();
+    painter_.setOpacity(std::clamp(raster.opacity, 0.0, 1.0));
+    painter_.setTransform(placed, true);
+    // Smoothed: a crop is at most the capped resolution, so it is usually
+    // magnified onto the device, where nearest-neighbour would print blocks.
+    painter_.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter_.drawImage(QPointF(0.0, 0.0), image);
+    painter_.restore();
+    ++stats_.rastersDrawn;
+    stats_.rasterPixelsEmbedded += static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows);
 }
 
 void PlanPainter::drawPointClouds()
@@ -573,6 +887,11 @@ void PlanPainter::drawPointClouds()
             cached = std::prev(cache_.clouds_.end());
         }
 
+        if (paper()) {
+            splatOnPaper(cloud, cached->splat);
+            continue;
+        }
+
         // Splat into an image rather than calling QPainter per point: a
         // QPainter::drawPoint costs microseconds, which at two million points is
         // seconds per frame. The image is the cache's, reused frame to frame;
@@ -602,6 +921,99 @@ void PlanPainter::drawPointClouds()
             painter_.drawImage(rows.topLeft(), layer, rows);
         }
     }
+}
+
+void PlanPainter::splatOnPaper(const katana::interop::PointCloudLayer& cloud,
+                               const katana::geometry::SplatCloud& splat)
+{
+    // The screen's splat fills an image the size of the view in device
+    // pixels: on an A1 page at 300 dpi, 70 megapixels a cloud. On paper the
+    // image covers only the part of the viewport the cloud reaches - the
+    // box around the turned viewport, so a twisted sheet's corners are not
+    // left empty - at the capped resolution.
+    const Box2 bounds = cloud.worldBounds();
+    const Box2 area(Point2(std::max(visible_.min.x, bounds.min.x), std::max(visible_.min.y, bounds.min.y)),
+                    Point2(std::min(visible_.max.x, bounds.max.x), std::min(visible_.max.y, bounds.max.y)));
+    if (area.empty() || !(view_.scale > 0.0)) {
+        return;
+    }
+    // A point is a square of 2 radius + 1 pixels of the image, as on screen
+    // it is of the screen, and an image pixel is at most
+    // kCloudPointPaperMillimetres of paper, so a point is as large on the
+    // page at 150 dpi as at 600. The image is grown by a point and a pixel
+    // all round, so a point on the area's edge is drawn whole.
+    const int radius = std::max(0, static_cast<int>(cloud.pointSize) - 1);
+    const double margin = 2.0 * (radius + 1);
+    const double share =
+        std::min(imageryShare(), 1.0 / (kCloudPointPaperMillimetres * options_.pixelsPerMillimetre));
+    double scale = view_.scale * share; // image pixels a model unit
+    const double budget = static_cast<double>(std::max<std::size_t>(options_.rasterPixelCap, 1));
+    const auto columnsAt = [&](double s) { return std::ceil(area.width() * s + margin); };
+    const auto rowsAt = [&](double s) { return std::ceil(area.height() * s + margin); };
+    if (columnsAt(scale) * rowsAt(scale) > budget) {
+        // Shrunk to the pixel cap. The margin does not shrink with the
+        // scale, so the scale is solved for rather than cut by the square
+        // root of the excess: (w s + m + 1)(h s + m + 1) = budget, the 1
+        // for the rounding up, is w h s^2 + (w + h)(m + 1) s + (m + 1)^2 -
+        // budget = 0.
+        const double w = area.width();
+        const double h = area.height();
+        const double m = margin + 1.0;
+        const double a = w * h;
+        const double b = (w + h) * m;
+        const double c = m * m - budget;
+        double fitted = 0.0;
+        if (c < 0.0) {
+            fitted = a > 0.0 ? (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a)
+                             : (b > 0.0 ? -c / b : scale);
+        }
+        scale = std::min(scale, fitted * (1.0 - 1e-9));
+    }
+    const double columns = columnsAt(scale);
+    const double rows = rowsAt(scale);
+    if (!(scale > 0.0) || columns * rows > budget) {
+        return; // a cap too small for even the margin
+    }
+    QImage image(static_cast<int>(columns), static_cast<int>(rows),
+                 QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) {
+        return;
+    }
+    katana::geometry::SplatView splatView;
+    splatView.centre = area.center();
+    splatView.scale = scale;
+    splatView.width = image.width();
+    splatView.height = image.height();
+    splatView.radius = radius;
+    splatView.pointBudget = options_.cloudPointBudget;
+    const katana::geometry::SplatStats splatted = katana::geometry::splatCloud(
+        splat, splatView, reinterpret_cast<std::uint32_t*>(image.bits()),
+        static_cast<std::size_t>(image.bytesPerLine()) / sizeof(std::uint32_t),
+        katana::core::TaskPool::shared());
+    stats_.cloudPointsInView += splatted.pointsInView;
+    stats_.cloudPointsDrawn += splatted.pointsDrawn;
+    if (splatted.rowEnd <= splatted.rowBegin) {
+        return;
+    }
+    // Image pixel (u, v) is the model point centre + ((u - W/2) / scale,
+    // -(v - H/2) / scale), which the view puts at toScreen(centre) + (u - W/2,
+    // v - H/2) k with k = view scale / scale: one scale and a shift, turned
+    // with the rest of the frame by the painter.
+    const double k = view_.scale / scale;
+    const QPointF at = toScreen(area.center());
+    const QTransform placed(k, 0.0, 0.0, k, at.x() - 0.5 * image.width() * k,
+                            at.y() - 0.5 * image.height() * k);
+    // Only the rows the splat cleared and drew: the rest of the image was
+    // never written.
+    const QRect band(0, splatted.rowBegin, image.width(), splatted.rowEnd - splatted.rowBegin);
+    painter_.save();
+    painter_.setTransform(placed, true);
+    // Not smoothed: a point is a crisp square, as on screen.
+    painter_.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    painter_.drawImage(band.topLeft(), image, band);
+    painter_.restore();
+    stats_.cloudPixelsEmbedded +=
+        static_cast<std::size_t>(band.width()) * static_cast<std::size_t>(band.height());
 }
 
 void PlanPainter::drawGrid()
@@ -648,12 +1060,29 @@ void PlanPainter::drawMeshFootprints()
         if (hull.size() < 2) {
             continue;
         }
-        const QColor colour(katana::render::redOf(item.flatColor),
-                            katana::render::greenOf(item.flatColor),
-                            katana::render::blueOf(item.flatColor));
+        katana::entity::Color flat{katana::render::redOf(item.flatColor),
+                                   katana::render::greenOf(item.flatColor),
+                                   katana::render::blueOf(item.flatColor), 255};
+        if (paper() && options_.plot != nullptr) {
+            flat = cad::paperColour(flat, *options_.plot); // a white mesh prints black
+        }
+        const QColor colour = toQColor(flat);
         QColor outline = colour;
         outline.setAlpha(190);
-        painter_.setPen(QPen(outline, 1, Qt::DashLine));
+        if (paper()) {
+            // A pen of paper millimetres, dashed in millimetres: the
+            // screen's one-pixel pen would be a hairline on a 600 dpi plot
+            // and twice as heavy at 300, and Qt counts a dash in pen widths,
+            // so the screen's DashLine at 0.13 mm would be dots half a
+            // millimetre long.
+            QPen pen(outline, markSize(1.0, kMeshOutlinePaperMillimetres));
+            pen.setCapStyle(Qt::FlatCap);
+            pen.setDashPattern({kMeshDashPaperMillimetres / kMeshOutlinePaperMillimetres,
+                                kMeshGapPaperMillimetres / kMeshOutlinePaperMillimetres});
+            painter_.setPen(pen);
+        } else {
+            painter_.setPen(QPen(outline, 1, Qt::DashLine));
+        }
         QColor fill = colour;
         fill.setAlpha(40);
         QPolygonF polygon;
@@ -1444,19 +1873,9 @@ Box2 visibleBox(const PlanFrame& frame)
     // rectangle can show. The unrotated visibleWorldBounds would leave out
     // the corners of a twisted viewport - exactly where a sheet's drawing
     // runs into its frame.
-    const double halfWidth = 0.5 * view.widthPixels;
-    const double halfHeight = 0.5 * view.heightPixels;
-    const double c = std::cos(frame.rotation);
-    const double s = std::sin(frame.rotation);
     Box2 box;
-    for (const auto& [dx, dy] : {std::pair{-halfWidth, -halfHeight}, std::pair{halfWidth, -halfHeight},
-                                 std::pair{halfWidth, halfHeight}, std::pair{-halfWidth, halfHeight}}) {
-        // A device offset (dx, dy) is where the painter's rotation by -angle
-        // (y down) put the unrotated offset R(angle) (dx, dy) in the same y-down
-        // pixels: undo it by turning the other way.
-        const double ux = c * dx - s * dy;
-        const double uy = s * dx + c * dy;
-        box.expand(view.screenToWorld(Point2(halfWidth + ux, halfHeight + uy)));
+    for (const Point2& corner : viewportCorners(frame)) {
+        box.expand(corner);
     }
     return box;
 }

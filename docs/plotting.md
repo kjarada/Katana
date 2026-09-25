@@ -634,6 +634,15 @@ editor shows exactly what plots. It reads no widget and keeps its caches
   of its alignment - fits with 4% to spare; the title block reports the
   scale drawn. Match lines are dash-dot with their label along them; a key
   plan fades the drawing and outlines the other sheets, numbered.
+- **Imagery under the plan.** Rasters (an aerial photo, a GeoTIFF), point
+  clouds and mesh footprints print beneath the linework, as the plan view
+  shows them. A raster is cropped to what the viewport shows and averaged
+  down to at most `SheetPaintOptions::rasterDpiCap` (200 dpi in a PDF, 110 in
+  the editor) and 16 megapixels, so a sheet over a 400-megapixel orthophoto
+  embeds only its viewport's few megapixels; a cloud is splatted into an
+  image of the viewport at the same cap; a footprint is a 0.13 mm dashed
+  outline. `docs/plan_view.md`, "Imagery on paper", has the rule and the
+  measurements.
 - **Sections.** Cut once per drawing revision from the window's visible
   surfaces along the named alignment, the design profile added when the
   alignment has one. A long section gets a data band (design and ground
@@ -641,7 +650,8 @@ editor shows exactly what plots. It reads no widget and keeps its caches
   its centreline and a "CH" caption. Crossings are dashed with their layer
   name and a circle at their level. The datum is written inside the plot.
 - **3D snapshot.** The 3D view's renderer on a white background, capped at
-  200 dpi and 8 megapixels.
+  200 dpi and 8 megapixels. The dpi cap is the same option the plan's
+  imagery is capped by.
 - **Legend, notes, image.** A sample line per layer in use (in its paper
   colour and weight); wrapped notes; a project image fitted.
 - **Furniture.** North arrow (pointing where world +Y is on the paper),
