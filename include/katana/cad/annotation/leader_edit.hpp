@@ -67,7 +67,7 @@ struct LeaderChange {
 
 // What of `change` can be refused without a leader: a template that does
 // not check (entity::checkLeaderTemplate), a text or label style not in the
-// model.
+// model, a size below 0 mm (or not a number).
 [[nodiscard]] katana::core::Status checkLeaderChange(const katana::entity::Model& model,
                                                      const LeaderChange& change);
 
@@ -153,6 +153,13 @@ struct LeadersFor {
 leadersFor(const katana::entity::Model& model, std::vector<katana::entity::EntityId> targets,
            const LeadersForOptions& options, double scale,
            const katana::commands::EntityAttributes& attributes);
+
+// Where leadersFor puts a leader's tip on `entity` for a note in direction
+// `angle` (radians): the place, named so the tip follows it, and the point.
+// nullopt for an entity that offers no place (a dimension, a label, a
+// leader). What the window previews a leader for the selection from.
+[[nodiscard]] std::optional<AnchoredPoint> leaderPlaceOn(const katana::entity::Entity& entity,
+                                                         double angle);
 
 // The notes of `ids` in a column ("ALIGN_LEADERS"): top down by where each
 // hangs (its last vertex), each moved to `x` (the topmost's when unset) and,
