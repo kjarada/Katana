@@ -57,7 +57,7 @@ TEST(Snapshot, AFileTakesTheDefaultsAndItsExtensionIsItsFormat)
 TEST(Snapshot, TheClipboardAndEveryOptionAreRead)
 {
     const auto request =
-        katana::qt::parseSnapshot("snapshot clipboard WIDTH=640 height=480 scale=2 bg=none view=3D");
+        katana::qt::parseSnapshot("snapshot clipboard WIDTH=640 height=480 scale=2 bg=none view=PLAN");
     ASSERT_TRUE(request.ok()) << request.error().describe();
     EXPECT_TRUE(request->clipboard);
     EXPECT_TRUE(request->path.isEmpty());
@@ -65,7 +65,23 @@ TEST(Snapshot, TheClipboardAndEveryOptionAreRead)
     EXPECT_EQ(request->height, 480);
     EXPECT_EQ(request->scale, 2.0);
     EXPECT_EQ(request->background, Background::None);
-    EXPECT_EQ(request->view, View::Model3D);
+    EXPECT_EQ(request->view, View::Plan);
+    const auto model = katana::qt::parseSnapshot("snapshot clipboard view=3D bg=theme");
+    ASSERT_TRUE(model.ok()) << model.error().describe();
+    EXPECT_EQ(model->view, View::Model3D);
+}
+
+// The 3D view is grabbed on its own ground, so a ground asked of it is
+// refused, in either order, rather than dropped.
+TEST(Snapshot, AGroundAskedOfThe3DViewIsRefusedRatherThanDropped)
+{
+    for (const char* line : {"SNAPSHOT a.png view=3d bg=none", "SNAPSHOT a.png bg=white view=3d",
+                             "SNAPSHOT CLIPBOARD bg=none view=3d"}) {
+        const auto refused = katana::qt::parseSnapshot(line);
+        ASSERT_FALSE(refused.ok()) << line;
+        EXPECT_NE(refused.error().describe().find("bg= is the plan view's"), std::string::npos)
+            << refused.error().describe();
+    }
 }
 
 TEST(Snapshot, WhatTheGrammarDoesNotTakeIsRefused)
@@ -91,14 +107,19 @@ TEST(Snapshot, TheLineItWritesIsTheLineItReads)
     request.width = 300;
     request.height = 150;
     request.background = Background::White;
-    request.view = View::Model3D;
     const QString line = katana::qt::snapshotCommandLine(request);
-    EXPECT_EQ(line, "SNAPSHOT \"C:/out/view.png\" width=300 height=150 bg=white view=3d");
+    EXPECT_EQ(line, "SNAPSHOT \"C:/out/view.png\" width=300 height=150 bg=white");
     const auto read = katana::qt::parseSnapshot(line);
     ASSERT_TRUE(read.ok());
     EXPECT_EQ(read->width, 300);
     EXPECT_EQ(read->background, Background::White);
-    EXPECT_EQ(read->view, View::Model3D);
+    EXPECT_EQ(read->view, View::Plan);
+    SnapshotRequest model;
+    model.path = "view.png";
+    model.view = View::Model3D;
+    EXPECT_EQ(katana::qt::snapshotCommandLine(model), "SNAPSHOT \"view.png\" view=3d");
+    EXPECT_EQ(katana::qt::parseSnapshot(katana::qt::snapshotCommandLine(model))->view,
+              View::Model3D);
     SnapshotRequest clipboard;
     clipboard.clipboard = true;
     clipboard.scale = 2.5;
@@ -169,8 +190,13 @@ TEST(ViewImageDialog, TheFieldsWriteTheLineAndExportRunsIt)
     child<QSpinBox>(dialog, "viewImageWidth")->setValue(300);
     child<QSpinBox>(dialog, "viewImageHeight")->setValue(150);
     child<QComboBox>(dialog, "viewImageBackground")->setCurrentText("White");
+    EXPECT_EQ(child<QLineEdit>(dialog, "viewImageCommand")->text(),
+              "SNAPSHOT \"out.png\" width=300 height=150 bg=white");
+    // The ground is the plan view's: for the 3D view it is greyed out and
+    // left off the line, which the verb would refuse.
     child<QComboBox>(dialog, "viewImageView")->setCurrentText("3D view");
-    const QString expected = "SNAPSHOT \"out.png\" width=300 height=150 bg=white view=3d";
+    EXPECT_FALSE(child<QComboBox>(dialog, "viewImageBackground")->isEnabled());
+    const QString expected = "SNAPSHOT \"out.png\" width=300 height=150 view=3d";
     EXPECT_EQ(child<QLineEdit>(dialog, "viewImageCommand")->text(), expected);
     child<QPushButton>(dialog, "viewImageExport")->click();
     EXPECT_EQ(ran, std::vector<QString>{expected});
@@ -192,6 +218,52 @@ TEST(ViewImageDialog, TheFormatSetsTheExtensionAndATransparentJpegIsRefused)
                     .contains("bg=none needs a .png"));
     child<QComboBox>(dialog, "viewImageFormat")->setCurrentText("PNG");
     EXPECT_TRUE(child<QPushButton>(dialog, "viewImageExport")->isEnabled());
+}
+
+// The file follows the drawing (suggestPath), in the format chosen, until
+// one is typed; and a file that is there is written over only when the
+// person says so.
+TEST(ViewImageDialog, TheSuggestedFileFollowsTheDrawingUntilOneIsTypedAndAReplaceIsAsked)
+{
+    QTemporaryDir folder;
+    ASSERT_TRUE(folder.isValid());
+    const QString there = folder.filePath("there.png");
+    QFile file(there);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    std::vector<QString> ran;
+    std::vector<QString> asked;
+    bool replace = false;
+    ViewImageDialogContext context;
+    context.run = [&ran](const QString& line) {
+        ran.push_back(line);
+        return VerbOutcome{true, "file=\"there.png\"", {}};
+    };
+    context.suggestedPath = "C:/a/a.png";
+    context.confirmReplace = [&](const QString& path) {
+        asked.push_back(path);
+        return replace;
+    };
+    ViewImageDialog dialog(std::move(context));
+    auto* path = child<QLineEdit>(dialog, "viewImagePath");
+    EXPECT_EQ(path->text(), "C:/a/a.png");
+    child<QComboBox>(dialog, "viewImageFormat")->setCurrentText("JPEG");
+    dialog.suggestPath("C:/b/b.png");
+    EXPECT_EQ(path->text(), "C:/b/b.jpg") << "another drawing's, in the format chosen";
+
+    path->setText(there);
+    child<QComboBox>(dialog, "viewImageFormat")->setCurrentText("PNG");
+    dialog.suggestPath("C:/c/c.png");
+    EXPECT_EQ(path->text(), there) << "a file typed is kept";
+
+    dialog.exportImage();
+    EXPECT_EQ(asked, std::vector<QString>{there});
+    EXPECT_TRUE(ran.empty()) << "kept when the person says no";
+    EXPECT_TRUE(child<QLabel>(dialog, "viewImageStatus")->text().startsWith("Not exported:"));
+    replace = true;
+    dialog.exportImage();
+    EXPECT_EQ(ran.size(), 1u);
 }
 
 // The line (0, 0)-(100, 50) framed in a 400 x 300 view: its midpoint is the

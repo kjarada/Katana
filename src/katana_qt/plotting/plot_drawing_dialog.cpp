@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -190,7 +191,8 @@ PlotDrawingDialog::PlotDrawingDialog(PlotDrawingDialogContext context, QWidget* 
     setMinimumWidth(560);
     const katana::cad::PlotSettings defaults;
 
-    path_ = new QLineEdit(context_.suggestedPath, this);
+    suggested_ = context_.suggestedPath;
+    path_ = new QLineEdit(suggested_, this);
     path_->setObjectName("plotDrawingPath");
     path_->setPlaceholderText("the PDF to write");
     auto* browseButton = new QPushButton("Browse...", this);
@@ -337,9 +339,26 @@ void PlotDrawingDialog::plot()
         status_->setText("nothing here can run a command");
         return;
     }
+    // Browse's file dialog asked before a file was written over; a path
+    // typed or suggested is asked about here, as the one before this
+    // dialog was.
+    if (context_.confirmReplace && QFileInfo::exists(made->path) &&
+        !context_.confirmReplace(made->path)) {
+        status_->setText("Not plotted: " + QDir::toNativeSeparators(made->path) +
+                         " is there and was kept.");
+        return;
+    }
     const VerbOutcome outcome = context_.run(plotDrawingCommandLine(*made));
     status_->setText(outcome.ok ? "Plotted: " + outcome.reply.section('\n', -1)
                                 : "Not plotted: " + outcome.error.section('\n', -1));
+}
+
+void PlotDrawingDialog::suggestPath(const QString& path)
+{
+    if (path_->text() == suggested_) {
+        path_->setText(path);
+    }
+    suggested_ = path;
 }
 
 void PlotDrawingDialog::browse()

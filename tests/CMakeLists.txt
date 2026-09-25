@@ -1595,7 +1595,22 @@ if(TARGET katana)
             "-DIMAGE_SIZE=${_out}/dialog_view.png|300|150"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_and_view_image_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The dialogs are kept, and their files follow the drawing: open another
+    # project with Plot to PDF left open and it suggests that project's PDF,
+    # as Export View as Image its PNG. It once plotted into the first
+    # project's folder under its name. The two projects are saved into the
+    # folder check_screenshot.cmake makes afresh for each run.
+    set(_follow "${CMAKE_CURRENT_BINARY_DIR}/plot_file_follows_headless_project")
+    add_test(NAME qt_the_plot_dialogs_file_follows_the_drawing_opened_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 0,0 10,10|>SAVE \"${_follow}/projB\"|>NEW|>RECT 0,0 5,5|>SAVE \"${_follow}/projA\"|@filePlot|?plotDrawingPath|>OPEN \"${_follow}/projB\"|?plotDrawingPath|@fileExportViewImage|?viewImagePath"
+            "-DEXPECT=plotDrawingPath: [^\r\n]*.projA.projA\\.pdf[\r\n]+opened [^\r\n]*projB[^\r\n]*[\r\n]+plotDrawingPath: [^\r\n]*.projB.projB\\.pdf[\r\n]+.*viewImagePath: [^\r\n]*.projB.projB\\.png"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/plot_file_follows_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_plot_and_view_image_dialogs_run_their_verbs_headless
+        qt_the_plot_dialogs_file_follows_the_drawing_opened_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

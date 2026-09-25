@@ -431,6 +431,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // Deferring to the event loop also coalesces one refresh per transaction
     // instead of one per command.
     documentListener_ = document_.addListener([this] { scheduleRefresh(); });
+    fileListener_ = document_.addListener([this](const cad::DocumentChange& change) {
+        if (change.has(cad::DocumentChange::Replaced | cad::DocumentChange::Saved |
+                       cad::DocumentChange::Metadata)) {
+            suggestPlotFiles();
+        }
+    });
     refreshAll();
     views_->stopTool();
     selectAction_->setChecked(true);
@@ -5285,6 +5291,9 @@ void MainWindow::plotToPdf()
         context.run = commandRunner();
         context.headless = [this] { return headless_; };
         context.suggestedPath = suggestedPlotFile(document_);
+        context.confirmReplace = [this](const QString& path) {
+            return confirmReplaceFile("Plot to PDF", path);
+        };
         plotDialog_ = new PlotDrawingDialog(std::move(context), this);
     }
     plotDialog_->show();
@@ -5292,22 +5301,52 @@ void MainWindow::plotToPdf()
     plotDialog_->activateWindow();
 }
 
+namespace {
+
+// Export View as Image's file: the plot's, as a PNG.
+QString suggestedImageFile(const katana::cad::Document& document)
+{
+    const QFileInfo plot(suggestedPlotFile(document));
+    return QDir::toNativeSeparators(plot.path() + "/" + plot.completeBaseName() + ".png");
+}
+
+} // namespace
+
 void MainWindow::showViewImageExport()
 {
     if (imageDialog_ == nullptr) {
         ViewImageDialogContext context;
         context.run = commandRunner();
         context.headless = [this] { return headless_; };
-        QString suggested = suggestedPlotFile(document_);
-        suggested = suggested.isEmpty() ? QString("view.png")
-                                        : QFileInfo(suggested).path() + "/" +
-                                              QFileInfo(suggested).completeBaseName() + ".png";
-        context.suggestedPath = QDir::toNativeSeparators(suggested);
+        context.suggestedPath = suggestedImageFile(document_);
+        context.confirmReplace = [this](const QString& path) {
+            return confirmReplaceFile("Export View as Image", path);
+        };
         imageDialog_ = new ViewImageDialog(std::move(context), this);
     }
     imageDialog_->show();
     imageDialog_->raise();
     imageDialog_->activateWindow();
+}
+
+void MainWindow::suggestPlotFiles()
+{
+    if (plotDialog_ != nullptr) {
+        plotDialog_->suggestPath(suggestedPlotFile(document_));
+    }
+    if (imageDialog_ != nullptr) {
+        imageDialog_->suggestPath(suggestedImageFile(document_));
+    }
+}
+
+bool MainWindow::confirmReplaceFile(const QString& title, const QString& path)
+{
+    if (headless_) {
+        return true;
+    }
+    return QMessageBox::question(this, title,
+                                 QDir::toNativeSeparators(path) +
+                                     " is already there. Replace it?") == QMessageBox::Yes;
 }
 
 void MainWindow::snapshotView(const SnapshotRequest& request)

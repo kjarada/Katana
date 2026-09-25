@@ -8,9 +8,11 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QTemporaryDir>
 
 #include <vector>
 
@@ -160,6 +162,55 @@ TEST(PlotDrawingDialog, FittingLeavesTheScaleOutAndARefusalIsSaid)
     dialog.plot();
     EXPECT_EQ(child<QLabel>(dialog, "plotDrawingStatus")->text(),
               "Not plotted: InvalidState: no plan viewport to plot from");
+}
+
+// Kept while the window lives, the dialog's file follows the drawing
+// (suggestPath) until one is typed - it once plotted every drawing into the
+// first project's folder - and a file that is there is written over only
+// when the person says so.
+TEST(PlotDrawingDialog, TheSuggestedFileFollowsTheDrawingUntilOneIsTypedAndAReplaceIsAsked)
+{
+    QTemporaryDir folder;
+    ASSERT_TRUE(folder.isValid());
+    const QString there = folder.filePath("there.pdf");
+    QFile file(there);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    std::vector<QString> ran;
+    std::vector<QString> asked;
+    bool replace = false;
+    PlotDrawingDialogContext context;
+    context.run = [&ran](const QString& line) {
+        ran.push_back(line);
+        return VerbOutcome{true, "file=\"there.pdf\"", {}};
+    };
+    context.suggestedPath = "C:/projA/projA.pdf";
+    context.confirmReplace = [&](const QString& path) {
+        asked.push_back(path);
+        return replace;
+    };
+    PlotDrawingDialog dialog(std::move(context));
+    auto* path = child<QLineEdit>(dialog, "plotDrawingPath");
+    dialog.suggestPath("C:/projB/projB.pdf");
+    EXPECT_EQ(path->text(), "C:/projB/projB.pdf");
+
+    path->setText(there);
+    dialog.suggestPath("C:/projC/projC.pdf");
+    EXPECT_EQ(path->text(), there) << "a file typed is kept";
+
+    dialog.plot();
+    EXPECT_EQ(asked, std::vector<QString>{there});
+    EXPECT_TRUE(ran.empty()) << "kept when the person says no";
+    EXPECT_TRUE(child<QLabel>(dialog, "plotDrawingStatus")->text().startsWith("Not plotted:"));
+    replace = true;
+    dialog.plot();
+    EXPECT_EQ(ran.size(), 1u);
+    // A file that is not there is written without a question.
+    path->setText(folder.filePath("new.pdf"));
+    dialog.plot();
+    EXPECT_EQ(asked.size(), 2u);
+    EXPECT_EQ(ran.size(), 2u);
 }
 
 TEST(PlotDrawingDialog, AHeadlessSessionIsToldToFillThePath)
