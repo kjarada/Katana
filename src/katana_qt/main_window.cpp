@@ -791,6 +791,9 @@ void MainWindow::buildActions()
     // Before Survey, whose Survey Coding section shows the code manager's
     // action too.
     buildFormatActions(*formatMenu, layersAction, customiseAction, replaceCustomisationAction);
+    // The Leaders manager's entries under the Annotate tools, made by the
+    // annotation workbench buildFormatActions has just built.
+    annotation_->addLeaderActions(*annotateMenu);
 
     // ---- Survey ------------------------------------------------------------------------
     buildSurveyActions(*surveyMenu, customiseAction, replaceCustomisationAction, codeAction);
