@@ -30,6 +30,7 @@
 #include "katana/interop/import.hpp"
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
+#include "gis_online.hpp"
 #include "survey/survey_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "sheet_editor.hpp"
@@ -359,6 +360,9 @@ class MainWindow final : public QMainWindow {
     // The Format menu's managers and what they share. Declared after the
     // Document, so it - and the dialogs it deletes - go first.
     std::unique_ptr<CustomisationWorkbench> format_;
+    // GIS > Online Data and the ONLINE verbs (gis_online.hpp). Declared after
+    // the Document, so it and its dialog go first.
+    std::unique_ptr<OnlineDataWorkbench> online_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's

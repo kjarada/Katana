@@ -785,6 +785,25 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
     gisMenu.addActions({importCloud, exportCloud, copc});
     gisMenu.addSeparator();
     gisMenu.addAction(info);
+    // Online - Web Services: its own section, filled by the workbench.
+    OnlineServices online;
+    online.document = &document_;
+    online.views = views_;
+    online.makeAction = [this](Icon icon, const QString& text, const QString& tip,
+                               const QKeySequence& shortcut, const QString& name) {
+        return makeAction(icon, text, tip, shortcut, name);
+    };
+    online.log = [this](const QString& text, bool isError) { logMessage(text, isError); };
+    online.headless = [this] { return headless_; };
+    online.addRaster = [this](interop::RasterOverlay raster) {
+        const interop::ReferenceId id = reference_.add(std::move(raster));
+        views_->invalidateReferenceCache();
+        refreshReferences();
+        views_->refreshAll();
+        return id;
+    };
+    online.version = KATANA_VERSION;
+    online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
     gisBar->addActions({importVector, importRaster, importCloud});
@@ -1830,6 +1849,11 @@ void MainWindow::runCommandLine()
         }
         applyCustomisation(paths, replace ? katana::archive12d::LoadMode::Replace
                                           : katana::archive12d::LoadMode::Merge);
+        return;
+    }
+    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
+    // workbench's, for the same reason as the verbs below.
+    if (online_ != nullptr && online_->runLine(line)) {
         return;
     }
     // The interoperability verbs, as katana_cli has them. They live in the
