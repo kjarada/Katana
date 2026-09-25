@@ -88,11 +88,14 @@ void putPoint(std::vector<std::byte>& out, const Point2& point)
     return {};
 }
 
-void putAnchor(std::vector<std::byte>& out, const AnchorRef& ref)
+void putAnchor(std::vector<std::byte>& out, const AnchorRef& ref, std::uint8_t version)
 {
     putU64(out, ref.entity);
     putU8(out, static_cast<std::uint8_t>(ref.point));
     putU32(out, ref.index);
+    if (version >= kBlobVersionSmartLeader) {
+        putDouble(out, ref.parameter);
+    }
 }
 
 katana::core::Status putPoints(std::vector<std::byte>& out, const std::vector<Point2>& points)
@@ -132,6 +135,31 @@ bool fitsVersionOne(const Geometry& geometry)
     }
     return !std::holds_alternative<LabelGeometry>(geometry) &&
            !std::holds_alternative<LeaderGeometry>(geometry);
+}
+
+// Whether version 2 can hold an anchor: one of the points it had, and no
+// parameter - compared by bits, so a -0.0 is written in the layout that keeps
+// it.
+bool anchorFitsVersionTwo(const AnchorRef& ref)
+{
+    return static_cast<int>(ref.point) <= static_cast<int>(AnchorPoint::SegmentMid) &&
+           std::bit_cast<std::uint64_t>(ref.parameter) == 0;
+}
+
+// Whether version 2 can hold `geometry`: its anchors do, and a leader is not
+// a smart one.
+bool fitsVersionTwo(const Geometry& geometry)
+{
+    if (const auto* dimension = std::get_if<DimensionGeometry>(&geometry)) {
+        return anchorFitsVersionTwo(dimension->startRef) &&
+               anchorFitsVersionTwo(dimension->endRef) &&
+               anchorFitsVersionTwo(dimension->vertexRef);
+    }
+    if (const auto* leader = std::get_if<LeaderGeometry>(&geometry)) {
+        return anchorFitsVersionTwo(leader->tipRef) && !leader->fields &&
+               leader->labelStyle.empty();
+    }
+    return true;
 }
 
 // ---- reading ---------------------------------------------------------------------
@@ -178,15 +206,19 @@ class Reader {
         return true;
     }
 
-    [[nodiscard]] bool readAnchor(AnchorRef& ref)
+    // Version 3 adds the parameter and the points after SegmentMid; a
+    // version-2 anchor naming one of those is malformed.
+    [[nodiscard]] bool readAnchor(AnchorRef& ref, std::uint8_t version)
     {
         std::uint8_t point = 0;
+        const bool withParameter = version >= kBlobVersionSmartLeader;
+        const AnchorPoint last = withParameter ? kLastAnchorPoint : AnchorPoint::SegmentMid;
         if (!readU64(ref.entity) || !readU8(point) || !readU32(ref.index) ||
-            point > static_cast<std::uint8_t>(AnchorPoint::SegmentMid)) {
+            point > static_cast<std::uint8_t>(last)) {
             return false;
         }
         ref.point = static_cast<AnchorPoint>(point);
-        return true;
+        return !withParameter || readDouble(ref.parameter);
     }
 
     [[nodiscard]] bool readPoints(std::vector<Point2>& points)
@@ -253,13 +285,16 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
     // Two header bytes plus the largest fixed payload; a polyline grows from
     // here. Reserving keeps a save from reallocating per entity.
     out.reserve(48);
-    const bool annotation = !fitsVersionOne(geometry);
-    putU8(out, annotation ? kBlobVersionAnnotation : kBlobVersion);
+    const std::uint8_t version = fitsVersionOne(geometry)   ? kBlobVersion
+                                 : fitsVersionTwo(geometry) ? kBlobVersionAnnotation
+                                                            : kBlobVersionSmartLeader;
+    const bool annotation = version >= kBlobVersionAnnotation;
+    putU8(out, version);
     putU8(out, static_cast<std::uint8_t>(geometry.index()));
 
     katana::core::Status status;
     std::visit(
-        [&out, &status, annotation](const auto& shape) {
+        [&out, &status, annotation, version](const auto& shape) {
             using Shape = std::decay_t<decltype(shape)>;
             if constexpr (std::is_same_v<Shape, PointGeometry>) {
                 putPoint(out, shape.position);
@@ -306,9 +341,9 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
                     putU8(out, static_cast<std::uint8_t>(shape.kind));
                     putDouble(out, shape.angle);
                     putPoint(out, shape.vertex);
-                    putAnchor(out, shape.startRef);
-                    putAnchor(out, shape.endRef);
-                    putAnchor(out, shape.vertexRef);
+                    putAnchor(out, shape.startRef, version);
+                    putAnchor(out, shape.endRef, version);
+                    putAnchor(out, shape.vertexRef, version);
                 }
             } else if constexpr (std::is_same_v<Shape, LabelGeometry>) {
                 putU64(out, shape.target);
@@ -337,7 +372,11 @@ Result<std::vector<std::byte>> geometryToBlob(const Geometry& geometry)
                 putDouble(out, shape.paperHeight);
                 putDouble(out, shape.arrowSize);
                 putDouble(out, shape.landing);
-                putAnchor(out, shape.tipRef);
+                putAnchor(out, shape.tipRef, version);
+                if (status && version >= kBlobVersionSmartLeader) {
+                    putU8(out, shape.fields ? 1u : 0u);
+                    status = putString(out, shape.labelStyle);
+                }
             } else {
                 // Without this, a geometry kind added later fell off the end of
                 // the chain, wrote a two-byte header and no payload, and the
@@ -363,11 +402,12 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
     if (!reader.readU8(version) || !reader.readU8(kind)) {
         return truncated();
     }
-    if (version != kBlobVersion && version != kBlobVersionAnnotation) {
+    if (version != kBlobVersion && version != kBlobVersionAnnotation &&
+        version != kBlobVersionSmartLeader) {
         return makeError(ErrorCode::ParseFailure, "unknown geometry blob version",
                          std::to_string(version));
     }
-    const bool annotation = version == kBlobVersionAnnotation;
+    const bool annotation = version >= kBlobVersionAnnotation;
 
     Geometry geometry;
     switch (static_cast<EntityType>(kind)) {
@@ -459,8 +499,9 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
             if (!reader.readU8(kindByte) ||
                 kindByte > static_cast<std::uint8_t>(DimensionKind::OrdinateY) ||
                 !reader.readDouble(dimension.angle) || !reader.readPoint(dimension.vertex) ||
-                !reader.readAnchor(dimension.startRef) || !reader.readAnchor(dimension.endRef) ||
-                !reader.readAnchor(dimension.vertexRef)) {
+                !reader.readAnchor(dimension.startRef, version) ||
+                !reader.readAnchor(dimension.endRef, version) ||
+                !reader.readAnchor(dimension.vertexRef, version)) {
                 return truncated();
             }
             dimension.kind = static_cast<DimensionKind>(kindByte);
@@ -502,13 +543,19 @@ Result<Geometry> geometryFromBlob(std::span<const std::byte> blob)
         std::uint8_t arrow = 0;
         std::uint8_t callout = 0;
         if (!reader.readPoints(leader.vertices) || !reader.readString(leader.text) ||
-            !reader.readString(leader.style) || !reader.readU8(arrow) ||
-            !reader.readU8(callout) || !reader.readDouble(leader.paperHeight) ||
-            !reader.readDouble(leader.arrowSize) || !reader.readDouble(leader.landing) ||
-            !reader.readAnchor(leader.tipRef) ||
+            !reader.readString(leader.style) || !reader.readU8(arrow) || !reader.readU8(callout) ||
+            !reader.readDouble(leader.paperHeight) || !reader.readDouble(leader.arrowSize) ||
+            !reader.readDouble(leader.landing) || !reader.readAnchor(leader.tipRef, version) ||
             arrow > static_cast<std::uint8_t>(ArrowHead::Dot) ||
             callout > static_cast<std::uint8_t>(CalloutShape::Circle)) {
             return truncated();
+        }
+        if (version >= kBlobVersionSmartLeader) {
+            std::uint8_t fields = 0;
+            if (!reader.readU8(fields) || fields > 1 || !reader.readString(leader.labelStyle)) {
+                return truncated();
+            }
+            leader.fields = fields != 0;
         }
         leader.arrow = static_cast<ArrowHead>(arrow);
         leader.callout = static_cast<CalloutShape>(callout);

@@ -18,6 +18,7 @@ add_library(katana_entity STATIC
     anchor.cpp
     label_text.cpp
     label_values.cpp
+    leader_values.cpp
 )
 katana_target_defaults(katana_entity)
 target_link_libraries(katana_entity
