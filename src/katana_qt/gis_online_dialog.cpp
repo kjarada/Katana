@@ -199,7 +199,38 @@ OnlineDataDialog::OnlineDataDialog(OnlineDialogContext context, QWidget* parent)
     form->addRow("OpenStreetMap tag:", tag_);
     form->addRow("Scene dates:", datesRow);
     form->addRow("Cloud:", cloud_);
-    form->addRow("Project CRS:", projectCrs_);
+    // The project's coordinate system, and the way to set it: an import needs
+    // one, and the dialog suggests the zone of the box being fetched.
+    auto* setCrs = new QPushButton("Set Project CRS...", this);
+    setCrs->setObjectName("onlineSetProjectCrs");
+    setCrs->setEnabled(static_cast<bool>(context_.chooseProjectCrs));
+    connect(setCrs, &QPushButton::clicked, this, [this] {
+        std::optional<std::pair<double, double>> place;
+        // The typed box's centre, when it is in longitude and latitude.
+        if (static_cast<interop::OnlineAreaKind>(area_->currentData().toInt()) ==
+                interop::OnlineAreaKind::Box &&
+            boxCrs_->currentIndex() == 1) {
+            const QStringList parts = box_->text().remove(' ').split(',');
+            bool ok[4] = {false, false, false, false};
+            if (parts.size() == 4) {
+                const double w = parts[0].toDouble(&ok[0]);
+                const double s = parts[1].toDouble(&ok[1]);
+                const double e = parts[2].toDouble(&ok[2]);
+                const double n = parts[3].toDouble(&ok[3]);
+                if (ok[0] && ok[1] && ok[2] && ok[3]) {
+                    place = std::pair{(w + e) / 2.0, (s + n) / 2.0};
+                }
+            }
+        }
+        if (context_.chooseProjectCrs && context_.chooseProjectCrs(place)) {
+            refreshProjectCrs();
+            setStatus("The project's coordinate system is set: imports go into it.");
+        }
+    });
+    auto* crsRow = new QHBoxLayout;
+    crsRow->addWidget(projectCrs_, 1);
+    crsRow->addWidget(setCrs);
+    form->addRow("Project CRS:", crsRow);
     form->addRow("Use CRS:", crs_);
     form->addRow("Key:", keyRow);
 
@@ -296,10 +327,15 @@ void OnlineDataDialog::refreshCatalogue()
     if (!keepLayer.empty()) {
         selectLayer(keepProvider, keepLayer);
     }
-    const std::string crs = context_.projectCrs ? context_.projectCrs() : std::string();
-    projectCrs_->setText(crs.empty() ? "none set - give one below, or set the project's"
-                                     : qs(crs));
+    refreshProjectCrs();
     showDetails();
+}
+
+void OnlineDataDialog::refreshProjectCrs()
+{
+    const std::string crs = context_.projectCrs ? context_.projectCrs() : std::string();
+    projectCrs_->setText(crs.empty() ? "none set - Set Project CRS..., or give one below"
+                                     : qs(crs));
 }
 
 bool OnlineDataDialog::selectLayer(const std::string& provider, const std::string& layer)

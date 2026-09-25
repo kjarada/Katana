@@ -48,6 +48,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     attribute_manager.hpp
     layer_manager.cpp
     layer_manager.hpp
+    project_crs_dialog.cpp
+    project_crs_dialog.hpp
     gis_dialogs.cpp
     gis_dialogs.hpp
     gis_online.cpp

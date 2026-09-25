@@ -224,6 +224,39 @@ word with arguments (`LINE 0,0 10,0`) is still the interpreter's, which is
 what scripts and the headless checks type; and an empty line is Enter in the
 drawing.
 
+## The project's coordinate system
+
+A project keeps its coordinate system as text in its metadata
+(`storage::ProjectMetadata::coordinateSystem`): `EPSG:7856`, or WKT or a PROJ
+string for a system with no code, or nothing for local coordinates. GIS >
+Online Data needs it to know where a web map goes, GIS imports reproject into
+it, and the sheets print it in the title block, so it is set in one place:
+
+- `Document::setCoordinateSystem` sets it as ONE undo step (`SET_CRS`). It
+  reads anything PROJ reads, through `geodesy::CoordinateReferenceSystem`, and
+  stores `EPSG:<code>` whenever the system has a code, so `7856`, `epsg:7856`
+  and the system's WKT are one value. Text that names no system is refused
+  (`InvalidCRS`) and changes nothing; the value it already has is no step.
+- `include/katana/cad/project_crs.hpp` describes a system (its registered
+  name, kind, units and area of use), lists the common ones (the GDA2020 and
+  GDA94 MGA zones 49 to 56, the national Albers and geographic systems, WGS 84
+  and its UTM zones, Web Mercator, New Zealand's and Great Britain's grids)
+  and suggests the systems that suit a place, best first: in Australia the
+  place's GDA2020 MGA zone, then GDA94's, then WGS 84 UTM, then WGS 84.
+- On the command line, `CRS` shows it, `CRS SET EPSG:7856` (a code, WKT or
+  PROJ) sets it, `CRS CLEAR` returns to local coordinates, `CRS FIND mga 56`
+  searches the common list and `CRS SUGGEST 151.21,-33.87` names the systems
+  for a place. Replies are one fact per line: `crs id=EPSG:7856 name="GDA2020
+  / MGA zone 56" kind="projected" units=metre`.
+- In the window, File > Project Coordinate System
+  (`src/katana_qt/project_crs_dialog.hpp`) lists the common systems grouped,
+  searches them, checks a typed one as it is typed, and sets it; the status
+  bar shows the system and opens the dialog when clicked; and GIS > Online
+  Data's Set Project CRS opens it with the systems for the typed box first.
+
+The tests are `tests/cad/test_project_crs.cpp` and
+`tests/qt_widgets/test_project_crs_dialog.cpp`.
+
 ## Threading and ownership
 
 Single-threaded; everything belongs to the GUI thread (`docs/architecture.md`,

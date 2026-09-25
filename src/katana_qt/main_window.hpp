@@ -395,6 +395,7 @@ class MainWindow final : public QMainWindow {
     QLabel* coordinateLabel_ = nullptr;
     QLabel* snapLabel_ = nullptr;
     QLabel* layerLabel_ = nullptr;
+    QToolButton* crsButton_ = nullptr;
     // The active view's own readout - a section's station and elevation
     // under the cursor, a 3D view's frame time - in a PERMANENT status-bar
     // label, so that it never overwrites a prompt or an error message.

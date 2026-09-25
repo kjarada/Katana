@@ -274,6 +274,13 @@ class Document {
     [[nodiscard]] std::optional<std::filesystem::path> projectDirectory() const;
     [[nodiscard]] const katana::storage::ProjectMetadata& metadata() const { return metadata_; }
     void setMetadata(katana::storage::ProjectMetadata metadata);
+    // The project's coordinate system (include/katana/cad/project_crs.hpp), set
+    // as ONE undoable step named `stepName`: an EPSG code, WKT or a PROJ
+    // string, stored as "EPSG:<code>" when the system has one; empty text for
+    // local coordinates. InvalidCRS for text that names no system, and then
+    // nothing changes; setting the value it already has is no step at all.
+    [[nodiscard]] katana::core::Status setCoordinateSystem(std::string_view text,
+                                                           std::string stepName = "SET_CRS");
 
     // ---- sheets (docs/plotting.md) -------------------------------------------
     //

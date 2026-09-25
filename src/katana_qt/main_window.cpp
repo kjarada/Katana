@@ -8,6 +8,7 @@
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
+#include "project_crs_dialog.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
@@ -499,6 +500,16 @@ void MainWindow::buildActions()
     fileMenu->addSeparator();
     fileMenu->addActions({plotAction, sheetsAction, plotSheetsAction});
     fileMenu->addSeparator();
+    // The project's coordinate system: what online data, reprojection and the
+    // title block need, set in one place (project_crs_dialog.hpp; CRS verb).
+    QAction* crsAction = makeAction(Icon::Properties, "Project &Coordinate System...",
+                                    "Set the coordinate system the project is in (EPSG code, WKT or "
+                                    "PROJ); online data and reprojection need one",
+                                    QKeySequence(), "fileProjectCrs");
+    connect(crsAction, &QAction::triggered, this,
+            [this] { (void)chooseProjectCrs(this, document_); });
+    fileMenu->addAction(crsAction);
+    fileMenu->addSeparator();
     QAction* quitAction =
         fileMenu->addAction("&Quit", QKeySequence::Quit, this, [this] { close(); });
     quitAction->setObjectName("fileQuit");
@@ -842,6 +853,9 @@ void MainWindow::buildGisActions(QMenu& gisMenu, QAction* exportAction)
         return id;
     };
     online.version = KATANA_VERSION;
+    online.chooseProjectCrs = [this](std::optional<std::pair<double, double>> place) {
+        return chooseProjectCrs(this, document_, place);
+    };
     online_ = std::make_unique<OnlineDataWorkbench>(*this, std::move(online), gisMenu);
 
     QToolBar* gisBar = makeToolBar("GIS", Qt::TopToolBarArea);
@@ -1280,6 +1294,14 @@ void MainWindow::buildStatusBar()
     layerLabel_ = new QLabel(this);
     frameStatsLabel_ = new QLabel(this);
     frameStatsLabel_->setObjectName("FrameStatsLabel");
+    // The project's coordinate system, one click from changing it.
+    crsButton_ = new QToolButton(this);
+    crsButton_->setObjectName("statusProjectCrs");
+    crsButton_->setAutoRaise(true);
+    crsButton_->setToolTip("The project's coordinate system: click to change it");
+    connect(crsButton_, &QToolButton::clicked, this,
+            [this] { (void)chooseProjectCrs(this, document_); });
+    statusBar()->addPermanentWidget(crsButton_);
     statusBar()->addPermanentWidget(frameStatsLabel_);
     statusBar()->addPermanentWidget(layerLabel_);
     statusBar()->addPermanentWidget(snapLabel_);
@@ -1388,6 +1410,9 @@ void MainWindow::refreshAll()
                                                             static_cast<int>(document_.history().undoName().size()))
                              : "&Undo");
     layerLabel_->setText("Layer: " + QString::fromStdString(document_.currentLayer()));
+    if (crsButton_ != nullptr) {
+        crsButton_->setText("CRS: " + projectCrsLabel(document_));
+    }
 }
 
 void MainWindow::refreshTitle()

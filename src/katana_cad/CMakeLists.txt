@@ -1,5 +1,6 @@
 add_library(katana_cad STATIC
     document.cpp
+    project_crs.cpp
     selection.cpp
     view_transform.cpp
     snapping.cpp

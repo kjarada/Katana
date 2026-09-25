@@ -1,6 +1,7 @@
 #include "katana/cad/command_interpreter.hpp"
 
 #include "katana/cad/parcel.hpp"
+#include "katana/cad/project_crs.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_tools.hpp"
@@ -368,6 +369,9 @@ Align     ALIGN LIST | NEW name x,y x,y [x,y ...] | PI name x,y [radius [spIn [s
           DESIGN name s,z[,L] s,z[,L] ... defines the design profile (parabolic vertical
           curves, symmetric); PVI name s z [L] appends; PROFILE name prints it with its
           high and low points; CLEARPROFILE name removes it
+CRS       CRS   the project's coordinate system  |  CRS SET EPSG:7856 (or a code, WKT, PROJ)
+          CRS CLEAR (local coordinates)  |  CRS FIND words (the common list: CRS FIND mga 56)
+          CRS SUGGEST lon,lat   the systems that suit a place, best first; SET is one undo step
 Parcel    PARCEL id            bearings, distances, area and centroid of a closed polyline
           PARCEL id LEGAL [name]   the deed wording;  PARCEL id LABEL [height]   text labels
 Survey    INVERSE p p | INVERSE line-id   distance, azimuth, bearing; height difference,
@@ -614,6 +618,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (verb == "ALIGN") {
         return alignment(args);
+    }
+    if (verb == "CRS") {
+        return coordinateSystem(args);
     }
     if (verb == "PARCEL") {
         return parcel(args);
@@ -1824,6 +1831,88 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         changed.vertical.reset();
         return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
                       "alignment " + name + " profile removed");
+    }
+    return usage(kUsage);
+}
+
+CommandInterpreter::Reply CommandInterpreter::coordinateSystem(const Tokens& args)
+{
+    const char* const kUsage =
+        "CRS | CRS SET code-or-WKT-or-PROJ | CRS CLEAR | CRS FIND words | CRS SUGGEST lon,lat";
+    // One fact per line, key=value, as the other replies an agent reads.
+    const auto quote = [](const std::string& text) { return "\"" + text + "\""; };
+    const auto describeLine = [&](const std::string& stored) -> std::string {
+        if (stored.empty()) {
+            return "crs id=none (local coordinates)";
+        }
+        auto description = describeCoordinateSystem(stored);
+        if (!description) {
+            return "crs id=" + quote(stored) + " recognised=no";
+        }
+        return "crs id=" + description->id + " name=" + quote(description->name) +
+               " kind=" + quote(description->kind) + " units=" + description->units;
+    };
+    const auto choiceLine = [&](const CrsChoice& entry) {
+        return "choice id=" + entry.id + " name=" + quote(entry.name) + " group=" +
+               quote(entry.group);
+    };
+    // Everything after the sub-verb, as one text: a WKT or PROJ string that
+    // was not quoted still arrives whole.
+    const auto rest = [&args] {
+        std::string text;
+        for (std::size_t i = 1; i < args.size(); ++i) {
+            text += (i > 1 ? " " : "") + args[i];
+        }
+        return text;
+    };
+    const std::string action = args.empty() ? std::string("SHOW") : upper(args[0]);
+    if (action == "SHOW" || action == "INFO") {
+        return describeLine(document_.metadata().coordinateSystem);
+    }
+    if (action == "SET") {
+        if (args.size() < 2) {
+            return usage(kUsage);
+        }
+        if (const Status status = document_.setCoordinateSystem(rest()); !status) {
+            return status.error();
+        }
+        return describeLine(document_.metadata().coordinateSystem);
+    }
+    if (action == "CLEAR" || action == "NONE") {
+        if (const Status status = document_.setCoordinateSystem(""); !status) {
+            return status.error();
+        }
+        return describeLine(document_.metadata().coordinateSystem);
+    }
+    if (action == "FIND") {
+        const std::vector<CrsChoice> found = findCoordinateSystems(rest());
+        std::string text = "found count=" + std::to_string(found.size());
+        for (const CrsChoice& entry : found) {
+            text += "\n" + choiceLine(entry);
+        }
+        return text;
+    }
+    if (action == "SUGGEST") {
+        std::string place = rest();
+        std::replace(place.begin(), place.end(), ',', ' ');
+        std::istringstream in(place);
+        std::string lonText;
+        std::string latText;
+        in >> lonText >> latText;
+        auto longitude = parseNumber(lonText);
+        auto latitude = parseNumber(latText);
+        if (!longitude || !latitude) {
+            return usage("CRS SUGGEST longitude,latitude   e.g. CRS SUGGEST 151.21,-33.87");
+        }
+        auto suggested = suggestCoordinateSystems(*longitude, *latitude);
+        if (!suggested) {
+            return suggested.error();
+        }
+        std::string text = "suggested count=" + std::to_string(suggested->size());
+        for (const CrsChoice& entry : *suggested) {
+            text += "\n" + choiceLine(entry);
+        }
+        return text;
     }
     return usage(kUsage);
 }

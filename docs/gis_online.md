@@ -300,7 +300,9 @@ ONLINE KEY <name> [value]
 ```
 
 In the window's command line and in a headless run
-(`katana <project> --command "ONLINE ..." --screenshot out.png`). `crs=` is for
+(`katana <project> --command "ONLINE ..." --screenshot out.png`). The
+project's coordinate system is set with File > Project Coordinate System, the
+dialog's Set Project CRS or `CRS SET` (`docs/cad.md`). `crs=` is for
 a project with no coordinate system, which it sets when the import succeeds,
 so the next import agrees with this one; given for a project that has one,
 it must be the same system (by EPSG code, however it is spelt) or it is

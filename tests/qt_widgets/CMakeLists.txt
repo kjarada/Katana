@@ -76,6 +76,9 @@ add_executable(katana_qt_widget_tests
     # customisation widgets (tests/qt_widgets/customisation/test_style_manager*).
     ${_qt_src}/style_manager.cpp
     ${_qt_src}/layer_manager.cpp
+    # File > Project Coordinate System (test_project_crs_dialog).
+    ${_qt_src}/project_crs_dialog.cpp
+    test_project_crs_dialog.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}
