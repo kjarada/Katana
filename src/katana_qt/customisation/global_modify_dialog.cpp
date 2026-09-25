@@ -1,11 +1,9 @@
 #include "customisation/global_modify_dialog.hpp"
 
 #include <algorithm>
-#include <set>
 #include <string>
 #include <utility>
 
-#include <QButtonGroup>
 #include <QCheckBox>
 #include <QColor>
 #include <QColorDialog>
@@ -17,10 +15,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QPointer>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTimer>
@@ -32,6 +28,7 @@
 #include "katana/core/text.hpp"
 #include "katana/entity/display.hpp"
 #include "katana/entity/entity_geometry.hpp"
+#include "katana/entity/model.hpp"
 
 namespace katana::qt {
 
@@ -40,19 +37,12 @@ namespace {
 using katana::cad::GlobalModify;
 using katana::cad::ModifyFilter;
 using katana::cad::ModifyScope;
-using katana::cad::ScopeKind;
 using katana::core::ErrorCode;
 using katana::core::makeError;
 using katana::core::Result;
 using katana::entity::Color;
-using katana::entity::EntityType;
 
 constexpr const char* kByLayer = "ByLayer";
-
-// Every geometry kind, in the variant's order: the type boxes of the filter.
-constexpr EntityType kTypes[] = {EntityType::Point,    EntityType::Line,   EntityType::Arc,
-                                 EntityType::Polyline, EntityType::Circle, EntityType::Text,
-                                 EntityType::Dimension};
 
 std::string text(const QString& value)
 {
@@ -108,25 +98,8 @@ struct GlobalModifyDialog::Impl {
     GlobalModifyDialog& dialog;
     CustomisationContext context;
 
-    // Apply to
-    QRadioButton* scopeSelection = nullptr;
-    QRadioButton* scopeView = nullptr;
-    QRadioButton* scopeLayers = nullptr;
-    QRadioButton* scopeDrawing = nullptr;
-    QComboBox* view = nullptr;
-    QCheckBox* onScreen = nullptr;
-    QListWidget* layers = nullptr;
-    QCheckBox* sublayers = nullptr;
-
-    // Filter
-    std::vector<std::pair<EntityType, QCheckBox*>> types;
-    QLineEdit* filterLayer = nullptr;
-    QLineEdit* filterStyle = nullptr;
-    QLineEdit* filterColour = nullptr;
-    QLineEdit* filterProperty = nullptr;
-    QLineEdit* filterValue = nullptr;
-    QLineEdit* filterText = nullptr;
-    QCheckBox* drawnOnly = nullptr;
+    // Apply to, and Only those that match: the shared controls.
+    ScopeFilterWidget* scopeFilter = nullptr;
 
     // A field of the Modify tabs: its tick and the editors it enables.
     struct Field {
@@ -223,15 +196,6 @@ struct GlobalModifyDialog::Impl {
         summary->setStyleSheet(isError ? QStringLiteral("color: #c0392b;") : QString());
     }
 
-    [[nodiscard]] std::vector<GlobalModifyView> openViews() const
-    {
-        if (dialog.views) {
-            return dialog.views();
-        }
-        return {GlobalModifyView{katana::cad::kNoView, QStringLiteral("Whole drawing view"),
-                                 nullptr, std::nullopt}};
-    }
-
     void schedulePreview()
     {
         if (!reloading) {
@@ -326,13 +290,10 @@ struct GlobalModifyDialog::Impl {
     }
 
     void build();
-    QWidget* buildScope(QWidget* parent);
-    QWidget* buildFilter(QWidget* parent);
     QWidget* buildEntitiesTab(QWidget* parent);
     QWidget* buildLayersTab(QWidget* parent);
     QWidget* buildStylesTab(QWidget* parent);
     void reload();
-    void updateScopeControls();
 };
 
 void GlobalModifyDialog::Impl::build()
@@ -352,8 +313,13 @@ void GlobalModifyDialog::Impl::build()
 
     auto* columns = new QHBoxLayout();
     auto* left = new QVBoxLayout();
-    left->addWidget(buildScope(&dialog));
-    left->addWidget(buildFilter(&dialog));
+    scopeFilter = new ScopeFilterWidget(QStringLiteral("globalModify"), &dialog);
+    // The dialog's own views function, read afresh each time it is needed.
+    scopeFilter->views = [this] {
+        return dialog.views ? dialog.views() : ScopeFilterWidget::noWorkspaceViews();
+    };
+    scopeFilter->onChanged = [this] { schedulePreview(); };
+    left->addWidget(scopeFilter);
     left->addStretch(1);
     columns->addLayout(left, 2);
 
@@ -405,117 +371,6 @@ void GlobalModifyDialog::Impl::build()
                      [this] { dialog.selectMatches(); });
     QObject::connect(applyButton, &QPushButton::clicked, &dialog, [this] { dialog.apply(); });
     QObject::connect(closeButton, &QPushButton::clicked, &dialog, [this] { dialog.close(); });
-}
-
-QWidget* GlobalModifyDialog::Impl::buildScope(QWidget* parent)
-{
-    auto* box = new QGroupBox(QStringLiteral("Apply to"), parent);
-    box->setObjectName(QStringLiteral("globalModifyScopeGroup"));
-    auto* layout = new QGridLayout(box);
-    auto* group = new QButtonGroup(box);
-    const auto radio = [&](const QString& label, const QString& name, int row) {
-        auto* button = new QRadioButton(label, box);
-        button->setObjectName(name);
-        group->addButton(button);
-        layout->addWidget(button, row, 0);
-        QObject::connect(button, &QRadioButton::toggled, &dialog, [this](bool on) {
-            if (on) {
-                updateScopeControls();
-                schedulePreview();
-            }
-        });
-        return button;
-    };
-    scopeSelection =
-        radio(QStringLiteral("Selected entities"), QStringLiteral("globalModifyScopeSelection"), 0);
-    scopeView =
-        radio(QStringLiteral("What a view shows"), QStringLiteral("globalModifyScopeView"), 1);
-    view = new QComboBox(box);
-    view->setObjectName(QStringLiteral("globalModifyView"));
-    layout->addWidget(view, 1, 1);
-    onScreen = new QCheckBox(QStringLiteral("Only what is on screen"), box);
-    onScreen->setObjectName(QStringLiteral("globalModifyOnScreen"));
-    onScreen->setToolTip(QStringLiteral("A plan view: only what lies in the area it shows now"));
-    layout->addWidget(onScreen, 2, 1);
-    scopeLayers =
-        radio(QStringLiteral("The checked layers"), QStringLiteral("globalModifyScopeLayers"), 3);
-    sublayers = new QCheckBox(QStringLiteral("With their sublayers"), box);
-    sublayers->setObjectName(QStringLiteral("globalModifySublayers"));
-    sublayers->setChecked(true);
-    layout->addWidget(sublayers, 3, 1);
-    layers = new QListWidget(box);
-    layers->setObjectName(QStringLiteral("globalModifyLayers"));
-    layers->setMinimumHeight(90);
-    layout->addWidget(layers, 4, 0, 1, 2);
-    scopeDrawing =
-        radio(QStringLiteral("The whole drawing"), QStringLiteral("globalModifyScopeDrawing"), 5);
-    scopeSelection->setChecked(true);
-
-    QObject::connect(view, &QComboBox::currentIndexChanged, &dialog, [this] { schedulePreview(); });
-    QObject::connect(onScreen, &QCheckBox::toggled, &dialog, [this] { schedulePreview(); });
-    QObject::connect(sublayers, &QCheckBox::toggled, &dialog, [this] { schedulePreview(); });
-    QObject::connect(layers, &QListWidget::itemChanged, &dialog, [this] { schedulePreview(); });
-    return box;
-}
-
-QWidget* GlobalModifyDialog::Impl::buildFilter(QWidget* parent)
-{
-    auto* box = new QGroupBox(QStringLiteral("Only those that match (optional)"), parent);
-    box->setObjectName(QStringLiteral("globalModifyFilterGroup"));
-    auto* form = new QFormLayout(box);
-
-    auto* typeRow = new QWidget(box);
-    auto* typeLayout = new QGridLayout(typeRow);
-    typeLayout->setContentsMargins(0, 0, 0, 0);
-    int column = 0;
-    int row = 0;
-    for (const EntityType type : kTypes) {
-        const QString name =
-            QString::fromUtf8(katana::entity::toString(type).data(),
-                              static_cast<qsizetype>(katana::entity::toString(type).size()));
-        auto* check = new QCheckBox(name, typeRow);
-        check->setObjectName(QStringLiteral("globalModifyType") + name);
-        QObject::connect(check, &QCheckBox::toggled, &dialog, [this] { schedulePreview(); });
-        typeLayout->addWidget(check, row, column);
-        types.emplace_back(type, check);
-        if (++column == 4) {
-            column = 0;
-            ++row;
-        }
-    }
-    form->addRow(QStringLiteral("Types (none: all)"), typeRow);
-
-    const QString wild = QStringLiteral(" - * and ? are wildcards");
-    filterLayer = lineEdit(box, QStringLiteral("globalModifyFilterLayer"),
-                           QStringLiteral("e.g. survey/*, roads"));
-    filterLayer->setToolTip(QStringLiteral("Layer paths, comma separated") + wild);
-    form->addRow(QStringLiteral("Layer"), filterLayer);
-    filterStyle = lineEdit(box, QStringLiteral("globalModifyFilterStyle"),
-                           QStringLiteral("a style, or ByLayer"));
-    filterStyle->setToolTip(QStringLiteral("The style worn; ByLayer for none") + wild);
-    form->addRow(QStringLiteral("Style"), filterStyle);
-    filterColour = lineEdit(box, QStringLiteral("globalModifyFilterColour"),
-                            QStringLiteral("#RRGGBB or ByLayer"));
-    form->addRow(QStringLiteral("Colour"), filterColour);
-    auto* propertyRow = new QWidget(box);
-    auto* propertyLayout = new QHBoxLayout(propertyRow);
-    propertyLayout->setContentsMargins(0, 0, 0, 0);
-    filterProperty =
-        lineEdit(propertyRow, QStringLiteral("globalModifyFilterProperty"), QStringLiteral("key"));
-    filterValue = lineEdit(propertyRow, QStringLiteral("globalModifyFilterValue"),
-                           QStringLiteral("value, e.g. TREE*"));
-    filterValue->setToolTip(QStringLiteral("The value as the properties panel prints it") + wild);
-    propertyLayout->addWidget(filterProperty);
-    propertyLayout->addWidget(filterValue);
-    form->addRow(QStringLiteral("Property"), propertyRow);
-    filterText = lineEdit(box, QStringLiteral("globalModifyFilterText"),
-                          QStringLiteral("a text's words, e.g. CH *"));
-    form->addRow(QStringLiteral("Text"), filterText);
-    drawnOnly = new QCheckBox(QStringLiteral("Only what is drawn (not hidden)"), box);
-    drawnOnly->setObjectName(QStringLiteral("globalModifyDrawnOnly"));
-    QObject::connect(drawnOnly, &QCheckBox::toggled, &dialog, [this] { schedulePreview(); });
-    form->addRow(QString(), drawnOnly);
-    return box;
 }
 
 QWidget* GlobalModifyDialog::Impl::buildEntitiesTab(QWidget* parent)
@@ -724,14 +579,6 @@ QWidget* GlobalModifyDialog::Impl::buildStylesTab(QWidget* parent)
     return page;
 }
 
-void GlobalModifyDialog::Impl::updateScopeControls()
-{
-    view->setEnabled(scopeView->isChecked());
-    onScreen->setEnabled(scopeView->isChecked());
-    layers->setEnabled(scopeLayers->isChecked());
-    sublayers->setEnabled(scopeLayers->isChecked());
-}
-
 void GlobalModifyDialog::Impl::reload()
 {
     if (!live()) {
@@ -740,35 +587,8 @@ void GlobalModifyDialog::Impl::reload()
     reloading = true;
     const katana::entity::Model& model = document().model();
 
-    // The layers, keeping the ticks.
-    {
-        const QSignalBlocker quiet(layers);
-        std::set<QString> checked;
-        for (int i = 0; i < layers->count(); ++i) {
-            if (layers->item(i)->checkState() == Qt::Checked) {
-                checked.insert(layers->item(i)->text());
-            }
-        }
-        layers->clear();
-        for (const std::string& name : model.layers.names()) {
-            auto* item = new QListWidgetItem(QString::fromStdString(name), layers);
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-            item->setCheckState(checked.contains(item->text()) ? Qt::Checked : Qt::Unchecked);
-        }
-    }
-
-    // The views, keeping the one chosen.
-    {
-        const QSignalBlocker quiet(view);
-        const QVariant kept = view->currentData();
-        view->clear();
-        for (const GlobalModifyView& open : openViews()) {
-            view->addItem(open.title, QVariant::fromValue<quint32>(open.id));
-        }
-        if (const int index = view->findData(kept); index >= 0) {
-            view->setCurrentIndex(index);
-        }
-    }
+    // The layers and the views, keeping what is ticked and chosen.
+    scopeFilter->reload(model);
 
     QStringList layerNames;
     for (const std::string& name : model.layers.names()) {
@@ -818,7 +638,6 @@ void GlobalModifyDialog::Impl::reload()
     }
     refill(layerDimStyle, dimStyles);
 
-    updateScopeControls();
     reloading = false;
 }
 
@@ -859,79 +678,12 @@ QString GlobalModifyDialog::summaryText() const
 
 Result<ModifyScope> GlobalModifyDialog::scope() const
 {
-    const Impl& d = *impl_;
-    ModifyScope scope;
-    if (d.scopeSelection->isChecked()) {
-        scope.kind = ScopeKind::Selection;
-    } else if (d.scopeDrawing->isChecked()) {
-        scope.kind = ScopeKind::Drawing;
-    } else if (d.scopeLayers->isChecked()) {
-        scope.kind = ScopeKind::Layers;
-        scope.sublayers = d.sublayers->isChecked();
-        for (int i = 0; i < d.layers->count(); ++i) {
-            if (d.layers->item(i)->checkState() == Qt::Checked) {
-                scope.layers.push_back(text(d.layers->item(i)->text()));
-            }
-        }
-        if (scope.layers.empty()) {
-            return makeError(ErrorCode::InvalidArgument, "tick at least one layer to apply to");
-        }
-    } else {
-        scope.kind = ScopeKind::View;
-        const std::vector<GlobalModifyView> open = d.openViews();
-        const auto id = static_cast<katana::cad::ViewId>(d.view->currentData().toUInt());
-        const auto found = std::ranges::find(open, id, &GlobalModifyView::id);
-        if (found == open.end()) {
-            return makeError(ErrorCode::NotFound, "that view is no longer open; choose another");
-        }
-        scope.view = found->hidden;
-        if (d.onScreen->isChecked()) {
-            if (!found->onScreen) {
-                return makeError(ErrorCode::InvalidArgument,
-                                 "only a plan view has an area on screen to limit to",
-                                 found->title.toStdString());
-            }
-            scope.area = found->onScreen;
-        }
-    }
-    return scope;
+    return impl_->scopeFilter->scope();
 }
 
 Result<ModifyFilter> GlobalModifyDialog::filter() const
 {
-    const Impl& d = *impl_;
-    ModifyFilter filter;
-    for (const auto& [type, check] : d.types) {
-        if (check->isChecked()) {
-            filter.types.insert(type);
-        }
-    }
-    for (const QString& part : d.filterLayer->text().split(QLatin1Char(','), Qt::SkipEmptyParts)) {
-        if (const std::string pattern = text(part); !pattern.empty()) {
-            filter.layers.push_back(pattern);
-        }
-    }
-    if (const std::string style = text(d.filterStyle->text()); !style.empty()) {
-        filter.style = style;
-    }
-    if (!d.filterColour->text().trimmed().isEmpty()) {
-        auto colour = readColour(d.filterColour->text(), "the filter's colour", true);
-        if (!colour) {
-            return colour.error();
-        }
-        filter.colour = *colour;
-    }
-    if (const std::string key = text(d.filterProperty->text()); !key.empty()) {
-        filter.property = key;
-    }
-    if (const std::string value = text(d.filterValue->text()); !value.empty()) {
-        filter.propertyValue = value;
-    }
-    if (const std::string words = text(d.filterText->text()); !words.empty()) {
-        filter.text = words;
-    }
-    filter.drawnOnly = d.drawnOnly->isChecked();
-    return filter;
+    return impl_->scopeFilter->filter();
 }
 
 Result<GlobalModify> GlobalModifyDialog::modification() const

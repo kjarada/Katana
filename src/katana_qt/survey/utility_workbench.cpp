@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <utility>
 
+#include "customisation/scope_filter_widget.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
 #include "view_workspace.hpp"
 
@@ -24,7 +25,8 @@ QString qs(const std::string& text)
 }
 
 // The menu section, in the order of the dialog's tabs. The letters are the
-// ones the Survey menu had left.
+// ones the Survey menu had left (--check-shortcuts): N and X for the two that
+// act on what is drawn.
 struct ToolAction {
     UtilityTool tool;
     Icon icon;
@@ -33,7 +35,7 @@ struct ToolAction {
     const char* name;
 };
 
-constexpr std::array<ToolAction, 5> kActions{{
+constexpr std::array<ToolAction, kUtilityToolCount> kActions{{
     {UtilityTool::Draw, Icon::FormatStyles, "Draw &Utility Schedule...",
      "Grade a utility schedule by AS 5488 quality level and add it to the drawing: a layer for "
      "each type and level, a linetype for each level, a point at each located vertex - one undo "
@@ -53,6 +55,14 @@ constexpr std::array<ToolAction, 5> kActions{{
      "Check a utility schedule against a client's delivery schema: mandatory attributes and "
      "their value lists",
      "utilityCheck"},
+    {UtilityTool::Regrade, Icon::GlobalModify, "Regrade Draw&n Utilities...",
+     "Grade the drawn utility lines in a scope again from their points as they are now - moved, "
+     "levels or methods edited - and draw their runs again: one undo step",
+     "utilityRegrade"},
+    {UtilityTool::Schedule, Icon::SurveyExport, "E&xport Drawn Utilities as a Schedule...",
+     "Write the drawn utility lines in a scope as a schedule (.csv) that reads back exactly: a "
+     "drawing edited in CAD made a deliverable",
+     "utilityWriteSchedule"},
 }};
 
 } // namespace
@@ -68,7 +78,7 @@ UtilityWorkbench::UtilityWorkbench(QMainWindow& window, UtilityServices services
         QAction* made =
             services_.makeAction(entry.icon, entry.text, entry.tip, QKeySequence(), entry.name);
         // The dialog it opens, by object name: how --dialog finds it, since
-        // five actions share one dialog.
+        // seven actions share one dialog.
         made->setData(QString("utilityDialog"));
         const UtilityTool tool = entry.tool;
         QObject::connect(made, &QAction::triggered, &window_, [this, tool] { open(tool); });
@@ -95,6 +105,11 @@ UtilityToolsDialog& UtilityWorkbench::dialog()
         UtilityDialogContext context;
         context.execute = [this](const QString& line) { return execute(line); };
         context.headless = services_.headless;
+        context.document = services_.document;
+        if (services_.views != nullptr) {
+            ViewWorkspace* views = services_.views;
+            context.views = [views] { return scopeFilterViews(views->viewSet()); };
+        }
         dialog_ = new UtilityToolsDialog(std::move(context), &window_);
     }
     return *dialog_;
@@ -104,6 +119,8 @@ void UtilityWorkbench::open(UtilityTool tool)
 {
     UtilityToolsDialog& shown = dialog();
     shown.showTool(tool);
+    // The views open now, when the dialog is already showing too.
+    shown.reload();
     shown.show();
     shown.raise();
     shown.activateWindow();
@@ -127,8 +144,12 @@ bool UtilityWorkbench::runLine(const QString& line)
             text.chop(1);
         }
         services_.log(text, false);
-        if (words.section(' ', 1, 1).compare("DRAW", Qt::CaseInsensitive) == 0 &&
-            services_.views != nullptr) {
+        // A DRAW adds the services and a REGRADE draws them again: either
+        // way the views are shown what the reply's bounds= box holds.
+        const QString action = words.section(' ', 1, 1);
+        const bool draws = action.compare("DRAW", Qt::CaseInsensitive) == 0 ||
+                           action.compare("REGRADE", Qt::CaseInsensitive) == 0;
+        if (draws && services_.views != nullptr) {
             if (const auto box = katana::cad::utilities::drawReplyBounds(*reply)) {
                 services_.views->zoomTo(*box);
             }

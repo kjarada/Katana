@@ -1,12 +1,15 @@
 #include "katana/cad/utilities/utility_drawing.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <format>
 #include <map>
 #include <memory>
 #include <set>
 #include <utility>
 
+#include "katana/cad/scope_verbs.hpp"
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/entity_geometry.hpp"
@@ -54,10 +57,11 @@ void setReal(PropertyMap& properties, std::string_view key, std::optional<double
     }
 }
 
-void setFields(PropertyMap& properties, const std::map<std::string, std::string>& fields)
+void setFields(PropertyMap& properties, const std::map<std::string, std::string>& fields,
+               std::string_view prefix = keys::kFieldPrefix)
 {
     for (const auto& [name, value] : fields) {
-        setText(properties, std::string(keys::kFieldPrefix) + name, value);
+        setText(properties, std::string(prefix) + name, value);
     }
 }
 
@@ -85,6 +89,7 @@ PropertyMap lineProperties(const sub::UtilityLine& line)
                                     std::string(sub::toString(attributes.status)));
     }
     setFields(properties, attributes.fields);
+    setFields(properties, attributes.recorded, keys::kRecordedPrefix);
     return properties;
 }
 
@@ -107,21 +112,38 @@ std::string limitedBy(const std::vector<sub::GradedSegment>& segments, std::size
     return text;
 }
 
+// A point carries its line's attributes (`shared`) and everything its row of
+// the schedule said, so that the points alone are the schedule
+// (utility_data.hpp reads them back); then what the grading found there.
 Entity vertexPoint(const sub::UtilityLine& line, std::size_t index, const sub::GradedVertex& graded,
                    const sub::CoverResult& cover, const UtilityDrawOptions& options,
-                   const std::string& layer)
+                   const std::string& layer, const PropertyMap& shared)
 {
     const sub::UtilityVertex& vertex = line.vertices[index];
     Entity point;
     point.geometry = katana::entity::PointGeometry{planPoint(vertex)};
     point.layer = layer;
+    point.properties = shared;
     PropertyMap& properties = point.properties;
-    properties.insert_or_assign(std::string(keys::kLine), line.id);
-    properties.insert_or_assign(std::string(keys::kType),
-                                std::string(utilityTypeWord(line.attributes.type)));
     setText(properties, keys::kVertex, vertex.id);
+    properties.insert_or_assign(std::string(keys::kOrder), static_cast<std::int64_t>(index + 1));
     properties.insert_or_assign(std::string(keys::kMethod),
                                 std::string(sub::toString(vertex.evidence.method)));
+    setReal(properties, keys::kLevel, vertex.level);
+    setReal(properties, keys::kDepth, vertex.depth);
+    setReal(properties, keys::kHorizontalUncertainty, vertex.evidence.horizontalUncertainty);
+    setReal(properties, keys::kVerticalUncertainty, vertex.evidence.verticalUncertainty);
+    if (!line.pathEvidence.empty() && index + 1 < line.vertices.size()) {
+        properties.insert_or_assign(std::string(keys::kPath),
+                                    std::string(sub::toString(line.pathEvidence[index])));
+    }
+    // Wherever it bears on a level or a cover, and wherever it is not what an
+    // unrecorded reference reads as.
+    if (sub::hasVerticalMeasurement(vertex) ||
+        vertex.levelReference != sub::LevelReference::Top) {
+        properties.insert_or_assign(std::string(keys::kLevelReference),
+                                    std::string(sub::toString(vertex.levelReference)));
+    }
     properties.insert_or_assign(std::string(keys::kQualityLevel),
                                 std::string(sub::toString(graded.classification.level)));
     if (vertex.claimed) {
@@ -129,11 +151,7 @@ Entity vertexPoint(const sub::UtilityLine& line, std::size_t index, const sub::G
                                     std::string(sub::toString(*vertex.claimed)));
     }
     setText(properties, keys::kOverClaim, graded.overClaim);
-    if (const std::optional<double> level = sub::serviceLevel(vertex)) {
-        properties.insert_or_assign(std::string(keys::kServiceLevel), *level);
-        properties.insert_or_assign(std::string(keys::kLevelReference),
-                                    std::string(sub::toString(vertex.levelReference)));
-    }
+    setReal(properties, keys::kServiceLevel, sub::serviceLevel(vertex));
     if (sub::hasVerticalMeasurement(vertex)) {
         properties.insert_or_assign(std::string(keys::kLevelQualified),
                                     graded.classification.levelQualified);
@@ -145,7 +163,13 @@ Entity vertexPoint(const sub::UtilityLine& line, std::size_t index, const sub::G
         properties.insert_or_assign(std::string(keys::kCoverBelowMinimum), cover.belowMinimum);
     }
     setText(properties, keys::kVerifies, vertex.verifies);
+    if (std::isfinite(options.grading.maximumDetectedSpacing)) {
+        properties.insert_or_assign(std::string(keys::kSpacing),
+                                    options.grading.maximumDetectedSpacing);
+    }
+    setReal(properties, keys::kMinimumCover, options.minimumCover);
     setFields(properties, vertex.fields);
+    setFields(properties, vertex.recorded, keys::kRecordedPrefix);
     return point;
 }
 
@@ -194,25 +218,6 @@ katana::core::Status needLayer(std::map<std::string, Layer>& layers, std::string
 double lengthAt(const DrawnUtilityLine& line, sub::QualityLevel level)
 {
     return line.lengthAt[static_cast<std::size_t>(level)];
-}
-
-// A value in a reply record: as it is when it is one plain word, else in
-// double quotes with '"' and '\' escaped, so a record still splits on blanks.
-std::string recordValue(std::string_view value)
-{
-    const bool plain =
-        !value.empty() && value.find_first_of(" \t\"=\\\n\r") == std::string_view::npos;
-    if (plain) {
-        return std::string(value);
-    }
-    std::string out = "\"";
-    for (const char c : value) {
-        if (c == '"' || c == '\\') {
-            out += '\\';
-        }
-        out += c == '\n' || c == '\r' ? ' ' : c;
-    }
-    return out + "\"";
 }
 
 } // namespace
@@ -428,7 +433,7 @@ Result<UtilityDrawing> drawUtilities(const std::vector<sub::UtilityLine>& lines,
         drawnOn.insert(pointsLayer);
         for (std::size_t i = 0; i < line.vertices.size(); ++i) {
             drawing.entities.push_back(vertexPoint(line, i, graded->vertices[i], (*cover)[i],
-                                                   options, pointsLayer));
+                                                   options, pointsLayer, shared));
             drawing.bounds.expand(planPoint(line.vertices[i]));
         }
         drawing.vertices += line.vertices.size();
@@ -478,12 +483,12 @@ cmd::CommandPtr utilityDrawCommand(const katana::entity::Model& model,
     return transaction;
 }
 
-std::string formatUtilityDrawing(const UtilityDrawing& drawing)
+std::string formatUtilityDrawing(const UtilityDrawing& drawing, std::string_view record)
 {
     std::string reply = std::format(
-        "utilities drawn lines={} vertices={} segments={} entities={} layers={} "
+        "{} lines={} vertices={} segments={} entities={} layers={} "
         "bounds={:.3f},{:.3f},{:.3f},{:.3f}",
-        drawing.lines.size(), drawing.vertices, drawing.segments, drawing.entities.size(),
+        record, drawing.lines.size(), drawing.vertices, drawing.segments, drawing.entities.size(),
         drawing.drawnLayers, drawing.bounds.min.x, drawing.bounds.min.y, drawing.bounds.max.x,
         drawing.bounds.max.y);
     for (const DrawnUtilityLine& line : drawing.lines) {

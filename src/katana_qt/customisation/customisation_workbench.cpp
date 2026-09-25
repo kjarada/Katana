@@ -254,23 +254,9 @@ GlobalModifyDialog& CustomisationWorkbench::showGlobalModify()
         globalModify_->setObjectName(QString::fromLatin1(kGlobalModifyName));
         globalModify_->setModal(false);
         if (services_.views != nullptr) {
-            // Read afresh each time: a view closed since has no state to
-            // point at, and a plan view's area moves with every pan.
+            // Read afresh each time (scopeFilterViews).
             ViewWorkspace* views = services_.views;
-            globalModify_->views = [views] {
-                std::vector<GlobalModifyView> open;
-                for (katana::cad::ViewState* state : views->viewSet().views()) {
-                    GlobalModifyView view;
-                    view.id = state->id;
-                    view.title = QString::fromStdString(katana::cad::ViewSet::title(*state));
-                    view.hidden = &state->layers;
-                    if (state->kind == katana::cad::ViewKind::Plan) {
-                        view.onScreen = state->plan.visibleWorldBounds();
-                    }
-                    open.push_back(std::move(view));
-                }
-                return open;
-            };
+            globalModify_->views = [views] { return scopeFilterViews(views->viewSet()); };
         }
     }
     globalModify_->reload();
