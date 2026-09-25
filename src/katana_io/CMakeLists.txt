@@ -9,6 +9,11 @@ add_library(katana_io STATIC
     gdal_adapter.cpp
     point_cloud_engine.cpp
     zip_container.cpp
+    # The web access and the reprojection the online import rests on
+    # (docs/gis_online.md): HTTP through GDAL's own libcurl, XML through its
+    # parser, warping and coordinate transformation through GDAL and OGR.
+    web_access.cpp
+    reproject.cpp
 )
 katana_target_defaults(katana_io)
 target_link_libraries(katana_io
