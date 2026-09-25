@@ -624,3 +624,26 @@ TEST(DxfWriter, WithNothingDrawnALeaderIsItsLineLandingAndNote)
     EXPECT_EQ(records(out->text, "LINE"), 2u);
     EXPECT_EQ(records(out->text, "TEXT"), 1u);
 }
+
+// A smart leader's note is read off the entity its tip is on, here too
+// (docs/annotation.md, "Smart leaders"): the file says what the drawing
+// says, not the template.
+TEST(DxfWriter, WithNothingDrawnASmartLeaderWritesTheNoteItReads)
+{
+    katana::entity::Model model;
+    katana::entity::Entity pit;
+    pit.geometry = katana::entity::PointGeometry{Point2(0.0, 0.0)};
+    pit.properties["invert"] = 10.5;
+    ASSERT_TRUE(model.entities.add(pit).ok());
+    katana::entity::LeaderGeometry leader;
+    leader.vertices = {Point2(0.0, 0.0), Point2(10.0, 10.0)};
+    leader.text = "IL {prop.invert:.2f}\nRL {rl:.3f}";
+    leader.fields = true;
+    leader.tipRef = katana::entity::AnchorRef{1, katana::entity::AnchorPoint::Position};
+    add(model, leader);
+    const auto out = dxf::writeDxf(model);
+    ASSERT_TRUE(out.ok());
+    EXPECT_NE(out->text.find("IL 10.50"), std::string::npos);
+    EXPECT_EQ(out->text.find("{prop.invert"), std::string::npos) << "never the template";
+    EXPECT_EQ(records(out->text, "TEXT"), 1u) << "no line for a level the pit has not got";
+}
