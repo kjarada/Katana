@@ -37,9 +37,10 @@ CHECK | DRAW | REGRADE | SCHEDULE` grades subsurface utility schedules by
 AS 5488 quality level, checks them against a delivery schema, draws them into
 the drawing, and does the same to what is drawn
 (`docs/subsurface_utilities.md`); it is the interpreter's too, and the
-`cli.utility_*` tests run it on `samples/utilities/`. Every verb on drawing
-data takes the shared scope words (`docs/cad.md`, "Scope and filter"), except
-that `VIEW` is the window's plan view: headless it is refused, and `AREA
+`cli.utility_*` tests run it on `samples/utilities/`. `MODIFY` and the
+`UTILITY` verbs take the shared scope words (`docs/cad.md`, "Scope and
+filter"; every new verb on drawing data is to take them too), except that
+`VIEW` is the window's plan view: headless it is refused, and `AREA
 x0,y0,x1,y1` names the window instead
 (`cli.utility_view_is_refused_headless_naming_area`). The window itself, run
 headless with `--command`, does answer `VIEW` - it has plan views even

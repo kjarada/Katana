@@ -393,11 +393,13 @@ DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           LAYER DIMSTYLE layer style   attaches one
 Attribs   CHLAYER name | COLOR #RRGGBB|BYLAYER   (selection)
 Global    MODIFY [scope] [WHERE k=v ...] SET k=v ... [PREVIEW]   global modify, one undo step
-Scope     every verb on drawing data: SELECTION (the default) | DRAWING | VIEW [id] [EXTENTS]
-          (the window's plan view as on screen; EXTENTS: its layers anywhere) |
-          AREA x0,y0,x1,y1 | LAYERS a,b [ONLY] (ONLY: not their sublayers)
+Scope     MODIFY and the UTILITY verbs: SELECTION | DRAWING | VIEW [id] [EXTENTS]
+          (the window's plan view as on screen; EXTENTS: its layers anywhere; id is the
+          view=N a reply gives, not its title's number) | AREA x0,y0,x1,y1 |
+          LAYERS a,b [ONLY] (ONLY: not their sublayers). MODIFY with none takes the
+          selection; a UTILITY verb takes a scope word or WHERE, else reads a file
           WHERE: TYPE=point,line LAYER=pat STYLE=pat|ByLayer COLOUR=#RRGGBB|ByLayer
-          PROP=key[:pat] TEXT=pat DRAWN ('*' '?' wildcards)
+          PROP=key[:pat] (PROP=:pat: any property) TEXT=pat DRAWN ('*' '?' wildcards)
           SET entities: LAYER= COLOUR= STYLE=name|ByLayer VISIBLE=yes|no PROP=key:value
           UNPROP=key HEIGHT=h SYMBOL=name[@size]   layers: LAYER.COLOUR= LAYER.LTYPE=
           LAYER.WEIGHT= LAYER.HATCH= LAYER.DIMSTYLE= LAYER.VISIBLE= LAYER.LOCKED=
@@ -2555,30 +2557,62 @@ Status parseSetWord(const std::string& word, GlobalModify& change)
 
 CommandInterpreter::Reply CommandInterpreter::modify(const Tokens& args)
 {
-    // PREVIEW may stand anywhere; the rest is the shared scope and filter
-    // words (scope_verbs.hpp), then SET and the fields to set.
-    Tokens words;
+    // MODIFY's own words stand where they always could: PREVIEW anywhere,
+    // SET before the fields, and a WHERE after them taking the filter up
+    // again. The rest are the shared scope and filter words (scope_verbs.hpp),
+    // read by the one parser - a LAYERS list being the word after LAYERS,
+    // whatever it says, so a layer may be called "preview" or "set".
+    Tokens scope;
+    GlobalModify request;
     bool preview = false;
-    for (const std::string& word : args) {
-        if (upper(word) == "PREVIEW") {
+    bool sawSet = false;
+    bool inWhere = false;
+    std::optional<std::size_t> firstWhere; // where in `scope` the filter began
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const std::string& word = args[i];
+        const std::string folded = upper(word);
+        if (folded == "PREVIEW") {
             preview = true;
-        } else {
-            words.push_back(word);
+            continue;
+        }
+        if (folded == "SET") {
+            sawSet = true;
+            inWhere = false;
+            continue;
+        }
+        if (folded == "WHERE") {
+            if (!firstWhere) {
+                firstWhere = scope.size();
+            }
+            inWhere = true;
+        } else if (sawSet && !inWhere) {
+            if (auto status = parseSetWord(word, request); !status) {
+                return status.error();
+            }
+            continue;
+        }
+        scope.push_back(word);
+        if (!inWhere && (folded == "LAYERS" || folded == "LAYER") && i + 1 < args.size()) {
+            scope.push_back(args[++i]);
         }
     }
+    if (!sawSet) {
+        return usage(kModifyUsage);
+    }
     std::size_t at = 0;
-    const auto scopeWords = parseScopeWords(words, at);
+    const auto scopeWords = parseScopeWords(scope, at);
     if (!scopeWords) {
         return scopeWords.error();
     }
-    if (at >= words.size() || upper(words[at]) != "SET") {
-        return usage(kModifyUsage);
-    }
-    GlobalModify request;
-    for (std::size_t i = at + 1; i < words.size(); ++i) {
-        if (auto status = parseSetWord(words[i], request); !status) {
-            return status.error();
+    if (at < scope.size()) {
+        // In the filter, a word that is no condition is named as one.
+        if (firstWhere && at > *firstWhere) {
+            ModifyFilter unused;
+            if (auto status = parseWhereCondition(scope[at], unused); !status) {
+                return status.error();
+            }
         }
+        return usage(kModifyUsage);
     }
     if (scopeWords->source == ScopeSource::Selection && document_.selection().empty()) {
         return makeError(ErrorCode::InvalidState,
@@ -2592,11 +2626,17 @@ CommandInterpreter::Reply CommandInterpreter::modify(const Tokens& args)
     if (!plan) {
         return plan.error();
     }
-    const std::string summary = plan->summary();
-    if (preview || plan->command == nullptr) {
-        return (preview ? "preview: " : "") + summary;
+    // A view's scope and a typed window say which part of the drawing they
+    // were - the view moves, and its id is not its title's number - as the
+    // UTILITY replies do; the other scopes say it in the line itself.
+    std::string reply = (preview ? "preview: " : "") + plan->summary();
+    if (scopeWords->source == ScopeSource::View || scopeWords->source == ScopeSource::Area) {
+        reply = scopeRecord(ScopeMatch{*resolved, plan->matched}) + "\n" + reply;
     }
-    return finish(document_.execute(std::move(plan->command)), summary + " One UNDO restores it.");
+    if (preview || plan->command == nullptr) {
+        return reply;
+    }
+    return finish(document_.execute(std::move(plan->command)), reply + " One UNDO restores it.");
 }
 
 // ---- history / file / inspect -----------------------------------------------------------------
