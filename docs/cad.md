@@ -331,6 +331,14 @@ it, and the sheets print it in the title block, so it is set in one place:
   refreshes. Set calls `Document::setCoordinateSystem` rather than running a
   `CRS SET` line: a WKT holds double quotes, which no command line can carry
   (`docs/desktop.md`, "One rule for a word on the line").
+- Kept open, it follows the drawing (`ProjectCrsDialog::follow`): a system set
+  elsewhere - a typed `CRS SET`, an undo, which says only that the history
+  moved - is shown in `projectCrsCurrent`, and in `projectCrsText` unless
+  something else was typed there; a new or opened drawing is shown afresh,
+  its own system and place, the opener's place dropped. Made non-modal, it
+  once showed the last project's system across an `OPEN`, and Set put that
+  system on the project just opened
+  (`ProjectCrsDialog.ANewDrawingIsShownAfreshAndSetCarriesNothingOver`).
 
 The tests are `tests/cad/test_project_crs.cpp`,
 `tests/qt_widgets/test_project_crs_dialog.cpp` and, through the real

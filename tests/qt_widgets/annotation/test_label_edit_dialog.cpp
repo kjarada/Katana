@@ -263,6 +263,86 @@ TEST(LabelEditDialog, ARefusedLineLeavesTheLabelAndSaysWhy)
     EXPECT_EQ(dialog.status(), "Easting: 'east' is not a number");
 }
 
+// Non-modal, the dialog follows the label: undone behind it, the form shows
+// the label as it now is, so Apply compares with what the model holds. It
+// once kept the pinned place it loaded, and an unchanged form then ran
+// nothing though the label had moved back.
+TEST(LabelEditDialog, AnUndoWhileItIsOpenShowsTheLabelAsItNowIs)
+{
+    Document document;
+    lotWithLabel(document);
+    Runner runner(document);
+    LabelEditDialog dialog(document, std::ref(runner));
+    ASSERT_TRUE(dialog.load(2));
+    child<QCheckBox>(dialog, "labelEditPinned")->setChecked(true);
+    child<QLineEdit>(dialog, "labelEditEasting")->setText("12");
+    child<QLineEdit>(dialog, "labelEditNorthing")->setText("34");
+    ASSERT_TRUE(dialog.apply());
+    ASSERT_TRUE(labelIn(document, 2).position.has_value());
+
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_FALSE(child<QCheckBox>(dialog, "labelEditPinned")->isChecked());
+    EXPECT_EQ(dialog.line(), "");
+    // Pinned again from the form: the line names the place, which the label
+    // no longer has.
+    child<QCheckBox>(dialog, "labelEditPinned")->setChecked(true);
+    child<QLineEdit>(dialog, "labelEditEasting")->setText("12");
+    child<QLineEdit>(dialog, "labelEditNorthing")->setText("34");
+    EXPECT_EQ(dialog.line(), "LABEL SET 2 at=12,34");
+
+    // Another entity's change leaves what is typed alone.
+    run(document, "POINT 100,100");
+    EXPECT_EQ(dialog.line(), "LABEL SET 2 at=12,34");
+}
+
+// A new or opened drawing empties it: the id it holds is the last drawing's,
+// and an opened project may well have a label of its own under it. Left open
+// across an OPEN, it once wrote its edits onto that label.
+TEST(LabelEditDialog, ANewDrawingEmptiesItRatherThanEditingAnotherDrawingsLabel)
+{
+    Document document;
+    lotWithLabel(document);
+    Runner runner(document);
+    LabelEditDialog dialog(document, std::ref(runner));
+    ASSERT_TRUE(dialog.load(2));
+    child<QCheckBox>(dialog, "labelEditOverride")->setChecked(true);
+    child<QLineEdit>(dialog, "labelEditText")->setText("Lot 7 DP 1234");
+    document.newDocument();
+    // Ids are never reused, so the new drawing's lot and label are numbered on.
+    run(document, "LABELSTYLE DEFAULTS");
+    run(document, "PLINE 100,100 130,100 130,140 100,140 CLOSE");
+    run(document, "LABEL " + std::to_string(document.lastCreatedEntities().front()) +
+                      " style=\"Lot Area\"");
+
+    EXPECT_FALSE(child<QPushButton>(dialog, "labelEditApply")->isEnabled());
+    EXPECT_EQ(child<QLabel>(dialog, "labelEditTarget")->text(), "-");
+    EXPECT_TRUE(dialog.status().startsWith("The drawing was replaced"))
+        << dialog.status().toStdString();
+    EXPECT_EQ(dialog.line(), "");
+    EXPECT_FALSE(dialog.apply());
+    EXPECT_TRUE(runner.lines.isEmpty());
+    document.model().entities.forEach([](const katana::entity::Entity& entity) {
+        if (const auto* label = std::get_if<LabelGeometry>(&entity.geometry)) {
+            EXPECT_TRUE(label->textOverride.empty()) << "label " << entity.id;
+        }
+    });
+}
+
+// Erased behind it, the label leaves the form empty.
+TEST(LabelEditDialog, AnErasedLabelLeavesItEmpty)
+{
+    Document document;
+    lotWithLabel(document);
+    Runner runner(document);
+    LabelEditDialog dialog(document, std::ref(runner));
+    ASSERT_TRUE(dialog.load(2));
+    run(document, "SELECT 2");
+    run(document, "ERASE");
+    EXPECT_FALSE(child<QPushButton>(dialog, "labelEditApply")->isEnabled());
+    EXPECT_EQ(dialog.status(), "Label 2 is no longer in the drawing; select one label, then "
+                               "choose Edit Label.");
+}
+
 // ---- the Label Layout Report ------------------------------------------------------------
 
 TEST(LabelLayoutReport, TheReplysCountsAndSuppressedLabelsAreRead)

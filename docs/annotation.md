@@ -514,6 +514,13 @@ reported one. Now:
   `LABEL SET` would read back as a line break. So is the bare word `none`,
   which `LABEL SET` reads as "no own text". The words are written as every
   annotation dialog writes them (`commandWord`, `annotationTextWord`).
+  Non-modal and kept, it follows the drawing (`LabelEditDialog::follow`), as
+  Edit Text does: the label changed from elsewhere - an undo, a typed
+  `LABEL SET` - is shown afresh, since Apply names only what differs from the
+  label as loaded; erased, or the drawing replaced, the form is emptied and
+  disabled. It once kept what it loaded, and Apply across an `OPEN` wrote
+  the last drawing's edits onto the label the opened project had at that id
+  (`LabelEditDialog.ANewDrawingEmptiesItRatherThanEditingAnotherDrawingsLabel`).
 * **The Properties panel** shows a label's resolved **Text** and its
   **Position** (`pinned at E, N` or `automatic`) beside its style, target,
   part and rule. The text is `annotation::shownLabelText`, which `LABEL LIST`
