@@ -199,7 +199,9 @@ Load Customisation, Replace Loaded Customisation and Apply Survey Codes
 (`docs/survey_coding.md`). The first three are the same `QAction` objects as
 on the Format menu (`SurveyServices::codeManager`, `loadCustomisation`,
 `replaceCustomisation`), so the two menus cannot drift; Apply Survey Codes
-(`applySurveyCodes`) is on this menu and the Survey toolbar only.
+(`applySurveyCodes`) is on this menu and the Survey toolbar only. The menu
+ends with Subsurface Utilities (AS 5488), added by a workbench of its own
+(`src/katana_qt/survey/utility_workbench.*`, `docs/subsurface_utilities.md`).
 `MainWindow` only makes the menu and toolbar - on a second toolbar row, with
 Terrain and GIS - and hands them over through `SurveyServices`, so the survey
 work never includes `main_window.hpp`.
