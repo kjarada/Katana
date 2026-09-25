@@ -178,7 +178,7 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `CHAMFER`), `SELECT`, `LAYER`, the tables (`LINETYPE`, `DIMSTYLE`, `HATCH`,
 `STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
 `UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`, and the sheet,
-annotation and utility families below. Aliases include
+annotation, utility and survey-code families below. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
 and civil verbs until the audit of 2026-09-23.
 
@@ -224,15 +224,29 @@ is one undo step. `CommandInterpreter::annotationHelpText` is their
 reference, and `HELP` prints it after the rest. The plain `TEXT p height
 "text"` and `DIM p p offset` are unchanged.
 
+The survey-code verbs (`CODE [property]`, `CODE EXPLAIN code`, `CODE CENSUS
+[property]`, `MAPFILE LIST [filter]`, `MAPFILE CHECK`; `docs/survey_coding.md`)
+are handed to `runSurveyCodeVerb` (`include/katana/cad/survey_code_verbs.hpp`)
+since 2026-09-26; they were `katana_cli`'s own, and the window refused them.
+`CODE` is one undo step, and `MAPFILE CHECK` is refused - its whole lint in
+the refusal, as `UTILITY CHECK` carries its check - when a rule has an error
+(`mapfileCheckReply`). The standard colour names they need are archive12d's,
+which cad may not see, so each front end passes the table with
+`CommandInterpreter::setColourLookup`; without one no colour is known and
+colours are left alone.
+
 Each front end adds verbs of its own, because `katana_cad` may not see GDAL,
 PDAL or the archive and customisation readers: the application's command line
-(`MainWindow::runCommandLine`) adds `IMPORT`, `EXPORT`, `INFO <file>`,
-`REFS`, `CUSTOMISE [REPLACE] <file>...`, the view verbs `ZOOM`, `GRID` and
-`SNAP`, and `QUIT`; `katana_cli` adds `IMPORT`, `EXPORT`, `REFS`, `COPC` and
-the survey-code verbs (`CODE`, `CODE EXPLAIN`, `CODE CENSUS`, `MAPFILE LIST`,
-`MAPFILE CHECK`, `CUSTOMISE [REPLACE]`; `docs/survey_coding.md`) - its
-`--help` lists them. Of the survey-code verbs only `CUSTOMISE` is on the
-application's command line; the rest are the Survey Code Manager's tabs.
+(`MainWindow::runCommandLine`, whose `dispatchLine` the window's dialogs run
+their lines through too - `docs/desktop.md`, "One executor: the command
+runner") adds `IMPORT <file> [LOCAL]`, `EXPORT`, `INFO <file>`, `REFS`,
+`COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
+report, `cad::customisationReport`), `PLOTSHEETS`, the view verbs `ZOOM`,
+`GRID` and `SNAP`, and `QUIT`; `katana_cli` adds the same interoperability
+verbs and `CUSTOMISE` - its `--help` lists them. Both read an `IMPORT` line's
+path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
+with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)
+to the interpreter unless a file of that name exists.
 
 In the application a typed line is routed before the interpreter sees it
 (`docs/tools.md`, "The tool host"): while a tool runs, the whole line is that tool's

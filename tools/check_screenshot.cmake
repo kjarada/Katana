@@ -134,7 +134,8 @@ endif()
 # (--dialog), "#NAME" shows the dock action NAME shows (--survey-dock),
 # "%NAME" makes the window's own dock or toolbar NAME the target (--panel),
 # ">TEXT" runs TEXT on the command line (--command) and ">" alone is Enter on
-# an empty command line (--enter), "?WIDGET" prints what the target's WIDGET
+# an empty command line (--enter), "<TEXT" runs TEXT through the window's one
+# executor as a dialog does (--run-line), "?WIDGET" prints what the target's WIDGET
 # shows, or whether the window's action of that name is checked (--report),"*NAME" triggers the menu item NAME in its turn
 # (--trigger), "!BUTTON" presses a button, and anything else is a FIELD=TEXT
 # fill. '|' between steps, for FILL's reason.
@@ -155,6 +156,8 @@ if(DEFINED DRIVE)
             list(APPEND extra --enter)
         elseif(_sigil STREQUAL ">")
             list(APPEND extra --command "${_rest}")
+        elseif(_sigil STREQUAL "<")
+            list(APPEND extra --run-line "${_rest}")
         elseif(_sigil STREQUAL "?")
             list(APPEND extra --report "${_rest}")
         elseif(_sigil STREQUAL "*")

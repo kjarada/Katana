@@ -1196,3 +1196,84 @@ if(TARGET katana_qt_widget_tests)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;QT_SCALE_FACTOR=set:1.25"
         TIMEOUT 120)
 endif()
+
+# The session verbs on the window's command line and the window's one
+# executor (docs/desktop.md, "One executor: the command runner"). Typed with
+# --command as an agent types them: INFO with an entity's id, CODE CENSUS,
+# MAPFILE CHECK, CUSTOMISE alone, COPC and IMPORT ... LOCAL, each of which the
+# window once refused or misread. Run with --run-line as a dialog runs its
+# line: never a running tool's answer, with what it logged coming back.
+if(TARGET katana)
+    set(_gis "${PROJECT_SOURCE_DIR}/samples/gis")
+    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    # A 10 x 5 rectangle: perimeter 30, area 50, described by INFO 1 and
+    # again by INFO #1 (a typed line's echo is not printed). The fixture survey code file
+    # holds 11 rules over 8 distinct codes (counted by hand in its head
+    # comment), none of which cannot be applied as written; the rectangle
+    # carries no code.
+    add_test(NAME qt_the_session_verbs_run_on_the_windows_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>RECT 0,0 10,5|>INFO 1|>INFO #1|>CUSTOMISE REPLACE \"${_fixture}/test_survey.mapfile\"|>CODE CENSUS|>MAPFILE CHECK|>CUSTOMISE"
+            "-DEXPECT=1  Polyline  layer=0  vertices=4  closed  length=30  area=50[\r\n]+1  Polyline  layer=0  vertices=4  closed  length=30  area=50.*0 entities carry a code in \"[^\"]*\", 0 distinct codes.*11 rules checked: 0 errors, [0-9]+ warnings?.*11 survey code rules over 8 distinct codes[\r\n]+Loaded files, in load order:.*\"test_survey\\.mapfile\", a survey code file"
+            "-DFORBID=unknown command|usage: CUSTOMISE"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/session_verbs_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # COPC typed, into a folder name with blanks, then described: every point
+    # of the sample's 40 000 (`pdal info`, as cli.copc_then_info) kept, and
+    # the IMPORT line that reads the result said after it. One path is a
+    # usage error; the menu item, whose two file dialogs no headless session
+    # can answer, points at the verb instead of waiting on them.
+    set(_window_copc "${CMAKE_CURRENT_BINARY_DIR}/qt copc/window scan.copc.laz")
+    add_test(NAME qt_copc_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/qt copc")
+    add_test(NAME qt_copc_folder
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/qt copc")
+    add_test(NAME qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>COPC \"${_gis}/survey_scan.las\" \"${_window_copc}\"|>INFO \"${_window_copc}\"|>COPC \"${_gis}/survey_scan.las\"|*convertCopc"
+            "-DEXPECT=Converted survey_scan\\.las to window scan\\.copc\\.laz, every point kept\\.[\r\n]+  IMPORT \"[^\r\n]*/qt copc/window scan\\.copc\\.laz\" reads it at a level of detail.*Point cloud: 40,000 points.*COPC: yes.*usage: COPC <source> <destination\\.copc\\.laz>.*A headless session opens no file dialog: type COPC <source> <destination\\.copc\\.laz> instead"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/copc_typed_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_copc_cleanup PROPERTIES FIXTURES_SETUP qt_copc_clean)
+    set_tests_properties(qt_copc_folder PROPERTIES
+        FIXTURES_REQUIRED qt_copc_clean FIXTURES_SETUP qt_copc)
+    set_tests_properties(qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
+        PROPERTIES FIXTURES_REQUIRED qt_copc)
+    # IMPORT ... LOCAL typed, the path quoted: parcels.geojson spans (180, 0)
+    # to (365, 165) (its coordinates, by hand), so it is moved by -180,0 and
+    # spans (0, 0) to (185, 165); nobody is asked where to put it. A raster's
+    # LOCAL is refused by name, as katana_cli refuses it.
+    add_test(NAME qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>IMPORT \"${_gis}/parcels.geojson\" LOCAL|>IMPORT ${_gis}/terrain.asc local"
+            "-DEXPECT=LOCAL: moved as one piece by -180\\.000,0\\.000, so its lower-left corner sits at 0,0\\.[\r\n]+Imported [0-9]+ entities from parcels\\.geojson[\r\n]+  extent 0\\.00,0\\.00 to 185\\.00,165\\.00.*LOCAL is not supported for rasters and point clouds"
+            "-DFORBID=No importer|Far from|no one to ask"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/import_local_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A dialog's line while a tool waits for a point: the CIRCLE is drawn,
+    # not taken for the Line's first point, its reply comes back, and the
+    # typed points then draw the line as ever - entity 2, from 0,0 to 10,0;
+    # the first Enter ends the chain, the second the tool. A refused line
+    # comes back not ok, with why.
+    add_test(NAME qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>LINE|<CIRCLE 5,5 2|>0,0|>10,0|>|>|<CIRCLE 0,0 -1|>LIST"
+            "-DEXPECT=--run-line CIRCLE 5,5 2: ok=yes[\r\n]+  reply: circle created.*--run-line CIRCLE 0,0 -1: ok=no[\r\n]+  error: InvalidGeometry: [^\r\n]*radius.*2 entities[\r\n]+1  Circle  layer=0  centre 5,5  radius=2 [^\r\n]*[\r\n]+2  Line  layer=0  0,0 -> 10,0  length=10"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/run_line_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_session_verbs_run_on_the_windows_command_line_headless
+        qt_copc_typed_on_the_windows_command_line_converts_the_cloud_headless
+        qt_import_local_typed_on_the_windows_command_line_moves_the_data_headless
+        qt_a_dialogs_line_is_run_never_given_to_a_running_tool_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

@@ -13,8 +13,11 @@
 // headless driver and the tests.
 
 #include <memory>
+#include <utility>
 
 #include <QPointer>
+
+#include "command_runner.hpp"
 
 class QAction;
 class QComboBox;
@@ -44,6 +47,13 @@ class AnnotationWorkbench {
     // The Format toolbar's scale box ("annotationScaleCombo").
     [[nodiscard]] QComboBox* scaleBox() const { return scale_; }
 
+    // The window's one executor (command_runner.hpp), for the annotation
+    // dialogs that change the drawing through a verb line. Set by the window
+    // once its command line exists; empty until then, and in a test that
+    // gives none.
+    void setCommandRunner(CommandRunner run) { run_ = std::move(run); }
+    [[nodiscard]] const CommandRunner& commandRunner() const { return run_; }
+
   private:
     // The box shows the document's scale; called whenever the document
     // changes, since an undo or an ANNOSCALE typed changes it too.
@@ -56,6 +66,7 @@ class AnnotationWorkbench {
     QComboBox* scale_ = nullptr;
     QPointer<TextStyleManagerDialog> textStyles_;
     QPointer<LabelStyleManagerDialog> labelStyles_;
+    CommandRunner run_;
     struct Listener;
     std::unique_ptr<Listener> listener_;
 };

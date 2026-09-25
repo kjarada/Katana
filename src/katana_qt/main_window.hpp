@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "annotation/annotation_workbench.hpp"
+#include "command_runner.hpp"
 #include "icons.hpp"
 #include "katana/archive12d/customisation.hpp"
 #include "katana/cad/customisation_record.hpp"
@@ -71,8 +72,12 @@ class MainWindow final : public QMainWindow {
     // Opens a project given on the command line.
     void openProject(const QString& directory);
     // Imports a data file given on the command line, routed by its extension
-    // exactly as File > Import does.
-    void importPath(const QString& path);
+    // exactly as File > Import does. With `local` - a typed IMPORT <file>
+    // LOCAL - vector data, a .12da archive or a DXF is moved as one piece so the
+    // lower-left corner of what it holds sits at 0,0, and nobody is asked
+    // where to put it; a raster or a point cloud refuses it by name, being
+    // reference data drawn at its own coordinates.
+    void importPath(const QString& path, bool local = false);
     // Plots the drawing to `path` on the active plan viewport. With
     // `fitToDrawing` the scale is the first standard one the drawing fits at
     // and the sheet is centred on it; otherwise `settings.scaleDenominator`
@@ -174,6 +179,15 @@ class MainWindow final : public QMainWindow {
     // Enter, or the last tool again. False when the line logged an error, so
     // a headless run can stop at a command that was refused.
     bool runCommand(const QString& line);
+    // The window's one executor for a dialog (command_runner.hpp): `line`
+    // echoed in the command log and run by the dispatcher a typed line goes
+    // to - but never offered to a running tool, and what is being typed on
+    // the command line is left alone - with what it logged returned. An empty
+    // line runs nothing and is not ok.
+    VerbOutcome runVerbLine(const QString& line);
+    // runVerbLine as a CommandRunner, for the workbenches to hand their
+    // dialogs.
+    [[nodiscard]] CommandRunner commandRunner();
 
     // Every key sequence the window's actions and menus answer to that two
     // of them share, one line each ("Ctrl+L: formatLayers, Line"); empty
@@ -290,9 +304,10 @@ class MainWindow final : public QMainWindow {
     void reportCustomisationCoverage();
     // The options are the GIS menu's dialogs' choices; File > Import and a
     // path on the command line take the defaults.
+    // `local`: moved to sit at 0,0, as importPath says.
     void importVectorFile(const std::filesystem::path& path,
-                          katana::interop::VectorImportOptions options = {});
-    void importArchive12dFile(const std::filesystem::path& path);
+                          katana::interop::VectorImportOptions options = {}, bool local = false);
+    void importArchive12dFile(const std::filesystem::path& path, bool local = false);
     void importRasterFile(const std::filesystem::path& path,
                           katana::interop::RasterImportOptions options = {});
     void importPointCloudFile(const std::filesystem::path& path,
@@ -306,7 +321,9 @@ class MainWindow final : public QMainWindow {
     // A .dxf, read and written natively rather than through GDAL
     // (main_window_dxf.cpp). The export honours the options' entities,
     // layers and origin shift; the rest are GDAL's.
-    void importDxfFile(const std::filesystem::path& path);
+    void importDxfFile(const std::filesystem::path& path, bool local = false);
+    // What an IMPORT ... LOCAL says it did: the shift, as the move it made.
+    void logLocalShift(const katana::geometry::Vec2& shift);
     bool exportDxfFile(const std::filesystem::path& path,
                        const katana::interop::VectorExportOptions& options);
 
@@ -321,7 +338,14 @@ class MainWindow final : public QMainWindow {
     void importWithOptions(const QString& path);
     void exportPointCloud();
     void exportSurfaceAsDem();
+    // GIS > Convert Point Cloud to COPC: asks for the two files, then runs the
+    // COPC line they make through runVerbLine, and offers to import the
+    // result.
     void convertPointCloudToCopc();
+    // COPC <source> <destination>, typed or from the menu item: converts,
+    // asks nothing, and logs the result and the IMPORT line that reads it.
+    void convertPointCloudToCopc(const std::filesystem::path& source,
+                                 const std::filesystem::path& destination);
     void showDatasetInformation();
     // The reference layer selected in the panel, or the only one of its kind
     // when the panel has no selection; nullptr, having said why, otherwise.
@@ -346,7 +370,17 @@ class MainWindow final : public QMainWindow {
     bool saveDocument();
     bool saveDocumentAs();
 
+    // Enter on the command line: the typed line echoed, then offered to the
+    // workbenches' verbs, to a running tool and to dispatchLine, in that order.
     void runCommandLine();
+    // The ONLINE and UTILITY verbs, run by their workbenches; false leaves the
+    // line to whoever asked.
+    bool runWorkbenchLine(const QString& line);
+    // Everything a line can be once no tool took it: a view verb, the
+    // window's own verbs (CUSTOMISE, IMPORT, EXPORT, INFO <file>, REFS, COPC,
+    // PLOTSHEETS), a tool's alias, or the interpreter's. Shared by the typed
+    // line and runVerbLine, so the two cannot come to differ.
+    void dispatchLine(const QString& line);
     // The part of the command line that is the CommandInterpreter's, for a
     // line no tool and no view verb took; `verb` is its first word, upper
     // case.
@@ -461,6 +495,15 @@ class MainWindow final : public QMainWindow {
     bool headless_ = false;
     int historyCursor_ = 0;         // position while browsing command history
     int errorsLogged_ = 0;          // logMessage's errors so far, for runCommand
+    // What runVerbLine's line has logged so far, while it runs: logMessage
+    // and warnUser add to it. Null otherwise.
+    struct VerbCapture {
+        QStringList reply;
+        QStringList errors;
+        // A failure warnUser showed in a box, which is not an error logged.
+        bool failed = false;
+    };
+    VerbCapture* capture_ = nullptr;
 };
 
 } // namespace katana::qt

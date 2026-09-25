@@ -7,6 +7,7 @@
 #include "katana/cad/project_crs.hpp"
 #include "katana/cad/purge.hpp"
 #include "katana/cad/style_catalogue.hpp"
+#include "katana/cad/survey_code_verbs.hpp"
 #include "katana/cad/survey_tools.hpp"
 #include "katana/cad/utilities/utility_verbs.hpp"
 #include "katana/entity/display.hpp"
@@ -387,6 +388,11 @@ Survey    INVERSE p p | INVERSE line-id   distance, azimuth, bearing; height dif
           36.8699 (decimal degrees) or a bearing N36d52m11.63sE ("N 36 52 11.63 E" quoted)
           AREA [id...]   area and perimeter of closed polylines and circles, each and in
           total (the selection when no ids); hectares when the project unit is the metre
+Codes     CODE [property]   apply the loaded survey codes to every entity carrying a field
+          code (the property found when not named), one undo step
+          CODE EXPLAIN code   why a code gets what it gets  |  CODE CENSUS [property]   the
+          codes this drawing carries  |  MAPFILE LIST [filter] | CHECK   the loaded survey
+          codes, one per line, or checked: CHECK fails when a rule has an error
 DimStyle  DIMSTYLE LIST | NEW name | SET name field value | DELETE name
           fields TEXT GAP EXTOFF EXTBEYOND ARROW HEAD SCALE DECIMALS ROUND PREFIX SUFFIX TRIM
           PAPER on|off (sizes in paper mm, drawn at the annotation scale)
@@ -404,7 +410,7 @@ Props     PROP LIST | SET key value [text|integer|real|boolean] | DELETE key
           PROP RENAME old new   (selection; the type is guessed unless stated)
 History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
-Inspect   LIST | INFO id | HELP
+Inspect   LIST | INFO id (or #id) | HELP
 Sheets    SHEETS [LIST] | JSON [path] | SAVE path | LOAD path      (HELP SHEETS: every option)
           SHEET NEW|REMOVE|MOVE|COPY|RENAME|SET|FIELD | VIEW ADD|SET|REMOVE|LIST | TILE n preset
           GENERATE fit|grid|strips|profile|sections|frames | TITLEBLOCK [LIST] | field value
@@ -418,6 +424,32 @@ Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE GM
 Result<std::vector<std::string>> CommandInterpreter::tokenize(std::string_view line)
 {
     return katana::cad::tokenize(line);
+}
+
+CommandInterpreter::ImportArgument CommandInterpreter::importArgument(std::string_view rest)
+{
+    static constexpr std::string_view kLocal = "LOCAL";
+    ImportArgument argument;
+    std::string_view text = katana::core::trimmed(rest);
+    if (text.size() > kLocal.size() &&
+        katana::core::equalsIgnoringCase(text.substr(text.size() - kLocal.size()), kLocal) &&
+        katana::core::isAsciiSpace(text[text.size() - kLocal.size() - 1])) {
+        argument.local = true;
+        text = katana::core::trimmed(text.substr(0, text.size() - kLocal.size()));
+    }
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+        text = text.substr(1, text.size() - 2);
+    }
+    argument.path = std::string(text);
+    return argument;
+}
+
+bool CommandInterpreter::isEntityId(std::string_view word)
+{
+    if (word.starts_with('#')) {
+        word.remove_prefix(1);
+    }
+    return parseId(word).ok();
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -586,6 +618,9 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     }
     if (utilities::isUtilityVerb(verb)) {
         return utilities::runUtilityVerb(document_, *tokens);
+    }
+    if (isSurveyCodeVerb(verb)) {
+        return runSurveyCodeVerb(document_, *tokens, colourOf_);
     }
     for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {
@@ -2770,7 +2805,11 @@ CommandInterpreter::Reply CommandInterpreter::inspect(const std::string& verb,
         if (args.size() != 1) {
             return usage("INFO id");
         }
-        const auto id = parseId(args[0]);
+        // #12 as well as 12: how an anchored point names an entity, so an id
+        // copied from a DIM line is taken as it is.
+        const std::string_view word =
+            args[0].starts_with('#') ? std::string_view(args[0]).substr(1) : std::string_view(args[0]);
+        const auto id = parseId(word);
         if (!id) {
             return id.error();
         }

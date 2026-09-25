@@ -38,6 +38,7 @@
 
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileInfo>
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QFormLayout>
@@ -67,6 +68,7 @@
 #include <cstdio>
 #include <map>
 #include <set>
+#include <utility>
 
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/generators.hpp"
@@ -77,6 +79,7 @@
 #include "katana/dxf/reader.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/archive12d/customisation.hpp"
+#include "katana/cad/customisation_report.hpp"
 #include "katana/cad/style_catalogue.hpp"
 #include "katana/cad/survey_coding.hpp"
 #include "katana/archive12d/domain.hpp"
@@ -344,6 +347,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
                    " has no menu; its tools start from the command line.");
     }
     views_->setReferenceData(&reference_);
+    // CODE and MAPFILE CHECK name colours by the standard table, which is
+    // archive12d's and so out of the interpreter's reach (survey_code_verbs.hpp).
+    interpreter_.setColourLookup(
+        [](std::string_view name) { return katana::archive12d::standardColour(name); });
     // GENERATE on the command line lays out what Generate Sheets would: what
     // the plan view draws, and the visible surfaces for the sections.
     interpreter_.setSheetContext([this] {
@@ -963,6 +970,7 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
     services.replaceCustomisation = replaceCustomisationAction;
     services.applySurveyCodes = codeAction;
     services.codeManager = format_->codeManagerAction();
+    services.run = commandRunner();
     // A second row: the drawing's own toolbars (File to Format) fill the
     // first, and in one row the Survey, Terrain and GIS bars were squeezed
     // to a button each behind their overflow arrows.
@@ -986,15 +994,11 @@ void MainWindow::buildSurveyActions(QMenu& surveyMenu, QAction* customiseAction,
         historyCursor_ = static_cast<int>(interpreter_.history().size());
         return reply;
     };
-    utilities.runCommand = [this](const QString& line) {
-        // Echoed as a typed line is, and run as runCommandLine runs a typed
-        // UTILITY line - but never handed to a running tool first: a tool
-        // waiting for a text's string would take any typed line for it, and
-        // the dialog's line is never a text. What was being typed on the
-        // command line is left as it was.
-        commandLog_->appendPlainText("> " + line);
-        (void)utilities_->runLine(line);
-    };
+    // The window's one executor: echoed as a typed line is and run as a
+    // typed UTILITY line is - but never handed to a running tool first: a
+    // tool waiting for a text's string would take any typed line for it, and
+    // the dialog's line is never a text.
+    utilities.run = commandRunner();
     utilities_ = std::make_unique<UtilityWorkbench>(*this, std::move(utilities), surveyMenu);
 }
 
@@ -1013,11 +1017,13 @@ void MainWindow::buildFormatActions(QMenu& formatMenu, QAction* layersAction,
     services.layers = layersAction;
     services.loadCustomisation = customiseAction;
     services.replaceCustomisation = replaceCustomisationAction;
+    services.run = commandRunner();
     QToolBar* formatBar = makeToolBar("Format", Qt::TopToolBarArea);
     formatBar->addAction(layersAction);
     format_ = std::make_unique<CustomisationWorkbench>(*this, std::move(services), formatMenu,
                                                        *formatBar);
     annotation_ = std::make_unique<AnnotationWorkbench>(*this, document_, formatMenu, *formatBar);
+    annotation_->setCommandRunner(commandRunner());
 }
 
 void MainWindow::buildToolActions(QMenu& drawMenu, QMenu& modifyMenu, QMenu& annotateMenu)
@@ -1438,6 +1444,12 @@ void MainWindow::warnUser(const QString& title, const QString& text)
     if (headless_) {
         logMessage(title + ": " + text.simplified(), true);
         return;
+    }
+    // A box is not a logged error, but a dialog that ran the line must still
+    // be told it failed, and why.
+    if (capture_ != nullptr) {
+        capture_->errors << title + ": " + text.simplified();
+        capture_->failed = true;
     }
     QMessageBox::warning(this, title, text);
 }
@@ -1922,6 +1934,9 @@ void MainWindow::logMessage(const QString& text, bool isError)
     }
     const QString line = isError ? "! " + text : text;
     commandLog_->appendPlainText(line);
+    if (capture_ != nullptr) {
+        (isError ? capture_->errors : capture_->reply) << text;
+    }
     if (isError) {
         ++errorsLogged_;
         statusBar()->showMessage(text, 6000);
@@ -1957,19 +1972,10 @@ void MainWindow::runCommandLine()
     // A tool waiting for typed text - a Text's string, a count - takes the
     // whole line before any verb below, as a transparent ZOOM gives way to it
     // (tools::isTransparentCommand): "Utility pit" is a label on a services
-    // plan, not a UTILITY line to refuse.
-    const bool toolTakesText = views_->toolTakesText();
-    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
-    // workbench's, as the interoperability verbs below are the window's - and
-    // before a running tool at a point or a pick, which would take the line
-    // for an answer.
-    if (online_ != nullptr && !toolTakesText && online_->runLine(line)) {
-        return;
-    }
-    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
-    // through the utilities workbench, which frames what a DRAW added - and
-    // before a running tool, for ONLINE's reason.
-    if (utilities_ != nullptr && !toolTakesText && utilities_->runLine(line)) {
+    // plan, not a UTILITY line to refuse. Otherwise the workbenches' verbs
+    // come before a running tool at a point or a pick, which would take the
+    // line for an answer.
+    if (!views_->toolTakesText() && runWorkbenchLine(line)) {
         return;
     }
     // While a tool runs, what is typed is its answer - a point, a distance,
@@ -1978,6 +1984,55 @@ void MainWindow::runCommandLine()
     if (views_->typeIntoTool(line)) {
         return;
     }
+    dispatchLine(line);
+}
+
+bool MainWindow::runWorkbenchLine(const QString& line)
+{
+    // ONLINE PROVIDERS, LAYERS, INFO, IMPORT, CUSTOM, KEY: the online
+    // workbench's, as the interoperability verbs are the window's.
+    if (online_ != nullptr && online_->runLine(line)) {
+        return true;
+    }
+    // UTILITY REPORT, VERIFY, CLEARANCE, CHECK, DRAW: the interpreter's verb,
+    // through the utilities workbench, which frames what a DRAW added.
+    return utilities_ != nullptr && utilities_->runLine(line);
+}
+
+VerbOutcome MainWindow::runVerbLine(const QString& line)
+{
+    const QString trimmed = line.trimmed();
+    if (trimmed.isEmpty()) {
+        // An empty TYPED line is Enter in the drawing; a dialog has no Enter
+        // to press, so for it an empty line is a line it failed to build.
+        return {false, {}, "there is no command to run"};
+    }
+    commandLog_->appendPlainText("> " + OnlineDataWorkbench::loggedLine(trimmed));
+    VerbCapture capture;
+    VerbCapture* const outer = std::exchange(capture_, &capture);
+    const int errorsBefore = errorsLogged_;
+    // Never typeIntoTool: that is the whole difference from a typed line.
+    if (!runWorkbenchLine(trimmed)) {
+        dispatchLine(trimmed);
+    }
+    capture_ = outer;
+    VerbOutcome outcome;
+    // By the errors COUNTED, not the lines captured: PLOTSHEETS logs the
+    // problems of a plot it carried out and takes them off the count, and a
+    // --command run judges the same line the same way (runCommand).
+    outcome.ok = errorsLogged_ == errorsBefore && !capture.failed;
+    outcome.reply = capture.reply.join('\n');
+    outcome.error = capture.errors.join('\n');
+    return outcome;
+}
+
+CommandRunner MainWindow::commandRunner()
+{
+    return [this](const QString& line) { return runVerbLine(line); };
+}
+
+void MainWindow::dispatchLine(const QString& line)
+{
     const QStringList words = line.split(' ', Qt::SkipEmptyParts);
     const QString verb = words.front().toUpper();
     const QString argument = words.size() > 1 ? words[1].toUpper() : QString();
@@ -2037,19 +2092,49 @@ void MainWindow::runCommandLine()
             }
             paths.push_back(toPath(word));
         }
-        if (paths.empty()) {
+        if (paths.empty() && replace) {
             logMessage("usage: CUSTOMISE [REPLACE] <file> [<file>...]", true);
+            return;
+        }
+        // Alone, it reports what is loaded and what it covers here, in the
+        // words katana_cli's CUSTOMISE says them (cad/customisation_report.hpp).
+        if (paths.empty()) {
+            logMessage(QString::fromStdString(katana::cad::customisationReport(
+                                                  document_, customisation_,
+                                                  customisationMissingAtOpen_))
+                           .trimmed());
             return;
         }
         applyCustomisation(paths, replace ? katana::archive12d::LoadMode::Replace
                                           : katana::archive12d::LoadMode::Merge);
         return;
     }
+    // INFO 12 describes entity 12, as the interpreter's INFO does - unless a
+    // file is really called that. Every INFO was once taken for a file here,
+    // so INFO 12 answered that the file did not exist.
+    if (verb == "INFO" && words.size() == 2 &&
+        cad::CommandInterpreter::isEntityId(words[1].toStdString()) && !QFileInfo::exists(words[1])) {
+        runInterpreterLine(line, verb);
+        return;
+    }
+    // IMPORT <file> [LOCAL], the path and the LOCAL read as the session reads
+    // them (CommandInterpreter::importArgument): LOCAL was once taken for part
+    // of the path, and "site.dxf LOCAL" had no importer.
+    if (verb == "IMPORT") {
+        const auto typed =
+            cad::CommandInterpreter::importArgument(line.mid(words.front().size()).toStdString());
+        if (typed.path.empty()) {
+            logMessage("usage: IMPORT <file> [LOCAL]", true);
+            return;
+        }
+        importPath(QString::fromStdString(typed.path), typed.local);
+        return;
+    }
     // The interoperability verbs, as katana_cli has them. They live in the
     // front ends, not the CommandInterpreter, because katana_cad may not see
     // GDAL or PDAL (tools/check_layering.cmake). The argument is the rest of
     // the line, one layer of quotes removed, so a path may hold spaces.
-    if (verb == "IMPORT" || verb == "EXPORT" || verb == "INFO") {
+    if (verb == "EXPORT" || verb == "INFO") {
         QString path = line.mid(words.front().size()).trimmed();
         if (path.size() >= 2 && path.startsWith('"') && path.endsWith('"')) {
             path = path.mid(1, path.size() - 2);
@@ -2058,9 +2143,7 @@ void MainWindow::runCommandLine()
             logMessage("usage: " + verb + " <file>", true);
             return;
         }
-        if (verb == "IMPORT") {
-            importPath(path);
-        } else if (verb == "EXPORT") {
+        if (verb == "EXPORT") {
             (void)exportDrawingTo(toPath(path), {});
         } else if (auto description = interop::describeSource(toPath(path))) {
             logMessage(QString::fromStdString(interop::formatDescription(*description)).trimmed());
@@ -2087,6 +2170,23 @@ void MainWindow::runCommandLine()
                            .arg(grouped(cloud.points.size()))
                            .arg(grouped(cloud.sourcePointCount)));
         }
+        return;
+    }
+    // COPC <source> <destination.copc.laz>, as katana_cli has it: each path
+    // one word or quoted, read by the interpreter's own rules. What the GIS
+    // menu's item runs once its two files are chosen.
+    if (verb == "COPC") {
+        const auto tokens = cad::CommandInterpreter::tokenize(line.toStdString());
+        if (!tokens) {
+            logMessage(QString::fromStdString(tokens.error().describe()), true);
+            return;
+        }
+        if (tokens->size() != 3) {
+            logMessage("usage: COPC <source> <destination.copc.laz>", true);
+            return;
+        }
+        convertPointCloudToCopc(toPath(QString::fromStdString((*tokens)[1])),
+                                toPath(QString::fromStdString((*tokens)[2])));
         return;
     }
     // PLOTSHEETS [path] [format=] [style=] [sheets=] [dpi=] [lineweight=]
@@ -2393,16 +2493,25 @@ QString importFilter()
 
 } // namespace
 
-void MainWindow::importPath(const QString& path)
+void MainWindow::importPath(const QString& path, bool local)
 {
     const std::filesystem::path file = toPath(path);
     if (katana::dxf::isDxfPath(file)) {
-        importDxfFile(file);
+        importDxfFile(file, local);
         return;
     }
-    switch (interop::kindForPath(file)) {
+    const interop::SourceKind kind = interop::kindForPath(file);
+    // Refused by name, in katana_cli's words, rather than dropped: a raster
+    // or a cloud has no shift to take.
+    if (local && (kind == interop::SourceKind::Raster || kind == interop::SourceKind::PointCloud)) {
+        logMessage("InvalidArgument: LOCAL is not supported for rasters and point clouds, which "
+                   "are reference data drawn at their own coordinates",
+                   true);
+        return;
+    }
+    switch (kind) {
     case interop::SourceKind::Vector:
-        importVectorFile(file);
+        importVectorFile(file, {}, local);
         return;
     case interop::SourceKind::Raster:
         importRasterFile(file);
@@ -2411,7 +2520,7 @@ void MainWindow::importPath(const QString& path)
         importPointCloudFile(file);
         return;
     case interop::SourceKind::Archive12d:
-        importArchive12dFile(file);
+        importArchive12dFile(file, local);
         return;
     case interop::SourceKind::Unknown:
         break;
@@ -2740,10 +2849,16 @@ void MainWindow::importFile()
 }
 
 void MainWindow::importVectorFile(const std::filesystem::path& path,
-                                  interop::VectorImportOptions options)
+                                  interop::VectorImportOptions options, bool local)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = interop::importVector(path, options);
+    // LOCAL: read again with the shift rather than moved afterwards, so the
+    // one reader applies the one shift to everything, as katana_cli does.
+    if (imported.ok() && local && !imported->bounds.empty()) {
+        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
+        imported = interop::importVector(path, options);
+    }
     QApplication::restoreOverrideCursor();
 
     if (!imported.ok()) {
@@ -2752,17 +2867,22 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
                              QString::fromStdString(imported.error().describe()));
         return;
     }
+    if (local && options.originShift) {
+        logLocalShift(*options.originShift);
+    }
 
     // Survey data in a projected CRS carries coordinates like (255440, 7410850)
     // while a drawing started from scratch sits near the origin. Merging them
     // succeeds and leaves the existing drawing a dot smaller than a pixel, so
     // the choice is put to the user BEFORE anything is added rather than left
     // to be discovered by zooming to extents.
+    // With LOCAL the place is chosen already: nothing to ask.
     const auto advice =
         interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    if (advice.farApart && headless_) {
+    const bool ask = advice.farApart && !local;
+    if (ask && headless_) {
         logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (advice.farApart) {
+    } else if (ask) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle("Far from the current drawing");
@@ -2853,10 +2973,19 @@ void MainWindow::importVectorFile(const std::filesystem::path& path,
     views_->zoomExtentsAll();
 }
 
-void MainWindow::importArchive12dFile(const std::filesystem::path& path)
+void MainWindow::importArchive12dFile(const std::filesystem::path& path, bool local)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     auto imported = interop::importArchive12d(path);
+    // LOCAL: read again with the shift, which the importer applies to
+    // everything - entities, surfaces and clouds alike.
+    std::optional<katana::geometry::Vec2> localShift;
+    if (imported.ok() && local && !imported->bounds.empty()) {
+        interop::Archive12dImportOptions options;
+        options.originShift = katana::geometry::Vec2(imported->bounds.min.x, imported->bounds.min.y);
+        localShift = options.originShift;
+        imported = interop::importArchive12d(path, options);
+    }
     QApplication::restoreOverrideCursor();
     if (!imported.ok()) {
         logMessage(QString::fromStdString(imported.error().describe()), true);
@@ -2864,15 +2993,20 @@ void MainWindow::importArchive12dFile(const std::filesystem::path& path)
                              QString::fromStdString(imported.error().describe()));
         return;
     }
+    if (localShift) {
+        logLocalShift(*localShift);
+    }
 
     // The same question a vector import asks, for the same reason: a 12da is
     // survey data at survey coordinates. Surfaces and clouds are shifted with
     // the entities - the shift is applied inside the importer, to everything.
+    // With LOCAL the place is chosen already.
     const auto advice =
         interop::advisePlacement(document_.model().entities.bounds(), imported->bounds);
-    if (advice.farApart && headless_) {
+    const bool ask = advice.farApart && !local;
+    if (ask && headless_) {
         logMessage(QString::fromStdString(advice.message) + " (kept: no one to ask).", true);
-    } else if (advice.farApart) {
+    } else if (ask) {
         QMessageBox box(this);
         box.setIcon(QMessageBox::Question);
         box.setWindowTitle("Far from the current drawing");
@@ -3645,8 +3779,25 @@ void MainWindow::exportSurfaceAsDem()
     logMessage("  the DEM declares no coordinate system; its coordinates are the drawing's");
 }
 
+void MainWindow::logLocalShift(const katana::geometry::Vec2& shift)
+{
+    // 0.0 - rather than a unary minus, which makes a shift of 0 "-0.000".
+    logMessage(QString("LOCAL: moved as one piece by %1,%2, so its lower-left corner sits at 0,0.")
+                   .arg(0.0 - shift.x, 0, 'f', 3)
+                   .arg(0.0 - shift.y, 0, 'f', 3));
+}
+
 void MainWindow::convertPointCloudToCopc()
 {
+    // Two file dialogs nobody could close: a headless session is pointed at
+    // the verb that asks nothing instead, where --action convertCopc would
+    // wait on the first one for ever.
+    if (headless_) {
+        logMessage("A headless session opens no file dialog: type COPC <source> "
+                   "<destination.copc.laz> instead.",
+                   true);
+        return;
+    }
     const QString source = QFileDialog::getOpenFileName(
         this, "Convert Point Cloud to COPC", QString(),
         "Point cloud (" + patternsFor(interop::pointCloudExtensions()) + ");;All files (*)");
@@ -3672,20 +3823,37 @@ void MainWindow::convertPointCloudToCopc()
     if (!destination.endsWith(".copc.laz", Qt::CaseInsensitive)) {
         destination += ".copc.laz";
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = engine.convertToCopc(toPath(source), toPath(destination));
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        logMessage(QString::fromStdString(status.error().describe()), true);
-        warnUser("Conversion failed", QString::fromStdString(status.error().describe()));
+    // The dialogs chose the files; the conversion is the COPC verb's, run as
+    // if typed, so it is logged as one and an agent's COPC is the same code.
+    const VerbOutcome outcome = runVerbLine(QString("COPC \"%1\" \"%2\"")
+                                                .arg(QDir::fromNativeSeparators(source),
+                                                     QDir::fromNativeSeparators(destination)));
+    if (!outcome.ok) {
+        warnUser("Conversion failed", outcome.error);
         return;
     }
-    logMessage("Converted " + fromPath(toPath(source).filename()) + " to " +
-               fromPath(toPath(destination).filename()) + ", every point kept.");
     if (!headless_ && QMessageBox::question(this, "Convert Point Cloud to COPC",
                                             "Import the COPC file now?") == QMessageBox::Yes) {
         importWithOptions(destination);
     }
+}
+
+void MainWindow::convertPointCloudToCopc(const std::filesystem::path& source,
+                                         const std::filesystem::path& destination)
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto status = katana::pointcloud::PointCloudEngine{}.convertToCopc(source, destination);
+    QApplication::restoreOverrideCursor();
+    if (!status) {
+        logMessage(QString::fromStdString(status.error().describe()), true);
+        return;
+    }
+    logMessage("Converted " + fromPath(source.filename()) + " to " +
+               fromPath(destination.filename()) + ", every point kept.");
+    // The next step, as a line to type: a COPC file is read at a level of
+    // detail, which the import asks for.
+    logMessage("  IMPORT \"" + QDir::fromNativeSeparators(fromPath(destination)) +
+               "\" reads it at a level of detail");
 }
 
 
