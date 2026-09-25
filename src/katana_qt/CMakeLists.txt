@@ -23,6 +23,8 @@ endif()
 # No Q_OBJECT classes: signals are connected to lambdas, so moc is not needed.
 add_executable(katana WIN32 MACOSX_BUNDLE
     main.cpp
+    command_reference_dialog.cpp
+    command_reference_dialog.hpp
     command_runner.hpp
     main_window.cpp
     main_window.hpp
@@ -68,6 +70,8 @@ add_executable(katana WIN32 MACOSX_BUNDLE
     theme.hpp
     jobs.cpp
     jobs.hpp
+    keyboard_shortcuts_dialog.cpp
+    keyboard_shortcuts_dialog.hpp
 )
 katana_target_defaults(katana)
 # The Survey workbench (PLAN.MD 45 slice 9) is globbed, for the reason

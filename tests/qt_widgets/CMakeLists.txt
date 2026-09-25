@@ -86,6 +86,10 @@ add_executable(katana_qt_widget_tests
     # File > Run Script and the SCRIPT verb's reading and running (test_script_runner).
     ${_qt_src}/script_runner.cpp
     test_script_runner.cpp
+    # Help > Command Reference and Keyboard Shortcuts (test_command_reference).
+    ${_qt_src}/command_reference_dialog.cpp
+    ${_qt_src}/keyboard_shortcuts_dialog.cpp
+    test_command_reference.cpp
     ${_qt_customisation_sources}
     ${_qt_customisation_tests}
     ${_qt_tool_sources}

@@ -241,9 +241,12 @@ PDAL or the archive and customisation readers: the application's command line
 their lines through too - `docs/desktop.md`, "One executor: the command
 runner") adds `IMPORT <file> [LOCAL]`, `EXPORT`, `INFO <file>`, `REFS`,
 `COPC`, `CUSTOMISE [REPLACE] <file>...` (alone, the loaded customisation's
-report, `cad::customisationReport`), `PLOTSHEETS`, the view verbs `ZOOM`,
-`GRID` and `SNAP`, and `QUIT`; `katana_cli` adds the same interoperability
-verbs and `CUSTOMISE` - its `--help` lists them. Both read an `IMPORT` line's
+report, `cad::customisationReport`), `PLOTSHEETS`, `SCRIPT <file> [CONTINUE]`,
+the view verbs `ZOOM`, `GRID` and `SNAP`, `QUIT`, and '#' comments; its typed
+`HELP` adds them to the interpreter's list (`windowHelpText`, `docs/desktop.md`,
+"The Command Reference and the keyboard shortcuts"). `katana_cli` adds the
+same interoperability verbs and `CUSTOMISE` - its `--help` lists them - and
+the interpreter's help says that `PLOTSHEETS` is the window's alone. Both read an `IMPORT` line's
 path and `LOCAL` with `CommandInterpreter::importArgument`, and hand `INFO`
 with an entity id (`CommandInterpreter::isEntityId`, a whole number or `#n`)
 to the interpreter unless a file of that name exists.

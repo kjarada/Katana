@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "annotation/annotation_workbench.hpp"
+#include "command_reference_dialog.hpp"
 #include "command_runner.hpp"
 #include "icons.hpp"
 #include "katana/archive12d/customisation.hpp"
@@ -34,6 +35,7 @@
 #include "katana/interop/reference_data.hpp"
 #include "customisation/customisation_workbench.hpp"
 #include "gis_online.hpp"
+#include "keyboard_shortcuts_dialog.hpp"
 #include "script_runner.hpp"
 #include "survey/survey_workbench.hpp"
 #include "survey/utility_workbench.hpp"
@@ -199,6 +201,10 @@ class MainWindow final : public QMainWindow {
     // (Format) > L"). `sequences`, when given, is set to how many distinct
     // sequences there are. For the headless --check-shortcuts switch.
     [[nodiscard]] QStringList shortcutClashes(int* sequences = nullptr) const;
+    // Every key those actions and shortcuts answer to, with the menu path
+    // its command is under, in the menus' order: Help > Keyboard Shortcuts'
+    // table. The keys are the ones shortcutClashes counts.
+    [[nodiscard]] std::vector<ShortcutRow> shortcutRows() const;
 
   protected:
     void closeEvent(QCloseEvent* event) override;
@@ -404,6 +410,12 @@ class MainWindow final : public QMainWindow {
     void showRunScript();
     // File > Recent Scripts, rebuilt from the settings.
     void refreshRecentScripts();
+    // Help > Command Reference, made the first time and kept, brought
+    // forward at `section` when one is named (Help > Sheets and Plotting
+    // Commands: "Sheets").
+    void showCommandReference(const QString& section);
+    // Help > Keyboard Shortcuts, made the first time and kept.
+    void showKeyboardShortcuts();
     void logMessage(const QString& text, bool isError = false);
     void addLayer();
     void addChildLayer();
@@ -530,6 +542,9 @@ class MainWindow final : public QMainWindow {
     // Scripts submenu.
     ScriptRunDialog* scriptDialog_ = nullptr;
     QMenu* recentScriptsMenu_ = nullptr;
+    // The Help menu's two dialogs, children of the window.
+    CommandReferenceDialog* referenceDialog_ = nullptr;
+    KeyboardShortcutsDialog* shortcutsDialog_ = nullptr;
 };
 
 } // namespace katana::qt
