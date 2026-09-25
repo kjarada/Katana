@@ -72,7 +72,7 @@ spellings of the same verbs, so a word means one thing whichever reads it:
 | Draw > Curves (`draw_curves.cpp`) | Circle (`CIRCLE`, `C`) and its Centre Diameter, 2 Points, 3 Points and Tangent Tangent Radius variants; Arc (`ARC`, `A`, three points) and its Start Centre End, Centre Start End and Start End Radius variants - a variant has no verb, being an option of the general tool, as drafters expect |
 | Modify > Transform (`modify_transform.cpp`) | Move (`MOVE`, `M`), Copy (`COPY`, `CO`, `CP`), Rotate (`ROTATE`, `RO`), Scale (`SCALE`, `SC`), Mirror (`MIRROR`, `MI`), Stretch (`STRETCH`, `S`), Rectangular Array (`ARRAYRECT`, `ARRAY`, `AR`), Polar Array (`ARRAYPOLAR`), Erase (`ERASE`, `E`, `DELETE`, `DEL`) |
 | Modify > Edit (`modify_edit*.cpp`) | Trim (`TRIM`, `TR`), Extend (`EXTEND`, `EX`), Offset (`OFFSET`, `O`), Fillet (`FILLET`, `F`), Chamfer (`CHAMFER`, `CHA`), Break (`BREAK`, `BR`), Break at Point (`BREAKATPOINT`), Join (`JOIN`, `J`), Explode (`EXPLODE`, `X`) |
-| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Leader (`LEADER`, `LEAD`, `LE`) |
+| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Leader (`LEADER`, `LEAD`, `LE`) |
 
 **The Annotate tools and the annotation system** (`docs/annotation.md`,
 2026-09-25). The Leader tool makes ONE leader entity (`LeaderGeometry`) -
@@ -91,7 +91,10 @@ clicked points measures those points. The ordinate's datum is the drawing's
 origin (`DIM ORDINATE ... datum=x,y` measures from another). The Linear
 Dimension tool still stores the projected aligned dimension described in
 `annotate_dimension.cpp`: that is what the DXF writer exports, and it draws
-the same picture; `DIM LINEAR` makes a Linear-kind one. A bare `LEADER`, `DAN`
+the same picture; `DIM LINEAR` makes a Linear-kind one. Text takes the `TEXT`
+verb's style, justification and paper height at its first prompt (`S`, `J`,
+`P`), and Multiline Text makes one text of every line typed, as `MTEXT` does
+(`docs/annotation.md`, "Text in the window"). A bare `LEADER`, `DAN`
 or `DIMRADIUS` typed starts the tool; with arguments the line is the command
 interpreter's, as `LINE 0,0 10,0` is.
 

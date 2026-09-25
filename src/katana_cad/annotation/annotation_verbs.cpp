@@ -810,9 +810,8 @@ Status applyTextOptions(const Arguments& args, const katana::entity::Model& mode
             text.text = unescape(value);
         }
     }
-    if (ann::isPaperSized(model, text)) {
-        text.height = ann::resolveTextStyle(model, text, scale).height;
-    }
+    // The Text and Multiline Text tools make theirs by the same rule.
+    ann::fitModelHeight(model, scale, text);
     return {};
 }
 

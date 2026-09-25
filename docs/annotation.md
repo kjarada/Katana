@@ -90,6 +90,45 @@ font's (`AnnotationFonts::measure`), the tests and a file export the
 estimated one (0.6 of the height a character), so layout is exact on screen
 and deterministic headless.
 
+### Text in the window: the Text tools and Edit Text
+
+The Annotate menu's **Text** tool (`TEXT`, `DTEXT`, `DT`) takes the verb's
+options at its first prompt - `S` for a text style (`.` for none), `J` for
+the justification (`TL` to `BR`), `P` for a height on paper in millimetres
+(`0` for a model height) - and **Multiline Text** (`MTEXT`, `MT`; the
+`annotate.mtext` tool) takes the same, then a line at a time until an empty
+line, and makes ONE text of them, broken by `\n`, as `MTEXT p "a\nb"` does
+(`src/katana_cad/tools/annotate_text.cpp`). A bare `MT` or `MTEXT` starts the
+tool; with arguments the line is the interpreter's verb, as `TEXT` is. Both
+make a text by the verb's own rule, `fitModelHeight`
+(`include/katana/cad/annotation/text_layout.hpp`): a paper-sized one - a
+paper height, or a style with one - gets its model height for the drawing's
+annotation scale and is never asked a height, so a drawn text and a typed
+one of the same request are the same entity
+(`AnnotateTextOptions.AStyleAndAJustificationMakeWhatTheTextVerbMakes`,
+`AnnotateMultilineText.EveryLineIsOneEntityAsMtextMakesIt`). The choices are
+offered from the newest text in the drawing, as its height and rotation
+always were, so they carry from one text to the next and through an undo;
+Multiline Text starts in `Standard` - paper-sized, as `MTEXT` is - where the
+newest text would leave it in model units. The plan was a separate
+`annotate_mtext.cpp`; the two tools differ only in how they commit, so they
+are one class with two modes rather than two copies of the option prompts.
+
+**Annotate > Edit Text...** (`annotateEditText`, the dialog `textEditDialog`,
+`src/katana_qt/annotation/text_edit_dialog.hpp`) edits the one text
+selected: its words over several lines, style, height on paper, model
+height, justification, rotation and position. It follows the selection and,
+with no single text selected, says so and waits for one - it asks nothing in
+a box of its own, so a headless run is never stopped by it. Apply builds ONE
+`TEXTEDIT id key=value ...` of the fields the form changed and runs it
+through the window's one executor: one undo step, the verb's refusal in the
+dialog's words. A text or a name holding a double quote cannot be written on
+a command line at all (the interpreter's quotes have no escape), and is
+refused before anything runs rather than sent cut short
+(`include/katana/cad/annotation/command_words.hpp`). The plan-view
+double-click that opens it on the text under the cursor is the plan view's
+(`annotateEditText` is what it triggers).
+
 ## Labels
 
 A label (`LabelGeometry`) is an entity that says WHAT it labels and in which
@@ -461,8 +500,11 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/cad/annotation/test_dimstyle_set_many.cpp` | `DIMSTYLE SET` and `NEW` with several pairs as one step, a bad pair refusing the line, `INFO`'s record, the changes between two styles reading back as the second, the words a dialog writes |
 | `tests/cad/annotation/test_export_annotation.cpp` | what a file is handed |
 | `tests/cad/tools/test_annotate.cpp` | the Leader tool's one entity, the Angular, Radius, Diameter and Ordinate Dimension tools |
+| `tests/cad/tools/test_annotate_text_options.cpp` | the Text tool's Style, Justify and Paper options and Multiline Text, each checked against what `TEXT` and `MTEXT` make |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
+| `tests/qt_widgets/annotation/test_text_edit_dialog.cpp` | Edit Text by object name: the selection followed, one `TEXTEDIT` of the changed keys, a value no line can carry refused |
+| `qt_multiline_text_and_edit_text_run_in_the_window_headless` (`tests/CMakeLists.txt`) | the real window: `MT` typed, two lines made one text; Edit Text on a selected text |
 | `tests/qt_widgets/annotation/test_dimension_style_manager.cpp` | the Dimension Styles manager by object name: every field in one line and one step, New, Duplicate, a refused Delete, the preview and sample, Revert |
 | `qt_the_dimension_styles_manager_runs_its_lines_headless` (`tests/CMakeLists.txt`) | the real window: Format > Dimension Styles..., a style made and applied, undone by one typed UNDO |
 
@@ -478,10 +520,11 @@ it skipped dimensions, and so does the archive exporter.
 * **Zoom Extents** frames an annotation by its entity's box, which for a
   paper-sized note or leader does not include its text: a note beyond the
   drawing can be cut off at the edge.
-* **The Text tool** asks for a model height as before; a style, a paper
-  height and a justification are the verb's (`TEXT ... style= paper=
-  justify=`, `TEXTEDIT`). The Linear Dimension tool stores the aligned
-  projection (`docs/tools.md`).
+* **The Linear Dimension tool** stores the aligned projection
+  (`docs/tools.md`).
+* **Edit Text works on one text.** A selection of several texts is not
+  edited together; `MODIFY` changes their layers and styles, and `TEXTEDIT`
+  is one text a line.
 * **Labels are not picked by their text**: a label is selected at its
   anchor, and moved off its placed position with `LABEL SET id at=x,y`
   rather than by dragging.
