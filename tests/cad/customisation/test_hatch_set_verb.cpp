@@ -161,6 +161,28 @@ TEST(HatchSet, StyleNewWithAFieldIsAStyleMadeWithItSetInOneStep)
     EXPECT_EQ(s.fails("STYLE NEW lonely HATCH"), ErrorCode::InvalidArgument); // no value
 }
 
+// A field whose value is one word takes one word: a second field after it
+// was once dropped, the style made and nothing said. NEW and SET alike.
+TEST(HatchSet, AWordAfterAOneWordFieldsValueIsRefusedRatherThanDropped)
+{
+    Session s;
+    const std::size_t before = s.undoCount();
+    EXPECT_EQ(s.fails("STYLE NEW a colour #FF0000 weight 0.5"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(s.document.model().styles.find("a"), nullptr);
+    EXPECT_EQ(s.undoCount(), before);
+    for (const char* line : {"STYLE NEW b weight 0.5 colour #FF0000", "STYLE NEW c hatch - x",
+                             "STYLE NEW d symbolsize 1.5 2"}) {
+        EXPECT_EQ(s.fails(line), ErrorCode::InvalidArgument) << line;
+    }
+    s.ok("STYLE NEW e colour #FF0000");
+    EXPECT_EQ(s.fails("STYLE SET e weight 0.5 colour #00FF00"), ErrorCode::InvalidArgument);
+    EXPECT_EQ(s.document.model().styles.find("e")->lineWeight,
+              katana::entity::Style{}.lineWeight);
+    // A name takes the rest of the line, as it always has.
+    s.ok("STYLE SET e description kerb and channel");
+    EXPECT_EQ(s.document.model().styles.find("e")->description, "kerb and channel");
+}
+
 TEST(HatchPatternRows, EveryPatternIsARowWithItsKindAndWhatUsesIt)
 {
     Session s;

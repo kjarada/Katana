@@ -872,6 +872,17 @@ CommandInterpreter::Reply CommandInterpreter::style(const Tokens& args)
     const auto setField = [&](katana::entity::Style& changed) -> std::optional<Reply> {
         const std::string field = upper(args[2]);
         const std::string& value = args[3];
+        // A field whose value is one word takes one: STYLE NEW a colour #F00
+        // weight 0.5 made the style, said so, and dropped the weight. The
+        // names (LINETYPE, SYMBOL, DESCRIPTION) take the rest of the line.
+        if ((field == "WEIGHT" || field == "COLOUR" || field == "COLOR" || field == "HATCH" ||
+             field == "SYMBOLSIZE") &&
+            args.size() > 4) {
+            return Reply(makeError(ErrorCode::InvalidArgument,
+                                   "too many arguments: one field and its value; set another "
+                                   "with STYLE SET",
+                                   args[4]));
+        }
         if (field == "LINETYPE") {
             // The rest of the line, as SYMBOL takes it: "WATR Main" unquoted
             // used to become "WATR" with "Main" dropped.
@@ -1850,6 +1861,13 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
         }
         changed.horizontal.pis = std::move(pis);
         const std::size_t count = changed.horizontal.pis.size();
+        // Setting what is already there is not an edit: no undo step. The
+        // Alignment Manager's Apply PIs writes the stored PIs back exactly
+        // when its grid was not edited, and each press was once a step and
+        // a drawing to save.
+        if (changed == *existing) {
+            return "alignment " + name + " unchanged";
+        }
         return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
                       "alignment " + name + " now has " + std::to_string(count) + " PIs");
     }
@@ -1901,6 +1919,10 @@ CommandInterpreter::Reply CommandInterpreter::alignment(const Tokens& args)
             profile.pvis.push_back(*pvi);
         }
         changed.vertical = std::move(profile);
+        // As PIS: the manager's Apply Profile on an unedited grid.
+        if (changed == *existing) {
+            return "alignment " + name + " unchanged";
+        }
         return finish(document_.execute(cmd::updateAlignment(std::move(changed))),
                       "alignment " + name + " designed with " + std::to_string(args.size() - 2) +
                           " PVIs");

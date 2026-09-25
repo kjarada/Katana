@@ -211,7 +211,7 @@ CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:
 | `LAYER LTYPE <layer> <name>` | also takes a library linestyle; refuses `ByLayer`, since a layer is what ByLayer inherits from |
 | `PURGE [STYLES\|LINETYPES\|HATCHES\|ALL]` | deletes what nothing uses as one undo step, keeping the current style |
 | `HATCH SET <name> angle spacing [angle spacing ...]` or `HATCH SET <name> SOLID` | replaces a pattern's families (degrees, model units) or makes it a solid fill, one undo step; keeps its description and each family's offset by position, none being typeable; an unchanged SET is no step; `none` is refused a fill. The Hatch Patterns tab's Save (`docs/desktop.md`) |
-| `STYLE NEW <name> [field value]` | a style made with one field set as `STYLE SET` would set it, one undo step - the Hatch Patterns tab's New Style Using This (`STYLE NEW name HATCH pattern`); a second word that is no field is still refused as a name that wanted quotes |
+| `STYLE NEW <name> [field value]` | a style made with one field set as `STYLE SET` would set it, one undo step - the Hatch Patterns tab's New Style Using This (`STYLE NEW name HATCH pattern`); a second word that is no field is still refused as a name that wanted quotes, and so is a word after a one-word field's value (`colour`, `weight`, `hatch`, `symbolsize`, in `SET` too), which was once dropped without a word |
 | `INVERSE`, `FORWARD` (`RADIATE`), `AREA` | the Survey menu's inverse, forward point and area, printed by the same formatters as its dialogs (`docs/survey.md`) |
 | `MODIFY [SELECTION\|DRAWING\|LAYERS a,b [ONLY]] [WHERE k=v ...] SET k=v ... [PREVIEW]` (`GM`, `GMODIFY`, `GLOBALMODIFY`) | Global Modify ("Global Modify", below): the entities in a scope and filter, the layers they sit on and the styles they wear, changed as one undo step; `PREVIEW` prints the plan and changes nothing |
 
@@ -496,6 +496,11 @@ more verbs to learn for what one does. The start chainage and the design
 profile are not PIs and are kept. `PIS` alone is how an agent reads the PIs it
 is about to edit - `ALIGN LIST` gives only the count - and prints the stored
 doubles in their shortest exact form, so writing them back changes nothing.
+And changes nothing in the history either: a `PIS` or a `DESIGN` that sets
+what is there already replies `alignment <name> unchanged` and takes no undo
+step, as `STYLE SET` and `HATCH SET` do - the Alignment Manager's Apply on an
+unedited grid was once a step and a drawing to save each time
+(`AlignVerb.PisAndDesignThatChangeNothingAreNoUndoStep`).
 
 **The station table always includes the key stations.** An interval table
 that skipped the TS, SC, CS and ST would be useless in the field, because

@@ -301,6 +301,26 @@ TEST(AlignVerb, PisReplacesEveryPIAsOneUndoStepAndKeepsTheRest)
     EXPECT_EQ(session.pis("road")[2].point, Point2(100, 100));
 }
 
+// Setting what is already there is not an edit: the Alignment Manager's
+// Apply on a grid nobody edited writes the stored PIs and PVIs back
+// exactly, and each press was once an undo step and a drawing to save.
+TEST(AlignVerb, PisAndDesignThatChangeNothingAreNoUndoStep)
+{
+    Session session;
+    session.ok("ALIGN NEW road 0,0 100,0 100,100");
+    session.ok("ALIGN SET road 1 50");
+    session.ok("ALIGN DESIGN road 0,16 150,17");
+    const std::size_t before = session.document.history().undoCount();
+    EXPECT_EQ(session.ok("ALIGN PIS road 0,0 100,0,50 100,100"), "alignment road unchanged");
+    EXPECT_EQ(session.ok("ALIGN DESIGN road 0,16 150,17"), "alignment road unchanged");
+    EXPECT_EQ(session.document.history().undoCount(), before);
+    // A change is still one step each.
+    EXPECT_EQ(session.ok("ALIGN PIS road 0,0 100,0,60 100,100"), "alignment road now has 3 PIs");
+    EXPECT_EQ(session.ok("ALIGN DESIGN road 0,16 150,18"),
+              "alignment road designed with 2 PVIs");
+    EXPECT_EQ(session.document.history().undoCount(), before + 2);
+}
+
 TEST(AlignVerb, PisRefusesWhatCannotBeAnAlignmentAndKeepsTheLastGoodOne)
 {
     Session session;
