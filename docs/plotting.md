@@ -726,10 +726,10 @@ viewport's in the order `preflightChecks()` lists them.
 | `viewport.outside` | Error or Warning | off the paper or under the title block (Error); past the drawing area into the margin (Warning) |
 | `viewport.overlap` | Warning or Info | a viewport covers part of an earlier one; a panel set wholly inside a view is an inset (Info) |
 | `viewport.too-small` | Info | smaller than its kind's minimum (the tiling table above) |
-| `scale.invalid` | Error | a fixed scale that is not a positive number |
+| `scale.invalid` | Error | a fixed scale that is not a positive number; an automatic one with nothing to fit and no usable stored scale |
 | `scale.non-standard` | Info | a fixed scale not on `kSheetScales`; the fix names the steps either side |
-| `plan.alignment-missing` | Warning | a plan follows an alignment the drawing does not have |
-| `plan.empty` | Warning | nothing the plan draws is in its window |
+| `plan.alignment-missing` | Warning | a plan or key plan follows an alignment the drawing does not have |
+| `plan.empty` | Warning | nothing a plan or key plan draws is in its window |
 | `text.too-small` | Warning | drawing text in a plan prints under 1.8 mm at the plan's scale |
 | `section.alignment-missing` | Error | a section has no alignment, or names one the drawing does not have |
 | `section.alignment-invalid` | Error | the alignment cannot be solved |
@@ -765,7 +765,11 @@ How the harder checks decide:
     caller passes their boxes (`otherContent`).
   - An automatic plan is checked where the painter will draw it:
     `planWindow` applies the painter's rule to the model, and the editor
-    passes the painter's own `resolvePlanViewport`.
+    passes the painter's own `resolvePlanViewport`. A test compares the two,
+    turned, along an alignment, over a mesh alone and with a layer hidden.
+  - A key plan is drawn as a plan is, so it is checked as one. Its sheet
+    outlines and a plan's match lines count as what it shows. Its own small
+    text is not reported: a key plan is a small-scale map of the sheets.
 - **Small text.** A text prints `height x 1000 / scale` mm high. A dimension's
   text is its style's height. The finding counts every too-small text in
   the plan's window and gives the smallest. The fix names the largest

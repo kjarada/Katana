@@ -662,6 +662,7 @@ TEST(SheetPreflight, NoLogoIsANoteAndAnUnreadableOneAWarning)
 {
     const Model model = drawing();
     SheetSet set = cleanSet();
+    EXPECT_TRUE(withCode(check(set, model), "logo.missing").empty());
     set.defaults.logoAsset.clear();
     auto found = withCode(check(set, model), "logo.missing");
     ASSERT_EQ(found.size(), 1u);
@@ -739,6 +740,7 @@ TEST(SheetPreflight, ASheetWithNoViewsIsEmpty)
 {
     const Model model = drawing();
     SheetSet set = cleanSet();
+    EXPECT_TRUE(withCode(check(set, model), "sheet.empty").empty());
     set.sheets.push_back(sheetOf("s2", "BLANK", {}));
     const auto found = withCode(check(set, model), "sheet.empty");
     ASSERT_EQ(found.size(), 1u);
@@ -756,6 +758,7 @@ TEST(SheetPreflight, AnUnknownFrameIsAnError)
 {
     const Model model = drawing();
     SheetSet set = cleanSet();
+    EXPECT_TRUE(withCode(check(set, model), "frame.unknown").empty());
     set.sheets[0].frame = "a1_plan";
     const auto found = withCode(check(set, model), "frame.unknown");
     ASSERT_EQ(found.size(), 1u);
@@ -767,6 +770,10 @@ TEST(SheetPreflight, RepeatedIdsAreErrors)
 {
     const Model model = drawing();
     SheetSet set = cleanSet();
+    set.sheets.push_back(sheetOf("s2", "PLAN 2", {planAt("vp2", kTiling, 500.0, Point2(50.0, 0.0))}));
+    EXPECT_TRUE(withCode(check(set, model), "sheet.duplicate-id").empty());
+    EXPECT_TRUE(withCode(check(set, model), "viewport.duplicate-id").empty());
+    set.sheets.pop_back();
     set.sheets.push_back(sheetOf("s1", "PLAN 2", {planAt("vp1", kTiling, 500.0, Point2(50.0, 0.0))}));
     const auto findings = check(set, model);
     const auto sheets = withCode(findings, "sheet.duplicate-id");
@@ -776,6 +783,58 @@ TEST(SheetPreflight, RepeatedIdsAreErrors)
     ASSERT_EQ(views.size(), 1u);
     EXPECT_EQ(views[0].sheetIndex, 1u);
     EXPECT_EQ(views[0].subject, "vp1");
+}
+
+TEST(SheetPreflight, AKeyPlanIsCheckedAsAPlanIsButForItsText)
+{
+    // A key plan is drawn as a plan: over nothing it is empty, and following
+    // an alignment the drawing lacks it is warned. Its outlines are content,
+    // and its drawing's small text is expected.
+    Model model = drawing();
+    add(model, katana::entity::TextGeometry{Point2(50.0, 10.0), "TINY", 0.1, 0.0});
+    SheetSet set = cleanSet();
+    Viewport key = planAt("vp9", Box2(Point2(300.0, 200.0), Point2(400.0, 280.0)), 2000.0,
+                          Point2(50.0, 0.0));
+    key.kind = ViewportKind::KeyPlan;
+    set.sheets.push_back(sheetOf("s2", "KEY PLAN", {key}));
+    auto findings = check(set, model);
+    EXPECT_TRUE(withCode(findings, "plan.empty").empty()) << codesOf(findings);
+    // The plan on sheet 1 is told about the tiny text; the key plan is not.
+    const auto small = withCode(findings, "text.too-small");
+    ASSERT_EQ(small.size(), 1u) << codesOf(findings);
+    EXPECT_EQ(small[0].viewportId, "vp1");
+
+    // Moved off the drawing it is empty ...
+    set.sheets[1].viewports[0].centre = Point2(5000.0, 5000.0);
+    auto found = withCode(check(set, model), "plan.empty");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].viewportId, "vp9");
+    // ... unless a sheet outline it draws is there.
+    WorldMark outline;
+    outline.kind = WorldMark::Kind::SheetOutline;
+    outline.sheet = "s1";
+    outline.points = {Point2(4990.0, 4990.0), Point2(5010.0, 4990.0), Point2(5010.0, 5010.0),
+                      Point2(4990.0, 5010.0)};
+    set.sheets[1].viewports[0].marks.push_back(outline);
+    EXPECT_TRUE(withCode(check(set, model), "plan.empty").empty());
+
+    set.sheets[1].viewports[0].source.alignment = "GONE";
+    found = withCode(check(set, model), "plan.alignment-missing");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].viewportId, "vp9");
+}
+
+TEST(SheetPreflight, AnAutomaticPlanWithNothingToFitAndNoUsableScaleIsAnError)
+{
+    const Model model; // nothing to fit to
+    SheetSet set = cleanSet();
+    set.sheets[0].viewports[0].autoScale = true;
+    EXPECT_TRUE(withCode(check(set, model), "scale.invalid").empty());
+    set.sheets[0].viewports[0].scale = 0.0;
+    const auto found = withCode(check(set, model), "scale.invalid");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].severity, Severity::Error);
+    EXPECT_EQ(found[0].viewportId, "vp1");
 }
 
 // ---- panels ---------------------------------------------------------------------------------
