@@ -216,8 +216,11 @@ Australia, adjusted where the marking colour would vanish on white paper;
 each is at least 3:1 against the plan view's ground and, as it prints,
 against white paper
 (`UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaper`). They are layer
-colours, so a project with its own convention changes the layers
-(`LAYER` or the layer panel), and a layer that exists keeps its own.
+colours, so a project with its own convention changes the layers after a
+draw - `MODIFY LAYERS utilities/water/QL-B SET LAYER.COLOUR=#RRGGBB`, or the
+layer panel - or makes them first, `LAYER NEW utilities/water/QL-B #RRGGBB`,
+since a draw uses a layer that exists as it is. (`LAYER` itself has no action
+that recolours a layer, and `LAYER NEW` refuses one that exists.)
 
 | Type | Default | Common marking colour |
 |---|---|---|
@@ -330,8 +333,11 @@ Government agency with its authority, and is not under an open licence. So
 the repository carries the means of reading it - the same arrangement as the
 12d reference files - and a checkout that has a copy, as
 Utility-Schema-and-Specification-v1.2.xlsx in the git-ignored folder
-"docs/TfNSW Reference Files", registers the `cli.utility_check_*` tests, which extract it
-and check the sample. The format of the schema file is in
+"docs/TfNSW Reference Files", registers
+`cli.utility_check_schema_from_the_workbook`, which extracts it, and
+`cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong`, which checks the
+sample against it. (The two `cli.utility_check_with_errors_*` tests use a
+schema written by hand and run in every checkout.) The format of the schema file is in
 `include/katana/survey/subsurface/delivery_schema.hpp`; nothing in the
 checker is TfNSW's, so another client's schema can be written by hand.
 
