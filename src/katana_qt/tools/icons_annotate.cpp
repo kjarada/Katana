@@ -180,6 +180,18 @@ void paintOrdinateDimension(const ToolInk& ink)
     ink.line(16, 6, 21, 6, true);
 }
 
+void paintLabel(const ToolInk& ink)
+{
+    // A labelled point: the point at the bottom left, and a tag beside it
+    // holding two lines of words - the label, which says what the point is
+    // rather than being drawn with it. No leader: a label is placed beside
+    // what it labels, and a line would read as the Leader tool's icon.
+    ink.node(5, 19);
+    ink.stroke(rectangle(9, 4, 12.5, 10), true);
+    ink.line(11.5, 7.5, 18.5, 7.5, true, 1.6);
+    ink.line(11.5, 11, 16.5, 11, true, 1.6);
+}
+
 } // namespace
 
 bool paintAnnotateIcon(std::string_view toolId, const ToolInk& ink)
@@ -200,6 +212,8 @@ bool paintAnnotateIcon(std::string_view toolId, const ToolInk& ink)
         paintOrdinateDimension(ink);
     } else if (toolId == "annotate.leader") {
         paintLeader(ink);
+    } else if (toolId == "annotate.label") {
+        paintLabel(ink);
     } else {
         return false;
     }

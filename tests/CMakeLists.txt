@@ -1277,3 +1277,25 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# Labels made, edited and reported in the window (docs/annotation.md, "In the
+# window"). By hand: a 30 x 40 lot (1), 1200 m2, is labelled by the bare LBL
+# tool on the selection, its Style option naming Lot Area, and the label (2)
+# pinned at 12,20; the Properties panel shows its words and where it is;
+# Edit Label unpins it and gives it its own words through the one executor,
+# naming only those two; the Label Layout Report finds the one label placed
+# and none without room; the Annotate menu offers the tool and both dialogs.
+if(TARGET katana)
+    add_test(NAME qt_labels_are_made_edited_and_reported_in_the_window_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>PLINE 0,0 30,0 30,40 0,40 CLOSE|>LABELSTYLE DEFAULTS|>SELECT 1|>LBL|>S|>Lot Area|>12,20|>|?annotate.label|>SELECT 2|?propertyTable|@annotateEditLabel|labelEditPinned=off|labelEditOverride=on|labelEditText=LOT 7|?labelEditCommand|!labelEditApply|?labelEditStatus|@annotateLabelLayout|?labelLayoutPlaced|?labelLayoutSuppressed|>LABEL LIST|?annotateMenu"
+            "-DEXPECT=1 label in style Lot Area.*annotate\\.label: Label Objects, unchecked.*propertyTable: .*Text \\| 1200\\.0 m[^;]* ; Position \\| pinned at 12\\.0000, 20\\.0000.*labelEditCommand: LABEL SET 2 text=\"LOT 7\" at=none[\r\n]+.*labelEditStatus: updated label id=2.*labelLayoutPlaced: 1[\r\n]+labelLayoutSuppressed: 0.*id=2 style=\"Lot Area\" target=1 part=-1 layer=0 rule=\"\" text=\"LOT 7\".*annotateMenu: Annotate: .*Label Objects .*Edit Label\\.\\.\\. .*Label Layout Report\\.\\.\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/labels_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_labels_are_made_edited_and_reported_in_the_window_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
