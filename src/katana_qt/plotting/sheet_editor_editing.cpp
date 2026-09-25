@@ -33,6 +33,7 @@
 #include <QTimer>
 
 #include "katana/cad/plot.hpp"
+#include "katana/cad/plotting/generators.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/cad/plotting/viewport_edits.hpp"
 #include "plotting/sheet_list_widget.hpp"
@@ -300,9 +301,23 @@ Status SheetEditor::paste()
         return viewports.error();
     }
     if (document_.sheetSet().sheets.empty()) {
-        if (auto s = addBlankSheet(); !s) {
+        // A sheet to paste onto, added in the paste's own step: one Undo
+        // takes both away, rather than leaving a blank sheet behind.
+        plotting::SheetSet set = document_.sheetSet();
+        plotting::Sheet sheet = plotting::blankSheet({}, "SHEET 1");
+        sheet.id = plotting::nextSheetId(set);
+        set.sheets.push_back(std::move(sheet));
+        auto pasted = plotting::pasteViewports(set, 0, std::move(*viewports));
+        if (!pasted) {
+            return pasted.error();
+        }
+        if (Status s = document_.setSheetSet(set, "PASTE_VIEWPORTS"); !s) {
             return s;
         }
+        setCurrentSheet(0);
+        canvas_->setSelection(*pasted);
+        report(QString("Pasted %1 onto a new sheet.").arg(views(pasted->size())));
+        return {};
     }
     auto ids = plotting::pasteViewports(document_, currentSheet(), std::move(*viewports));
     if (!ids) {

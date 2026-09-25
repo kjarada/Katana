@@ -1619,6 +1619,10 @@ void SheetEditor::rebuildProperties()
 
         const bool plan = v.kind == ViewportKind::Plan || v.kind == ViewportKind::KeyPlan;
         const bool section = v.kind == ViewportKind::LongSection || v.kind == ViewportKind::CrossSections;
+        // An automatic section's exaggeration is the fitted one, shown as
+        // such and kept when a fixed scale is chosen, so choosing one does
+        // not redraw the section at the stale stored exaggeration.
+        std::optional<double> fittedExaggeration;
         if (plan || section) {
             auto* scale = scaleBox(box, true);
             scale->setObjectName(QStringLiteral("sheetViewportScale"));
@@ -1633,16 +1637,21 @@ void SheetEditor::rebuildProperties()
                 const plotting::SectionFit fit = resolveSectionViewport(v, source(), sectionCuts_);
                 fitted.scale = fit.scale;
                 fitted.verticalExaggeration = fit.exaggeration;
+                fittedExaggeration = fit.exaggeration;
                 scale->setToolTip(
                     QString("Automatic: now %1").arg(QString::fromStdString(plotting::scaleText(fitted))));
             } else {
                 scale->setCurrentText(scaleLabel(v.scale));
             }
-            connect(scale, &QComboBox::textActivated, this, [edit, scale](const QString& text) {
+            connect(scale, &QComboBox::textActivated, this,
+                    [edit, scale, fittedExaggeration](const QString& text) {
                 if (text == QStringLiteral("Auto")) {
                     edit([](Viewport& e) { e.autoScale = true; });
                 } else if (auto value = parseScale(text)) {
-                    edit([value](Viewport& e) {
+                    edit([value, fittedExaggeration](Viewport& e) {
+                        if (e.autoScale && fittedExaggeration) {
+                            e.verticalExaggeration = *fittedExaggeration;
+                        }
                         e.scale = *value;
                         e.autoScale = false;
                     });
@@ -1681,7 +1690,8 @@ void SheetEditor::rebuildProperties()
             form->addRow(plan ? QStringLiteral("Centre N") : QStringLiteral("Centre level"), cy);
         }
         if (section) {
-            auto* ve = spin(box, 0.1, 100.0, v.verticalExaggeration, 2, QStringLiteral(" x"));
+            auto* ve = spin(box, 0.1, 100.0, fittedExaggeration.value_or(v.verticalExaggeration), 2,
+                            QStringLiteral(" x"));
             ve->setObjectName(QStringLiteral("sheetViewportExaggeration"));
             ve->setEnabled(!v.autoScale);
             if (v.autoScale) {

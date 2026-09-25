@@ -56,8 +56,10 @@ class Sample {
             context.plot != nullptr ? katana::cad::paperFillColour(entry.colour, *context.plot)
                                     : entry.colour;
         fillInk_ = QColor(area.r, area.g, area.b, area.a);
-        // The plan painter's pen: the weight in paper millimetres.
-        penWidth_ = std::max(entry.lineWeight, 0.0) * context.pixelsPerMillimetre;
+        // The plan painter's pen: the weight in paper millimetres, times the
+        // plot style's line weight scale, as the plan beside it is drawn.
+        lineScale_ = context.plot != nullptr ? context.plot->lineWeightScale : 1.0;
+        penWidth_ = std::max(entry.lineWeight, 0.0) * lineScale_ * context.pixelsPerMillimetre;
         pen_ = QPen(ink_, penWidth_);
         target_.view = view_;
         target_.entityPen = pen_;
@@ -230,8 +232,8 @@ class Sample {
             }
             case katana::cad::HatchDrawing::Lines:
                 // The finest standard pen, as the plan hatches on paper.
-                painter_.setPen(
-                    QPen(ink_, kHatchLinePaperMillimetres * context_.pixelsPerMillimetre));
+                painter_.setPen(QPen(ink_, kHatchLinePaperMillimetres * lineScale_ *
+                                               context_.pixelsPerMillimetre));
                 for (const katana::geometry::Segment2& hatch :
                      katana::cad::hatchSegments(swatch, *pattern)) {
                     painter_.drawLine(at(hatch.start), at(hatch.end));
@@ -268,6 +270,7 @@ class Sample {
     katana::cad::ViewTransform view_{};
     QColor ink_;
     QColor fillInk_; // a solid area's colour on paper
+    double lineScale_ = 1.0; // the plot style's line weight scale
     double penWidth_ = 0.0;
     QPen pen_;
     StylePaintTarget target_{};

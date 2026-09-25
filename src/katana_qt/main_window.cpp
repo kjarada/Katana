@@ -11,6 +11,7 @@
 #include "plotting/plot_dialog.hpp"
 #include "plotting/sheet_arrange.hpp"
 #include "plotting/sheet_checks.hpp"
+#include "plotting/sheet_tables.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
@@ -288,6 +289,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         };
         context.content = [this](const cad::plotting::Viewport& viewport) {
             return viewportContent(viewport, sheetSource(), document_.sheetSet());
+        };
+        context.fitSection = [this](const cad::plotting::Viewport& viewport) {
+            SheetPaintCache cache;
+            return resolveSectionViewport(viewport, sheetSource(), cache);
+        };
+        context.drawn = [this](const cad::plotting::SheetSet& set) {
+            return resolvedSheetSet(set, sheetSource());
         };
         return context;
     });

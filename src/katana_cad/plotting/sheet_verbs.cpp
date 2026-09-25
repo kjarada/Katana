@@ -1071,13 +1071,18 @@ Result<std::string> newSheet(Document& document, const Words& args)
     return "added " + sheetLine(document.sheetSet(), position);
 }
 
-Result<std::string> sheetField(Document& document, std::size_t index, const Words& args)
+Result<std::string> sheetField(Document& document, std::size_t index, const Words& args,
+                               const SheetVerbContextProvider& context)
 {
     if (args.size() < 3) {
         return usage("SHEET FIELD n field [value]   (\"\" clears the sheet's own value)");
     }
     const SheetSet& set = document.sheetSet();
-    const auto automatic = resolveFields(set, index, fieldContextFor(document, {}));
+    // The automatic values as the title block prints them: with the front
+    // end's scales for automatic views when it has them.
+    const SheetVerbContext given = context && args.size() == 3 ? context() : SheetVerbContext{};
+    const auto automatic =
+        resolveFields(given.drawn ? given.drawn(set) : set, index, fieldContextFor(document, {}));
     std::string field;
     for (const auto& [name, value] : automatic) {
         if (folded(name) == folded(args[2])) {
@@ -1321,7 +1326,7 @@ Result<std::string> sheetVerb(Document& document, const Words& args,
         return "set " + sheetLine(document.sheetSet(), index);
     }
     if (action == "FIELD") {
-        return sheetField(document, index, args);
+        return sheetField(document, index, args, context);
     }
     if (action == "SUGGESTPAPER" || action == "PAPER") {
         return suggestPaperVerb(document, index, args, context);
@@ -1758,14 +1763,22 @@ Result<std::string> arrangeVerb(Document& document, const Words& args,
             ids.push_back(set.sheets[at->first].viewports[at->second].id);
         }
         // An automatic plan is matched at the scale it is drawn at, with what
-        // the front end's plan shows.
+        // the front end's plan shows; an automatic section at the scale and
+        // exaggeration the front end fits it to.
         std::optional<double> scale;
-        if (source.autoScale && isPlanLike(source.kind)) {
+        std::optional<double> exaggeration;
+        if (source.autoScale) {
             const SheetVerbContext given = context ? context() : SheetVerbContext{};
-            scale = drawnScale(source, contentOf(document, given, source));
+            if (isPlanLike(source.kind)) {
+                scale = drawnScale(source, contentOf(document, given, source));
+            } else if (isSection(source.kind) && given.fitSection) {
+                const SectionFit fit = given.fitSection(source);
+                scale = fit.scale;
+                exaggeration = fit.exaggeration;
+            }
         }
         const std::string fromId = source.id;
-        auto changed = matchScale(document, ids, fromId, scale);
+        auto changed = matchScale(document, ids, fromId, scale, exaggeration);
         if (!changed) {
             return changed.error();
         }

@@ -47,13 +47,15 @@ alignViewports(Document& document, std::size_t sheetIndex, std::span<const std::
 distributeViewports(Document& document, std::size_t sheetIndex, std::span<const std::string> ids,
                     DistributeAxis axis);
 
-// matchScale across the set: the ids whose scale changed. `fromScale` is the
-// scale an automatic `fromId` is drawn at, when the caller knows it (the
-// editor does); without it an automatic plan's scale is worked out from what
-// it shows, as the painter works it out, and any other view's own is used.
+// matchScale across the set: the ids whose scale changed. `fromScale` (and
+// for a section `fromExaggeration`) is what an automatic `fromId` is drawn
+// at, when the caller knows it (the editor does); without it an automatic
+// plan's scale is worked out from what it shows, as the painter works it
+// out, and any other view's own is used.
 [[nodiscard]] core::Result<std::vector<std::string>>
 matchScale(Document& document, std::span<const std::string> ids, std::string_view fromId,
-           std::optional<double> fromScale = std::nullopt);
+           std::optional<double> fromScale = std::nullopt,
+           std::optional<double> fromExaggeration = std::nullopt);
 
 // The scale viewport `viewport` is drawn at: its own, or for an automatic
 // plan or key plan the first of kSheetScales at which `content` fits its

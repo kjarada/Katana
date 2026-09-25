@@ -125,7 +125,8 @@ Result<std::vector<std::string>> distributeViewports(Document& document, std::si
 
 Result<std::vector<std::string>> matchScale(Document& document, std::span<const std::string> ids,
                                             std::string_view fromId,
-                                            std::optional<double> fromScale)
+                                            std::optional<double> fromScale,
+                                            std::optional<double> fromExaggeration)
 {
     if (!fromScale) {
         // An automatic plan is matched at the scale it is drawn at, not at
@@ -141,7 +142,7 @@ Result<std::vector<std::string>> matchScale(Document& document, std::span<const 
     const Status status = editSheetSet(
         document,
         [&](SheetSet& set) -> Status {
-            auto matched = matchScale(set, ids, fromId, fromScale);
+            auto matched = matchScale(set, ids, fromId, fromScale, fromExaggeration);
             if (!matched) {
                 return matched.error();
             }

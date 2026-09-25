@@ -485,6 +485,25 @@ TEST(SheetEditorEditing, CutTakesTheViewsAndPasteBringsThemBackWhereTheyWere)
     EXPECT_EQ(byId(document, 0, "vp5").rect, box(220.0, 100.0, 300.0, 180.0));
 }
 
+// Pasting into a set with no sheets adds the sheet in the paste's own step:
+// one Undo takes both away, rather than leaving a blank sheet behind.
+TEST(SheetEditorEditing, APasteIntoASetWithNoSheetsIsOneStep)
+{
+    Document document;
+    Shown shown(document);
+    shown.canvas().setSelection({"vp1", "vp2"});
+    ASSERT_TRUE(shown.editor.copySelection().ok());
+    ASSERT_TRUE(document.setSheetSet(plotting::SheetSet{}, "REMOVE_SHEETS").ok());
+    katana::qt::test::processEvents();
+    const std::size_t before = steps(document);
+    ASSERT_TRUE(shown.editor.paste().ok());
+    EXPECT_EQ(steps(document), before + 1);
+    ASSERT_EQ(document.sheetSet().sheets.size(), 1u);
+    EXPECT_EQ(document.sheetSet().sheets[0].viewports.size(), 2u);
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_TRUE(document.sheetSet().sheets.empty());
+}
+
 TEST(SheetEditorEditing, DuplicateIsOneStepFiveMillimetresRightAndDown)
 {
     Document document;
