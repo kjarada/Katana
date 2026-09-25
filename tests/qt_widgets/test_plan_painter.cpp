@@ -5,14 +5,18 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <thread>
 
+#include <QFile>
 #include <QImage>
 #include <QMouseEvent>
+#include <QTemporaryDir>
 #include <QWheelEvent>
 #include <QPainter>
 
@@ -21,6 +25,8 @@
 #include "katana/commands/entity_commands.hpp"
 #include "katana/entity/model.hpp"
 #include "katana/geometry/alignment.hpp"
+#include "katana/geometry/mesh.hpp"
+#include "katana/render/framebuffer.hpp"
 #include "plan_painter.hpp"
 #include "widget_harness.hpp"
 
@@ -31,6 +37,8 @@ using katana::geometry::Box2;
 using katana::geometry::Point2;
 using katana::geometry::Polyline2;
 using katana::geometry::Segment2;
+using katana::interop::RasterOverlay;
+using katana::interop::ReferenceData;
 using katana::qt::PlanFrame;
 using katana::qt::PlanMedium;
 using katana::qt::PlanPaintCache;
@@ -68,15 +76,14 @@ PlanFrame frameOf(double width, double height, double scale, Point2 centre, doub
     return frame;
 }
 
-// Paints `model` through `frame` onto a `fill`ed image of the frame's size.
-QImage painted(const Model& model, const PlanFrame& frame, const PlanPaintOptions& options,
-               QRgb fill = kBlack, PlanPaintStats* stats = nullptr, PlanPaintCache* cache = nullptr)
+// Paints `source` through `frame` onto a `fill`ed image of the frame's size.
+QImage paintedSource(const PlanSource& source, const PlanFrame& frame,
+                     const PlanPaintOptions& options, QRgb fill = kBlack,
+                     PlanPaintStats* stats = nullptr, PlanPaintCache* cache = nullptr)
 {
     QImage image(static_cast<int>(frame.transform.widthPixels),
                  static_cast<int>(frame.transform.heightPixels), QImage::Format_ARGB32_Premultiplied);
     image.fill(fill);
-    PlanSource source;
-    source.model = &model;
     PlanPaintCache local;
     QPainter painter(&image);
     const PlanPaintStats result =
@@ -86,6 +93,85 @@ QImage painted(const Model& model, const PlanFrame& frame, const PlanPaintOption
         *stats = result;
     }
     return image;
+}
+
+// Paints `model` through `frame` onto a `fill`ed image of the frame's size.
+QImage painted(const Model& model, const PlanFrame& frame, const PlanPaintOptions& options,
+               QRgb fill = kBlack, PlanPaintStats* stats = nullptr, PlanPaintCache* cache = nullptr)
+{
+    PlanSource source;
+    source.model = &model;
+    return paintedSource(source, frame, options, fill, stats, cache);
+}
+
+// A `width` x `height` raster whose pixel (x, y) is `colour(x, y)`, placed by
+// `geotransform`.
+RasterOverlay rasterOf(int width, int height, const std::array<double, 6>& geotransform,
+                       const std::function<QRgb(int, int)>& colour)
+{
+    RasterOverlay raster;
+    raster.name = "ortho";
+    raster.width = width;
+    raster.height = height;
+    raster.rgba.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+    std::size_t at = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const QRgb c = colour(x, y);
+            raster.rgba[at++] = static_cast<std::uint8_t>(qRed(c));
+            raster.rgba[at++] = static_cast<std::uint8_t>(qGreen(c));
+            raster.rgba[at++] = static_cast<std::uint8_t>(qBlue(c));
+            raster.rgba[at++] = static_cast<std::uint8_t>(qAlpha(c));
+        }
+    }
+    raster.geotransform = geotransform;
+    raster.hasGeotransform = true;
+    return raster;
+}
+
+// The geotransform of pixels `size` model units square, the image turned
+// `angle` counter-clockwise about its top-left corner at `origin`: a step
+// along a row moves size (cos, sin), a step down a column size (sin, -cos).
+std::array<double, 6> turnedGeotransform(Point2 origin, double size, double angle)
+{
+    const double c = std::cos(angle);
+    const double s = std::sin(angle);
+    return {origin.x, size * c, size * s, origin.y, size * s, -size * c};
+}
+
+// Where the red channel of row `y` first falls through half, going right, in
+// pixel-centre units interpolated between the two pixels either side; NaN
+// when it does not.
+double redFallAlongRow(const QImage& image, int y)
+{
+    for (int x = 0; x + 1 < image.width(); ++x) {
+        const double a = qRed(image.pixel(x, y));
+        const double b = qRed(image.pixel(x + 1, y));
+        if (a >= 127.5 && b < 127.5) {
+            return x + (a - 127.5) / (a - b);
+        }
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+// The same for the green channel down column `x`.
+double greenFallDownColumn(const QImage& image, int x)
+{
+    for (int y = 0; y + 1 < image.height(); ++y) {
+        const double a = qGreen(image.pixel(x, y));
+        const double b = qGreen(image.pixel(x, y + 1));
+        if (a >= 127.5 && b < 127.5) {
+            return y + (a - 127.5) / (a - b);
+        }
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+// Whether `a` and `b` are within `tolerance` on every channel.
+bool near(QRgb a, QRgb b, int tolerance = 2)
+{
+    return std::abs(qRed(a) - qRed(b)) <= tolerance && std::abs(qGreen(a) - qGreen(b)) <= tolerance &&
+           std::abs(qBlue(a) - qBlue(b)) <= tolerance;
 }
 
 // Whether any pixel within `radius` of (x, y) is not `background`.
@@ -462,6 +548,368 @@ TEST(PlanPainter, APdfIsGivenTheNearestWholeResolutionAndTheScaleToTheExactOne)
     EXPECT_EQ(even.scale, 1.0);
     // Never a resolution of nothing.
     EXPECT_EQ(katana::qt::pdfResolutionFor(0.4).resolution, 1);
+}
+
+// ---- imagery on paper ------------------------------------------------------------------
+
+TEST(PlanPainter, ARasterOnPaperLandsWhereTheScreenDrawsTheWholeImage)
+{
+    // A 256 x 256 image of 0.25 m pixels, red in its left half and green in
+    // its top half: an edge through its middle in each channel. Through a
+    // 240 x 160 frame at 6.4 px a metre an image pixel is 1.6 device pixels.
+    // On paper at 8 px/mm with a cap of 63.5 dpi (2.5 px/mm, 0.3125 of the
+    // device's) it is half a capped pixel, so the crop is averaged down by
+    // two; with no cap it is embedded as it is. Either way the red edge must
+    // cross each row, and the green edge each column, where the screen -
+    // which draws the whole image through the one composed transform - puts
+    // it, to within a device pixel.
+    //
+    // Straight; the image turned 25 degrees by its geotransform; the frame
+    // turned 0.35 rad (20 degrees); and both, 25 degrees and 0.2 rad (36.5
+    // degrees in all - under 45, so the red edge still crosses every row
+    // tested and the green every column). The view's centre is 1.5 m east
+    // and 1 m south of the image's middle, so neither edge runs through the
+    // frame's centre, about which it turns.
+    PlotSettings settings;
+    struct Turn {
+        double image = 0.0;
+        double frame = 0.0;
+    };
+    const double degrees25 = 25.0 * katana::math::kPi / 180.0;
+    for (const Turn turn : {Turn{0.0, 0.0}, Turn{degrees25, 0.0}, Turn{0.0, 0.35},
+                            Turn{degrees25, 0.2}}) {
+        const auto g = turnedGeotransform(Point2(1000.0, 2000.0), 0.25, turn.image);
+        ReferenceData reference;
+        reference.add(rasterOf(256, 256, g, [](int x, int y) {
+            return qRgb(x < 128 ? 255 : 0, y < 128 ? 255 : 0, 60);
+        }));
+        const Point2 middle(g[0] + 128.0 * (g[1] + g[2]), g[3] + 128.0 * (g[4] + g[5]));
+        const PlanFrame frame =
+            frameOf(240.0, 160.0, 6.4, Point2(middle.x + 1.5, middle.y - 1.0), turn.frame);
+        PlanSource source;
+        source.reference = &reference;
+        PlanPaintStats screenStats;
+        const QImage screen = paintedSource(source, frame, PlanPaintOptions{}, kBlack, &screenStats);
+        EXPECT_EQ(screenStats.rastersDrawn, 1u);
+        for (const double cap : {63.5, 0.0}) {
+            PlanPaintOptions paper = paperOptions(settings, 8.0);
+            paper.rasterDpiCap = cap;
+            PlanPaintStats stats;
+            const QImage printed = paintedSource(source, frame, paper, kBlack, &stats);
+            EXPECT_EQ(stats.rastersDrawn, 1u);
+            EXPECT_EQ(stats.rasterCropsMade, 1u);
+            double worst = 0.0;
+            for (int y = 20; y <= 140; y += 5) {
+                const double expected = redFallAlongRow(screen, y);
+                const double actual = redFallAlongRow(printed, y);
+                ASSERT_FALSE(std::isnan(expected)) << "row " << y;
+                ASSERT_FALSE(std::isnan(actual)) << "row " << y;
+                worst = std::max(worst, std::abs(expected - actual));
+            }
+            for (int x = 60; x <= 180; x += 5) {
+                const double expected = greenFallDownColumn(screen, x);
+                const double actual = greenFallDownColumn(printed, x);
+                ASSERT_FALSE(std::isnan(expected)) << "column " << x;
+                ASSERT_FALSE(std::isnan(actual)) << "column " << x;
+                worst = std::max(worst, std::abs(expected - actual));
+            }
+            EXPECT_LE(worst, 1.0) << "image turned " << turn.image << ", frame turned " << turn.frame
+                                  << ", cap " << cap;
+        }
+    }
+}
+
+TEST(PlanPainter, ARasterOnPaperIsCroppedToTheViewportAndEmbeddedNoFinerThanTheCap)
+{
+    // A 2000 x 2000 image of 5 cm pixels, 100 m square, under a 200 x 100
+    // frame at 10 px a metre about its middle - 1 : 1000 at 10 px/mm (254
+    // dpi). The frame shows 20 x 10 m of it, 400 x 200 of its pixels, each
+    // half a device pixel; with a pixel of margin all round the crop is
+    // 402 x 202. The whole image at its own resolution would be 4 000 000
+    // pixels.
+    //   No dpi cap: averaged down to the device's own resolution, one pixel
+    //     a device pixel: 402 / 2 x 202 / 2 = 201 x 101, 20 301.
+    //   100 dpi: 3.937 px/mm, 0.3937 of the device's, so a pixel is 0.19685
+    //     of a capped one: 402 x 0.19685 = 79 by 202 x 0.19685 = 40, 3 160.
+    //   100 dpi and a pixel cap of 1 000: at most 1 000.
+    ReferenceData reference;
+    reference.add(rasterOf(2000, 2000, {0.0, 0.05, 0.0, 100.0, 0.0, -0.05},
+                           [](int, int) { return qRgb(30, 140, 90); }));
+    PlanSource source;
+    source.reference = &reference;
+    const PlanFrame frame = frameOf(200.0, 100.0, 10.0, Point2(50.0, 50.0));
+    PlotSettings settings;
+    const auto embedded = [&](double dpiCap, std::size_t pixelCap) {
+        PlanPaintOptions paper = paperOptions(settings, 10.0);
+        paper.rasterDpiCap = dpiCap;
+        paper.rasterPixelCap = pixelCap;
+        PlanPaintStats stats;
+        const QImage printed = paintedSource(source, frame, paper, kWhite, &stats);
+        EXPECT_EQ(stats.rastersDrawn, 1u);
+        // The image's colour, all over the viewport, at every resolution.
+        for (const QPoint at : {QPoint(2, 2), QPoint(100, 50), QPoint(197, 97)}) {
+            EXPECT_TRUE(near(printed.pixel(at), qRgb(30, 140, 90)))
+                << at.x() << "," << at.y() << " cap " << dpiCap << "/" << pixelCap;
+        }
+        return static_cast<double>(stats.rasterPixelsEmbedded);
+    };
+    EXPECT_NEAR(embedded(0.0, 16'000'000), 20'301.0, 400.0);
+    EXPECT_NEAR(embedded(100.0, 16'000'000), 3'160.0, 150.0);
+    const double capped = embedded(100.0, 1'000);
+    EXPECT_LE(capped, 1'000.0);
+    EXPECT_GT(capped, 900.0);
+}
+
+TEST(PlanPainter, AFineRasterIsAveragedDownOnPaperAndNotPointSampled)
+{
+    // A 400 x 400 one-pixel black and white checkerboard of 1 cm pixels,
+    // exactly filling a 100 x 100 frame at 25 px a metre: four image pixels
+    // to a device pixel each way, and the crop - its margin clamped to the
+    // image - the whole image. On paper with the dpi cap off it is averaged
+    // down to the device's resolution, 100 x 100, four to one, and every box
+    // of 4 x 4 checks is half white: 127.5, mid grey, everywhere, and drawn
+    // 1 : 1. Sampled at the nearest pixel it would print a moire of black
+    // and white.
+    ReferenceData reference;
+    reference.add(rasterOf(400, 400, {0.0, 0.01, 0.0, 4.0, 0.0, -0.01}, [](int x, int y) {
+        return (x + y) % 2 == 0 ? qRgb(255, 255, 255) : qRgb(0, 0, 0);
+    }));
+    PlanSource source;
+    source.reference = &reference;
+    PlotSettings settings;
+    PlanPaintOptions paper = paperOptions(settings, 10.0);
+    paper.rasterDpiCap = 0.0;
+    PlanPaintStats stats;
+    const QImage printed = paintedSource(source, frameOf(100.0, 100.0, 25.0, Point2(2.0, 2.0)),
+                                         paper, kWhite, &stats);
+    EXPECT_EQ(stats.rasterPixelsEmbedded, 100u * 100u);
+    int far = 0;
+    for (int y = 0; y < 100; ++y) {
+        for (int x = 0; x < 100; ++x) {
+            far += std::abs(qGray(printed.pixel(x, y)) - 128) > 2 ? 1 : 0;
+        }
+    }
+    EXPECT_EQ(far, 0);
+}
+
+TEST(PlanPainter, AHiddenRasterOrOneOutsideTheViewportDoesNotPrint)
+{
+    ReferenceData reference;
+    const katana::interop::ReferenceId id = reference.add(
+        rasterOf(100, 100, {0.0, 1.0, 0.0, 100.0, 0.0, -1.0}, [](int, int) { return qRgb(220, 0, 0); }));
+    PlanSource source;
+    source.reference = &reference;
+    PlotSettings settings;
+    const PlanPaintOptions paper = paperOptions(settings, 4.0);
+    PlanFrame frame = frameOf(100.0, 100.0, 2.0, Point2(50.0, 50.0));
+
+    PlanPaintStats stats;
+    EXPECT_TRUE(near(paintedSource(source, frame, paper, kWhite, &stats).pixel(50, 50), qRgb(220, 0, 0)));
+    EXPECT_EQ(stats.rastersDrawn, 1u);
+
+    // Hidden in this view only.
+    const std::set<std::uint64_t> hidden{id};
+    frame.hiddenReferences = &hidden;
+    EXPECT_EQ(paintedSource(source, frame, paper, kWhite, &stats).pixel(50, 50), kWhite);
+    EXPECT_EQ(stats.rastersDrawn, 0u);
+    EXPECT_EQ(stats.rasterPixelsEmbedded, 0u);
+    frame.hiddenReferences = nullptr;
+
+    // Hidden in the Reference Data panel.
+    reference.findRaster(id)->visible = false;
+    EXPECT_EQ(paintedSource(source, frame, paper, kWhite, &stats).pixel(50, 50), kWhite);
+    EXPECT_EQ(stats.rastersDrawn, 0u);
+    reference.findRaster(id)->visible = true;
+
+    // Shown, but a kilometre from the viewport: nothing of it is embedded.
+    frame = frameOf(100.0, 100.0, 2.0, Point2(1050.0, 50.0));
+    EXPECT_EQ(paintedSource(source, frame, paper, kWhite, &stats).pixel(50, 50), kWhite);
+    EXPECT_EQ(stats.rastersDrawn, 0u);
+    EXPECT_EQ(stats.rasterPixelsEmbedded, 0u);
+}
+
+TEST(PlanPainter, APaperCropIsResampledOnceAndTheCropsKeptAreBounded)
+{
+    // The sheet editor paints paper, and repaints for a pan of the editor
+    // or a second viewport over the same image: the same crop at the same
+    // size comes from the cache, and is drawn exactly as when it was made.
+    // A crop elsewhere is made afresh; however many are made, no more than
+    // kMaximumRasterCrops are kept.
+    ReferenceData reference;
+    reference.add(rasterOf(400, 400, {0.0, 0.25, 0.0, 100.0, 0.0, -0.25},
+                           [](int x, int y) { return qRgb(x % 256, y % 256, 90); }));
+    PlanSource source;
+    source.reference = &reference;
+    PlotSettings settings;
+    PlanPaintOptions paper = paperOptions(settings, 8.0);
+    paper.rasterDpiCap = 100.0;
+    PlanPaintCache cache;
+    const PlanFrame frame = frameOf(100.0, 80.0, 4.0, Point2(50.0, 50.0));
+    PlanPaintStats stats;
+    const QImage first = paintedSource(source, frame, paper, kWhite, &stats, &cache);
+    EXPECT_EQ(stats.rasterCropsMade, 1u);
+    const QImage again = paintedSource(source, frame, paper, kWhite, &stats, &cache);
+    EXPECT_EQ(stats.rasterCropsMade, 0u);
+    EXPECT_EQ(stats.rastersDrawn, 1u);
+    EXPECT_TRUE(first == again);
+    EXPECT_EQ(cache.rasterCropCount(), 1u);
+
+    for (int i = 0; i < 12; ++i) {
+        (void)paintedSource(source, frameOf(100.0, 80.0, 4.0, Point2(20.0 + 5.0 * i, 40.0)), paper,
+                            kWhite, &stats, &cache);
+        EXPECT_EQ(stats.rasterCropsMade, 1u) << i;
+        EXPECT_LE(cache.rasterCropCount(), PlanPaintCache::kMaximumRasterCrops);
+    }
+    EXPECT_EQ(cache.rasterCropCount(), PlanPaintCache::kMaximumRasterCrops);
+    cache.invalidateReferences();
+    EXPECT_EQ(cache.rasterCropCount(), 0u);
+}
+
+TEST(PlanPainter, APointCloudOnPaperFillsTheTurnedViewportAtTheCappedResolution)
+{
+    // Red points every half metre over (-60, -60)-(60, 60), under a 200 x
+    // 100 frame at 2 px a metre turned 30 degrees, on paper at 8 px/mm with
+    // imagery capped at 100 dpi: 0.4921 of the device's resolution, so the
+    // splat's image is 0.9843 px a metre. It covers the box around the
+    // turned viewport - half-widths of 111.6 and 93.3 px, 55.8 and 46.65 m -
+    // where that box meets the cloud: 111.6 x 93.3 m, which with a pixel of
+    // margin either side is ceil(109.8 + 2) x ceil(91.8 + 2) = 112 x 94
+    // pixels. Every corner of the device is inside the turned viewport and
+    // must be red: the screen's splat, sized to the unturned view, leaves
+    // those corners empty. With a pixel cap of 2 000 it is at most that.
+    //
+    // Uncapped, the image is no finer than kCloudPointPaperMillimetres =
+    // 0.25 mm a pixel, 4 px/mm, so that a point is the same size on the page
+    // at every resolution: the same sheet at 8 px/mm (a frame of 2 px a
+    // metre) and at 16 (4 px a metre) splats into the same image, 1 px a
+    // metre, ceil(111.6 + 2) x ceil(93.3 + 2) = 114 x 96.
+    katana::interop::PointCloudLayer cloud;
+    cloud.colorMode = katana::interop::PointColorMode::SourceColor;
+    for (int i = 0; i <= 240; ++i) {
+        for (int j = 0; j <= 240; ++j) {
+            katana::pointcloud::PointCloudPoint point;
+            point.x = -60.0 + 0.5 * i;
+            point.y = -60.0 + 0.5 * j;
+            point.red = 220;
+            point.hasColor = true;
+            cloud.points.push_back(point);
+        }
+    }
+    cloud.bounds.minX = -60.0;
+    cloud.bounds.minY = -60.0;
+    cloud.bounds.maxX = 60.0;
+    cloud.bounds.maxY = 60.0;
+    cloud.bounds.minZ = 0.0;
+    cloud.bounds.maxZ = 0.0;
+    cloud.sourcePointCount = cloud.points.size();
+    ReferenceData reference;
+    reference.add(std::move(cloud));
+    PlanSource source;
+    source.reference = &reference;
+    PlotSettings settings;
+    PlanPaintOptions paper = paperOptions(settings, 8.0);
+    paper.rasterDpiCap = 100.0;
+    const PlanFrame frame = frameOf(200.0, 100.0, 2.0, Point2(0.0, 0.0), katana::math::kPi / 6.0);
+    PlanPaintStats stats;
+    const QImage printed = paintedSource(source, frame, paper, kWhite, &stats);
+    EXPECT_GT(stats.cloudPointsDrawn, 0u);
+    EXPECT_NEAR(static_cast<double>(stats.cloudPixelsEmbedded), 112.0 * 94.0, 112.0 * 3.0);
+    for (const QPoint at : {QPoint(1, 1), QPoint(198, 1), QPoint(1, 98), QPoint(198, 98),
+                            QPoint(100, 50)}) {
+        EXPECT_TRUE(near(printed.pixel(at), qRgb(220, 0, 0))) << at.x() << "," << at.y();
+    }
+
+    paper.rasterPixelCap = 2'000;
+    const QImage coarse = paintedSource(source, frame, paper, kWhite, &stats);
+    EXPECT_LE(stats.cloudPixelsEmbedded, 2'000u);
+    EXPECT_GT(stats.cloudPixelsEmbedded, 1'500u);
+    EXPECT_TRUE(near(coarse.pixel(100, 50), qRgb(220, 0, 0)));
+
+    const auto uncapped = [&](double k) {
+        PlanPaintOptions sheet = paperOptions(settings, 8.0 * k);
+        sheet.rasterDpiCap = 0.0;
+        PlanPaintStats at;
+        (void)paintedSource(source,
+                            frameOf(200.0 * k, 100.0 * k, 2.0 * k, Point2(0.0, 0.0), katana::math::kPi / 6.0),
+                            sheet, kWhite, &at);
+        return at.cloudPixelsEmbedded;
+    };
+    EXPECT_EQ(uncapped(1.0), 114u * 96u);
+    EXPECT_EQ(uncapped(2.0), 114u * 96u);
+}
+
+TEST(PlanPainter, AMeshFootprintOnPaperIsOutlinedInPaperMillimetresAtEveryResolution)
+{
+    // A black mesh 60 units square about the origin, plotted twice: at
+    // 10 px/mm through a frame of 1 px a unit, and at 20 px/mm through one
+    // of 2 px a unit - the same sheet at twice the resolution. Its outline is
+    // kMeshOutlinePaperMillimetres = 0.13 mm, 1.3 and 2.6 px, half of it
+    // outside the square, dashed 2 mm on and 1 mm off; inside is the faint
+    // fill. The ink OUTSIDE the square is the outline's outer half alone, so
+    // at twice the resolution, twice as long and twice as wide, it is four
+    // times as much. A screen's one-pixel pen would be twice as much.
+    katana::geometry::TriangleMesh mesh;
+    mesh.vertices = {{-30.0, -30.0, 0.0}, {30.0, -30.0, 0.0}, {30.0, 30.0, 0.0}, {-30.0, 30.0, 0.0}};
+    mesh.faces = {{0, 1, 2}, {0, 2, 3}};
+    std::vector<katana::cad::SceneMesh> meshes(1);
+    meshes[0].name = "slab";
+    meshes[0].mesh = &mesh;
+    meshes[0].flatColor = katana::render::rgba(0, 0, 0);
+    PlanSource source;
+    source.meshes = &meshes;
+    PlotSettings settings;
+    const auto outsideInk = [&](double k) {
+        const QImage image = paintedSource(source, frameOf(100.0 * k, 100.0 * k, k, Point2(0.0, 0.0)),
+                                           paperOptions(settings, 10.0 * k), kWhite);
+        const int lo = static_cast<int>(20.0 * k);
+        const int hi = static_cast<int>(80.0 * k);
+        double total = 0.0;
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                if (x < lo || x >= hi || y < lo || y >= hi) {
+                    total += (255.0 - qGray(image.pixel(x, y))) / 255.0;
+                }
+            }
+        }
+        return total;
+    };
+    const double coarse = outsideInk(1.0);
+    const double fine = outsideInk(2.0);
+    ASSERT_GT(coarse, 10.0);
+    EXPECT_GT(fine / coarse, 3.4);
+    EXPECT_LT(fine / coarse, 4.6);
+}
+
+TEST(PlanPainter, ASinglePagePlotEmbedsTheRasterItShowsAndNotAHiddenOne)
+{
+    // File > Plot to PDF: the imagery prints, as one embedded image, and a
+    // raster hidden in the view does not.
+    ReferenceData reference;
+    const katana::interop::ReferenceId id = reference.add(rasterOf(
+        200, 200, {0.0, 1.0, 0.0, 200.0, 0.0, -1.0}, [](int x, int y) { return qRgb(x, y, 128); }));
+    PlanSource source;
+    source.reference = &reference;
+    PlotSettings settings;
+    settings.paper = katana::cad::PaperSize::A4;
+    settings.dpi = 150.0;
+    settings.scaleDenominator = 2000.0;
+    settings.center = Point2(100.0, 100.0);
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const auto plotted = [&](const std::set<std::uint64_t>& hidden) {
+        const QString path = dir.filePath("plot.pdf");
+        PlanPaintCache cache;
+        const auto status = katana::qt::plotPlanToPdf(path, settings, source,
+                                                      katana::cad::LayerOverrides{}, hidden, cache);
+        EXPECT_TRUE(status.ok());
+        QFile file(path);
+        EXPECT_TRUE(file.open(QIODevice::ReadOnly));
+        return file.readAll();
+    };
+    // An image XObject; every page's /ProcSet names /ImageB and /ImageC
+    // whether it has one or not.
+    EXPECT_TRUE(plotted({}).contains("/Subtype /Image"));
+    EXPECT_FALSE(plotted({id}).contains("/Subtype /Image"));
 }
 
 // ---- screen speed, without a change of look --------------------------------------------

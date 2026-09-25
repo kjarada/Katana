@@ -17,9 +17,14 @@
 //                  rotation, clipped to its rectangle, with its match lines.
 //   KeyPlan        the same, faded, with the other sheets' outlines numbered.
 //   LongSection    ground and design along an alignment, a grid, level and
-//   CrossSections  chainage labels and a data band; cut once and cached.
+//   CrossSections  chainage labels and a data band; cut once and cached;
+//                  cut and fill shaded, crossings noted with level and
+//                  depth, labels placed clear of each other; autoScale
+//                  fitted (resolveSectionViewport). Drawn by
+//                  plotting/section_painter.hpp through this painter's pens.
 //   Model3D        the 3D view's renderer, as a raster capped in resolution.
-//   Legend         the layers the sheet draws, a sample line each.
+//   Legend         what the sheet's plans show (cad/plotting/legend.hpp), a
+//                  sample each as it prints (plotting/legend_painter.hpp).
 //   Notes, Image   text wrapped to the rectangle; a project image fitted.
 //
 // North arrows, scale bars and titles are sized in paper millimetres.
@@ -48,6 +53,7 @@
 
 #include "katana/cad/plot.hpp"
 #include "katana/cad/plotting/frame.hpp"
+#include "katana/cad/plotting/section_fit.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/cad/scene.hpp"
 #include "katana/cad/section.hpp"
@@ -66,7 +72,8 @@ namespace katana::qt {
 // member left empty leaves out only what it provides.
 struct SheetSource {
     PlanSource plan;
-    // For the 3D snapshot, whose scene builder reads the document.
+    // For the 3D snapshot, whose scene builder reads the document, and the
+    // survey code descriptions a legend is labelled with.
     const katana::cad::Document* document = nullptr;
     // Surfaces the sections are cut from and the 3D snapshot shows; hidden
     // ones are left out, as the section view leaves them out.
@@ -111,6 +118,10 @@ struct SheetPaintStats {
     // Viewports that could not be drawn as asked, one line each ("vp3: no
     // alignment named MC01"). The viewport is outlined and left empty.
     std::vector<std::string> problems;
+    // Notes the sections left out for want of room clear of the others in
+    // their plots - a crossing's, the centreline's levels - each dropped
+    // rather than drawn over another label or past its plot.
+    std::size_t sectionNotesDropped = 0;
 };
 
 // A viewport's scale and centre once "auto" is decided: what is drawn, and
@@ -155,9 +166,28 @@ SheetPaintStats paintSheet(QPainter& painter, const katana::cad::plotting::Sheet
 
 // The scale and centre `viewport` is drawn at: its own, or for autoScale the
 // largest of kSheetScales at which what it shows fits, and for autoCentre the
-// middle of it. Plans only; a section's are decided when it is cut.
+// middle of it. Plans only; a section's are resolveSectionViewport's.
 [[nodiscard]] ResolvedViewport resolvePlanViewport(const katana::cad::plotting::Viewport& viewport,
                                                    const SheetSource& source);
+// The same for a viewport on sheet `sheetIndex` of `set`, which is what the
+// painter draws: an automatic key plan fits every sheet's plan outline
+// (keyPlanOutlines), the drawing only when there is none (fitKeyPlan). Any
+// other viewport resolves as above.
+[[nodiscard]] ResolvedViewport resolvePlanViewport(const katana::cad::plotting::Viewport& viewport,
+                                                   const SheetSource& source,
+                                                   const katana::cad::plotting::SheetSet& set,
+                                                   std::size_t sheetIndex);
+
+// The horizontal scale and exaggeration section `viewport` is drawn at: its
+// own, or for autoScale the largest standard scale at which its chainage
+// range (the whole alignment without one) or its cross sections' width fits
+// its plot, and the largest exaggeration of kSectionExaggerations at which
+// its levels then fit (cad/plotting/section_fit.hpp). The sections are cut
+// through `cache`, as a paint cuts them; a section that cannot be cut keeps
+// the viewport's own scale and exaggeration.
+[[nodiscard]] katana::cad::plotting::SectionFit
+resolveSectionViewport(const katana::cad::plotting::Viewport& viewport, const SheetSource& source,
+                       SheetPaintCache& cache);
 
 // The one mapping from paper to device and back.
 [[nodiscard]] QPointF paperToDevice(const katana::geometry::Point2& paper, double paperHeightMm,
@@ -173,7 +203,8 @@ SheetPaintStats paintSheet(QPainter& painter, const katana::cad::plotting::Sheet
 sheetFrame(const katana::cad::plotting::Sheet& sheet);
 
 // Plots the sheets at `indices` of `set` (every sheet when empty), in that
-// order, to one vector PDF at `path`, each page the size of its sheet's paper.
+// order, to one vector PDF at `path`, each page the size of its sheet's paper,
+// in the set's plot style (its colour mode and line weight scale) at `dpi`.
 // `problems` receives what paintSheet reports, prefixed with the sheet's
 // name. FileExportFailure when the file cannot be written; InvalidArgument
 // for an index past the end or a set with nothing to plot.

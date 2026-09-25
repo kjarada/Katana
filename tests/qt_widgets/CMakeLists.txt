@@ -8,7 +8,7 @@
 # Registered with the prefix "qt_widgets." so that `ctest -R qt_` runs these
 # with the application's headless checks.
 # Found in src/katana_qt's own directory scope, which this one does not see.
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
 set(_qt_src "${PROJECT_SOURCE_DIR}/src/katana_qt")
 # The customisation managers' shared pieces (the style painter the plan view
@@ -96,7 +96,7 @@ target_include_directories(katana_qt_widget_tests PRIVATE "${_qt_src}"
 # katana_surveyio and katana_survey: the survey pages read and reduce field files.
 target_link_libraries(katana_qt_widget_tests PRIVATE
     katana_cad katana_interop katana_render katana_archive12d katana_survey katana_surveyio
-    Qt6::Widgets GTest::gtest)
+    Qt6::Widgets Qt6::PrintSupport GTest::gtest)
 target_compile_definitions(katana_qt_widget_tests PRIVATE
     KATANA_SURVEYIO_DATA="${PROJECT_SOURCE_DIR}/tests/surveyio/data"
     KATANA_SURVEY_UI_DATA="${CMAKE_CURRENT_SOURCE_DIR}/survey/data")

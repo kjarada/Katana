@@ -8,6 +8,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "katana/cad/plotting/legend.hpp"
+#include "katana/cad/plotting/plan_grid.hpp"
+
 namespace katana::cad::plotting {
 
 using katana::core::ErrorCode;
@@ -152,6 +155,38 @@ void putPoint(Json& json, const char* key, const Point2& value, const Point2& fa
     }
 }
 
+// The page setup: the colour mode by name, so the enum may grow and reorder.
+Json pageSetupJson(const PageSetup& setup)
+{
+    static const PageSetup d;
+    Json json = Json::object();
+    if (setup.colourMode != d.colourMode) {
+        json["colour_mode"] = toString(setup.colourMode);
+    }
+    putNumber(json, "line_weight_scale", setup.lineWeightScale, d.lineWeightScale);
+    putNumber(json, "dpi", setup.dpi, d.dpi);
+    putText(json, "file_name_pattern", setup.fileNamePattern, d.fileNamePattern);
+    putFlag(json, "file_per_sheet", setup.filePerSheet, d.filePerSheet);
+    return json;
+}
+
+PageSetup pageSetupFrom(const Json& json)
+{
+    const PageSetup d;
+    PageSetup setup;
+    const std::string mode = json.value("colour_mode", std::string(toString(d.colourMode)));
+    const auto parsedMode = plotColourModeFrom(mode);
+    if (!parsedMode) {
+        throw BadValue{"unknown colour mode \"" + mode + "\""};
+    }
+    setup.colourMode = *parsedMode;
+    setup.lineWeightScale = json.value("line_weight_scale", d.lineWeightScale);
+    setup.dpi = json.value("dpi", d.dpi);
+    setup.fileNamePattern = json.value("file_name_pattern", d.fileNamePattern);
+    setup.filePerSheet = json.value("file_per_sheet", d.filePerSheet);
+    return setup;
+}
+
 Json signOffJson(const SignOff& signOff)
 {
     Json json = Json::object();
@@ -235,6 +270,16 @@ Json viewportJson(const Viewport& viewport)
         marks.push_back(markJson(mark));
     }
     putList(json, "marks", std::move(marks));
+    if (viewport.revisionLimit != d.revisionLimit) {
+        json["revision_limit"] = viewport.revisionLimit;
+    }
+    if (viewport.legendScope != d.legendScope) {
+        json["legend_scope"] = toString(viewport.legendScope);
+    }
+    if (viewport.gridStyle != d.gridStyle) {
+        json["grid_style"] = toString(viewport.gridStyle);
+    }
+    putNumber(json, "grid_interval", viewport.gridInterval, d.gridInterval);
     return json;
 }
 
@@ -282,6 +327,29 @@ Viewport viewportFrom(const Json& json)
     for (const Json& mark : json.value("marks", Json::array())) {
         viewport.marks.push_back(markFrom(mark));
     }
+    if (json.contains("revision_limit")) {
+        // A count: -1 or 2.5 would read as some other count, not as an error.
+        const Json& limit = json.at("revision_limit");
+        if (!limit.is_number_unsigned()) {
+            throw BadValue{"the revision limit is not a whole number of at least 0"};
+        }
+        viewport.revisionLimit = limit.get<std::size_t>();
+    }
+    const std::string scope = json.value("legend_scope", std::string(toString(d.legendScope)));
+    const auto parsedScope = legendScopeFrom(scope);
+    if (!parsedScope) {
+        throw BadValue{"unknown legend scope \"" + scope + "\""};
+    }
+    viewport.legendScope = *parsedScope;
+    if (json.contains("grid_style")) {
+        const std::string grid = json.at("grid_style").get<std::string>();
+        const auto style = gridStyleFrom(grid);
+        if (!style) {
+            throw BadValue{"unknown grid style \"" + grid + "\""};
+        }
+        viewport.gridStyle = *style;
+    }
+    viewport.gridInterval = json.value("grid_interval", d.gridInterval);
     return viewport;
 }
 
@@ -391,6 +459,7 @@ Result<std::string> sheetSetToJson(const SheetSet& set)
     putText(root, "numbering", set.numbering, SheetSet{}.numbering);
     putList(root, "revisions", std::move(revisions));
     putList(root, "sheets", std::move(sheets));
+    putList(root, "page_setup", pageSetupJson(set.pageSetup));
     if (!allFinite(root)) {
         return makeError(ErrorCode::InvalidArgument,
                          "the sheet set holds a number that is not finite (an infinity or NaN)");
@@ -429,6 +498,9 @@ Result<SheetSet> sheetSetFromJson(std::string_view text)
         }
         for (const Json& sheet : root.value("sheets", Json::array())) {
             set.sheets.push_back(sheetFrom(sheet));
+        }
+        if (root.contains("page_setup")) {
+            set.pageSetup = pageSetupFrom(root.at("page_setup"));
         }
         return set;
     } catch (const Json::exception& error) {
