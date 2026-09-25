@@ -46,6 +46,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -69,6 +70,19 @@ struct ExportOptions {
     // 2.5 mm text is 2.5 x scale / 1000 model units in the file, since a DXF
     // TEXT has one height. The application passes its annotation scale.
     double annotationScale = 1000.0;
+    // Annotation the caller has drawn out for this export, by entity: an
+    // entity found here is written as these shapes - lines, polylines and
+    // single-line texts, on its layer and in its colour - instead of as
+    // itself. It is how a label (whose words and place are worked out for a
+    // view by katana_cad's placer, which this module may not see), a
+    // dimension of a kind other than aligned and a leader's arrowhead and
+    // callout frame reach the file: cad/annotation/export_annotation.hpp
+    // draws them, at annotationScale, and the front ends pass them. An entry
+    // with no shapes writes nothing (a label with no room at the scale).
+    // Null writes those kinds as before: labels and the other dimension kinds
+    // skipped with a warning, a leader as its line, landing and note.
+    const std::map<katana::entity::EntityId, std::vector<katana::entity::Geometry>>* drawn =
+        nullptr;
 };
 
 struct DxfExport {

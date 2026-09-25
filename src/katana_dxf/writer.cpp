@@ -1,8 +1,5 @@
 #include "katana/dxf/writer.hpp"
 
-#include "katana/entity/annotation.hpp"
-#include "katana/entity/text_block.hpp"
-
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -14,11 +11,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "katana/core/text.hpp"
 #include "katana/dxf/codes.hpp"
 #include "katana/dxf/reader.hpp"
+#include "katana/entity/annotation.hpp"
 #include "katana/entity/dimension_text.hpp"
 #include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/tables.hpp"
+#include "katana/entity/text_block.hpp"
 
 namespace katana::dxf {
 
@@ -234,6 +234,10 @@ class Writer {
     std::uint64_t begin(std::string_view type, const Entity& entity, std::string_view subclass,
                         std::uint64_t owner = kModelSpaceRecord);
     void writeEntity(const Entity& entity);
+    // The entity as its own geometry, with no drawn shapes looked up: what
+    // writeEntity writes each drawn shape with, since a shape keeps its
+    // entity's id.
+    void writeGeometry(const Entity& entity);
     void writePolyline(const Entity& entity, const Polyline2& polyline);
     void writeText(const Entity& entity, const katana::entity::TextGeometry& text);
     void writeDimension(const Entity& entity, const katana::entity::DimensionGeometry& dimension);
@@ -265,6 +269,9 @@ class Writer {
     std::vector<std::pair<const katana::entity::Linetype*, std::string>> linetypes_;
     std::vector<std::pair<const katana::entity::Layer*, std::string>> layers_;
     std::size_t partialHeights_ = 0;
+    // Labels drawn out by the front end that drew nothing (no room at the
+    // scale), counted for the warning.
+    std::size_t drawnNothing_ = 0;
     // Labels, and dimensions of a kind other than aligned, not written
     // (writeEntity says why), for the export's warning.
     std::size_t labelsSkipped_ = 0;
@@ -1128,6 +1135,27 @@ void Writer::writeDimension(const Entity& entity, const katana::entity::Dimensio
 
 void Writer::writeEntity(const Entity& entity)
 {
+    // Annotation the front end drew out for this file (ExportOptions::drawn):
+    // written as its shapes, on its layer and in its colour.
+    if (options_.drawn != nullptr) {
+        if (const auto found = options_.drawn->find(entity.id); found != options_.drawn->end()) {
+            if (found->second.empty()) {
+                ++drawnNothing_;
+            }
+            Entity shape = entity;
+            shape.properties.clear(); // an annotation's shapes have no surveyed heights
+            for (const katana::entity::Geometry& geometry : found->second) {
+                shape.geometry = geometry;
+                writeGeometry(shape);
+            }
+            return;
+        }
+    }
+    writeGeometry(entity);
+}
+
+void Writer::writeGeometry(const Entity& entity)
+{
     std::visit(
         [&](const auto& shape) {
             using T = std::decay_t<decltype(shape)>;
@@ -1224,8 +1252,13 @@ void Writer::writeEntities()
         if (!only.empty() && !only.contains(entity.layer)) {
             return;
         }
+        // A label or a dimension the file cannot hold is counted skipped,
+        // not written as well.
+        const std::size_t skipped = result_.entitiesSkipped;
         writeEntity(entity);
-        ++result_.entitiesWritten;
+        if (result_.entitiesSkipped == skipped) {
+            ++result_.entitiesWritten;
+        }
     });
     text(0, "ENDSEC");
 }
@@ -1262,6 +1295,12 @@ Result<DxfExport> Writer::run()
             std::to_string(labelsSkipped_) +
             " labels were not written: their text and place are worked out for a view, which "
             "the file has no form for");
+    }
+    if (drawnNothing_ != 0) {
+        result_.warnings.push_back(
+            std::to_string(drawnNothing_) + " labels had no room at 1:" +
+            katana::core::formatExactReal(options_.annotationScale) +
+            " and were not written, as the plan view leaves them out at that scale");
     }
     if (dimensionsSkipped_ != 0) {
         result_.warnings.push_back(
