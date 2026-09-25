@@ -4,7 +4,9 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include <QAbstractItemView>
@@ -19,6 +21,7 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFocusEvent>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -50,6 +53,8 @@
 #include "katana/cad/plotting/sheet_commands.hpp"
 #include "katana/geometry/alignment.hpp"
 #include "katana/math/numerics.hpp"
+#include "plotting/sheet_list_widget.hpp"
+#include "plotting/sheet_rulers.hpp"
 
 namespace katana::qt {
 
@@ -70,10 +75,14 @@ constexpr double kMaximumZoom = 60.0;
 constexpr double kHandlePixels = 7.0;
 constexpr double kSnapPixels = 8.0;
 constexpr double kMinimumViewportMm = 10.0;
+// How far a press must go before it is a drag, not a click: a hand's tremor
+// on a click must not move a viewport.
+constexpr double kDragStartPixels = 3.0;
 
 const QColor kDesk(88, 91, 99);
 const QColor kSelection(0, 120, 215);
 const QColor kGuide(230, 60, 160);
+const QColor kCrossing(0, 150, 70);
 
 constexpr std::array kKinds{ViewportKind::Plan,          ViewportKind::LongSection,
                             ViewportKind::CrossSections, ViewportKind::Model3D,
@@ -223,11 +232,18 @@ void SheetCanvas::setSheet(std::size_t index)
     if (index != sheet_) {
         sheet_ = index;
         selected_.clear();
+        selection_.clear();
         fitted_ = false;
         invalidate();
-        if (onSelectionChanged) {
-            onSelectionChanged(selected_);
-        }
+        selectionChanged();
+    }
+}
+
+void SheetCanvas::selectionChanged()
+{
+    update();
+    if (onSelectionChanged) {
+        onSelectionChanged(selected_);
     }
 }
 
@@ -236,27 +252,113 @@ void SheetCanvas::select(std::string viewportId)
     if (!viewportId.empty() && viewport(viewportId) == nullptr) {
         viewportId.clear();
     }
-    if (viewportId == selected_) {
+    std::vector<std::string> selection;
+    if (!viewportId.empty()) {
+        selection.push_back(viewportId);
+    }
+    if (viewportId == selected_ && selection == selection_) {
         return;
     }
     selected_ = std::move(viewportId);
-    update();
-    if (onSelectionChanged) {
-        onSelectionChanged(selected_);
+    selection_ = std::move(selection);
+    selectionChanged();
+}
+
+std::vector<std::string> SheetCanvas::selectedIds() const
+{
+    std::vector<std::string> ids;
+    if (const Sheet* sheet = currentSheet()) {
+        for (const Viewport& v : sheet->viewports) {
+            if (isSelected(v.id)) {
+                ids.push_back(v.id);
+            }
+        }
     }
+    return ids;
+}
+
+bool SheetCanvas::isSelected(std::string_view viewportId) const
+{
+    return !viewportId.empty() && std::ranges::find(selection_, viewportId) != selection_.end();
+}
+
+void SheetCanvas::setSelection(std::vector<std::string> ids, std::string primary)
+{
+    std::vector<std::string> kept;
+    for (std::string& id : ids) {
+        if (viewport(id) != nullptr && std::ranges::find(kept, id) == kept.end()) {
+            kept.push_back(std::move(id));
+        }
+    }
+    if (std::ranges::find(kept, primary) == kept.end()) {
+        primary = kept.empty() ? std::string{} : kept.back();
+    }
+    if (kept == selection_ && primary == selected_) {
+        return;
+    }
+    selection_ = std::move(kept);
+    selected_ = std::move(primary);
+    selectionChanged();
+}
+
+void SheetCanvas::toggleSelected(const std::string& viewportId)
+{
+    if (viewport(viewportId) == nullptr) {
+        return;
+    }
+    std::vector<std::string> ids = selection_;
+    if (isSelected(viewportId)) {
+        std::erase(ids, viewportId);
+        setSelection(std::move(ids), selected_ == viewportId ? std::string{} : selected_);
+    } else {
+        ids.push_back(viewportId);
+        setSelection(std::move(ids), viewportId);
+    }
+}
+
+void SheetCanvas::selectAll()
+{
+    std::vector<std::string> ids;
+    if (const Sheet* sheet = currentSheet()) {
+        for (const Viewport& v : sheet->viewports) {
+            if (!v.rect.empty()) {
+                ids.push_back(v.id);
+            }
+        }
+    }
+    setSelection(std::move(ids), selected_);
+}
+
+void SheetCanvas::cycleSelection(bool forward)
+{
+    if (const Sheet* sheet = currentSheet()) {
+        select(plotting::cycleViewport(*sheet, selected_, forward));
+    }
+}
+
+// Drops from the selection what is no longer on the sheet: after an undo, a
+// delete, a paste that was undone.
+void SheetCanvas::pruneSelection()
+{
+    const auto gone = [this](const std::string& id) { return viewport(id) == nullptr; };
+    if (std::ranges::none_of(selection_, gone) && (selected_.empty() || !gone(selected_))) {
+        return;
+    }
+    std::erase_if(selection_, gone);
+    if (selected_.empty() || gone(selected_)) {
+        selected_ = selection_.empty() ? std::string{} : selection_.back();
+    }
+    selectionChanged();
 }
 
 void SheetCanvas::invalidate()
 {
     ++version_;
-    if (!selected_.empty() && viewport(selected_) == nullptr) {
-        selected_.clear();
-        if (onSelectionChanged) {
-            onSelectionChanged(selected_);
-        }
-    }
+    pruneSelection();
     update();
 }
+
+double SheetCanvas::rulerPixels() const { return rulers_ ? kSheetRulerPixels : 0.0; }
 
 void SheetCanvas::fitPage()
 {
@@ -265,13 +367,122 @@ void SheetCanvas::fitPage()
                            ? katana::cad::paperDimensions(sheet->paper, sheet->landscape)
                            : katana::cad::paperDimensions(katana::cad::PaperSize::A3, true);
     const double margin = 24.0;
-    zoom_ = std::clamp(std::min((width() - 2.0 * margin) / paper.widthMm,
-                                (height() - 2.0 * margin) / paper.heightMm),
+    // The paper fitted to what the rulers leave.
+    const double inset = rulerPixels();
+    const double w = width() - inset;
+    const double h = height() - inset;
+    zoom_ = std::clamp(std::min((w - 2.0 * margin) / paper.widthMm,
+                                (h - 2.0 * margin) / paper.heightMm),
                        kMinimumZoom, kMaximumZoom);
-    origin_ = QPointF((width() - paper.widthMm * zoom_) / 2.0,
-                      (height() - paper.heightMm * zoom_) / 2.0);
+    origin_ = QPointF(inset + (w - paper.widthMm * zoom_) / 2.0,
+                      inset + (h - paper.heightMm * zoom_) / 2.0);
     fitted_ = true;
     update();
+}
+
+void SheetCanvas::zoomTo(const Box2& box)
+{
+    if (box.empty() || currentSheet() == nullptr) {
+        fitPage();
+        return;
+    }
+    const double margin = 24.0;
+    const double inset = rulerPixels();
+    const double w = width() - inset;
+    const double h = height() - inset;
+    zoom_ = std::clamp(std::min((w - 2.0 * margin) / std::max(box.width(), 1.0),
+                                (h - 2.0 * margin) / std::max(box.height(), 1.0)),
+                       kMinimumZoom, kMaximumZoom);
+    // The box's centre in the middle of what the rulers leave.
+    const Point2 c = box.center();
+    origin_ = QPointF(inset + w / 2.0 - c.x * zoom_,
+                      inset + h / 2.0 - (paperHeight() - c.y) * zoom_);
+    fitted_ = true;
+    update();
+}
+
+void SheetCanvas::zoomToSelection()
+{
+    const Sheet* sheet = currentSheet();
+    if (sheet == nullptr) {
+        return;
+    }
+    const std::vector<std::string> ids = selectedIds();
+    zoomTo(plotting::viewportBounds(*sheet, ids));
+}
+
+void SheetCanvas::setSnapToGrid(bool on)
+{
+    snapGrid_ = on;
+    update();
+}
+
+void SheetCanvas::setRulersShown(bool on)
+{
+    // The paper stays where it is; the rulers cover or uncover the desk.
+    rulers_ = on;
+    update();
+}
+
+ResolvedViewport SheetCanvas::resolvedPlan(const Viewport& v) const
+{
+    if (!v.autoScale && !v.autoCentre) {
+        return ResolvedViewport{v.scale, v.centre};
+    }
+    if (resolvedVersion_ != version_) {
+        resolved_.clear();
+        resolvedVersion_ = version_;
+    }
+    if (const auto it = resolved_.find(v.id); it != resolved_.end()) {
+        return it->second;
+    }
+    const ResolvedViewport at = resolvePlanViewport(v, editor_.source());
+    resolved_.emplace(v.id, at);
+    return at;
+}
+
+SheetCursorReadout SheetCanvas::readoutAt(const QPointF& widget) const
+{
+    const Sheet* sheet = currentSheet();
+    if (sheet == nullptr) {
+        return {};
+    }
+    return sheetCursorReadout(*sheet, widgetToPaper(widget),
+                              [this](const Viewport& v) { return resolvedPlan(v); });
+}
+
+void SheetCanvas::updateReadout(const QPointF& widget)
+{
+    readout_ = readoutAt(widget);
+    cursorPaper_ = readout_.onSheet ? std::optional<Point2>(readout_.paper) : std::nullopt;
+    if (onCursorMoved) {
+        onCursorMoved(readout_);
+    }
+    // The rulers mark the cursor: only they need painting for a move.
+    if (rulers_ && drag_ == Drag::None) {
+        const int r = kSheetRulerPixels;
+        update(QRect(0, 0, width(), r));
+        update(QRect(0, 0, r, height()));
+    }
+}
+
+Box2 SheetCanvas::liveRect(const std::string& id) const
+{
+    const Viewport* v = viewport(id);
+    if (v == nullptr) {
+        return {};
+    }
+    if (pressMoved_ && drag_ == Drag::Move) {
+        if (const auto it = startRects_.find(id); it != startRects_.end()) {
+            return startRects_.size() == 1
+                       ? liveRect_
+                       : Box2(it->second.min + liveDelta_, it->second.max + liveDelta_);
+        }
+    }
+    if (pressMoved_ && drag_ == Drag::Resize && id == selected_) {
+        return liveRect_;
+    }
+    return v->rect;
 }
 
 QPointF SheetCanvas::paperToWidget(const Point2& paper) const
@@ -309,8 +520,9 @@ std::string SheetCanvas::viewportAt(const QPointF& widget) const
 
 std::optional<int> SheetCanvas::handleAt(const QPointF& widget) const
 {
+    // Handles only on a viewport selected alone: a group is moved, not sized.
     const Viewport* v = viewport(selected_);
-    if (v == nullptr || v->locked) {
+    if (v == nullptr || v->locked || selection_.size() != 1) {
         return std::nullopt;
     }
     const QRectF r = widgetRect(v->rect);
@@ -388,10 +600,16 @@ void SheetCanvas::paintEvent(QPaintEvent* /*event*/)
         return;
     }
     painter.setRenderHint(QPainter::Antialiasing, true);
+    const auto paper = katana::cad::paperDimensions(sheet->paper, sheet->landscape);
+    RulerView ruler;
+    ruler.pixelsPerMillimetre = zoom_;
+    ruler.paperOrigin = origin_;
+    ruler.paperWidthMm = paper.widthMm;
+    ruler.paperHeightMm = paper.heightMm;
 
     // The drawing dragged inside its viewport: the paint shifted, clipped to it.
-    if (drag_ == Drag::PanView) {
-        if (const Viewport* v = viewport(selected_)) {
+    if (drag_ == Drag::PanView && pressMoved_) {
+        if (const Viewport* v = viewport(panViewId_)) {
             const QRectF r = widgetRect(v->rect);
             painter.save();
             painter.setClipRect(r);
@@ -403,18 +621,44 @@ void SheetCanvas::paintEvent(QPaintEvent* /*event*/)
         }
     }
 
+    // The paper grid, faint, while a drag snaps to it.
+    if (snapGrid_) {
+        paintPaperGrid(painter, ruler, gridMm_);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+    }
+
     // The drawing area, faint, so an empty sheet shows where views go.
     painter.setPen(QPen(QColor(0, 120, 215, 60), 1.0, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
     painter.drawRect(widgetRect(plotting::drawingArea(*sheet)));
 
-    // The selection, its handles, and the rectangle being dragged.
+    // What is being moved or sized, its own paint going with it.
+    paintDraggedContent(painter);
+
+    // Every selected viewport outlined where it is now; a group's bounds.
+    Box2 bounds;
+    for (const std::string& id : selection_) {
+        const Box2 box = liveRect(id);
+        bounds.expand(box);
+        if (id != selected_ && !box.empty()) {
+            painter.setPen(QPen(kSelection, 1.5));
+            painter.drawRect(widgetRect(box));
+        }
+    }
+    ruler.highlight = bounds;
+    if (selection_.size() > 1 && !bounds.empty()) {
+        painter.setPen(QPen(kSelection, 1.0, Qt::DashLine));
+        painter.drawRect(widgetRect(bounds).adjusted(-4.0, -4.0, 4.0, 4.0));
+    }
+
+    // The primary, its handles, and the rectangle being dragged.
     if (const Viewport* v = viewport(selected_)) {
-        const Box2 box = (drag_ == Drag::Move || drag_ == Drag::Resize) ? liveRect_ : v->rect;
-        const QRectF r = widgetRect(box);
+        const bool dragging = pressMoved_ && (drag_ == Drag::Move || drag_ == Drag::Resize);
+        const Box2 box = dragging && selection_.size() > 1 ? bounds : liveRect(selected_);
+        const QRectF r = widgetRect(liveRect(selected_));
         painter.setPen(QPen(kSelection, 2.0));
         painter.drawRect(r);
-        if (!v->locked) {
+        if (!v->locked && selection_.size() == 1) {
             painter.setBrush(Qt::white);
             painter.setPen(QPen(kSelection, 1.2));
             for (const QPointF& at :
@@ -426,7 +670,7 @@ void SheetCanvas::paintEvent(QPaintEvent* /*event*/)
             }
             painter.setBrush(Qt::NoBrush);
         }
-        if (drag_ == Drag::Move || drag_ == Drag::Resize) {
+        if (dragging) {
             painter.setPen(QPen(kGuide, 1.0, Qt::DashLine));
             if (guideX_) {
                 const double x = paperToWidget(Point2(*guideX_, 0.0)).x();
@@ -436,13 +680,90 @@ void SheetCanvas::paintEvent(QPaintEvent* /*event*/)
                 const double y = paperToWidget(Point2(0.0, *guideY_)).y();
                 painter.drawLine(QPointF(0.0, y), QPointF(width(), y));
             }
+            // Where it is and how big, as the status line would say it.
+            const QRectF around = widgetRect(box);
+            const QString label = QString("%1, %2   %3 x %4 mm")
+                                      .arg(box.min.x, 0, 'f', 1)
+                                      .arg(box.min.y, 0, 'f', 1)
+                                      .arg(box.width(), 0, 'f', 1)
+                                      .arg(box.height(), 0, 'f', 1);
+            const QRectF plate = painter.fontMetrics()
+                                     .boundingRect(label)
+                                     .toRectF()
+                                     .translated(around.bottomLeft() + QPointF(4.0, 18.0))
+                                     .adjusted(-4.0, -2.0, 4.0, 2.0);
+            painter.fillRect(plate, QColor(30, 32, 38, 200));
             painter.setPen(Qt::white);
-            painter.drawText(r.bottomLeft() + QPointF(0.0, 16.0),
-                             QString("%1 x %2 mm")
-                                 .arg(box.width(), 0, 'f', 1)
-                                 .arg(box.height(), 0, 'f', 1));
+            painter.drawText(around.bottomLeft() + QPointF(4.0, 18.0), label);
         }
     }
+
+    // The rubber band: a window solid and blue, a crossing dashed and green,
+    // as CAD programs draw them.
+    if (drag_ == Drag::Band && pressMoved_) {
+        const bool crossing = bandCorner_.x < pressPaper_.x;
+        const QColor ink = crossing ? kCrossing : kSelection;
+        QColor fill = ink;
+        fill.setAlpha(28);
+        const Box2 band(Point2(std::min(pressPaper_.x, bandCorner_.x), std::min(pressPaper_.y, bandCorner_.y)),
+                        Point2(std::max(pressPaper_.x, bandCorner_.x), std::max(pressPaper_.y, bandCorner_.y)));
+        painter.setPen(QPen(ink, 1.0, crossing ? Qt::DashLine : Qt::SolidLine));
+        painter.setBrush(fill);
+        painter.drawRect(widgetRect(band));
+        painter.setBrush(Qt::NoBrush);
+    }
+
+    if (rulers_) {
+        ruler.cursor = cursorPaper_;
+        paintSheetRulers(painter, size(), ruler);
+    }
+}
+
+void SheetCanvas::paintDraggedContent(QPainter& painter)
+{
+    const bool moving = drag_ == Drag::Move && pressMoved_ && !startRects_.empty();
+    const bool sizing = drag_ == Drag::Resize && pressMoved_;
+    if ((!moving && !sizing) || image_.isNull()) {
+        return;
+    }
+    // The last paint, in the image's own pixels: where a paper rectangle was
+    // painted in it.
+    const double ratio = image_.devicePixelRatio();
+    const QPointF shift = origin_ - imageOrigin_;
+    const auto inImage = [&](const Box2& paper) {
+        const QRectF r = widgetRect(paper).translated(-shift);
+        return QRectF(r.topLeft() * ratio, r.size() * ratio);
+    };
+    std::map<std::string, Box2> from;
+    if (moving) {
+        from = startRects_;
+    } else {
+        from.emplace(selected_, startRect_);
+    }
+    painter.save();
+    // Where they were, faded: the paper beneath them is not painted yet.
+    for (const auto& [id, start] : from) {
+        const QRectF r = widgetRect(start);
+        painter.fillRect(r, QColor(255, 255, 255, 190));
+        painter.setPen(QPen(QColor(120, 122, 128), 1.0, Qt::DotLine));
+        painter.drawRect(r);
+    }
+    for (const auto& [id, start] : from) {
+        const QRectF to = widgetRect(liveRect(id));
+        if (moving) {
+            painter.drawImage(to, image_, inImage(start));
+            continue;
+        }
+        // Sized: what it showed stays centred - a plan keeps its centre and
+        // scale - and the rest is empty paper until it is painted again.
+        const QRectF was = widgetRect(start);
+        painter.save();
+        painter.setClipRect(to);
+        painter.fillRect(to, Qt::white);
+        painter.drawImage(was.translated(to.center() - was.center()), image_, inImage(start));
+        painter.restore();
+    }
+    painter.restore();
 }
 
 void SheetCanvas::resizeEvent(QResizeEvent* event)
@@ -461,7 +782,14 @@ void SheetCanvas::mousePressEvent(QMouseEvent* event)
     pressPaper_ = widgetToPaper(at);
     guideX_.reset();
     guideY_.reset();
-    if (event->button() == Qt::MiddleButton) {
+    pressMoved_ = false;
+    narrowOnClick_ = false;
+    pressHit_.clear();
+    startRects_.clear();
+    liveDelta_ = Point2();
+    // The middle button, or the left with Space held, drags the paper about.
+    if (event->button() == Qt::MiddleButton ||
+        (event->button() == Qt::LeftButton && spaceHeld_)) {
         drag_ = Drag::Pan;
         setCursor(Qt::ClosedHandCursor);
         return;
@@ -469,32 +797,66 @@ void SheetCanvas::mousePressEvent(QMouseEvent* event)
     if (event->button() != Qt::LeftButton) {
         return;
     }
-    if (auto handle = handleAt(at)) {
-        drag_ = Drag::Resize;
-        handle_ = *handle;
-        startRect_ = liveRect_ = viewport(selected_)->rect;
+    // The rulers are not paper.
+    if (at.x() < rulerPixels() || at.y() < rulerPixels()) {
         return;
+    }
+    const bool shift = (event->modifiers() & Qt::ShiftModifier) != 0;
+    const bool control = (event->modifiers() & Qt::ControlModifier) != 0;
+    if (!shift && !control) {
+        if (auto handle = handleAt(at)) {
+            drag_ = Drag::Resize;
+            handle_ = *handle;
+            startRect_ = liveRect_ = viewport(selected_)->rect;
+            return;
+        }
     }
     const std::string hit = viewportAt(at);
-    select(hit);
     const Viewport* v = viewport(hit);
     if (v == nullptr) {
-        drag_ = Drag::Pan; // the paper itself: drag it about
-        setCursor(Qt::ClosedHandCursor);
+        // Empty paper: a rubber band, adding to the selection with Ctrl or
+        // Shift, else replacing it.
+        bandAdds_ = shift || control;
+        if (!bandAdds_) {
+            select({});
+        }
+        drag_ = Drag::Band;
+        bandCorner_ = pressPaper_;
         return;
     }
-    if ((event->modifiers() & Qt::ShiftModifier) != 0 &&
-        (v->kind == ViewportKind::Plan || v->kind == ViewportKind::KeyPlan)) {
+    if (shift && (v->kind == ViewportKind::Plan || v->kind == ViewportKind::KeyPlan)) {
+        // Shift-drag pans the drawing inside a plan; a Shift-click without a
+        // drag toggles the plan in the selection (commitDrag).
         drag_ = Drag::PanView;
+        panViewId_ = hit;
         viewShift_ = Point2();
-        const ResolvedViewport resolved = resolvePlanViewport(*v, editor_.source());
-        startCentre_ = resolved.centre;
-        setCursor(Qt::SizeAllCursor);
+        startCentre_ = resolvedPlan(*v).centre;
         return;
     }
-    if (!v->locked) {
+    if (shift || control) {
+        toggleSelected(hit);
+        return;
+    }
+    if (isSelected(hit)) {
+        // One of a group: it becomes the primary and the group moves with it;
+        // let go without moving, it is selected alone.
+        narrowOnClick_ = selection_.size() > 1;
+        setSelection(selection_, hit);
+    } else {
+        select(hit);
+    }
+    pressHit_ = hit;
+    const Sheet* sheet = currentSheet();
+    startBounds_ = Box2();
+    for (const Viewport& each : sheet->viewports) {
+        if (isSelected(each.id) && !each.locked && !each.rect.empty()) {
+            startRects_.emplace(each.id, each.rect);
+            startBounds_.expand(each.rect);
+        }
+    }
+    if (!startRects_.empty()) {
         drag_ = Drag::Move;
-        startRect_ = liveRect_ = v->rect;
+        startRect_ = liveRect_ = startBounds_;
     }
 }
 
@@ -504,28 +866,47 @@ void SheetCanvas::updateDrag(const QPointF& widget, Qt::KeyboardModifiers modifi
     if (sheet == nullptr) {
         return;
     }
+    // A press is a click until the cursor has gone a few pixels from it.
+    if (!pressMoved_) {
+        const QPointF gone = widget - pressWidget_;
+        if (std::hypot(gone.x(), gone.y()) < kDragStartPixels) {
+            return;
+        }
+        pressMoved_ = true;
+        narrowOnClick_ = false;
+        if (drag_ == Drag::PanView) {
+            setCursor(Qt::SizeAllCursor);
+        }
+    }
     const Point2 now = widgetToPaper(widget);
     const Point2 delta = now - pressPaper_;
+    // Alt: no snapping at all, to the edges or to the grid.
     const bool snap = (modifiers & Qt::AltModifier) == 0;
-    const double tolerance = kSnapPixels / zoom_;
+    const double tolerance = snap ? kSnapPixels / zoom_ : 0.0;
+    const double grid = snap && snapGrid_ ? gridMm_ : 0.0;
     const Box2 area = plotting::drawingArea(*sheet);
+    // What the moving viewports snap to: every placed viewport not moving.
     std::vector<Box2> others;
     for (const Viewport& v : sheet->viewports) {
-        if (v.id != selected_ && !v.rect.empty()) {
+        const bool moving = drag_ == Drag::Move ? startRects_.contains(v.id) : v.id == selected_;
+        if (!moving && !v.rect.empty()) {
             others.push_back(v.rect);
         }
     }
     guideX_.reset();
     guideY_.reset();
     if (drag_ == Drag::Move) {
-        Box2 moved(startRect_.min + delta, startRect_.max + delta);
+        // The group's bounds snap, and every member moves as they do.
+        Box2 moved(startBounds_.min + delta, startBounds_.max + delta);
         if (snap) {
-            const plotting::SnapResult snapped = plotting::snapRect(moved, area, others, tolerance);
+            const plotting::SnapResult snapped =
+                plotting::snapMovingRect(moved, area, others, tolerance, grid);
             moved = snapped.rect;
             guideX_ = snapped.guideX;
             guideY_ = snapped.guideY;
         }
         liveRect_ = moved;
+        liveDelta_ = moved.min - startBounds_.min;
     } else if (drag_ == Drag::Resize) {
         Box2 r = startRect_;
         // Which edges this handle moves: 0 TL, 1 T, 2 TR, 3 R, 4 BR, 5 B, 6 BL, 7 L.
@@ -539,21 +920,14 @@ void SheetCanvas::updateDrag(const QPointF& widget, Qt::KeyboardModifiers modifi
             xs.insert(xs.end(), {o.min.x, o.max.x});
             ys.insert(ys.end(), {o.min.y, o.max.y});
         }
+        // An edge snaps to another edge in reach, else to the grid.
         const auto snapTo = [&](double value, const std::vector<double>& targets,
                                 std::optional<double>& guide) {
-            if (!snap) {
-                return value;
+            const plotting::EdgeSnap snapped = plotting::snapEdge(value, targets, tolerance, grid);
+            if (snapped.guide) {
+                guide = snapped.guide;
             }
-            double best = value;
-            double bestDistance = tolerance;
-            for (const double t : targets) {
-                if (std::abs(t - value) <= bestDistance) {
-                    bestDistance = std::abs(t - value);
-                    best = t;
-                    guide = t;
-                }
-            }
-            return best;
+            return snapped.value;
         };
         if (left) {
             r.min.x = std::min(snapTo(startRect_.min.x + delta.x, xs, guideX_),
@@ -574,6 +948,8 @@ void SheetCanvas::updateDrag(const QPointF& widget, Qt::KeyboardModifiers modifi
         liveRect_ = r;
     } else if (drag_ == Drag::PanView) {
         viewShift_ = delta;
+    } else if (drag_ == Drag::Band) {
+        bandCorner_ = now;
     }
     update();
 }
@@ -581,6 +957,7 @@ void SheetCanvas::updateDrag(const QPointF& widget, Qt::KeyboardModifiers modifi
 void SheetCanvas::mouseMoveEvent(QMouseEvent* event)
 {
     const QPointF at = event->position();
+    updateReadout(at);
     switch (drag_) {
     case Drag::Pan:
         origin_ += at - pressWidget_;
@@ -590,13 +967,16 @@ void SheetCanvas::mouseMoveEvent(QMouseEvent* event)
     case Drag::Move:
     case Drag::Resize:
     case Drag::PanView:
+    case Drag::Band:
         updateDrag(at, event->modifiers());
         return;
     case Drag::None:
         break;
     }
     // The cursor says what a press would do.
-    if (auto handle = handleAt(at)) {
+    if (spaceHeld_) {
+        setCursor(Qt::OpenHandCursor);
+    } else if (auto handle = handleAt(at)) {
         static constexpr std::array<Qt::CursorShape, 8> kCursors{
             Qt::SizeFDiagCursor, Qt::SizeVerCursor, Qt::SizeBDiagCursor, Qt::SizeHorCursor,
             Qt::SizeFDiagCursor, Qt::SizeVerCursor, Qt::SizeBDiagCursor, Qt::SizeHorCursor};
@@ -611,47 +991,116 @@ void SheetCanvas::mouseMoveEvent(QMouseEvent* event)
 void SheetCanvas::commitDrag()
 {
     const Drag drag = drag_;
+    const bool moved = pressMoved_;
     drag_ = Drag::None;
+    pressMoved_ = false;
     guideX_.reset();
     guideY_.reset();
     unsetCursor();
-    const Viewport* v = viewport(selected_);
-    if (v == nullptr) {
+    const Sheet* sheet = currentSheet();
+    if (sheet == nullptr) {
         update();
         return;
     }
-    const std::string id = selected_;
     Status status;
-    if ((drag == Drag::Move || drag == Drag::Resize) && !(liveRect_ == v->rect)) {
+    if (drag == Drag::Band) {
+        // A click on empty paper has already cleared the selection.
+        if (moved) {
+            const Box2 band(Point2(std::min(pressPaper_.x, bandCorner_.x),
+                                   std::min(pressPaper_.y, bandCorner_.y)),
+                            Point2(std::max(pressPaper_.x, bandCorner_.x),
+                                   std::max(pressPaper_.y, bandCorner_.y)));
+            const auto mode = bandCorner_.x < pressPaper_.x ? plotting::BandMode::Crossing
+                                                            : plotting::BandMode::Window;
+            const std::vector<std::string> picked = plotting::viewportsInBand(*sheet, band, mode);
+            if (bandAdds_) {
+                std::vector<std::string> ids = selection_;
+                ids.insert(ids.end(), picked.begin(), picked.end());
+                setSelection(std::move(ids), selected_);
+            } else {
+                setSelection(picked);
+            }
+        }
+    } else if (drag == Drag::PanView) {
+        const std::string id = std::exchange(panViewId_, std::string{});
+        const Point2 shift = std::exchange(viewShift_, Point2());
+        const Viewport* v = viewport(id);
+        if (v != nullptr && !moved) {
+            toggleSelected(id); // a Shift-click, not a drag
+        } else if (v != nullptr && (shift.x != 0.0 || shift.y != 0.0)) {
+            const ResolvedViewport resolved = resolvedPlan(*v);
+            // The drawing follows the hand, so the centre moves the other way.
+            const Point2 centre =
+                startCentre_ - rotated(shift, v->rotation) * (resolved.scale / 1000.0);
+            const double scale = resolved.scale;
+            status = plotting::editViewport(
+                document_, id,
+                [centre, scale](Viewport& edited) {
+                    edited.centre = centre;
+                    edited.scale = scale;
+                    edited.autoCentre = false;
+                    edited.autoScale = false;
+                    return Status{};
+                },
+                "PAN_VIEWPORT");
+        }
+    } else if (drag == Drag::Move && !moved) {
+        // A click on one of a group: that one alone.
+        if (narrowOnClick_) {
+            select(pressHit_);
+        }
+    } else if (drag == Drag::Move && startRects_.size() == 1) {
+        // One viewport takes the snapped rectangle exactly.
+        const auto& [id, start] = *startRects_.begin();
         const Box2 rect = liveRect_;
-        status = plotting::editViewport(
-            document_, id,
-            [rect](Viewport& edited) {
-                edited.rect = rect;
-                return Status{};
-            },
-            drag == Drag::Move ? "MOVE_VIEWPORT" : "RESIZE_VIEWPORT");
-    } else if (drag == Drag::PanView &&
-               (viewShift_.x != 0.0 || viewShift_.y != 0.0)) {
-        const ResolvedViewport resolved = resolvePlanViewport(*v, editor_.source());
-        // The drawing follows the hand, so the centre moves the other way.
-        const Point2 centre =
-            startCentre_ - rotated(viewShift_, v->rotation) * (resolved.scale / 1000.0);
-        const double scale = resolved.scale;
-        status = plotting::editViewport(
-            document_, id,
-            [centre, scale](Viewport& edited) {
-                edited.centre = centre;
-                edited.scale = scale;
-                edited.autoCentre = false;
-                edited.autoScale = false;
-                return Status{};
-            },
-            "PAN_VIEWPORT");
+        if (!(rect == start)) {
+            status = plotting::editViewport(
+                document_, id,
+                [rect](Viewport& edited) {
+                    edited.rect = rect;
+                    return Status{};
+                },
+                "MOVE_VIEWPORT");
+        }
+    } else if (drag == Drag::Move && (liveDelta_.x != 0.0 || liveDelta_.y != 0.0)) {
+        // A group: every member by the same distance, one step.
+        std::vector<std::string> ids;
+        for (const auto& entry : startRects_) {
+            ids.push_back(entry.first);
+        }
+        status = plotting::moveViewports(document_, sheet_, ids, liveDelta_, "MOVE_VIEWPORTS");
+    } else if (drag == Drag::Resize && moved) {
+        const Viewport* v = viewport(selected_);
+        if (v != nullptr && !(liveRect_ == v->rect)) {
+            const Box2 rect = liveRect_;
+            status = plotting::editViewport(
+                document_, selected_,
+                [rect](Viewport& edited) {
+                    edited.rect = rect;
+                    return Status{};
+                },
+                "RESIZE_VIEWPORT");
+        }
     }
+    startRects_.clear();
+    narrowOnClick_ = false;
     viewShift_ = Point2();
     // A refused edit leaves the viewport where it was; the paint shows that.
     (void)status;
+    update();
+}
+
+void SheetCanvas::cancelDrag()
+{
+    drag_ = Drag::None;
+    pressMoved_ = false;
+    narrowOnClick_ = false;
+    startRects_.clear();
+    panViewId_.clear();
+    viewShift_ = Point2();
+    guideX_.reset();
+    guideY_.reset();
+    unsetCursor();
     update();
 }
 
@@ -670,7 +1119,16 @@ void SheetCanvas::mouseReleaseEvent(QMouseEvent* /*event*/)
 
 void SheetCanvas::mouseDoubleClickEvent(QMouseEvent* event)
 {
-    if (viewportAt(event->position()).empty()) {
+    const QPointF at = event->position();
+    if (event->button() != Qt::LeftButton || at.x() < rulerPixels() || at.y() < rulerPixels()) {
+        return;
+    }
+    // A viewport fills the window; the desk or empty paper fits the page.
+    const std::string hit = viewportAt(at);
+    if (const Viewport* v = viewport(hit)) {
+        select(hit);
+        zoomTo(v->rect);
+    } else {
         fitPage();
     }
 }
@@ -692,12 +1150,26 @@ void SheetCanvas::wheelEvent(QWheelEvent* event)
 
 void SheetCanvas::keyPressEvent(QKeyEvent* event)
 {
-    const Viewport* v = viewport(selected_);
-    if (event->key() == Qt::Key_Escape) {
-        select({});
+    // Space held: a left drag pans the paper, as in drawing programs.
+    if (event->key() == Qt::Key_Space) {
+        if (!event->isAutoRepeat()) {
+            spaceHeld_ = true;
+            if (drag_ == Drag::None) {
+                setCursor(Qt::OpenHandCursor);
+            }
+        }
         return;
     }
-    if (v == nullptr) {
+    if (event->key() == Qt::Key_Escape) {
+        // A drag under way is abandoned, leaving everything where it was.
+        if (drag_ != Drag::None) {
+            cancelDrag();
+        } else {
+            select({});
+        }
+        return;
+    }
+    if (selection_.empty()) {
         QWidget::keyPressEvent(event);
         return;
     }
@@ -714,22 +1186,70 @@ void SheetCanvas::keyPressEvent(QKeyEvent* event)
     case Qt::Key_Down: nudge = Point2(0.0, -step); break;
     default: QWidget::keyPressEvent(event); return;
     }
-    if (v->locked) {
+    // Every selected viewport, one step; the locked ones stay.
+    (void)editor_.nudgeSelection(nudge);
+}
+
+void SheetCanvas::keyReleaseEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        spaceHeld_ = false;
+        if (drag_ != Drag::Pan) {
+            unsetCursor();
+        }
         return;
     }
-    (void)plotting::editViewport(
-        document_, selected_,
-        [nudge](Viewport& edited) {
-            edited.rect = Box2(edited.rect.min + nudge, edited.rect.max + nudge);
-            return Status{};
-        },
-        "MOVE_VIEWPORT");
+    QWidget::keyReleaseEvent(event);
+}
+
+bool SheetCanvas::event(QEvent* event)
+{
+    // Tab steps through the viewports rather than out of the canvas; on a
+    // sheet with none it moves the focus on as usual.
+    if (event->type() == QEvent::KeyPress) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        const Sheet* sheet = currentSheet();
+        if ((key->key() == Qt::Key_Tab || key->key() == Qt::Key_Backtab) && sheet != nullptr &&
+            !plotting::cycleViewport(*sheet, {}, true).empty()) {
+            const bool back =
+                key->key() == Qt::Key_Backtab || (key->modifiers() & Qt::ShiftModifier) != 0;
+            cycleSelection(!back);
+            return true;
+        }
+    }
+    return QWidget::event(event);
+}
+
+void SheetCanvas::leaveEvent(QEvent* event)
+{
+    // Off the canvas: the rulers' mark and the status line go blank.
+    cursorPaper_.reset();
+    readout_ = {};
+    if (onCursorMoved) {
+        onCursorMoved(readout_);
+    }
+    if (rulers_) {
+        const int r = kSheetRulerPixels;
+        update(QRect(0, 0, width(), r));
+        update(QRect(0, 0, r, height()));
+    }
+    QWidget::leaveEvent(event);
+}
+
+void SheetCanvas::focusOutEvent(QFocusEvent* event)
+{
+    // Space let go where the canvas could not hear it.
+    spaceHeld_ = false;
+    QWidget::focusOutEvent(event);
 }
 
 void SheetCanvas::contextMenuEvent(QContextMenuEvent* event)
 {
+    // On one of a group, the menu is for the group.
     const std::string hit = viewportAt(event->pos());
-    select(hit);
+    if (!isSelected(hit)) {
+        select(hit);
+    }
     if (onContextMenu) {
         onContextMenu(event->globalPos(), hit);
     }
@@ -757,7 +1277,7 @@ SheetEditor::SheetEditor(katana::cad::Document& document, SourceProvider source,
     auto* listPanel = new QWidget(listDock);
     auto* listLayout = new QVBoxLayout(listPanel);
     listLayout->setContentsMargins(4, 4, 4, 4);
-    list_ = new QListWidget(listPanel);
+    list_ = new SheetListWidget(listPanel);
     list_->setObjectName(QStringLiteral("sheetList"));
     listLayout->addWidget(list_);
     auto* buttons = new QHBoxLayout();
@@ -838,8 +1358,12 @@ SheetEditor::SheetEditor(katana::cad::Document& document, SourceProvider source,
     statusBar()->addWidget(status_, 1);
 
     buildActions();
+    setUpEditing();
 
-    canvas_->onSelectionChanged = [this](const std::string&) { rebuildProperties(); };
+    canvas_->onSelectionChanged = [this](const std::string&) {
+        rebuildProperties();
+        updateEditActions();
+    };
     canvas_->onContextMenu = [this](const QPointF& global, const std::string& id) {
         showContextMenu(global, id);
     };
@@ -941,6 +1465,7 @@ void SheetEditor::buildActions()
 
     bar->addSeparator();
     QAction* fit = bar->addAction(icon(Icon::ZoomExtents), QStringLiteral("Fit Page"));
+    fit->setObjectName(QStringLiteral("sheetFitPage"));
     fit->setShortcut(QKeySequence(Qt::Key_Home));
     connect(fit, &QAction::triggered, this, [this] { canvas_->fitPage(); });
 
@@ -976,7 +1501,7 @@ void SheetEditor::rebuildList()
         const Sheet& sheet = set.sheets[i];
         const std::string number =
             plotting::formatSheetNumber(set.numbering, i + 1, set.sheets.size(), set.defaults.setNumber);
-        list_->addItem(QString("%1   %2   (%3 %4)")
+        list_->addItem(QString("%1   %2\n%3 %4")
                            .arg(QString::fromStdString(number),
                                 QString::fromStdString(sheet.name), paperName(sheet.paper),
                                 sheet.landscape ? QStringLiteral("landscape")
@@ -987,6 +1512,7 @@ void SheetEditor::rebuildList()
     }
     rebuilding_ = false;
     canvas_->setSheet(keep);
+    refreshThumbnails();
 }
 
 void SheetEditor::rebuildProperties()
@@ -1024,6 +1550,16 @@ void SheetEditor::rebuildProperties()
                 report(QString::fromStdString(s.error().describe()), true);
             }
         };
+        if (const std::size_t count = canvas_->selectedIds().size(); count > 1) {
+            auto* group = new QLabel(QString("%1 views selected: a drag, the arrows, Delete, Copy and "
+                                             "Duplicate act on them all. These properties are %2's.")
+                                         .arg(count)
+                                         .arg(QString::fromStdString(id)),
+                                     panel);
+            group->setObjectName(QStringLiteral("sheetSelectionNote"));
+            group->setWordWrap(true);
+            layout->addWidget(group);
+        }
         auto* box = new QGroupBox(kindName(v.kind) + QString("  (%1)").arg(QString::fromStdString(v.id)), panel);
         auto* form = new QFormLayout(box);
 
@@ -1410,6 +1946,13 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
             }, "RESIZE_VIEWPORT");
         });
         menu.addSeparator();
+        // The Edit and View menus' own actions, shortcuts and all.
+        for (const char* name : {"sheetCut", "sheetCopy", "sheetDuplicateViews", "sheetZoomSelection"}) {
+            if (QAction* a = findChild<QAction*>(QString::fromLatin1(name))) {
+                menu.addAction(a);
+            }
+        }
+        menu.addSeparator();
         menu.addAction(QStringLiteral("Delete"), this, [this] { (void)removeSelectedViewport(); });
     } else {
         QMenu* add = menu.addMenu(QStringLiteral("Add View"));
@@ -1424,6 +1967,11 @@ void SheetEditor::showContextMenu(const QPointF& global, const std::string& view
                              [this, preset] { (void)tile(preset); });
         }
         menu.addSeparator();
+        for (const char* name : {"sheetPaste", "sheetSelectAll"}) {
+            if (QAction* a = findChild<QAction*>(QString::fromLatin1(name))) {
+                menu.addAction(a);
+            }
+        }
         menu.addAction(QStringLiteral("Fit Page"), this, [this] { canvas_->fitPage(); });
     }
     menu.exec(global.toPoint());
@@ -1566,14 +2114,12 @@ Status SheetEditor::addViewport(ViewportKind kind)
 
 Status SheetEditor::removeSelectedViewport()
 {
-    const std::string id = canvas_->selected();
-    if (id.empty()) {
+    const std::vector<std::string> ids = canvas_->selectedIds();
+    if (ids.empty()) {
         return {};
     }
-    return plotting::editSheet(document_, currentSheet(), [&id](Sheet& s) {
-        std::erase_if(s.viewports, [&id](const Viewport& v) { return v.id == id; });
-        return Status{};
-    }, "REMOVE_VIEWPORT");
+    return plotting::removeViewports(document_, currentSheet(), ids,
+                                     ids.size() == 1 ? "REMOVE_VIEWPORT" : "REMOVE_VIEWPORTS");
 }
 
 Status SheetEditor::tile(TilingPreset preset)
