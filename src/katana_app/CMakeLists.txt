@@ -314,7 +314,11 @@ if(KATANA_BUILD_TESTS)
     # UTILITY CHECK against a schema written by hand, as any client's can be
     # (delivery_schema.hpp): the sample gives each service's material once,
     # so the rows after the first are empty - 11 errors. The whole check is
-    # shown, and the script fails, so a delivery can be gated on it.
+    # shown, and the script fails, so a delivery can be gated on it. The
+    # refusal's one line goes to stderr and the check to stdout, which ctest
+    # merges in no fixed order, so the check is matched on its own; which
+    # stream takes what is pinned in tests/app/test_session.cpp, by
+    # Session.ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes.
     set(_example_schema "${CMAKE_CURRENT_BINARY_DIR}/cli-utility-schema.csv")
     file(WRITE "${_example_schema}"
         "kind,attribute,value,detail,label\n"
@@ -328,7 +332,7 @@ if(KATANA_BUILD_TESTS)
                 -c "UTILITY CHECK \"${_utilities}/schedule.csv\" SCHEMA \"${_example_schema}\"")
     set_tests_properties(cli.utility_check_with_errors_shows_the_whole_check PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "the schedule does not meet the schema: 11 errors${_eol}Delivery schema check against Example Services Schema v1${_eol}14 rows, 4 assets \\(line\\): 11 errors, 0 warnings.*material is empty \\(11 rows")
+        "Delivery schema check against Example Services Schema v1${_eol}14 rows, 4 assets \\(line\\): 11 errors, 0 warnings.*material is empty \\(11 rows")
     add_test(NAME cli.utility_check_with_errors_fails_the_script
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli>
