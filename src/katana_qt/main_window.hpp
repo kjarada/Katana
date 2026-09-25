@@ -325,7 +325,13 @@ class MainWindow final : public QMainWindow {
     void cutSectionAlong(katana::geometry::Polyline2 alignment, const QString& along,
                          const katana::geometry::SolvedProfile* profile = nullptr,
                          const std::string& profileName = {});
-    void setVerticalExaggeration();
+    // View > Vertical Exaggeration: the factor asked for in a box, then the
+    // EXAGGERATION line run through the one executor; headless, refused with
+    // the line to type instead.
+    void askVerticalExaggeration();
+    // EXAGGERATION <factor>: elevations in the 3D and section views times
+    // `factor`, about the middle of the data.
+    void setVerticalExaggeration(double factor);
     void buildDocks();
     void buildReferenceDock();
     void buildStatusBar();
@@ -439,18 +445,32 @@ class MainWindow final : public QMainWindow {
     bool saveDocument();
     bool saveDocumentAs();
 
-    // Enter on the command line: the typed line echoed, then offered to the
-    // workbenches' verbs, to a running tool and to dispatchLine, in that order.
+    // Enter on the command line: what the field holds, one line (runTypedLine)
+    // or several - a paste, which a tool waiting for text takes a line at a
+    // time (typeLinesIntoTool) and anything else runs as a script
+    // (runPastedLines).
     void runCommandLine();
+    // One typed line: echoed, then offered to the workbenches' verbs, to a
+    // running tool and to dispatchLine, in that order.
+    void runTypedLine(const QString& line);
+    // Several lines given while a tool waits for text - a text's lines, pasted
+    // at its prompt: each typed in turn, blank lines left out, so none of
+    // them is run as a command.
+    void typeLinesIntoTool(const QString& text);
     // The ONLINE and UTILITY verbs, run by their workbenches; false leaves the
     // line to whoever asked.
     bool runWorkbenchLine(const QString& line);
+    // Who a line came from. Only a person's typed line starts a tool by a
+    // bare word; a script's, a paste's or a dialog's is the interpreter's, as
+    // katana_cli runs the same line.
+    enum class LineSource { Typed, Executor };
     // Everything a line can be once no tool took it: a '#' comment, a view
-    // verb, the window's own verbs (SCRIPT, CUSTOMISE, IMPORT, EXPORT,
-    // INFO <file>, REFS, COPC, PLOTSHEETS), a tool's alias, or the
-    // interpreter's. Shared by the typed line and runVerbLine, so the two
-    // cannot come to differ.
-    void dispatchLine(const QString& line);
+    // verb (ZOOM, GRID, SNAP, EXAGGERATION), the window's own verbs (SCRIPT,
+    // CUSTOMISE, IMPORT, EXPORT, INFO <file>, REFS, COPC, PLOTSHEETS, PLOT,
+    // SNAPSHOT, HELP), a tool's alias when typed, or the interpreter's.
+    // Shared by the typed line and runVerbLine, so the two differ only where
+    // `source` says.
+    void dispatchLine(const QString& line, LineSource source);
     // The part of the command line that is the CommandInterpreter's, for a
     // line no tool and no view verb took; `verb` is its first word, upper
     // case.

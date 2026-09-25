@@ -72,9 +72,9 @@ struct ReferenceSection {
 // help, and the reference shows it as its Window section.
 [[nodiscard]] QString windowHelpText();
 
-// Every section of the reference: the interpreter's commands, annotation,
-// sheets, subsurface utilities, online data, the window's own verbs, and the
-// tools by menu.
+// Every section of the reference: the interpreter's commands (the annotation
+// verbs among them), sheets, subsurface utilities, online data, the window's
+// own verbs, and the tools by menu.
 [[nodiscard]] std::vector<ReferenceSection> commandReferenceSections();
 
 class CommandReferenceDialog final : public QDialog {

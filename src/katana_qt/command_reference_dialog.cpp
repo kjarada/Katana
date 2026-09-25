@@ -138,10 +138,13 @@ QString windowHelpText()
     // In the interpreter's layout, so the typed HELP reads as one text.
     return R"(Window    the verbs the desktop window's command line runs itself, beside the
           interpreter's. IMPORT, EXPORT, INFO <file>, REFS, COPC and CUSTOMISE are
-          katana_cli's too; the rest are the window's alone
+          katana_cli's too, and UTILITY is the interpreter's, run here through the
+          utilities workbench; the rest are the window's alone, which katana_cli and
+          katana_mcp refuse by name
 Script    SCRIPT <file.kcs> [CONTINUE]   run a katana_cli script a line at a time, stopping
           at the first line refused unless CONTINUE (File > Run Script); a line starting
-          with # is a note and runs nothing; several lines pasted run as a script
+          with # is a note and runs nothing; several lines pasted run as a script, but
+          pasted at a prompt for text (Text, Multiline Text) they are its lines
 Import    IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]   a drawing, vector data, a
           raster or a point cloud, by its extension; vector data, a .12da archive or a DXF
           moves as one piece: LOCAL puts its lower-left corner at 0,0, ALONGSIDE on the
@@ -161,14 +164,20 @@ Plot      PLOT <file.pdf> [paper=A0..A4] [landscape|portrait] [fit|scale=N] [dpi
 Snapshot  SNAPSHOT <file.png|.jpg|.tif> | CLIPBOARD [width=N] [height=N] [scale=F]
           [bg=theme|white|none] [view=plan|3d]   a picture of a view (File > Export View
           as Image, Edit > Copy View as Image)
-View      ZOOM (Z)   the drawing's extents | GRID [ON|OFF] | SNAP [ON|OFF] (OSNAP)
+View      ZOOM (Z)   the drawing's extents | GRID [ON|OFF] | SNAP [ON|OFF] (OSNAP) |
+          SNAP <mode> [ON|OFF]   one of View > Snap Modes: Endpoint, Midpoint, Center,
+          Intersection, Perpendicular, Tangent, Nearest, Grid | EXAGGERATION [factor]
+          elevations in the 3D and section views times 0.01 to 1000 (View > Vertical
+          Exaggeration); alone, the factor now
 Online    ONLINE PROVIDERS | LAYERS | INFO | IMPORT | CUSTOM | KEY   online data (GIS >
           Online Data); the usage of each is under Online data
 Utility   UTILITY REPORT|VERIFY|CLEARANCE|CHECK|DRAW   subsurface utilities (HELP UTILITY)
 Quit      QUIT | EXIT   close the window; in a script, end the script
-Tools     a bare tool word starts the tool: LINE, L, C, TR, or an id such as
-          draw.circle.ttr; with arguments it is the interpreter's (LINE 0,0 10,0). A bare
-          LS starts the List tool here, where katana_cli reads LS as LABELSTYLE)";
+Tools     a bare tool word typed here starts the tool: LINE, L, C, TR, or an id such as
+          draw.circle.ttr; with arguments it is the interpreter's (LINE 0,0 10,0), and so
+          is a script's, a paste's or a dialog's line, as katana_cli runs it (ERASE there
+          erases the selection). A bare LS typed starts the List tool, where katana_cli
+          reads LS as LABELSTYLE)";
 }
 
 std::vector<ReferenceSection> commandReferenceSections()

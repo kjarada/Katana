@@ -1500,6 +1500,34 @@ if(TARGET katana)
             "-DEXPECT=rectangle created[\r\n]+[^!]*! InvalidGeometry[^\r\n]*[\r\n]+script=pasted lines=3 ran=2 failed=1 stopped_at=2[\r\n]+! The pasted lines stopped at line 2, which was refused: CIRCLE 0,0 -1[\r\n]+1 entities"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pasted_lines_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The same lines pasted while Text waits for its words are those words: a
+    # line at a time, the blank one between them left out, so the text has
+    # two lines and "RECT 0,0 5,5" draws nothing. As a script, the rectangle
+    # was drawn and the second line refused as an unknown command.
+    add_test(NAME qt_lines_pasted_at_a_text_prompt_are_the_texts_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>DT|>0,0|>2.5|>0|>RECT 0,0 5,5\n\nsecond line|>"
+            "-DEXPECT=2 lines of text"
+            "-DFORBID=rectangle created|unknown command|pasted lines|stopped at"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pasted_text_lines_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A script's bare tool word is the interpreter's, as katana_cli runs it:
+    # ERASE erases the selection, and MOVE with nothing selected is refused.
+    # The window once started the Erase and Move tools for them, erased
+    # nothing, and counted every line run.
+    set(_bare_words "${CMAKE_CURRENT_BINARY_DIR}/qt_scripts/bare_tool_words.kcs")
+    file(WRITE "${_bare_words}"
+        "RECT 0,0 10,10\nSELECT ALL\nERASE\nLIST\nCIRCLE 0,0 5\nMOVE\n")
+    add_test(NAME qt_a_scripts_bare_tool_word_runs_as_katana_cli_runs_it_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SCRIPT \"${_bare_words}\" CONTINUE|>LIST"
+            "-DEXPECT=1 erased[\r\n]+0 entities[\r\n]+circle created[\r\n]+! InvalidState: nothing is selected[^\r\n]*[\r\n]+script=\"[^\"]*/bare_tool_words\\.kcs\" lines=6 ran=6 failed=1[\r\n]+.*1 entities[\r\n]+2  Circle"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/script_bare_tool_words_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # Without --screenshot, --script is a batch run as katana_cli's is: never
     # shown, over when its steps are, 0 when every line ran and 1 at the first
     # refused.
@@ -1518,6 +1546,8 @@ if(TARGET katana)
         qt_run_script_dialog_runs_the_line_it_shows_headless
         qt_a_dialogs_script_line_gets_back_what_every_line_said_headless
         qt_several_lines_on_the_command_line_run_as_a_script_headless
+        qt_lines_pasted_at_a_text_prompt_are_the_texts_lines_headless
+        qt_a_scripts_bare_tool_word_runs_as_katana_cli_runs_it_headless
         qt_script_batch_run_exits_when_the_script_is_done_headless
         qt_script_batch_run_fails_at_a_refused_line_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
@@ -1673,7 +1703,24 @@ if(TARGET katana)
             "-DFORBID=\\(modal\\)|no such menu item|not an entity id"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/select_by_id_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # The rest of the View menu by name, and the values a click cannot carry
+    # typed. A snap mode toggled by its name, then set by SNAP <mode>; SNAP
+    # ENDPOINT OFF leaves object snap on (it once turned it off); an unknown
+    # word is refused; the quad layout, a standard view and perspective by
+    # name; EXAGGERATION sets and reports the factor; Vertical Exaggeration,
+    # headless, says to type the line rather than open a box nobody can
+    # answer; a Panels toggle by name.
+    add_test(NAME qt_every_view_menu_item_is_named_and_its_values_are_typed_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=?viewSnapModeEndpoint|*viewSnapModeEndpoint|?viewSnapModeEndpoint|>SNAP ENDPOINT ON|?viewSnapModeEndpoint|>SNAP CENTRE OFF|>SNAP ENDPOINT OFF|?viewSnap|>SNAP BOGUS|>GRID MAYBE|*viewLayoutQuad|*viewStandardIsoSouthWest|*viewTogglePerspective|>EXAGGERATION 2.5|>EXAGGERATION|>EXAGGERATION 0|*viewVerticalExaggeration|*viewPanelLayers|?viewPanelLayers"
+            "-DEXPECT=viewSnapModeEndpoint: Endpoint, checked[\r\n]+viewSnapModeEndpoint: Endpoint, unchecked[\r\n]+snap_mode=endpoint state=on[\r\n]+viewSnapModeEndpoint: Endpoint, checked[\r\n]+snap_mode=center state=off[\r\n]+snap_mode=endpoint state=off[\r\n]+viewSnap: Object Snap, checked[\r\n]+! usage: SNAP [^\r\n]*[\r\n]+! usage: GRID [^\r\n]*[\r\n]+(Orthographic|Perspective) projection\\.[\r\n]+Vertical exaggeration x2\\.50\\.[\r\n]+vertical_exaggeration=2\\.5[\r\n]+! usage: EXAGGERATION [^\r\n]*[\r\n]+! A headless session opens no dialog: type EXAGGERATION <factor> instead\\.[\r\n]+viewPanelLayers: Layers, unchecked"
+            "-DFORBID=no such menu item|No 3D viewport"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/view_menu_named_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     set_tests_properties(qt_select_by_id_selects_and_frames_headless
+        qt_every_view_menu_item_is_named_and_its_values_are_typed_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

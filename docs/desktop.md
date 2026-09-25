@@ -117,9 +117,33 @@ kept, like Format > Layers, so several lookups need no reopening, and
 **Every Edit and View action has an object name**, so `--trigger` and
 `--report` reach it as a person's click does: `editUndo`, `editRedo`,
 `editSelectAll`, `editDeselect`, `editSelectById`, `editErase`,
-`editAttributes`, `viewZoomExtents`, `viewGrid` and `viewSnap`. Until
-2026-09-26 Undo, Redo, Select All, Erase Selection, Zoom Extents, Grid and
-Object Snap had none, and a headless run could not reach them.
+`editAttributes`, `viewZoomExtents`, `viewGrid` and `viewSnap`; the snap
+modes `viewSnapModeEndpoint` to `viewSnapModeGrid` (by their menu names:
+Endpoint, Midpoint, Center, Intersection, Perpendicular, Tangent, Nearest,
+Grid); the viewport layouts `viewLayoutSingle`, `viewLayoutSplitVertical`,
+`viewLayoutSplitHorizontal`, `viewLayoutThreeLeft`, `viewLayoutThreeTop` and
+`viewLayoutQuad`; `viewShowsPlan` and the other Active Viewport Shows items;
+the standard 3D views `viewStandardTop`, `Bottom`, `Front`, `Back`, `Left`,
+`Right`, `IsoSouthWest`, `IsoSouthEast`, `IsoNorthEast` and `IsoNorthWest`;
+`viewTogglePerspective`; `viewVerticalExaggeration`; and the Panels toggles
+`viewPanelLayers`, `viewPanelProperties`, `viewPanelCommandLine` and
+`viewPanelReferenceData`. Until 2026-09-26 Undo, Redo, Select All, Erase
+Selection, Zoom Extents, Grid and Object Snap had none, and a headless run
+could not reach them; the rest of the View menu had none after that either,
+while this paragraph said it had.
+
+The values a click cannot carry are typed: `SNAP <mode> [ON|OFF]` sets one
+snap mode, as its menu item does, and `EXAGGERATION [factor]` sets the
+vertical exaggeration (0.01 to 1000), or alone says it as a record,
+`vertical_exaggeration=2`. View > Vertical Exaggeration asks in a box and runs
+that line through the one executor; in a headless run it asks nothing and
+says to type the line, since `--trigger` now reaches it and the box would
+wait for ever.
+`GRID` and `SNAP` take `ON`, `OFF` or nothing (a toggle) and refuse any other
+word - every other word once meant `OFF`, so `SNAP ENDPOINT OFF` turned
+object snap off altogether - and say what they did (`grid=on`, `snap=off`,
+`snap_mode=endpoint state=off`)
+(`qt_every_view_menu_item_is_named_and_its_values_are_typed_headless`).
 
 Two rendering details are worth noting. Arcs and circles are tessellated in
 *model* space with a chord count chosen for a sub-quarter-pixel sagitta, so a
@@ -949,7 +973,12 @@ through one function, `MainWindow::runScript`
 Each line is run by `runVerbLine`, as a dialog's line is: echoed, kept in the
 history, its own undo step as in `katana_cli`, and never a running tool's
 answer - a script names its points (`LINE 0,0 10,0`, not `LINE` and then its
-points). The run stops at the first line refused unless `CONTINUE` (the
+points). Nor does a bare tool word in it start the tool, as a typed one does
+(`MainWindow::LineSource`): `ERASE` alone is the interpreter's, erasing the
+selection as `katana_cli` does, and `MOVE` alone is refused for want of its
+arguments there as here. The window once started the Erase tool for it, erased
+nothing, and still reported every line run and exited 0
+(`qt_a_scripts_bare_tool_word_runs_as_katana_cli_runs_it_headless`). The run stops at the first line refused unless `CONTINUE` (the
 dialog's `scriptContinueOnError`) is given, and ends with a record:
 `script="<file>" lines=N ran=N failed=N`, with `stopped_at=K` (the file's line
 number), `quit_at=K` or `cancelled_at=K` when it ended early, and an error
@@ -971,7 +1000,14 @@ command line (Ctrl+V with line breaks in the clipboard, or a context-menu
 paste and then Enter) run at once as a script that stops at the first
 refused, `script=pasted` in its record; whatever was typed before the paste
 starts the first line. The single-line field used to show the breaks as
-blanks and run the whole as one line of nonsense.
+blanks and run the whole as one line of nonsense. Pasted while a tool waits
+for typed text - the lines of a Text or a Multiline Text - they are that text
+instead (`MainWindow::typeLinesIntoTool`): each line typed in turn, as though
+typed and entered, and a blank line left out, since to Text it is the Enter
+that finishes and a paragraph break in what was copied is not. Run as a
+script, a label's words were once taken for commands - `RECT 0,0 5,5` pasted
+as a text's first line drew a rectangle, and its second line was refused
+(`qt_lines_pasted_at_a_text_prompt_are_the_texts_lines_headless`).
 
 Tested in `tests/qt_widgets/test_script_runner.cpp` (reading, the stopping
 rules, the record, the dialog) and through the real window by
@@ -999,8 +1035,9 @@ own code keeps, so nothing is written twice:
 - **Online data**: `interop::onlineUsage`;
 - **Window**: `windowHelpText`, the verbs `MainWindow::dispatchLine` and
   `runWorkbenchLine` take before the interpreter (`SCRIPT`, `IMPORT`,
-  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `CUSTOMISE`, `PLOTSHEETS`, `ZOOM`,
-  `GRID`, `SNAP`, `ONLINE`, `UTILITY`, `QUIT`), and the rule for a bare tool
+  `EXPORT`, `INFO <file>`, `REFS`, `COPC`, `CUSTOMISE`, `PLOTSHEETS`, `PLOT`,
+  `SNAPSHOT`, `ZOOM`, `GRID`, `SNAP`, `EXAGGERATION`, `ONLINE`, `UTILITY`,
+  `QUIT`, and `HELP`, which adds this section to the interpreter's), and the rule for a bare tool
   word - with the one word that means different things on the two command
   lines: a bare `LS` starts the List tool in the window and is `LABELSTYLE`
   in `katana_cli`;
