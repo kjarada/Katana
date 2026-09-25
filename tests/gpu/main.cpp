@@ -9,10 +9,12 @@ int main(int argc, char** argv)
 {
     // Offscreen, as every Katana Qt test runs: it is the platform the
     // fallback rules are written for, and raw QRhi on Direct3D 11 renders
-    // into textures under it all the same. KATANA_GPU_TEST_PLATFORM=windows
-    // runs them on the desktop platform instead, where the cases that need a
-    // real QRhiWidget (test_gpu_scene_view.cpp) stop skipping; ctest never
-    // sets it, because a headless runner has no desktop.
+    // into textures under it all the same. KATANA_GPU_TEST_PLATFORM names
+    // another: windows runs them on the desktop, where the cases that need a
+    // real QRhiWidget (test_gpu_scene_view.cpp) stop skipping - by hand,
+    // since a headless runner has no desktop; xcb is what ctest sets on
+    // Linux, under Xvfb, because Qt's offscreen platform cannot make the
+    // Vulkan instance every device case needs (tests/gpu/CMakeLists.txt).
     const QByteArray platform = qEnvironmentVariableIsSet("KATANA_GPU_TEST_PLATFORM")
                                     ? qgetenv("KATANA_GPU_TEST_PLATFORM")
                                     : QByteArray("offscreen");

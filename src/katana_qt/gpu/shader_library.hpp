@@ -2,25 +2,25 @@
 
 // Where the GPU renderer's shaders come from (docs/gpu.md, "Shaders").
 //
-// TODAY: HLSL source. QRhi accepts a QShader holding HLSL text and its
+// WINDOWS: HLSL source. QRhi accepts a QShader holding HLSL text and its
 // Direct3D 11 backend compiles it with d3dcompiler_47.dll - part of every
-// Windows 10 and 11 install - when the pipeline is created. No build-time
-// tool and no package: the price is Direct3D 11 only, and a compile on the
-// first frame (docs/gpu.md, "Measurements", BM_GpuStartUp).
+// Windows 10 and 11 install; Katana calls that compiler itself, once per
+// process (shader_compiler.hpp). No build-time tool and no package, at the
+// price of a compile on the first frame (docs/gpu.md, "Measurements",
+// BM_GpuStartUp).
 //
-// LATER: precompiled shaders. Qt's `qsb` tool (package qt6-shadertools, not
-// installed; the owner has not approved adding it) turns one Vulkan-style GLSL
-// source into a .qsb holding SPIR-V, GLSL, HLSL/DXBC and MSL at build time.
-// Those bytes would be embedded like the customisation (tools/
-// embed_customisation.py: no rcc, no moc) and handed to
-// SerializedShaderLibrary below, and the renderer would not change - it only
-// ever asks a ShaderLibrary for a program. That would add the Vulkan, Metal
-// and OpenGL backends (Linux and macOS), skip the first-frame compile, and
-// catch a shader error at build time instead of at the first frame. One
-// caveat: qsb cannot translate a GEOMETRY shader into HLSL or MSL, so the
-// geometry stage of Expansion::GeometryShader would still be this file's
-// hand-written HLSL (qsb takes it with --replace), and Metal, which has no
-// geometry stage, would draw with Expansion::Instanced.
+// LINUX: precompiled shaders. Qt's `qsb` tool (Qt6ShaderTools, part of the
+// Linux toolchain) turns the Vulkan-style GLSL in shaders/ into a .qsb of
+// SPIR-V per stage at build time; the bytes are embedded with #embed and
+// handed to SerializedShaderLibrary below (baked_shaders.hpp). The renderer
+// does not change - it only ever asks a ShaderLibrary for a program.
+//
+// The two sets are written to draw the same thing, stage for stage; the
+// tests hold each to the software rasteriser on its own platform. qsb could
+// also bake the GLSL to HLSL for Windows, except the GEOMETRY stages, which
+// it cannot translate to HLSL or MSL: that is why the HLSL stays hand-written
+// rather than generated, and why Metal, which has no geometry stage, would
+// draw with Expansion::Instanced.
 
 #include <array>
 #include <string>
@@ -84,6 +84,11 @@ class ShaderLibrary {
     [[nodiscard]] virtual std::string describe() const = 0;
 };
 
+// The library this build draws with: HLSL compiled to bytecode once per
+// process on Windows (compiledHlslShaders), SPIR-V baked at build time on
+// Linux (bakedShaders).
+[[nodiscard]] const ShaderLibrary& defaultShaders();
+
 // HLSL source (shader model 5.0) compiled at run time. Direct3D 11 only.
 [[nodiscard]] const ShaderLibrary& runtimeHlslShaders();
 
@@ -92,9 +97,9 @@ class ShaderLibrary {
 [[nodiscard]] const char* hlslSource(Program program, Expansion expansion, QShader::Stage stage);
 
 // Shaders serialized by qsb (QShader::serialize), one blob per stage of each
-// program and expansion. Not used by the build today; it is the seam
-// precompiled shaders plug into. A blob that does not deserialize is reported
-// when the program is asked for, not ignored.
+// program and expansion: what the Linux build's baked shaders are. A blob
+// that does not deserialize is reported when the program is asked for, not
+// ignored.
 class SerializedShaderLibrary final : public ShaderLibrary {
   public:
     struct Blobs {

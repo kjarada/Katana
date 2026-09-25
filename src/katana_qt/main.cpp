@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <optional>
+#include <thread>
 
 #include "icons.hpp"
 #include "attribute_manager.hpp"
@@ -32,6 +33,10 @@
 #include "theme.hpp"
 #include "main_window.hpp"
 #include "plotting/plot_output.hpp"
+#if defined(KATANA_GPU_D3D11)
+#include "gpu/renderer_choice.hpp"
+#include "gpu/shader_compiler.hpp"
+#endif
 
 namespace {
 
@@ -388,6 +393,19 @@ bool fillField(QWidget& dialog, const QString& assignment)
 int main(int argc, char* argv[])
 {
     QApplication application(argc, argv);
+#if defined(KATANA_GPU_D3D11)
+    // The HLSL compiled on a worker while the window is built, so the first
+    // GPU 3D view finds its bytecode ready (docs/gpu.md, "Shaders"; the
+    // compile is 110-175 ms) - only when a 3D view would be drawn on the GPU,
+    // so a headless run neither pays for it nor waits for it at exit. The
+    // library caches it for the process and is safe from any thread. Joined
+    // when main returns.
+    std::jthread precompile;
+    if (katana::qt::gpu::chooseRenderer(katana::qt::gpu::currentRendererEnvironment(false, false))
+            .kind == katana::qt::gpu::RendererKind::Gpu) {
+        precompile = std::jthread([] { (void)katana::qt::gpu::precompileHlslShaders(); });
+    }
+#endif
     application.setApplicationName("Katana");
     application.setOrganizationName("Katana");
     application.setApplicationVersion(KATANA_VERSION);

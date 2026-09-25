@@ -121,6 +121,13 @@ path: its own contexts, and GDAL's (so PDAL's). An explicit `PROJ_DATA` still
 wins, and a distribution's PROJ, whose compiled-in path is right, is left to
 it.
 
+**The GPU renderer** is built on Linux too, on Vulkan, its shaders baked at
+build time by the prefix's `qsb` (`docs/gpu.md`). The 3D view uses it on the
+`xcb` and `wayland` platforms. Its tests need a display and a Vulkan device:
+ctest runs them under `xvfb-run` when it is installed, on Mesa's lavapipe
+where there is no GPU (Debian and Ubuntu: `xvfb`, `mesa-vulkan-drivers`), and
+they skip without them.
+
 What is Windows-only: `KATANA_DEPLOY_RUNTIME` and the `bundle` and `package`
 targets (the Linux build tree runs from its run-time path), and the
 customisation compiled in from `resources/customisation/`, which is
@@ -128,7 +135,8 @@ third-party material kept out of the repository - the tests that need it
 skip without it, on every platform.
 
 **Claude Code cloud sessions** run `.claude/hooks/session-start.sh` when they
-start: it runs the setup script into `/opt/katana-toolchain`, puts the
+start: it runs the setup script into `/opt/katana-toolchain`, installs Xvfb
+and Mesa's Vulkan drivers for the GPU tests when it can, puts the
 prefix's `cmake`, `ctest`, `ninja` and `clang-format` on `PATH`, configures
 `build/linux-release`, and tells the session how to build and test. The
 container is kept after the hook, so the toolchain is downloaded once and

@@ -18,9 +18,18 @@
 //   * optionally, lighting per pixel from face normals (LightingMode);
 //   * vertical exaggeration as a uniform, so changing it rebuilds nothing.
 //
-// UPLOADS happen only when the scene changes. setDrawList packs the list
-// (gpu_scene.hpp) and marks it dirty; the next render() uploads it once. Every
-// other frame writes one 160-byte uniform block - the camera - and draws.
+// LAYERS. A scene is one or more draw lists drawn in order into one depth
+// buffer, each with its own depth rule - the GPU twin of cad::renderLayers,
+// which the 3D view draws its grid, terrain, edges, drawing and selection
+// with (the grid and the edges test depth but do not write it; scene.hpp has
+// why). Every layer is packed against ONE origin, the centre of their joint
+// bounds, so one uniform block serves them all. setDrawList is the one-layer
+// case.
+//
+// UPLOADS happen only when the scene changes. setLayers packs every layer
+// (gpu_scene.hpp) and updateLayer one, marking what changed dirty; the next
+// render() uploads only that. Every other frame writes one 160-byte uniform
+// block - the camera - and draws.
 //
 // The renderer owns no render target. It is handed a QRhi, a render pass
 // descriptor to build pipelines against, and each frame a command buffer and
@@ -29,12 +38,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 
 #include "gpu_scene.hpp"
 #include "katana/core/error.hpp"
 #include "katana/render/camera.hpp"
 #include "katana/render/draw_list.hpp"
-#include "shader_compiler.hpp"
 #include "shader_library.hpp"
 
 class QRhi;
@@ -91,6 +100,14 @@ struct GpuFrameStats {
     std::size_t uploadedBytes = 0;
 };
 
+// One pass of a layered scene (GpuRenderer::setLayers).
+struct LayerSource {
+    const katana::render::DrawList* list = nullptr; // null or empty: nothing drawn
+    // False for a layer that is tested against the depth drawn before it but
+    // writes none: cad::renderLayers' grid and edges.
+    bool depthWrite = true;
+};
+
 class GpuRenderer {
   public:
     GpuRenderer();
@@ -106,7 +123,7 @@ class GpuRenderer {
     // rather than drawing nothing.
     [[nodiscard]] katana::core::Status
     initialise(QRhi* rhi, QRhiRenderPassDescriptor* pass, int sampleCount,
-               const ShaderLibrary& shaders = compiledHlslShaders(),
+               const ShaderLibrary& shaders = defaultShaders(),
                Expansion preferred = Expansion::GeometryShader);
     // Drops every GPU resource (the QRhi is going away, or the target format
     // changed). The packed scene is kept and re-uploaded after initialise().
@@ -115,11 +132,27 @@ class GpuRenderer {
     // How lines and points are widened since initialise().
     [[nodiscard]] Expansion expansion() const;
 
-    // Packs `list` for the GPU; it is uploaded by the next render().
+    // Packs `list` for the GPU as the one layer of the scene, writing depth;
+    // it is uploaded by the next render().
     void setDrawList(const katana::render::DrawList& list);
-    // Takes an already packed scene (a test that fixes the origin).
+    // Packs every layer, in drawing order, against the centre of their joint
+    // bounds; uploaded by the next render().
+    void setLayers(std::span<const LayerSource> layers);
+    // Repacks layer `index` alone, against the origin the last setLayers
+    // chose, keeping its depth rule: for a layer that changed without the
+    // rest - a selection, edges recoloured by their fade. Its content should
+    // lie within the scene setLayers was given (a selection within the
+    // drawing), or its offsets from the origin lose precision. An index past
+    // the layers is ignored.
+    void updateLayer(std::size_t index, const katana::render::DrawList& list);
+    // Takes an already packed scene as the one layer (a test that fixes the
+    // origin).
     void setScene(GpuSceneData scene);
+    // The first layer as packed (an empty scene when there is none).
     [[nodiscard]] const GpuSceneData& scene() const;
+    [[nodiscard]] std::size_t layerCount() const;
+    // The world box of every layer together: what a view frames.
+    [[nodiscard]] katana::math::AABB sceneBounds() const;
 
     // Point clouds, drawn after the scene as round sprites.
     void setPointCloud(PointCloudData cloud);

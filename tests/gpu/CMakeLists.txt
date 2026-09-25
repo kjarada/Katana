@@ -19,6 +19,7 @@ add_executable(katana_gpu_tests
     test_gpu_scene.cpp
     test_renderer_choice.cpp
     test_gpu_render.cpp
+    test_gpu_layers.cpp
     test_gpu_scene_view.cpp
 )
 target_include_directories(katana_gpu_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -30,10 +31,39 @@ if(WIN32)
     set_property(TARGET katana_gpu_tests PROPERTY TEST_LAUNCHER
         ${CMAKE_COMMAND} -E env --modify "PATH=path_list_prepend:${KATANA_RUNTIME_BIN}")
 endif()
+# The platform the suite runs on (tests/gpu/main.cpp reads it). Windows:
+# offscreen, where raw QRhi on Direct3D 11 still renders into textures.
+# Linux: Qt's offscreen platform cannot make a Vulkan instance, so the suite
+# runs on xcb under Xvfb - which also lets the "OnTheDesktop" cases draw a
+# real QRhiWidget, on lavapipe when there is no GPU. Without xvfb-run the
+# suite runs offscreen and every case that needs a device skips, saying so.
+set(_katana_gpu_platform "offscreen")
+if(NOT WIN32)
+    find_program(KATANA_XVFB_RUN xvfb-run
+        DOC "Runs the Vulkan GPU tests under a virtual X server (Debian/Ubuntu: xvfb)")
+    if(KATANA_XVFB_RUN)
+        set_property(TARGET katana_gpu_tests PROPERTY TEST_LAUNCHER
+            "${KATANA_XVFB_RUN}" -a -s "-screen 0 1280x1024x24")
+        set(_katana_gpu_platform "xcb")
+    else()
+        message(STATUS "xvfb-run not found: the Vulkan GPU tests will skip their device cases")
+    endif()
+endif()
 gtest_discover_tests(katana_gpu_tests
     TEST_PREFIX "gpu."
     DISCOVERY_MODE PRE_TEST
     DISCOVERY_TIMEOUT 60
     PROPERTIES ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen;KATANA_GPU_TEST_PLATFORM=set:${_katana_gpu_platform}"
 )
+if(NOT _katana_gpu_platform STREQUAL "offscreen")
+    # What the widget tells its host under the offscreen platform, where every
+    # headless Katana run happens: the one case the xcb run skips.
+    add_test(NAME gpu_offscreen.GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack
+        COMMAND katana_gpu_tests
+            --gtest_filter=GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack)
+    set_tests_properties(
+        gpu_offscreen.GpuSceneView.UnderTheOffscreenPlatformReportsThatItCannotRenderSoTheHostFallsBack
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "QT_QPA_PLATFORM=set:offscreen;KATANA_GPU_TEST_PLATFORM=set:offscreen")
+endif()

@@ -30,6 +30,17 @@ const char* toString(RendererKind kind)
     return "unknown";
 }
 
+const char* toString(GpuBackend backend)
+{
+    switch (backend) {
+    case GpuBackend::Direct3D11:
+        return "Direct3D 11";
+    case GpuBackend::Vulkan:
+        return "Vulkan";
+    }
+    return "unknown";
+}
+
 RendererDecision chooseRenderer(const RendererEnvironment& environment)
 {
     const std::string requested = lowered(environment.rendererOverride);
@@ -54,18 +65,29 @@ RendererDecision chooseRenderer(const RendererEnvironment& environment)
                 "the GPU renderer failed earlier in this session" + ignored};
     }
     const std::string platform = lowered(environment.platformName);
-    if (platform != "windows") {
-        const std::string shown = platform.empty() ? std::string("none") : platform;
+    const bool shown = environment.backend == GpuBackend::Direct3D11
+                           ? platform == "windows"
+                           : platform == "xcb" || platform == "wayland";
+    const std::string api = toString(environment.backend);
+    if (!shown) {
+        const std::string name = platform.empty() ? std::string("none") : platform;
         return {RendererKind::Software,
-                "the '" + shown + "' platform cannot show the Direct3D 11 view" + ignored};
+                "the '" + name + "' platform cannot show the " + api + " view" + ignored};
     }
-    return {RendererKind::Gpu, "Direct3D 11 on the windows platform" + ignored};
+    RendererDecision decision{RendererKind::Gpu, api + " on the " + platform + " platform" + ignored};
+    decision.softwareDeviceAllowed = requested == "gpu";
+    return decision;
 }
 
 RendererEnvironment currentRendererEnvironment(bool userPrefersSoftware, bool gpuFailedThisSession)
 {
     RendererEnvironment environment;
     environment.gpuBuilt = true; // this file is only compiled into the GPU module
+#if defined(KATANA_GPU_VULKAN)
+    environment.backend = GpuBackend::Vulkan;
+#else
+    environment.backend = GpuBackend::Direct3D11;
+#endif
     if (qGuiApp != nullptr) {
         environment.platformName = QGuiApplication::platformName().toStdString();
     }

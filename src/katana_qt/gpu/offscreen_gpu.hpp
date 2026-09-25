@@ -4,13 +4,16 @@
 // "Testing").
 //
 // QRhiWidget cannot render under Qt's offscreen platform - every Katana test
-// and headless screenshot runs there - but QRhi itself can: Direct3D 11 needs
-// no window to render into a texture, on the real GPU or on WARP, Windows'
-// software Direct3D device (tests/gpu runs on both). This class is that: a QRhi
-// of its own, a multisampled colour buffer resolved into a texture, a 32-bit
-// float depth texture, and a synchronous frame with an optional read-back and
-// the GPU's own timestamp for the frame. The tests compare its pixels with the
-// software rasteriser's; the benchmark times it.
+// and headless screenshot runs there - but QRhi itself can render into a
+// texture with no window: on Windows through Direct3D 11, on the real GPU or
+// on WARP, Windows' software device; on Linux through Vulkan, on the real GPU
+// or on Mesa's lavapipe (tests/gpu runs on both). Vulkan does need a platform
+// that can make a Vulkan instance, which Qt's offscreen one cannot, so the
+// Linux tests run on xcb under Xvfb (tests/gpu/CMakeLists.txt). This class is
+// a QRhi of its own, a multisampled colour buffer resolved into a texture, a
+// 32-bit float depth texture, and a synchronous frame with an optional
+// read-back and the GPU's own timestamp for the frame. The tests compare its
+// pixels with the software rasteriser's; the benchmark times it.
 
 #include <cstddef>
 #include <memory>
@@ -27,7 +30,10 @@ namespace katana::qt::gpu {
 
 enum class GpuDevice {
     Hardware, // the machine's GPU
-    Warp,     // Windows' software Direct3D 11 device: slow, but always there
+    // The platform's software device: WARP on Windows, which every install
+    // has; lavapipe on Linux, Mesa's Vulkan on the CPU (mesa-vulkan-drivers).
+    // Slow, but a GPU-less machine can still run the tests on it.
+    Software,
 };
 
 [[nodiscard]] const char* toString(GpuDevice device);
@@ -41,15 +47,15 @@ struct OffscreenOptions {
     // How lines and points are widened; the renderer falls back to Instanced
     // on a device without a geometry stage (GpuRenderer::initialise).
     Expansion expansion = Expansion::GeometryShader;
-    // Where the shaders come from; null for compiledHlslShaders(). Must
+    // Where the shaders come from; null for defaultShaders(). Must
     // outlive create().
     const ShaderLibrary* shaders = nullptr;
 };
 
 class OffscreenGpu {
   public:
-    // Fails with Unsupported when there is no Direct3D 11 device of the kind
-    // asked for - the tests SKIP on that, rather than fail - and with
+    // Fails with Unsupported when there is no device of the kind asked for -
+    // the tests SKIP on that, rather than fail - and with
     // RenderingFailure when the device exists but a target or pipeline
     // cannot be made.
     [[nodiscard]] static katana::core::Result<std::unique_ptr<OffscreenGpu>>

@@ -36,6 +36,18 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
 fi
 export PATH="$tools_bin:$PATH"
 
+# The GPU tests' display and device: a virtual X server and Mesa's software
+# Vulkan (docs/gpu.md, "Testing"). Without them those cases skip rather than
+# fail, so a failed install is reported and not fatal. Before the configure,
+# which looks for xvfb-run.
+if ! command -v xvfb-run > /dev/null || [ ! -e /usr/share/vulkan/icd.d/lvp_icd.json ]; then
+    if command -v apt-get > /dev/null && [ "$(id -u)" = 0 ]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb xauth mesa-vulkan-drivers \
+            libvulkan1 > /dev/null 2>&1 ||
+            echo "could not install xvfb and mesa-vulkan-drivers: the GPU tests will skip" >&2
+    fi
+fi
+
 # Configure (seconds), not build (minutes of four cores): the first `cmake
 # --build` of the session does that, incrementally from here on.
 cmake --preset linux-release > /dev/null
@@ -48,6 +60,6 @@ Katana cloud session: the Linux toolchain is installed and build/linux-release i
 - Test:  ctest --preset linux-release -j 4       (or one suite: build/linux-release/bin/tests/katana_<module>_tests --gtest_filter=...)
 - Other presets: linux-debug, linux-relwithdebinfo, linux-sanitize. Format: cmake --build --preset linux-release --target format-check
 - github.com downloads are blocked here: never add a FetchContent/URL download to the Linux path; the toolchain file finds GoogleTest and Benchmark in the prefix.
-- The GPU renderer (src/katana_qt/gpu) is Direct3D 11 only and is not built on Linux; the 3D view uses the software rasteriser here.
+- The GPU renderer (src/katana_qt/gpu) is built here too, on Vulkan (docs/gpu.md). Its tests run on xcb under Xvfb, on Mesa's lavapipe: this hook installs both (xvfb, mesa-vulkan-drivers); without them those cases skip. Offscreen, the 3D view uses the software rasteriser.
 - How work is done in this repository - measuring before claiming, derived test expectations, the SIMD kernel rules - is docs/architecture.md, "Working rules", and docs/performance.md. Read those before changing code.
 MSG

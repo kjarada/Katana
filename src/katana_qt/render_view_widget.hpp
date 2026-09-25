@@ -3,14 +3,23 @@
 // 3D / elevation viewport (PLAN.MD Phase 15).
 //
 // Rule 3 again: this widget owns a camera and a framebuffer and NOTHING else.
-// It asks katana_cad to turn the document into a DrawList, hands that to the
-// software rasteriser, and blits the result. Every geometric decision - what to
-// draw, how an arc is chorded, where the scene's bounds are, what a drag does
-// to a camera - lives in a tested library below it. Replacing the rasteriser
-// with a Vulkan one changes the two lines that call it and nothing else.
+// It asks katana_cad to turn the document into a DrawList, hands that to a
+// renderer, and shows the result. Every geometric decision - what to draw,
+// how an arc is chorded, where the scene's bounds are, what a drag does to a
+// camera - lives in a tested library below it.
 //
-// The framebuffer is wrapped in a QImage WITHOUT copying: Framebuffer stores
-// 0xAARRGGBB row-major, which is exactly QImage::Format_ARGB32.
+// TWO RENDERERS (docs/gpu.md, "Fallback"). Where gpu::chooseRenderer says so
+// - a desktop platform, the GPU renderer built in, nothing against it - the
+// view is drawn by a GpuSceneView child that covers it: the same layers, the
+// same depth rules (cad::renderLayers, GpuRenderer::setLayers), the same
+// camera and the same mouse. Everywhere else, and after the GPU view fails
+// once in a session, the software rasteriser draws it, as it always did; it
+// is also what every headless run and test uses. The legend and the empty
+// message are painted over either.
+//
+// The software framebuffer is wrapped in a QImage WITHOUT copying:
+// Framebuffer stores 0xAARRGGBB row-major, which is exactly
+// QImage::Format_ARGB32.
 
 #include <functional>
 
@@ -34,6 +43,10 @@ struct ViewContext {
     const std::vector<katana::cad::SceneMesh>* meshes = nullptr;
     katana::cad::SceneOptions options{};
 };
+
+namespace gpu {
+class GpuSceneView;
+} // namespace gpu
 
 class RenderViewWidget final : public QWidget {
   public:
@@ -112,6 +125,14 @@ class RenderViewWidget final : public QWidget {
     [[nodiscard]] double lastBuildMilliseconds() const { return lastBuildMs_; }
     [[nodiscard]] const katana::render::RenderStats& lastStats() const { return stats_; }
 
+    // True while the GPU view draws this one; false for the software
+    // rasteriser. Why, in one sentence (gpu::RendererDecision::reason, or the
+    // failure that sent it back to software).
+    [[nodiscard]] bool drawnOnGpu() const { return gpuView_ != nullptr; }
+    // The GPU child while there is one: the tests' way to its frame.
+    [[nodiscard]] gpu::GpuSceneView* gpuView() const { return gpuView_; }
+    [[nodiscard]] const QString& rendererReason() const { return rendererReason_; }
+
     // Raised when this view is clicked or the user moves the keyboard focus
     // into it (view_focus.hpp), so the workspace can make it active; the
     // workspace ignores re-activating the active view.
@@ -125,6 +146,7 @@ class RenderViewWidget final : public QWidget {
     std::function<void(const QString&)> onFrameStats;
 
   protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -135,7 +157,28 @@ class RenderViewWidget final : public QWidget {
     void keyPressEvent(QKeyEvent* event) override;
 
   private:
+    class Overlay;
+
     void rebuildIfNeeded();
+    // A repaint by whichever renderer draws the view.
+    void requestFrame();
+    // Device pixels per logical pixel the scene's widths are built for: the
+    // display's for the software framebuffer, 1 for the GPU view, which scales
+    // logical widths itself (gpu::FrameSettings::pixelRatio).
+    [[nodiscard]] double sceneScale() const;
+    // The GPU child, when the renderer rules choose it (constructor).
+    void makeGpuView();
+    // Back to the software rasteriser for the rest of the session, saying why.
+    void dropGpuView(const QString& reason);
+    // What cad::renderLayers does before drawing, for the GPU's frame: the
+    // scene rebuilt if it is dirty, the depth range fitted, the edges faded
+    // for the frame's scale, and whatever changed handed to the GPU view.
+    void prepareGpuFrame(katana::render::Camera& frameCamera);
+    // Hands the GPU view what it has not been given since the last rebuild
+    // (the stale flags below), the edges drawn or not.
+    void sendLayersToGpu(bool drawEdges, bool edgesChanged);
+    // The legend and the empty message, over whichever renderer drew.
+    void paintOverlays(QPainter& painter);
     // A document notification: the drawing changed (its revision moved), or
     // only something else did - the selection, the current layer.
     void documentChanged();
@@ -192,6 +235,21 @@ class RenderViewWidget final : public QWidget {
     enum class Drag { None, Orbit, Pan };
     Drag drag_ = Drag::None;
     QPoint lastMouse_;
+
+    // The GPU view and the overlay over it: children, owned by Qt; null when
+    // the software rasteriser draws.
+    gpu::GpuSceneView* gpuView_ = nullptr;
+    QWidget* overlay_ = nullptr;
+    QString rendererReason_;
+    // What the GPU view has not been given since the last rebuild: every
+    // layer (the terrain was rebuilt); the drawing's - grid, entities and
+    // selection, the terrain's being unchanged; or the selection alone. And
+    // whether it last drew the edges.
+    bool gpuLayersStale_ = true;
+    bool gpuDrawingStale_ = false;
+    bool gpuSelectionStale_ = false;
+    bool gpuEdgesShown_ = false;
+    bool rebuiltSinceStats_ = false;
 
     katana::cad::Document* listenedDocument_ = nullptr;
     // Declared LAST so it is destroyed FIRST: the listener it owns captures
