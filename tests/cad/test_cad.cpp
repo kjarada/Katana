@@ -782,6 +782,22 @@ TEST(CadInterpreter, InfoTakesAnIdWrittenPlainOrAsAnAnchoredPointNamesIt)
     EXPECT_EQ(s.fails("INFO 1 2"), ErrorCode::InvalidArgument);
 }
 
+TEST(CadInterpreter, SelectTakesIdsWrittenPlainOrAsInfoTakesThem)
+{
+    Session s;
+    s.ok("POINT 1,1");
+    s.ok("POINT 2,2");
+    s.ok("POINT 3,3");
+    // The ids Select by ID and a DIM line give, #n among them.
+    EXPECT_EQ(s.ok("SELECT #1 3"), "2 selected");
+    EXPECT_EQ(s.document.selection().ids(), (std::vector<katana::entity::EntityId>{1, 3}));
+    EXPECT_EQ(s.fails("SELECT #4"), ErrorCode::NotFound);
+    EXPECT_EQ(s.fails("SELECT #"), ErrorCode::ParseFailure);
+    EXPECT_EQ(s.fails("SELECT ##2"), ErrorCode::ParseFailure);
+    // A refused line leaves the selection as it was.
+    EXPECT_EQ(s.document.selection().ids(), (std::vector<katana::entity::EntityId>{1, 3}));
+}
+
 TEST(CadInterpreter, AnEntityIdIsAPositiveWholeNumberPlainOrAfterAHash)
 {
     for (const char* word : {"1", "12", "#12", "18446744073709551615"}) {

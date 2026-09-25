@@ -228,7 +228,15 @@ class ViewportWidget final : public QWidget {
     // at the screen position the menu should open at; and the keyboard's
     // menu key under the same conditions. While a tool runs, a right-click
     // is Enter instead, and with no handler set a right-click cancels (Esc).
+    // With nothing selected, the entity under the cursor is selected first,
+    // so the menu acts on what was clicked; a selection there already is
+    // kept, as it is the menu's subject.
     std::function<void(const QPoint& globalPos)> onContextMenu;
+    // A double click on an entity with no tool running, after its first
+    // click has selected it: the window opens what edits it (a text's
+    // editor, or the Properties panel). Not raised on empty space or while a
+    // tool runs, where the second click is the tool's.
+    std::function<void(katana::entity::EntityId id)> onEntityDoubleClicked;
 
   protected:
     void paintEvent(QPaintEvent* event) override;
@@ -275,6 +283,9 @@ class ViewportWidget final : public QWidget {
     [[nodiscard]] std::optional<katana::entity::EntityId> entityAt(const QPointF& screen) const;
     void wireToolHost();
     void selectAt(const QPointF& screen, Qt::KeyboardModifiers modifiers);
+    // Before the shortcut menu opens at `screen`: the entity there becomes
+    // the selection when nothing is selected.
+    void selectForMenu(const QPointF& screen);
     void selectInBox(const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers);
     // What a box from `from` to `to` picks through this view's layers: what
     // it encloses dragged left to right, what it touches right to left.

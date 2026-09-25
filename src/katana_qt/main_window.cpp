@@ -13,6 +13,7 @@
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
+#include "plan_context_menu.hpp"
 #include "plotting/plot_dialog.hpp"
 #include "plotting/sheet_arrange.hpp"
 #include "plotting/sheet_checks.hpp"
@@ -413,6 +414,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         commandInput_->setFocus(Qt::ShortcutFocusReason);
         commandInput_->insert(text);
     };
+    // A right-click with no tool running: the selection's verbs
+    // (plan_context_menu.hpp). A double click on an entity: what edits it.
+    views_->onContextMenu = [this](const QPoint& globalPos) { showPlanContextMenu(globalPos); };
+    views_->onEntityDoubleClicked = [this](katana::entity::EntityId id) {
+        editDoubleClicked(id);
+    };
 
     views_->setSurfaces(&sceneSurfaces_);
     refreshViewMenu();
@@ -602,14 +609,15 @@ void MainWindow::buildActions()
     fileBar->addActions({importAction, exportAction, plotAction, sheetsAction});
 
     // ---- Edit ------------------------------------------------------------------------
-    undoAction_ = makeAction(Icon::Undo, "&Undo", "Undo the last command", QKeySequence::Undo);
+    undoAction_ = makeAction(Icon::Undo, "&Undo", "Undo the last command", QKeySequence::Undo,
+                             "editUndo");
     redoAction_ = makeAction(Icon::Redo, "&Redo", "Redo the command that was undone",
-                             QKeySequence::Redo);
+                             QKeySequence::Redo, "editRedo");
     QAction* selectAllAction = makeAction(Icon::SelectAll, "Select &All",
                                           "Select every entity on an unlocked layer",
-                                          QKeySequence::SelectAll);
+                                          QKeySequence::SelectAll, "editSelectAll");
     QAction* eraseAction = makeAction(Icon::Erase, "&Erase Selection", "Erase the selected entities",
-                                      QKeySequence(Qt::Key_Delete));
+                                      QKeySequence(Qt::Key_Delete), "editErase");
     connect(undoAction_, &QAction::triggered, this, [this] {
         if (const auto status = document_.undo(); !status) {
             logMessage(QString::fromStdString(status.error().describe()), true);
@@ -634,6 +642,13 @@ void MainWindow::buildActions()
     QAction* deselectAction = editMenu->addAction("&Deselect", QKeySequence(Qt::Key_Escape), this,
                                                   [this] { views_->cancel(); });
     deselectAction->setObjectName("editDeselect");
+    // The ids LIST, INFO and AREA print, back into a selection
+    // (select_by_id_dialog.hpp); non-modal and kept, as Format > Layers is.
+    QAction* selectByIdAction =
+        editMenu->addAction("Select by &ID...", this, [this] { showSelectById(); });
+    selectByIdAction->setObjectName("editSelectById");
+    selectByIdAction->setStatusTip("Select entities by the ids LIST and INFO print, and find them");
+    selectByIdAction->setData(QStringLiteral("selectByIdDialog")); // for --dialog
     editMenu->addAction(eraseAction);
     editMenu->addSeparator();
     QAction* attributesAction =
@@ -715,15 +730,16 @@ void MainWindow::buildActions()
     // ---- View ------------------------------------------------------------------------
     QAction* extentsAction = makeAction(Icon::ZoomExtents, "Zoom &Extents",
                                         "Fit the whole drawing in the view",
-                                        QKeySequence(Qt::CTRL | Qt::Key_E));
+                                        QKeySequence(Qt::CTRL | Qt::Key_E), "viewZoomExtents");
     connect(extentsAction, &QAction::triggered, this, [this] { views_->zoomExtents(); });
-    gridAction_ = makeAction(Icon::Grid, "&Grid", "Show or hide the grid", QKeySequence(Qt::Key_F7));
+    gridAction_ = makeAction(Icon::Grid, "&Grid", "Show or hide the grid", QKeySequence(Qt::Key_F7),
+                             "viewGrid");
     gridAction_->setCheckable(true);
     gridAction_->setChecked(views_->gridVisible());
     connect(gridAction_, &QAction::toggled, this, [this](bool on) { views_->setGridVisible(on); });
     snapAction_ = makeAction(Icon::Snap, "Object &Snap",
                              "Snap the cursor to endpoints, midpoints, centres and intersections",
-                             QKeySequence(Qt::Key_F3));
+                             QKeySequence(Qt::Key_F3), "viewSnap");
     snapAction_->setCheckable(true);
     snapAction_->setChecked(views_->snapEnabled());
     connect(snapAction_, &QAction::toggled, this, [this](bool on) { views_->setSnapEnabled(on); });
@@ -1817,6 +1833,86 @@ void MainWindow::selectOnly(katana::entity::EntityId id)
 {
     logMessage(QString::fromStdString(
         interpreter_.run("SELECT " + std::to_string(id)).valueOr("")));
+}
+
+void MainWindow::showPlanContextMenu(const QPoint& globalPos)
+{
+    PlanContextMenuContext context;
+    context.document = &document_;
+    context.actions = this;
+    context.run = commandRunner();
+    context.lastToolId = views_->lastToolId();
+    context.chooseColour = [this](const QColor& initial) -> std::optional<QColor> {
+        const QColor chosen = QColorDialog::getColor(initial, this, "Colour");
+        return chosen.isValid() ? std::optional<QColor>(chosen) : std::nullopt;
+    };
+    // popup, not exec: nothing waits on it. It goes when it hides, by
+    // deleteLater: a menu hides BEFORE it triggers the item chosen, and the
+    // deferred delete waits for the item to finish - even for a colour
+    // dialog's own event loop, which does not run it.
+    auto* menu = new PlanContextMenu(std::move(context), this);
+    connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
+    menu->popup(globalPos);
+}
+
+void MainWindow::showSelectById()
+{
+    if (!selectById_) {
+        SelectByIdContext context;
+        context.document = &document_;
+        context.run = commandRunner();
+        context.onSelected = [this](bool zoom) { showSelection(zoom); };
+        selectById_ = std::make_unique<SelectByIdDialog>(std::move(context), this);
+    }
+    selectById_->show();
+    selectById_->raise();
+    selectById_->activateWindow();
+}
+
+void MainWindow::showSelection(bool zoom)
+{
+    // Framed in the view the person is working in, as the style manager's
+    // Select Users frames what a style covers; the other views keep theirs.
+    ViewportWidget* plan = views_->activePlanView();
+    if (zoom && plan != nullptr) {
+        katana::geometry::Box2 bounds;
+        for (const katana::entity::EntityId id : document_.selection().ids()) {
+            if (const katana::entity::Entity* entity = document_.model().entities.find(id)) {
+                bounds.expand(katana::entity::boundingBox(entity->geometry));
+            }
+        }
+        plan->zoomTo(bounds);
+    }
+    propertyDock_->show();
+    propertyDock_->raise();
+}
+
+void MainWindow::editDoubleClicked(katana::entity::EntityId id)
+{
+    const katana::entity::Entity* entity = document_.model().entities.find(id);
+    if (entity == nullptr) {
+        return;
+    }
+    // The first click selected it; a Shift or Ctrl first click may have
+    // added it to more, and the editors act on what is selected.
+    if (document_.selection().size() != 1 || !document_.selection().contains(id)) {
+        document_.selection().set({id});
+        document_.notifySelectionChanged();
+    }
+    // A text or a label opens its own editor where the window has one
+    // (Annotate > Edit Text, Edit Label); anything else is edited in
+    // the Properties panel.
+    const char* editor = entity->type() == katana::entity::EntityType::Text    ? "annotateEditText"
+                         : entity->type() == katana::entity::EntityType::Label ? "annotateEditLabel"
+                                                                               : nullptr;
+    if (editor != nullptr) {
+        if (auto* action = findChild<QAction*>(QString::fromLatin1(editor));
+            action != nullptr && action->isEnabled()) {
+            action->trigger();
+            return;
+        }
+    }
+    showSelection(false);
 }
 
 std::unique_ptr<LayerManagerDialog> MainWindow::makeLayerManager()

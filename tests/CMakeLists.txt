@@ -1277,3 +1277,24 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# Edit > Select by ID and the Edit and View actions' object names
+# (docs/desktop.md, "The plan view's shortcut menu"). Three points; Select All
+# by its action; the dialog, non-modal, selects #2 and 3 through the executor
+# and says what SELECT answered; Grid is reached by its name and turned off;
+# Erase by its name erases the two, and Undo by its name brings them back.
+if(TARGET katana)
+    add_test(NAME qt_select_by_id_selects_and_frames_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>POINT 1,1|>POINT 20,20|>POINT 40,40|*editSelectAll|@editSelectById|selectByIdIds=#2, 3|!selectByIdSelect|?selectByIdStatus|*viewGrid|?viewGrid|*editErase|>LIST|*editUndo|>LIST"
+            "-DEXPECT=3 selected.*--dialog editSelectById opened selectByIdDialog \"Select by ID\"[\r\n]+2 selected[\r\n]+selectByIdStatus: 2 selected.*viewGrid: Grid, unchecked[\r\n]+2 erased[\r\n]+1 entities[\r\n]+1 +Point +layer=0 +at 1,1.*3 entities"
+            "-DFORBID=\\(modal\\)|no such menu item|not an entity id"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/select_by_id_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_select_by_id_selects_and_frames_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
