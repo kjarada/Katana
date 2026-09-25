@@ -34,6 +34,7 @@
 #include "katana/cad/document.hpp"
 #include "katana/cad/plotting/preflight.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
+#include "katana/geometry/alignment.hpp"
 #include "katana/geometry/mesh.hpp"
 #include "katana/terrain/tin_surface.hpp"
 #include "plotting/sheet_checks.hpp"
@@ -181,21 +182,66 @@ TEST(SheetChecks, TheOptionsCarryWhatThePainterDrawsFrom)
 
 TEST(SheetChecks, AnAutomaticPlanIsCheckedWhereThePainterDrawsIt)
 {
+    // The headless rule (plotting::planWindow, given the window's imagery and
+    // meshes as otherContent) must decide an automatic plan's scale and centre
+    // as the painter does, or the checks would test a window that never prints.
+    // Compared case by case: square, turned, along a stretch of an alignment,
+    // over a mesh alone, and with the drawing's layer hidden.
     Model model;
     katana::entity::Entity line;
-    line.geometry = katana::geometry::Segment2{Point2(0.0, 0.0), Point2(300.0, 0.0)};
-    line.layer = "0";
+    line.geometry = katana::geometry::Segment2{Point2(0.0, 0.0), Point2(300.0, 40.0)};
+    line.layer = "WALLS";
     ASSERT_TRUE(model.entities.add(std::move(line)).ok());
+    katana::entity::Alignment road;
+    road.name = "MC01";
+    road.horizontal.pis = {katana::geometry::AlignmentPI{Point2(0.0, 100.0)},
+                           katana::geometry::AlignmentPI{Point2(400.0, 300.0)}};
+    ASSERT_TRUE(model.alignments.add(road).ok());
+    katana::geometry::TriangleMesh mesh;
+    mesh.vertices = {{-900.0, -700.0, 0.0}, {-850.0, -700.0, 1.0}, {-850.0, -640.0, 2.0}};
+    mesh.faces = {{0u, 1u, 2u}};
+    std::vector<katana::cad::SceneMesh> meshes(1);
+    meshes[0].mesh = &mesh;
     SheetSource source;
     source.plan.model = &model;
-    plotting::Viewport plan = planAt("vp1", Box2(Point2(23.0, 35.0), Point2(410.0, 287.0)), 1.0, Point2());
+    source.plan.meshes = &meshes;
+    const auto options = katana::qt::preflightOptionsFor(source);
+
+    plotting::Viewport plan =
+        planAt("vp1", Box2(Point2(23.0, 35.0), Point2(410.0, 287.0)), 1.0, Point2());
     plan.autoScale = true;
     plan.autoCentre = true;
-    const auto painted = katana::qt::resolvePlanViewport(plan, source);
-    const auto options = katana::qt::preflightOptionsFor(source);
-    const plotting::PlanWindow checked = options.resolvePlan(plan);
-    EXPECT_EQ(checked.scale, painted.scale);
-    EXPECT_EQ(checked.centre, painted.centre);
+    const auto agree = [&](const plotting::Viewport& viewport, std::string_view what) {
+        const auto painted = katana::qt::resolvePlanViewport(viewport, source);
+        const plotting::PlanWindow headless = plotting::planWindow(viewport, model, options.otherContent);
+        EXPECT_EQ(headless.scale, painted.scale) << what;
+        EXPECT_NEAR(headless.centre.x, painted.centre.x, 1e-9) << what;
+        EXPECT_NEAR(headless.centre.y, painted.centre.y, 1e-9) << what;
+        const plotting::PlanWindow checked = options.resolvePlan(viewport);
+        EXPECT_EQ(checked.scale, painted.scale) << what;
+    };
+    agree(plan, "square");
+    plotting::Viewport turned = plan;
+    turned.rotation = 0.5; // radians
+    agree(turned, "turned");
+    plotting::Viewport along = plan;
+    along.source.alignment = "MC01";
+    along.source.chainageFrom = 50.0;
+    along.source.chainageTo = 250.0;
+    agree(along, "along a stretch of MC01");
+    plotting::Viewport hidden = plan;
+    (void)hidden.hiddenLayers.hide("WALLS");
+    agree(hidden, "WALLS hidden");
+    // The mesh alone: the drawing and the alignment are far from it, so
+    // a scale fitted to the mesh differs from one fitted to everything.
+    Model empty;
+    source.plan.model = &empty;
+    const auto meshOnly = katana::qt::resolvePlanViewport(plan, source);
+    const plotting::PlanWindow headless = plotting::planWindow(plan, empty, options.otherContent);
+    EXPECT_EQ(headless.scale, meshOnly.scale);
+    EXPECT_NEAR(headless.centre.x, meshOnly.centre.x, 1e-9);
+    EXPECT_NEAR(headless.centre.y, meshOnly.centre.y, 1e-9);
+    EXPECT_NEAR(meshOnly.centre.x, -875.0, 1e-9);
 }
 
 TEST(SheetChecks, APlanOverOnlyAMeshIsNotEmpty)
