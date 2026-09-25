@@ -20,7 +20,8 @@
 //   CrossSections  chainage labels and a data band; cut once and cached;
 //                  cut and fill shaded, crossings noted with level and
 //                  depth, labels placed clear of each other; autoScale
-//                  fitted (resolveSectionViewport).
+//                  fitted (resolveSectionViewport). Drawn by
+//                  plotting/section_painter.hpp through this painter's pens.
 //   Model3D        the 3D view's renderer, as a raster capped in resolution.
 //   Legend         the layers the sheet draws, a sample line each.
 //   Notes, Image   text wrapped to the rectangle; a project image fitted.
