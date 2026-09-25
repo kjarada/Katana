@@ -59,7 +59,7 @@ Result<std::vector<Point2>> contentFor(const Document& document, const Viewport&
                          "offset, level) points",
                          viewport.id);
     }
-    return viewportContent(document.model(), viewport);
+    return viewportContent(document.model(), document.sheetSet(), viewport);
 }
 
 } // namespace
@@ -133,7 +133,8 @@ Result<std::vector<std::string>> matchScale(Document& document, std::span<const 
         if (auto from = locate(document.sheetSet(), fromId);
             from && from->viewport->autoScale && isPlanKind(from->viewport->kind)) {
             fromScale = drawnScale(*from->viewport,
-                                   viewportContent(document.model(), *from->viewport));
+                                   viewportContent(document.model(), document.sheetSet(),
+                                                   *from->viewport));
         }
     }
     std::vector<std::string> changed;
