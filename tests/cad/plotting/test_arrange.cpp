@@ -369,6 +369,11 @@ TEST(SheetArrange, AViewShowsItsStretchOfItsAlignmentOrTheDrawing)
     strip.source.chainageFrom = 900.0;
     strip.source.chainageTo = 1500.0;
     expectBox(boxOf(viewportContent(model, strip)), 900.0, 0.0, 1000.0, 0.0);
+    // A range wholly past the end shows none of the alignment: the drawing,
+    // as the painter then fits it.
+    strip.source.chainageFrom = 1200.0;
+    strip.source.chainageTo = 1500.0;
+    expectBox(boxOf(viewportContent(model, strip)), 0.0, -50.0, 1000.0, 40.0);
 
     // A plan of the drawing: the line and the alignment. An alignment the
     // model does not have leaves the drawing.
@@ -738,6 +743,73 @@ TEST(SheetArrange, ACrowdedSheetIsArrangedTheSameWayEveryTimeAndNeverBelowTheMin
     EXPECT_EQ(sheet, arranged);
 }
 
+TEST(SheetArrange, APanelLargerThanTheMainViewGivesWayToIt)
+{
+    // A 100 x 100 mm plan in the top-left corner and a 250 x 240 mm legend
+    // beside it, overlapping nothing: the legend is the larger, so it is
+    // packed again, no larger than the plan.
+    Sheet sheet;
+    const Box2 plan(Point2(25.5, 184.5), Point2(125.5, 284.5));
+    sheet.viewports.push_back(viewportAt("vp1", ViewportKind::Plan, plan));
+    sheet.viewports.push_back(viewportAt("vp2", ViewportKind::Legend, Box2(Point2(150.0, 40.0), Point2(400.0, 280.0))));
+    const ArrangeResult result = autoArrange(sheet);
+    EXPECT_EQ(result.moved, std::vector<std::string>{"vp2"});
+    EXPECT_EQ(byId(sheet, "vp1").rect, plan);
+    expectTidy(sheet);
+    EXPECT_LE(areaOf(byId(sheet, "vp2").rect), areaOf(plan) + 1e-9);
+    // A legend no larger than the plan stays where it is.
+    Sheet small;
+    small.viewports.push_back(viewportAt("vp1", ViewportKind::Plan, plan));
+    const Box2 legend(Point2(150.0, 40.0), Point2(230.0, 140.0));
+    small.viewports.push_back(viewportAt("vp2", ViewportKind::Legend, legend));
+    EXPECT_TRUE(autoArrange(small).moved.empty());
+    EXPECT_EQ(byId(small, "vp2").rect, legend);
+}
+
+TEST(SheetArrange, AnUnplacedMainViewIsPackedFirstAndStaysTheLargest)
+{
+    // The plan has no place yet and a large 3D view fills most of the sheet:
+    // the plan takes the first cell, and the 3D view is made no larger.
+    Sheet sheet;
+    sheet.viewports.push_back(viewportAt("vp1", ViewportKind::Model3D, Box2(Point2(30.0, 40.0), Point2(400.0, 280.0))));
+    sheet.viewports.push_back(viewportAt("vp2", ViewportKind::Plan, {}));
+    const ArrangeResult result = autoArrange(sheet);
+    EXPECT_TRUE(result.unplaced.empty());
+    EXPECT_TRUE(result.overlapping.empty());
+    expectTidy(sheet);
+    ASSERT_FALSE(byId(sheet, "vp2").rect.empty());
+    EXPECT_GE(areaOf(byId(sheet, "vp2").rect), areaOf(byId(sheet, "vp1").rect) - 1e-9);
+}
+
+TEST(SheetArrange, AViewInTheTilingAreasMarginIsBroughtInsideIt)
+{
+    // Inside the drawing area (23..410) but over the tiling area's inset:
+    // it is moved to 25.5, half a gutter inside the tiling area's 24.
+    Sheet sheet;
+    sheet.viewports.push_back(viewportAt("vp1", ViewportKind::Legend, Box2(Point2(23.5, 100.0), Point2(103.5, 160.0))));
+    const ArrangeResult result = autoArrange(sheet);
+    EXPECT_EQ(result.moved, std::vector<std::string>{"vp1"});
+    expectBox(byId(sheet, "vp1").rect, 25.5, 100.0, 105.5, 160.0);
+}
+
+TEST(SheetArrange, AViewAsLargeAsTheSpaceIsBroughtInWithoutFailing)
+{
+    // On A2 and A4 the packing space's width less a view's own can round to
+    // just below its left edge; the view is brought in, not refused.
+    for (const PaperSize paper : {PaperSize::A4, PaperSize::A2}) {
+        Sheet sheet;
+        sheet.paper = paper;
+        const Box2 space = tilingArea(sheet).inflated(-kTilingGutterMm / 2.0);
+        const Box2 wide(Point2(space.min.x + 40.0, space.min.y - 30.0),
+                        Point2(space.max.x + 40.0, space.max.y - 30.0));
+        sheet.viewports.push_back(viewportAt("vp1", ViewportKind::Plan, wide));
+        (void)autoArrange(sheet);
+        expectTidy(sheet);
+        EXPECT_NEAR(byId(sheet, "vp1").rect.width(), space.width(), 1e-9);
+        EXPECT_NEAR(byId(sheet, "vp1").rect.min.x, space.min.x, 1e-9);
+    }
+}
+
 TEST(SheetArrange, AViewWithNoRoomAtAllIsReportedAndLeftWhereItWas)
 {
     // A locked panel covers the whole tiling area; the plan under it has
@@ -873,13 +945,18 @@ TEST(SheetArrange, DistributingNeedsThreeViewsThatCanMove)
               ErrorCode::NotFound);
 
     // Vertically: bottoms 40 (a, ends 80), 45 (c, 15 high) and 50 (b, starts
-    // 50 ends 120): the gap is (50 - 80 - 15) / 2 = -22.5; c is placed at
-    // 80 - 22.5 = 57.5.
+    // 50 ends 120): c's 15 mm would have to fit between 80 and 50, a gap of
+    // (50 - 80 - 15) / 2 = -22.5 mm that would lay the views over each
+    // other. Refused, and nothing moves.
     Sheet free = threeViews();
+    const Sheet unmoved = free;
     const auto moved = distributeViewports(free, kAbc, DistributeAxis::Vertical);
-    ASSERT_TRUE(moved.ok());
-    EXPECT_EQ(*moved, std::vector<std::string>{"c"});
-    EXPECT_NEAR(byId(free, "c").rect.min.y, 57.5, 1e-9);
+    ASSERT_FALSE(moved.ok());
+    EXPECT_EQ(moved.error().code, ErrorCode::InvalidArgument);
+    EXPECT_NE(moved.error().message.find("15.0 mm high together, and there is -30.0 mm"),
+              std::string::npos)
+        << moved.error().message;
+    EXPECT_EQ(free, unmoved);
 }
 
 TEST(SheetArrange, MatchingAScaleCopiesItToEveryScaledViewOnAnySheet)

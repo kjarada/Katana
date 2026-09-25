@@ -223,13 +223,26 @@ TEST(SheetArrangeEditor, AligningActsOnTheSelectionOrOnEveryView)
     EXPECT_EQ(viewportOf(document, "vp3").rect.min.x, 24.0);
     EXPECT_EQ(viewportOf(document, "vp1").rect.min.x, 30.0);
 
-    // Spacing with one selected spaces them all: vp3 is now first (24..84),
-    // vp2 last (100..130), vp1 between them.
+    // Spacing with one selected spaces them all. vp3 is now first (24..84)
+    // and vp2 last (100..130), with the 50 mm of vp1 to fit in the 16 mm
+    // between them: refused, as a message, and nothing moves.
     shown.trigger("sheetDistributeHorizontal");
-    EXPECT_EQ(document.history().undoCount(), before + 3);
-    EXPECT_EQ(shown.errors, 0);
-    const double gap = (100.0 - 84.0 - 50.0) / 2.0;
-    EXPECT_NEAR(viewportOf(document, "vp1").rect.min.x, 84.0 + gap, 1e-9);
+    EXPECT_EQ(document.history().undoCount(), before + 2);
+    EXPECT_EQ(shown.errors, 1);
+    ASSERT_FALSE(shown.messages.empty());
+    EXPECT_TRUE(shown.messages.back().contains("overlap")) << shown.messages.back().toStdString();
+    EXPECT_EQ(viewportOf(document, "vp1").rect.min.x, 30.0);
+
+    // Back as they were - vp1 at 30..80, vp2 at 100..130, vp3 at 300..360 -
+    // vp2 goes half way along the 220 mm between the others less its width.
+    ASSERT_TRUE(document.undo().ok());
+    ASSERT_TRUE(document.undo().ok());
+    katana::qt::test::processEvents();
+    shown.trigger("sheetDistributeHorizontal");
+    EXPECT_EQ(document.history().undoCount(), before + 1);
+    EXPECT_EQ(shown.errors, 1);
+    const double gap = (300.0 - 80.0 - 30.0) / 2.0;
+    EXPECT_NEAR(viewportOf(document, "vp2").rect.min.x, 80.0 + gap, 1e-9);
 }
 
 TEST(SheetArrangeEditor, MatchScaleListsTheOtherScaledViewsAndMatchesTheSelection)
@@ -401,6 +414,9 @@ TEST(SheetArrangeEditor, ChoosePaperPutsTheSheetOnPaperThatHoldsItsPlan)
                     s.viewports.front().kind = plotting::ViewportKind::Legend;
                     return katana::core::Status{};
                 }).ok());
+    // The properties are rebuilt on the change; the old button, deleted
+    // later, must not be the one found.
+    katana::qt::test::processEvents();
     auto* disabled = shown.editor.findChild<QPushButton*>(QStringLiteral("sheetChoosePaper"));
     ASSERT_NE(disabled, nullptr);
     EXPECT_FALSE(disabled->isEnabled());

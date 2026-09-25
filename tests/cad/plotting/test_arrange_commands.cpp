@@ -171,6 +171,18 @@ TEST(SheetArrangeCommands, MatchingAnAutomaticPlanTakesTheScaleItIsDrawnAt)
     // A view at a scale of its own is drawn at it.
     offCentre.autoScale = false;
     EXPECT_EQ(drawnScale(offCentre, content), 500.0);
+    // Turned, the painter measures the drawing's BOX, not its outline. A
+    // diamond (50, 0), (100, 50), (50, 100), (0, 50) turned 45 degrees is a
+    // 70.7 m square, but its 100 x 100 m box turned is 141.4 m across: in
+    // 200 x 200 mm with 4% to spare that needs 1 : 735.4, so 1 : 750 - not
+    // the 1 : 367.7 (1 : 500) the diamond alone would need.
+    Viewport turned = viewportAt("vp9", ViewportKind::Plan, Box2(Point2(30.0, 40.0), Point2(230.0, 240.0)));
+    turned.autoScale = true;
+    turned.autoCentre = true;
+    turned.rotation = std::numbers::pi / 4.0;
+    const std::vector<Point2> diamond{Point2(50.0, 0.0), Point2(100.0, 50.0), Point2(50.0, 100.0),
+                                      Point2(0.0, 50.0)};
+    EXPECT_EQ(drawnScale(turned, diamond), 750.0);
     const std::size_t before = document.history().undoCount();
 
     const std::vector<std::string> targets{"vp2"};

@@ -59,8 +59,9 @@ matchScale(Document& document, std::span<const std::string> ids, std::string_vie
 // plan or key plan the first of kSheetScales at which `content` fits its
 // rectangle with kAutoScaleSpare to spare, turned as it is turned and
 // measured about the point it is drawn round (the content's middle with an
-// automatic centre, else the view's centre) - the painter's rule, measured
-// on `content` where the painter measures the drawing's box.
+// automatic centre, else the view's centre) - the painter's rule: a view
+// along an alignment by `content` itself, any other by the four corners of
+// `content`'s box, as the painter measures the drawing's box.
 [[nodiscard]] double drawnScale(const Viewport& viewport, std::span<const Point2> content);
 
 // fitViewportToContent on viewport `viewportId`, wherever it is, inside its

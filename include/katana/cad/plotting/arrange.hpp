@@ -228,8 +228,9 @@ struct ArrangeResult {
 //   - locked viewports stay where they are, and others keep clear of them;
 //   - the main view - the lowest tiling rank, ties in the sheet's order -
 //     keeps its place and size;
-//   - every other view that overlaps nothing and lies inside the drawing
-//     area stays where it is (one that strayed outside is brought in first);
+//   - every other view that overlaps nothing, lies inside the tiling area
+//     (one that strayed outside is brought in first) and is no larger than
+//     the main view stays where it is;
 //   - the rest, in rank order, are packed into the free space one gutter
 //     from everything, each at the highest, then left-most, place it fits;
 //     when they do not all fit they shrink together, in 5% steps, never
@@ -237,8 +238,11 @@ struct ArrangeResult {
 //     main one is packed again; and only then is the main view made smaller,
 //     from its top-left corner, in 10% steps. A view that gives way is never
 //     made larger than the main view.
-// A main view that overlaps a locked one is packed first, with the rest. An
+// A main view that overlaps a locked one, or is not placed, is packed first,
+// with the rest, and none of them is made larger than it is packed. An
 // unplaced viewport is packed with the size of the cell tiling would give it.
+// A view with no room left even at its minimum stays where it was and is
+// reported; the views placed after it keep clear of it.
 // Deterministic: the same sheet is always arranged the same way, and a sheet
 // arranged completely does not change when it is arranged again.
 ArrangeResult autoArrange(Sheet& sheet, double gutterMm = kTilingGutterMm);
