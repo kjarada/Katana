@@ -434,9 +434,11 @@ is one step, and none when nothing moves.
 note and look (`changeLeaders`, `applyLeaderChange`), attaching, freezing
 and detaching, an attribute through the leader, one per entity
 (`leadersFor`), aligning, renumbering - each checked against the model and
-returned as ONE command or refused. The verbs parse their words into it, and
-the window's Leaders manager ("In the window" below) fills it from its form,
-so a verb typed and a button pressed cannot differ.
+returned as ONE command or refused - a template that does not check, a
+style not in the drawing, a size below 0 mm (`paper=-3` included; 0 is the
+text style's height, or no landing) - never half made. The verbs parse their
+words into it, and the window's Leaders manager ("In the window" below)
+fills it from its form, so a verb typed and a button pressed cannot differ.
 
 ### Freezing and letting go
 
@@ -513,28 +515,62 @@ dialog's problem line in the command's words.
 
 * **Leader**: every leader in the drawing, by what it says, and a form for
   the chosen one, which follows the drawing's selection. The form says what
-  the tip is on in words ("Polyline 1, 50% along segment 2"); the note is
-  Text, a Template read off that entity, or a Label style's template, checked
-  as it is typed and shown as it would read ("Says"); beside it are the
-  values the entity offers at the tip, and double-clicking one puts
-  `{name}` into the note and makes it a template. Below: the arrow, callout,
-  text style and sizes; an attribute of the entity set or removed through
-  the leader, of the type chosen or as typed (`LEADER PROP`, which reads a
-  value as `PROP SET` does - `CommandInterpreter::propertyValue`); and Freeze
-  Note, Detach Tip and Apply. Choosing a label style lends the form that
-  style's text style and height, as `labelstyle=` lends a leader them. An
-  unchanged form applied is no step. The form is read again from the leader
-  when the leader changes under it - an undo, a verb typed - and left alone,
-  unapplied edits and all, when something else changes
-  (`TheFormFollowsTheSelectionAndAnUndoButKeepsUnappliedEdits`); it watches
-  the document through `DocumentWatcher`, as `docs/desktop.md` asks.
-* **For Selection**: a leader, or with Balloons ticked a numbered balloon, to
-  each selected entity, its note text, a template or a label style's, the
-  note's direction and its distance on paper (`LEADER FOR`); it says how
-  many it made and why it skipped any.
+  the tip is on in words ("Polyline 1, 50.0% along segment 2") and, for a
+  tip along a line, an arc, a circle or a polyline segment, how far along in
+  per cent, which Apply moves it by; **Attach to Selected** puts the tip of a
+  plain leader, or of one on something else, on the other entity selected
+  with it, at the place of it nearest the tip (`LEADER ATTACH`,
+  `AttachToSelectedPutsTheTipOnTheEntityAndAlongMovesIt`). The note is Text,
+  a Template read off that entity, or a Label style's template, checked as
+  it is typed and shown as it would read ("Says"); a style's template is
+  shown to read, and read again when the style is edited
+  (`AStylesNoteIsReadAfreshWhenTheStyleChanges`). Beside it are the values
+  the entity offers at the tip: double-clicking one puts `{name}` into the
+  note where the cursor is - the end of the note until the user moves it -
+  and makes the note a template. Below: the arrow, callout, text style and
+  sizes; an attribute of the entity set or removed through the leader, of the
+  type chosen or as typed (`LEADER PROP`, which reads a value as `PROP SET`
+  does - `CommandInterpreter::propertyValue`); and Freeze Note, Detach Tip
+  and Apply. Choosing a label style lends the form that style's text style
+  and height, as `labelstyle=` lends a leader them; choosing Text or Template
+  again puts back the words typed and the look from before
+  (`ANoteMadeAStylesAndBackKeepsTheUsersWordsAndLook`).
+
+  Apply sends only what the user changed: the form remembers what it showed
+  and leaves out every field still showing that, so a value its widgets
+  cannot hold exactly - a height finer than their 3 decimals, a landing past
+  their 1000 mm, a non-breaking space - is never rewritten, and an untouched
+  form applied is no step
+  (`AnUntouchedFormIsNoStepAndWhatItsWidgetsCannotHoldIsKept`). With the
+  shown leader one of several selected, Apply, Freeze and Detach change them
+  all, in one step, and the form says so
+  (`SeveralSelectedLeadersAreChangedTogetherInOneStep`). Freeze, Detach and
+  Attach act on the leader as drawn, so while the form has changes not
+  applied they are greyed, their tips say why, and they refuse
+  (`TheListChoosesAndFreezeWaitsForTheFormToBeApplied`). The form is read
+  again from the leader when the leader changes under it - an undo, a verb
+  typed - and left alone, unapplied edits and all, when something else
+  changes (`TheFormFollowsTheSelectionAndAnUndoButKeepsUnappliedEdits`); a
+  drawing opened or started afresh starts the form afresh, even where the new
+  drawing has the very same leader (`ADrawingReplacedStartsTheFormAfresh`).
+  It watches the document through `DocumentWatcher`, as `docs/desktop.md`
+  asks.
+* **For Selection**: a leader, or with Balloons ticked a balloon, to each
+  selected entity (`LEADER FOR`, `BALLOON FOR`): the note as text, a
+  template or a label style's, checked and shown as it would read for the
+  first selected entity that has a place for a leader, with the values that
+  entity offers there to double-click into it; the look (arrow and callout,
+  each Automatic by default - a dot for a tip inside an outline, a circle for
+  a balloon - text style, height, arrow size, landing); and the note's
+  direction and distance on paper. A balloon with no note is numbered on
+  from the highest there is. It says how many it made and why it skipped
+  any, and what it made is selected, so the Leader tab shows it and Arrange
+  can line it up (`ForSelectionIsPreviewedForTheFirstAndPlacedAsTold`).
 * **Arrange**: the selected leaders' notes lined up at the topmost's x or a
   given one, stacked or not (`LEADER ALIGN`), and the balloons numbered again
-  from a number, as made, across or down (`BALLOON RENUMBER`).
+  from a number, as made, across or down (`BALLOON RENUMBER`); numbering
+  that changes nothing is no step
+  (`ArrangeAlignsTheSelectedNotesAndRenumbersTheBalloons`).
 
 ## Stored with the project
 
@@ -612,8 +648,8 @@ it skipped dimensions, and so does the archive exporter.
 | `tests/entity/annotation/test_leader_values.cpp` | Along and Inside anchors, the nearest place, what a leader can say of every kind of target, the leader template check, validation, the version-3 blob and JSON |
 | `tests/cad/annotation/test_smart_leaders.cpp` | the LEADER verbs end to end: templates, label styles, `#id@x,y` and `.inside`, VALUES, LIST, SET, ATTACH, DETACH, FREEZE, PROP, FOR, ALIGN, BALLOON FOR and RENUMBER; following stretches and moves, going with the target, copies |
 | `tests/cad/tools/test_smart_leader_tool.cpp` | the Leader tool: a tip put on what it is clicked on, fields checked as typed, a note that would say nothing refused |
-| `tests/cad/annotation/test_leader_edit.cpp` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped, a label style's look lent, attaching, the value rows |
-| `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name: the form, the template checked and previewed, values inserted, attributes set, freeze and detach, following the selection and undo, For Selection, Arrange, the menu's letters |
+| `tests/cad/annotation/test_leader_edit.cpp` | the shared edits: an unchanged edit is no command, what cannot be made is refused rather than skipped (negative sizes too), a label style's look lent, attaching, the value rows, where a leader goes on an entity |
+| `tests/qt_widgets/annotation/test_leader_manager.cpp` | the Leaders manager driven by object name and its widgets' own signals: the form, the template checked and previewed, only what changed applied (values the widgets cannot hold kept), the note kind switched and back, a style's template read afresh, values double-clicked in at the cursor, attributes set, attach and along, several leaders at once, freeze and detach waiting for Apply, following the selection, undo and a replaced drawing, For Selection's preview and placing, Arrange, each menu entry's tab |
 | `tests/dxf/test_writer.cpp` | paper-sized text at the scale, drawn annotation, labels with no room |
 | `tests/qt_widgets/annotation/test_annotation_ui.cpp` | painting (a white style prints black, masks, paper height at every scale, the painter's label counts) and the managers and scale box driven by object name |
 
