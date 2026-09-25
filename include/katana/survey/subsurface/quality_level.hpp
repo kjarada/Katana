@@ -46,15 +46,17 @@ enum class QualityLevel {
 // "QL-A" .. "QL-D": the spelling the standard and every deliverable uses.
 [[nodiscard]] const char* toString(QualityLevel level);
 
-// Accepts "QL-A", "QLA", "QL A", "A" in any letter case, with blanks around.
-// nullopt for anything else, including "E" and an empty string: an unknown
-// quality level is not QL-D, it is a record nobody graded.
+// Accepts "QL-A", "QLA", "QL A", "A" and "Quality Level A" in any letter
+// case, with blanks around. nullopt for anything else, including "E",
+// "Unknown" and an empty string: an unknown quality level is not QL-D, it is
+// a record nobody graded.
 [[nodiscard]] std::optional<QualityLevel> parseQualityLevel(std::string_view text);
 
 // How a position was obtained. The quality level a record may claim is capped
 // by its method before any tolerance is looked at: no accuracy makes a
 // radar pick into a QL-A observation, because QL-A means the service was SEEN.
 enum class LocationMethod {
+    Unknown,                  // the method was not recorded: nothing supports better than QL-D
     Records,                  // plans, GIS, as-constructed drawings
     Anecdotal,                // verbal, site knowledge
     SurfaceFeature,           // a pit, valve, marker or pole surveyed and correlated
@@ -67,9 +69,13 @@ enum class LocationMethod {
 
 [[nodiscard]] const char* toString(LocationMethod method);
 
-// Accepts the enumerator names and the field abbreviations surveyors use:
+// Accepts the enumerator names, the field abbreviations surveyors use -
 // "records", "anecdotal", "surface", "EML", "GPR", "geophysical", "NDD",
-// "pothole", "vac", "trench" - any letter case. nullopt otherwise.
+// "pothole", "vac", "trench" - and the Locate Method names of AS 5488.2 as
+// delivery schemas spell them: "Archive Drawings and Plans" and "Geographic
+// Information System" are Records, "Electronic Detection" is EML,
+// "Potholing" is non-destructive excavation, "Survey" (a surveyed feature)
+// is SurfaceFeature. Any letter case; nullopt otherwise.
 [[nodiscard]] std::optional<LocationMethod> parseLocationMethod(std::string_view text);
 
 // The best level the method can ever support.

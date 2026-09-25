@@ -7,6 +7,7 @@
 //   UTILITY REPORT <schedule.csv> [MINCOVER <m>] [SPACING <m>]
 //   UTILITY VERIFY <schedule.csv>
 //   UTILITY CLEARANCE <schedule.csv> <design.csv> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
+//   UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>
 //
 // The schedules are read, graded and reported; nothing is added to the
 // drawing, so the verbs are safe to run against any open project.

@@ -11,6 +11,7 @@
 
 #include "katana/core/text.hpp"
 #include "katana/survey/subsurface/clearance.hpp"
+#include "katana/survey/subsurface/delivery_schema.hpp"
 #include "katana/survey/subsurface/utility_csv.hpp"
 #include "katana/survey/subsurface/utility_report.hpp"
 #include "katana/survey/subsurface/verification.hpp"
@@ -193,6 +194,33 @@ bool clearance(const std::vector<std::string>& args)
     return true;
 }
 
+// UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>: exit status 1 when the
+// schedule has errors against the schema, so that a script can gate on it.
+bool check(const std::vector<std::string>& args)
+{
+    if (args.size() != 4 || !core::equalsIgnoringCase(args[2], "SCHEMA")) {
+        return fail("InvalidArgument: usage: UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>");
+    }
+    const auto schemaText = readFile(args[3]);
+    if (!schemaText) {
+        return fail("NotFound: cannot read " + args[3]);
+    }
+    const auto schema = sub::parseDeliverySchema(*schemaText);
+    if (!schema) {
+        return fail(schema.error().describe() + " in " + args[3]);
+    }
+    const auto scheduleText = readFile(args[1]);
+    if (!scheduleText) {
+        return fail("NotFound: cannot read " + args[1]);
+    }
+    const auto result = sub::checkDelivery(*scheduleText, *schema);
+    if (!result) {
+        return fail(result.error().describe() + " in " + args[1]);
+    }
+    std::cout << sub::renderSchemaCheck(*result, *schema);
+    return result->count(sub::FindingSeverity::Error) == 0;
+}
+
 } // namespace
 
 bool runUtilityVerb(std::string_view argument)
@@ -211,7 +239,10 @@ bool runUtilityVerb(std::string_view argument)
     if (action == "clearance") {
         return clearance(*args);
     }
-    return fail("InvalidArgument: usage: UTILITY REPORT | VERIFY | CLEARANCE ... "
+    if (action == "check") {
+        return check(*args);
+    }
+    return fail("InvalidArgument: usage: UTILITY REPORT | VERIFY | CLEARANCE | CHECK ... "
                 "(katana_cli --help)");
 }
 
@@ -224,7 +255,11 @@ const char* utilityHelpText()
            "          QL-A exposures that name them in the verifies column\n"
            "          UTILITY CLEARANCE <schedule.csv> <design.csv> [WIDTH <m>]\n"
            "          [H <m>] [V <m>] [MARGIN <m>]  clearance of proposed works\n"
-           "          from each service, widened by its quality level's tolerance\n";
+           "          from each service, widened by its quality level's tolerance\n"
+           "          UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>  the schedule\n"
+           "          against a client's delivery schema: mandatory attributes and\n"
+           "          their value lists (tools/utility_schema_domains.py makes the\n"
+           "          schema file from a TfNSW Utility Schema workbook)\n";
 }
 
 } // namespace katana::app
