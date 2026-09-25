@@ -411,6 +411,16 @@ Id Builder::product(const IfcClass& ifcClass, std::string_view key, std::string_
     return id;
 }
 
+void Builder::tally(std::string_view source, const IfcClass& ifcClass, std::string_view system,
+                    std::string_view why, std::size_t count)
+{
+    if (count == 0) {
+        return;
+    }
+    tally_[{std::string(source), ifcClass.entity, ifcClass.predefinedType, ifcClass.objectType,
+            std::string(system), std::string(why)}] += count;
+}
+
 Id Builder::propertySet(std::string_view key, std::string_view name, const PropertyList& properties)
 {
     if (properties.empty()) {
@@ -602,6 +612,11 @@ void Builder::finish()
     for (const auto& [name, representations] : layers_) {
         file_.add("IfcPresentationLayerAssignment",
                   Args().string(name).null().refs(representations).null());
+    }
+    report_.tally.clear();
+    report_.tally.reserve(tally_.size());
+    for (const auto& [key, count] : tally_) {
+        report_.tally.push_back(ClassTally{key[0], key[1], key[2], key[3], key[4], key[5], count});
     }
     for (const auto& [reference, objects] : associations_) {
         file_.add("IfcRelAssociatesClassification",

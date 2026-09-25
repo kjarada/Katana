@@ -1,5 +1,7 @@
-# IFC 4.3 export (IFC4X3_ADD2), natively: the drawing, its alignments, its
-# surfaces and an AS 5488 subsurface utility investigation (docs/ifc.md).
+# IFC 4.3 exchange (IFC4X3_ADD2 out; IFC2X3, IFC4 and IFC4X3 in), natively:
+# the drawing, its alignments, its surfaces and an AS 5488 subsurface utility
+# investigation (docs/ifc.md), and what the two front ends share about it
+# (front_end.cpp: the IMPORT/EXPORT grammar and the files an export names).
 #
 # Deliberately NOT part of katana_interop, for the reason the DXF and 12d
 # modules are not: writing IFC needs nothing but the domain model, so this
@@ -18,6 +20,7 @@ add_library(katana_ifc STATIC
     step_reader.cpp
     import_alignment.cpp
     import.cpp
+    front_end.cpp
 )
 katana_target_defaults(katana_ifc)
 # commands for one thing, the import as the single undoable step both front

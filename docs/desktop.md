@@ -715,6 +715,57 @@ workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
 progress and Cancel in the status bar; the entities arrive as one command.
 
+## File > Import IFC and Export IFC
+
+IFC 4.3 both ways (`docs/ifc.md`) has two entries of its own in File,
+`fileImportIfc` ("Import IFC...") and `fileExportIfc` ("Export IFC..."), beside
+Import and Export Vector rather than inside them: what an IFC exchange chooses
+- which of the drawing's objects go, an AS 5488 utility schedule and the
+delivery schema it was written to, a project's classification rules - has no
+place in the generic dialogs. Each opens a dialog (`IfcImportDialog`,
+`IfcExportDialog`, `src/katana_qt/ifc_dialogs.hpp`) that the window makes on
+first use and keeps: non-modal, a File field with a Browse button rather than a
+file dialog asked up front, and every control named in the header, so that a
+headless run drives it (`--dialog fileExportIfc`, `--fill`, `--press`) and
+Browse, headless, says to type the path instead of opening a box.
+
+Neither dialog reads or writes a file. Each hands what was chosen to the
+window through its context (`IfcExportContext`, `IfcImportContext`), and the
+window runs the code a typed line runs (`src/katana_qt/main_window_ifc.cpp`):
+`MainWindow::exportIfcFile` and `MainWindow::importIfcFile`, which take the
+verbs' grammar, the files an export names and the GlobalId namespace from
+`include/katana/ifc/front_end.hpp` - the same functions `katana_cli` calls -
+so a dialog, a line typed in the window and a line given to `katana_cli` write
+the same file. The export dialog's table, `ifcExportClasses`, previews it: for
+each layer, service, alignment and surface, how many objects become which IFC
+class, in which system, and why ("rule kerb", "a graded segment: type water",
+"a label: labels are not exported"). It is the writer's own account
+(`ifc::IfcExport::tally`), made by writing the file in memory, never a second
+guess at the mapping; and a class that is wrong for a project's layers is put
+right with a rules file, which Save Default Rules starts from the defaults.
+
+A .ifc reaches the same two functions from everywhere else a path enters:
+File > Import and its IFC filter, a path given to the window, the typed
+`IMPORT` and `EXPORT` (with their `LOCAL`, `UTILITIES`, `SCHEMA`, `RULES`,
+`SPACING` and `NODRAWING`, split by the shared grammar before the window's
+generic one takes the rest of the line as a path), the GIS imports' "All
+files", `INFO` and GIS > Dataset Information (`MainWindow::describeIfcFile`),
+and `--import-options`, which builds the import dialog. Choosing IFC in Export
+Vector's file dialog opens the export dialog with the file filled. The Command
+Reference lists the window's own verbs after the interpreter's.
+
+An import asks what the DXF import asks - a file far from the drawing is
+shifted alongside or kept - weighing everything it brings, alignments and
+surfaces too. When the file names an EPSG code and the project has none, File
+> Import asks whether the project takes it, the dialog's "Take the file's
+coordinate system" answers in advance, and a headless or typed import says
+how (`CRS SET`); the change is its own undoable step, after the import's.
+Data shifted or moved to the origin is in no system, and takes none. Terrain
+comes in as surfaces of the session (`MainWindow::addSurface`), which the
+export also writes out - the one exchange that carries the 3D view's surfaces
+both ways besides the 12d archive. `qt_widgets.IfcExportDialog.PreviewShowsTheWritersAccountClassByClass`
+and the `qt_ifc_*_headless` checks (`tests/CMakeLists.txt`) drive all of it.
+
 ## Global Modify
 
 Format > Global Modify... (`GlobalModifyDialog`,
