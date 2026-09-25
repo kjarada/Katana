@@ -4,6 +4,6 @@ file(GLOB _commands_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURC
 
 katana_add_test_suite(commands
     LIBS katana_commands
-    SOURCES test_commands.cpp test_annotation_tables.cpp
+    SOURCES test_commands.cpp test_annotation_tables.cpp test_command_stack_names.cpp
         ${_commands_customisation_tests}
 )

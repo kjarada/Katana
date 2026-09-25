@@ -298,6 +298,9 @@ class MainWindow final : public QMainWindow {
 
     void refreshAll();
     void refreshTitle();
+    // The Edit toolbar's Undo and Redo lists, from the history: the k-th
+    // entry (undoStepK, redoStepK) runs UNDO k or REDO k.
+    void refreshHistoryMenus();
     void refreshLayers();
     void refreshProperties();
     void refreshReferences();
@@ -516,6 +519,10 @@ class MainWindow final : public QMainWindow {
     std::vector<std::string> customisationMissingAtOpen_;
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
+    // The drop-down lists of the Edit toolbar's Undo and Redo buttons
+    // (editUndoButton, editRedoButton): editUndoMenu, editRedoMenu.
+    QMenu* undoHistory_ = nullptr;
+    QMenu* redoHistory_ = nullptr;
     QAction* gridAction_ = nullptr;
     QAction* snapAction_ = nullptr;
     // The catalogue's tools, one action each, by id; and Select, checked
