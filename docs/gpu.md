@@ -91,6 +91,73 @@ marks it dirty; the next frame uploads it once. Every other frame writes one
 (`AFrameThatOnlyMovesTheCameraUploadsNothing`). A packed vertex is 16 bytes
 against the draw list's 28.
 
+## Packing
+
+`packDrawList` runs on the CPU for every layer the 3D view rebuilds, so every
+edit pays it before anything reaches the GPU, and on a dense TIN it was
+several milliseconds. `BM_GpuPack` times it on the ground grid with a line
+along each triangle edge, as a TIN's edges are drawn (no device needed; its
+`digest` counter is FNV-1a over every packed byte). Three changes, in the
+order the profile ranked them (2026-09-25):
+
+1. **Bounds once per vertex.** `DrawList::bounds()` visited a vertex once for
+   every primitive using it, and a TIN's vertex is a corner of about six
+   triangles and an end of as many edges. Each layer was also bounded twice,
+   once for the scene's origin (`setLayers`) and once inside `packDrawList`.
+   That was 61% of the time. `DrawList::bounds()` now marks the vertices its
+   primitives use and bounds each marked vertex once, in index order. This is
+   the scene builder's walk (`docs/performance.md`, "The 3D scene build"),
+   moved into `render::DrawList` so that both callers share one copy. When an
+   extreme is a zero, the one case where the visiting order decides the
+   result (which zero's sign), it falls back to primitive order.
+   `tests/render/test_draw_list.cpp` holds it to the old walk, to the bit, on
+   2000 generated lists with both zeros, NaN, infinities, unused vertices and
+   indices past the end. `setLayers` bounds each layer once and passes the box
+   in (`packDrawList(list, origin, bounds, out)`).
+2. **Triangle indices written in place.** They were appended, three
+   `push_back`s a triangle, and that made the whole pack 14% slower than
+   sizing the array once (plain integers: one memset), writing through a
+   pointer and cutting it back to the triangles kept. The same done to the
+   lines made the pack 24% slower instead: a `GpuLine`'s widths default to 1,
+   so sizing the array writes every line once before the loop writes it
+   again. The lines and points are still appended.
+3. **The vertices by AVX2** (`simd/pack_avx2.cpp`, a kernel file under the
+   rules of `docs/performance.md`, "SIMD"). Each step packs four vertices:
+   their twelve doubles fill three registers, the origin is laid out in the
+   same pattern and subtracted lane by lane, and CVTPD2PS rounds each lane to
+   float as `static_cast<float>` does. It is the smallest of the three
+   changes, because once the first two were done the vertex pass was about
+   3% of the profile. Its output is the loop's to the bit
+   (`PackDrawList.EveryVertexPacksToTheSameBitsAtEachSimdLevel`: every length
+   0-70, with both zeros, infinities, NaN, subnormals and doubles outside
+   float's range). A wrong byte rotation, and the tail reading the wrong
+   origin lane, each fail that test and the hand-worked one after it. The
+   kernel has no minimum length: a probe build with the minimum at 1 packed
+   four vertices as fast as the loop (minimums 64 against 67 ns; in the A/A
+   copy 66 against 68).
+
+`tools/compare_benchmarks.py --alternate 7 BM_GpuPack before=... after=...
+after_again=...`, on the cloud container's 4-core Xeon at 2.10 GHz. `before`
+is this tree with only the benchmark added; `after again` is a byte copy of
+`after`, the A/A control. The digests are the same in all three binaries and
+at both levels. Min / median of 21 samples:
+
+| Case | before | after | after again |
+| --- | --- | --- | --- |
+| 66k vertices, 197k lines, AVX2 | 8.19 / 8.52 ms | 1.69 / 1.82 ms | 1.72 / 1.82 ms |
+| the same, scalar | 8.25 / 8.56 ms | 1.82 / 1.87 ms | 1.82 / 1.90 ms |
+| 526k vertices, 1.57M lines, AVX2 | 80.46 / 87.39 ms | 25.89 / 32.69 ms | 24.09 / 31.66 ms |
+| the same, scalar | 82.82 / 87.00 ms | 23.50 / 32.40 ms | 27.30 / 33.44 ms |
+
+The pack is 4.6-4.7x faster at 66k vertices and 2.7x at 526k, where its 63 MB
+of lines no longer fit in any cache. `before`'s two rows both time the old
+code, which had no kernel. The kernel takes 3-4% off the pack at 66k vertices,
+where the A/A pair agrees to 2%. At 526k the A/A medians differ by 3% and the
+minimums by up to 16%, so its share there is not resolved. On lists the size
+of an entity or selection layer it takes 6-12% off (medians, AVX2 against
+scalar, then the same in the A/A copy): 226 against 247 ns and 243 against
+258 ns for 16 vertices, 4.61 against 5.10 us and 4.53 against 5.12 us for 256.
+
 ## Precision
 
 A GPU takes positions and matrices as 32-bit floats, and at an MGA northing of
