@@ -23,6 +23,7 @@
 
 #include "katana/cad/document.hpp"
 #include "katana/cad/interactive_tool.hpp"
+#include "katana/cad/snapping.hpp"
 #include "katana/core/error.hpp"
 #include "katana/entity/entity.hpp"
 #include "katana/geometry/primitives2d.hpp"
@@ -71,7 +72,12 @@ class ToolHost {
     // Each answers what the tool made of it. With no tool running the answer
     // is Rejected and onRejected says so: an input with nowhere to go is
     // reported, not dropped.
-    Outcome point(const Point2& at);
+    // A click at `at`; `snap` is what the view's snapping found there, if
+    // anything. A snap to an entity's end, middle, centre or vertex reaches
+    // the tool as that point of that entity (cad::routeSnappedPoint), so
+    // the annotation it makes follows the entity.
+    Outcome point(const Point2& at,
+                  const std::optional<katana::cad::SnapResult>& snap = std::nullopt);
     Outcome entity(katana::entity::EntityId id, const Point2& at);
     // Typed text, through routeTypedInput: "10,20", "@5,0" and "@5<90" are
     // points (the relative forms from lastPoint()), anything else is a value

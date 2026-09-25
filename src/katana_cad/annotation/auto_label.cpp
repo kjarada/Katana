@@ -170,6 +170,26 @@ Result<CommandPtr> createLabel(const katana::entity::Model& model, const LabelRe
     return changeCommand("CREATE_LABEL", std::move(changes));
 }
 
+Result<CommandPtr> createLabels(const katana::entity::Model& model,
+                                const std::vector<LabelRequest>& requests)
+{
+    if (requests.empty()) {
+        return makeError(ErrorCode::InvalidArgument, "there is nothing to label");
+    }
+    auto transaction = std::make_unique<katana::commands::Transaction>("CREATE_LABEL");
+    for (const LabelRequest& one : requests) {
+        auto built = createLabel(model, one);
+        if (!built) {
+            return makeError(built.error().code, built.error().message,
+                             (one.target != 0 ? "id=" + std::to_string(one.target)
+                                              : "alignment=" + one.alignment) +
+                                 " " + built.error().context);
+        }
+        transaction->add(std::move(*built));
+    }
+    return CommandPtr(std::move(transaction));
+}
+
 Result<CommandPtr> autoLabel(const katana::entity::Model& model,
                              const std::vector<std::string>& ruleNames, AutoLabelReport* report)
 {

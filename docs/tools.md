@@ -72,7 +72,7 @@ spellings of the same verbs, so a word means one thing whichever reads it:
 | Draw > Curves (`draw_curves.cpp`) | Circle (`CIRCLE`, `C`) and its Centre Diameter, 2 Points, 3 Points and Tangent Tangent Radius variants; Arc (`ARC`, `A`, three points) and its Start Centre End, Centre Start End and Start End Radius variants - a variant has no verb, being an option of the general tool, as drafters expect |
 | Modify > Transform (`modify_transform.cpp`) | Move (`MOVE`, `M`), Copy (`COPY`, `CO`, `CP`), Rotate (`ROTATE`, `RO`), Scale (`SCALE`, `SC`), Mirror (`MIRROR`, `MI`), Stretch (`STRETCH`, `S`), Rectangular Array (`ARRAYRECT`, `ARRAY`, `AR`), Polar Array (`ARRAYPOLAR`), Erase (`ERASE`, `E`, `DELETE`, `DEL`) |
 | Modify > Edit (`modify_edit*.cpp`) | Trim (`TRIM`, `TR`), Extend (`EXTEND`, `EX`), Offset (`OFFSET`, `O`), Fillet (`FILLET`, `F`), Chamfer (`CHAMFER`, `CHA`), Break (`BREAK`, `BR`), Break at Point (`BREAKATPOINT`), Join (`JOIN`, `J`), Explode (`EXPLODE`, `X`) |
-| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Leader (`LEADER`, `LEAD`, `LE`) |
+| Annotate (`annotate*.cpp`) | Text (`TEXT`, `DTEXT`, `DT`), Multiline Text (`MTEXT`, `MT`), Linear Dimension (`DIMLINEAR`, `DLI`), Aligned Dimension (`DIMALIGNED`, `DAL`), Angular Dimension (`DIMANGULAR`, `DAN`), Radius Dimension (`DIMRADIUS`, `DRA`), Diameter Dimension (`DIMDIAMETER`, `DDI`), Ordinate Dimension (`DIMORDINATE`, `DOR`), Baseline Dimension (`DIMBASELINE`, `DBA`), Continue Dimension (`DIMCONTINUE`, `DCO`), Leader (`LEADER`, `LEAD`, `LE`), Balloon (`BALLOON`), Label Objects (`LABELOBJECTS`, `LBL`, `LABEL`) |
 
 **The Annotate tools and the annotation system** (`docs/annotation.md`,
 2026-09-25). The Leader tool makes ONE leader entity (`LeaderGeometry`) -
@@ -87,16 +87,43 @@ and Ordinate Dimension tools (`annotate_dimension_kinds.cpp`) make the
 dimension the `DIM` verb makes, through the same builders
 (`include/katana/cad/annotation/dimension_build.hpp`), so a picked pair of
 lines, arc or circle is FOLLOWED when it is edited; a dimension given by
-clicked points measures those points. The ordinate's datum is the drawing's
-origin (`DIM ORDINATE ... datum=x,y` measures from another). The Linear
-Dimension tool still stores the projected aligned dimension described in
-`annotate_dimension.cpp`: that is what the DXF writer exports, and it draws
-the same picture; `DIM LINEAR` makes a Linear-kind one. Text takes the `TEXT`
-verb's style, justification and paper height at its first prompt (`S`, `J`,
-`P`), and Multiline Text makes one text of every line typed, as `MTEXT` does
-(`docs/annotation.md`, "Text in the window"). A bare `LEADER`, `DAN`
-or `DIMRADIUS` typed starts the tool; with arguments the line is the command
-interpreter's, as `LINE 0,0 10,0` is.
+clicked points measures those points, unless a point was snapped to an
+entity's end, middle, centre or vertex, which it then follows
+(`docs/annotation.md`, "Associativity"). The ordinate's datum is the
+drawing's origin until Datum gives another (`DIM ORDINATE ... datum=x,y`),
+kept for the rest of the run as the datum of the drawing's newest ordinate.
+The Linear Dimension tool stores the projected aligned dimension described
+in `annotate_dimension.cpp` where that can draw what was asked - every
+drawing made before the Linear kind holds it - and the Linear kind `DIM
+LINEAR` makes for Rotated (a typed angle or two points), for a line between
+the origins' levels (once refused) and for snapped origins, which only the
+Linear kind can follow. The export draws both (`export_annotation.hpp`), so
+the old reason for the projection, that the DXF writer drew only the aligned
+kind, no longer holds. Text takes the `TEXT` verb's style, justification and
+paper height at its first prompt (`S`, `J`, `P`), and Multiline Text makes one
+text of every line typed, as `MTEXT` does (`docs/annotation.md`, "Text in the
+window"). A bare `LEADER`, `DAN` or `DIMRADIUS` typed starts
+the tool; with arguments the line is the command interpreter's, as
+`LINE 0,0 10,0` is. Label Objects (`annotate_label.cpp`, 2026-09-26) is the
+`LABEL` verb by hand, made through the same `annotation::createLabels`; a
+bare `LABEL` starts it (`docs/annotation.md`, "In the window").
+
+**Chains, balloons and the leader's options** (2026-09-26). Baseline and
+Continue Dimension (`annotate_dimension_chain.cpp`) go on from the drawing's
+newest linear or aligned dimension - the one the last dimension tool made,
+as AutoCAD's go on from the last - and Select picks another; each origin
+clicked is one more dimension, Enter makes them all as one command through
+`annotation::dimensionChain` (DIM BASELINE's and DIM CONTINUE's door) and
+Enter again ends the tool; Esc keeps those placed. Baseline's Spacing
+overrides a text height and a half of the base's style. Balloon
+(`annotate_balloon.cpp`) is BALLOON by hand, numbered by
+`annotation::nextBalloonNumber` unless Number says otherwise. The Leader's
+first prompt takes Arrow, Callout, Style and Paper - LEADER's `arrow=`,
+`callout=`, `style=` and `paper=` - for the leader being drawn. What a tool
+starting again should remember is read from the drawing, not kept by the
+program: the newest dimension to go on from, the newest ordinate's datum,
+the highest balloon, the newest hand-placed label's style. Each of these
+tools is tested against the verb line that makes the same entities.
 
 The sixth family in `families.hpp`, Inquiry (Distance, Area, ID Point, Angle,
 List), is listed and empty. The Survey menu's tools (`docs/survey.md`) are

@@ -515,3 +515,24 @@ if(KATANA_BUILD_TESTS AND TARGET katana_interop)
         PASS_REGULAR_EXPRESSION "ALONGSIDE: moved as one piece by 820\\.000,2000\\.000.*extent 1000,2000 to 1185,2165.*OFFSET: moved as one piece by 10\\.000,-20\\.500.*extent 190,-20\\.5 to 375,144\\.5"
         FAIL_REGULAR_EXPRESSION "error")
 endif()
+
+# Labels by hand and their layout, as an agent types them (docs/annotation.md,
+# "The verbs"). Two numbered points at one place (1, 2) labelled in a style
+# that may not move its labels: the first label (3) is placed and the second
+# (4) finds no room, and LABEL LAYOUT names it on a line of its own. Pinned
+# elsewhere with LABEL SET, both are placed - the pinned one counted as
+# displaced, since it is away from its own place with a leader back to its
+# point (label_layout.cpp gives a dragged label that candidate).
+if(KATANA_BUILD_TESTS)
+    add_test(NAME cli.label_layout_names_the_label_that_found_no_room
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "LABELSTYLE NEW pt kind=point text={point} displace=off"
+                -c "POINT 0,0" -c "SELECT 1" -c "PROP SET point P1"
+                -c "POINT 0,0" -c "SELECT 2" -c "PROP SET point P2"
+                -c "LABEL 1 2 style=pt" -c "LABEL LAYOUT" -c "LABEL SET 4 at=50,50"
+                -c "LABEL LAYOUT")
+    set_tests_properties(cli.label_layout_names_the_label_that_found_no_room PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "considered=2 placed=1 displaced=0 suppressed=1 orphaned=0[\r\n]+label=3 piece=0 [^\r\n]*[\r\n]+label=4 piece=0 suppressed=yes.*updated label id=4.*considered=2 placed=2 displaced=1 suppressed=0 orphaned=0")
+endif()

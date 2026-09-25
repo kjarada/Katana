@@ -591,6 +591,27 @@ std::string labelText(const LabelGeometry& label, const LabelStyle& style, const
     return katana::entity::formatLabel(style.text, piece.values);
 }
 
+std::string shownLabelText(const katana::entity::Model& model, const LabelGeometry& label)
+{
+    const LabelStyle* style = model.labelStyles.find(label.style);
+    if (style == nullptr) {
+        return {};
+    }
+    std::string joined;
+    for (const LabelPiece& piece : labelPiecesOf(model, label, *style)) {
+        if (piece.tickOnly) {
+            continue;
+        }
+        const std::string text = labelText(label, *style, piece);
+        if (text.empty()) {
+            continue;
+        }
+        joined += joined.empty() ? "" : " | ";
+        joined += text;
+    }
+    return joined;
+}
+
 LabelLayout layoutLabels(const katana::entity::Model& model, const std::vector<const Entity*>& labels,
                          const LabelLayoutOptions& options)
 {
@@ -813,6 +834,7 @@ LabelLayout layoutLabels(const katana::entity::Model& model, const std::vector<c
         }
         if (!placed) {
             ++layout.suppressed;
+            layout.suppressedPieces.push_back({entry.entity->id, entry.pieceIndex});
             keepMarks();
         }
     }

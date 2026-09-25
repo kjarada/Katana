@@ -80,6 +80,13 @@ struct PlacedLabel {
     bool displaced = false;
 };
 
+// A piece of a label, by the label's id and the piece's index.
+struct LabelPieceRef {
+    katana::entity::EntityId label = 0;
+    std::size_t piece = 0;
+    friend bool operator==(const LabelPieceRef&, const LabelPieceRef&) = default;
+};
+
 struct LabelLayout {
     std::vector<PlacedLabel> placed;
     // Marks drawn whatever the text does - chainage ticks, spot-level
@@ -90,6 +97,10 @@ struct LabelLayout {
     std::size_t suppressed = 0; // of those, no room
     std::size_t displaced = 0;  // of those, placed away from their first place
     std::size_t orphaned = 0;   // labels with no target, style or text
+    // The suppressed pieces themselves, in the placing order: what LABEL
+    // LAYOUT names, so a person or an agent can select them and give them
+    // room (Annotate > Label Layout Report's Select Suppressed).
+    std::vector<LabelPieceRef> suppressedPieces;
 };
 
 // Lays out `labels` (label entities; anything else is ignored) for the
@@ -120,6 +131,13 @@ labelPiecesOf(const katana::entity::Model& model, const katana::entity::LabelGeo
 [[nodiscard]] std::string labelText(const katana::entity::LabelGeometry& label,
                                     const katana::entity::LabelStyle& style,
                                     const katana::entity::LabelPiece& piece);
+
+// The words a whole label shows now: each piece's labelText, the empty ones
+// and chainage ticks left out, joined by " | ". Empty when its style is gone
+// or it says nothing. What LABEL LIST replies as text= and the window's
+// Properties show, so the two cannot disagree.
+[[nodiscard]] std::string shownLabelText(const katana::entity::Model& model,
+                                         const katana::entity::LabelGeometry& label);
 
 // Whether two convex polygons overlap (touching edges count as apart): the
 // separating axis test the placer uses, exposed for its tests.

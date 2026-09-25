@@ -67,6 +67,12 @@ ToolStep InteractiveTool::point(const Point2& /*at*/)
                               toString(expects()));
 }
 
+ToolStep InteractiveTool::anchoredPoint(const Point2& at,
+                                        const katana::entity::AnchorRef& /*anchor*/)
+{
+    return point(at);
+}
+
 ToolStep InteractiveTool::entity(katana::entity::EntityId /*id*/, const Point2& /*at*/)
 {
     return ToolStep::rejected(std::string("an entity is not expected here; the tool wants ") +
@@ -181,6 +187,17 @@ ToolStep routeTypedInput(InteractiveTool& tool, std::string_view text)
         return tool.point(*point);
     }
     return tool.value(input);
+}
+
+ToolStep routeSnappedPoint(InteractiveTool& tool, const Document& document, const Point2& at,
+                           const std::optional<SnapResult>& snap)
+{
+    if (snap) {
+        if (const auto anchor = snapAnchor(document.model(), *snap)) {
+            return tool.anchoredPoint(at, *anchor);
+        }
+    }
+    return tool.point(at);
 }
 
 // ---- the catalogue -----------------------------------------------------------------

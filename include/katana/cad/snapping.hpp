@@ -82,4 +82,17 @@ struct SnapResult {
                                              const SnapRequest& request,
                                              const katana::geometry::SpatialIndex* index = nullptr);
 
+// The named point of the entity `snap` found that sits where it snapped - a
+// line's or an arc's start, end or middle, an arc's or a circle's centre, a
+// polyline's vertex or the middle of one of its segments, a point's or a
+// text's position, a leader's tip or last vertex - as the reference that
+// names it (entity/anchor.hpp), so annotation made from the snapped point can
+// follow the entity as one made from a typed #id.end point does. Endpoint,
+// Midpoint and Center snaps only: an Intersection, Perpendicular, Tangent or
+// Nearest point is not a point one entity keeps as it is edited, and Grid is
+// no entity's. Nullopt too when the entity is gone, or none of its named
+// points is within the geometric tolerance of the snapped point.
+[[nodiscard]] std::optional<katana::entity::AnchorRef> snapAnchor(const katana::entity::Model& model,
+                                                                  const SnapResult& snap);
+
 } // namespace katana::cad

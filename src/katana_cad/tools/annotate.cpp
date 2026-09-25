@@ -1,6 +1,7 @@
 // Text and dimensions (see families.hpp). The tools themselves are in
-// annotate_text.cpp, annotate_dimension.cpp, annotate_dimension_kinds.cpp and
-// annotate_leader.cpp; this file
+// annotate_text.cpp, annotate_dimension.cpp, annotate_dimension_kinds.cpp,
+// annotate_dimension_chain.cpp, annotate_leader.cpp, annotate_balloon.cpp and
+// annotate_label.cpp; this file
 // lists them, so the one call toolCatalog() makes keeps every one of them in
 // the link.
 //
@@ -119,9 +120,39 @@ void addAnnotateTools(ToolCatalog& catalog, const Report& report)
         .order = 6,
         .aliases = {"DIMORDINATE", "DOR"},
         .shortcut = {},
-        .tip = "Writes a feature's X or Y from the drawing's origin at the end of a leader; the "
-               "leader's direction chooses which, or type X or Y.",
+        .tip = "Writes a feature's X or Y from a datum (the drawing's origin until Datum gives "
+               "another) at the end of a leader; the leader's direction chooses which, or type "
+               "X or Y.",
         .make = annotate::makeOrdinateDimensionTool,
+    }));
+    // AutoCAD's DIMBASELINE/DBA and DIMCONTINUE/DCO; DIM BASELINE and DIM
+    // CONTINUE on the command line make the same chains
+    // (annotate_dimension_chain.cpp).
+    report(catalog.add(ToolInfo{
+        .id = "annotate.dimbaseline",
+        .name = "Baseline Dimension",
+        .category = "Annotate",
+        .group = "Dimensions",
+        .order = 7,
+        .aliases = {"DIMBASELINE", "DBA"},
+        .shortcut = {},
+        .tip = "Adds dimensions measured from the same first origin as the newest linear or "
+               "aligned dimension (or one chosen with Select), each a spacing further out: click "
+               "each next origin, then press Enter.",
+        .make = annotate::makeBaselineDimensionTool,
+    }));
+    report(catalog.add(ToolInfo{
+        .id = "annotate.dimcontinue",
+        .name = "Continue Dimension",
+        .category = "Annotate",
+        .group = "Dimensions",
+        .order = 8,
+        .aliases = {"DIMCONTINUE", "DCO"},
+        .shortcut = {},
+        .tip = "Chains dimensions end to end from the newest linear or aligned dimension (or one "
+               "chosen with Select), on its dimension line: click each next origin, then press "
+               "Enter.",
+        .make = annotate::makeContinueDimensionTool,
     }));
     report(catalog.add(ToolInfo{
         .id = "annotate.leader",
@@ -132,8 +163,39 @@ void addAnnotateTools(ToolCatalog& catalog, const Report& report)
         .aliases = {"LEADER", "LEAD", "LE"},
         .shortcut = {},
         .tip = "Draws an arrow to a feature with a note at its end: pick the tip and the bends, "
-               "press Enter, then type the note.",
+               "press Enter, then type the note; Arrow, Callout, Style and Paper change this "
+               "leader's look.",
         .make = annotate::makeLeaderTool,
+    }));
+    // A bare BALLOON starts it; with arguments BALLOON is the interpreter's
+    // verb, which makes the same balloon (annotate_balloon.cpp).
+    report(catalog.add(ToolInfo{
+        .id = "annotate.balloon",
+        .name = "Balloon",
+        .category = "Annotate",
+        .group = "Leaders",
+        .order = 2,
+        .aliases = {"BALLOON"},
+        .shortcut = {},
+        .tip = "A numbered circle at the end of a leader, counting on from the drawing's highest "
+               "balloon: pick the tip and where the circle sits, then press Enter.",
+        .make = annotate::makeBalloonTool,
+    }));
+    // A bare LABEL starts it, as a bare LEADER starts the Leader tool; with
+    // arguments LABEL is the interpreter's verb, which makes the same labels
+    // (annotate_label.cpp).
+    report(catalog.add(ToolInfo{
+        .id = "annotate.label",
+        .name = "Label Objects",
+        .category = "Annotate",
+        .group = "Labels",
+        .order = 1,
+        .aliases = {"LABELOBJECTS", "LBL", "LABEL"},
+        .shortcut = {},
+        .tip = "Labels the objects chosen in a label style - a point's number, a line's bearing "
+               "and distance, a lot's area: pick them, press Enter, then click where the text "
+               "goes or press Enter to let it find room.",
+        .make = annotate::makeLabelTool,
     }));
 }
 

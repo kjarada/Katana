@@ -1573,6 +1573,41 @@ if(TARGET katana)
     set_tests_properties(qt_the_dimension_styles_manager_runs_its_lines_headless
         qt_multiline_text_and_edit_text_run_in_the_window_headless
         qt_the_label_style_manager_runs_chosen_rules_headless
+# Labels made, edited and reported in the window (docs/annotation.md, "In the
+# window"). By hand: a 30 x 40 lot (1), 1200 m2, is labelled by the bare LBL
+# tool on the selection, its Style option naming Lot Area, and the label (2)
+# pinned at 12,20; the Properties panel shows its words and where it is;
+# Edit Label unpins it and gives it its own words through the one executor,
+# naming only those two; the Label Layout Report finds the one label placed
+# and none without room; the Annotate menu offers the tool and both dialogs.
+if(TARGET katana)
+    add_test(NAME qt_labels_are_made_edited_and_reported_in_the_window_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>PLINE 0,0 30,0 30,40 0,40 CLOSE|>LABELSTYLE DEFAULTS|>SELECT 1|>LBL|>S|>Lot Area|>12,20|>|?annotate.label|>SELECT 2|?propertyTable|@annotateEditLabel|labelEditPinned=off|labelEditOverride=on|labelEditText=LOT 7|?labelEditCommand|!labelEditApply|?labelEditStatus|@annotateLabelLayout|?labelLayoutPlaced|?labelLayoutSuppressed|>LABEL LIST|?annotateMenu"
+            "-DEXPECT=1 label in style Lot Area.*annotate\\.label: Label Objects, unchecked.*propertyTable: .*Text \\| 1200\\.0 m[^;]* ; Position \\| pinned at 12\\.0000, 20\\.0000.*labelEditCommand: LABEL SET 2 text=\"LOT 7\" at=none[\r\n]+.*labelEditStatus: updated label id=2.*labelLayoutPlaced: 1[\r\n]+labelLayoutSuppressed: 0.*id=2 style=\"Lot Area\" target=1 part=-1 layer=0 rule=\"\" text=\"LOT 7\".*annotateMenu: Annotate: .*Label Objects .*Edit Label\\.\\.\\. .*Label Layout Report\\.\\.\\."
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/labels_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_labels_are_made_edited_and_reported_in_the_window_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+    # The chain and balloon tools started by their aliases and answered on
+    # the command line (docs/tools.md). By hand: DBA goes on from the newest
+    # dimension (1: 0,0 to 10,0, its line 5 above), and one origin at 20,0
+    # makes a baseline dimension measuring 20; Enter makes it, Enter again
+    # ends the tool. BALLOON from 30,0 to 35,5 is balloon 1, the drawing's
+    # first. LEADER's Callout option boxes the next leader's note.
+    add_test(NAME qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>DIM LINEAR 0,0 10,0 at=5,5|>DBA|?annotate.dimbaseline|>20,0|>|>|>BALLOON|>30,0|>35,5|>|>|>LE|>C|>B|>40,0|>45,5|>|>NOTE|>|>|>LIST"
+            "-DEXPECT=annotate\\.dimbaseline: Baseline Dimension, checked[\r\n]+1 baseline dimension.*balloon 1.*leader with 1 line of text.*4 entities[\r\n]+1  Dimension  layer=0  linear  measures 10[\r\n]+2  Dimension  layer=0  linear  measures 20[\r\n]+3  Leader  layer=0  vertices=2  tip 30,0  \"1\"  callout=circle[\r\n]+4  Leader  layer=0  vertices=2  tip 40,0  \"NOTE\"  callout=box"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/chain_balloon_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_the_chain_balloon_and_leader_options_answer_on_the_command_line_headless
         PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)

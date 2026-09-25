@@ -31,6 +31,7 @@
 #include "katana/cad/annotation/command_words.hpp"
 #include "katana/cad/annotation/dimension_build.hpp"
 #include "katana/cad/annotation/label_layout.hpp"
+#include "katana/cad/annotation/leader_build.hpp"
 #include "katana/cad/annotation/text_layout.hpp"
 #include "katana/cad/command_interpreter.hpp"
 #include "katana/cad/dimension_draw.hpp"
@@ -481,28 +482,6 @@ std::string describeRule(const katana::entity::LabelRule& rule)
     return out.str();
 }
 
-// The text a label shows now, its pieces' texts joined by " | ".
-std::string labelTexts(const katana::entity::Model& model, const katana::entity::LabelGeometry& label)
-{
-    const auto* style = model.labelStyles.find(label.style);
-    if (style == nullptr) {
-        return {};
-    }
-    std::string joined;
-    for (const auto& piece : ann::labelPiecesOf(model, label, *style)) {
-        if (piece.tickOnly) {
-            continue;
-        }
-        const std::string text = ann::labelText(label, *style, piece);
-        if (text.empty()) {
-            continue;
-        }
-        joined += joined.empty() ? "" : " | ";
-        joined += text;
-    }
-    return joined;
-}
-
 // Runs a command built elsewhere; nullptr is "nothing to do", said.
 Result<std::string> runBuilt(Document& document, Result<cmd::CommandPtr> built,
                              const std::string& done, const std::string& nothing)
@@ -582,7 +561,8 @@ LabelStyle LABELSTYLE LIST | NEW name kind=point|segment|arc|area|chainage [text
           ch .Nf upper lower; a line with a value the target lacks is dropped
 Label     LABEL id [id...] style= [part=N] [layer=] [at=x,y] [text=]  (SELECTION for the
           selection) | LABEL ALIGN name style= [layer=] | LIST [id...] | SET id [style=
-          at=x,y|none text=|none] | DELETE id... | LAYOUT [scale=N] [collisions=on|off]
+          at=x,y|none text=|none layer=] | DELETE id... | LAYOUT [scale=N] [collisions=on|off]
+          (LAYOUT adds a label= piece= suppressed=yes line for each piece with no room)
 AutoLabel AUTOLABEL RULE ADD name style= [layer=glob code=glob type= labellayer= enabled=]
           AUTOLABEL RULE SET name opts | RULE DELETE name | RULE LIST
           AUTOLABEL RUN [rule...] | PREVIEW [rule...] | CLEAR [rule...]
@@ -1050,7 +1030,7 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
             if (label->position) {
                 line << " at=" << real(label->position->x) << "," << real(label->position->y);
             }
-            line << " text=" << field(labelTexts(model, *label));
+            line << " text=" << field(ann::shownLabelText(model, *label));
             out += out.empty() ? "" : "\n";
             out += line.str();
         });
@@ -1125,6 +1105,11 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
             out << "\nlabel=" << placed.label << " piece=" << placed.piece << " x=" << real(centre.x)
                 << " y=" << real(centre.y) << " candidate=" << placed.candidate
                 << " displaced=" << (placed.displaced ? "yes" : "no") << " text=" << field(text);
+        }
+        // Then each piece that found no room, so it can be selected and
+        // given some.
+        for (const ann::LabelPieceRef& piece : layout.suppressedPieces) {
+            out << "\nlabel=" << piece.label << " piece=" << piece.piece << " suppressed=yes";
         }
         return out.str();
     }
@@ -1236,19 +1221,13 @@ CommandInterpreter::Reply CommandInterpreter::label(const Tokens& args)
             requests.push_back(request);
         }
     }
-    // Every label as one step: one UNDO takes back the lot.
-    auto transaction = std::make_unique<cmd::Transaction>("CREATE_LABEL");
-    for (const ann::LabelRequest& one : requests) {
-        auto built = ann::createLabel(model, one);
-        if (!built) {
-            return makeError(built.error().code, built.error().message,
-                             (one.target != 0 ? "id=" + std::to_string(one.target)
-                                              : "alignment=" + one.alignment) +
-                                 " " + built.error().context);
-        }
-        transaction->add(std::move(*built));
+    // Every label as one step: one UNDO takes back the lot. The Label
+    // Objects tool makes its labels through the same door.
+    auto built = ann::createLabels(model, requests);
+    if (!built) {
+        return built.error();
     }
-    if (auto status = document_.execute(std::move(transaction)); !status) {
+    if (auto status = document_.execute(std::move(*built)); !status) {
         return status.error();
     }
     const auto created = document_.lastCreatedEntities();
@@ -1529,56 +1508,30 @@ CommandInterpreter::Reply CommandInterpreter::dimension(const Tokens& args)
         if (!id) {
             return id.error();
         }
-        const Entity* base = model.entities.find(*id);
-        const auto* dimension = base != nullptr
-                                    ? std::get_if<katana::entity::DimensionGeometry>(&base->geometry)
-                                    : nullptr;
-        if (dimension == nullptr) {
-            return makeError(ErrorCode::InvalidArgument, "that entity is not a dimension",
-                             "id=" + std::to_string(*id));
-        }
         auto list = points(1);
         if (!list) {
             return list.error();
         }
-        Result<std::vector<katana::entity::DimensionGeometry>> chain =
-            std::vector<katana::entity::DimensionGeometry>{};
-        if (kind == "BASELINE") {
-            // A text height and a half apart unless told: AutoCAD's metric
-            // DIMDLI of 3.75 against a DIMTXT of 2.5.
-            const auto style = dimensionStyleAtScale(resolveDimensionStyle(model, *base),
-                                                     document_.annotationScale());
-            double spacing = 1.5 * style.textHeight;
-            if (const std::string* text = parsed->find("spacing")) {
-                auto value = numberOf(*text, "spacing");
-                if (!value) {
-                    return value.error();
-                }
-                spacing = *value;
+        // A text height and a half apart unless told (ann::baselineSpacing).
+        std::optional<double> spacing;
+        if (const std::string* text = parsed->find("spacing");
+            text != nullptr && kind == "BASELINE") {
+            auto value = numberOf(*text, "spacing");
+            if (!value) {
+                return value.error();
             }
-            chain = ann::baselineDimensions(*dimension, *list, spacing);
-        } else {
-            chain = ann::continuedDimensions(*dimension, *list);
+            spacing = *value;
         }
-        if (!chain) {
-            return chain.error();
+        // The whole chain as one step, on the base's layer and style - the
+        // Baseline and Continue Dimension tools' door too.
+        auto built = ann::dimensionChain(
+            model, *id, *list,
+            kind == "BASELINE" ? ann::DimensionChain::Baseline : ann::DimensionChain::Continued,
+            spacing, document_.annotationScale());
+        if (!built) {
+            return built.error();
         }
-        // The whole chain as one step, on the base's layer and style.
-        cmd::ChangeSet changes;
-        for (auto& geometry : *chain) {
-            Entity entity;
-            entity.geometry = std::move(geometry);
-            entity.layer = base->layer;
-            entity.style = base->style;
-            entity.color = base->color;
-            changes.add.push_back(std::move(entity));
-        }
-        if (auto status = document_.execute(std::make_unique<cmd::ChangeSetCommand>(
-                kind == "BASELINE" ? "DIM_BASELINE" : "DIM_CONTINUE",
-                [changes](const cmd::CommandContext&) -> Result<cmd::ChangeSet> {
-                    return changes;
-                }));
-            !status) {
+        if (auto status = document_.execute(std::move(*built)); !status) {
             return status.error();
         }
         const auto ids = document_.lastCreatedEntities();
@@ -1617,21 +1570,8 @@ CommandInterpreter::Reply CommandInterpreter::leader(const std::string& verb, co
     }
     if (balloon) {
         leader.callout = katana::entity::CalloutShape::Circle;
-        // The next number: one more than the highest balloon already numbered.
-        long long highest = 0;
-        document_.model().entities.forEach([&](const Entity& entity) {
-            const auto* other = std::get_if<katana::entity::LeaderGeometry>(&entity.geometry);
-            if (other == nullptr || other->callout != katana::entity::CalloutShape::Circle) {
-                return;
-            }
-            long long value = 0;
-            const auto [end, error] = std::from_chars(
-                other->text.data(), other->text.data() + other->text.size(), value);
-            if (error == std::errc{} && end == other->text.data() + other->text.size()) {
-                highest = std::max(highest, value);
-            }
-        });
-        leader.text = std::to_string(highest + 1);
+        // The next number, as the Balloon tool numbers one.
+        leader.text = ann::nextBalloonNumber(document_.model());
     }
     for (const auto& [key, value] : parsed->options) {
         if (key == "text" || key == "n") {
