@@ -8,6 +8,7 @@
 #include "gis_dialogs.hpp"
 #include "jobs.hpp"
 #include "layer_manager.hpp"
+#include "plotting/plot_dialog.hpp"
 #include "style_manager.hpp"
 
 #include <chrono>
@@ -392,14 +393,18 @@ void MainWindow::buildActions()
         makeAction(Icon::Plot, "Plot Sheets to P&DF...",
                    "Plot every sheet of the project to one PDF", QKeySequence(), "filePlotSheets");
     connect(plotSheetsAction, &QAction::triggered, this, [this] {
-        const QString path = QFileDialog::getSaveFileName(this, "Plot Sheets to PDF", QString(),
-                                                          "PDF (*.pdf)");
-        if (path.isEmpty()) {
+        // The Plot dialog (plotting/plot_dialog.hpp) over every sheet; the
+        // page setup is kept only for sheets the project has.
+        const auto set = sheetsToPlot();
+        if (!set) {
+            logMessage(QString::fromStdString(set.error().describe()), true);
             return;
         }
-        if (const auto status = plotSheetsToPdf(path); !status) {
-            logMessage(QString::fromStdString(status.error().describe()), true);
-        }
+        plotInteractively(this, *set, 0, true, suggestedPlotFile(document_),
+                          QString::fromStdString(document_.metadata().name),
+                          [this] { return sheetSource(); },
+                          document_.sheetSet().sheets.empty() ? nullptr : &document_,
+                          [this](const QString& text, bool isError) { logMessage(text, isError); });
     });
 
     QAction* customiseAction =
@@ -4411,14 +4416,13 @@ void MainWindow::showSheets()
     sheets_->activateWindow();
 }
 
-katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+katana::core::Result<cad::plotting::SheetSet> MainWindow::sheetsToPlot()
 {
-    const SheetSource source = sheetSource();
     cad::plotting::SheetSet set = document_.sheetSet();
     if (set.sheets.empty()) {
         // Nothing laid out yet: one sheet fitted to the drawing, for this plot.
         cad::plotting::LayoutRequest request;
-        request.planArea = planDrawnBounds(source.plan, {}, {});
+        request.planArea = planDrawnBounds(sheetSource().plan, {}, {});
         auto sheets = cad::plotting::smartLayout(document_.model(), request);
         if (!sheets) {
             return sheets.error();
@@ -4427,23 +4431,41 @@ katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
         set.sheets = std::move(*sheets);
         logMessage("The project has no sheets: plotting one fitted to the drawing.");
     }
-    SheetPaintCache cache;
-    std::vector<std::string> problems;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const auto status = katana::qt::plotSheetsToPdf(path, set, {}, source, 300.0, cache,
-                                                    QString::fromStdString(document_.metadata().name),
-                                                    &problems);
-    QApplication::restoreOverrideCursor();
-    if (!status) {
-        return status;
+    return set;
+}
+
+katana::core::Result<PlotReport> MainWindow::plotSheets(const cad::plotting::SheetSet& set,
+                                                        const PlotRequest& request)
+{
+    PlotRequest titled = request;
+    if (titled.title.isEmpty()) {
+        titled.title = QString::fromStdString(document_.metadata().name);
     }
-    for (const std::string& problem : problems) {
+    SheetPaintCache cache;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    auto result = katana::qt::plotSheets(set, titled, [this] { return sheetSource(); }, cache);
+    QApplication::restoreOverrideCursor();
+    if (!result) {
+        return result.error();
+    }
+    for (const std::string& problem : result->problems) {
         logMessage(QString::fromStdString(problem), true);
     }
-    logMessage(QString("Plotted %1 sheet%2 to %3.")
-                   .arg(set.sheets.size())
-                   .arg(set.sheets.size() == 1 ? "" : "s")
-                   .arg(path));
+    logMessage(result->summary(titled));
+    return result;
+}
+
+katana::core::Status MainWindow::plotSheetsToPdf(const QString& path)
+{
+    const auto set = sheetsToPlot();
+    if (!set) {
+        return set.error();
+    }
+    PlotRequest request = plotRequestFor(set->pageSetup, path);
+    request.format = PlotFormat::Pdf;
+    if (auto result = plotSheets(*set, request); !result) {
+        return result.error();
+    }
     return {};
 }
 

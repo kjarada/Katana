@@ -161,7 +161,8 @@ class SheetEditor final : public QMainWindow {
     katana::core::Status tile(katana::cad::plotting::TilingPreset preset);
     katana::core::Status addBlankSheet();
     katana::core::Status removeSelectedViewport();
-    // Plots the current sheet, or every sheet, to `path`. Problems are
+    // Plots the current sheet, or every sheet, to one PDF at `path` in the
+    // set's page setup (its plot style and resolution). Problems are
     // reported through onMessage.
     katana::core::Status plotToPdf(const QString& path, bool allSheets);
 
