@@ -141,8 +141,9 @@ target_include_directories(katana_tool_icon_sheet PRIVATE "${CMAKE_CURRENT_SOURC
 target_link_libraries(katana_tool_icon_sheet PRIVATE katana_cad Qt6::Widgets)
 
 # The GPU renderer for the 3D view: a library of its own (gpu/CMakeLists.txt,
-# docs/gpu.md), switched by KATANA_GPU. Not linked into `katana` yet - a later
-# change hosts it inside the 3D view with the software rasteriser as the
-# fallback - so today its tests (tests/gpu) and benchmark (benchmarks/gpu)
-# are what build it.
+# docs/gpu.md), switched by KATANA_GPU. RenderViewWidget hosts it, with the
+# software rasteriser as the fallback, when it is built (KATANA_HAS_GPU).
 add_subdirectory(gpu)
+if(TARGET katana_gpu)
+    target_link_libraries(katana PRIVATE katana_gpu)
+endif()

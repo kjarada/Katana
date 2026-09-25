@@ -855,21 +855,21 @@ class Writer {
 [[nodiscard]] double safeNullValue(const Archive& archive)
 {
     std::vector<double> heights;
-    const auto collect = [&heights](const std::vector<Vertex>& vertices) {
+    const auto collectAll = [&heights](const std::vector<Vertex>& vertices) {
         for (const Vertex& vertex : vertices) {
             if (vertex.z) {
                 heights.push_back(*vertex.z);
             }
         }
     };
-    const auto one = [&heights](const std::optional<double>& z) {
+    const auto collectOne = [&heights](const std::optional<double>& z) {
         if (z) {
             heights.push_back(*z);
         }
     };
     struct Visitor {
-        decltype(collect)& collect;
-        decltype(one)& one;
+        decltype(collectAll)& collect;
+        decltype(collectOne)& one;
         void operator()(const VertexString& s) const
         {
             collect(s.vertices);
@@ -898,7 +898,7 @@ class Writer {
         void operator()(const Trimesh& m) const { collect(m.vertices); }
     };
     for (const Element& element : archive.elements) {
-        std::visit(Visitor{collect, one}, element);
+        std::visit(Visitor{collectAll, collectOne}, element);
     }
     std::sort(heights.begin(), heights.end());
     const auto collides = [&heights](double candidate) {

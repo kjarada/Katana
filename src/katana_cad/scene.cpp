@@ -440,46 +440,6 @@ class Heights {
     mutable std::vector<katana::geometry::Point3> scratch_;
 };
 
-// DrawList::bounds() - the box of the finite vertices a primitive uses - to
-// the bit, visiting each vertex once rather than once per primitive using it:
-// a TIN's vertex is in six triangles, and the walk was an eighth of the build.
-// Only which of two zeros an extreme keeps depends on the order the list
-// visits them in (AABB::expand keeps the first), so when an extreme is zero
-// the list's own walk decides.
-[[nodiscard]] AABB boundsOf(const DrawList& list, std::vector<std::uint8_t>& used)
-{
-    const std::size_t count = list.positions.size();
-    used.assign(count, 0);
-    const auto use = [&used, count](VertexIndex index) {
-        if (index < count) {
-            used[index] = 1;
-        }
-    };
-    for (const auto& triangle : list.triangles) {
-        use(triangle.a);
-        use(triangle.b);
-        use(triangle.c);
-    }
-    for (const auto& line : list.lines) {
-        use(line.a);
-        use(line.b);
-    }
-    for (const auto& point : list.points) {
-        use(point.a);
-    }
-    AABB box;
-    for (std::size_t i = 0; i < count; ++i) {
-        if (used[i] != 0 && list.positions[i].isFinite()) {
-            box.expand(list.positions[i]);
-        }
-    }
-    if (box.min.x == 0.0 || box.min.y == 0.0 || box.min.z == 0.0 || box.max.x == 0.0 ||
-        box.max.y == 0.0 || box.max.z == 0.0) {
-        return list.bounds();
-    }
-    return box;
-}
-
 // A 1-2-5 step at least `wanted`: 1, 2, 5, 10, 20, 50...
 [[nodiscard]] double niceStep(double wanted)
 {
@@ -1302,8 +1262,8 @@ void SceneBuilder::buildTerrain(const std::vector<SceneSurface>& surfaces,
                                          : (std::isfinite(options.entityElevation)
                                                 ? options.entityElevation
                                                 : 0.0));
-    layers.terrainBounds = boundsOf(layers.terrain, used_);
-    layers.terrainBounds.expand(boundsOf(layers.edges, used_));
+    layers.terrainBounds = layers.terrain.bounds(used_);
+    layers.terrainBounds.expand(layers.edges.bounds(used_));
     layers.bounds = layers.terrainBounds;
 }
 
@@ -1326,7 +1286,7 @@ void SceneBuilder::buildEntities(const Document& document,
                                                   : 0.0));
     }
     layers.bounds = layers.terrainBounds;
-    layers.bounds.expand(boundsOf(layers.entities, used_));
+    layers.bounds.expand(layers.entities.bounds(used_));
 }
 
 void SceneBuilder::buildSelection(const Document& document,
@@ -1403,7 +1363,7 @@ void SceneBuilder::build(const Document& document, const std::vector<SceneSurfac
         if (!layers.terrainDatum && std::isfinite(lowest)) {
             layers.datum = liftOf(options)(lowest);
         }
-        layers.bounds.expand(boundsOf(entities, used_));
+        layers.bounds.expand(entities.bounds(used_));
     }
     const auto append = [&out](const DrawList& from) {
         const VertexIndex base = static_cast<VertexIndex>(out.positions.size());

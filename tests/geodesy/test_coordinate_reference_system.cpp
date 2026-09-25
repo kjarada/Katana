@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <iostream>
 #include <string>
 
 #include "geodesy_test_support.hpp"
+#include "katana/core/library_data.hpp"
 #include "katana/geodesy/coordinate_reference_system.hpp"
 
 using namespace katana::geodesy;
@@ -348,4 +350,21 @@ TEST(GeodesyCrs, ValueSemantics)
     const auto other = CoordinateReferenceSystem::fromEpsg(32630);
     ASSERT_OK(other);
     EXPECT_FALSE(copy == *other);
+}
+
+// In a relocated Linux prefix PROJ's compiled-in search path is wrong, and
+// Katana points its contexts at the data beside libproj instead
+// (core/library_data.hpp). Wherever that is decided, it must be a directory
+// PROJ can open proj.db from - this process has libproj loaded.
+TEST(ProjData, TheDirectoryKatanaPointsProjAtHoldsItsDatabase)
+{
+    const auto& data = katana::core::projDataDirectory();
+    if (!data.has_value()) {
+        GTEST_SKIP() << "PROJ's own search is used here (PROJ_DATA set, or not a relocated "
+                        "Linux prefix)";
+    }
+    EXPECT_TRUE(std::filesystem::is_regular_file(*data / "proj.db")) << data->string();
+    // And PROJ opens it: a CRS the database defines is found by its code.
+    const auto crs = CoordinateReferenceSystem::fromEpsg(28356);
+    ASSERT_OK(crs);
 }

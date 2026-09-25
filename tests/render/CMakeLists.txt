@@ -1,4 +1,4 @@
 katana_add_test_suite(render
     LIBS katana_render
-    SOURCES test_camera.cpp test_depth.cpp test_rasterizer.cpp test_rasterizer_simd.cpp test_task_pool.cpp
+    SOURCES test_camera.cpp test_depth.cpp test_draw_list.cpp test_rasterizer.cpp test_rasterizer_simd.cpp test_task_pool.cpp
 )
