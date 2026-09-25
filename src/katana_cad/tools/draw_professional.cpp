@@ -25,6 +25,7 @@
 
 #include "families.hpp"
 #include "katana/cad/drawing/construction.hpp"
+#include "katana/cad/drawing/draw_shapes.hpp"
 #include "katana/cad/drawing/vertex_editing.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/commands/command_stack.hpp"
@@ -68,24 +69,13 @@ std::string number(double value) { return katana::core::formatExactReal(value); 
 
 Entity makeEntity(Geometry geometry, const cmd::EntityAttributes& attributes)
 {
-    Entity entity;
-    entity.geometry = std::move(geometry);
-    entity.layer = attributes.layer;
-    entity.style = attributes.style;
-    entity.color = attributes.color;
-    return entity;
+    return drawnEntity(std::move(geometry), attributes);
 }
 
 // Entities created by one command named for what was drawn.
 cmd::CommandPtr createNamed(std::string name, std::vector<Entity> entities)
 {
-    return std::make_unique<cmd::ChangeSetCommand>(
-        std::move(name),
-        [entities = std::move(entities)](const cmd::CommandContext&) -> Result<cmd::ChangeSet> {
-            cmd::ChangeSet changes;
-            changes.add = entities;
-            return changes;
-        });
+    return createDrawn(std::move(name), std::move(entities));
 }
 
 // A polyline entity stored as the simplest kind that holds it.
@@ -679,28 +669,16 @@ class ConstructionTool final : public InteractiveTool {
   private:
     [[nodiscard]] Segment2 line(const Point2& through, const Vec2& direction) const
     {
-        const Point2 far = through + direction * kConstructionReach;
-        return ray_ ? Segment2{through, far} : Segment2{through - direction * kConstructionReach, far};
+        return constructionSegment(through, direction, ray_);
     }
 
     ToolStep make()
     {
-        cmd::EntityAttributes attributes = attributes_;
-        attributes.layer = std::string(kConstructionLayer);
-        auto transaction = std::make_unique<cmd::Transaction>(ray_ ? "CREATE_RAY" : "CREATE_XLINE");
-        if (document_ != nullptr && document_->model().layers.find(attributes.layer) == nullptr) {
-            katana::entity::Layer layer;
-            layer.name = attributes.layer;
-            layer.color = katana::entity::Color{0x80, 0x80, 0x80, 0xFF};
-            transaction->add(cmd::createLayer(layer));
-        }
-        std::vector<Entity> entities;
-        for (const Segment2& made : lines_) {
-            entities.push_back(makeEntity(made, attributes));
-        }
+        const katana::entity::Model none;
+        auto transaction = createConstruction(document_ != nullptr ? document_->model() : none,
+                                              attributes_, lines_, ray_);
         const std::size_t count = lines_.size();
         lines_.clear();
-        transaction->add(createNamed(ray_ ? "CREATE_RAY" : "CREATE_XLINE", std::move(entities)));
         return ToolStep::done(std::move(transaction),
                               std::to_string(count) + (ray_ ? " ray" : " construction line") +
                                   (count == 1 ? "" : "s"));
@@ -826,16 +804,7 @@ class DoubleLineTool final : public InteractiveTool {
   private:
     [[nodiscard]] static std::vector<Polyline2> sides(const Polyline2& path)
     {
-        std::vector<Polyline2> out;
-        if (path.vertices.size() < 2) {
-            return out;
-        }
-        for (const double sign : {1.0, -1.0}) {
-            if (auto side = geo::offset(path, sign * 0.5 * doubleLineWidth())) {
-                out.push_back(std::move(*side));
-            }
-        }
-        return out;
+        return doubleLineSides(path, doubleLineWidth());
     }
 
     ToolStep finish(bool closed)

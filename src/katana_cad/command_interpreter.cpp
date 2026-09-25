@@ -424,7 +424,7 @@ History   UNDO [n] | REDO [n]
 File      NEW | OPEN directory | SAVE [directory]
 Inspect   LIST | INFO id | HELP
 Aliases   L PL C A PO REC T M CO RO SC MI AR E O TR EX F CHA U LA SEL RADIATE ?  LE MT TS LS
-)" + annotationHelpText();
+)" + annotationHelpText() + drawingHelpText();
 }
 
 Result<Point2> CommandInterpreter::parsePoint(const std::string& text)
@@ -606,7 +606,10 @@ CommandInterpreter::Reply CommandInterpreter::run(std::string_view line)
     if (isAnnotationVerb(verb, args)) {
         return annotation(verb, args);
     }
-    for (const char* name : {"POINT", "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
+    if (isDrawingVerb(verb, args)) {
+        return drawingVerb(verb, args);
+    }
+    for (const char* name : {"POINT", "LINE", "RECT", "CIRCLE", "ARC", "TEXT", "DIM"}) {
         if (verb == name) {
             return draw(verb, args);
         }
@@ -942,7 +945,8 @@ CommandInterpreter::Reply CommandInterpreter::draw(const std::string& verb, cons
 {
     const cmd::EntityAttributes attributes = document_.currentAttributes();
 
-    // Leading arguments that are points; PLINE may end with CLOSE.
+    // Leading arguments that are points. (PLINE is the drawing system's:
+    // drawing/drawing_verbs.cpp.)
     const auto parsePoints = [&](std::size_t count) -> Result<std::vector<Point2>> {
         std::vector<Point2> points;
         for (std::size_t i = 0; i < count; ++i) {
@@ -984,20 +988,6 @@ CommandInterpreter::Reply CommandInterpreter::draw(const std::string& verb, cons
         }
         const std::size_t count = chain->size();
         return finish(document_.execute(std::move(chain)), std::to_string(count) + " lines created");
-    }
-    if (verb == "PLINE") {
-        const bool closed = !args.empty() && (upper(args.back()) == "CLOSE" || upper(args.back()) == "C");
-        const std::size_t pointCount = args.size() - (closed ? 1 : 0);
-        if (pointCount < 2) {
-            return usage("PLINE p p [p...] [CLOSE]");
-        }
-        auto points = parsePoints(pointCount);
-        if (!points) {
-            return points.error();
-        }
-        return finish(document_.execute(cmd::createPolyline(
-                          katana::geometry::Polyline2{std::move(*points), closed}, attributes)),
-                      "polyline created");
     }
     if (verb == "RECT") {
         if (args.size() != 2) {
