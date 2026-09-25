@@ -70,6 +70,14 @@ class CommandInterpreter {
     // "@10,10" after File > New silently measures from the discarded drawing.
     void resetPointState();
 
+    // A property value as PROP SET reads one: of the stated `type` (text,
+    // integer, real, boolean) when there is one, else guessed from the text -
+    // "true" and "false" are booleans, a whole number an integer, another
+    // number a real, anything else text. LEADER PROP and the window's
+    // Leaders manager read a value the same way.
+    [[nodiscard]] static katana::core::Result<katana::entity::PropertyValue>
+    propertyValue(const std::string& text, const std::string* type);
+
   private:
     using Tokens = std::vector<std::string>;
     using Reply = katana::core::Result<std::string>;
@@ -127,11 +135,6 @@ class CommandInterpreter {
     // from it follows the entity (annotation/associative.hpp).
     [[nodiscard]] katana::core::Result<annotation::AnchoredPoint>
     parseAnchoredPoint(const std::string& text);
-    // A property value as PROP SET reads one: of the stated `type` (text,
-    // integer, real, boolean) when there is one, else guessed from the text.
-    // LEADER PROP reads its value the same way.
-    [[nodiscard]] static katana::core::Result<katana::entity::PropertyValue>
-    propertyValue(const std::string& text, const std::string* type);
 
     Document& document_;
     std::vector<std::string> history_;
