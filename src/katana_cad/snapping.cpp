@@ -225,6 +225,18 @@ struct EntitySnaps {
     {
         collector.offer(g.start, SnapMode::Endpoint, id);
         collector.offer(g.end, SnapMode::Endpoint, id);
+        if (g.usesVertex()) {
+            collector.offer(g.vertex, SnapMode::Endpoint, id);
+        }
+    }
+    // A label offers nothing: its text is not geometry anyone draws to.
+    void operator()(const katana::entity::LabelGeometry&) const {}
+    // A leader's tip and each bend, as a polyline's vertices.
+    void operator()(const katana::entity::LeaderGeometry& g) const
+    {
+        for (const Point2& vertex : g.vertices) {
+            collector.offer(vertex, SnapMode::Endpoint, id);
+        }
     }
 };
 

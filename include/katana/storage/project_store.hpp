@@ -89,6 +89,10 @@ struct ProjectContents {
     std::vector<katana::entity::HatchPattern> hatchPatterns{};
     std::vector<katana::entity::Alignment> alignments{};
     std::vector<katana::entity::PropertyDefinition> propertyDefinitions{};
+    // The annotation tables, schema 11 (entity/annotation.hpp).
+    std::vector<katana::entity::TextStyle> textStyles{};
+    std::vector<katana::entity::LabelStyle> labelStyles{};
+    std::vector<katana::entity::LabelRule> labelRules{};
     std::vector<katana::entity::Entity> entities{};
     std::vector<Relationship> relationships{};
     katana::entity::EntityId nextEntityId = 1;
@@ -144,7 +148,9 @@ class ProjectStore {
     // 9: a style's description and point symbol.
     // 10: survey jobs - the raw bytes of each imported field file and its
     //     siblings, its reduction settings, report and placed points.
-    static constexpr int kCurrentSchemaVersion = 10;
+    // 11: the annotation tables - text styles, label styles, auto-label rules
+    //     - and a dimension style's paper sizing (docs/annotation.md).
+    static constexpr int kCurrentSchemaVersion = 11;
     static constexpr std::size_t kDefaultBackupsToKeep = 10;
 
     // The most bytes one survey job may take in a project: its own row (the
