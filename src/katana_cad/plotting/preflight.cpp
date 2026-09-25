@@ -18,6 +18,7 @@
 #include "katana/cad/plotting/frame.hpp"
 #include "katana/cad/plotting/layout.hpp"
 #include "katana/cad/plotting/sheet_commands.hpp"
+#include "katana/cad/plotting/tables.hpp"
 #include "katana/cad/selection.hpp"
 #include "katana/cad/spatial_query.hpp"
 #include "katana/geometry/alignment.hpp"
@@ -132,7 +133,8 @@ bool isScaled(ViewportKind kind)
 bool isPanel(ViewportKind kind)
 {
     return kind == ViewportKind::Legend || kind == ViewportKind::Notes ||
-           kind == ViewportKind::Image || kind == ViewportKind::KeyPlan;
+           kind == ViewportKind::Image || kind == ViewportKind::KeyPlan ||
+           kind == ViewportKind::SheetIndex || kind == ViewportKind::Revisions;
 }
 
 // ---- the title block's blanks -----------------------------------------------------------
@@ -961,6 +963,30 @@ void checkViewport(const SheetSet& set, std::size_t index, std::size_t position,
                 "Type its text in the view's properties, or remove it");
         }
         break;
+    case ViewportKind::SheetIndex:
+    case ViewportKind::Revisions: {
+        // A table is laid out as the painter lays it out (tables.hpp), so
+        // the rows it leaves out are the rows the plot leaves out: a register
+        // that says "+3 more" hands over a set whose last sheets it never
+        // lists.
+        const bool revisions = viewport.kind == ViewportKind::Revisions;
+        if (revisions && set.revisions.empty()) {
+            add(Severity::Info, "revisions.empty", {},
+                std::format("{} has no revisions to list: it prints its headings alone", label),
+                "Add a revision on the Title Block, or remove the table");
+            break;
+        }
+        const TableLayout table = layoutViewportTable(set, index, viewport);
+        if (table.rowsHidden > 0) {
+            add(Severity::Warning, "table.overflow", {},
+                std::format("{} shows {} of its {} rows: {} do not fit and print as \"+{} {}\"",
+                            label, table.rowsShown, table.rowsShown + table.rowsHidden,
+                            table.rowsHidden, table.rowsHidden, revisions ? "earlier" : "more"),
+                revisions ? "Make it taller, or show only the newest revisions"
+                          : "Make it larger, or give it a sheet of its own");
+        }
+        break;
+    }
     case ViewportKind::Model3D:
     case ViewportKind::Legend:
         break;
