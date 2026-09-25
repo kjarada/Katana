@@ -90,6 +90,16 @@ struct UtilityAttributes {
     // by the schema's own attribute name. Kept so that they can be checked
     // (delivery_schema.hpp) and reported, never dropped.
     std::map<std::string, std::string> fields;
+    // Cells the schedule reader reads as "not recorded", or reads only in
+    // part, kept as the schedule wrote them by the reader's column name: a
+    // "type" that names no kind ("Not Specified", "N"), a "status" of
+    // "Unknown", and any "size" that a diameter written back would not say
+    // again - "Not Applicable", "Unknown", "1200 x 900", or a size given
+    // beside diameter_mm. So a schedule written back (writeUtilityCsv) says
+    // what this one said and meets a delivery schema this one met. Nothing
+    // grades from them; the writer takes one back only while it still reads
+    // as the value held above, so an edit made since wins.
+    std::map<std::string, std::string> recorded;
 
     friend bool operator==(const UtilityAttributes&, const UtilityAttributes&) = default;
 };
@@ -136,6 +146,10 @@ struct UtilityVertex {
     // (a depth description, the date obtained, a pothole report), by the
     // schema's attribute name.
     std::map<std::string, std::string> fields;
+    // As UtilityAttributes::recorded, for a vertex's cells: a "ql" of
+    // "Unknown" (no claim), and a "level_ref" given with no level and no
+    // depth that reads as the top - which an empty cell reads as too.
+    std::map<std::string, std::string> recorded;
 
     friend bool operator==(const UtilityVertex&, const UtilityVertex&) = default;
 };

@@ -364,15 +364,19 @@ if(KATANA_BUILD_TESTS)
         "utilities scheduled path=\"[^\"]*cli utility scheduled\\.csv\" lines=4 vertices=14${_eol}scope=drawing matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
     # REGRADE at a 20 m detected spacing: W1's 12.5 m past the pothole is
     # traced now, QL-B, as DRAW at that spacing draws it; the other three
-    # services grade as they did, so one changes.
+    # services grade as they did, but every point in scope takes the 20 m
+    # it was graded with (utility.spacing), so all four lines change. A
+    # regrade then told nothing grades each line at the 20 m it now carries,
+    # not the default 10 m: nothing changes.
     add_test(NAME cli.utility_regrade_grades_what_is_drawn_again
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli>
                 -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
-                -c "UTILITY REGRADE LAYERS utilities SPACING 20")
+                -c "UTILITY REGRADE LAYERS utilities SPACING 20"
+                -c "UTILITY REGRADE LAYERS utilities")
     set_tests_properties(cli.utility_regrade_grades_what_is_drawn_again PROPERTIES
         PASS_REGULAR_EXPRESSION
-        "utilities regraded changed=1 lines=4 vertices=14 segments=10 entities=21 layers=10 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}scope=layers layers=utilities sublayers=yes matched=21 lines=4 completed=0 ignored=0${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000")
+        "utilities regraded changed=4 lines=4 vertices=14 segments=10 entities=21 layers=10 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}scope=layers layers=utilities sublayers=yes matched=21 lines=4 completed=0 ignored=0${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000.*utilities regraded changed=0 lines=4 .*line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000")
     # VIEW is the window's plan view: headless it is refused, naming the
     # window typed in, which takes the gas main's run and two points.
     add_test(NAME cli.utility_view_is_refused_headless_naming_area

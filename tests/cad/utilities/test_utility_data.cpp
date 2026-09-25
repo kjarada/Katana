@@ -487,6 +487,43 @@ TEST(UtilityData, PointsThatDoNotAgreeAreRefusedByName)
     EXPECT_TRUE(session.ok("UTILITY REPORT DRAWING").starts_with("scope=drawing matched=21"));
 }
 
+TEST(UtilityData, APointWhoseLineWasDeletedRefusesItsLineRatherThanLeavingItShort)
+{
+    Session session;
+    session.ok("UTILITY DRAW " + sample("schedule.csv"));
+    const EntityId lost = session.point("W1-2");
+    session.select({lost});
+    session.ok("PROP DELETE utility.line");
+    const std::string why = "point W1-2 (#" + std::to_string(lost) +
+                            ") is a vertex of a schedule and has no utility.line, the line it is "
+                            "a point of; by its attributes it is a point of line W1; give it its "
+                            "line again, or delete its utility.vertex and utility.order";
+    // In the scope: not "ignored", as a point of no schedule is.
+    EXPECT_EQ(session.refused("UTILITY REPORT DRAWING").message, why);
+    // Outside it: W1, read whole from its other points, would be W1 short of
+    // a vertex - graded, redrawn and written so.
+    session.select({session.point("W1-3")});
+    const std::size_t steps = session.steps();
+    const std::map<EntityId, Entity> before = session.snapshot();
+    EXPECT_EQ(session.refused("UTILITY REGRADE SELECTION").message, why);
+    EXPECT_EQ(session.steps(), steps);
+    EXPECT_EQ(session.snapshot(), before);
+    const ScratchDirectory scratch("stray");
+    EXPECT_EQ(session.refused("UTILITY SCHEDULE \"" + scratch.at("out.csv") +
+                              "\" LAYERS utilities/water")
+                  .message,
+              why);
+    EXPECT_FALSE(fs::exists(scratch.at("out.csv")));
+    // A line it is not a point of reads as it did.
+    EXPECT_EQ(firstLine(session.ok("UTILITY REPORT LAYERS utilities/gas")),
+              "scope=layers layers=utilities/gas sublayers=yes matched=3 lines=1 completed=0 "
+              "ignored=0");
+    // Given its line again, W1 reads whole.
+    session.ok("UNDO");
+    EXPECT_EQ(firstLine(session.ok("UTILITY REPORT DRAWING")),
+              "scope=drawing matched=21 lines=4 completed=0 ignored=0");
+}
+
 // ---- REGRADE -------------------------------------------------------------------------------
 
 TEST(UtilityData, RegradeAfterAMovedPointDrawsWhatADrawOfTheScheduleSoEditedDraws)
@@ -590,6 +627,54 @@ TEST(UtilityData, RegradeOfWhatNobodyEditedChangesNothingAndPushesNoStep)
     const auto bounds = drawReplyBounds(reply);
     ASSERT_TRUE(bounds.has_value());
     EXPECT_DOUBLE_EQ(bounds->max.y, 6250007.2);
+}
+
+TEST(UtilityData, RegradeGradesEachLineWithTheSettingsItWasDrawnWithUnlessToldOtherwise)
+{
+    // Unedited, whatever it was drawn with: nothing to regrade - no cover
+    // flag stripped, no run graded at the default spacing instead.
+    for (const char* options : {" MINCOVER 0.6", " SPACING 20", " SPACING 20 MINCOVER 0.6"}) {
+        Session session;
+        session.ok("UTILITY DRAW " + sample("schedule.csv") + options);
+        const std::map<EntityId, Entity> before = session.snapshot();
+        const std::string reply = session.ok("UTILITY REGRADE DRAWING");
+        EXPECT_TRUE(reply.starts_with("utilities regraded changed=0 ")) << options << "\n"
+                                                                        << reply;
+        EXPECT_EQ(session.snapshot(), before) << options;
+        EXPECT_EQ(session.steps(), 1u) << options;
+    }
+
+    // What the points say they were graded with.
+    const ScratchDirectory scratch("settings");
+    Session session;
+    session.ok("UTILITY DRAW " + sample("schedule.csv") + " SPACING 20");
+    const Entity& drawnPoint = *session.document.model().entities.find(session.point("W1-5"));
+    EXPECT_EQ(katana::entity::toString(drawnPoint.properties.at(std::string(keys::kSpacing))),
+              katana::entity::toString(katana::entity::PropertyValue(20.0)));
+    EXPECT_FALSE(drawnPoint.properties.contains(std::string(keys::kMinimumCover)));
+
+    // One point moved: its line alone changes, graded at the 20 m it was
+    // drawn with - what a DRAW of the schedule so edited at 20 m draws.
+    session.select({session.point("W1-5")});
+    session.ok("MOVE -3,0");
+    EXPECT_TRUE(session.ok("UTILITY REGRADE DRAWING").starts_with("utilities regraded changed=1 "));
+    const std::string edited = scratch.file(
+        "moved.csv",
+        replaced(sampleText("schedule.csv"), "W1,W1-5,334030.000,", "W1,W1-5,334027.000,"));
+    EXPECT_EQ(drawing(session.document), drawnFrom(edited, " SPACING 20"));
+
+    // Told otherwise, every line in scope takes what it is told - and keeps it.
+    session.ok("UTILITY REGRADE DRAWING SPACING 10");
+    EXPECT_EQ(drawing(session.document), drawnFrom(edited, " SPACING 10"));
+    EXPECT_TRUE(session.ok("UTILITY REGRADE DRAWING").starts_with("utilities regraded changed=0 "));
+
+    // Points of one line that disagree on them are refused, as on any
+    // attribute of the line.
+    session.select({session.point("W1-2")});
+    session.ok("PROP SET utility.spacing 15 real");
+    EXPECT_TRUE(contains(session.refused("UTILITY REGRADE DRAWING").message,
+                         "has utility.spacing \"15"))
+        << session.refused("UTILITY REGRADE DRAWING").message;
 }
 
 TEST(UtilityData, RegradeKeepsWhatIsThePersonsOnAPoint)
@@ -706,6 +791,59 @@ TEST(UtilityData, TheDrawingIsCheckedAsTheScheduleItWouldWriteInTheSchemasWords)
     EXPECT_TRUE(contains(written, "Electronic Detection")) << written;
     EXPECT_TRUE(contains(written, "Quality Level B")) << written;
     EXPECT_EQ(parsed(written), parsed(sampleText("schedule_tfnsw.csv")));
+}
+
+TEST(UtilityData, WhatTheScheduleSaidItDidNotKnowIsKeptSoTheDrawingMeetsTheSameSchema)
+{
+    // Every one of these reads as "not recorded": the drawing must still say
+    // it, or a schedule that met the schema writes a deliverable that does not.
+    const ScratchDirectory scratch("unknowns");
+    const std::string schemaFile = scratch.file(
+        "schema.csv", "kind,attribute,value,detail,label\n"
+                      "schema,Example Utility Schema,0.2,,\n"
+                      "identifier,AssetIdentifier,,,\n"
+                      "field,AssetIdentifier,Alphanumerical,Yes,Asset Identifier\n"
+                      "field,LocateMethod,Domain List: Locate Method,Yes,Locate Method\n"
+                      "domain,LocateMethod,Electronic Detection,,\n"
+                      "field,QualityLevel,Domain List: Quality Level,Yes,Quality Level\n"
+                      "domain,QualityLevel,Quality Level B,,\n"
+                      "domain,QualityLevel,Unknown,,\n"
+                      "field,Size,Alphanumerical,Yes,Size\n"
+                      "field,AssetStatus,Domain List: Asset Status,Yes,Asset Status\n"
+                      "domain,AssetStatus,In Service,,\n"
+                      "domain,AssetStatus,Unknown,,\n"
+                      "field,AssetTypeCode,Domain List: Asset Type Code,Yes,Asset Type Code\n"
+                      "domain,AssetTypeCode,W,,\n"
+                      "domain,AssetTypeCode,N,,\n"
+                      "field,DepthLocation,Domain List: Depth Location,Yes,Depth Location\n"
+                      "domain,DepthLocation,Top of Pipe,,\n"
+                      "domain,DepthLocation,Unknown,,\n");
+    const std::string scheduleText =
+        "AssetIdentifier,point,easting,northing,LocateMethod,QualityLevel,Size,AssetStatus,"
+        "AssetTypeCode,DepthLocation\n"
+        "W-1,P1,334000,6250000,Electronic Detection,Unknown,Not Applicable,Unknown,N,Top of Pipe\n"
+        "W-1,P2,334010,6250000,Electronic Detection,Unknown,Not Applicable,Unknown,N,Top of Pipe\n";
+    const std::string scheduleFile = scratch.file("schedule.csv", scheduleText);
+    Session session;
+    const std::string passes = "2 rows, 1 assets (AssetIdentifier): 0 errors, 0 warnings";
+    const std::string fromFile =
+        session.ok("UTILITY CHECK " + scheduleFile + " SCHEMA " + schemaFile);
+    EXPECT_TRUE(contains(fromFile, passes)) << fromFile;
+
+    session.ok("UTILITY DRAW " + scheduleFile);
+    const std::string fromDrawing = session.ok("UTILITY CHECK DRAWING SCHEMA " + schemaFile);
+    EXPECT_TRUE(contains(fromDrawing, passes)) << fromDrawing;
+
+    // The deliverable has every column the schema asks for, said as the
+    // schedule said it, and reads back as the schedule read.
+    session.ok("UTILITY SCHEDULE \"" + scratch.at("out.csv") + "\" DRAWING SCHEMA " + schemaFile);
+    const std::string written = scratch.read("out.csv");
+    EXPECT_EQ(firstLine(written), "AssetIdentifier,point,easting,northing,LocateMethod,"
+                                  "DepthLocation,QualityLevel,AssetTypeCode,Size,AssetStatus");
+    EXPECT_TRUE(contains(written, "\nW-1,P1,334000,6250000,Electronic Detection,Top of Pipe,"
+                                  "Unknown,N,Not Applicable,Unknown\n"))
+        << written;
+    EXPECT_EQ(parsed(written), parsed(scheduleText));
 }
 
 // ---- the design CLEARANCE measures against ----------------------------------------------------
@@ -862,6 +1000,43 @@ TEST(UtilityData, AnAlignmentsDesignIsWithinAMillimetreOfItsCurvesInPlanAndInLev
     // The profile ends at 170 m, short of the alignment's end: no level there.
     EXPECT_FALSE(design->vertices.back().level.has_value());
     EXPECT_TRUE(design->vertices.front().level.has_value());
+}
+
+TEST(UtilityData, AnAlignmentsDesignEndsAtItsEndWhenItsLengthsSumARoundingPastIt)
+{
+    // A tangent, a tight curve and a 140 m tangent from chainage 43.45: the
+    // last element's end, summed element by element from the start, comes out
+    // one rounding past endStation(), start plus length. The design must still
+    // run to the alignment's last PI - dropping that end dropped the whole
+    // last tangent, and a service crossing it cleared.
+    katana::entity::Alignment alignment;
+    alignment.name = "road";
+    alignment.horizontal.pis = {{Point2(333950, 6250050)},
+                                {Point2(333960, 6250000.3), 4.5958},
+                                {Point2(334100, 6250000.3)}};
+    alignment.horizontal.startStation = 43.45;
+    const auto solved = katana::geometry::solveAlignment(alignment.horizontal);
+    ASSERT_TRUE(solved.ok());
+    const auto& last = solved->elements().back();
+    // The test reaches the case it is for.
+    ASSERT_GT(last.startStation + last.length, solved->endStation());
+
+    const auto stations = designStations(alignment);
+    const auto design = designFromAlignment(alignment);
+    ASSERT_TRUE(stations.ok() && design.ok());
+    ASSERT_EQ(stations->size(), design->vertices.size());
+    EXPECT_EQ(stations->back(), solved->endStation());
+    EXPECT_NEAR(design->vertices.back().position.easting, 334100.0, 1e-6);
+    EXPECT_NEAR(design->vertices.back().position.northing, 6250000.3, 1e-6);
+    EXPECT_NEAR(design->vertices.front().position.easting, 333950.0, 1e-6);
+
+    // The drawn water main crosses that tangent at W1-3 -> W1-4: a hard
+    // conflict, whatever the chainage the alignment starts from.
+    Session session;
+    session.ok("UTILITY DRAW " + sample("schedule.csv"));
+    ASSERT_TRUE(session.document.execute(katana::commands::createAlignment(alignment)).ok());
+    const std::string reply = session.ok("UTILITY CLEARANCE DRAWING DESIGN ALIGNMENT road");
+    EXPECT_TRUE(contains(reply, "Suggested Clash attribute: W1 Hard")) << reply;
 }
 
 TEST(UtilityData, HelpUtilityListsTheDrawingSourcesAndTheNewVerbs)
