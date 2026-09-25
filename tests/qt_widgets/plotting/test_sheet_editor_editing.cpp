@@ -40,6 +40,7 @@
 #include "plotting/sheet_list_widget.hpp"
 #include "plotting/sheet_readout.hpp"
 #include "plotting/sheet_rulers.hpp"
+#include "plotting/sheet_thumbnails.hpp"
 #include "plotting/viewport_clipboard.hpp"
 #include "sheet_editor.hpp"
 #include "widget_harness.hpp"
@@ -985,3 +986,156 @@ TEST(SheetEditorEditing, EveryEditingActionHasAStableName)
     EXPECT_NE(shown.editor.findChild<QLabel*>(QStringLiteral("sheetCursorStatus")), nullptr);
 }
 
+
+// ---- found in review ------------------------------------------------------------------
+
+TEST(SheetEditorEditing, AClickOnALockedMemberOfAGroupSelectsItAloneAndADragFromItMovesTheRest)
+{
+    Document document;
+    Shown shown(document);
+    SheetCanvas& canvas = shown.canvas();
+    // vp3 is locked.
+    canvas.setSelection({"vp2", "vp3"}, "vp2");
+    const std::size_t before = steps(document);
+    click(canvas, shown.at(350.0, 140.0));
+    EXPECT_EQ(canvas.selectedIds(), (Ids{"vp3"}));
+    EXPECT_EQ(steps(document), before);
+
+    // Dragged from the locked one, the group moves without it, in one step.
+    canvas.setSelection({"vp2", "vp3"}, "vp2");
+    drag(canvas, shown.at(350.0, 140.0), shown.at(350.0, 120.0), Qt::AltModifier);
+    EXPECT_EQ(steps(document), before + 1);
+    EXPECT_EQ(byId(document, 0, "vp3").rect, box(320.0, 100.0, 380.0, 180.0));
+    EXPECT_NEAR(byId(document, 0, "vp2").rect.min.y, 80.0, 1e-6);
+    EXPECT_EQ(canvas.selectedIds(), (Ids{"vp2", "vp3"}));
+
+    // Only locked ones selected: a drag from one moves nothing and records
+    // nothing.
+    ASSERT_TRUE(plotting::editViewport(document, "vp1", [](plotting::Viewport& v) {
+                    v.locked = true;
+                    return katana::core::Status{};
+                }).ok());
+    canvas.setSelection({"vp1", "vp3"}, "vp1");
+    const std::size_t locked = steps(document);
+    drag(canvas, shown.at(150.0, 140.0), shown.at(170.0, 120.0));
+    EXPECT_EQ(steps(document), locked);
+    EXPECT_EQ(byId(document, 0, "vp1").rect, box(100.0, 100.0, 200.0, 180.0));
+    EXPECT_EQ(canvas.selectedIds(), (Ids{"vp1", "vp3"}));
+    // And a click on one of them selects it alone.
+    click(canvas, shown.at(150.0, 140.0));
+    EXPECT_EQ(canvas.selectedIds(), (Ids{"vp1"}));
+}
+
+TEST(SheetEditorEditing, EscapeInARubberBandLeavesTheSelectionAsItWas)
+{
+    Document document;
+    Shown shown(document);
+    SheetCanvas& canvas = shown.canvas();
+    canvas.select("vp1");
+    drag(canvas, shown.at(260.0, 190.0), shown.at(90.0, 90.0), Qt::NoModifier, Qt::LeftButton,
+         /*release=*/false);
+    key(canvas, Qt::Key_Escape);
+    mouse(canvas, QEvent::MouseButtonRelease, shown.at(90.0, 90.0));
+    EXPECT_EQ(canvas.selectedIds(), (Ids{"vp1"}));
+}
+
+TEST(SheetEditorEditing, ADropInTheSpacingBetweenTwoRowsGoesBetweenThem)
+{
+    plotting::SheetSet set = twoSheets();
+    plotting::Sheet third;
+    third.id = "s3";
+    third.name = "THIRD";
+    set.sheets.push_back(third);
+    Document document;
+    Shown shown(document, set);
+    auto* list = dynamic_cast<katana::qt::SheetListWidget*>(
+        shown.editor.findChild<QListWidget*>(QStringLiteral("sheetList")));
+    ASSERT_NE(list, nullptr);
+    const QRect first = list->visualItemRect(list->item(0));
+    const QRect second = list->visualItemRect(list->item(1));
+    ASSERT_LT(first.bottom() + 1, second.top()); // there is a gap
+    const int gap = (first.bottom() + second.top()) / 2;
+    EXPECT_EQ(list->insertionRowAt(QPoint(first.center().x(), gap)), 1);
+    // FIRST dropped there stays; THIRD dropped there goes second.
+    shown.editor.setCurrentSheet(0);
+    EXPECT_FALSE(list->dropAt(QPoint(first.center().x(), gap)));
+    shown.editor.setCurrentSheet(2);
+    EXPECT_TRUE(list->dropAt(QPoint(first.center().x(), gap)));
+    katana::qt::test::processEvents();
+    EXPECT_EQ(document.sheetSet().sheets[1].id, "s3");
+    EXPECT_EQ(document.sheetSet().sheets[2].id, "s2");
+}
+
+TEST(SheetEditorEditing, APictureGoesStaleWhenAnotherSheetsNumberItsMatchLinePrintsChanges)
+{
+    plotting::SheetSet set = twoSheets();
+    plotting::WorldMark mark;
+    mark.points = {Point2(0.0, 0.0), Point2(10.0, 0.0)};
+    mark.label = "MATCH LINE";
+    mark.sheet = "s2";
+    set.sheets[0].viewports[0].marks.push_back(mark);
+    katana::qt::SheetThumbnails thumbnails;
+    const SheetSource source;
+    (void)thumbnails.thumbnail(set, 0, source);
+    (void)thumbnails.thumbnail(set, 1, source);
+    EXPECT_FALSE(thumbnails.isStale(set, 0, source));
+    // The sheet it leads to gets a number of its own: the label changes.
+    set.sheets[1].fields["sheet_number"] = "C-101";
+    EXPECT_TRUE(thumbnails.isStale(set, 0, source));
+}
+
+TEST(SheetEditorEditing, PicturesGoStaleOnUndoAndOnATitleBlockEdit)
+{
+    Document document;
+    Shown shown(document);
+    shown.editor.renderThumbnailsNow();
+    ASSERT_EQ(shown.editor.pendingThumbnails(), 0u);
+    ASSERT_TRUE(plotting::editSheet(document, 1, [](plotting::Sheet& sheet) {
+                    sheet.name = "RENAMED";
+                    return katana::core::Status{};
+                }).ok());
+    shown.editor.renderThumbnailsNow();
+    ASSERT_TRUE(document.undo().ok());
+    EXPECT_EQ(shown.editor.pendingThumbnails(), 1u);
+    shown.editor.renderThumbnailsNow();
+    // The title block every sheet shares: every picture.
+    plotting::SheetSet set = document.sheetSet();
+    set.defaults.organisation = "ACME SURVEYS";
+    ASSERT_TRUE(document.setSheetSet(set, "EDIT_TITLE_BLOCK").ok());
+    EXPECT_EQ(shown.editor.pendingThumbnails(), 2u);
+    // And a sheet removed takes its picture with it.
+    set.sheets.pop_back();
+    ASSERT_TRUE(document.setSheetSet(set, "REMOVE_SHEET").ok());
+    katana::qt::test::processEvents();
+    EXPECT_TRUE(shown.editor.thumbnails().cached("s2").isNull());
+}
+
+TEST(SheetEditorEditing, PageUpAndPageDownAreLeftToTheBoxesOfTheProperties)
+{
+    Document document;
+    Shown shown(document);
+    for (const char* name : {"sheetPreviousSheet", "sheetNextSheet"}) {
+        QAction& action = shown.action(name);
+        EXPECT_EQ(action.shortcutContext(), Qt::WidgetWithChildrenShortcut) << name;
+        const QList<QObject*> on = action.associatedObjects();
+        EXPECT_TRUE(on.contains(shown.editor.canvas())) << name;
+        EXPECT_TRUE(on.contains(shown.editor.findChild<QListWidget*>(QStringLiteral("sheetList")))) << name;
+        // Not the window: there a spin box's PgUp would switch sheets.
+        EXPECT_FALSE(on.contains(&shown.editor)) << name;
+    }
+}
+
+TEST(SheetEditorEditing, TheNoteOfAGroupIsShortEnoughForANarrowPanel)
+{
+    Document document;
+    Shown shown(document);
+    shown.canvas().setSelection({"vp1", "vp2"}, "vp2");
+    auto* note = shown.editor.findChild<QLabel*>(QStringLiteral("sheetSelectionNote"));
+    ASSERT_NE(note, nullptr);
+    EXPECT_TRUE(note->wordWrap());
+    EXPECT_TRUE(note->text().startsWith(QStringLiteral("2 views selected")));
+    EXPECT_TRUE(note->text().contains(QStringLiteral("vp2")));
+    for (const QString& line : note->text().split('\n')) {
+        EXPECT_LE(note->fontMetrics().horizontalAdvance(line), 260) << line.toStdString();
+    }
+}
