@@ -40,8 +40,12 @@ Point2 pointFromJson(const Json& j)
 Json anchorToJson(const AnchorRef& ref)
 {
     Json j = {{"entity", ref.entity}, {"point", std::string(toString(ref.point))}};
-    if (ref.point == AnchorPoint::Vertex || ref.point == AnchorPoint::SegmentMid) {
+    if (ref.point == AnchorPoint::Vertex || ref.point == AnchorPoint::SegmentMid ||
+        (ref.point == AnchorPoint::Along && ref.index != 0)) {
         j["index"] = ref.index;
+    }
+    if (ref.point == AnchorPoint::Along) {
+        j["parameter"] = ref.parameter;
     }
     return j;
 }
@@ -56,6 +60,7 @@ AnchorRef anchorFromJson(const Json& j)
     }
     ref.point = *point;
     ref.index = j.value("index", std::uint32_t{0});
+    ref.parameter = j.value("parameter", 0.0);
     return ref;
 }
 
@@ -188,6 +193,12 @@ Json toJsonValue(const Geometry& geometry)
             if (g.tipRef.associated()) {
                 j["tipRef"] = anchorToJson(g.tipRef);
             }
+            if (g.fields) {
+                j["fields"] = true;
+            }
+            if (!g.labelStyle.empty()) {
+                j["labelStyle"] = g.labelStyle;
+            }
             return j;
         }
     };
@@ -291,6 +302,8 @@ Result<Geometry> geometryFromJsonValue(const Json& j)
         if (j.contains("tipRef")) {
             leader.tipRef = anchorFromJson(j.at("tipRef"));
         }
+        leader.fields = j.value("fields", false);
+        leader.labelStyle = j.value("labelStyle", std::string{});
         geometry = std::move(leader);
         break;
     }

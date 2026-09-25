@@ -121,11 +121,17 @@ class CommandInterpreter {
     [[nodiscard]] Reply dimension(const Tokens& args);
     [[nodiscard]] Reply leader(const std::string& verb, const Tokens& args);
     // A point that may name another entity's point - "#12", "#12.end",
-    // "#12.v3", "#12.s2", "#12.mid", "#12.centre" - or any point parsePoint
-    // takes. A named point carries its reference, so what is made from it
-    // follows the entity (annotation/associative.hpp).
+    // "#12.v3", "#12.s2", "#12.mid", "#12.centre", "#12.inside" - or the
+    // point of it nearest a point, "#12@x,y" (on it, Along) - or any point
+    // parsePoint takes. A named point carries its reference, so what is made
+    // from it follows the entity (annotation/associative.hpp).
     [[nodiscard]] katana::core::Result<annotation::AnchoredPoint>
     parseAnchoredPoint(const std::string& text);
+    // A property value as PROP SET reads one: of the stated `type` (text,
+    // integer, real, boolean) when there is one, else guessed from the text.
+    // LEADER PROP reads its value the same way.
+    [[nodiscard]] static katana::core::Result<katana::entity::PropertyValue>
+    propertyValue(const std::string& text, const std::string* type);
 
     Document& document_;
     std::vector<std::string> history_;

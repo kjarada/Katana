@@ -82,7 +82,14 @@ dimension style: a paper-sized style's millimetres as they are, a model-unit
 style's converted to paper at the document's annotation scale, so a leader is
 made the size it would have been drawn and then keeps its size on paper. It
 keeps the old hook rule as its landing: one arrowhead long, only for a note on
-a last segment more than 15 degrees off level. The Angular, Radius, Diameter
+a last segment more than 15 degrees off level. A tip clicked within the pick
+aperture of a point, line, arc, circle, polyline or text is put ON it and
+follows it (`nearestAnchor`), and the note of such a leader may name the
+entity's values in braces - `{prop.size} PVC`, `CH {chainage:.1f}` - which
+makes it a smart leader read off the entity (`docs/annotation.md`, "Smart
+leaders"). A line with a brace is checked as it is typed, a note that would
+say nothing is refused with what the entity lacks, and a tip on nothing keeps
+its note as typed, braces and all (`tests/cad/tools/test_smart_leader_tool.cpp`). The Angular, Radius, Diameter
 and Ordinate Dimension tools (`annotate_dimension_kinds.cpp`) make the
 dimension the `DIM` verb makes, through the same builders
 (`include/katana/cad/annotation/dimension_build.hpp`), so a picked pair of
