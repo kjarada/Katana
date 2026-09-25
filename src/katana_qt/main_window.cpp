@@ -376,36 +376,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     interpreter_.setColourLookup(
         [](std::string_view name) { return katana::archive12d::standardColour(name); });
     // GENERATE on the command line lays out what Generate Sheets would: what
-    // the plan view draws, and the visible surfaces for the sections.
-    interpreter_.setSheetContext([this] {
-        cad::plotting::SheetVerbContext context;
-        PlanSource plan = planSourceOf(document_);
-        plan.reference = &reference_;
-        plan.meshes = &sceneMeshes_;
-        context.drawingExtent = planDrawnBounds(plan, {}, {});
-        for (const auto& surface : sceneSurfaces_) {
-            if (surface.visible && surface.surface != nullptr) {
-                context.surfaces.push_back({surface.name, surface.surface});
-            }
-        }
-        // SHEETS CHECK with what the painter knows, as the Checks dock runs
-        // them; and what a view shows for ARRANGE, VIEW FIT and the rest, as
-        // the editor's Arrange menu measures it.
-        context.check = [this](std::span<const std::size_t> sheets) {
-            return checkSheetsFor(document_.sheetSet(), sheetSource(), sheets);
-        };
-        context.content = [this](const cad::plotting::Viewport& viewport) {
-            return viewportContent(viewport, sheetSource(), document_.sheetSet());
-        };
-        context.fitSection = [this](const cad::plotting::Viewport& viewport) {
-            SheetPaintCache cache;
-            return resolveSectionViewport(viewport, sheetSource(), cache);
-        };
-        context.drawn = [this](const cad::plotting::SheetSet& set) {
-            return resolvedSheetSet(set, sheetSource());
-        };
-        return context;
-    });
+    // the plan view draws, and the visible surfaces for the sections; SHEETS
+    // CHECK and ARRANGE see what the painter sees. The same context the
+    // sheet editor's own lines get (sheetVerbContextFor).
+    interpreter_.setSheetContext(
+        [this] { return sheetVerbContextFor(document_, [this] { return sheetSource(); }); });
 
     views_->onPrompt = [this](const QString& prompt) {
         statusBar()->showMessage(prompt);
@@ -5471,7 +5446,22 @@ void MainWindow::showSheets()
     if (!sheets_) {
         sheets_ = std::make_unique<SheetEditor>(document_, [this] { return sheetSource(); }, this);
         sheets_->onMessage = [this](const QString& text, bool isError) { logMessage(text, isError); };
+        // Its dialogs' lines run as typed ones do (command_runner.hpp).
+        sheets_->setCommandRunner(commandRunner());
+        // Generate Sheets' "The current plan view": what the plan view shows.
+        sheets_->planViewArea = [this]() -> std::optional<katana::geometry::Box2> {
+            const ViewportWidget* view = views_->activePlanView();
+            if (view == nullptr) {
+                return std::nullopt;
+            }
+            const cad::ViewTransform& shown = view->viewTransform();
+            const katana::geometry::Point2 a = shown.screenToWorld({0.0, 0.0});
+            const katana::geometry::Point2 b = shown.screenToWorld({shown.widthPixels, shown.heightPixels});
+            return katana::geometry::Box2({std::min(a.x, b.x), std::min(a.y, b.y)},
+                                          {std::max(a.x, b.x), std::max(a.y, b.y)});
+        };
     }
+    sheets_->setHeadless(headless_);
     sheets_->show();
     sheets_->raise();
     sheets_->activateWindow();

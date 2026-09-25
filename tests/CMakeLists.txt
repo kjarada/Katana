@@ -212,6 +212,42 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 400)
 
+    # The Sheets editor's Generate Sheets filled as a person fills it: the
+    # line it shows is the GENERATE line the window's one executor runs
+    # (MainWindow::runVerbLine), and UNDO takes the sheets away as one step.
+    # The dialog goes when it closes, so the grab is of the editor's toolbar.
+    add_test(NAME qt_generate_sheets_runs_the_line_it_shows_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>ALIGN NEW ROAD 0,0 1000,0|*fileSheets|@sheetGenerate|sheetGenerateLayout=Plan strips along an alignment|sheetGenerateScale=1:500|sheetGenerateFrom=100|sheetGenerateTo=900|sheetGeneratePaper=A1|?sheetGenerateLine|!sheetGenerateOk|%sheetToolBar|>SHEETS|>UNDO|>SHEETS"
+            "-DEXPECT=sheetGenerateLine: GENERATE strips paper=A1 landscape frame=on alignment=\"ROAD\" scale=500 overlap=10 keyplan=on from=100 to=900[\r\n].*generated [0-9]+ sheets: 1 to [0-9]+.*sheet 1 id=s1 name=[^\r\n]* paper=A1 orientation=landscape.*[\r\n]0 sheets"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generate_sheets_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_generate_sheets_runs_the_line_it_shows_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
+    # The Sheets editor's Sheet Set menu in the window: Copy Sheet Set as
+    # JSON runs SHEETS JSON through the window's one executor; Page Setup is
+    # filled and saved by its object names, one step and no plot; Save
+    # Sheet Set As, whose file dialog no headless session can answer, names
+    # its verb; and UNDO takes the page setup back.
+    add_test(NAME qt_sheet_set_menu_runs_its_lines_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>SHEET NEW PLAN|*fileSheets|*sheetCopySetJson|@sheetPageSetup|plotColourMode=Greyscale|plotDpi=150|pageSetupFilePerSheet=on|?plotPatternPreview|!pageSetupSave|%sheetToolBar|>SHEETS PAGESETUP|*sheetSaveSet|>UNDO|>SHEETS PAGESETUP"
+            "-DEXPECT=\"format\":\"katana-sheets\".*plotPatternPreview: First file: 01 PLAN\\.pdf.*pagesetup style=greyscale lineweight=1 dpi=150 pattern=\"[^\"]*\" filepersheet=on.*type SHEETS SAVE \"path\" instead.*pagesetup style=colour lineweight=1 dpi=300 pattern=\"[^\"]*\" filepersheet=off"
+            "-DFORBID=Plotted|file="
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/sheet_set_menu_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_sheet_set_menu_runs_its_lines_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+
     # The whole main window, built and painted headlessly: theme, toolbars, every
     # icon, the viewport with the sample in it. See tools/check_screenshot.cmake.
     add_test(NAME qt_screenshot_headless

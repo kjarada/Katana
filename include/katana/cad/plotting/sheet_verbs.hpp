@@ -4,7 +4,7 @@
 // command line"): the verbs a person, a script, the headless katana_cli and
 // an AI agent type to lay out, edit and inspect a project's sheets.
 //
-//   SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | CHECK | PAGESETUP
+//   SHEETS [LIST] | JSON [path] | SAVE path | LOAD path | APPEND path | CHECK | PAGESETUP
 //   SHEET NEW | REMOVE | MOVE | COPY | RENAME | SET | FIELD | SUGGESTPAPER
 //   VIEW ADD | SET | REMOVE | LIST | FIT | BESTROTATE
 //   TILE n preset

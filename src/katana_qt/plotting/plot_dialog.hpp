@@ -27,6 +27,7 @@
 #include <QDialog>
 #include <QString>
 
+#include "katana/cad/plotting/page_setup.hpp"
 #include "katana/cad/plotting/sheet_set.hpp"
 #include "katana/core/error.hpp"
 #include "plot_output.hpp"
@@ -56,14 +57,29 @@ namespace katana::qt {
 // plotBrowseFolder, plotPattern and plotPatternPreview, plotPrinter; then
 // plotOpenAfter, plotKeepSetup, plotProblem, and the buttons plotRun and
 // plotCancel.
+//
+// In its page-setup mode (Mode::PageSetup, the Sheets editor's Sheet Set >
+// Page Setup) it is pageSetupDialog, "Page Setup": only what the set's page
+// setup keeps - plotColourMode, plotLineWeightScale, plotDpi, plotPattern
+// with plotPatternPreview, and pageSetupFilePerSheet ("A PDF per sheet") -
+// with plotProblem, and the buttons pageSetupSave and plotCancel. Nothing is
+// plotted: Save's line is pageSetupLine.
 class PlotDialog final : public QDialog {
   public:
+    enum class Mode { Plot, PageSetup };
+
     // For `set`, starting from its page setup. `current` is the sheet the
     // editor shows, offered as "Current sheet"; `allSheets` picks All rather
     // than Current to start with. `suggestedFile` is the PDF offered, and
     // its folder the folder offered for a file a sheet.
     PlotDialog(const katana::cad::plotting::SheetSet& set, std::size_t current, bool allSheets,
-               const QString& suggestedFile, QWidget* parent = nullptr);
+               const QString& suggestedFile, QWidget* parent = nullptr, Mode mode = Mode::Plot);
+
+    // The page setup the controls describe, and the SHEETS PAGESETUP line
+    // that makes it the set's - every option written out, the pattern
+    // quoted and its backslashes doubled so the verb reads it back as it is.
+    [[nodiscard]] katana::cad::plotting::PageSetup pageSetup() const;
+    [[nodiscard]] QString pageSetupLine() const;
 
     // The plot the controls describe. For the printer the destination is
     // empty and the format is the page setup's.
@@ -78,6 +94,9 @@ class PlotDialog final : public QDialog {
     // What stops the choice being plotted - a sheet list that names no
     // sheet, a raster too large, no destination - as validatePlotRequest
     // says it; shown in the dialog, and Plot is disabled while there is one.
+    // In the page-setup mode, what stops the page setup being saved:
+    // validatePageSetup's refusal, or a double quote in the pattern, which
+    // the command line has no way to type.
     [[nodiscard]] katana::core::Status check() const;
 
   private:
@@ -85,6 +104,9 @@ class PlotDialog final : public QDialog {
 
     katana::cad::plotting::SheetSet set_;
     std::size_t current_ = 0;
+    Mode mode_ = Mode::Plot;
+    QWidget* sheetsRow_ = nullptr;
+    QCheckBox* filePerSheet_ = nullptr;
     QRadioButton* all_ = nullptr;
     QRadioButton* currentOnly_ = nullptr;
     QRadioButton* list_ = nullptr;
