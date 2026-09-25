@@ -31,6 +31,9 @@ code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
 (`cli.sheet_verbs_lay_out_edit_and_list_the_sheets`); only `PLOTSHEETS`,
 which paints, needs the window.
 
+The same session is served to Claude over the Model Context Protocol by
+`katana_mcp` (`docs/mcp.md`).
+
 ## katana with --screenshot and --plot
 
 ```sh
