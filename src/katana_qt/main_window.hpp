@@ -34,6 +34,7 @@
 #include "customisation/customisation_workbench.hpp"
 #include "gis_online.hpp"
 #include "survey/survey_workbench.hpp"
+#include "survey/utility_workbench.hpp"
 #include "tools/tool_menus.hpp"
 #include "plotting/plot_output.hpp"
 #include "sheet_editor.hpp"
@@ -381,6 +382,10 @@ class MainWindow final : public QMainWindow {
     // GIS > Online Data and the ONLINE verbs (gis_online.hpp). Declared after
     // the Document, so it and its dialog go first.
     std::unique_ptr<OnlineDataWorkbench> online_;
+    // Survey > Subsurface Utilities (AS 5488) and the framing after a UTILITY
+    // DRAW (survey/utility_workbench.hpp). After the Document for the reason
+    // online_ is.
+    std::unique_ptr<UtilityWorkbench> utilities_;
     // Format > Layers, shown beside the drawing and kept between uses. It
     // holds the Document, so it is owned here - declared after document_,
     // destroyed before it - rather than left to Qt, which deletes a window's

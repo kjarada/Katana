@@ -661,6 +661,48 @@ if(TARGET katana)
             "-DREFUSED=Saved the survey layout template \"ctest shared layout\".*Deleted the survey layout template \"ctest shared layout\".*--fill: template has no choice 'ctest shared layout'"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/survey_templates_reach_export_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # ---- Survey > Subsurface Utilities (AS 5488), survey/utility_workbench.hpp --
+    #
+    # The dialog writes the UTILITY line and runs nothing itself. Opened on
+    # Clearance by its own menu item, it shows the line it would run - the
+    # schedule, the design and the one option given, in the verb's order - and
+    # on Verify the same schedule with nothing else.
+    set(_utility_samples "${PROJECT_SOURCE_DIR}/samples/utilities")
+    add_test(NAME qt_utility_dialog_writes_the_line_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@utilityClearance|utilitySchedule=${_utility_samples}/schedule.csv|utilityDesign=${_utility_samples}/design.csv|utilityWidth=0.375|?utilityCommand|utilityTabs=Verify|?utilityCommand"
+            "-DEXPECT=--dialog utilityClearance opened utilityDialog \"Subsurface Utilities \\(AS 5488\\)\".*utilityCommand: UTILITY CLEARANCE [^\r\n]*/samples/utilities/schedule\\.csv\"? \"?[^\r\n]*/samples/utilities/design\\.csv\"? WIDTH 0\\.375[\r\n]+utilityCommand: UTILITY VERIFY [^\r\n]*/samples/utilities/schedule\\.csv\"?[\r\n]"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_line_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # Run on Draw: the line goes through the window's command line to the
+    # interpreter's UTILITY DRAW, and the plan view is framed on what it drew.
+    # By hand from samples/utilities/schedule.csv, graded as UTILITY REPORT
+    # grades it (cli.utility_report_grades_the_sample_and_names_the_over_claim,
+    # detected spacing 10 m): 4 lines, 14 vertices, 10 segments. The runs of one
+    # level are W1 QL-B B B | A | C (the 12.5 m gap to W1-5 is longer than the
+    # spacing), E1 B | C C (E1-3's radar pick is QL-C), T1 C and G1 D: 7
+    # polylines, and a point per vertex, 21 entities. W1 is 1.420 m QL-A,
+    # 8.001 + 8.001 + 0.100 = 16.102 m QL-B and 12.502 m QL-C; G1 is 40 m of
+    # records. The bounds are the schedule's extremes, (334000, 6250000) to
+    # (334040, 6250007.2) - MGA zone 56, thousands of kilometres from where an
+    # empty drawing's view looks, so "Plan 21 drawn" is the framing's doing.
+    # The reply is read twice: in the log, and in the dialog's output. It needs
+    # the interpreter's UTILITY DRAW; a build without it refuses the line as an
+    # unknown command, and this test fails there.
+    add_test(NAME qt_utility_dialog_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=@utilityDraw|utilitySchedule=${_utility_samples}/schedule.csv|!utilityRun|?utilityStatus|?utilityOutput|?FrameStatsLabel"
+            "-DEXPECT=--dialog utilityDraw opened utilityDialog.*utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=[0-9]+ bounds=334000(\\.0*)?,6250000(\\.0*)?,334040(\\.0*)?,6250007\\.20*[\r\n].*line id=W1 type=water length=30\\.02[0-9]* ql_a=1\\.42[0-9]* ql_b=16\\.10[0-9]* ql_c=12\\.50[0-9]* ql_d=0(\\.0*)?[\r\n].*utilityStatus: Drawn as one undo step.*utilityOutput: utilities drawn lines=4 vertices=14 segments=10 entities=21 [^\r\n]*line id=G1 type=gas length=40(\\.0*)? ql_a=0(\\.0*)? ql_b=0(\\.0*)? ql_c=0(\\.0*)? ql_d=40(\\.0*)?.*FrameStatsLabel: Plan +21 drawn"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/utility_dialog_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_utility_dialog_writes_the_line_headless qt_utility_dialog_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
     # ---- the window's wiring of the managers' foundations ----------------------
     #
     # Format > Load Customisation merges (audit QT-21), through the window's
