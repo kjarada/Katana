@@ -464,10 +464,11 @@ Format
   Load Customisation...              loadCustomisation
   Replace Loaded Customisation...    replaceCustomisation
   ---
+  Global Modify...                   formatGlobalModify  -> globalModifyDialog
   Purge Unused...                    formatPurge
 ```
 
-The Format toolbar carries Layers and the three managers. Survey > Survey
+The Format toolbar carries Layers, the three managers and Global Modify. Survey > Survey
 Coding shows the same code manager, Load and Replace actions - the same
 `QAction` objects (`SurveyServices::codeManager`), so two menus cannot drift
 apart.
@@ -713,6 +714,35 @@ the `ONLINE IMPORT` command the verb would parse and handing it back to the
 workbench - one executor, so no path exists in the dialog that an agent cannot
 take on the command line. The download runs as a background job with its
 progress and Cancel in the status bar; the entities arrive as one command.
+
+## Global Modify
+
+Format > Global Modify... (`GlobalModifyDialog`,
+`src/katana_qt/customisation/global_modify_dialog.*`) states the request
+`cad::planGlobalModify` takes (`docs/cad.md`, "Global Modify") and decides
+nothing of its own. Non-modal, one instance kept by the Format workbench
+(`CustomisationWorkbench::showGlobalModify`), as the managers are:
+
+- **Apply to**: the selection, a view, the checked layers (with their
+  sublayers or not), or the whole drawing. The views are the workspace's
+  open ones, read afresh each time through `GlobalModifyDialog::views`, so a
+  closed view is never pointed at and a plan view's "only what is on screen"
+  is its visible area as it is now; the dialog itself never sees the
+  workspace, which is what lets a widget test give it views of its own.
+- **Only those that match**: types, layer and style patterns, colour,
+  property and value, text, drawn only.
+- **Modify**: three tabs - Entities, Their Layers, Their Styles. A field
+  changes only when its box is ticked, and its editor is disabled until then,
+  so an unticked field can never be written by accident (the rule "`<varies>`
+  protects" states for the attribute manager).
+- **The summary** under the form is the plan's own, refreshed as the form is
+  edited (coalesced to one preview per 150 ms) and as the drawing or the
+  selection changes. Apply is one undo step and logs the summary; Select
+  Matches selects what the scope and filter take and frames it in the active
+  plan view. Text that does not read - a colour that is not `#RRGGBB` or
+  ByLayer - is said in the summary, in red, and nothing runs.
+
+Tested in `tests/qt_widgets/customisation/test_global_modify_dialog.cpp`.
 
 ## The rules a dialog or panel follows
 
