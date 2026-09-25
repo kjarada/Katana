@@ -9,6 +9,8 @@ file(GLOB _cad_plotting_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/plo
 file(GLOB _cad_survey_job_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_survey_job*.cpp")
 # The annotation system's tests (docs/annotation.md), globbed as its sources are.
 file(GLOB _cad_annotation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/annotation/*.cpp")
+# The AS 5488 utility verbs and their drawing (docs/subsurface_utilities.md).
+file(GLOB _cad_utility_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/utilities/*.cpp")
 
 katana_add_test_suite(cad
     LIBS katana_cad
@@ -18,7 +20,12 @@ katana_add_test_suite(cad
         ${_cad_plotting_tests}
         ${_cad_survey_job_tests}
         ${_cad_annotation_tests}
+        ${_cad_utility_tests}
 )
+# The sample investigation the utility tests draw and report, the one the
+# cli.utility_* tests and docs/subsurface_utilities.md work by hand.
+target_compile_definitions(katana_cad_tests PRIVATE
+    KATANA_UTILITY_SAMPLES="${PROJECT_SOURCE_DIR}/samples/utilities")
 # The Modify > Edit family's tests reach its internal header
 # (tools/modify_edit_support.hpp: EditSession, drawable) the way the family's
 # sources do, rather than by a path climbing out of tests/.

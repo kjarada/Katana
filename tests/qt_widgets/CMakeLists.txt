@@ -22,10 +22,11 @@ file(GLOB _qt_customisation_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}
 # for the same reason.
 file(GLOB _qt_tool_sources CONFIGURE_DEPENDS "${_qt_src}/tools/*.cpp")
 file(GLOB _qt_tool_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp")
-# The survey import wizard, the reduction options and report, and Survey
-# Jobs (src/katana_qt/survey/), with their tests: the pages are driven by
-# their object names as a person clicks them, on the fixtures of
-# tests/surveyio/data and tests/qt_widgets/survey/data.
+# The survey import wizard, the reduction options and report, Survey Jobs
+# and the Subsurface Utilities dialog and workbench (src/katana_qt/survey/),
+# with their tests: the pages are driven by their object names as a person
+# clicks them, on the fixtures of tests/surveyio/data and
+# tests/qt_widgets/survey/data.
 file(GLOB _qt_survey_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/survey/*.cpp")
 set(_qt_survey_sources
     ${_qt_src}/survey/survey_import_wizard.cpp
@@ -34,7 +35,9 @@ set(_qt_survey_sources
     ${_qt_src}/survey/reduction_report_view.cpp
     ${_qt_src}/survey/survey_task.cpp
     ${_qt_src}/survey/survey_job_support.cpp
-    ${_qt_src}/survey/survey_jobs_dialog.cpp)
+    ${_qt_src}/survey/survey_jobs_dialog.cpp
+    ${_qt_src}/survey/utility_dialog.cpp
+    ${_qt_src}/survey/utility_workbench.cpp)
 # The sheets' dialogs, panels and output (src/katana_qt/plotting/) and their
 # tests: globbed, as they are in the application.
 file(GLOB _qt_plotting_sources CONFIGURE_DEPENDS "${_qt_src}/plotting/*.cpp")

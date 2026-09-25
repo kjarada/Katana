@@ -176,6 +176,11 @@ class ViewWorkspace final : public QMainWindow {
     [[nodiscard]] katana::core::Status startTool(std::string_view id);
     // The running tool's id in whichever plan view runs one, "" when none.
     [[nodiscard]] std::string activeToolId() const;
+    // True when the running tool is waiting for typed text - a Text's
+    // string, a height, a count (cad::ToolInput::Value) - rather than a point
+    // or a pick. The command line then hands it a typed line before reading
+    // the line as any verb: a text may well begin "Utility" or "Online".
+    [[nodiscard]] bool toolTakesText() const;
     // Hands a whole typed line to the running tool - the command line's
     // Enter while a tool runs. False, and nothing done, when no tool runs:
     // the line is then a command.

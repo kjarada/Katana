@@ -4,9 +4,13 @@ Tools for surveying buried services and grading what is known about them by
 the quality levels of AS 5488.1-2019, "Classification of subsurface utility
 information". The code is `katana::survey::subsurface`
 (`include/katana/survey/subsurface/`, `src/katana_survey/subsurface_*.cpp`);
-the command line reaches it through `UTILITY` (`src/katana_app/utility_verbs.hpp`).
-It sits in `katana_survey` because it is survey calculation - positions,
-tolerances, lengths, levels - and needs nothing above `core` and `math`.
+the command line reaches it through `UTILITY`
+(`include/katana/cad/utilities/utility_verbs.hpp`), a verb of the shared
+`CommandInterpreter`, so the window's command line, `katana_cli`,
+`katana_mcp` and an agent all run the same code. The calculation sits in
+`katana_survey` because it is survey calculation - positions, tolerances,
+lengths, levels - and needs nothing above `core` and `math`; the verbs and the
+drawing they make sit in `katana_cad`, which owns the document.
 
 The short version of the standard, as this code reads it:
 
@@ -36,6 +40,7 @@ project specification, and set them where they differ.
 | Were the QL-B detections as good as the locator said? | `subsurface::verifyDetections` | `VERIFY` |
 | Does the deliverable meet the client's schema? | `subsurface::checkDelivery` | `CHECK ... SCHEMA` |
 | What should the schema's Clash attribute say? | `subsurface::clashOf` | `CLEARANCE` |
+| Where is each stretch, at what level, on the plan? | `utilities::drawUtilities` | `DRAW` |
 
 ## Decisions, and where this is stricter than the standard
 
@@ -138,6 +143,7 @@ main from the records, crossed by a proposed stormwater pipe.
 katana_cli -c "UTILITY REPORT samples/utilities/schedule.csv MINCOVER 0.6"
 katana_cli -c "UTILITY VERIFY samples/utilities/schedule.csv"
 katana_cli -c "UTILITY CLEARANCE samples/utilities/schedule.csv samples/utilities/design.csv WIDTH 0.375"
+katana_cli -c "UTILITY DRAW samples/utilities/schedule.csv" -c "LAYER LIST"
 ```
 
 An investigation is delivered as IFC 4.3 with `EXPORT <file.ifc> UTILITIES
@@ -146,6 +152,138 @@ An investigation is delivered as IFC 4.3 with `EXPORT <file.ifc> UTILITIES
 element its type and feature make it, carrying its quality level, and each
 located point an `IfcAnnotation` carrying its evidence (`docs/ifc.md`,
 "Subsurface utilities").
+
+## UTILITY on the command line
+
+`UTILITY` is the interpreter's (`utilities::runUtilityVerb`), so it is typed
+the same at the window's command line, in a `katana_cli` script and in a
+`katana_mcp` batch. Words are case-insensitive and a path with blanks is
+quoted. `HELP UTILITY` lists every option.
+
+```
+UTILITY REPORT <schedule.csv> [MINCOVER <m>] [SPACING <m>]
+UTILITY VERIFY <schedule.csv>
+UTILITY CLEARANCE <schedule.csv> <design.csv> [WIDTH <m>] [H <m>] [V <m>] [MARGIN <m>]
+UTILITY CHECK <schedule.csv> SCHEMA <schema.csv>
+UTILITY DRAW <schedule.csv> [SPACING <m>] [MINCOVER <m>] [LAYER <prefix>]
+```
+
+`REPORT`, `VERIFY`, `CLEARANCE` and `CHECK` read the files, grade and reply
+with the report; they never touch the drawing, so they are safe against any
+open project. `SPACING` is `GradingSettings::maximumDetectedSpacing` (default
+10 m) for both `REPORT` and `DRAW`, so a drawing and a report of one schedule
+agree. `CHECK` with errors against the schema is refused, and the refusal
+carries the whole check - a script that stops must still say why. `katana_cli`
+prints the refusal's first line on stderr, as every refusal, and the check
+after it on stdout, where a report goes, so `katana_cli -c "UTILITY CHECK
+..." > check.txt` keeps the check exactly when it failed; and exits 1. An option
+that is not the verb's, one given twice, or a negative or missing number is
+refused by name; so is a file that cannot be read or parsed, with its path.
+
+## Drawing the services
+
+`UTILITY DRAW` grades the schedule as `REPORT` does and adds it to the drawing
+as ONE undo step named `UTILITY DRAW` (`utilities::utilityDrawCommand`). It is
+all or nothing: a line that cannot be graded - one located vertex, a
+coordinate that is not a number - refuses the whole draw, naming the line,
+and nothing is added. `utilities::drawUtilities` builds the drawing as values
+with no document, which is what `tests/cad/utilities/test_utility_drawing.cpp`
+tests; the command then creates what the drawing lacks, in this order:
+
+- **Linetypes** by quality level, named `utility-ql-b`, `utility-ql-c` and
+  `utility-ql-d`, when a layer about to be made names one. Model metres, for
+  plans at 1:200 to 1:500, so the level survives a monochrome plot:
+
+  | Level | Linetype | Pattern (m) | At 1:500 on paper |
+  |---|---|---|---|
+  | QL-A | `continuous` | solid | solid |
+  | QL-B | `utility-ql-b` | 1.5 dash, 0.75 gap | 3 mm dashes |
+  | QL-C | `utility-ql-c` | 1.5 dash, 0.5 gap, dot, 0.5 gap | dash-dot |
+  | QL-D | `utility-ql-d` | dot, 0.6 gap | a dot every 1.2 mm |
+
+- **Layers** `<prefix>/<type>/QL-A` .. `QL-D` (those used) and
+  `<prefix>/<type>/points`, and their parents, parents first - so undo takes
+  every one back. The prefix is `utilities` unless `LAYER` names another
+  (`LAYER "Site Services/Located"`); one too deep or too long for the two
+  levels drawn under it is refused as the prefix, before anything is made.
+  `<type>` is one word per kind of service:
+  `water`, `electricity`, `telecommunications`, `gas`, `recycled-water`,
+  `fire-service`, `sewer`, `stormwater`, `fuel`, `its`, `other`, `unknown`
+  (`utilities::utilityTypeWord`). A QL layer takes its level's linetype; every
+  layer of a type, and the `<prefix>/<type>` group, takes the type's colour. A
+  layer that already exists is used as it is: its colour, linetype and lock
+  are the person's. A locked one refuses the draw when it runs, as any edit
+  on a locked layer is refused.
+- **Entities**, ByLayer: one polyline per maximal run of consecutive segments
+  graded at the same level, on that level's layer - so a polyline ends
+  exactly where the level changes (on the sample, W1 is three: QL-B to the
+  pothole, the QL-A trench, then QL-C past the detected spacing) - and one
+  point per located vertex on the points layer. A run of no plan length to
+  the model's tolerance (two records at one place, or a rounding error apart,
+  graded unlike their neighbours) has nothing to draw; its points are still
+  drawn.
+
+**The colours are Katana's defaults, not the standard's.** AS 5488
+classifies information and sets no colours. The defaults follow the colours
+services are commonly marked in, and their pipes and conduits made in, in
+Australia, adjusted where the marking colour would vanish on white paper;
+each is at least 3:1 against the plan view's ground and, as it prints,
+against white paper
+(`UtilityDrawing.EveryTypeColourReadsOnTheScreenAndOnPaper`). They are layer
+colours, so a project with its own convention changes the layers after a
+draw - `MODIFY LAYERS utilities/water/QL-B SET LAYER.COLOUR=#RRGGBB`, or the
+layer panel - or makes them first, `LAYER NEW utilities/water/QL-B #RRGGBB`,
+since a draw uses a layer that exists as it is. (`LAYER` itself has no action
+that recolours a layer, and `LAYER NEW` refuses one that exists.)
+
+| Type | Default | Common marking colour |
+|---|---|---|
+| water | `#2F80ED` blue | blue |
+| electricity | `#E07000` orange | orange |
+| telecommunications | `#FFFFFF` white, which prints black (`PlotSettings::whiteToBlack`) | white |
+| gas | `#B8860B` dark gold | yellow, which vanishes on paper |
+| recycled-water | `#9B59D0` lilac | lilac |
+| fire-service | `#E53935` red | red |
+| sewer | `#A0896B` dark cream | cream, which vanishes on paper |
+| stormwater | `#43A047` green | none in common use: Katana's choice |
+| fuel | `#B06030` brown | Katana's choice |
+| its | `#009EB0` cyan | Katana's choice |
+| other | `#949494` grey | Katana's choice |
+| unknown | `#D63AD6` magenta | Katana's choice, to stand out: nobody established what it is |
+
+**What the grading found is on the entities**, as `utility.*` properties
+(`utilities::keys`), so the property panel, `PROP LIST` or an agent can ask
+why a stretch is QL-C without running the report again. A property that was
+not recorded, or cannot be computed, is absent - absent is not zero - and
+that includes `utility.status`, which a schedule without one leaves off, as
+the report lists it missing. Two are always there: `utility.type`, which
+names the layer (`unknown` when not recorded), and `utility.level_ref` beside
+a service level, the part of the service the level is on - `top` for a level
+given with no reference, as the grading and the cover read it, so it does
+not say whether the reference was recorded.
+
+| On | Properties |
+|---|---|
+| each polyline | `utility.line`, `utility.type`, `utility.quality_level` (the run's), `utility.limited_by` (why the run is below its ends, each reason once), `utility.length` (the run's plan length), `utility.from` and `utility.to` (its end vertices), `utility.owner`, `utility.material`, `utility.diameter` (metres) and `utility.diameter_inside`, `utility.configuration`, `utility.description`, `utility.status` |
+| each point | `utility.line`, `utility.type`, `utility.vertex`, `utility.method`, `utility.quality_level` (the vertex's graded level), `utility.claimed` and `utility.over_claim`, `utility.service_level` with `utility.level_ref`, `utility.level_qualified`, `utility.surface_level`, `utility.cover` with `utility.cover_note`, `utility.cover_below_minimum` (only with `MINCOVER`), `utility.verifies` |
+| both | a delivery schema's own attributes, uninterpreted, as `utility.field.<name>` |
+
+The reply is one record a line: the drawing, then each service.
+
+```
+utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000.000,6250000.000,334040.000,6250007.200
+line id=W1 type=water length=30.024 ql_a=1.420 ql_b=16.102 ql_c=12.502 ql_d=0.000
+line id=E1 type=electricity length=27.001 ql_a=0.000 ql_b=9.001 ql_c=18.001 ql_d=0.000
+line id=T1 type=telecommunications length=33.000 ql_a=0.000 ql_b=0.000 ql_c=33.000 ql_d=0.000
+line id=G1 type=gas length=40.000 ql_a=0.000 ql_b=0.000 ql_c=0.000 ql_d=40.000
+```
+
+`layers=` counts the layers that hold what was drawn, made or reused, not the
+groups above them; `bounds=` is the box of every located vertex, for a front
+end to frame - survey data in a real coordinate system usually lands far
+from what is on the screen. `utilities::drawReplyBounds` reads it back from
+the reply, so every front end reads it the same way. `cli.utility_draw_adds_the_graded_sample_to_the_drawing`
+and `tests/cad/utilities/test_utility_verbs.cpp` run it on the sample.
 
 ## The TfNSW Utility Schema and Specification
 
@@ -193,7 +331,8 @@ capacities against the row's asset type code, and that `AssetIdentifier` is
 prefixed with the asset type code, as the schema asks. Values must be spelt
 exactly - the schema says so - and one that matches only when case is
 ignored is a warning naming the listed spelling. The exit status is 1 when
-there are errors, so a script can gate a delivery on it.
+there are errors, so a script can gate a delivery on it
+(`cli.utility_check_with_errors_fails_the_script`).
 
 The schema file is made from the user's own copy of the workbook:
 
@@ -208,8 +347,11 @@ Government agency with its authority, and is not under an open licence. So
 the repository carries the means of reading it - the same arrangement as the
 12d reference files - and a checkout that has a copy, as
 Utility-Schema-and-Specification-v1.2.xlsx in the git-ignored folder
-"docs/TfNSW Reference Files", registers the `cli.utility_check_*` tests, which extract it
-and check the sample. The format of the schema file is in
+"docs/TfNSW Reference Files", registers
+`cli.utility_check_schema_from_the_workbook`, which extracts it, and
+`cli.utility_check_finds_what_the_tfnsw_sample_gets_wrong`, which checks the
+sample against it. (The two `cli.utility_check_with_errors_*` tests use a
+schema written by hand and run in every checkout.) The format of the schema file is in
 `include/katana/survey/subsurface/delivery_schema.hpp`; nothing in the
 checker is TfNSW's, so another client's schema can be written by hand.
 
@@ -224,11 +366,29 @@ Two things found in v1.2 while writing the extraction:
   "etc."; they are written as open domains, where any number or `N x M` is
   accepted besides the listed words.
 
+## In the desktop app
+
+Survey > Subsurface Utilities (AS 5488) has an item for each tool: Draw
+Utility Schedule, Utility Investigation Report, Verify Detections Against
+Exposures, Clearance of Proposed Works and Check Against a Delivery Schema.
+Each opens the same dialog on its own tab. The dialog has one field for each
+option the verb takes - the detected spacing and minimum cover shared by Draw
+and Report, as `SPACING` and `MINCOVER` are - shows the exact `UTILITY` line
+it will run, and runs
+that line through the window's command line. The line is logged and undoable
+like a typed one, and the reply appears in the dialog, where it can be copied
+or saved. Typing the same line on the command line does the same, which is how
+an agent drives it. After a draw, typed or from the dialog, every plan view is
+framed on what was drawn. `docs/desktop.md` ("Survey > Subsurface Utilities")
+describes how it is built. File > Export IFC takes a schedule and its delivery
+schema too, and its preview shows each service's graded segments by the class
+they are written as (`docs/ifc.md`, "In the window").
+
 ## Not done
 
-- The utilities are reported and exported to IFC, not drawn: no layers,
-  linetypes by quality level, or symbols in the drawing yet, and no Survey
-  menu entry.
+- The drawing is plan only: levels, depths and cover are properties of the
+  points, not a 3D string, and pits, valves and poles are points, not
+  symbols.
 - Attribute quality levels (grading the type, owner or material of a service
   separately from its position) are not modelled.
 - `CHECK` does not evaluate the schema's conditional attributes (it cannot

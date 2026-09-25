@@ -902,6 +902,16 @@ std::string ViewWorkspace::activeToolId() const
     return {};
 }
 
+bool ViewWorkspace::toolTakesText() const
+{
+    for (ViewportWidget* plan : planViews()) {
+        if (plan->toolActive()) {
+            return plan->toolExpects() == katana::cad::ToolInput::Value;
+        }
+    }
+    return false;
+}
+
 bool ViewWorkspace::typeIntoTool(const QString& text)
 {
     for (ViewportWidget* plan : planViews()) {

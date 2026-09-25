@@ -5,7 +5,6 @@
 add_library(katana_app STATIC
     session.cpp session.hpp
     dxf_verbs.cpp dxf_verbs.hpp
-    utility_verbs.cpp utility_verbs.hpp
     ifc_verbs.cpp ifc_verbs.hpp
     mcp_server.cpp mcp_server.hpp
 )
@@ -282,6 +281,67 @@ if(KATANA_BUILD_TESTS)
     set_tests_properties(cli.utility_clearance_shows_the_crossing_within_tolerance PROPERTIES
         PASS_REGULAR_EXPRESSION "W1 W1-2 -> W1-3 +QL-B +within tolerance +-0\\.263 +0\\.300 +0\\.372")
     set_tests_properties(cli.utility_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY DRAW on the same sample: W1 is three runs (QL-B, the QL-A
+    # trench between the potholes, the QL-C stretch past the detected
+    # spacing), E1 two, T1 and G1 one each, and a point per vertex - 21
+    # entities on 11 layers, the first record carrying the bounds a window
+    # frames.
+    add_test(NAME cli.utility_draw_adds_the_graded_sample_to_the_drawing
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\"" -c "LAYER LIST")
+    set_tests_properties(cli.utility_draw_adds_the_graded_sample_to_the_drawing PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "utilities drawn lines=4 vertices=14 segments=10 entities=21 layers=11 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=16\\.102 ql_c=12\\.502 ql_d=0\\.000.*utilities/water/QL-A  #2F80ED  \\(1 entities\\)${_eol}  utilities/water/QL-B  #2F80ED  \\(1 entities\\)${_eol}  utilities/water/QL-C  #2F80ED  \\(1 entities\\)${_eol}  utilities/water/points  #2F80ED  \\(6 entities\\)")
+
+    # A service of one located vertex cannot be graded, and refuses the whole
+    # draw by its id: nothing is drawn and the script stops, failing.
+    set(_one_vertex "${CMAKE_CURRENT_BINARY_DIR}/cli utility one vertex.csv")
+    file(WRITE "${_one_vertex}"
+        "line,point,easting,northing,method,h_unc,type\n"
+        "W1,W1-1,0,0,EML,0.1,water\n"
+        "W1,W1-2,10,0,EML,0.1,\n"
+        "W9,W9-1,5,5,EML,0.1,water\n")
+    add_test(NAME cli.utility_draw_refuses_a_line_it_cannot_grade
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "UTILITY DRAW \"${_one_vertex}\"" -c "LAYER LIST")
+    set_tests_properties(cli.utility_draw_refuses_a_line_it_cannot_grade PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "line W9 cannot be graded: a utility line needs at least two vertices; nothing was drawn"
+        FAIL_REGULAR_EXPRESSION "utilities drawn|utilities/water")
+    add_test(NAME cli.utility_a_refused_draw_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "UTILITY DRAW \"${_one_vertex}\"")
+    set_tests_properties(cli.utility_a_refused_draw_fails_the_script PROPERTIES WILL_FAIL TRUE)
+
+    # UTILITY CHECK against a schema written by hand, as any client's can be
+    # (delivery_schema.hpp): the sample gives each service's material once,
+    # so the rows after the first are empty - 11 errors. The whole check is
+    # shown, and the script fails, so a delivery can be gated on it. The
+    # refusal's one line goes to stderr and the check to stdout, which ctest
+    # merges in no fixed order, so the check is matched on its own; which
+    # stream takes what is pinned in tests/app/test_session.cpp, by
+    # Session.ARefusalThatCarriesAReportPrintsTheReportWhereAReportGoes.
+    set(_example_schema "${CMAKE_CURRENT_BINARY_DIR}/cli-utility-schema.csv")
+    file(WRITE "${_example_schema}"
+        "kind,attribute,value,detail,label\n"
+        "schema,Example Services Schema,1,,\n"
+        "identifier,line,,,\n"
+        "field,line,Alphanumerical,Yes,Line\n"
+        "field,material,Free Text,Yes,Material\n")
+    add_test(NAME cli.utility_check_with_errors_shows_the_whole_check
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY CHECK \"${_utilities}/schedule.csv\" SCHEMA \"${_example_schema}\"")
+    set_tests_properties(cli.utility_check_with_errors_shows_the_whole_check PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "Delivery schema check against Example Services Schema v1${_eol}14 rows, 4 assets \\(line\\): 11 errors, 0 warnings.*material is empty \\(11 rows")
+    add_test(NAME cli.utility_check_with_errors_fails_the_script
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY CHECK \"${_utilities}/schedule.csv\" SCHEMA \"${_example_schema}\"")
+    set_tests_properties(cli.utility_check_with_errors_fails_the_script PROPERTIES WILL_FAIL TRUE)
 
     # UTILITY CHECK against the real TfNSW Utility Schema, when this checkout
     # has the owner's copy (it is theirs to keep, not the repository's - see
