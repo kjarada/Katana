@@ -242,9 +242,15 @@ TEST(ScopeFilterWidget, EachScopeIsSaidInTheWordsTheGrammarReads)
     tick(widget, "gmSublayers", false);
     EXPECT_EQ(words(widget), "LAYERS roads,survey ONLY");
 
-    // A view by its id: what it shows on screen, or its layers anywhere.
+    // A view by its id: what it shows on screen, or its layers anywhere. The
+    // list shows the id beside the title, since the number in a title counts
+    // only the views of its kind: 3D 1 is VIEW 2.
     press(widget, "gmScopeView");
-    find<QComboBox>(widget, "gmView")->setCurrentIndex(0);
+    auto* views = find<QComboBox>(widget, "gmView");
+    ASSERT_EQ(views->count(), 2);
+    EXPECT_EQ(views->itemText(0), "Plan 1 (VIEW 1)");
+    EXPECT_EQ(views->itemText(1), "3D 1 (VIEW 2)");
+    views->setCurrentIndex(0);
     EXPECT_EQ(words(widget), "VIEW 1 EXTENTS");
     tick(widget, "gmOnScreen");
     EXPECT_EQ(words(widget), "VIEW 1");
@@ -305,9 +311,16 @@ TEST(ScopeFilterWidget, EachFilterIsSaidInTheWordsTheGrammarReads)
     EXPECT_TRUE(contains(refusal(widget), "the filter's colour: type #RRGGBB or ByLayer"));
     type(widget, "gmFilterColour", "");
 
-    // A value to match needs the property it is the value of.
+    // A value with no property is a value any property holds, as Global
+    // Modify reads it.
     type(widget, "gmFilterValue", "TREE*");
-    EXPECT_TRUE(contains(refusal(widget), "needs the property"));
+    EXPECT_EQ(words(widget), "DRAWING WHERE PROP=:TREE*");
+    // A property whose name has a ':' cannot be said: PROP= ends the name at
+    // the first one, so the words would take another filter. Refused.
+    type(widget, "gmFilterValue", "");
+    type(widget, "gmFilterProperty", "addr:street");
+    EXPECT_TRUE(contains(refusal(widget), "cannot be written as PROP=")) << refusal(widget);
+    type(widget, "gmFilterValue", "TREE*");
     type(widget, "gmFilterProperty", "code");
     EXPECT_EQ(words(widget), "DRAWING WHERE PROP=code:TREE*");
     type(widget, "gmFilterValue", "");
@@ -377,6 +390,7 @@ TEST(ScopeFilterWidget, TheWordsTakeWhatTheControlsTake)
     same({fixture.pA, fixture.pC}, "the drawing's trees");
     tick(widget, "gmTypePoint", false);
     type(widget, "gmFilterProperty", "");
+    same({fixture.pA, fixture.pC}, "a value any property holds");
     type(widget, "gmFilterValue", "");
 
     press(widget, "gmScopeLayers");
