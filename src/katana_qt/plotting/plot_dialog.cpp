@@ -177,7 +177,7 @@ PlotDialog::PlotDialog(const plotting::SheetSet& set, std::size_t current, bool 
         },
         this);
     folder_->setText(suggestedFile.isEmpty() ? QString()
-                                             : QDir::toNativeSeparators(suggested.absolutePath()));
+                                             : QDir::toNativeSeparators(suggested.path()));
     form_->addRow(QStringLiteral("Folder"), folderRow_);
     pattern_ = new QLineEdit(qtText(setup.fileNamePattern), this);
     pattern_->setObjectName(QStringLiteral("plotPattern"));

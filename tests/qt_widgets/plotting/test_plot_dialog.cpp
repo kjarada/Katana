@@ -372,9 +372,13 @@ TEST(PlotDialog, TheEditorsPlotButtonsOpenIt)
 TEST(PlotDialog, TheSuggestedFileIsNamedAfterTheProject)
 {
     Document document;
-    EXPECT_TRUE(katana::qt::suggestedPlotFile(document).endsWith("/sheets.pdf"));
+    // A new drawing is "Untitled".
+    EXPECT_TRUE(katana::qt::suggestedPlotFile(document).endsWith("/Untitled.pdf"));
     auto metadata = document.metadata();
     metadata.name = "Main Street: Stage 2";
     document.setMetadata(metadata);
     EXPECT_TRUE(katana::qt::suggestedPlotFile(document).endsWith("/Main Street- Stage 2.pdf"));
+    metadata.name.clear();
+    document.setMetadata(metadata);
+    EXPECT_TRUE(katana::qt::suggestedPlotFile(document).endsWith("/sheets.pdf"));
 }
