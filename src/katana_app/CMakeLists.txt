@@ -226,6 +226,18 @@ if(KATANA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "1  Polyline  layer=0  vertices=4  closed  length=30  area=50"
         FAIL_REGULAR_EXPRESSION "error")
 
+    # STATUS and STATUS JSON: the record katana_mcp's katana_status gives,
+    # here as a verb (cad/document_status.hpp). One rectangle, selected, one
+    # undo step.
+    add_test(NAME cli.status_reports_the_drawing_in_text_and_json
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli> -c "RECT 0,0 10,5" -c "SELECT ALL" -c STATUS
+                -c "STATUS JSON")
+    set_tests_properties(cli.status_reports_the_drawing_in_text_and_json PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "Entities: 1  Layers: 1  Alignments: 0${_eol}Current layer: 0${_eol}Selected: 1  Undo steps: 1  Redo steps: 0${_eol}.*  \"entities\": 1,${_eol}.*  \"selected\": 1,${_eol}.*  \"undoSteps\": 1${_eol}}"
+        FAIL_REGULAR_EXPRESSION "error")
+
     # The help names the customisation's files by what they are, in the words
     # the window uses, and no product: what STYLE's linetype takes and what
     # CUSTOMISE loads.

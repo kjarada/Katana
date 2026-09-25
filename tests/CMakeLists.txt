@@ -1412,3 +1412,27 @@ if(TARGET katana)
             "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
         TIMEOUT 180)
 endif()
+
+# STATUS [JSON] typed in the window, the status bar's selection count, and File
+# > Drawing Summary (docs/desktop.md, "File > Drawing Summary"). The style
+# "kerb" is drawn with the fixture's TEST Dashed Kerb, and the library that
+# defines it is then replaced by the symbol fixture, so the name is
+# unresolved: the summary lists it, and Show in Styles and Linetypes leaves the
+# style manager showing only the styles that name it - kerb, not "other".
+# Copy as JSON runs STATUS JSON through the one executor.
+if(TARGET katana)
+    set(_fixture "${PROJECT_SOURCE_DIR}/tests/archive12d/data/customisation")
+    add_test(NAME qt_drawing_summary_and_status_json_describe_the_drawing_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=$<TARGET_FILE:katana>"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=>CUSTOMISE REPLACE \"${_fixture}/test_linestyles.4d\"|>STYLE NEW kerb|>STYLE NEW other|>STYLE SET kerb linetype \"TEST Dashed Kerb\"|>CUSTOMISE REPLACE \"${_fixture}/test_symbols.4d\"|>RECT 0,0 10,5|>SELECT ALL|>STATUS|>STATUS JSON|?statusSelectionCount|@fileDrawingSummary|?drawingSummaryDrawing|?drawingSummaryCurrent|?drawingSummarySelection|?drawingSummaryHistory|?drawingSummaryUnresolved|drawingSummaryUnresolved=TEST Dashed Kerb|!drawingSummaryShowMissing|?drawingSummaryStatus|!drawingSummaryCopyJson|?drawingSummaryStatus|@formatStyles|?styleTable"
+            "-DEXPECT=Entities: 1  Layers: 1  Alignments: 0[\r\n]+Current layer: 0[\r\n]+Selected: 1  Undo steps: 4  Redo steps: 0[\r\n]+Customisation: 4 linestyles and symbols, 0 survey code rules[\r\n]+{[\r\n]+  \"alignments\": 0,[\r\n]+  \"currentLayer\": \"0\",[\r\n]+  \"currentStyle\": \"\",[\r\n]+  \"entities\": 1,.*  \"undoSteps\": 4[\r\n]+}[\r\n]+statusSelectionCount: 1 selected / 1 entities[\r\n]+[^\r\n]*opened drawingSummaryDialog \"Drawing Summary\"[\r\n]+drawingSummaryDrawing: 1 entity, 1 layer, 0 alignments, 0 sheets[\r\n]+drawingSummaryCurrent: layer 0, style ByLayer, annotation scale 1:[0-9]+, no coordinate system[\r\n]+drawingSummarySelection: 1 entity selected[\r\n]+drawingSummaryHistory: 4 steps to undo \\(next: [^)]+\\), 0 steps to redo[\r\n]+drawingSummaryUnresolved: TEST Dashed Kerb[\r\n]+drawingSummaryStatus: Styles and Linetypes shows the styles that name TEST Dashed Kerb\\.[\r\n]+{.*}[\r\n]+drawingSummaryStatus: Copied the drawing's state as JSON \\(STATUS JSON\\)\\.[\r\n]+[^\r\n]*opened styleManagerDialog[^\r\n]*[\r\n]+styleTable: kerb \\| [^;\r\n]*TEST Dashed Kerb[^;\r\n]*[\r\n]"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/drawing_summary_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_drawing_summary_and_status_json_describe_the_drawing_headless
+        PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()

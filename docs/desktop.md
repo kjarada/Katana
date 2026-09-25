@@ -15,8 +15,8 @@ File, Edit, View, Draw, Modify, Annotate, Format, Survey, Terrain, GIS, Help
 (`MainWindow::buildActions`; each menu has an object name, `fileMenu` to
 `helpMenu`). File keeps to files: the customisation is loaded from Format
 and from Survey > Survey Coding, beside the managers of what it brings. The
-status bar shows a view's running readout, the current layer, the active snap
-and the cursor coordinates.
+status bar shows a view's running readout, how many entities are selected of
+how many, the current layer, the active snap and the cursor coordinates.
 
 The readout (`FrameStatsLabel`) is a 3D view's frame time or a section's
 station and elevation under the cursor, forwarded from whichever view raised
@@ -880,6 +880,44 @@ the two cannot disagree.
 
 Tested in `tests/qt_widgets/test_command_reference.cpp` and, through the Help
 menu, by `qt_the_help_menu_finds_a_verb_and_lists_every_key_headless`.
+
+## File > Drawing Summary
+
+The window showed only pieces of the drawing's state - the title, the current
+layer, the current style - and nowhere the alignment count, the undo depth,
+the full project path or the customisation it was drawn with; the
+customisation's coverage was logged once, at a load, and scrolled away. File >
+Drawing Summary (`fileDrawingSummary`, `drawingSummaryDialog`,
+`src/katana_qt/customisation/drawing_summary_dialog.hpp`) keeps it all in view,
+non-modal and kept, following the Document through a `DocumentWatcher`
+(refreshed once a turn of the event loop however many commands ran):
+
+- the project's full path and whether it has unsaved changes;
+- entities, layers, alignments and sheets;
+- the current layer, style, annotation scale and coordinate system;
+- the selection;
+- the undo and redo depth with the next step each way;
+- the customisation, in the words a bare `CUSTOMISE` prints
+  (`cad::customisationSummary`): the loaded files in load order, the files the
+  project was drawn with that are not loaded, the counts and this drawing's
+  coverage; and the names the drawing's styles give that no loaded library
+  defines (`drawingSummaryUnresolved`). A double-click on one, or Show in Styles
+  and Linetypes, opens Format > Styles and Linetypes on its Styles tab with the
+  Missing chip and the name in the search, reached by the object names the
+  manager's header lists (`MainWindow::showMissingInStyles`), so its styles
+  are what the manager shows.
+
+It changes nothing. Copy as JSON runs `STATUS JSON` through the one executor
+and copies the reply - exactly what `katana_status` and `katana://status` give
+(`docs/cad.md`, "STATUS") - and Load Customisation is the Format menu's item.
+The status bar has a permanent `statusSelectionCount` label, "3 selected / 120
+entities", refreshed with the panels.
+
+Tested in `tests/qt_widgets/customisation/test_drawing_summary_dialog.cpp`
+and, typed and through the menu, by
+`qt_drawing_summary_and_status_json_describe_the_drawing_headless`, which
+leaves a style's linestyle undefined by replacing the library that defined it
+and follows the name into the style manager.
 
 ## GIS > Online Data: a workbench of its own
 

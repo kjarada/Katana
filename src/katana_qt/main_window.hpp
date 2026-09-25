@@ -67,6 +67,7 @@ class StyleManagerDialog;
 class AttributeManagerDialog;
 class LayerManagerDialog;
 class DatasetInfoDialog;
+class DrawingSummaryDialog;
 
 class MainWindow final : public QMainWindow {
   public:
@@ -416,6 +417,11 @@ class MainWindow final : public QMainWindow {
     void showCommandReference(const QString& section);
     // Help > Keyboard Shortcuts, made the first time and kept.
     void showKeyboardShortcuts();
+    // File > Drawing Summary, made the first time and kept.
+    void showDrawingSummary();
+    // Format > Styles and Linetypes on its Missing chip, searching for `name`:
+    // where the summary sends a name no loaded library defines.
+    void showMissingInStyles(const QString& name);
     void logMessage(const QString& text, bool isError = false);
     void addLayer();
     void addChildLayer();
@@ -484,6 +490,8 @@ class MainWindow final : public QMainWindow {
     // under the cursor, a 3D view's frame time - in a PERMANENT status-bar
     // label, so that it never overwrites a prompt or an error message.
     QLabel* frameStatsLabel_ = nullptr;
+    // "3 selected / 120 entities", permanent, refreshed with the panels.
+    QLabel* selectionCountLabel_ = nullptr;
     // The Properties panel's Style row, and the Properties toolbar's
     // current style for new work (D9).
     QComboBox* propertyStyle_ = nullptr;
@@ -545,6 +553,9 @@ class MainWindow final : public QMainWindow {
     // The Help menu's two dialogs, children of the window.
     CommandReferenceDialog* referenceDialog_ = nullptr;
     KeyboardShortcutsDialog* shortcutsDialog_ = nullptr;
+    // File > Drawing Summary, a child of the window. It holds the Document
+    // through a DocumentWatcher, which is safe when the Document goes first.
+    DrawingSummaryDialog* summaryDialog_ = nullptr;
 };
 
 } // namespace katana::qt

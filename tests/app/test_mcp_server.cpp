@@ -361,6 +361,47 @@ TEST_F(McpServer, TheHelpAndStatusAreResources)
               -32002);
 }
 
+// katana_status and katana://status are the STATUS verb's (cad/document_status.hpp),
+// so an agent reads one record whichever front end it drives. The resource's
+// text is written out by hand for this drawing - one rectangle, selected, one
+// undo step, no project, no customisation (the session loads none) - in the
+// form it has always had: every key in alphabetical order, indented by two.
+TEST_F(McpServer, TheStatusToolAndResourceSayWhatTheStatusVerbSays)
+{
+    initialize();
+    (void)call("katana_run_commands", Json{{"commands", {"RECT 0,0 30,20", "SELECT ALL"}}});
+    const Json verbs = call("katana_run_commands", Json{{"commands", {"STATUS", "STATUS JSON"}}});
+    const Json& lines = verbs["structuredContent"]["commands"];
+    const std::string text = lines[0]["output"].get<std::string>();
+    const std::string json = lines[1]["output"].get<std::string>();
+
+    const Json tool = call("katana_status");
+    EXPECT_EQ(textOf(tool), text);
+    EXPECT_EQ(tool["structuredContent"], Json::parse(json));
+    const Json resource = request("resources/read", Json{{"uri", "katana://status"}});
+    const std::string read = resource["result"]["contents"][0]["text"].get<std::string>();
+    EXPECT_EQ(read, json);
+    EXPECT_EQ(read, "{\n"
+                    "  \"alignments\": 0,\n"
+                    "  \"currentLayer\": \"0\",\n"
+                    "  \"currentStyle\": \"\",\n"
+                    "  \"entities\": 1,\n"
+                    "  \"layers\": 1,\n"
+                    "  \"modified\": true,\n"
+                    "  \"project\": null,\n"
+                    "  \"redoSteps\": 0,\n"
+                    "  \"selected\": 1,\n"
+                    "  \"styleLibraryDefinitions\": 0,\n"
+                    "  \"surveyCodeRules\": 0,\n"
+                    "  \"undoSteps\": 1\n"
+                    "}");
+    EXPECT_EQ(text, "Project: (none - not saved to a project yet)  [unsaved changes]\n"
+                    "Entities: 1  Layers: 1  Alignments: 0\n"
+                    "Current layer: 0\n"
+                    "Selected: 1  Undo steps: 1  Redo steps: 0\n"
+                    "Customisation: 0 linestyles and symbols, 0 survey code rules");
+}
+
 TEST_F(McpServer, NothingACommandPrintsLeaksOntoTheRealStreams)
 {
     initialize();

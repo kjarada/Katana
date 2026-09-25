@@ -56,7 +56,7 @@ lot at 1000,2000 and label its bearings" - and Claude chooses the commands.
 | `katana_run_commands` | a list of commands, in order; stops at the first failure unless `stop_on_error` is false | each line |
 | `katana_run_script` | a `.kcs` script file, as `katana_cli script.kcs` runs it | each line of the file |
 | `katana_help` | the command reference | `HELP` and the session's own verbs |
-| `katana_status` | project, unsaved changes, entity, layer and alignment counts, current layer and style, selection, undo depth | nothing: read from the Document |
+| `katana_status` | project, unsaved changes, entity, layer and alignment counts, current layer and style, selection, undo depth | nothing: read from the Document by `cad::documentStatus`, as `STATUS` and `STATUS JSON` read it |
 | `katana_new_project` | a new, empty drawing | `NEW` |
 | `katana_open_project` | open a project directory | `OPEN "<path>"` |
 | `katana_save_project` | save in place, or as a project at `path` | `SAVE` / `SAVE "<path>"` |
@@ -85,7 +85,10 @@ and `status`, the drawing's state after the call. `isError` is true when a
 command failed, so the model sees the failure and the reason.
 
 The help (`katana://help`) and the status (`katana://status`) are also
-resources, for a client that attaches context rather than calling tools.
+resources, for a client that attaches context rather than calling tools. The
+status - the tool's text and structured content, and the resource - is the
+interpreter's `STATUS` and `STATUS JSON` (`docs/cad.md`, "STATUS"), so an
+agent driving the window or `katana_cli` reads the same record.
 
 ## What the server adds to the command line
 
