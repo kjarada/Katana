@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <expected>
 #include <format>
 #include <limits>
 
@@ -213,8 +214,8 @@ std::size_t placeAndDraw(const std::vector<Placed>& labels, const Box2& bounds,
 }
 
 // Draws `section` in `area`; returns how many of its notes it had no room
-// for (SheetPaintStats::sectionNotesDropped).
-std::size_t paintSection(SectionCanvas& canvas, const Box2& area, const katana::cad::Section& section,
+// for (SheetPaintStats::sectionNotesDropped), or - nothing drawn - why not.
+std::expected<std::size_t, std::string> paintSection(SectionCanvas& canvas, const Box2& area, const katana::cad::Section& section,
                          const SectionAxes& axes)
 {
     QPainter& painter = canvas.painter();
@@ -253,15 +254,21 @@ std::size_t paintSection(SectionCanvas& canvas, const Box2& area, const katana::
     request.bandRows = rows.size();
     request.caption = !axes.caption.isEmpty();
     plotting::SectionLayout layout = plotting::sectionPlotLayout(request);
+    const auto noRoom = [&area] {
+        return std::unexpected(std::format("no room for a section in {:.1f} x {:.1f} mm",
+                                           area.width(), area.height()));
+    };
     if (layout.plot.empty()) {
-        return 0;
+        return noRoom();
     }
     const double midY = layout.plot.center().y;
     const double lowLevel = centre.y - 0.5 * layout.plot.height() / vMm;
     const double highLevel = centre.y + 0.5 * layout.plot.height() / vMm;
     // Level labels are stacked up the side: their height sets their step,
     // 7 mm apart at the least so the grid stays open.
-    const double vStep = plotting::labelStep(vMm, 7.0, 1.0, [&](double) { return levelStyle.capMm; });
+    // Never finer than the millimetre their three decimals can write.
+    const double vStep = std::max(
+        plotting::labelStep(vMm, 7.0, 1.0, [&](double) { return levelStyle.capMm; }), 0.001);
     const std::vector<double> levelValues = plotting::gridValues(lowLevel, highLevel, vStep, 200);
     request.levelLabelMm = 0.0;
     for (const double level : levelValues) {
@@ -270,7 +277,7 @@ std::size_t paintSection(SectionCanvas& canvas, const Box2& area, const katana::
     }
     layout = plotting::sectionPlotLayout(request);
     if (layout.plot.empty()) {
-        return 0;
+        return noRoom();
     }
     Box2 plot = layout.plot;
     const bool banded = layout.banded;
@@ -282,7 +289,9 @@ std::size_t paintSection(SectionCanvas& canvas, const Box2& area, const katana::
         plot.min.x = std::max(plot.min.x, X(axes.range->first));
         plot.max.x = std::min(plot.max.x, X(axes.range->second));
         if (!(plot.width() > 1.0)) {
-            return 0; // the range is off the plot
+            return std::unexpected(std::format(
+                "chainages {:.3f} to {:.3f} are off the plot centred on {:.3f}",
+                axes.range->first, axes.range->second, centre.x));
         }
     }
     const double firstValue = centre.x + (plot.min.x - midX) / hMm;
@@ -795,6 +804,19 @@ SectionPaintResult paintSectionViewport(SectionCanvas& canvas, const Viewport& v
             std::format("the scale 1:{} is not a positive number", viewport.scale));
         return result;
     }
+    // So are the range, the centre and the cross sections' settings: a number
+    // that is not finite would put the whole section at infinity.
+    const bool stationsFinite = std::ranges::all_of(
+        from.stations, [](double station) { return std::isfinite(station); });
+    if (!std::isfinite(from.chainageFrom) || !std::isfinite(from.chainageTo) ||
+        !std::isfinite(from.sectionInterval) || !std::isfinite(from.sectionHalfWidth) ||
+        !stationsFinite ||
+        (!viewport.autoCentre && (!std::isfinite(viewport.centre.x) ||
+                                  !std::isfinite(viewport.centre.y)))) {
+        result.problems.emplace_back(
+            "a chainage, centre or width of the section is not a finite number");
+        return result;
+    }
     SectionAxes axes;
     axes.scale = viewport.scale;
     axes.exaggeration = viewport.verticalExaggeration > 0.0 ? viewport.verticalExaggeration : 1.0;
@@ -819,7 +841,12 @@ SectionPaintResult paintSectionViewport(SectionCanvas& canvas, const Viewport& v
                          ? std::pair{from.chainageFrom, from.chainageTo}
                          : std::pair{start, start + section->length};
         axes.dataBand = true;
-        result.notesDropped += paintSection(canvas, area, *section, axes);
+        const auto drawn = paintSection(canvas, area, *section, axes);
+        if (!drawn) {
+            result.problems.push_back(drawn.error());
+            return result;
+        }
+        result.notesDropped += *drawn;
         result.drawn = true;
         return result;
     }
@@ -846,7 +873,12 @@ SectionPaintResult paintSectionViewport(SectionCanvas& canvas, const Viewport& v
         rowAxes.shift = -halfWidth;
         rowAxes.caption = QString("CH %1").arg(stations[i], 0, 'f', 3);
         rowAxes.profileLevel = cuts.profileLevel ? cuts.profileLevel(stations[i]) : std::nullopt;
-        result.notesDropped += paintSection(canvas, row, *section, rowAxes);
+        const auto drawn = paintSection(canvas, row, *section, rowAxes);
+        if (!drawn) {
+            result.problems.push_back(rowAxes.caption.toStdString() + ": " + drawn.error());
+            continue;
+        }
+        result.notesDropped += *drawn;
         result.drawn = true;
     }
     return result;

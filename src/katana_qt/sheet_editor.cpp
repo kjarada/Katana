@@ -1634,7 +1634,8 @@ void SheetEditor::rebuildProperties()
                 // A section fits both its scale and its exaggeration.
                 scale->setCurrentIndex(0);
                 Viewport fitted = v;
-                const plotting::SectionFit fit = resolveSectionViewport(v, source(), sectionCuts_);
+                const plotting::SectionFit fit =
+                    resolveSectionViewport(v, source(), canvas_->paintCache());
                 fitted.scale = fit.scale;
                 fitted.verticalExaggeration = fit.exaggeration;
                 fittedExaggeration = fit.exaggeration;
@@ -1649,10 +1650,10 @@ void SheetEditor::rebuildProperties()
                     edit([](Viewport& e) { e.autoScale = true; });
                 } else if (auto value = parseScale(text)) {
                     edit([value, fittedExaggeration](Viewport& e) {
+                        e.scale = *value;
                         if (e.autoScale && fittedExaggeration) {
                             e.verticalExaggeration = *fittedExaggeration;
                         }
-                        e.scale = *value;
                         e.autoScale = false;
                     });
                 } else {
