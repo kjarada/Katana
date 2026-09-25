@@ -40,17 +40,22 @@ AnnotationWorkbench::AnnotationWorkbench(QWidget& window, katana::cad::Document&
                                          QMenu& menu, QToolBar& toolBar)
     : window_(window), document_(document), listener_(std::make_unique<Listener>())
 {
+    // Menu letters T and E: the Format menu's others are L, Y, B, S, D, R
+    // and P, and a letter that reaches two items reaches neither
+    // (qt_every_shortcut_and_menu_letter_reaches_one_thing_headless).
     textStylesAction_ = new QAction(QStringLiteral("&Text Styles..."), &window);
     textStylesAction_->setObjectName(QStringLiteral("formatTextStyles"));
     textStylesAction_->setToolTip(QStringLiteral(
         "The drawing's text styles: face, height on paper, width, slant, colour, background "
         "mask, readability (TEXTSTYLE)"));
+    textStylesAction_->setStatusTip(textStylesAction_->toolTip());
     textStylesAction_->setData(QStringLiteral("textStyleManagerDialog"));
-    labelStylesAction_ = new QAction(QStringLiteral("&Label Styles and Rules..."), &window);
+    labelStylesAction_ = new QAction(QStringLiteral("Lab&el Styles and Rules..."), &window);
     labelStylesAction_->setObjectName(QStringLiteral("formatLabelStyles"));
     labelStylesAction_->setToolTip(QStringLiteral(
         "Label styles - what a label says and where it goes - and the rules that label the "
         "drawing by layer, code and kind (LABELSTYLE, AUTOLABEL)"));
+    labelStylesAction_->setStatusTip(labelStylesAction_->toolTip());
     labelStylesAction_->setData(QStringLiteral("labelStyleManagerDialog"));
     QObject::connect(textStylesAction_, &QAction::triggered, &window, [this] { showTextStyles(); });
     QObject::connect(labelStylesAction_, &QAction::triggered, &window,
