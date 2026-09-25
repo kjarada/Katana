@@ -433,10 +433,12 @@ Result<PlanGrid> planGrid(const Viewport& viewport, const PlanPlacement& at,
         const auto covers = [&label, &clear](const Box2& box) {
             return !box.empty() && !clear(box, label.box);
         };
+        const double spacing = std::max(options.labelSpacingMm, 0.0);
         const bool blocked =
             std::ranges::any_of(options.keepOut, covers) ||
-            std::ranges::any_of(grid.labels,
-                                [&covers](const GridLabel& placed) { return covers(placed.box); });
+            std::ranges::any_of(grid.labels, [&](const GridLabel& placed) {
+                return !clear(placed.box.inflated(spacing), label.box);
+            });
         if (!blocked) {
             grid.labels.push_back(std::move(label));
         }
