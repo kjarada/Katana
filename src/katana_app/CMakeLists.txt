@@ -5,6 +5,7 @@
 add_library(katana_app STATIC
     session.cpp session.hpp
     dxf_verbs.cpp dxf_verbs.hpp
+    utility_verbs.cpp utility_verbs.hpp
     mcp_server.cpp mcp_server.hpp
 )
 katana_target_defaults(katana_app)
@@ -243,6 +244,40 @@ if(KATANA_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
                 $<TARGET_FILE:katana_cli> -c "SHEET NEW PLAN" -c "SHEET REMOVE 2")
     set_tests_properties(cli.a_refused_sheet_verb_fails_the_script PROPERTIES WILL_FAIL TRUE)
+endif()
+
+# UTILITY on the sample investigation (samples/utilities, worked by hand in
+# docs/subsurface_utilities.md). E1-3 is a radar pick at 350 mm claimed as
+# QL-B: the report must say so. The pothole W1-X1 checks the detection W1-3:
+# hypot(0.080, 0.060) = 0.100 in plan; top 19.155 against the detection's
+# centre 19.180 + 0.075 = 19.255, so -0.100. The stormwater design crosses
+# W1's W1-2 -> W1-3, a QL-B stretch, clear by 0.372 m vertically at the
+# drawn levels but not across QL-B's 500 mm - within tolerance, not clear.
+if(KATANA_BUILD_TESTS)
+    set(_utilities "${PROJECT_SOURCE_DIR}/samples/utilities")
+    add_test(NAME cli.utility_report_grades_the_sample_and_names_the_over_claim
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVER 0.6")
+    add_test(NAME cli.utility_verify_compares_the_pothole_with_its_detection
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY VERIFY \"${_utilities}/schedule.csv\"")
+    add_test(NAME cli.utility_clearance_shows_the_crossing_within_tolerance
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY CLEARANCE \"${_utilities}/schedule.csv\" \"${_utilities}/design.csv\" WIDTH 0.375")
+    add_test(NAME cli.utility_refuses_an_unknown_option
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY REPORT \"${_utilities}/schedule.csv\" MINCOVR 0.6")
+    set_tests_properties(cli.utility_report_grades_the_sample_and_names_the_over_claim PROPERTIES
+        PASS_REGULAR_EXPRESSION "4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    set_tests_properties(cli.utility_verify_compares_the_pothole_with_its_detection PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 +W1-3 +W1-X1 +0\\.100 +ok +-0\\.100 +ok")
+    set_tests_properties(cli.utility_clearance_shows_the_crossing_within_tolerance PROPERTIES
+        PASS_REGULAR_EXPRESSION "W1 W1-2 -> W1-3 +QL-B +within tolerance +-0\\.263 +0\\.300 +0\\.372")
+    set_tests_properties(cli.utility_refuses_an_unknown_option PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # A .dxf through the command line both ways, natively - no GDAL, so it runs
