@@ -149,35 +149,30 @@ TEST(DxfReaderR12, ThePercentCodesOfTextBecomeTheSignsTheyName)
     EXPECT_EQ(std::get<TextGeometry>(bearing->geometry).height, 1.8);
 }
 
-TEST(DxfReaderR12, ABulgedPolylineIsChordedWithinTheToleranceAndKeepsItsVertices)
+TEST(DxfReaderR12, ABulgedPolylineKeepsItsArcExactly)
 {
+    // Chorded to 1 mm until the drawing system (docs/drawing.md) gave the
+    // model a polyline that holds arcs: now the arc comes in as the file
+    // has it, a bulge on its vertex, and nothing is approximated.
     const auto imported = load("r12_survey.dxf");
-    const Entity* found = nullptr;
-    for (const Entity* entity : ofKind<Polyline2>(imported)) {
-        if (std::get<Polyline2>(entity->geometry).closed) {
-            found = entity;
-        }
-    }
-    ASSERT_NE(found, nullptr);
-    const Polyline2& polyline = std::get<Polyline2>(found->geometry);
-    // Bulge 1 from (0,0) to (2,0) is a half turn counter-clockwise: centre
-    // (1,0), radius 1, bulging below the chord. At 1 mm the step is
-    // 2 acos(1 - 0.001) = 0.08945 rad, so pi needs ceil(35.12) = 36 chords,
-    // 35 points between the two vertices: 4 + 35 = 39 in all.
-    ASSERT_EQ(polyline.vertices.size(), 39u);
+    const auto curved = ofKind<katana::geometry::CurvePolyline2>(imported);
+    ASSERT_EQ(curved.size(), 1u);
+    const auto& polyline = std::get<katana::geometry::CurvePolyline2>(curved[0]->geometry);
+    ASSERT_EQ(polyline.vertices.size(), 4u);
     EXPECT_TRUE(polyline.closed);
-    EXPECT_EQ(polyline.vertices.front(), Point2(0.0, 0.0));
-    EXPECT_EQ(polyline.vertices[36], Point2(2.0, 0.0));
-    EXPECT_EQ(polyline.vertices[37], Point2(2.0, 2.0));
-    EXPECT_EQ(polyline.vertices[38], Point2(0.0, 2.0));
-    for (std::size_t i = 1; i < 36; ++i) {
-        EXPECT_NEAR(polyline.vertices[i].distanceTo(Point2(1.0, 0.0)), 1.0, 1e-12);
-        EXPECT_LT(polyline.vertices[i].y, 0.0);
-    }
-    // The square's 4 and the 36 triangles of the fan: 1/2 * 36 * sin(pi/36).
-    EXPECT_NEAR(polyline.area(), 4.0 + 18.0 * std::sin(kPi / 36.0), 1e-12);
-    EXPECT_GE(imported.arcsChorded, 1u);
-    EXPECT_TRUE(anyWarningContains(imported, "chorded to within 0.001"));
+    EXPECT_EQ(polyline.vertices[0].position, Point2(0.0, 0.0));
+    EXPECT_EQ(polyline.vertices[1].position, Point2(2.0, 0.0));
+    EXPECT_EQ(polyline.vertices[2].position, Point2(2.0, 2.0));
+    EXPECT_EQ(polyline.vertices[3].position, Point2(0.0, 2.0));
+    // Bulge 1 from (0,0) to (2,0) is a half turn counter-clockwise: centre
+    // (1,0), radius 1, bulging below the chord.
+    EXPECT_EQ(polyline.vertices[0].bulge, 1.0);
+    const auto arc = std::get<katana::geometry::Arc2>(polyline.segment(0));
+    EXPECT_NEAR(arc.center.distanceTo(Point2(1.0, 0.0)), 0.0, 1e-12);
+    EXPECT_LT(arc.midpoint().y, 0.0);
+    // The square's 4 and the half disc below it, exactly.
+    EXPECT_NEAR(polyline.area(), 4.0 + 0.5 * kPi, 1e-12);
+    EXPECT_EQ(imported.arcsChorded, 0u);
 }
 
 TEST(DxfReaderR12, AThreeDimensionalPolylineKeepsEveryVertexHeight)
@@ -328,24 +323,23 @@ TEST(DxfReaderR2000, TheFileIsReadWithEveryEntityItDraws)
 TEST(DxfReaderR2000, AnLwPolylineKeepsItsClosedFlagElevationAndArc)
 {
     const auto imported = load("r2000_site.dxf");
-    const auto polylines = ofKind<Polyline2>(imported);
+    const auto polylines = ofKind<katana::geometry::CurvePolyline2>(imported);
     ASSERT_EQ(polylines.size(), 1u);
-    const Polyline2& polyline = std::get<Polyline2>(polylines[0]->geometry);
+    const auto& polyline = std::get<katana::geometry::CurvePolyline2>(polylines[0]->geometry);
     EXPECT_TRUE(polyline.closed);
+    ASSERT_EQ(polyline.vertices.size(), 4u);
     // Bulge tan(pi/8) from (10,0) to (20,10) is a quarter turn: chord
     // 10 sqrt 2, radius (10 sqrt 2 / 4)(1 + b^2)/b = 10, centre (10,10).
-    // At 1 mm: step 2 acos(0.9999) = 0.028284, (pi/2)/0.028284 = 55.5 -> 56
-    // chords, 55 points between: 4 + 55 = 59.
-    ASSERT_EQ(polyline.vertices.size(), 59u);
-    for (std::size_t i = 2; i < 57; ++i) {
-        EXPECT_NEAR(polyline.vertices[i].distanceTo(Point2(10.0, 10.0)), 10.0, 1e-9);
+    const auto arc = std::get<katana::geometry::Arc2>(polyline.segment(1));
+    EXPECT_NEAR(arc.radius, 10.0, 1e-9);
+    EXPECT_NEAR(arc.center.distanceTo(Point2(10.0, 10.0)), 0.0, 1e-9);
+    // The 10 x 10 square and the quarter disc beside it (what the fan of
+    // chords approximated when the arc was chorded): 100 + 25 pi.
+    EXPECT_NEAR(polyline.area(), 100.0 + 25.0 * kPi, 1e-9);
+    // The elevation is every vertex's height, held by the geometry.
+    for (const auto& vertex : polyline.vertices) {
+        EXPECT_EQ(vertex.height, 7.25);
     }
-    // The 10 x 10 square and the fan of 56 triangles of the quarter circle:
-    // 1/2 * 100 * 56 * sin(pi/112).
-    EXPECT_NEAR(polyline.area(), 100.0 + 2800.0 * std::sin(kPi / 112.0), 1e-9);
-    const auto heights = katana::entity::heightsOf(polylines[0]->properties, 59);
-    EXPECT_EQ(heights.front(), 7.25);
-    EXPECT_EQ(heights.back(), 7.25);
     EXPECT_EQ(polylines[0]->layer, "Boundary");
 }
 

@@ -90,6 +90,14 @@ std::string kindName(const Geometry& geometry)
         return "label";
     case katana::entity::EntityType::Leader:
         return "leader";
+    case katana::entity::EntityType::CurvePolyline:
+        return std::get<katana::geometry::CurvePolyline2>(geometry).closed ? "closed polyline"
+                                                                            : "polyline";
+    case katana::entity::EntityType::Ellipse:
+        return std::get<katana::geometry::Ellipse2>(geometry).isFull() ? "ellipse"
+                                                                        : "elliptical arc";
+    case katana::entity::EntityType::Spline:
+        return "spline";
     }
     return "object";
 }

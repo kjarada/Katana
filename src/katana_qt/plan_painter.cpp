@@ -1356,6 +1356,30 @@ void PlanPainter::drawGeometry(const katana::entity::Geometry& geometry)
             self.drawText(drawing.textAnchor, drawing.text, drawing.textHeight,
                           drawing.textRotation);
         }
+        // The drawing system's curves, chorded in model space to a quarter of
+        // a pixel as the arcs above are.
+        void operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            const double tolerance = 0.25 / std::max(self.view_.scale, 1e-12);
+            if (g.closed && self.hatch_ != nullptr) {
+                const Polyline2 boundary = g.toPolyline(tolerance);
+                QPolygonF polygon;
+                polygon.reserve(static_cast<int>(boundary.vertices.size()));
+                for (const auto& vertex : boundary.vertices) {
+                    polygon << self.toScreen(vertex);
+                }
+                self.drawHatch(boundary, polygon);
+            }
+            self.strokePolyline(g.tessellate(tolerance), false);
+        }
+        void operator()(const katana::geometry::Ellipse2& g) const
+        {
+            self.strokePolyline(g.tessellate(0.25 / std::max(self.view_.scale, 1e-12)), false);
+        }
+        void operator()(const katana::geometry::Spline2& g) const
+        {
+            self.strokePolyline(g.tessellate(0.25 / std::max(self.view_.scale, 1e-12)), false);
+        }
     };
     std::visit(Visitor{*this, drawArcPath}, geometry);
 }

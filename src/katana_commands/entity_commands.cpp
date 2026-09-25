@@ -1,5 +1,7 @@
 #include "katana/commands/entity_commands.hpp"
 
+#include "katana/entity/curve_pieces.hpp"
+
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -167,6 +169,16 @@ Result<std::vector<Curve2>> edgeCurves(const CommandContext& context,
         if (const auto* polyline = std::get_if<Polyline2>(&entity->geometry)) {
             for (std::size_t i = 0; i < polyline->segmentCount(); ++i) {
                 curves.emplace_back(polyline->segment(i));
+            }
+            continue;
+        }
+        // A curve polyline, an ellipse and a spline cut and bound through
+        // their pieces (entity/curve_pieces.hpp).
+        if (std::holds_alternative<katana::geometry::CurvePolyline2>(entity->geometry) ||
+            std::holds_alternative<katana::geometry::Ellipse2>(entity->geometry) ||
+            std::holds_alternative<katana::geometry::Spline2>(entity->geometry)) {
+            for (auto& piece : katana::entity::curvePieces(entity->geometry)) {
+                curves.push_back(std::move(piece));
             }
             continue;
         }
@@ -429,6 +441,30 @@ CommandPtr offsetEntity(EntityId source, double distance, const Point2& side)
                     }
                 }
                 auto moved = katana::geometry::offset(*polyline, sign * std::abs(distance));
+                if (!moved) {
+                    return moved.error();
+                }
+                entity->geometry = std::move(*moved);
+            } else if (const auto* curved =
+                           std::get_if<katana::geometry::CurvePolyline2>(&entity->geometry)) {
+                // The side of the nearest piece decides the sign: left of a
+                // line, or - on an arc - inside a counter-clockwise one.
+                const auto near = curved->nearest(side);
+                if (!near) {
+                    return makeError(ErrorCode::InvalidGeometry, "the polyline has no vertices");
+                }
+                double sign = 1.0;
+                const auto piece = curved->segment(near->segment);
+                if (const auto* line = std::get_if<Segment2>(&piece)) {
+                    sign = katana::geometry::Line2{line->start, line->delta()}.signedDistanceTo(side) >= 0.0
+                               ? 1.0
+                               : -1.0;
+                } else {
+                    const auto& arc = std::get<Arc2>(piece);
+                    const bool inside = side.distanceTo(arc.center) < arc.radius;
+                    sign = (inside == (arc.sweep > 0.0)) ? 1.0 : -1.0;
+                }
+                auto moved = katana::geometry::offset(*curved, sign * std::abs(distance));
                 if (!moved) {
                     return moved.error();
                 }

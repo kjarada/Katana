@@ -265,6 +265,41 @@ std::string describe(const Entity& entity)
                 out << "  callout=" << katana::entity::toString(g.callout);
             }
         }
+        void operator()(const katana::geometry::CurvePolyline2& g) const
+        {
+            std::size_t arcs = 0;
+            std::size_t withHeight = 0;
+            for (std::size_t i = 0; i < g.segmentCount(); ++i) {
+                arcs += g.isArc(i) ? 1 : 0;
+            }
+            for (const auto& vertex : g.vertices) {
+                withHeight += vertex.height ? 1 : 0;
+            }
+            out << "  vertices=" << g.vertices.size() << (g.closed ? "  closed" : "  open")
+                << "  arcs=" << arcs << "  heights=" << withHeight << "  length=" << g.length();
+            if (g.closed) {
+                out << "  area=" << g.area();
+            }
+        }
+        void operator()(const katana::geometry::Ellipse2& g) const
+        {
+            out << "  centre " << g.center.x << "," << g.center.y << "  major=" << g.majorRadius()
+                << "  minor=" << g.minorRadius() << "  rotation="
+                << g.majorAxis.angle() * katana::math::kRadToDeg;
+            if (!g.isFull()) {
+                out << "  start=" << g.startParameter * katana::math::kRadToDeg
+                    << "  sweep=" << g.sweep * katana::math::kRadToDeg;
+            }
+            out << "  length=" << g.length();
+        }
+        void operator()(const katana::geometry::Spline2& g) const
+        {
+            out << "  degree=" << g.degree << "  control=" << g.controlPoints.size();
+            if (g.hasFitPoints()) {
+                out << "  fit=" << g.fitPoints.size();
+            }
+            out << "  length=" << g.length();
+        }
     };
     std::visit(Detail{out}, entity.geometry);
     if (!entity.visible) {

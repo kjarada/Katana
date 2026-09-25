@@ -1,5 +1,7 @@
 #include "katana/cad/selection.hpp"
 
+#include "katana/entity/curve_pieces.hpp"
+
 #include "katana/cad/spatial_query.hpp"
 
 #include <algorithm>
@@ -176,6 +178,34 @@ struct TouchesBox {
     bool operator()(const katana::entity::LeaderGeometry& g) const
     {
         return (*this)(Polyline2{g.vertices, false});
+    }
+    // A curve polyline by its segments and arcs; an ellipse and a spline by
+    // their chords (entity/curve_pieces.hpp), good to a millimetre.
+    bool operator()(const katana::geometry::CurvePolyline2& g) const { return anyPiece(g); }
+    bool operator()(const katana::geometry::Ellipse2& g) const { return anyPiece(g); }
+    bool operator()(const katana::geometry::Spline2& g) const { return anyPiece(g); }
+
+    bool anyPiece(const katana::entity::Geometry& geometry) const
+    {
+        for (const auto& piece : katana::entity::curvePieces(geometry)) {
+            const bool touches = std::visit(
+                [this](const auto& curve) {
+                    using Curve = std::decay_t<decltype(curve)>;
+                    if constexpr (std::is_same_v<Curve, Segment2>) {
+                        return katana::geometry::clip(curve, box).has_value();
+                    } else if constexpr (std::is_same_v<Curve, Arc2>) {
+                        return box.contains(curve.startPoint()) || box.contains(curve.endPoint()) ||
+                               crossesAnEdge(curve);
+                    } else {
+                        return box.contains(curve.pointAtAngle(0.0)) || crossesAnEdge(curve);
+                    }
+                },
+                piece);
+            if (touches) {
+                return true;
+            }
+        }
+        return false;
     }
 
     template <typename Curve> bool crossesAnEdge(const Curve& curve) const

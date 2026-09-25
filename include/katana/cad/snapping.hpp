@@ -4,9 +4,11 @@
 // intersection, perpendicular, tangent, nearest and grid.
 //
 // Resolution order: the closest candidate among the "exact" modes (endpoint,
-// midpoint, centre, intersection, perpendicular, tangent) wins; ties prefer the
+// midpoint, centre, intersection, perpendicular, tangent, and the drawing
+// system's node, quadrant and apparent intersection) wins; ties prefer the
 // order just listed. Only if none is inside the aperture does Nearest apply,
-// and only then Grid. This mirrors how drafters expect snaps to behave: an
+// then Extension and Parallel (points on lines that are not drawn), and only
+// then Grid. This mirrors how drafters expect snaps to behave: an
 // endpoint always beats merely being somewhere on the line.
 
 #include <cstdint>
@@ -28,6 +30,18 @@ enum class SnapMode : std::uint32_t {
     Tangent = 1u << 5,       // needs SnapRequest::from
     Nearest = 1u << 6,
     Grid = 1u << 7,
+    // Appended 2026-09-25 with the drawing system (docs/drawing.md); the
+    // bits above keep their values, since snap settings are saved by value.
+    Quadrant = 1u << 8,             // the ends of a circle's, arc's or ellipse's axes
+    Node = 1u << 9,                 // a point entity, a spline's fit points
+    Extension = 1u << 10,           // along a line or arc carried on past its end
+    Parallel = 1u << 11,            // needs SnapRequest::from: parallel to a hovered line
+    ApparentIntersection = 1u << 12, // where two lines WOULD cross if extended
+    // One-shot overrides, not running snaps: snap() ignores them and the
+    // precision input (drawing/precision_input.hpp) runs them - From takes a
+    // base point then an offset, MidBetween the middle of two picked points.
+    From = 1u << 13,
+    MidBetween = 1u << 14,
 };
 
 using SnapModes = std::uint32_t;
@@ -47,7 +61,9 @@ using SnapModes = std::uint32_t;
 
 inline constexpr SnapModes kDefaultSnapModes =
     SnapMode::Endpoint | SnapMode::Midpoint | SnapMode::Center | SnapMode::Intersection;
-inline constexpr SnapModes kAllSnapModes = 0xFF;
+// Every running snap. (0xFF until the drawing system appended Quadrant to
+// ApparentIntersection; From and MidBetween are one-shot, so not in it.)
+inline constexpr SnapModes kAllSnapModes = 0x1FFF;
 
 [[nodiscard]] const char* toString(SnapMode mode);
 
@@ -58,6 +74,8 @@ struct SnapRequest {
     // Start of the segment being drawn; enables Perpendicular and Tangent.
     std::optional<katana::geometry::Point2> from{};
     double gridSpacing = 0.0; // model units; <= 0 disables Grid
+    // Where Grid is anchored (a grid need not pass through the origin).
+    katana::geometry::Point2 gridOrigin{};
     // The view the cursor is in; null for the document rule alone. A layer
     // hidden in that view is not snappable there - a snap to a line nobody can
     // see puts a point somewhere the user cannot explain.

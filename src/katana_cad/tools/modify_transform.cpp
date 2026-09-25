@@ -1895,6 +1895,60 @@ struct Stretcher {
         }
         return std::optional<Geometry>(std::move(out));
     }
+
+    // A curve polyline's vertices inside the window move and each arc keeps
+    // its bulge, so it keeps its shape between its ends.
+    Result<std::optional<Geometry>> operator()(const katana::geometry::CurvePolyline2& polyline) const
+    {
+        if (std::ranges::none_of(polyline.vertices,
+                                 [&](const auto& v) { return window.contains(v.position); })) {
+            return std::optional<Geometry>();
+        }
+        katana::geometry::CurvePolyline2 out = polyline;
+        for (auto& vertex : out.vertices) {
+            vertex.position = moved(vertex.position);
+        }
+        if (!katana::entity::validate(out)) {
+            return makeError(ErrorCode::InvalidArgument,
+                             "stretching would collapse the polyline");
+        }
+        return std::optional<Geometry>(std::move(out));
+    }
+
+    // An ellipse moves whole when its centre is inside, as a circle does.
+    Result<std::optional<Geometry>> operator()(const katana::geometry::Ellipse2& ellipse) const
+    {
+        if (!window.contains(ellipse.center)) {
+            return std::optional<Geometry>();
+        }
+        katana::geometry::Ellipse2 out = ellipse;
+        out.center = ellipse.center + delta;
+        return std::optional<Geometry>(out);
+    }
+
+    // A spline's defining points inside the window move - its fit points,
+    // through which it is solved again, or its control points.
+    Result<std::optional<Geometry>> operator()(const katana::geometry::Spline2& spline) const
+    {
+        auto& points = spline.hasFitPoints() ? spline.fitPoints : spline.controlPoints;
+        if (std::ranges::none_of(points, [&](const Point2& p) { return window.contains(p); })) {
+            return std::optional<Geometry>();
+        }
+        std::vector<Point2> shifted = points;
+        for (Point2& p : shifted) {
+            p = moved(p);
+        }
+        if (!spline.hasFitPoints()) {
+            katana::geometry::Spline2 out = spline;
+            out.controlPoints = std::move(shifted);
+            return std::optional<Geometry>(std::move(out));
+        }
+        auto out = katana::geometry::Spline2::throughPoints(std::move(shifted), spline.degree);
+        if (!out) {
+            return out.error();
+        }
+        return std::optional<Geometry>(std::move(*out));
+    }
 };
 
 // The change set of a stretch: every entity of `ids` the window touches.

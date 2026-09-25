@@ -93,6 +93,59 @@ std::optional<Point2> resolveAnchor(const Entity& entity, const AnchorRef& ref)
                 return std::nullopt;
             }
         }
+        // The drawing system's kinds (docs/drawing.md): a curve polyline as
+        // a polyline, its segment middles on the arcs; an ellipse's and a
+        // spline's ends and an ellipse's centre.
+        std::optional<Point2> operator()(const katana::geometry::CurvePolyline2& polyline) const
+        {
+            const auto& v = polyline.vertices;
+            if (v.empty()) {
+                return std::nullopt;
+            }
+            switch (ref.point) {
+            case AnchorPoint::Start:
+                return v.front().position;
+            case AnchorPoint::End:
+                return v.back().position;
+            case AnchorPoint::Vertex:
+                return ref.index < v.size() ? std::optional(v[ref.index].position) : std::nullopt;
+            case AnchorPoint::SegmentMid:
+                if (ref.index >= polyline.segmentCount()) {
+                    return std::nullopt;
+                }
+                return std::visit([](const auto& piece) { return piece.pointAt(0.5); },
+                                  polyline.segment(ref.index));
+            default:
+                return std::nullopt;
+            }
+        }
+        std::optional<Point2> operator()(const katana::geometry::Ellipse2& ellipse) const
+        {
+            switch (ref.point) {
+            case AnchorPoint::Centre:
+                return ellipse.center;
+            case AnchorPoint::Start:
+                return ellipse.startPoint();
+            case AnchorPoint::End:
+                return ellipse.endPoint();
+            default:
+                return std::nullopt;
+            }
+        }
+        std::optional<Point2> operator()(const katana::geometry::Spline2& spline) const
+        {
+            if (!spline.checkStructure()) {
+                return std::nullopt;
+            }
+            switch (ref.point) {
+            case AnchorPoint::Start:
+                return spline.startPoint();
+            case AnchorPoint::End:
+                return spline.endPoint();
+            default:
+                return std::nullopt;
+            }
+        }
     };
     return std::visit(Visitor{ref}, entity.geometry);
 }
