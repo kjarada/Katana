@@ -119,12 +119,6 @@ struct Legend {
     friend bool operator==(const Legend&, const Legend&) = default;
 };
 
-// The window a plan viewport shows on the ground once "auto" is decided.
-struct PlanWindow {
-    double scale = 500.0;
-    katana::geometry::Point2 centre{};
-};
-
 // The window `viewport` shows: its own scale and centre, or for autoScale and
 // autoCentre the fit to its stretch of its alignment or else to what it draws
 // (the entities it lets through and the alignments), with 4% to spare - the
