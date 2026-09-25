@@ -188,7 +188,9 @@ tests; the command then creates what the drawing lacks, in this order:
 - **Layers** `<prefix>/<type>/QL-A` .. `QL-D` (those used) and
   `<prefix>/<type>/points`, and their parents, parents first - so undo takes
   every one back. The prefix is `utilities` unless `LAYER` names another
-  (`LAYER "Site Services/Located"`). `<type>` is one word per kind of service:
+  (`LAYER "Site Services/Located"`); one too deep or too long for the two
+  levels drawn under it is refused as the prefix, before anything is made.
+  `<type>` is one word per kind of service:
   `water`, `electricity`, `telecommunications`, `gas`, `recycled-water`,
   `fire-service`, `sewer`, `stormwater`, `fuel`, `its`, `other`, `unknown`
   (`utilities::utilityTypeWord`). A QL layer takes its level's linetype; every
@@ -200,9 +202,10 @@ tests; the command then creates what the drawing lacks, in this order:
   graded at the same level, on that level's layer - so a polyline ends
   exactly where the level changes (on the sample, W1 is three: QL-B to the
   pothole, the QL-A trench, then QL-C past the detected spacing) - and one
-  point per located vertex on the points layer. A run of no plan length (two
-  records at one place, graded unlike their neighbours) has nothing to draw;
-  its points are still drawn.
+  point per located vertex on the points layer. A run of no plan length to
+  the model's tolerance (two records at one place, or a rounding error apart,
+  graded unlike their neighbours) has nothing to draw; its points are still
+  drawn.
 
 **The colours are Katana's defaults, not the standard's.** AS 5488
 classifies information and sets no colours. The defaults follow the colours
@@ -232,7 +235,13 @@ colours, so a project with its own convention changes the layers
 **What the grading found is on the entities**, as `utility.*` properties
 (`utilities::keys`), so the property panel, `PROP LIST` or an agent can ask
 why a stretch is QL-C without running the report again. A property that was
-not recorded, or cannot be computed, is absent - absent is not zero.
+not recorded, or cannot be computed, is absent - absent is not zero - and
+that includes `utility.status`, which a schedule without one leaves off, as
+the report lists it missing. Two are always there: `utility.type`, which
+names the layer (`unknown` when not recorded), and `utility.level_ref` beside
+a service level, the part of the service the level is on - `top` for a level
+given with no reference, as the grading and the cover read it, so it does
+not say whether the reference was recorded.
 
 | On | Properties |
 |---|---|

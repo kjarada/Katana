@@ -200,6 +200,10 @@ TEST(UtilityVerbs, EachVerbRefusesWhatItCannotRun)
     EXPECT_TRUE(
         contains(refusal("UTILITY DRAW " + kSchedule + " WIDTH 1"), "unknown option WIDTH"));
     EXPECT_TRUE(contains(refusal("UTILITY DRAW " + kSchedule + " LAYER a//b"), "not a layer path"));
+    // A prefix that is a path, but too deep for the two levels under it, is
+    // refused as the prefix, before anything is made.
+    EXPECT_TRUE(contains(refusal("UTILITY DRAW " + kSchedule + " LAYER a/b/c/d/e/f/g/h/i/j/k/l/m/n/o"),
+                         "the layer prefix leaves no room"));
 
     // A file that is not there is NotFound, by its path.
     const katana::core::Error missing = session.refused("UTILITY VERIFY \"" + kSamples +
@@ -383,6 +387,29 @@ TEST(UtilityVerbs, ARefusedDrawChangesNothing)
     EXPECT_EQ(session.entities(), 0u);
     EXPECT_EQ(session.layers(), locked);
     EXPECT_FALSE(session.hasLinetype("utility-ql-b"));
+}
+
+TEST(UtilityVerbs, RecordsARoundingErrorApartDrawAsTheReportGradesThem)
+{
+    // A pothole recorded twice, 10 nm apart, as a reprojected export leaves
+    // it. REPORT grades the 0.000 m between them; DRAW refused the whole
+    // schedule over it, with the model's "polyline has zero length".
+    Session session;
+    const ScratchDirectory scratch("near");
+    const std::string near =
+        scratch.file("near.csv",
+                     "line,point,easting,northing,method,level,level_ref,surface,h_unc,v_unc,"
+                     "path,type\n"
+                     "S1,S1-1,334100.0,6250200.0,EML,,,,0.10,,,sewer\n"
+                     "S1,S1-2,334105.0,6250200.0,pothole,19.0,top,20.0,0.02,0.02,exposed,\n"
+                     "S1,S1-3,334105.00000001,6250200.0,pothole,19.0,top,20.0,0.02,0.02,,\n"
+                     "S1,S1-4,334110.0,6250200.0,EML,,,,0.10,,,\n");
+    EXPECT_TRUE(contains(session.ok("UTILITY REPORT " + near), "S1-2 -> S1-3  0.000 m  QL-A"));
+    const std::string reply = session.ok("UTILITY DRAW " + near);
+    EXPECT_EQ(firstLine(reply), "utilities drawn lines=1 vertices=4 segments=3 entities=6 layers=2 "
+                                "bounds=334100.000,6250200.000,334110.000,6250200.000");
+    EXPECT_EQ(session.steps(), 1u);
+    EXPECT_EQ(session.entities(), 6u);
 }
 
 TEST(UtilityVerbs, LayerPutsTheDrawingUnderAnotherPrefix)

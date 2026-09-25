@@ -9,6 +9,7 @@
 
 #include "katana/commands/command_stack.hpp"
 #include "katana/commands/entity_commands.hpp"
+#include "katana/entity/entity_geometry.hpp"
 #include "katana/entity/layer_path.hpp"
 
 namespace katana::cad::utilities {
@@ -77,8 +78,12 @@ PropertyMap lineProperties(const sub::UtilityLine& line)
     }
     setText(properties, keys::kConfiguration, attributes.configuration);
     setText(properties, keys::kDescription, attributes.description);
-    properties.insert_or_assign(std::string(keys::kStatus),
-                                std::string(sub::toString(attributes.status)));
+    // Unknown is what a schedule without a status reads as, and what the
+    // report lists as missing: not recorded, so not there.
+    if (attributes.status != sub::UtilityStatus::Unknown) {
+        properties.insert_or_assign(std::string(keys::kStatus),
+                                    std::string(sub::toString(attributes.status)));
+    }
     setFields(properties, attributes.fields);
     return properties;
 }
@@ -149,9 +154,24 @@ Entity vertexPoint(const sub::UtilityLine& line, std::size_t index, const sub::G
 // ancestors take the defaults but for the kind's own group,
 // "<prefix>/<type>", which takes its colour, so the layer tree reads as the
 // plan does.
-void needLayer(std::map<std::string, Layer>& layers, std::string_view prefix, sub::UtilityType type,
-               const std::string& name, std::string_view linetype)
+//
+// The name is checked here, as the model will check it: a prefix that is a
+// layer path can still be too deep or too long once two levels are put under
+// it, and a drawing with such a layer in it would be refused only when its
+// command ran - after its linetypes and layers had been made and taken back,
+// and naming the depth rather than the prefix that caused it.
+katana::core::Status needLayer(std::map<std::string, Layer>& layers, std::string_view prefix,
+                               sub::UtilityType type, const std::string& name,
+                               std::string_view linetype)
 {
+    if (auto status = katana::entity::validateLayerPath(name); !status) {
+        const katana::core::Error& why = status.error();
+        return makeError(ErrorCode::InvalidArgument,
+                         "the layer prefix leaves no room for the layers drawn under it: " + name +
+                             " - " + why.message +
+                             (why.context.empty() ? std::string() : " (" + why.context + ")"),
+                         std::string(prefix));
+    }
     const std::string group = katana::entity::joinLayerPath(prefix, utilityTypeWord(type));
     for (const std::string& ancestor : katana::entity::layerAncestors(name)) {
         if (!layers.contains(ancestor)) {
@@ -168,6 +188,7 @@ void needLayer(std::map<std::string, Layer>& layers, std::string_view prefix, su
     layer.color = utilityTypeColour(type);
     layer.linetype = std::string(linetype);
     layers.insert_or_assign(name, std::move(layer));
+    return {};
 }
 
 double lengthAt(const DrawnUtilityLine& line, sub::QualityLevel level)
@@ -368,14 +389,21 @@ Result<UtilityDrawing> drawUtilities(const std::vector<sub::UtilityLine>& lines,
             for (std::size_t v = segments[first].from; v <= segments[last].from + 1; ++v) {
                 polyline.vertices.push_back(planPoint(line.vertices[v]));
             }
-            if (polyline.length() > 0.0) {
+            Entity run;
+            run.geometry = std::move(polyline);
+            // A run with no plan length to the model's tolerance - two records
+            // at one place, or a rounding error apart - has nothing to draw.
+            // Asked of the model's own check, so the drawing never holds an
+            // entity its command would then refuse, refusing the whole draw.
+            if (katana::entity::validate(run.geometry)) {
                 const std::string layer = qualityLevelLayerName(options.layerPrefix, type, level);
-                needLayer(layers, options.layerPrefix, type, layer,
-                          qualityLevelLinetypeName(level));
+                if (auto status = needLayer(layers, options.layerPrefix, type, layer,
+                                            qualityLevelLinetypeName(level));
+                    !status) {
+                    return status.error();
+                }
                 drawnOn.insert(layer);
                 levelsUsed.insert(level);
-                Entity run;
-                run.geometry = std::move(polyline);
                 run.layer = layer;
                 run.properties = shared;
                 PropertyMap& properties = run.properties;
@@ -392,8 +420,11 @@ Result<UtilityDrawing> drawUtilities(const std::vector<sub::UtilityLine>& lines,
         }
 
         const std::string pointsLayer = pointsLayerName(options.layerPrefix, type);
-        needLayer(layers, options.layerPrefix, type, pointsLayer,
-                  katana::entity::kContinuousLinetype);
+        if (auto status = needLayer(layers, options.layerPrefix, type, pointsLayer,
+                                    katana::entity::kContinuousLinetype);
+            !status) {
+            return status.error();
+        }
         drawnOn.insert(pointsLayer);
         for (std::size_t i = 0; i < line.vertices.size(); ++i) {
             drawing.entities.push_back(vertexPoint(line, i, graded->vertices[i], (*cover)[i],

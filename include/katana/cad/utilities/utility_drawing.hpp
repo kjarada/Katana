@@ -49,7 +49,10 @@ inline constexpr std::string_view kUtilityDrawStep = "UTILITY DRAW";
 
 // The properties a drawn service carries. One place for the names, since the
 // window, an agent and the tests all read them. A property is absent when
-// its value was not recorded or cannot be computed: absent is not zero.
+// its value was not recorded or cannot be computed: absent is not zero. Two
+// are always there when their entity is: the type, which names the layer
+// ("unknown" when not recorded), and a level's reference, which the level is
+// read on (see kLevelReference).
 namespace keys {
 // On both the polylines and the points.
 inline constexpr std::string_view kLine = "utility.line";   // the schedule's line id
@@ -64,6 +67,8 @@ inline constexpr std::string_view kDiameter = "utility.diameter"; // metres
 inline constexpr std::string_view kDiameterInside = "utility.diameter_inside";
 inline constexpr std::string_view kConfiguration = "utility.configuration";
 inline constexpr std::string_view kDescription = "utility.description";
+// "in service", "disused", "abandoned", "proposed"; absent when the schedule
+// gives none, which the report lists as a missing attribute.
 inline constexpr std::string_view kStatus = "utility.status";
 // Why the run is below the better of its segments' ends, each distinct
 // reason once, joined by "; ".
@@ -77,6 +82,11 @@ inline constexpr std::string_view kMethod = "utility.method";
 inline constexpr std::string_view kClaimed = "utility.claimed";
 inline constexpr std::string_view kOverClaim = "utility.over_claim";
 inline constexpr std::string_view kServiceLevel = "utility.service_level";
+// With a service level, always: the part of the service it is on, "top",
+// "centre", "invert" or "unknown" - the reference the grading and the cover
+// took it on. A level given with no reference is read as on the top
+// (parseUtilityCsv), so "top" is also what an unrecorded one reads as: the
+// parsed schedule does not keep the difference.
 inline constexpr std::string_view kLevelReference = "utility.level_ref";
 inline constexpr std::string_view kLevelQualified = "utility.level_qualified";
 inline constexpr std::string_view kSurfaceLevel = "utility.surface_level";
@@ -164,10 +174,14 @@ struct UtilityDrawing {
 
 // The drawing of `lines`, graded with `options.grading`. All or nothing:
 // InvalidArgument naming the line when any line cannot be graded (fewer than
-// two vertices, a non-finite coordinate), when the prefix is not a layer path,
-// or when there are no lines at all. A run of no plan length - two records at
-// one place, graded unlike their neighbours - has no polyline to draw; its
-// vertices are still drawn as points and its segments still counted.
+// two vertices, a non-finite coordinate); naming the prefix when it is not a
+// layer path, or leaves a layer drawn under it too deep or too long for the
+// model; and when there are no lines at all. A run of no plan length to the
+// model's tolerance - two records at one place, or a rounding error apart,
+// graded unlike their neighbours - has no polyline to draw; its vertices are
+// still drawn as points and its segments still counted. So a drawing this
+// returns holds nothing utilityDrawCommand's model would refuse as geometry
+// or as a layer name.
 [[nodiscard]] katana::core::Result<UtilityDrawing>
 drawUtilities(const std::vector<katana::survey::subsurface::UtilityLine>& lines,
               const UtilityDrawOptions& options = {});
