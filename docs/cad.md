@@ -170,7 +170,12 @@ Commands: drawing (`POINT`, `LINE`, `PLINE`, `RECT`, `CIRCLE`, `ARC`, `TEXT`,
 `STYLE`), civil (`ALIGN`, `PARCEL`), attributes (`CHLAYER`, `COLOR`, `PROP`),
 `UNDO`, `REDO`, `NEW`, `OPEN`, `SAVE`, `LIST`, `INFO`, `HELP`. Aliases include
 `LT`/`LTYPE`, `DS`, `HA`, `ST`, `AL` and `PARC`. This list lacked the tables
-and civil verbs until the audit of 2026-09-23.
+and civil verbs until the audit of 2026-09-23. The drawing system's verbs
+(`VERTEX`, `WEED`, `DENSIFY`, `STRAIGHTEN`, `CLOSE`, `OPEN` of polylines,
+`STARTVERTEX`, `VERTEXZ`, `PLINE` with `ARC` and `LINE`, `PLINE3D`, `SPLINE`,
+`ELLIPSE`, `XLINE`, `RAY`, `DLINE` and the drafting settings) are listed in
+`docs/drawing.md`, "The command line"; `PLINE` is handled there now, and
+replies with the new polyline's record.
 
 Added on 2026-09-23 for the style, linetype and symbol managers (fixing audit
 CAD-06) and the Survey menu; `CommandInterpreter::helpText` is the reference:

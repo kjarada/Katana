@@ -102,6 +102,24 @@ class CommandInterpreter {
     [[nodiscard]] katana::core::Result<annotation::AnchoredPoint>
     parseAnchoredPoint(const std::string& text);
 
+    // The drawing system's verbs (drawing/drawing_verbs.cpp, docs/drawing.md):
+    // VERTEX, WEED, DENSIFY, STRAIGHTEN, CLOSE, OPEN (of polylines),
+    // STARTVERTEX, VERTEXZ, PLINE with ARC and LINE, PLINE3D, SPLINE, ELLIPSE,
+    // XLINE, RAY, DLINE and the drafting settings. Options are key=value;
+    // replies are key=value records, one per line.
+    [[nodiscard]] static bool isDrawingVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] static std::string drawingHelpText();
+    [[nodiscard]] Reply drawingVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply vertexVerb(const Tokens& args);
+    [[nodiscard]] Reply polylineVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply drawShapeVerb(const std::string& verb, const Tokens& args);
+    [[nodiscard]] Reply draftingVerb(const std::string& verb, const Tokens& args);
+    // A point with an optional height, relative input measured from `from`
+    // when given (a vertex being moved) or else from the last point.
+    [[nodiscard]] katana::core::Result<PrecisePoint>
+    parseDrawingPoint(const std::string& text,
+                      std::optional<katana::geometry::Point2> from = std::nullopt);
+
     Document& document_;
     std::vector<std::string> history_;
     std::optional<katana::geometry::Point2> lastPoint_;

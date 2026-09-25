@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "families.hpp"
+#include "katana/cad/drawing/draw_shapes.hpp"
 #include "katana/commands/change_set.hpp"
 #include "katana/core/text.hpp"
 #include "katana/math/numerics.hpp"
@@ -488,26 +489,13 @@ class PolylineTool final : public InteractiveTool {
 
     // The direction the chain is heading at its last vertex: the last
     // segment's tangent at its end, east before there is one.
-    [[nodiscard]] Vec2 heading() const
-    {
-        if (vertices_.size() < 2) {
-            return Vec2(1.0, 0.0);
-        }
-        const auto& from = vertices_[vertices_.size() - 2];
-        const Vec2 chord = (vertices_.back().position - from.position).normalized();
-        // A segment's end tangent is its chord turned by half its sweep.
-        const double sweep = 4.0 * std::atan(from.bulge);
-        return chord.rotated(0.5 * sweep);
-    }
-
-    // The bulge of the arc from the last vertex to `to`, tangent to heading():
-    // the chord makes half the sweep with the tangent.
+    // The bulge of the arc from the last vertex to `to`, tangent to the
+    // segment before it (cad::tangentBulge, shared with PLINE ... ARC).
     [[nodiscard]] double tangentBulge(const Point2& to) const
     {
-        const Vec2 tangent = heading();
-        const Vec2 chord = to - vertices_.back().position;
-        const double half = std::atan2(tangent.cross(chord), tangent.dot(chord));
-        return katana::geometry::bulgeFromSweep(2.0 * half);
+        katana::geometry::CurvePolyline2 path;
+        path.vertices = vertices_;
+        return katana::cad::tangentBulge(path, to);
     }
 
     ToolStep close()
