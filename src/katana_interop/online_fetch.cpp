@@ -606,11 +606,11 @@ Result<RasterPlan> stacSources(const OnlineLayer& layer, const Prepared& prepare
         }
         const fs::path vrt = cachePath(cacheRoot(environment), "products",
                                        katana::gis::sha256Hex("composite\n" + item.id + "\n" + bands[0]), ".vrt");
-        // Sentinel-2 L2A reflectance is scaled by 10000 with an offset of
-        // 1000 since processing baseline 04.00 (2022); 1000..4000 holds the
-        // land surface from dark water to bright roofs without clipping
-        // either much, which is the stretch a true-colour view needs.
-        if (auto built = katana::gis::buildTrueColourVrt(bands, 1000.0, 4000.0, vrt); !built) {
+        // Sentinel-2 L2A reflectance times 10000. Earth Search's COGs have
+        // the offset of processing baseline 04.00 already removed (measured:
+        // Sydney Harbour reads 35 in red on 2026-09-20), so 0..3000 - the
+        // usual true-colour stretch - holds dark water to bright roofs.
+        if (auto built = katana::gis::buildTrueColourVrt(bands, 0.0, 3000.0, vrt); !built) {
             return built.error();
         }
         plan.sources.push_back(katana::gis::WarpSource{vrt.string(), std::nullopt, {}});
@@ -666,7 +666,7 @@ Result<OnlineImport> fetchRaster(const OnlineLayer& layer, const OnlineRequestOp
         return makeError(ErrorCode::InvalidArgument,
                          "the area at this resolution is " + formatNumber(std::round(pixels / 1e6)) +
                              " million pixels, more than the " +
-                             formatNumber(static_cast<double>(environment.maxPixels) / 1e6) +
+                             formatNumber(std::round(static_cast<double>(environment.maxPixels) / 1e5) / 10.0) +
                              " million allowed; use res=" + formatNumber(std::ceil(fits * 100.0) / 100.0) +
                              " or coarser, or a smaller area");
     }
@@ -729,6 +729,11 @@ Result<OnlineImport> fetchRaster(const OnlineLayer& layer, const OnlineRequestOp
         }
         for (const std::string& warning : warped->warnings) {
             result.warnings.push_back(warning);
+        }
+        for (const katana::gis::WarpSource& source : plan->sources) {
+            if (source.path.starts_with("/vsicurl/")) {
+                ++result.stats.remoteSources;
+            }
         }
         std::error_code error;
         fs::rename(partial, product, error);
@@ -1094,8 +1099,22 @@ Result<OnlineImport> fetchVectors(const OnlineLayer& layer, const OnlineRequestO
             return file.error();
         }
         ++result.stats.pages;
+        report("Clipping " + layer.title + " to the area");
+        // The file covers far more than the area: its features are cut at
+        // the area's edge (in the file's own CRS, WGS 84 for every File layer
+        // the catalogue has) before they are read.
+        const fs::path clipped = cachePath(
+            cacheRoot(environment), "products",
+            katana::gis::sha256Hex("clip\n" + file->string() + "\n" + formatNumber(prepared->lonLat.minX) +
+                                   "," + formatNumber(prepared->lonLat.minY) + "," +
+                                   formatNumber(prepared->lonLat.maxX) + "," +
+                                   formatNumber(prepared->lonLat.maxY)),
+            ".gpkg");
+        if (auto cut = katana::gis::clipVectorFile(*file, prepared->lonLat, clipped); !cut) {
+            return cut.error();
+        }
         report("Reading " + layer.title);
-        auto imported = importPage(*file, layer, options, prepared->lonLat);
+        auto imported = importPage(clipped, layer, options, prepared->lonLat);
         if (!imported) {
             return imported.error();
         }

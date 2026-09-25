@@ -577,6 +577,55 @@ Result<WarpResult> warpToGeoTiff(const std::vector<WarpSource>& sources, const W
     return result;
 }
 
+Status clipVectorFile(const std::filesystem::path& input, const CrsBox& box,
+                      const std::filesystem::path& output)
+{
+    detail::ensureGdalRegistered();
+    if (!box.valid()) {
+        return makeError(ErrorCode::InvalidArgument, "the clip box is empty or inverted");
+    }
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    DatasetHandle source(GDALOpenEx(input.string().c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                    nullptr, nullptr, nullptr));
+    CPLPopErrorHandler();
+    if (!source) {
+        return makeError(ErrorCode::FileImportFailure, "GDAL could not open the downloaded file",
+                         std::string(CPLGetLastErrorMsg()));
+    }
+    CPLStringList arguments;
+    const auto add = [&](const std::string& value) { arguments.AddString(value.c_str()); };
+    add("-f");
+    add("GPKG");
+    add("-clipsrc");
+    add(number(box.minX));
+    add(number(box.minY));
+    add(number(box.maxX));
+    add(number(box.maxY));
+    // A polygon cut by the box can become several; keep each part's type
+    // general rather than refuse the layer.
+    add("-nlt");
+    add("PROMOTE_TO_MULTI");
+    add("-skipfailures");
+    GDALVectorTranslateOptions* options = GDALVectorTranslateOptionsNew(arguments.List(), nullptr);
+    std::error_code ignored;
+    std::filesystem::remove(output, ignored);
+    std::filesystem::create_directories(output.parent_path(), ignored);
+    GDALDatasetH sources[] = {source.get()};
+    int usageError = FALSE;
+    CPLErrorReset();
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    DatasetHandle clipped(GDALVectorTranslate(output.string().c_str(), nullptr, 1, sources, options,
+                                              &usageError));
+    CPLPopErrorHandler();
+    GDALVectorTranslateOptionsFree(options);
+    if (!clipped) {
+        std::filesystem::remove(output, ignored);
+        return makeError(ErrorCode::FileImportFailure, "GDAL could not clip the downloaded file",
+                         std::string(CPLGetLastErrorMsg()));
+    }
+    return {};
+}
+
 Status buildTrueColourVrt(const std::vector<std::string>& bandPaths, double low, double high,
                           const std::filesystem::path& output)
 {
@@ -615,6 +664,12 @@ Status buildTrueColourVrt(const std::vector<std::string>& bandPaths, double low,
     add(number(high));
     add("1");
     add("255");
+    // With an exponent (of 1: still linear) gdal_translate CLAMPS a value
+    // outside low..high to the ends of the output range. Without it a value
+    // below `low` - dark water - came out 0, the no-data value, and the
+    // harbour was transparent.
+    add("-exponent");
+    add("1");
     add("-a_nodata");
     add("0");
     add("-colorinterp");

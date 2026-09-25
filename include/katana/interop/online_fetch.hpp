@@ -117,6 +117,9 @@ struct OnlineStats {
     int pages = 0;
     std::uint64_t duplicates = 0; // features a later page repeated, dropped
     bool productFromCache = false; // the finished raster itself was cached
+    // Rasters read by GDAL itself over HTTP (a COG through /vsicurl/), whose
+    // range requests are GDAL's and not counted in `requests`.
+    int remoteSources = 0;
 };
 
 struct OnlineImport {

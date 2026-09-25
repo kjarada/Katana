@@ -98,6 +98,16 @@ struct RasterProbe {
                                                             const std::string& userAgent = {},
                                                             int timeoutSeconds = 60);
 
+// Writes the features of every layer of `input` clipped to `box` (in the
+// input's own CRS) to a GeoPackage at `output` - GDAL's VectorTranslate with
+// -clipsrc, so a line or polygon crossing the box is cut at its edge rather
+// than kept whole. For a file that covers the world (Natural Earth's
+// coastline is one feature per landmass): without the clip an area around
+// Sydney imported the whole east coast of Australia.
+[[nodiscard]] katana::core::Status clipVectorFile(const std::filesystem::path& input,
+                                                  const CrsBox& box,
+                                                  const std::filesystem::path& output);
+
 // ---- warping ----------------------------------------------------------------
 
 // A raster to be warped. Either a dataset that carries its own georeferencing
@@ -146,8 +156,9 @@ warpToGeoTiff(const std::vector<WarpSource>& sources, const WarpOptions& options
 
 // A virtual raster (GDAL VRT, written to `output`) stacking three single-band
 // rasters - Sentinel-2's red, green and blue reflectance, 0 to about 10000 -
-// as one 8-bit RGB image, each band's `low`..`high` scaled onto 1..255 and 0
-// kept for no-data: the true-colour composite a person expects to see. No
+// as one 8-bit RGB image, each band's `low`..`high` scaled onto 1..255 (a
+// value outside it clamped to the end, never to 0) and 0 kept for no-data:
+// the true-colour composite a person expects to see. No
 // pixel is read here; the VRT is a warp source like any other, so only the
 // part of each band the warp needs is ever fetched.
 [[nodiscard]] katana::core::Status buildTrueColourVrt(const std::vector<std::string>& bandPaths,

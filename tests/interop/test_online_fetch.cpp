@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -558,9 +559,14 @@ TEST(OnlineFetch, ALocalGeoJsonGoesThroughTheSameFetchPathAsAFileUrl)
     const auto* polygon = std::get_if<katana::geometry::Polyline2>(&imported->vectors->entities.front().geometry);
     ASSERT_NE(polygon, nullptr);
     // Web Mercator from its formula (x = R lambda, y = R ln tan(pi/4 + phi/2)).
-    EXPECT_NEAR(polygon->vertices.front().x, 6378137.0 * 151.2050 * std::numbers::pi / 180.0, 1e-4);
-    EXPECT_NEAR(polygon->vertices.front().y,
-                6378137.0 * std::log(std::tan(std::numbers::pi / 4.0 + -33.8700 * std::numbers::pi / 360.0)), 1e-4);
+    // The file is clipped to the area before it is read, which may start the
+    // ring at another corner: the corner is looked for, not assumed first.
+    const double x = 6378137.0 * 151.2050 * std::numbers::pi / 180.0;
+    const double y = 6378137.0 * std::log(std::tan(std::numbers::pi / 4.0 + -33.8700 * std::numbers::pi / 360.0));
+    EXPECT_TRUE(std::any_of(polygon->vertices.begin(), polygon->vertices.end(), [&](const auto& vertex) {
+        return std::abs(vertex.x - x) < 1e-4 && std::abs(vertex.y - y) < 1e-4;
+    }));
+    EXPECT_EQ(polygon->vertices.size(), 4u);
     // The area filter: an area away from the lots imports none of them.
     OnlineRequestOptions elsewhere = sydneyOptions("EPSG:3857");
     elsewhere.area = CrsBox{150.0, -35.0, 150.01, -34.99};
