@@ -24,6 +24,8 @@ QString kindLabel(ViewportKind kind)
     case ViewportKind::Notes: return QStringLiteral("Notes");
     case ViewportKind::Image: return QStringLiteral("Image");
     case ViewportKind::KeyPlan: return QStringLiteral("Key plan");
+    case ViewportKind::SheetIndex: return QStringLiteral("Drawing register");
+    case ViewportKind::Revisions: return QStringLiteral("Revision table");
     }
     return {};
 }
