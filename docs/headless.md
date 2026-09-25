@@ -34,10 +34,18 @@ code file the tests write themselves. The sheet verbs (`docs/plotting.md`,
 "Sheets on the command line") are the interpreter's, so they run here too
 (`cli.sheet_verbs_lay_out_edit_and_list_the_sheets`); only `PLOTSHEETS`,
 which paints, needs the window. `UTILITY REPORT | VERIFY | CLEARANCE |
-CHECK | DRAW` grades subsurface utility schedules by AS 5488 quality level,
-checks them against a delivery schema and draws them into the drawing
+CHECK | DRAW | REGRADE | SCHEDULE` grades subsurface utility schedules by
+AS 5488 quality level, checks them against a delivery schema, draws them into
+the drawing, and does the same to what is drawn
 (`docs/subsurface_utilities.md`); it is the interpreter's too, and the
-`cli.utility_*` tests run it on `samples/utilities/`.
+`cli.utility_*` tests run it on `samples/utilities/`. `MODIFY` and the
+`UTILITY` verbs take the shared scope words (`docs/cad.md`, "Scope and
+filter"; every new verb on drawing data is to take them too), except that
+`VIEW` is the window's plan view: headless it is refused, and `AREA
+x0,y0,x1,y1` names the window instead
+(`cli.utility_view_is_refused_headless_naming_area`). The window itself, run
+headless with `--command`, does answer `VIEW` - it has plan views even
+offscreen (`qt_modify_view_takes_what_the_plan_view_shows_headless`).
 
 The same session is served to Claude over the Model Context Protocol by
 `katana_mcp` (`docs/mcp.md`).
@@ -159,11 +167,11 @@ every action, field, button and tab gets one. In a test they are one
 
 | Switch | `-DDRIVE` step | What it does |
 |---|---|---|
-| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the five Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
+| `--dialog NAME` (first called `--survey-dialog`, still accepted) | `@NAME` | triggers action NAME as a click does and makes the dialog it opened the target: the dialog named by the action's data (the Format managers carry `styleManagerDialog`, `symbolLibraryDialog`, `surveyCodeManagerDialog`, `textStyleManagerDialog`, `labelStyleManagerDialog`, `dimensionStyleManagerDialog`; Annotate > Edit Text carries `textEditDialog`; File > Project Coordinate System carries `projectCrsDialog`; the seven Subsurface Utilities items all carry `utilityDialog`), else NAME + `Dialog` (the Survey dialogs, `formatLayersDialog`); says on stderr what opened, and whether it is modal |
 | `--survey-dock ACTION` | `#ACTION` | shows the dock that action shows and makes it the target; at the end its status line is printed |
 | `--panel NAME` | `%NAME` | makes the window's own dock, toolbar or menu NAME the target; a menu is opened under its title, so a grab shows what it offers |
 | `--fill FIELD=TEXT` | `FIELD=TEXT` | a line or text box (`\n` a line break), a choice by its text (an editable one takes a name it does not list, as typing does), a spin or check box, a tab brought to the front by its text (`managerTabs=Linetypes`), or a list, grid or tree row selected by its text - the whole row where the view selects rows, as a click does |
-| `--press BUTTON` | `!BUTTON` | clicks it; a disabled button fails the run |
+| `--press BUTTON` | `!BUTTON` | clicks it - a radio button too, which is how one is chosen (`!utilitySourceDrawing`); a disabled button fails the run |
 | `--command TEXT` | `>TEXT` | runs TEXT as if typed on the command line - make styles and a selection, or start a tool by its alias and answer its prompts; without `--screenshot` the commands run before `--sheets-json` and the plots, and a refused one fails a run that writes one of them |
 | `--enter` | `>` alone | Enter on an empty command line (an empty argument does not survive a CMake list) |
 | `--run-line TEXT` | `<TEXT` | runs TEXT through the window's one executor, as a dialog runs the line it built (`MainWindow::runVerbLine`, `desktop.md`, "One executor: the command runner"): never a running tool's answer; prints `--run-line TEXT: ok=yes` or `ok=no`, then a `  reply: ` or `  error: ` line for each line it logged - what the dialog gets back. Without `--screenshot` it runs with the `--command` lines, and a refused one fails a run that writes |

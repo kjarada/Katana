@@ -106,6 +106,8 @@ struct PositionEvidence {
     std::optional<double> horizontalUncertainty; // nullopt: not assessed
     std::optional<double> verticalUncertainty;   // nullopt: no level, or not assessed
     bool hasLevel = false;                       // a level of the service was recorded
+
+    friend bool operator==(const PositionEvidence&, const PositionEvidence&) = default;
 };
 
 struct Classification {

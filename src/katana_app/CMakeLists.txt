@@ -522,6 +522,62 @@ if(KATANA_BUILD_TESTS)
                 -c "UTILITY CHECK \"${_utilities}/schedule.csv\" SCHEMA \"${_example_schema}\"")
     set_tests_properties(cli.utility_check_with_errors_fails_the_script PROPERTIES WILL_FAIL TRUE)
 
+    # The same verbs on what is drawn (docs/subsurface_utilities.md, "Drawing
+    # data"), by the scope words MODIFY takes. The sample drawn and reported
+    # from the drawing is the sample's report, after the record of what the
+    # scope took: its 7 runs and 14 points, 4 lines, all of each.
+    add_test(NAME cli.utility_report_of_the_drawing_is_the_report_of_the_schedule_drawn
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY REPORT DRAWING MINCOVER 0.6")
+    set_tests_properties(cli.utility_report_of_the_drawing_is_the_report_of_the_schedule_drawn
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "scope=drawing matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    # Written back as a schedule, which reads again as the sample does.
+    set(_scheduled "${CMAKE_CURRENT_BINARY_DIR}/cli utility scheduled.csv")
+    add_test(NAME cli.utility_schedule_writes_the_drawing_back_as_a_schedule_that_reads_again
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY SCHEDULE \"${_scheduled}\" DRAWING"
+                -c "UTILITY REPORT \"${_scheduled}\" MINCOVER 0.6")
+    set_tests_properties(cli.utility_schedule_writes_the_drawing_back_as_a_schedule_that_reads_again
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "utilities scheduled path=\"[^\"]*cli utility scheduled\\.csv\" lines=4 vertices=14${_eol}scope=drawing matched=21 lines=4 completed=0 ignored=0${_eol}AS 5488 subsurface utility investigation: 4 lines, 14 vertices.*E1 / E1-3: claimed QL-B, the ground penetrating radar evidence supports QL-C")
+    # REGRADE at a 20 m detected spacing: W1's 12.5 m past the pothole is
+    # traced now, QL-B, as DRAW at that spacing draws it; the other three
+    # services grade as they did, but every point in scope takes the 20 m
+    # it was graded with (utility.spacing), so all four lines change. A
+    # regrade then told nothing grades each line at the 20 m it now carries,
+    # not the default 10 m: nothing changes.
+    add_test(NAME cli.utility_regrade_grades_what_is_drawn_again
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY REGRADE LAYERS utilities SPACING 20"
+                -c "UTILITY REGRADE LAYERS utilities")
+    set_tests_properties(cli.utility_regrade_grades_what_is_drawn_again PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "utilities regraded changed=4 lines=4 vertices=14 segments=10 entities=21 layers=10 bounds=334000\\.000,6250000\\.000,334040\\.000,6250007\\.200${_eol}scope=layers layers=utilities sublayers=yes matched=21 lines=4 completed=0 ignored=0${_eol}line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000.*utilities regraded changed=0 lines=4 .*line id=W1 type=water length=30\\.024 ql_a=1\\.420 ql_b=28\\.604 ql_c=0\\.000 ql_d=0\\.000")
+    # VIEW is the window's plan view: headless it is refused, naming the
+    # window typed in, which takes the gas main's run and two points.
+    add_test(NAME cli.utility_view_is_refused_headless_naming_area
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\"" -c "UTILITY REPORT VIEW")
+    set_tests_properties(cli.utility_view_is_refused_headless_naming_area PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "VIEW is the window's plan view, and there is none here; give the window instead: AREA x0,y0,x1,y1")
+    add_test(NAME cli.utility_area_takes_what_lies_in_the_window
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                $<TARGET_FILE:katana_cli>
+                -c "UTILITY DRAW \"${_utilities}/schedule.csv\""
+                -c "UTILITY VERIFY AREA 333990,6250006.5,334050,6250008")
+    set_tests_properties(cli.utility_area_takes_what_lies_in_the_window PROPERTIES
+        PASS_REGULAR_EXPRESSION
+        "scope=area area=333990,6250006\\.5,334050,6250008 matched=3 lines=1 completed=0 ignored=0")
+
     # UTILITY CHECK against the real TfNSW Utility Schema, when this checkout
     # has the owner's copy (it is theirs to keep, not the repository's - see
     # .gitignore). tools/utility_schema_domains.py makes the schema file, then

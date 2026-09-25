@@ -1,26 +1,35 @@
 #include "survey/utility_dialog.hpp"
 
 #include <QApplication>
+#include <QButtonGroup>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFontDatabase>
 #include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <initializer_list>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "customisation/document_watcher.hpp"
+#include "katana/cad/document.hpp"
 #include "katana/core/text.hpp"
 #include "katana/survey/subsurface/clearance.hpp"
 #include "katana/survey/subsurface/utility_network.hpp"
@@ -95,6 +104,82 @@ Result<QString> prefixed(const QString& prefix, const Result<QString>& part)
     return prefix + *part;
 }
 
+// The drawing's scope and filter words, or why the controls say none.
+Result<QString> scopeWords(const UtilityForm& form)
+{
+    if (!form.scopeError.isEmpty()) {
+        return invalid("the drawing's scope: " + form.scopeError);
+    }
+    const QString words = form.scope.trimmed();
+    if (words.isEmpty()) {
+        return invalid("choose what in the drawing to act on first");
+    }
+    return words;
+}
+
+// Where the services come from: the schedule's path, or the scope words.
+Result<QString> sourceWords(const UtilityForm& form)
+{
+    return utilitySourceOf(form) == UtilitySource::Drawing
+               ? scopeWords(form)
+               : requiredFile(form.schedule, "utility schedule");
+}
+
+// "#12" for "#12" or "12": an entity id is a whole number from 1.
+Result<QString> entityWord(const QString& text)
+{
+    QString id = text.trimmed();
+    if (id.isEmpty()) {
+        return invalid("choose the line or polyline of the proposed works first: its #id, or "
+                       "Use Selected");
+    }
+    if (id.startsWith('#')) {
+        id.remove(0, 1);
+    }
+    const auto number = katana::core::parseInteger(id.toStdString());
+    const bool digits = !id.isEmpty() && std::all_of(id.begin(), id.end(), [](QChar c) {
+        return c >= '0' && c <= '9';
+    });
+    if (!digits || !number || *number < 1) {
+        return invalid("the design entity must be #<entity id>, not '" + text.trimmed() + "'");
+    }
+    return "#" + id;
+}
+
+// Clearance's works, after the services: the positional design file of a
+// schedule file (the form the line always had), else DESIGN and the works.
+Result<QString> designWords(const UtilityForm& form)
+{
+    switch (form.designSource) {
+    case UtilityDesignSource::File: {
+        const auto path = requiredFile(form.design, "design of the proposed works");
+        if (!path) {
+            return path.error();
+        }
+        return utilitySourceOf(form) == UtilitySource::File ? " " + *path : " DESIGN " + *path;
+    }
+    case UtilityDesignSource::Entity: {
+        const auto id = entityWord(form.designEntity);
+        if (!id) {
+            return id.error();
+        }
+        const auto level = option("LEVEL", form.designLevel, "The design level");
+        if (!level) {
+            return level.error();
+        }
+        return " DESIGN " + *id + *level;
+    }
+    case UtilityDesignSource::Alignment: {
+        const QString name = form.alignment.trimmed();
+        if (name.isEmpty()) {
+            return invalid("choose the alignment of the proposed works first");
+        }
+        return prefixed(" DESIGN ALIGNMENT ", word(name, "The alignment's name"));
+    }
+    }
+    return invalid("choose the design of the proposed works first");
+}
+
 QLabel* noteLabel(const QString& text, QWidget* parent)
 {
     auto* label = new QLabel(text, parent);
@@ -118,17 +203,47 @@ const char* utilityVerbWord(UtilityTool tool)
         return "CLEARANCE";
     case UtilityTool::Check:
         return "CHECK";
+    case UtilityTool::Regrade:
+        return "REGRADE";
+    case UtilityTool::Schedule:
+        return "SCHEDULE";
     }
     return "REPORT";
 }
 
+UtilitySource utilitySourceOf(const UtilityForm& form)
+{
+    switch (form.tool) {
+    case UtilityTool::Draw:
+        return UtilitySource::File;
+    case UtilityTool::Regrade:
+    case UtilityTool::Schedule:
+        return UtilitySource::Drawing;
+    case UtilityTool::Report:
+    case UtilityTool::Verify:
+    case UtilityTool::Clearance:
+    case UtilityTool::Check:
+        break;
+    }
+    return form.source;
+}
+
 Result<QString> utilityCommandLine(const UtilityForm& form)
 {
-    const auto schedule = requiredFile(form.schedule, "utility schedule");
-    if (!schedule) {
-        return schedule.error();
+    QString line = QString("UTILITY ") + utilityVerbWord(form.tool);
+    // SCHEDULE names what it writes before the scope it writes.
+    if (form.tool == UtilityTool::Schedule) {
+        const auto out = requiredFile(form.scheduleOut, "schedule to write");
+        if (!out) {
+            return out.error();
+        }
+        line += " " + *out;
     }
-    QString line = QString("UTILITY ") + utilityVerbWord(form.tool) + " " + *schedule;
+    const auto source = sourceWords(form);
+    if (!source) {
+        return source.error();
+    }
+    line += " " + *source;
     // The rest in the order the verb lists it, an option only when given; the
     // first part that cannot be written refuses the whole line.
     std::vector<Result<QString>> parts;
@@ -147,7 +262,7 @@ Result<QString> utilityCommandLine(const UtilityForm& form)
     case UtilityTool::Verify:
         break;
     case UtilityTool::Clearance:
-        parts.push_back(prefixed(" ", requiredFile(form.design, "design of the proposed works")));
+        parts.push_back(designWords(form));
         parts.push_back(option("WIDTH", form.width, "The works' width"));
         parts.push_back(option("H", form.horizontal, "The horizontal clearance"));
         parts.push_back(option("V", form.vertical, "The vertical clearance"));
@@ -155,6 +270,16 @@ Result<QString> utilityCommandLine(const UtilityForm& form)
         break;
     case UtilityTool::Check:
         parts.push_back(prefixed(" SCHEMA ", requiredFile(form.schema, "delivery schema")));
+        break;
+    case UtilityTool::Regrade:
+        parts.push_back(option("SPACING", form.spacing, "The detected spacing"));
+        parts.push_back(option("MINCOVER", form.minCover, "The minimum cover"));
+        break;
+    case UtilityTool::Schedule:
+        if (!form.scheduleSchema.trimmed().isEmpty()) {
+            parts.push_back(
+                prefixed(" SCHEMA ", requiredFile(form.scheduleSchema, "delivery schema")));
+        }
         break;
     }
     for (const Result<QString>& part : parts) {
@@ -173,7 +298,7 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     setWindowTitle("Subsurface Utilities (AS 5488)");
     // Non-modal: kept open beside the drawing, which a Draw changes.
     setModal(false);
-    resize(900, 660);
+    resize(1120, 860);
 
     // The placeholders show the library's own defaults, read from its
     // settings, so what they say cannot drift from what a blank option gets.
@@ -192,6 +317,12 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
         made->setAutoDefault(false);
         return made;
     };
+    const auto radio = [this](const char* name, const QString& text, QButtonGroup* group) {
+        auto* made = new QRadioButton(text, this);
+        made->setObjectName(name);
+        group->addButton(made);
+        return made;
+    };
     const auto row = [](std::initializer_list<QWidget*> widgets) {
         auto* layout = new QHBoxLayout;
         bool first = true;
@@ -203,22 +334,51 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     };
     const QString csvFilter = "CSV files (*.csv);;All files (*)";
 
-    // What every tool reads.
+    // ---- where the services come from, above the tabs --------------------------
+    auto* sourceBox = new QGroupBox("Services from", this);
+    sourceBox->setObjectName("utilitySourceGroup");
+    auto* sourceGroup = new QButtonGroup(sourceBox);
+    sourceFile_ = radio("utilitySourceFile", "A schedule file", sourceGroup);
+    sourceFile_->setToolTip("Report, Verify, Clearance and Check read the schedule (.csv). "
+                            "Draw always does");
+    sourceDrawing_ = radio("utilitySourceDrawing", "What is drawn", sourceGroup);
+    sourceDrawing_->setToolTip(
+        "Report, Verify, Clearance and Check read the services UTILITY DRAW drew, taken by the "
+        "scope and filter below - each line whole. Regrade and Schedule always do");
+    sourceFile_->setChecked(true);
     schedule_ = field("utilitySchedule", "the utility schedule: a .csv, one row per located vertex",
                       "The schedule of located services (docs/subsurface_utilities.md, \"The "
                       "schedule format\"): rows with the same line id form one service, in order");
-    auto* scheduleBrowse = button("utilityScheduleBrowse", "Browse...");
+    scheduleBrowse_ = button("utilityScheduleBrowse", "Browse...");
+    auto* sourceLayout = new QGridLayout(sourceBox);
+    sourceLayout->addWidget(sourceFile_, 0, 0);
+    sourceLayout->addLayout(row({schedule_, scheduleBrowse_}), 0, 1);
+    sourceLayout->addWidget(sourceDrawing_, 1, 0);
+    sourceLayout->addWidget(
+        noteLabel("the lines UTILITY DRAW drew, in the scope and filter on the left; a scope "
+                  "that takes part of a line takes all of it",
+                  sourceBox),
+        1, 1);
+    sourceLayout->setColumnStretch(1, 1);
+
+    // The drawing's scope and filter: Global Modify's own controls.
+    scope_ = new ScopeFilterWidget("utility", this);
+    scope_->views = context_.views;
+    // What the utility tools usually act on: everything drawn.
+    scope_->setChoice(ScopeChoice::Drawing);
+    scope_->onChanged = [this] { refreshCommand(); };
+
     spacing_ = field("utilitySpacing", defaultOf(grading.maximumDetectedSpacing) + " m",
                      "SPACING: the longest segment a detected path may span and stay QL-B; a "
                      "longer one was interpolated, not traced, and grades QL-C. The project "
                      "specification's figure, not the standard's");
-    // Shared by Draw and Report, as the verb's SPACING and MINCOVER are, so a
-    // drawing and a report of one schedule are graded and flagged alike.
+    // Shared by Draw, Report and Regrade, as the verb's SPACING and MINCOVER
+    // are, so a drawing and a report of one schedule are graded and flagged
+    // alike.
     minCover_ = field("utilityMinCover", "none - cover is given, not tested",
                       "MINCOVER: flag every vertex whose cover is less than this - in the "
                       "report's findings, and on each drawn point (utility.cover_below_minimum)");
     auto* common = new QFormLayout;
-    common->addRow("Schedule:", row({schedule_, scheduleBrowse}));
     common->addRow("Detected spacing (m):", spacing_);
     common->addRow("Minimum cover (m):", minCover_);
 
@@ -231,11 +391,12 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     auto* drawPage = new QWidget(tabs_);
     auto* drawLayout = new QFormLayout(drawPage);
     drawLayout->addRow(noteLabel(
-        "Grades the schedule and adds it to the drawing as one undo step: a layer for each "
-        "type of service and quality level, with a linetype for each level (QL-A continuous, "
-        "QL-B dashed, QL-C dash-dot, QL-D dotted), one polyline for each run at one level, and "
-        "a point at every located vertex carrying its evidence - and, with a minimum cover, "
-        "whether its cover is below it. A line that cannot be graded refuses the whole draw.",
+        "Grades the schedule file and adds it to the drawing as one undo step: a layer for "
+        "each type of service and quality level, with a linetype for each level (QL-A "
+        "continuous, QL-B dashed, QL-C dash-dot, QL-D dotted), one polyline for each run at one "
+        "level, and a point at every located vertex carrying its whole schedule row - and, with "
+        "a minimum cover, whether its cover is below it. A line that cannot be graded refuses "
+        "the whole draw.",
         drawPage));
     layerPrefix_ = field("utilityLayerPrefix", "default utilities",
                          "LAYER: the layer the drawn services nest under, as "
@@ -248,7 +409,8 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     reportLayout->addRow(noteLabel(
         "The investigation report: every vertex and segment graded by AS 5488 quality level, "
         "the length of each service at each level, depth of cover, and what the schedule "
-        "claims better than its evidence supports. Nothing is added to the drawing.",
+        "claims better than its evidence supports. Nothing is added to the drawing. On what "
+        "is drawn, the reply leads with what the scope took.",
         reportPage));
     tabs_->addTab(reportPage, "Report");
 
@@ -270,11 +432,34 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
         "locate it first), Within tolerance, or Clear. The clearances are the asset owners' "
         "rules, not AS 5488's.",
         clearancePage));
+    auto* designGroup = new QButtonGroup(clearancePage);
+    designFile_ = radio("utilityDesignFile", "Design file:", designGroup);
+    designFile_->setChecked(true);
     design_ = field("utilityDesign", "the proposed works: a .csv of the centre line",
                     "The design centre line (docs/subsurface_utilities.md): easting, northing and "
                     "an optional level at each vertex");
-    auto* designBrowse = button("utilityDesignBrowse", "Browse...");
-    clearanceLayout->addRow("Design:", row({design_, designBrowse}));
+    designBrowse_ = button("utilityDesignBrowse", "Browse...");
+    clearanceLayout->addRow(designFile_, row({design_, designBrowse_}));
+    designEntity_ = radio("utilityDesignEntity", "Drawn line or polyline:", designGroup);
+    designEntityId_ = field("utilityDesignEntityId", "#id of its centre line",
+                            "A line or polyline in the drawing as the works' centre line: #id, "
+                            "or select it and press Use Selected");
+    designUseSelected_ = button("utilityDesignUseSelected", "Use Selected");
+    designUseSelected_->setToolTip("The one entity selected in the drawing");
+    designLevel_ = field("utilityDesignLevel", "its own heights, if it has them",
+                         "LEVEL: the works' level, metres; left blank, the levels the line or "
+                         "polyline carries, or none");
+    auto* entityRow = row({designEntityId_, designUseSelected_});
+    entityRow->addWidget(new QLabel("Level (m):", clearancePage));
+    entityRow->addWidget(designLevel_);
+    clearanceLayout->addRow(designEntity_, entityRow);
+    designAlignment_ = radio("utilityDesignAlignment", "Alignment:", designGroup);
+    alignment_ = new QComboBox(this);
+    alignment_->setObjectName("utilityDesignAlignmentName");
+    alignment_->setToolTip("One of the drawing's alignments: its horizontal geometry, at the "
+                           "levels of its design profile where it has one");
+    alignment_->setPlaceholderText("the drawing has no alignment");
+    clearanceLayout->addRow(designAlignment_, alignment_);
     width_ = field("utilityWidth", "default 0 m - the centre line itself",
                    "WIDTH: the works' width - a pipe's outside diameter, a trench's width");
     clearanceLayout->addRow("Works width (m):", width_);
@@ -295,7 +480,8 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     auto* checkLayout = new QFormLayout(checkPage);
     checkLayout->addRow(noteLabel(
         "The schedule against a client's delivery schema: every mandatory attribute present, "
-        "every value from its list, spelt exactly. A schedule with errors still shows the whole "
+        "every value from its list, spelt exactly. What is drawn is checked as the schedule "
+        "it would write in the schema's words. A schedule with errors still shows the whole "
         "report, and the line fails so that a script can stop on it.",
         checkPage));
     schema_ = field("utilitySchema", "the delivery schema: a .csv of attributes and value lists",
@@ -305,6 +491,36 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     auto* schemaBrowse = button("utilitySchemaBrowse", "Browse...");
     checkLayout->addRow("Schema:", row({schema_, schemaBrowse}));
     tabs_->addTab(checkPage, "Check");
+
+    auto* regradePage = new QWidget(tabs_);
+    auto* regradeLayout = new QVBoxLayout(regradePage);
+    regradeLayout->addWidget(noteLabel(
+        "Grades the drawn lines in the scope again from their points as they are now - points "
+        "moved, levels or location methods edited - and draws their runs again, as one undo "
+        "step. A line whose grading did not change is left alone, and when none did, nothing "
+        "is added to the undo history. Always reads what is drawn; the detected spacing and "
+        "the minimum cover above apply.",
+        regradePage));
+    regradeLayout->addStretch(1);
+    tabs_->addTab(regradePage, "Regrade");
+
+    auto* schedulePage = new QWidget(tabs_);
+    auto* scheduleLayout = new QFormLayout(schedulePage);
+    scheduleLayout->addRow(noteLabel(
+        "Writes the drawn lines in the scope as a schedule (.csv) that UTILITY reads back as "
+        "they are: a drawing edited in CAD made a deliverable. With a schema, in its column "
+        "names and spellings. Always reads what is drawn; nothing in the drawing changes.",
+        schedulePage));
+    scheduleOut_ = field("utilityScheduleOut", "the schedule to write: a .csv",
+                         "Where UTILITY SCHEDULE writes the lines in the scope; an existing file "
+                         "is replaced");
+    auto* scheduleOutBrowse = button("utilityScheduleOutBrowse", "Browse...");
+    scheduleLayout->addRow("Write to:", row({scheduleOut_, scheduleOutBrowse}));
+    scheduleSchema_ = field("utilityScheduleSchema", "none - the schedule format's own words",
+                            "SCHEMA: write in this delivery schema's column names and spellings");
+    auto* scheduleSchemaBrowse = button("utilityScheduleSchemaBrowse", "Browse...");
+    scheduleLayout->addRow("Schema (optional):", row({scheduleSchema_, scheduleSchemaBrowse}));
+    tabs_->addTab(schedulePage, "Schedule");
 
     // The line, as it will run.
     command_ = new QLineEdit(this);
@@ -331,7 +547,7 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     // The reports are tables: wrapping would break their columns.
     output_->setLineWrapMode(QPlainTextEdit::NoWrap);
     output_->setPlaceholderText("The reply appears here and in the command log.");
-    output_->setMinimumHeight(200);
+    output_->setMinimumHeight(160);
 
     copy_ = button("utilityCopy", "Copy");
     save_ = button("utilitySave", "Save As...");
@@ -344,9 +560,18 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     buttons->addStretch(1);
     buttons->addWidget(close);
 
+    // The source above everything it feeds; the scope and filter beside the
+    // tabs that read them.
+    auto* tools = new QVBoxLayout;
+    tools->addLayout(common);
+    tools->addWidget(tabs_);
+    tools->addStretch(1);
+    auto* middle = new QHBoxLayout;
+    middle->addWidget(scope_, 2);
+    middle->addLayout(tools, 3);
     auto* layout = new QVBoxLayout(this);
-    layout->addLayout(common);
-    layout->addWidget(tabs_);
+    layout->addWidget(sourceBox);
+    layout->addLayout(middle);
     auto* commandForm = new QFormLayout;
     commandForm->addRow("Command:", command_);
     layout->addLayout(commandForm);
@@ -354,18 +579,31 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     layout->addWidget(output_, 1);
     layout->addLayout(buttons);
 
-    for (QLineEdit* edit : {schedule_, spacing_, layerPrefix_, minCover_, design_, width_,
-                            horizontal_, vertical_, margin_, schema_}) {
+    for (QLineEdit* edit :
+         {schedule_, spacing_, layerPrefix_, minCover_, design_, designEntityId_, designLevel_,
+          width_, horizontal_, vertical_, margin_, schema_, scheduleOut_, scheduleSchema_}) {
         connect(edit, &QLineEdit::textChanged, this, [this] { refreshCommand(); });
     }
+    for (QRadioButton* choice :
+         {sourceFile_, sourceDrawing_, designFile_, designEntity_, designAlignment_}) {
+        connect(choice, &QRadioButton::toggled, this, [this] { refreshCommand(); });
+    }
+    connect(alignment_, &QComboBox::currentTextChanged, this, [this] { refreshCommand(); });
     connect(tabs_, &QTabWidget::currentChanged, this, [this] { refreshCommand(); });
-    connect(scheduleBrowse, &QPushButton::clicked, this, [this, csvFilter] {
+    connect(scheduleBrowse_, &QPushButton::clicked, this, [this, csvFilter] {
         browse(*schedule_, "Utility Schedule", csvFilter);
     });
-    connect(designBrowse, &QPushButton::clicked, this,
+    connect(designBrowse_, &QPushButton::clicked, this,
             [this, csvFilter] { browse(*design_, "Proposed Works", csvFilter); });
+    connect(designUseSelected_, &QPushButton::clicked, this, [this] { useSelectedDesign(); });
     connect(schemaBrowse, &QPushButton::clicked, this,
             [this, csvFilter] { browse(*schema_, "Delivery Schema", csvFilter); });
+    connect(scheduleOutBrowse, &QPushButton::clicked, this, [this, csvFilter] {
+        browseForSave(*scheduleOut_, "Write Utility Schedule", csvFilter);
+    });
+    connect(scheduleSchemaBrowse, &QPushButton::clicked, this, [this, csvFilter] {
+        browse(*scheduleSchema_, "Delivery Schema", csvFilter);
+    });
     connect(run_, &QPushButton::clicked, this, [this] { run(); });
     connect(copy_, &QPushButton::clicked, this, [this] {
         QApplication::clipboard()->setText(output_->toPlainText());
@@ -374,6 +612,56 @@ UtilityToolsDialog::UtilityToolsDialog(UtilityDialogContext context, QWidget* pa
     connect(save_, &QPushButton::clicked, this, [this] { saveOutput(); });
     connect(close, &QPushButton::clicked, this, [this] { hide(); });
 
+    if (context_.document != nullptr) {
+        // The layers, views and alignments follow the drawing: a DRAW adds
+        // layers, an undo takes them away.
+        watcher_ = std::make_unique<DocumentWatcher>(
+            *context_.document, [this](const DocumentChanges& changes) {
+                if (changes.model) {
+                    reload();
+                }
+            });
+    }
+    reload();
+    refreshCommand();
+}
+
+UtilityToolsDialog::~UtilityToolsDialog() = default;
+
+bool UtilityToolsDialog::documentAlive() const
+{
+    return context_.document != nullptr && watcher_ != nullptr && watcher_->documentAlive();
+}
+
+void UtilityToolsDialog::showEvent(QShowEvent* event)
+{
+    // The views open now, not when the dialog was made.
+    reload();
+    QDialog::showEvent(event);
+}
+
+void UtilityToolsDialog::reload()
+{
+    if (!documentAlive()) {
+        // The views are the window's, drawing or none.
+        scope_->reloadViews();
+        refreshCommand();
+        return;
+    }
+    const katana::entity::Model& model = context_.document->model();
+    scope_->reload(model);
+    {
+        const QSignalBlocker quiet(alignment_);
+        const QString kept = alignment_->currentText();
+        alignment_->clear();
+        for (const std::string& name : model.alignments.names()) {
+            alignment_->addItem(qs(name));
+        }
+        // The one chosen, else the first: a choice with a placeholder is
+        // left on none when it is filled, and "none" is no alignment.
+        const int index = alignment_->findText(kept);
+        alignment_->setCurrentIndex(index >= 0 ? index : (alignment_->count() > 0 ? 0 : -1));
+    }
     refreshCommand();
 }
 
@@ -387,13 +675,32 @@ UtilityTool UtilityToolsDialog::tool() const
     return static_cast<UtilityTool>(tabs_->currentIndex());
 }
 
+void UtilityToolsDialog::setSource(UtilitySource source)
+{
+    (source == UtilitySource::Drawing ? sourceDrawing_ : sourceFile_)->setChecked(true);
+}
+
 UtilityForm UtilityToolsDialog::form() const
 {
     UtilityForm form;
     form.tool = tool();
+    form.source = sourceDrawing_->isChecked() ? UtilitySource::Drawing : UtilitySource::File;
     form.schedule = schedule_->text();
+    if (const auto words = scope_->verbWords()) {
+        form.scope = *words;
+    } else {
+        form.scopeError = qs(words.error().message);
+    }
+    form.designSource = designEntity_->isChecked()      ? UtilityDesignSource::Entity
+                        : designAlignment_->isChecked() ? UtilityDesignSource::Alignment
+                                                        : UtilityDesignSource::File;
     form.design = design_->text();
+    form.designEntity = designEntityId_->text();
+    form.designLevel = designLevel_->text();
+    form.alignment = alignment_->currentText();
     form.schema = schema_->text();
+    form.scheduleOut = scheduleOut_->text();
+    form.scheduleSchema = scheduleSchema_->text();
     form.minCover = minCover_->text();
     form.spacing = spacing_->text();
     form.width = width_->text();
@@ -411,12 +718,34 @@ Result<QString> UtilityToolsDialog::command() const
 
 void UtilityToolsDialog::refreshCommand()
 {
+    const UtilityForm current = form();
     // The detected spacing grades and the minimum cover flags what was
-    // graded; only Draw and Report grade.
-    const bool grades = tool() == UtilityTool::Draw || tool() == UtilityTool::Report;
+    // graded; Draw, Report and Regrade grade.
+    const bool grades = current.tool == UtilityTool::Draw ||
+                        current.tool == UtilityTool::Report ||
+                        current.tool == UtilityTool::Regrade;
     spacing_->setEnabled(grades);
     minCover_->setEnabled(grades);
-    const auto line = command();
+    // The source is chosen where a tool reads either; Draw reads the file and
+    // Regrade and Schedule the drawing whatever is chosen.
+    const bool chooses = current.tool == UtilityTool::Report ||
+                         current.tool == UtilityTool::Verify ||
+                         current.tool == UtilityTool::Clearance ||
+                         current.tool == UtilityTool::Check;
+    sourceFile_->setEnabled(chooses);
+    sourceDrawing_->setEnabled(chooses);
+    const bool drawing = utilitySourceOf(current) == UtilitySource::Drawing;
+    schedule_->setEnabled(!drawing);
+    scheduleBrowse_->setEnabled(!drawing);
+    scope_->setEnabled(drawing);
+    design_->setEnabled(designFile_->isChecked());
+    designBrowse_->setEnabled(designFile_->isChecked());
+    designEntityId_->setEnabled(designEntity_->isChecked());
+    designUseSelected_->setEnabled(designEntity_->isChecked());
+    designLevel_->setEnabled(designEntity_->isChecked());
+    alignment_->setEnabled(designAlignment_->isChecked());
+
+    const auto line = utilityCommandLine(current);
     command_->setText(line ? *line : QString());
     command_->setPlaceholderText(line ? QString() : "nothing to run yet: " + qs(line.error().message));
 }
@@ -443,10 +772,62 @@ void UtilityToolsDialog::run()
         return;
     }
     showOutput(qs(*reply));
-    setStatus(running == UtilityTool::Draw
-                  ? "Drawn as one undo step - Undo removes it all. The records are below and in "
-                    "the command log."
-                  : "Done. The report is below and in the command log.");
+    // Said from the reply's own first record, never from the tab alone: a
+    // scope that takes no utility line answers with the scope's record, and
+    // then nothing was regraded or written, and no step is there to undo.
+    const auto leads = [&reply](std::string_view record) { return reply->starts_with(record); };
+    switch (running) {
+    case UtilityTool::Draw:
+        setStatus("Drawn as one undo step - Undo removes it all. The records are below and in "
+                  "the command log.");
+        break;
+    case UtilityTool::Regrade:
+        if (leads("utilities regraded changed=0 ")) {
+            setStatus("Nothing needed regrading: the drawing is as it was, and nothing was added "
+                      "to the undo history.");
+        } else if (leads("utilities regraded ")) {
+            setStatus("Regraded as one undo step - Undo puts it back. The records are below and "
+                      "in the command log.");
+        } else {
+            setStatus("Nothing in the scope is a utility line: nothing was regraded, and nothing "
+                      "was added to the undo history.");
+        }
+        break;
+    case UtilityTool::Schedule:
+        setStatus(leads("utilities scheduled ")
+                      ? "Written. What was written is below and in the command log."
+                      : "Nothing in the scope is a utility line: nothing was written.");
+        break;
+    case UtilityTool::Report:
+    case UtilityTool::Verify:
+    case UtilityTool::Clearance:
+    case UtilityTool::Check:
+        setStatus("Done. The report is below and in the command log.");
+        break;
+    }
+}
+
+bool UtilityToolsDialog::useSelectedDesign()
+{
+    if (!documentAlive()) {
+        setStatus("There is no drawing here to select the proposed works in.", true);
+        return false;
+    }
+    const std::vector<katana::entity::EntityId> selected = context_.document->selection().ids();
+    if (selected.size() != 1) {
+        setStatus(selected.empty()
+                      ? "Select the line or polyline of the proposed works first."
+                      : QString("Select just the line or polyline of the proposed works: %1 "
+                                "entities are selected.")
+                            .arg(selected.size()),
+                  true);
+        return false;
+    }
+    designEntityId_->setText("#" + QString::number(selected.front()));
+    designEntity_->setChecked(true);
+    setStatus("The proposed works: #" + QString::number(selected.front()) +
+              ", the entity selected.");
+    return true;
 }
 
 void UtilityToolsDialog::showOutput(const QString& text)
@@ -469,6 +850,21 @@ void UtilityToolsDialog::browse(QLineEdit& field, const QString& title, const QS
         return;
     }
     const QString path = QFileDialog::getOpenFileName(this, title, field.text().trimmed(), filter);
+    if (!path.isEmpty()) {
+        field.setText(QDir::toNativeSeparators(path));
+    }
+}
+
+void UtilityToolsDialog::browseForSave(QLineEdit& field, const QString& title,
+                                       const QString& filter)
+{
+    if (context_.headless && context_.headless()) {
+        setStatus("A headless session opens no file dialog: fill " + field.objectName() +
+                      " with the path instead.",
+                  true);
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(this, title, field.text().trimmed(), filter);
     if (!path.isEmpty()) {
         field.setText(QDir::toNativeSeparators(path));
     }
